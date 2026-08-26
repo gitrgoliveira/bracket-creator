@@ -578,7 +578,7 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     }
   });
 
-  // Numeric finalNext fields (poolSize / poolWinners / teamSize) must
+  // Numeric finalNext fields (poolSize / poolWinners) must
   // wrap their value in the safeInt fallback. The bug shape: cleared
   // number input stores NaN in local; if user then edits a non-numeric
   // field, saveNow PUTs next.poolSize=NaN → JSON encodes null → Go
@@ -611,19 +611,18 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     //                         "invalid" and falls back to latestC.<field>,
     //                         silently re-sending the stale mixed-only value
     //                         and defeating the clear.
-    //   teamSize              safeNonNegInt (>= 0). Zero is teamSize's
-    //                         REQUIRED value for an individual competition
-    //                         (ValidateCompetitionTeamSize rejects any
-    //                         non-team kind with teamSize > 0). Under
-    //                         safeInt's >= 1 floor, the 0 that
-    //                         normalizeConfigForKind stages on a team ->
-    //                         individual flip was discarded and the stored
-    //                         team size re-sent, so the PUT failed the very
-    //                         rule the flip had just satisfied (bc-symm).
+    // teamSize is deliberately NOT in this table, and the reason is the
+    // point of the separate assertion below it: a guard on `shaped.teamSize`
+    // is DEAD, because normalizeConfigForKind rewrites teamSize on both of
+    // its branches (0 going individual, DEFAULT_TEAM_SIZE for a team under
+    // the floor) and therefore always hands back a finite integer. It was
+    // written as safeNonNegInt(shaped.teamSize, latestC.teamSize) and read
+    // as protection while doing nothing: clearing Team size on a stored 3
+    // silently saved 5. The guard belongs BEFORE the normalizer instead --
+    // resolveTeamSize, asserted below.
     const GUARD_BY_FIELD = {
       poolSize: 'safeNonNegInt',
       poolWinners: 'safeNonNegInt',
-      teamSize: 'safeNonNegInt',
     };
     for (const [field, guard] of Object.entries(GUARD_BY_FIELD)) {
       const pattern = new RegExp(`\\b${field}:\\s*${guard}\\(`);
@@ -632,6 +631,28 @@ describe('AdminSettings.saveNow payload whitelist', () => {
         `finalNext.${field} must use ${guard}(...): raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
       ).toBe(true);
     }
+
+    // teamSize's guard, in the one position where it can actually fire: on
+    // the way IN to the shaping call, not on its way out. Both halves are
+    // pinned -- the resolveTeamSize call, and the absence of the dead
+    // post-shape guard that used to stand in for it -- because restoring
+    // either alone re-opens the silent-5 save.
+    // Read from `src`, not `body`: this one lives in the shapeConfigForSave
+    // call ABOVE the finalNext literal, which is exactly the placement being
+    // pinned.
+    const shapedMatch = src.match(/const shaped = shapeConfigForSave\(([\s\S]*?)\n\s*\}\);/);
+    expect(
+      shapedMatch,
+      'saveNow must shape the payload through shapeConfigForSave(latestC, ...), which is what scopes the two normalizers to a staged format/kind change'
+    ).not.toBeNull();
+    expect(
+      /teamSize:\s*resolveTeamSize\(effective\.teamSize,\s*latestC\.teamSize\)/.test(shapedMatch[1]),
+      'the staged teamSize must be resolved against the stored value BEFORE shapeConfigForSave: normalizeConfigForKind rewrites teamSize on both branches, so a guard on its output is dead code'
+    ).toBe(true);
+    expect(
+      /teamSize:\s*safe(Non)?NegInt\(shaped\.teamSize/.test(body),
+      'finalNext.teamSize must NOT re-guard shaped.teamSize: shaped.teamSize is always a finite integer, so that guard never fires and reads as protection while providing none'
+    ).toBe(false);
   });
 
   // The safeInt helper itself must check the full set of dimensions
@@ -1035,6 +1056,15 @@ describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6
     expect(src).toContain('local.status !== "draw-ready"');
   });
 
+  it('lockedAfterDraw is exactly isDrawReady || isStarted', () => {
+    // The two checkbox guards below assert on `lockedAfterDraw` rather than
+    // respelling the disjunction, so THIS is what keeps them pinning both
+    // flags: if the named const stopped meaning "draw-ready or started",
+    // those assertions would still pass while the controls silently
+    // unlocked. Pinning the definition is what makes the name safe to use.
+    expect(src).toMatch(/const lockedAfterDraw\s*=\s*isDrawReady \|\| isStarted;/);
+  });
+
   it('Engi checkbox is disabled when isStarted or team (in addition to isDrawReady)', () => {
     // The checkbox input for Engi must gate on isDrawReady + isStarted, and also
     // on kind !== individual (engi is individual-only; Copilot #326). bc-symm
@@ -1042,12 +1072,12 @@ describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6
     // shared engiApplies(kind) predicate from competition_shape.jsx (the same
     // rule, expressed once so the create form and this screen can't drift),
     // so the regex now matches its negation, !engiApplies(local.kind).
-    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted \|\| !engiApplies\(local\.kind\)\}/);
+    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{lockedAfterDraw \|\| !engiApplies\(local\.kind\)\}/);
   });
 
   it('Naginata checkbox is disabled when isStarted (in addition to isDrawReady)', () => {
     // The checkbox input for Naginata must gate on both flags.
-    expect(src).toMatch(/checked=\{!!local\.naginata\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted\}/);
+    expect(src).toMatch(/checked=\{!!local\.naginata\}[\s\S]{0,200}disabled=\{lockedAfterDraw\}/);
   });
 });
 

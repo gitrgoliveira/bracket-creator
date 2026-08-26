@@ -12,10 +12,22 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, LABEL_ZEKKEN, LABEL_ENGI,
+  HINT_ZEKKEN, HINT_ENGI,
+  LABEL_NAGINATA, HINT_NAGINATA,
+  LABEL_CHECK_IN, HINT_CHECK_IN,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
 } from '../competition_shape.jsx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
+
+// The two screens under comparison, read and comment-stripped ONCE. The
+// three describe blocks below previously re-read both files and re-ran
+// stripComments over them independently, so the same ~200 KB was walked
+// three times per run. Hoisting also guarantees all three blocks are
+// judging byte-identical input.
+const SETUP_SRC = read('admin_setup.jsx');
+const SETTINGS_SRC = read('admin_competition_settings.jsx');
 
 // bc-symm Phase 5: the operator ruling behind competition_shape.jsx (see its
 // header) is that the competition CREATE form (admin_setup.jsx's
@@ -41,6 +53,12 @@ const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
 function stripComments(s) {
   return s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 }
+
+// Comment-stripped once each, for the same reason SETUP_SRC/SETTINGS_SRC
+// are read once: two describe blocks below both need these and were each
+// building their own copy.
+const SETUP_STRIPPED = stripComments(SETUP_SRC);
+const SETTINGS_STRIPPED = stripComments(SETTINGS_SRC);
 
 // ── Task 1: structural parity guard ─────────────────────────────────────
 //
@@ -92,8 +110,8 @@ function shapeImportNames(src) {
 const isControlBearing = (name) => name.startsWith('LABEL_') || name.endsWith('_OPTIONS');
 
 describe('competition CREATE vs SETTINGS: control parity (bc-symm Phase 5)', () => {
-  const setupNames = shapeImportNames(read('admin_setup.jsx'));
-  const settingsNames = shapeImportNames(read('admin_competition_settings.jsx'));
+  const setupNames = shapeImportNames(SETUP_SRC);
+  const settingsNames = shapeImportNames(SETTINGS_SRC);
 
   it('the parser actually found a competition_shape.jsx import on both screens (not a vacuous pass)', () => {
     // Guards the guard: a regex that stops matching (module renamed, import
@@ -154,29 +172,6 @@ describe('competition CREATE vs SETTINGS: control parity (bc-symm Phase 5)', () 
   // state, settings has both, so a control genuinely tied to either of
   // those (e.g. something gated on isDrawReady) could legitimately have no
   // create-side equivalent. No such control exists yet, hence empty.
-  //
-  // The 19 is smaller than a source-level count of every LABEL_*/_OPTIONS
-  // name in each screen's competition_shape.jsx import block (20, including
-  // LABEL_KIND) -- NOT a parity gap, a parser quirk worth knowing before
-  // re-deriving this number by hand: shapeImportNames' regex starts
-  // matching at the FIRST `import {` in the file, which on both screens is
-  // the qualifier_preview.jsx import immediately above the
-  // competition_shape.jsx one, and (non-greedy) keeps consuming until it
-  // finds a `}` immediately followed by `from './competition_shape.jsx'`.
-  // That folds the qualifier_preview.jsx import's own closing `}  from
-  // './qualifier_preview.jsx';` and the leading `import {\n  LABEL_KIND`
-  // of the NEXT import into one garbled, comma-split token that starts with
-  // neither `LABEL_` nor ends in `_OPTIONS` -- so LABEL_KIND alone is
-  // invisible to isControlBearing here, identically on both screens (hence
-  // the count still nets to zero difference; nothing here is unverified,
-  // it is undercounted by exactly one name on both sides equally).
-  // LABEL_KIND's own copy is still independently guarded by the COPY dict
-  // in the "copy has a single home" describe block below, so this is a
-  // narrower blind spot in THIS check, not a hole in the file's overall
-  // coverage of that constant. Left as a known quirk rather than fixed:
-  // reworking the regex to anchor on the competition_shape.jsx import
-  // specifically is a change to this guard's own matching behaviour, out
-  // of scope for whichever task last touched this comment.
   const ALLOWED_DIVERGENCE = new Set([]);
 
   it('every control-bearing import competition_shape.jsx offers is used by BOTH screens', () => {
@@ -211,8 +206,8 @@ describe('competition CREATE vs SETTINGS: control parity (bc-symm Phase 5)', () 
 // a copy change automatically instead of needing a second hand-transcription
 // that could itself go stale.
 describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 5)', () => {
-  const setupSrc = stripComments(read('admin_setup.jsx'));
-  const settingsSrc = stripComments(read('admin_competition_settings.jsx'));
+  const setupSrc = SETUP_STRIPPED;
+  const settingsSrc = SETTINGS_STRIPPED;
 
   // Every LABEL_*/HINT_* string competition_shape.jsx exports (verified
   // against `grep -n '^export const LABEL_\|^export const HINT_'
@@ -237,6 +232,10 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
     LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
     LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
     LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, LABEL_ZEKKEN, LABEL_ENGI,
+    HINT_ZEKKEN, HINT_ENGI,
+    LABEL_NAGINATA, HINT_NAGINATA,
+    LABEL_CHECK_IN, HINT_CHECK_IN,
+    LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
   };
 
   it('every listed constant is still a non-trivial string export (not a vacuous pass)', () => {
@@ -251,10 +250,8 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
     }
   });
 
-  // Two constants cannot be safely asserted by plain substring inclusion,
-  // each for a different reason than "convenient to skip" (per-file, not
-  // blanket, so the check stays as strong as it can be on the file where the
-  // false positive does not occur):
+  // One constant cannot be safely asserted by plain substring inclusion, for
+  // a reason other than "convenient to skip":
   //
   //   LABEL_FORMAT ("Format") is a short, common substring of unrelated
   //   identifiers BOTH screens already contain for other reasons --
@@ -265,23 +262,17 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   //   control label. A hit here is not evidence of copy drift on either
   //   screen.
   //
-  //   LABEL_SWISS_ROUNDS ("Number of Swiss rounds") is a genuine prefix of a
-  //   DIFFERENT string in admin_setup.jsx only: validateSwissRounds's error
-  //   message reads "Number of Swiss rounds must be a whole number ≥ 1." --
-  //   naming the field being validated is what an error message is supposed
-  //   to do, not a second copy of the field's <label>. Settings has no such
-  //   validator string, so it stays checked.
-  //
-  //   LABEL_TEAM_SIZE ("Team size") is the same "error message names the
-  //   field" shape, in admin_setup.jsx only: create()'s team-size guard
-  //   reads `setError('Team size must be a whole number.')` ahead of the
-  //   submit-time MIN/MAX check just below it. admin_competition_settings.jsx
-  //   has no equivalent inline validator string (poolSettingsError and the
-  //   server 400 cover that screen instead), so it stays checked.
+  // LABEL_SWISS_ROUNDS and LABEL_TEAM_SIZE used to be excluded here too, on
+  // admin_setup.jsx only: each was a genuine prefix of that screen's own
+  // validator message ("Number of Swiss rounds must be a whole number >= 1.",
+  // 'Team size must be a whole number.'). Naming the field being validated is
+  // what an error message is supposed to do, so those were false positives
+  // rather than copy drift -- but the messages now interpolate the constant
+  // instead of restating it, which removes the false positive AND makes the
+  // message track a copy change. Both constants are checked on both screens
+  // again.
   const EXCLUDE_FROM = {
     LABEL_FORMAT: new Set(['setup', 'settings']),
-    LABEL_SWISS_ROUNDS: new Set(['setup']),
-    LABEL_TEAM_SIZE: new Set(['setup']),
   };
 
   const SOURCES = { setup: setupSrc, settings: settingsSrc };
@@ -298,6 +289,36 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
           `(${JSON.stringify(value)}): render it via the imported constant instead, or the two ` +
           'screens can drift apart the next time only one copy is edited.'
         ).toBe(false);
+      });
+    }
+  }
+
+  // The check above is only half the rule, and the missing half is the one
+  // that actually broke. "Does not re-spell the constant's text" catches a
+  // screen that COPIES the shared string; it is blind to a screen that uses
+  // a DIFFERENT string instead -- which is exactly what happened to the
+  // check-in hint, where create said "...counter for this competition." and
+  // settings said "...counter. Disable for competitions that don't need
+  // attendance tracking.". Neither screen contained the other's text, so a
+  // literal-absence check would have passed on both for as long as the drift
+  // survived. Hoisting the copy into competition_shape.jsx creates a single
+  // home; this is what makes both screens live in it.
+  //
+  // Two or more occurrences of the bare name = the import line plus at least
+  // one render site. One occurrence = imported and never used, which is the
+  // shape a re-inlined literal leaves behind.
+  const VIA_HELPER = new Set(['LABEL_POOL_DURATION', 'HINT_POOL_DURATION']);
+  for (const name of Object.keys(COPY)) {
+    if (VIA_HELPER.has(name)) continue;
+    for (const key of ['setup', 'settings']) {
+      it(`${FILE_NAMES[key]} actually renders ${name}, not just imports it`, () => {
+        const uses = (SOURCES[key].match(new RegExp(`\\b${name}\\b`, 'g')) || []).length;
+        expect(
+          uses,
+          `${FILE_NAMES[key]} names ${name} ${uses} time(s): it must import the constant AND render ` +
+          'it at least once. One occurrence means the import is there but the control is drawing its ' +
+          'copy from somewhere else, which is how two screens drift while owning a shared constant.'
+        ).toBeGreaterThan(1);
       });
     }
   }
@@ -335,8 +356,8 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
 // own header commentary warns about for shapeImportNames' over-match: a
 // guard that silently compares less than it claims).
 describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)', () => {
-  const setupSrc = stripComments(read('admin_setup.jsx'));
-  const settingsSrc = stripComments(read('admin_competition_settings.jsx'));
+  const setupSrc = SETUP_STRIPPED;
+  const settingsSrc = SETTINGS_STRIPPED;
 
   // Each marker names one control (in the canonical dependency-first order,
   // for readability only -- see the header above for why that order is
@@ -354,7 +375,13 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Start time', pattern: '>Start time<' },
     { key: 'Competition type (Kind)', pattern: '{LABEL_KIND}' },
     { key: 'Format', pattern: '{LABEL_FORMAT}' },
-    { key: 'Team size', pattern: '{LABEL_TEAM_SIZE}' },
+    // Anchored as a JSX text node (`>{...}<`) rather than the bare
+    // `{LABEL_TEAM_SIZE}`: create()'s validator now names the field
+    // through the same constant (`${LABEL_TEAM_SIZE} must be a whole
+    // number.`), which contains the bare form as a substring and would
+    // make this marker match twice. The label render site is the one
+    // that defines where the control sits, so that is what we anchor to.
+    { key: 'Team size', pattern: '>{LABEL_TEAM_SIZE}<' },
     { key: 'Team match type', pattern: '{LABEL_TEAM_MATCH_TYPE}' },
     { key: 'Pool format (round-robin shape)', pattern: '{LABEL_POOL_FORMAT}' },
     { key: 'Round-robin (round-robin in pools)', pattern: '{LABEL_ROUND_ROBIN}' },
@@ -362,7 +389,7 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Pool size', pattern: '{LABEL_POOL_SIZE}' },
     { key: 'Pool winners', pattern: '{LABEL_POOL_WINNERS}' },
     { key: 'Extra qualifiers', pattern: '{LABEL_EXTRA_QUALIFIERS}' },
-    { key: 'Swiss rounds', pattern: '{LABEL_SWISS_ROUNDS}' },
+    { key: 'Swiss rounds', pattern: '>{LABEL_SWISS_ROUNDS}<' },
     { key: 'League tiebreak', pattern: '{LABEL_LEAGUE_TIEBREAK}' },
     { key: 'Two joint 3rd places', pattern: '{LABEL_TWO_THIRD_PLACES}' },
     { key: 'Assigned shiaijo (courts)', pattern: '>Assigned shiaijo (courts)<' },
@@ -385,17 +412,18 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     // which has no `{`/`}` around the bare name and is never itself a
     // `durationField(...)` call.
     { key: 'Playoff duration', pattern: /\{LABEL_PLAYOFF_DURATION\}|durationField\(LABEL_PLAYOFF_DURATION,/ },
-    { key: 'Player number prefix', pattern: '>Player number prefix ' },
+    { key: 'Player number prefix', pattern: '{LABEL_NUMBER_PREFIX}' },
     { key: 'Zekken (participant CSV column)', pattern: '{LABEL_ZEKKEN}' },
     { key: 'Engi (kata pairs)', pattern: '{LABEL_ENGI}' },
-    // Naginata and Check-in have no LABEL_* constant -- competition_shape
-    // .jsx doesn't own this copy, both screens spell it inline (and
-    // identically, which Task 2 above cannot check for exactly that
-    // reason: there is no shared constant to import) -- so the marker
-    // anchors to the label markup itself: the checkbox text immediately
-    // followed by the closing </label> it always has.
-    { key: 'Naginata competition', pattern: 'Naginata competition</label>' },
-    { key: 'Check-in tracking', pattern: 'Check-in tracking</label>' },
+    // Naginata and Check-in DID have no LABEL_* constant, so these two
+    // markers used to anchor on the raw label markup and Task 2 above could
+    // not check their copy at all. That blind spot was not hypothetical:
+    // the two screens' check-in HINTS had already drifted apart under it.
+    // Both controls now own their copy in competition_shape.jsx, so the
+    // markers anchor on the constants like every other entry here, and
+    // Task 2 covers the hints for free.
+    { key: 'Naginata competition', pattern: '{LABEL_NAGINATA}' },
+    { key: 'Check-in tracking', pattern: '{LABEL_CHECK_IN}' },
   ];
 
   it('the marker list is non-empty (not a vacuous pass)', () => {
@@ -508,5 +536,82 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
       'Both screens must render every shared control in the same sequence. Move the control(s) ' +
       'that differ to match the other screen -- do not special-case an exception here.'
     ).toEqual(setupOrder);
+  });
+});
+
+// bc-symm-settings-create-parity, review round: the rules this module owns
+// have to be ASKED, not re-derived at a call site. A respelling renders
+// identically to a call, which is exactly why this is a source-text check --
+// see this file's header for the full rationale.
+//
+// Both classes below were live in the shipped diff. The create form gated
+// its zekken and engi RENDER sites on zekkenApplies/engiApplies while its
+// PUT payload, two and eighty lines away, still spelled
+// `kind === "individual"` by hand -- so the pair would have parted company
+// the moment the kind rule gained a third value (the server already accepts
+// "" as a legal kind). And the settings screen respelled optionLabel's
+// `.find(...)?.label` twice, ten lines from formatClearedValue which calls
+// the real thing.
+describe('competition CREATE vs SETTINGS: shared rules are asked, not re-derived', () => {
+  // Both screens import these predicates already, so a bare comparison
+  // against the wire value is always a respelling rather than a missing
+  // helper.
+  const RESPELLINGS = [
+    {
+      pattern: /kind\s*===\s*["']individual["']/g,
+      rule: 'zekkenApplies(kind) / engiApplies(kind) / teamFieldsVisible(kind)',
+      why: 'the kind rule has one owner in competition_shape.jsx, and both screens already import it for their render gates',
+    },
+    {
+      pattern: /format\s*===\s*["']mixed["']/g,
+      rule: 'FORMAT_MIXED',
+      why: 'the wire value is an exported constant; a literal is the copy that stops following when the constant moves',
+    },
+    {
+      pattern: /poolSizeMode\s*===\s*["'](max|min)["']/g,
+      rule: 'resolvePoolSizeMode + POOL_SIZE_MODE_MAX / POOL_SIZE_MODE_MIN',
+      why: 'the stored field has a third state ("") the pills do not, and a bare equality lights neither pill for it',
+    },
+    {
+      pattern: /_OPTIONS\.find\(\s*\(\s*o\s*\)\s*=>\s*o\.value\s*===/g,
+      rule: 'optionLabel(options, value)',
+      why: "optionLabel is the one option-list lookup in this codebase, so the .find shape and its ?? fallback are not respelled per call site",
+    },
+  ];
+
+  const SCREENS = [
+    ['admin_setup.jsx', SETUP_STRIPPED],
+    ['admin_competition_settings.jsx', SETTINGS_STRIPPED],
+  ];
+
+  // A guard that can only ever pass is not a guard. Prove each pattern
+  // actually matches the shape it is written to catch, against text this
+  // test controls.
+  it('every pattern matches its own respelling (not a vacuous pass)', () => {
+    const SAMPLES = [
+      'const x = kind === "individual" ? a : b;',
+      'if (format === "mixed") { emit(); }',
+      'const lit = poolSizeMode === "max";',
+      'FORMAT_OPTIONS.find((o) => o.value === format)?.label',
+    ];
+    RESPELLINGS.forEach((r, i) => {
+      expect(
+        new RegExp(r.pattern.source).test(SAMPLES[i]),
+        `pattern for ${r.rule} does not match its own sample: ${SAMPLES[i]}`
+      ).toBe(true);
+    });
+  });
+
+  it('neither screen re-derives a rule competition_shape.jsx already owns', () => {
+    for (const [name, src] of SCREENS) {
+      for (const { pattern, rule, why } of RESPELLINGS) {
+        const hits = src.match(new RegExp(pattern.source, 'g')) || [];
+        expect(
+          hits,
+          `${name} spells out a rule that ${rule} owns (${hits.length} time(s): ${hits.join(', ')}). ` +
+          `Call ${rule} instead -- ${why}.`
+        ).toEqual([]);
+      }
+    }
   });
 });

@@ -1,6 +1,6 @@
-import React from 'react';
-import { render, act, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { act, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { installSettingsHarness, mountSettings } from './settings_mount_harness.jsx';
 
 // bc-qual review round: the "Knockout qualifiers" radio on the competition
 // SETTINGS page must be able to save its STANDARD value.
@@ -20,65 +20,9 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 //      with no control on the screen able to clear it.
 //
 // Mounted through the public AdminCompetition entry (AdminSettings is
-// module-internal), same harness shape as admin_competition.render.test.jsx.
+// module-internal). The shared harness lives in settings_mount_harness.jsx.
 
-const noop = () => {};
-const Stub = (name) => {
-  const C = () => <div data-stub={name} />;
-  C.displayName = `Stub(${name})`;
-  return C;
-};
-
-const STUBBED_GLOBALS = {
-  AdminTopbar: Stub('AdminTopbar'),
-  Breadcrumbs: Stub('Breadcrumbs'),
-  StatusBadge: Stub('StatusBadge'),
-  CourtPicker: Stub('CourtPicker'),
-  AdminParticipants: Stub('AdminParticipants'),
-  AdminPools: Stub('AdminPools'),
-  AdminScoreEditor: Stub('AdminScoreEditor'),
-  AdminExport: Stub('AdminExport'),
-  BracketTree: Stub('BracketTree'),
-  AdminTeamLineupsList: Stub('AdminTeamLineupsList'),
-  competitionKindLabel: () => 'Individual',
-  formatDate: (d) => String(d ?? ''),
-  matchMedia: () => ({
-    matches: false,
-    addEventListener: noop, removeEventListener: noop,
-    addListener: noop, removeListener: noop,
-  }),
-  confirmDialog: vi.fn().mockResolvedValue(false),
-  promptAdminPassword: vi.fn().mockResolvedValue(null),
-  promptDialog: vi.fn().mockResolvedValue(null),
-  API: {
-    estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
-    swissGenerateRound: vi.fn().mockResolvedValue(null),
-    updateCompetitionAwards: vi.fn().mockResolvedValue(null),
-    completeCompetition: vi.fn().mockResolvedValue({ status: 'completed' }),
-    fetchDrawWarnings: vi.fn().mockResolvedValue([]),
-    // saveNow runs a post-save clash check before navigating away.
-    getScheduleClashes: vi.fn().mockResolvedValue([]),
-  },
-};
-
-const originals = {};
-let AdminCompetition;
-
-beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
-  await import('../../admin_competition.jsx');
-  AdminCompetition = window.AdminCompetition;
-});
-
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+installSettingsHarness();
 
 // A mixed competition already saved with a NON-standard qualifier mode: the
 // only starting state from which "save Standard" is a change at all.
@@ -105,41 +49,6 @@ function makeCompetition(overrides = {}) {
     swissRounds: 0,
     ...overrides,
   };
-}
-
-async function mountSettings(comp, onUpdate) {
-  const t = {
-    name: 'Spring Taikai',
-    courts: ['A', 'B'],
-    competitions: [comp, { id: 'c2', name: 'Yudansha' }],
-  };
-  let result;
-  await act(async () => {
-    result = render(
-      <AdminCompetition
-        tournament={t}
-        competition={comp}
-        pools={[]}
-        poolMatches={[]}
-        standings={[]}
-        bracket={null}
-        section="settings"
-        onSection={noop}
-        onBack={noop}
-        onOpenCompetition={noop}
-        onUpdate={onUpdate}
-        onRefreshCompetition={noop}
-        onMoveCourt={noop}
-        onEditScore={noop}
-        onLogout={noop}
-        onViewerMode={noop}
-        tweaks={{}}
-        password=""
-        showToast={noop}
-      />
-    );
-  });
-  return result;
 }
 
 const byText = (container, text) =>

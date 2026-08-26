@@ -319,13 +319,27 @@ describe('radio copy has a single home (both screens render extraQualifiersLabel
 
   const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
 
+  // Call sites that legitimately resolve a qualifier value through the helper
+  // WITHOUT being one of the three pills. Enumerated rather than folded into a
+  // ">= 3" bound, which would stop the count pinning anything: "Standard" is
+  // too common a word for the inline-literal check below to cover, so this
+  // count is the only thing keeping that pill honest.
+  const NON_PILL_USES = {
+    // formatClearedValue(), naming the about-to-be-lost qualifier setting in
+    // the staged-config-clears notice. Without it the notice printed the raw
+    // wire value ("larger-pools") where every other field shows its label.
+    'admin_competition_settings.jsx': 1,
+  };
+
   for (const screen of screens) {
     it(`${screen} renders all three pill labels through the helper`, () => {
       const calls = read(screen).match(/extraQualifiersLabel\(/g) || [];
+      const expected = 3 + (NON_PILL_USES[screen] || 0);
       expect(
         calls.length,
-        `${screen} must call extraQualifiersLabel() once per pill (3), got ${calls.length}`
-      ).toBe(3);
+        `${screen} must call extraQualifiersLabel() once per pill (3)` +
+        `${NON_PILL_USES[screen] ? ` plus ${NON_PILL_USES[screen]} enumerated non-pill use(s)` : ''}, got ${calls.length}`
+      ).toBe(expected);
     });
 
     it(`${screen} does not spell the pill copy inline`, () => {

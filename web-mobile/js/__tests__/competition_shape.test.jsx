@@ -18,6 +18,10 @@ import {
   normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE,
   kindChangeBlockedReason,
   poolSettingsError,
+  swissSettingsError, MIN_SWISS_ROUNDS,
+  resolveTeamSize,
+  resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
+  configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
 } from '../competition_shape.jsx';
 
@@ -539,6 +543,39 @@ describe('pendingConfigClears', () => {
     expect(pendingConfigClears(cfg, { ...cfg })).toEqual([]);
   });
 
+  // The property that matters is not that the two functions agree today but
+  // that they CANNOT disagree: pendingConfigClears reports the diff against
+  // shapeConfigForSave's output, which is the value the payload boundary
+  // sends. Swept over the shapes that reach the normalizers at all, plus the
+  // stored-but-inconsistent ones (team + withZekkenName, individual +
+  // teamSize) that an unscoped normalization used to clear without a word.
+  it('names every field shapeConfigForSave will actually change, on every staged shape', () => {
+    const stores = [
+      { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: 'larger-pools', teamSize: 0, teamMatchType: 'fixed', engi: true, withZekkenName: true },
+      { format: FORMAT_MIXED, kind: KIND_TEAM, poolSize: 4, poolWinners: 2, extraQualifiers: '', teamSize: 3, teamMatchType: 'kachinuki', engi: false, withZekkenName: true },
+      { format: FORMAT_PLAYOFFS, kind: KIND_INDIVIDUAL, poolSize: 0, poolWinners: 0, extraQualifiers: '', teamSize: 3, teamMatchType: 'fixed', engi: false, withZekkenName: false },
+    ];
+    for (const stored of stores) {
+      for (const format of [FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS]) {
+        for (const kind of [KIND_INDIVIDUAL, KIND_TEAM]) {
+          const staged = { ...stored, format, kind };
+          const sent = shapeConfigForSave(stored, staged);
+          const named = new Set(pendingConfigClears(stored, staged).map((x) => x.key));
+          for (const key of Object.keys(sent)) {
+            if (sent[key] === staged[key]) continue;
+            // Only a MEANINGFUL staged value is reportable: a field already
+            // at 0/""/false had nothing in it to lose.
+            if (!staged[key]) continue;
+            expect(
+              named.has(key),
+              `save changes ${key} (${JSON.stringify(staged[key])} -> ${JSON.stringify(sent[key])}) for ${kind}/${format} but the notice does not name it`
+            ).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
   it('mixed(poolSize 4, poolWinners 2) -> playoffs reports both keys with their "from" values', () => {
     const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: '' };
     const staged = { ...stored, format: FORMAT_PLAYOFFS };
@@ -581,5 +618,154 @@ describe('pendingConfigClears', () => {
     expect(pendingConfigClears(stored, staged)).toEqual(
       expect.arrayContaining([{ key: 'extraQualifiers', from: 'larger-pools' }])
     );
+  });
+});
+
+// bc-symm-settings-create-parity, review round: resolveTeamSize exists
+// because the guard it replaces was DEAD. saveNow read
+// `safeNonNegInt(shaped.teamSize, latestC.teamSize)`, but
+// normalizeConfigForKind rewrites teamSize on BOTH branches, so its output
+// is always a finite integer and the fallback could never fire. The visible
+// consequence: clearing the Team size input on a stored 3 saved 5, while the
+// input's own comment promised the last-saved value.
+describe('resolveTeamSize', () => {
+  it('keeps a usable staged value', () => {
+    expect(resolveTeamSize(2, 5)).toBe(2);
+    expect(resolveTeamSize(7, 5)).toBe(7);
+  });
+
+  it('falls back to the stored value for every unusable staged value', () => {
+    // NaN is what decideNumericUpdate stores for a CLEARED input; 0 and 1
+    // are what it stores for a typed value below the field's own min (it
+    // stages what was typed so the input can show it, and reports
+    // shouldSave: false). All three mean "no usable team size supplied".
+    for (const staged of [NaN, 0, 1, -3, 2.5, undefined, null]) {
+      expect(resolveTeamSize(staged, 3)).toBe(3);
+    }
+  });
+
+  it('resolves to 0 when the stored value is unusable too, so the kind normalizer decides', () => {
+    // An individual competition stores teamSize 0. Flipping it to team
+    // leaves nothing to fall back to, and normalizeConfigForKind's floor
+    // then supplies DEFAULT_TEAM_SIZE -- which is the create form's rule,
+    // not a value invented here.
+    expect(resolveTeamSize(NaN, 0)).toBe(0);
+    expect(resolveTeamSize(1, undefined)).toBe(0);
+    expect(normalizeConfigForKind({ kind: KIND_TEAM, teamSize: resolveTeamSize(NaN, 0) }).teamSize).toBe(DEFAULT_TEAM_SIZE);
+  });
+
+  it('never defeats the deliberate 0 a team -> individual flip stages', () => {
+    // The 0 comes from normalizeConfigForKind's kind branch, which runs
+    // AFTER this function, so resolving first cannot re-inflate it.
+    const shaped = normalizeConfigForKind({ kind: KIND_INDIVIDUAL, teamSize: resolveTeamSize(NaN, 5) });
+    expect(shaped.teamSize).toBe(0);
+  });
+});
+
+// The Swiss twin of poolSettingsError, shared for the same reason: the
+// settings screen's Format editor makes "swiss" reachable for a stored
+// competition whose swissRounds is 0, and nothing there blocked the save.
+describe('swissSettingsError', () => {
+  it('is null for every non-swiss format, whatever the round count', () => {
+    for (const format of [FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, '', undefined]) {
+      for (const rounds of [NaN, 0, -1, 4]) {
+        expect(swissSettingsError(format, rounds)).toBeNull();
+      }
+    }
+  });
+
+  it('rejects the values the server rejects, and names the field it is about', () => {
+    for (const rounds of [NaN, 0, -3, 4.5, undefined, null]) {
+      const err = swissSettingsError(FORMAT_SWISS, rounds);
+      expect(err).toBeTruthy();
+      // The copy has to name the field, because the settings screen prints
+      // it directly rather than behind a fixed short label.
+      expect(err).toContain(LABEL_SWISS_ROUNDS);
+    }
+  });
+
+  it('accepts the floor and above', () => {
+    expect(swissSettingsError(FORMAT_SWISS, MIN_SWISS_ROUNDS)).toBeNull();
+    expect(swissSettingsError(FORMAT_SWISS, 6)).toBeNull();
+  });
+
+  it('mirrors validateSwissConfig, whose floor is 1', () => {
+    expect(MIN_SWISS_ROUNDS).toBe(1);
+  });
+});
+
+// resolvePoolSizeMode: the stored field has a third state the pills do not.
+// Nothing on the server fills PoolSizeMode in on POST, so a competition
+// authored outside the SPA sits on disk with "" -- and every consumer reads
+// that as minimum sizing via `isMax := PoolSizeMode == "max"`.
+describe('resolvePoolSizeMode', () => {
+  it('resolves the unset/legacy/unknown value to minimum, matching the engine', () => {
+    for (const stored of ['', undefined, null, 'MAX', 'maximum', 'nonsense']) {
+      expect(resolvePoolSizeMode(stored)).toBe(POOL_SIZE_MODE_MIN);
+    }
+  });
+
+  it('passes the two canonical values through', () => {
+    expect(resolvePoolSizeMode(POOL_SIZE_MODE_MAX)).toBe(POOL_SIZE_MODE_MAX);
+    expect(resolvePoolSizeMode(POOL_SIZE_MODE_MIN)).toBe(POOL_SIZE_MODE_MIN);
+  });
+
+  it('always lights exactly one of the two pills', () => {
+    for (const stored of ['', undefined, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN, 'nonsense']) {
+      const resolved = resolvePoolSizeMode(stored);
+      const lit = [POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN].filter((v) => v === resolved);
+      expect(lit).toHaveLength(1);
+    }
+  });
+
+  it('mirrors the wire values byte-for-byte', () => {
+    expect(POOL_SIZE_MODE_MAX).toBe('max');
+    expect(POOL_SIZE_MODE_MIN).toBe('min');
+  });
+});
+
+// shapeConfigForSave scopes the two normalizers to a staged format/kind
+// change. Unscoped, a save that touched only the start time forced
+// withZekkenName false on a stored team competition that carried it -- which
+// is in the PUT's output-affecting set, so at draw-ready the operator's own
+// edit died on a 409 about a change they never made, on every attempt, with
+// the zekken checkbox disabled at that status.
+describe('shapeConfigForSave', () => {
+  const TEAM_WITH_ZEKKEN = {
+    format: FORMAT_MIXED, kind: KIND_TEAM, teamSize: 5, teamMatchType: 'fixed',
+    engi: false, withZekkenName: true, poolSize: 4, poolWinners: 2, extraQualifiers: '',
+  };
+
+  it('leaves a stored-but-inconsistent record untouched when no flip is staged', () => {
+    const staged = { ...TEAM_WITH_ZEKKEN, startTime: '10:00' };
+    expect(shapeConfigForSave(TEAM_WITH_ZEKKEN, staged).withZekkenName).toBe(true);
+    expect(shapeConfigForSave(TEAM_WITH_ZEKKEN, staged)).toEqual(staged);
+  });
+
+  it('still normalizes when a kind change IS staged', () => {
+    const staged = { ...TEAM_WITH_ZEKKEN, kind: KIND_INDIVIDUAL };
+    const sent = shapeConfigForSave(TEAM_WITH_ZEKKEN, staged);
+    expect(sent.teamSize).toBe(0);
+    expect(sent.teamMatchType).toBe('fixed');
+  });
+
+  it('still normalizes when a format change IS staged', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: 'larger-pools' };
+    const sent = shapeConfigForSave(stored, { ...stored, format: FORMAT_PLAYOFFS });
+    expect(sent.poolSize).toBe(0);
+    expect(sent.poolWinners).toBe(0);
+    expect(sent.extraQualifiers).toBe('');
+  });
+
+  it('returns a copy, never the staged object itself', () => {
+    const staged = { ...TEAM_WITH_ZEKKEN };
+    expect(shapeConfigForSave(TEAM_WITH_ZEKKEN, staged)).not.toBe(staged);
+  });
+
+  it('configShapeChangeStaged is the gate, and reads both fields', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_TEAM };
+    expect(configShapeChangeStaged(stored, { ...stored })).toBe(false);
+    expect(configShapeChangeStaged(stored, { ...stored, format: FORMAT_LEAGUE })).toBe(true);
+    expect(configShapeChangeStaged(stored, { ...stored, kind: KIND_INDIVIDUAL })).toBe(true);
   });
 });

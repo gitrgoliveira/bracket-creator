@@ -1,6 +1,6 @@
-import React from 'react';
-import { render, act, fireEvent } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { act, fireEvent } from '@testing-library/react';
+import { describe, it, expect } from 'vitest';
+import { installSettingsHarness, mountSettings } from './settings_mount_harness.jsx';
 
 // bc-symm: pins the wiring behind a browser-verified gap this PR itself made
 // reachable. normalizePoolConfig (internal/mobileapp/handlers_competition.go)
@@ -30,68 +30,11 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 // exactly the lockout `savedCourtsErr` (the courts equivalent) is written
 // to avoid.
 //
-// Harness copied from kind_flip_reconciliation.render.test.jsx (same
-// mount-through-AdminCompetition shape; AdminSettings is module-internal so
-// it isn't reachable directly), including its STUBBED_GLOBALS and the
-// getScheduleClashes stub saveNow's post-save clash check needs.
+// The shared harness lives in settings_mount_harness.jsx.
+
+installSettingsHarness();
 
 const noop = () => {};
-const Stub = (name) => {
-  const C = () => <div data-stub={name} />;
-  C.displayName = `Stub(${name})`;
-  return C;
-};
-
-const STUBBED_GLOBALS = {
-  AdminTopbar: Stub('AdminTopbar'),
-  Breadcrumbs: Stub('Breadcrumbs'),
-  StatusBadge: Stub('StatusBadge'),
-  CourtPicker: Stub('CourtPicker'),
-  AdminParticipants: Stub('AdminParticipants'),
-  AdminPools: Stub('AdminPools'),
-  AdminScoreEditor: Stub('AdminScoreEditor'),
-  AdminExport: Stub('AdminExport'),
-  BracketTree: Stub('BracketTree'),
-  AdminTeamLineupsList: Stub('AdminTeamLineupsList'),
-  competitionKindLabel: () => 'Individual',
-  formatDate: (d) => String(d ?? ''),
-  matchMedia: () => ({
-    matches: false,
-    addEventListener: noop, removeEventListener: noop,
-    addListener: noop, removeListener: noop,
-  }),
-  confirmDialog: vi.fn().mockResolvedValue(false),
-  promptAdminPassword: vi.fn().mockResolvedValue(null),
-  promptDialog: vi.fn().mockResolvedValue(null),
-  API: {
-    estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
-    swissGenerateRound: vi.fn().mockResolvedValue(null),
-    updateCompetitionAwards: vi.fn().mockResolvedValue(null),
-    completeCompetition: vi.fn().mockResolvedValue({ status: 'completed' }),
-    fetchDrawWarnings: vi.fn().mockResolvedValue([]),
-    // saveNow runs a post-save clash check before navigating away.
-    getScheduleClashes: vi.fn().mockResolvedValue([]),
-  },
-};
-
-const originals = {};
-let AdminCompetition;
-
-beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
-  await import('../../admin_competition.jsx');
-  AdminCompetition = window.AdminCompetition;
-});
-
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
 
 // courts: ['A'] (a single shiaijo) is legal for every format regardless of
 // venue size (shiaijoCountError short-circuits at n <= 1), which keeps
@@ -119,41 +62,6 @@ function makeCompetition(overrides = {}) {
     swissRounds: 0,
     ...overrides,
   };
-}
-
-async function mountSettings(comp, onUpdate) {
-  const t = {
-    name: 'Spring Taikai',
-    courts: ['A', 'B'],
-    competitions: [comp, { id: 'c2', name: 'Yudansha' }],
-  };
-  let result;
-  await act(async () => {
-    result = render(
-      <AdminCompetition
-        tournament={t}
-        competition={comp}
-        pools={[]}
-        poolMatches={[]}
-        standings={[]}
-        bracket={null}
-        section="settings"
-        onSection={noop}
-        onBack={noop}
-        onOpenCompetition={noop}
-        onUpdate={onUpdate}
-        onRefreshCompetition={noop}
-        onMoveCourt={noop}
-        onEditScore={noop}
-        onLogout={noop}
-        onViewerMode={noop}
-        tweaks={{}}
-        password=""
-        showToast={noop}
-      />
-    );
-  });
-  return result;
 }
 
 const byText = (container, tag, text) =>

@@ -85,17 +85,21 @@ function validatePoolSettings(format, poolSize, winners) {
 
 // T190 (US13: FR-050a): submit-time validation for the swissRounds
 // field. Only meaningful when format === "swiss"; short-circuits with
-// { ok: true } for other formats. Same shape as validatePoolSettings: 
-// NaN/fractional/zero/negative all blocked. Default UI value is 4
-// (common Swiss tournament size for ~16 players).
+// { ok: true } for other formats. NaN/fractional/zero/negative all blocked.
+// Default UI value is 4 (common Swiss tournament size for ~16 players).
+//
+// The rule itself now lives in competition_shape.jsx's swissSettingsError,
+// shared with the Settings screen, whose new Format editor makes "swiss"
+// reachable for a stored competition with no round count -- exactly the
+// route by which poolSettingsError came to be shared. So this is just the
+// `{ok, error}` adapter this file's submit path and
+// __tests__/admin_setup.test.jsx already depend on, the same shape
+// validatePoolSettings above has.
 //
 // Exported for vitest at __tests__/admin_setup.test.jsx.
 function validateSwissSettings(format, swissRounds) {
-  if (format !== "swiss") return { ok: true, error: null };
-  if (!Number.isInteger(swissRounds) || swissRounds < 1) {
-    return { ok: false, error: "Number of Swiss rounds must be a whole number ≥ 1." };
-  }
-  return { ok: true, error: null };
+  const error = swissSettingsError(format, swissRounds);
+  return { ok: !error, error };
 }
 
 // Theme normalization lives next to its canonical user, BrandingManager, so the
@@ -133,7 +137,14 @@ import {
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies,
-  MIN_TEAM_SIZE, poolSettingsError,
+  MIN_TEAM_SIZE, DEFAULT_TEAM_SIZE, poolSettingsError, swissSettingsError,
+  MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
+  FORMAT_MIXED, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
+  poolFormatHint, resolvePoolFormat, leagueTiebreakActive,
+  HINT_ZEKKEN, HINT_ENGI,
+  LABEL_NAGINATA, HINT_NAGINATA,
+  LABEL_CHECK_IN, HINT_CHECK_IN,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
 } from './competition_shape.jsx';
 import { DurationInput } from './duration.jsx';
 
@@ -721,7 +732,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // this control existed, so a create that never touches the checkbox
   // produces the same competition it always did.
   const [roundRobin, setRoundRobin] = useStateA(true);
-  const [poolMode, setPoolMode] = useStateA("max");
+  // Seeded to "max" and only ever written by the two pills below, so unlike
+  // the settings screen's stored value this never needs resolvePoolSizeMode
+  // -- it cannot hold the empty third state a record authored outside the
+  // SPA has. The constants are shared so the two screens still write the
+  // same strings.
+  const [poolMode, setPoolMode] = useStateA(POOL_SIZE_MODE_MAX);
   const [poolSize, setPoolSize] = useStateA(3);
   const [winners, setWinners] = useStateA(2);
   // Knockout qualifiers (bc-qual LP-5a): "" (standard, default), "larger-pools",
@@ -744,7 +760,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // effect below) so we never clobber a deliberate choice.
   const startTimeEditedRef = useRefA(false);
   const [date, setDate] = useStateA(tournament.date);
-  const [teamSize, setTeamSize] = useStateA(5);
+  const [teamSize, setTeamSize] = useStateA(DEFAULT_TEAM_SIZE);
   // What teamSize this form would actually SEND, which is not the state var.
   // `teamSize` keeps its 5 while kind is individual (so switching back to
   // Team restores the operator's number instead of resetting it), but the
@@ -898,9 +914,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // produces a different stored value than they see. Reject early
     // when kind=team. (Individual competitions don't expose this field;
     // teamSize=0 is the canonical value there.)
-    if (kind === "team") {
+    if (teamFieldsVisible(kind)) {
       if (!Number.isInteger(teamSize)) {
-        setError('Team size must be a whole number.');
+        setError(`${LABEL_TEAM_SIZE} must be a whole number.`);
         return;
       }
       if (teamSize < MIN_TEAM_SIZE || teamSize > MAX_TEAM_SIZE) {
@@ -954,7 +970,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       courts: selectedCourts,
       poolMode, poolSize, winnersPerPool: winners,
       numberPrefix: numberPrefix.trim().substring(0, 3),
-      withZekkenName: kind === "individual" ? withZekken : false,
+      // zekkenApplies, not a `kind === "individual"` literal: the rule has
+      // one owner (competition_shape.jsx) and the render gate below already
+      // reads it, so a payload line spelling it out by hand is the half that
+      // silently stops following when the rule moves.
+      withZekkenName: zekkenApplies(kind) ? withZekken : false,
       checkInEnabled: checkInEnabled,
       // bc-symm: sent unconditionally, unlike poolFormat/extraQualifiers/etc
       // below which are attached post-construction only for the formats
@@ -975,7 +995,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // signature unchanged and lets the backend's JSON binding pick up
     // the camelCase key directly. Only emit for formats that run pool
     // play: knockout-only competitions have no pool phase.
-    if (format === "mixed" || format === "league") {
+    if (poolFormatVisible(format)) {
       c.poolFormat = poolFormat;
     }
     // Knockout qualifiers (bc-qual LP-5a). Same post-construction pattern as
@@ -984,13 +1004,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // resetExtraQualifiersOnPoolModeChange keeps the stored value at
     // standard ("") whenever poolMode isn't "min", so this is never a
     // non-standard value outside the shape ValidateExtraQualifiers accepts.
-    if (format === "mixed") {
+    if (format === FORMAT_MIXED) {
       c.extraQualifiers = extraQualifiers;
     }
     // League joint-3rd convention (kendo two joint 3rds vs naginata single 3rd).
     // Emit only for leagues; the backend uses `omitempty` so it stays invisible
     // on other formats. Same post-construction pattern as poolFormat above.
-    if (format === "league") {
+    if (twoThirdPlacesVisible(format)) {
       c.leagueTwoThirdPlaces = leagueTwoThirdPlaces;
     }
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
@@ -999,7 +1019,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // lets the backend's JSON binding pick up the camelCase key. The
     // backend uses `omitempty` so the field is invisible on non-Swiss
     // competitions even if it were set.
-    if (format === "swiss") {
+    if (swissRoundsVisible(format)) {
       c.swissRounds = swissRounds;
     }
     // bc-symm: per-phase match durations, settings-only until now. Same
@@ -1035,10 +1055,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // scoring backend treats engi as non-team). Force it off for non-individual
     // kinds even if the state lingered from a kind switch, so a team comp can't
     // be created with engi=true. The checkbox is also hidden unless individual.
-    c.engi = kind === "individual" ? engi : false;
+    c.engi = engiApplies(kind) ? engi : false;
     // FR-044: team match format. Only meaningful for team competitions; sending
     // it for individual comps is harmless but omitting it keeps the payload clean.
-    if (kind === "team") {
+    if (teamFieldsVisible(kind)) {
       c.teamMatchType = teamMatchType;
     }
     // Surface a SERVER rejection in this form's own error banner, the same
@@ -1211,10 +1231,10 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               <label className="field__label">{LABEL_POOL_FORMAT}</label>
               <div className="radio-group">
                 {POOL_FORMAT_OPTIONS.map((o) => (
-                  <button key={o.value} className={`radio-pill ${poolFormat === o.value ? "is-active" : ""}`} type="button" onClick={() => setPoolFormat(o.value)}>{o.label}</button>
+                  <button key={o.value} className={`radio-pill ${resolvePoolFormat(poolFormat) === o.value ? "is-active" : ""}`} type="button" onClick={() => setPoolFormat(o.value)}>{o.label}</button>
                 ))}
               </div>
-              <div className="field__hint">{POOL_FORMAT_OPTIONS.find((o) => o.value === poolFormat)?.hint}</div>
+              <div className="field__hint">{poolFormatHint(poolFormat)}</div>
             </div>
           )}
 
@@ -1231,24 +1251,24 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
-          {format === "mixed" && (
+          {format === FORMAT_MIXED && (
             <>
               <div className="field">
                 <label className="field__label">Pool size is a</label>
                 <div className="radio-group">
-                  <button className={`radio-pill ${poolMode === "max" ? "is-active" : ""}`} type="button" onClick={() => {
+                  <button className={`radio-pill ${poolMode === POOL_SIZE_MODE_MAX ? "is-active" : ""}`} type="button" onClick={() => {
                     // Leaving minimum-players-per-pool sizing hides the
                     // "Knockout qualifiers" radio below; reset its value to
                     // standard so it can't persist as a stale non-standard
                     // selection under a mode it's no longer valid for. See
                     // resetExtraQualifiersOnPoolModeChange's own comment.
-                    setPoolMode("max");
-                    setExtraQualifiers((eq) => resetExtraQualifiersOnPoolModeChange("max", eq));
+                    setPoolMode(POOL_SIZE_MODE_MAX);
+                    setExtraQualifiers((eq) => resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, eq));
                   }}>maximum</button>
-                  <button className={`radio-pill ${poolMode === "min" ? "is-active" : ""}`} type="button" onClick={() => setPoolMode("min")}>minimum</button>
+                  <button className={`radio-pill ${poolMode === POOL_SIZE_MODE_MIN ? "is-active" : ""}`} type="button" onClick={() => setPoolMode(POOL_SIZE_MODE_MIN)}>minimum</button>
                 </div>
                 <div className="field__hint">
-                  {poolMode === "max"
+                  {poolMode === POOL_SIZE_MODE_MAX
                     ? "No pool will have more than the size below (more pools, smaller pools)."
                     : "Each pool will have at least the size below (fewer pools, larger pools)."}
                 </div>
@@ -1271,20 +1291,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 <div className="field"><label className="field__label">{LABEL_POOL_SIZE}</label><input
                   className="input"
                   type="number"
-                  min="3"
+                  min={MIN_POOL_SIZE}
                   step="1"
                   value={Number.isFinite(poolSize) ? poolSize : ""}
-                  onChange={(e) => setPoolSize(decideNumericUpdate(e.target.value, 3).value)}
+                  onChange={(e) => setPoolSize(decideNumericUpdate(e.target.value, MIN_POOL_SIZE).value)}
                 /></div>
                 <div className="field">
                   <label className="field__label">{LABEL_POOL_WINNERS}</label>
                   <input
                     className="input"
                     type="number"
-                    min="1"
+                    min={MIN_POOL_WINNERS}
                     step="1"
                     value={Number.isFinite(winners) ? winners : ""}
-                    onChange={(e) => setWinners(decideNumericUpdate(e.target.value, 1).value)}
+                    onChange={(e) => setWinners(decideNumericUpdate(e.target.value, MIN_POOL_WINNERS).value)}
                     disabled={winnersInputDisabled(extraQualifiers)}
                   />
                   {winnersInputDisabled(extraQualifiers) && (
@@ -1346,13 +1366,16 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {swissRoundsVisible(format) && (
             <div className="field">
               <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
+              {/* Floor is MIN_SWISS_ROUNDS (competition_shape.jsx), shared
+                  with swissSettingsError and with the settings twin, so the
+                  input's min and the submit-time message agree. */}
               <input
                 className="input"
                 type="number"
-                min="1"
+                min={MIN_SWISS_ROUNDS}
                 step="1"
                 value={Number.isFinite(swissRounds) ? swissRounds : ""}
-                onChange={(e) => setSwissRounds(decideNumericUpdate(e.target.value, 1).value)}
+                onChange={(e) => setSwissRounds(decideNumericUpdate(e.target.value, MIN_SWISS_ROUNDS).value)}
                 style={{ maxWidth: 120 }}
               />
               <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
@@ -1371,7 +1394,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
                   <button
                     key={o.value}
-                    className={`radio-pill ${(o.value === 3 ? ((leagueTiebreakTopN || 0) === 0 || leagueTiebreakTopN === 3) : leagueTiebreakTopN === o.value) ? "is-active" : ""}`}
+                    className={`radio-pill ${leagueTiebreakActive(o.value, leagueTiebreakTopN) ? "is-active" : ""}`}
                     type="button"
                     onClick={() => setLeagueTiebreakTopN(o.value)}
                   >{o.label}</button>
@@ -1384,7 +1407,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {twoThirdPlacesVisible(format) && (
             <div className="field">
               <label className="checkbox"><input type="checkbox" checked={leagueTwoThirdPlaces} onChange={(e) => setLeagueTwoThirdPlaces(e.target.checked)} /> {LABEL_TWO_THIRD_PLACES}</label>
-              <div className="field__hint" style={{ marginTop: 4 }}>{HINT_TWO_THIRD_PLACES}</div>
+              <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_TWO_THIRD_PLACES}</div>
             </div>
           )}
 
@@ -1416,6 +1439,11 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               the state this form submits can never itself be
               out-of-band -- there is nothing for a submit-time guard to
               catch that the leaf hasn't already refused to pass on. */}
+          {/* Always true on THIS screen -- `format` starts at "playoffs" and is
+              only ever set from FORMAT_OPTIONS, and all four formats satisfy one
+              of the two predicates. Kept for parity with the settings twin, where
+              a stored legacy record can carry format: "" and the wrapper does
+              real work. */}
           {(poolDurationVisible(format) || playoffDurationVisible(format)) && (
             <div className="row">
               {poolDurationVisible(format) && (
@@ -1446,33 +1474,33 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <div className="field">
-            <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+            <label className="field__label">{LABEL_NUMBER_PREFIX} <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
             <input className="input" placeholder="e.g. A" maxLength="3" value={numberPrefix} onChange={(e) => setNumberPrefix(e.target.value)} style={{ maxWidth: 80 }} />
-            <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+            <div className="field__hint">{HINT_NUMBER_PREFIX}</div>
           </div>
 
           {zekkenApplies(kind) && (
             <div className="field">
               <label className="checkbox"><input type="checkbox" checked={withZekken} onChange={(e) => setWithZekken(e.target.checked)} /> {LABEL_ZEKKEN}</label>
-              <div className="field__hint" style={{ marginTop: 4 }}>When enabled, participant CSV uses three columns: Name, Zekken, Dojo.</div>
+              <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_ZEKKEN}</div>
             </div>
           )}
 
           {engiApplies(kind) && (
             <div className="field">
               <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> {LABEL_ENGI}</label>
-              <div className="field__hint" style={{ marginTop: 4 }}>Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.</div>
+              <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_ENGI}</div>
             </div>
           )}
 
           <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => { setNaginata(e.target.checked); setLeagueTwoThirdPlaces(!e.target.checked); }} /> Naginata competition</label>
-            <div className="field__hint" style={{ marginTop: 4 }}>Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.</div>
+            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => { setNaginata(e.target.checked); setLeagueTwoThirdPlaces(!e.target.checked); }} /> {LABEL_NAGINATA}</label>
+            <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_NAGINATA}</div>
           </div>
 
           <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={checkInEnabled} onChange={(e) => setCheckInEnabled(e.target.checked)} /> Check-in tracking</label>
-            <div className="field__hint" style={{ marginTop: 4 }}>Show check-in column and counter for this competition.</div>
+            <label className="checkbox"><input type="checkbox" checked={checkInEnabled} onChange={(e) => setCheckInEnabled(e.target.checked)} /> {LABEL_CHECK_IN}</label>
+            <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_CHECK_IN}</div>
           </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>

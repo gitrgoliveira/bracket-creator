@@ -252,6 +252,31 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		return res
 	}
 
+	// Cross-file guard symmetry with POST /competitions and PUT
+	// /competitions/:id, and for the reason ValidateCompetitionKind's own
+	// doc comment gives: an unrecognised Kind is not rejected anywhere
+	// downstream, it simply runs as "individual" through the whole engine.
+	// This door writes competitions directly via store.SaveCompetitionChanged
+	// rather than through those handlers, so without this check a manifest
+	// saying `kind: banana` persisted silently -- and could then only be
+	// corrected by CHANGING it, since the PUT guard is deliberately
+	// change-scoped and never speaks up about a stored value on its own.
+	//
+	// TeamSize rides along because the same manifest carries `team_size` as
+	// an independent key with no cross-check: `kind: individual` plus
+	// `team_size: 3` is a pairing every other write path refuses, and it is
+	// the shape the settings screen then has to reconcile on the operator's
+	// behalf. The two validators sit in the same order the POST handler runs
+	// them in.
+	if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+		res.Error = "kind: " + err.Error()
+		return res
+	}
+	if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
+		res.Error = "teamSize: " + err.Error()
+		return res
+	}
+
 	if comp.PoolSize == 0 {
 		comp.PoolSize = 4
 	}

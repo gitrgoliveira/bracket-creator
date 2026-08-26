@@ -21,10 +21,10 @@ import {
 // bc-symm Phase 3: option lists, copy and coupling rules shared with the
 // competition CREATE form (admin_setup.jsx's AdminCreateCompetition), so the
 // two screens cannot drift apart. See competition_shape.jsx's header for the
-// full split rationale. normalizeConfigForFormat and kindChangeBlockedReason
-// are settings-only imports: the create form has no staged config to
-// re-normalize on a format flip and no roster that could ever block a kind
-// change.
+// full split rationale. shapeConfigForSave, resolveTeamSize and
+// kindChangeBlockedReason are settings-only imports: the create form builds
+// a payload from scratch rather than re-shaping a stored one, and it has no
+// roster that could ever block a kind change.
 import {
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
@@ -38,9 +38,17 @@ import {
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies,
-  normalizeConfigForFormat, normalizeConfigForKind, kindChangeBlockedReason,
-  FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_FULL, POOL_FORMAT_PARTIAL,
-  MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears,
+  shapeConfigForSave, resolveTeamSize, kindChangeBlockedReason,
+  FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_PARTIAL,
+  MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears, swissSettingsError,
+  CLEARED_FIELD_LABELS, optionLabel, poolFormatHint, resolvePoolFormat,
+  resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
+  leagueTiebreakActive, twoThirdPlacesVisible,
+  MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
+  HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL,
+  LABEL_NAGINATA, HINT_NAGINATA,
+  LABEL_CHECK_IN, HINT_CHECK_IN,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
 } from './competition_shape.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 
@@ -64,48 +72,21 @@ export function formatCompMinutes(m) {
   return `${h}h ${String(min).padStart(2, "0")}m`;
 }
 
-// This is an INDEX for the pending-clears notice below, NOT the render
-// sites' source of copy: it goes from a pendingConfigClears
-// (competition_shape.jsx) KEY (e.g. "poolSize") to the LABEL_* constant
-// naming that field, for the one place (the notice's bullet list) that has
-// to look a label up dynamically by a key it only knows at runtime. This
-// screen's own field <label>s do NOT read through this map -- they import
-// and render LABEL_POOL_SIZE / LABEL_POOL_WINNERS / LABEL_EXTRA_QUALIFIERS /
-// LABEL_TEAM_SIZE / LABEL_TEAM_MATCH_TYPE / LABEL_ENGI / LABEL_ZEKKEN
-// directly, the same access path admin_setup.jsx uses for the identical
-// controls (bc-symm: the LABEL_TEAM_SIZE constant directly, not a second
-// lookup through this map's own key). Lives HERE, not in competition_shape.jsx: that module is
-// a pure leaf that returns keys only (its own doc comment explains why --
-// it owns the RULE, this screen owns the RENDER), so the label copy
-// belongs with the renderer. Every value below is still one of
-// competition_shape.jsx's own LABEL_* exports, so the string has exactly
-// one home either way, and the bc-symm parity guard
-// (competition_parity.test.jsx) covers it the ordinary way, by asserting
-// admin_setup.jsx and this file both import the same LABEL_* names.
-const CLEARED_FIELD_LABELS = {
-  poolSize: LABEL_POOL_SIZE,
-  poolWinners: LABEL_POOL_WINNERS,
-  extraQualifiers: LABEL_EXTRA_QUALIFIERS,
-  teamSize: LABEL_TEAM_SIZE,
-  teamMatchType: LABEL_TEAM_MATCH_TYPE,
-  engi: LABEL_ENGI,
-  withZekkenName: LABEL_ZEKKEN,
-};
-
 // Human-readable rendering of a cleared field's CURRENT (about-to-be-lost)
 // value. Booleans read "on" (pendingConfigClears only ever reports a
 // truthy boolean -- see its "meaningful" filter -- so "off" is never
-// reached here). teamMatchType gets its pill copy (TEAM_MATCH_TYPE_OPTIONS,
-// competition_shape.jsx) rather than the raw wire value ("kachinuki"/
-// "fixed"); everything else prints as-is. The fallback to
-// TEAM_MATCH_TYPE_OPTIONS[0] (Regular/"fixed") mirrors the original
-// ternary's catch-all: any value other than exactly "kachinuki" -- "fixed",
-// legacy "", or an unrecognised string -- reads as Regular.
+// reached here). teamMatchType and extraQualifiers resolve through their
+// option lists rather than branching per field; everything else prints as-is.
 function formatClearedValue(key, value) {
   if (typeof value === "boolean") return "on";
+  // Resolve an enum through its own option list rather than branching per
+  // field: teamMatchType went through TEAM_MATCH_TYPE_OPTIONS while
+  // extraQualifiers -- also in CLEARED_FIELD_LABELS -- fell through to
+  // String(value) and printed its raw wire value.
   if (key === "teamMatchType") {
-    return (TEAM_MATCH_TYPE_OPTIONS.find((o) => o.value === value) || TEAM_MATCH_TYPE_OPTIONS[0]).label;
+    return optionLabel(TEAM_MATCH_TYPE_OPTIONS, value) || TEAM_MATCH_TYPE_OPTIONS[0].label;
   }
+  if (key === "extraQualifiers") return extraQualifiersLabel(value);
   return String(value);
 }
 
@@ -353,7 +334,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // already hidden. Same NaN/fractional/negative guards as safeInt; the
     // only difference is the lower bound. The NaN fallback to latestC.<field>
     // still protects a field the operator never touched from being zeroed by
-    // an unrelated save. poolSize/poolWinners (below, read from `shaped`)
+    // an unrelated save -- but note teamSize no longer READS that fallback
+    // here: it is resolved against the stored value BEFORE shaping instead
+    // (resolveTeamSize, below), because normalizeConfigForKind rewrites
+    // teamSize on both of its branches, so a guard applied to its OUTPUT is
+    // dead code. poolSize/poolWinners (below, read from `shaped`)
     // joined it for the identical shape of reason: normalizeConfigForFormat's
     // 0 going out of "mixed" is a DECISION (no pool phase to size), not a
     // cleared input, and safeInt's >=1 floor would read that decision as
@@ -380,8 +365,25 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     // the instant Save actually sends it; pendingConfigClears
     // (competition_shape.jsx), rendered below the Format/Kind controls,
     // tells the operator what THIS save is about to clear before they
-    // commit to it.
-    const shaped = normalizeConfigForKind(normalizeConfigForFormat(effective));
+    // commit to it. shapeConfigForSave is also what SCOPES the two
+    // normalizers to a staged format/kind change -- see its own comment for
+    // the draw-ready 409 an unscoped run caused on a stored team
+    // competition carrying withZekkenName.
+    // teamSize is resolved against the stored value BEFORE shaping, never
+    // after. normalizeConfigForKind rewrites it on BOTH branches (0 going
+    // individual, DEFAULT_TEAM_SIZE for a team under the floor), so
+    // shaped.teamSize is always a finite integer and the
+    // `safeNonNegInt(shaped.teamSize, latestC.teamSize)` this line used to
+    // pair with could never fire: clearing the Team size input on a stored 3
+    // silently saved 5, and typing a 1 or a 0 did the same, while the input's
+    // own comment promised a fall back to the last-saved value.
+    // resolveTeamSize (competition_shape.jsx) is that fall back, and the
+    // pendingClears notice below calls it too so the warning can never name a
+    // value the save will not send.
+    const shaped = shapeConfigForSave(latestC, {
+      ...effective,
+      teamSize: resolveTeamSize(effective.teamSize, latestC.teamSize),
+    });
     const finalNext = {
       id: latestC.id,
       name: trimmedName,
@@ -399,9 +401,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       roundRobin: effective.roundRobin,
       // withZekkenName is normalizeConfigForKind's field (forced false going
       // team; see that function's own comment for why), so it reads from
-      // `shaped` for the same reason poolSize/poolWinders do above.
+      // `shaped` for the same reason poolSize/poolWinners do above.
       withZekkenName: shaped.withZekkenName,
-      teamSize: safeNonNegInt(shaped.teamSize, latestC.teamSize),
+      // No safeNonNegInt here: see the resolveTeamSize note on `shaped` above
+      // -- the guard belongs before the normalizer, not after it.
+      teamSize: shaped.teamSize,
       numberPrefix: trimmedPrefix,
       format: effective.format,
       kind: effective.kind,
@@ -682,6 +686,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // changes the scoring paradigm; flipping naginata affects the bronze match.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
+  // The draw-lock condition and its copy, named once. Both were repeated
+  // across this component (16 spellings of the condition, 8 of the note),
+  // and three of the note's occurrences had to be hand-copied correctly
+  // when they were added -- the ninth is the one that says something
+  // slightly different.
+  const lockedAfterDraw = isDrawReady || isStarted;
+  const lockedNote = lockedAfterDraw ? " Locked after draw." : "";
+
   // Kind lock: a ROSTER lock, not the isDrawReady/isStarted pair above.
   // Individual and team rosters don't translate (competition_shape.jsx's
   // kindChangeBlockedReason), and the roster exists long before any draw
@@ -772,21 +784,53 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const poolSettingsErr = poolSettingsError(local.format, local.poolSize, local.poolWinners);
   const blockingPoolSettingsErr = !!poolSettingsErr && (formatChanged || poolFieldsChanged);
 
+  // The Swiss twin of the pool gate directly above, and it exists for the
+  // same reason and by the same route: the Format editor makes "swiss"
+  // reachable for a stored competition that has never had a round count, and
+  // swissRounds is 0 on every non-Swiss record. Tapping the "Swiss" pill
+  // rendered "Number of Swiss rounds" showing 0 with Save still live, and
+  // the PUT took validateSwissConfig's raw server string. The create form
+  // has blocked the identical combination client-side since T190; this is
+  // the settings side of that guard, over the SAME rule
+  // (swissSettingsError, competition_shape.jsx).
+  //
+  // Change-scoped like the pool gate, and for the same reason: a stored
+  // Swiss competition whose round count is already 0 must not have every
+  // unrelated edit blocked by a value the operator did not touch.
+  const swissFieldsChanged = local.swissRounds !== c.swissRounds;
+  const swissSettingsErr = swissSettingsError(local.format, local.swissRounds);
+  const blockingSwissSettingsErr = !!swissSettingsErr && (formatChanged || swissFieldsChanged);
+
   // What THIS save is about to clear, per the operator ruling that a config
   // change must never quietly overwrite or delete the operator's data --
   // it must surface what will happen and let the operator decide.
-  // pendingConfigClears (competition_shape.jsx) returns [] unless a format
-  // or kind change is actually staged; rendered as a WARNING (never a
-  // blocker -- see saveDisabled below, which does not include it) directly
-  // under the Format/Kind controls that caused it.
-  const pendingClears = pendingConfigClears(c, local);
+  // pendingConfigClears (competition_shape.jsx) reports the diff between
+  // what is staged and what shapeConfigForSave will actually send, so it
+  // returns [] unless a format or kind change is staged; rendered as a
+  // WARNING (never a blocker -- see saveDisabled below, which does not
+  // include it) directly under the Format/Kind controls that caused it.
+  //
+  // Staged teamSize is resolved exactly as saveNow resolves it. Without
+  // this the notice reads the raw input: type a 1 into Team size while
+  // flipping to Team and it announced "Team size (1)" as about to be
+  // cleared, when the save neither keeps 1 nor clears it -- it sends the
+  // stored value, or the default when there is none.
+  const pendingClears = pendingConfigClears(c, {
+    ...local,
+    teamSize: resolveTeamSize(local.teamSize, c.teamSize),
+  });
   // Names the format/kind the operator is switching TO, for the notice's
   // "which does not apply to <x>" clause. Only the sides that actually
   // changed are named, so a kind-only flip doesn't claim a format change
   // that never happened (and vice versa).
+  // optionLabel (competition_shape.jsx) is the one option-list lookup in
+  // this codebase; these two used to respell its `.find(...)?.label` inline,
+  // ten lines from formatClearedValue which already calls it. The `||` tails
+  // keep the raw wire value as a last resort, which optionLabel's own ""
+  // return does not supply.
   const pendingClearsTarget = [
-    formatChanged ? (FORMAT_OPTIONS.find((o) => o.value === local.format)?.label || local.format) : null,
-    local.kind !== c.kind ? (KIND_OPTIONS.find((o) => o.value === local.kind)?.label || local.kind) : null,
+    formatChanged ? (optionLabel(FORMAT_OPTIONS, local.format) || local.format) : null,
+    local.kind !== c.kind ? (optionLabel(KIND_OPTIONS, local.kind) || local.kind) : null,
   ].filter(Boolean).join(" / ");
   // The mechanism sentence is dropped from the standing hint while the red
   // error is on screen: the error states it one line above, and printing it
@@ -811,7 +855,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
-  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr;
+  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr;
 
   // The blocking message and its precedence, shared by the header chip and the
   // footer for the same reason saveDisabled is: the footer used to restate the
@@ -832,7 +876,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         // field and the exact rule (e.g. "Players per pool must be a whole
         // number ≥ 3."), so it is printed directly rather than behind a
         // fixed short label.
-        : blockingPoolSettingsErr ? `⚠ ${poolSettingsErr}` : "";
+        : blockingPoolSettingsErr ? `⚠ ${poolSettingsErr}`
+          // Same reasoning as the pool arm above: swissSettingsError already
+          // names the field and the rule, so it prints directly.
+          : blockingSwissSettingsErr ? `⚠ ${swissSettingsErr}` : "";
   const saveBlocked = !!saveBlockMessage;
 
   return (
@@ -975,12 +1022,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               className={`radio-pill ${local.kind === o.value ? "is-active" : ""}`}
               type="button"
               onClick={() => update("kind", o.value)}
-              disabled={isDrawReady || isStarted || !!kindLockReason}
+              disabled={lockedAfterDraw || !!kindLockReason}
             >{o.label}</button>
           ))}
         </div>
         <div className="field__hint">
-          {kindLockReason}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+          {kindLockReason}{lockedNote}
         </div>
       </div>
       <div className="field">
@@ -1000,12 +1047,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               className={`radio-pill ${local.format === o.value ? "is-active" : ""}`}
               type="button"
               onClick={() => update("format", o.value)}
-              disabled={isDrawReady || isStarted}
+              disabled={lockedAfterDraw}
             >{o.label}</button>
           ))}
         </div>
         <div className="field__hint">
-          {formatHint(local.format)}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+          {formatHint(local.format)}{lockedNote}
         </div>
       </div>
       {/* Data-loss notice for a staged Format/Competition-type change,
@@ -1045,9 +1092,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* not 1, whenever it's visible at all (team-only, see */}
           {/* teamFieldsVisible above). */}
           {/* Render NaN as "" so clearing the input stays empty instead of */}
-          {/* collapsing to "0"; saveNow's safeNonNegInt guard means a */}
-          {/* cleared/invalid value falls back to the last-saved teamSize */}
-          {/* rather than landing on the backend as a clobbering 0. */}
+          {/* collapsing to "0"; saveNow resolves the staged value through */}
+          {/* resolveTeamSize (competition_shape.jsx), so a cleared input -- */}
+          {/* or a typed 0 or 1, both below this field's own min -- falls */}
+          {/* back to the last-saved teamSize rather than landing on the */}
+          {/* backend as a clobbering 0 or as a silent 5. */}
           {/* draw-ready lock: teamSize is output-affecting. */}
           <input
             className="input"
@@ -1082,12 +1131,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 className={`radio-pill ${(o.value === "kachinuki" ? local.teamMatchType === "kachinuki" : local.teamMatchType !== "kachinuki") ? "is-active" : ""}`}
                 type="button"
                 onClick={() => update("teamMatchType", o.value)}
-                disabled={isDrawReady || isStarted}
+                disabled={lockedAfterDraw}
               >{o.label}</button>
             ))}
           </div>
           <div className="field__hint">
-            {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{(isDrawReady || isStarted) ? " Locked after draw." : ""}
+            {teamMatchTypeHint(local.teamMatchType === "kachinuki")}{lockedNote}
           </div>
         </div>
       )}
@@ -1100,10 +1149,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             {POOL_FORMAT_OPTIONS.map((o) => (
               <button
                 key={o.value}
-                className={`radio-pill ${(local.poolFormat || POOL_FORMAT_FULL) === o.value ? "is-active" : ""}`}
+                className={`radio-pill ${resolvePoolFormat(local.poolFormat) === o.value ? "is-active" : ""}`}
                 type="button"
                 onClick={() => update("poolFormat", o.value)}
-                disabled={isDrawReady || isStarted}
+                disabled={lockedAfterDraw}
               >{o.label}</button>
             ))}
           </div>
@@ -1113,31 +1162,44 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 in competition_shape.jsx), and this file already reads an
                 empty poolFormat as non-partial at the courts-suggestion hint
                 below (was: `local.poolFormat === "partial"`). */}
-            {POOL_FORMAT_OPTIONS.find((o) => o.value === (local.poolFormat || POOL_FORMAT_FULL))?.hint}
-            {(isDrawReady || isStarted) ? " Locked after draw." : ""}
+            {poolFormatHint(local.poolFormat)}
+            {lockedNote}
           </div>
         </div>
       )}
-      <div className="field">
-        {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx)
-            -- true only for "mixed" with poolFormat !== "partial", the one
-            combination internal/engine/pools.go actually reads
-            comp.RoundRobin for. Rendering it unconditionally (as this used
-            to) showed a live-looking control that a league or a
-            partial-pool mixed competition silently ignored.
-            draw-ready lock: roundRobin is output-affecting. */}
-        {roundRobinVisible(local.format, local.poolFormat) && (
+      {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx)
+          -- true only for "mixed" with poolFormat !== "partial", the one
+          combination internal/engine/pools.go actually reads
+          comp.RoundRobin for. Rendering it unconditionally (as this used
+          to) showed a live-looking control that a league or a
+          partial-pool mixed competition silently ignored.
+          The guard wraps the .field, not just the checkbox inside it: an
+          empty .field still carries the class's own margin, and the sibling
+          poolFormatVisible / swissRoundsVisible blocks on this screen all
+          gate the wrapper too.
+          draw-ready lock: roundRobin is output-affecting. */}
+      {roundRobinVisible(local.format, local.poolFormat) && (
+        <div className="field">
           <label className="checkbox"><input type="checkbox" checked={local.roundRobin} onChange={(e) => update("roundRobin", e.target.checked)} disabled={isDrawReady} /> {LABEL_ROUND_ROBIN}</label>
-        )}
-      </div>
+        </div>
+      )}
       {local.format === FORMAT_MIXED && (
         <>
           <div className="field">
             <label className="field__label">Pool size is a</label>
+            {/* Stored/legacy "" resolves to "minimum", which is what the
+                engine does with it (`isMax := PoolSizeMode == "max"`
+                everywhere) -- see resolvePoolSizeMode in
+                competition_shape.jsx. Nothing on the server fills this
+                field in on POST, so a competition authored outside the SPA
+                reaches the Format editor with "" and a bare equality lit
+                NEITHER pill while the draw ran minimum sizing. Same fix, and
+                the same reason, as resolvePoolFormat on the sibling field
+                above. */}
             {/* draw-ready lock: poolSizeMode, poolSize, poolWinners are output-affecting. */}
             <div className="radio-group">
               <button
-                className={`radio-pill ${local.poolSizeMode === "max" ? "is-active" : ""}`}
+                className={`radio-pill ${resolvePoolSizeMode(local.poolSizeMode) === POOL_SIZE_MODE_MAX ? "is-active" : ""}`}
                 type="button"
                 onClick={() => {
                   // bc-qual LP-5a: leaving minimum-players-per-pool sizing
@@ -1146,12 +1208,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                   // non-standard selection under a mode it's no longer
                   // valid for (same reset admin_setup.jsx's create form
                   // applies on the same transition).
-                  update("poolSizeMode", "max");
-                  update("extraQualifiers", resetExtraQualifiersOnPoolModeChange("max", local.extraQualifiers));
+                  update("poolSizeMode", POOL_SIZE_MODE_MAX);
+                  update("extraQualifiers", resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, local.extraQualifiers));
                 }}
                 disabled={isDrawReady}
               >maximum</button>
-              <button className={`radio-pill ${local.poolSizeMode === "min" ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", "min")} disabled={isDrawReady}>minimum</button>
+              <button className={`radio-pill ${resolvePoolSizeMode(local.poolSizeMode) === POOL_SIZE_MODE_MIN ? "is-active" : ""}`} type="button" onClick={() => update("poolSizeMode", POOL_SIZE_MODE_MIN)} disabled={isDrawReady}>minimum</button>
             </div>
           </div>
           <div className="row">
@@ -1165,9 +1227,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             <div className="field"><label className="field__label">{LABEL_POOL_SIZE}</label><input
               className="input"
               type="number"
-              min="3"
+              min={MIN_POOL_SIZE}
               value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
-              onChange={(e) => updateNumber("poolSize", e.target.value, 3)}
+              onChange={(e) => updateNumber("poolSize", e.target.value, MIN_POOL_SIZE)}
               disabled={isDrawReady}
             /></div>
             <div className="field">
@@ -1175,9 +1237,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               <input
                 className="input"
                 type="number"
-                min="1"
+                min={MIN_POOL_WINNERS}
                 value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
-                onChange={(e) => updateNumber("poolWinners", e.target.value, 1)}
+                onChange={(e) => updateNumber("poolWinners", e.target.value, MIN_POOL_WINNERS)}
                 disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
               />
               {/* bc-qual LP-5a: same coupling hint as the create form; */}
@@ -1220,7 +1282,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               server-side outputAffectingChanged set alongside them).
               Federation-neutral copy per operator ruling: no federation
               names anywhere in this UI. */}
-          {extraQualifiersRadioVisible(local.format, local.poolSizeMode) && (() => {
+          {/* Resolved, not raw: extraQualifiersRadioVisible's gate is a
+              strict `poolMode === "min"`, so an unresolved "" hid the radio
+              on exactly the records the SERVER would accept a non-standard
+              qualifier setting for (its own test is `isMax := ... == "max"`).
+              The predicate keeps its strict contract; the call site hands it
+              a resolved value. */}
+          {extraQualifiersRadioVisible(local.format, resolvePoolSizeMode(local.poolSizeMode)) && (() => {
             const activeShape = local.extraQualifiers === EXTRA_QUALIFIERS_LARGER_POOLS
               ? qualifierPreview.largerPools
               : local.extraQualifiers === EXTRA_QUALIFIERS_FILL_BRACKET
@@ -1274,22 +1342,29 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       {swissRoundsVisible(local.format) && (
         <div className="field">
           <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
+          {/* Floor is MIN_SWISS_ROUNDS (competition_shape.jsx), the same
+              constant swissSettingsError reads, so the input's own min and
+              the message that blocks Save cannot state different numbers. */}
           <input
             className="input"
             type="number"
-            min="1"
+            min={MIN_SWISS_ROUNDS}
             step="1"
             value={Number.isFinite(local.swissRounds) ? local.swissRounds : ""}
-            onChange={(e) => updateNumber("swissRounds", e.target.value, 1)}
+            onChange={(e) => updateNumber("swissRounds", e.target.value, MIN_SWISS_ROUNDS)}
             style={{ maxWidth: 120 }}
           />
+          {/* Inline, like the pool block's error above: the header/footer
+              chip states the blocker, but the operator's eye is on the field
+              they just emptied. */}
+          {swissSettingsErr && <window.FieldError>{swissSettingsErr}</window.FieldError>}
           <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
         </div>
       )}
       {/* League standings settings. The joint-3rd convention applies to ALL
           leagues (team + individual); the "Break ties for top" band is a
           team-league tie-breaker knob and stays team-only. */}
-      {local.format === FORMAT_LEAGUE && (
+      {twoThirdPlacesVisible(local.format) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
           {/* leagueTiebreakVisible folds format === "league" into its own
               check, so this re-evaluates that half of the outer wrapper's
@@ -1303,14 +1378,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
                 {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
                   <button
                     key={o.value}
-                    className={`radio-pill ${(o.value === 3 ? ((local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3) : local.leagueTiebreakTopN === o.value) ? "is-active" : ""}`}
+                    className={`radio-pill ${leagueTiebreakActive(o.value, local.leagueTiebreakTopN) ? "is-active" : ""}`}
                     type="button"
-                    disabled={isDrawReady || isStarted}
+                    disabled={lockedAfterDraw}
                     onClick={() => update("leagueTiebreakTopN", o.value)}
                   >{o.label}</button>
                 ))}
               </div>
-              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}{lockedNote}</div>
             </div>
           )}
           {/* `.field` for its margin-bottom, matching admin_setup.jsx's wrapper
@@ -1324,10 +1399,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               on the form and so had nothing to collide with. */}
           <div className="field" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <label className="checkbox">
-              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={isDrawReady || isStarted} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
+              <input type="checkbox" checked={!!local.leagueTwoThirdPlaces} disabled={lockedAfterDraw} onChange={(e) => update("leagueTwoThirdPlaces", e.target.checked)} />
               {" "}{LABEL_TWO_THIRD_PLACES}
             </label>
-            <div className="field__hint field__hint--checkbox">{HINT_TWO_THIRD_PLACES}{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+            <div className="field__hint field__hint--checkbox">{HINT_TWO_THIRD_PLACES}{lockedNote}</div>
           </div>
         </div>
       )}
@@ -1466,9 +1541,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       )}
       <div className="field">
-        <label className="field__label">Player number prefix <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
+        <label className="field__label">{LABEL_NUMBER_PREFIX} <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
         <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} disabled={isDrawReady} style={{ maxWidth: 80 }} />
-        <div className="field__hint">Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.</div>
+        <div className="field__hint">{HINT_NUMBER_PREFIX}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1480,19 +1555,19 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
               operator unable to see, let alone recover, a setting they
               remember configuring. */}
           <label className="checkbox"><input type="checkbox" checked={local.withZekkenName} onChange={(e) => update("withZekkenName", e.target.checked)} disabled={isDrawReady || !zekkenApplies(local.kind)} /> {LABEL_ZEKKEN}</label>
-          <div className="field__hint field__hint--checkbox">{!zekkenApplies(local.kind) ? "(Only applicable for individual competitions)" : "When enabled, participant CSV uses three columns: Name, Zekken, Dojo."}</div>
+          <div className="field__hint field__hint--checkbox">{!zekkenApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : HINT_ZEKKEN}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={isDrawReady || isStarted || !engiApplies(local.kind)} /> {LABEL_ENGI}</label>
-          <div className="field__hint field__hint--checkbox">{!engiApplies(local.kind) ? "(Only applicable for individual competitions)" : `Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.${(isDrawReady || isStarted) ? " Locked after draw." : ""}`}</div>
+          <label className="checkbox"><input type="checkbox" checked={!!local.engi} onChange={(e) => update("engi", e.target.checked)} disabled={lockedAfterDraw || !engiApplies(local.kind)} /> {LABEL_ENGI}</label>
+          <div className="field__hint field__hint--checkbox">{!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} disabled={isDrawReady || isStarted} /> Naginata competition</label>
-          <div className="field__hint field__hint--checkbox">Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.{(isDrawReady || isStarted) ? " Locked after draw." : ""}</div>
+          <label className="checkbox"><input type="checkbox" checked={!!local.naginata} onChange={(e) => update("naginata", e.target.checked)} disabled={lockedAfterDraw} /> {LABEL_NAGINATA}</label>
+          <div className="field__hint field__hint--checkbox">{HINT_NAGINATA}{lockedNote}</div>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> Check-in tracking</label>
-          <div className="field__hint field__hint--checkbox">Show check-in column and counter. Disable for competitions that don't need attendance tracking.</div>
+          <label className="checkbox"><input type="checkbox" checked={!!local.checkInEnabled} onChange={(e) => update("checkInEnabled", e.target.checked)} /> {LABEL_CHECK_IN}</label>
+          <div className="field__hint field__hint--checkbox">{HINT_CHECK_IN}</div>
         </div>
       </div>
       {/* Repeat Save at the foot of the long settings form so the operator

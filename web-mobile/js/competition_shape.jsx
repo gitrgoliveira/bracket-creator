@@ -86,12 +86,23 @@ export const FORMAT_OPTIONS = [
   { value: FORMAT_SWISS, label: "Swiss", hint: "Swiss-system: fixed number of rounds, pairing players with equal win counts; cumulative standings decide the winner." },
 ];
 
+// optionLabel: resolve a wire value through one of this module's option
+// lists to its operator-facing copy. `field` picks which copy ("label" by
+// default, "hint" for the lines under a pill group). Returns "" for an
+// unrecognised or empty value, so a caller can render the result directly
+// without a fallback -- an unknown value shows nothing rather than the raw
+// wire string. Every option-list lookup in this codebase goes through here
+// so the "?? \"\"" and the `.find` shape are not respelled per call site.
+export function optionLabel(options, value, field = "label") {
+  return options.find((o) => o.value === value)?.[field] ?? "";
+}
+
 // formatHint: the hint line shown under the Format pills for the given
 // format. "" for an unrecognised/empty format, matching the create form's
 // chained `{format === "x" && "..."}` rendering (nothing shown when no
 // branch matches).
 export function formatHint(format) {
-  return FORMAT_OPTIONS.find((o) => o.value === format)?.hint ?? "";
+  return optionLabel(FORMAT_OPTIONS, format, "hint");
 }
 
 // POOL_FORMAT_OPTIONS / LABEL_POOL_FORMAT: verbatim from admin_setup.jsx's
@@ -101,6 +112,24 @@ export const POOL_FORMAT_OPTIONS = [
   { value: POOL_FORMAT_FULL, label: "Full round-robin", hint: "Every participant plays every other participant in their pool." },
   { value: POOL_FORMAT_PARTIAL, label: "Partial / neighbour-only", hint: "Each participant plays a neighbourhood subset: useful when a full round-robin would not fit in the day's schedule." },
 ];
+
+// resolvePoolFormat: a stored/legacy "" means "full" -- the engine's own
+// unset default (internal/engine/pools.go's `switch comp.PoolFormat`
+// falls through to the full round-robin arm). Both screens need this to
+// pick the active pill AND the hint, and before this existed they
+// disagreed: settings resolved `local.poolFormat || POOL_FORMAT_FULL`
+// while create used the bare value, so an empty poolFormat lit no pill
+// and showed no hint on the create form.
+export function resolvePoolFormat(poolFormat) {
+  return poolFormat || POOL_FORMAT_FULL;
+}
+
+// poolFormatHint: the hint under the "Round-robin shape" pills, the twin
+// of formatHint above. Resolves the legacy-empty value first so the hint
+// matches whichever pill is lit.
+export function poolFormatHint(poolFormat) {
+  return optionLabel(POOL_FORMAT_OPTIONS, resolvePoolFormat(poolFormat), "hint");
+}
 
 // poolFormatVisible: true wherever a competition builds a pool phase at all
 // (bc-symm Gap 1). internal/engine/pools.go:149's `switch comp.PoolFormat`
@@ -143,16 +172,48 @@ export function swissRoundsVisible(format) {
   return format === FORMAT_SWISS;
 }
 
+// MIN_SWISS_ROUNDS: the floor validateSwissConfig
+// (internal/mobileapp/handlers_competition.go) enforces -- "swiss format
+// requires swissRounds >= 1" -- written down once, next to the client rule
+// that keeps a request below it off the wire. Same pattern as
+// MIN_POOL_SIZE / MIN_TEAM_SIZE below.
+export const MIN_SWISS_ROUNDS = 1;
+
+// swissSettingsError: the ONE owner of the Swiss-rounds rule, moved here
+// from admin_setup.jsx's validateSwissSettings (which is now a thin
+// { ok, error } adapter over it, exactly as validatePoolSettings became one
+// over poolSettingsError). Returns `string | null`, like every other error
+// helper in this module.
+//
+// It is here rather than on the create form because settings needs it too,
+// and by the same route poolSettingsError did: the Format editor this
+// change added to the settings screen makes "swiss" reachable for a stored
+// competition that has never had a round count, and swissRounds sits on
+// disk as 0 for every non-Swiss competition (`omitempty` on the wire, so an
+// untouched record simply has no value). Tapping the new "Swiss" pill
+// therefore renders "Number of Swiss rounds" showing 0, with nothing
+// blocking Save -- and the PUT takes a 400 whose raw server string reaches
+// the operator verbatim, which is precisely the gap poolSettingsError
+// exists to close on the sibling field.
+export function swissSettingsError(format, swissRounds) {
+  if (format !== FORMAT_SWISS) return null;
+  if (!Number.isInteger(swissRounds) || swissRounds < MIN_SWISS_ROUNDS) {
+    return `${LABEL_SWISS_ROUNDS} must be a whole number ≥ ${MIN_SWISS_ROUNDS}.`;
+  }
+  return null;
+}
+
 // --- Round-robin-in-pools checkbox --------------------------------------
 //
 // Present on both surfaces (admin_setup.jsx, admin_competition_
-// settings.jsx). Both used to render this checkbox unconditionally, but it
-// is only ever READ in one place: internal/engine/pools.go:157 checks
-// `comp.RoundRobin` solely inside the PoolFormat switch's `default` branch
-// (PoolFormatFull, or an unset/unrecognized value) -- the
-// PoolFormatPartial case at pools.go:150-152 calls
-// helper.CreatePartialPoolMatches(pools) and never looks at RoundRobin at
-// all, so unchecking the box does nothing once poolFormat is "partial".
+// settings.jsx). Both used to render this checkbox unconditionally, but
+// only ONE read of the flag decides anything the operator can see, and it
+// is internal/engine/pools.go:157: `comp.RoundRobin` is checked solely
+// inside the PoolFormat switch's `default` branch (PoolFormatFull, or an
+// unset/unrecognized value) -- the PoolFormatPartial case at
+// pools.go:150-152 calls helper.CreatePartialPoolMatches(pools) and never
+// looks at RoundRobin at all, so unchecking the box does nothing once
+// poolFormat is "partial".
 // And internal/engine/competition.go:896 unconditionally overwrites
 // `comp.RoundRobin = true` for CompFormatLeague before generatePools runs,
 // regardless of what the operator stored, so the checkbox is equally inert
@@ -161,6 +222,27 @@ export function swissRoundsVisible(format) {
 // Elsewhere the control was a lie -- unchecking it left the UI showing
 // "off" while the draw still built a full round-robin (league) or ran
 // CreatePartialPoolMatches regardless (partial).
+//
+// The flag IS read in three other places, none of which widens that rule
+// -- they are listed here because "only read in one place" was this
+// comment's original wording and it was simply false, which is a bad
+// footing for the sole justification given for removing a control
+// operators used to have:
+//
+//   internal/engine/estimate_schedule.go:47 copies it into
+//     helper.EstimateMatchCountsInput, where poolMatchesPerPool
+//     (helper/estimate.go:189) branches on it -- but only down the
+//     estimator's `case "mixed"` path. `case "league"`
+//     (helper/estimate.go:87-89) computes N*(N-1)/2 directly and never
+//     consults the flag, matching competition.go:896's forced true. So the
+//     estimator agrees with the draw on every format, and agrees with this
+//     rule about which format the operator can move.
+//   internal/engine/competition.go:1022 compares it against the value
+//     loaded at the top of StartCompetition, to abort a draw whose config
+//     changed underneath it. A drift check, not a behaviour switch.
+//   internal/mobileapp/handlers_competition.go:1344 puts it in the
+//     output-affecting set that forces a redraw while draw-ready -- which
+//     is why the checkbox carries the same isDrawReady lock as poolSize.
 export const LABEL_ROUND_ROBIN = "Round-robin in pools";
 
 // roundRobinVisible: gates the checkbox on the one combination where it is
@@ -190,10 +272,23 @@ export const HINT_LEAGUE_TIEBREAK = "Tied teams within this finishing band requi
 // `(local.leagueTiebreakTopN || 0) === 0 || local.leagueTiebreakTopN === 3`
 // active-pill check -- but 0 is not a selectable OPTION, only the default
 // resolution of "not yet chosen", so it is not listed as a value here.
+export const LEAGUE_TIEBREAK_DEFAULT = 3;
 export const LEAGUE_TIEBREAK_OPTIONS = [
-  { value: 3, label: "Top 3" },
+  { value: LEAGUE_TIEBREAK_DEFAULT, label: "Top 3" },
   { value: 4, label: "Top 4" },
 ];
+
+// leagueTiebreakActive: is `option` the lit pill for the stored value?
+// The "a stored/legacy 0 (unset) reads as Top 3" rule described above was
+// previously stated in THIS COMMENT ONLY, while both screens carried the
+// same nested ternary
+//   (o.value === 3 ? ((v || 0) === 0 || v === 3) : v === o.value)
+// with the 3 hardcoded a second and third time. That is precisely the
+// per-surface chain this module exists to replace, so the rule is now
+// executable here and the screens ask instead of re-deriving.
+export function leagueTiebreakActive(option, stored) {
+  return option === (stored || LEAGUE_TIEBREAK_DEFAULT);
+}
 
 // leagueTiebreakVisible: mirrors admin_competition_settings.jsx's gate,
 // `local.format === "league" && (local.teamSize > 0 || local.kind ===
@@ -301,6 +396,35 @@ export function teamFieldsVisible(kind) {
 // than folding into these constants.
 export const LABEL_ZEKKEN = "Use Zekken display name";
 export const LABEL_ENGI = "Engi (kata competition)";
+export const HINT_ZEKKEN = "When enabled, participant CSV uses three columns: Name, Zekken, Dojo.";
+export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi pairs. Enter each pair as one participant: Name 1 - Name 2, Dojo.";
+
+// --- The remaining shared checkboxes / text fields ----------------------
+//
+// Naginata, Check-in and the player-number prefix are rendered by BOTH
+// screens and were the last shared controls whose copy lived nowhere.
+//
+// The check-in HINT had ALREADY DRIFTED by the time it was hoisted: create
+// said "Show check-in column and counter for this competition." while
+// settings said "Show check-in column and counter. Disable for
+// competitions that don't need attendance tracking." The settings wording
+// is kept -- it is the one that says what turning the control OFF is for,
+// which is the only reason an operator touches it. That drift is the exact
+// failure mode a half-converted field invites: hoisting the LABEL alone
+// makes the label undriftable while leaving the sentence under it free,
+// and the parity guard only sees strings this module owns. So a hint is
+// hoisted WITH its label, never after it.
+export const LABEL_NAGINATA = "Naginata competition";
+export const HINT_NAGINATA = "Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.";
+export const LABEL_CHECK_IN = "Check-in tracking";
+export const HINT_CHECK_IN = "Show check-in column and counter. Disable for competitions that don't need attendance tracking.";
+export const LABEL_NUMBER_PREFIX = "Player number prefix";
+export const HINT_NUMBER_PREFIX = "Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.";
+// HINT_KIND_ONLY_INDIVIDUAL: settings shows this in place of the zekken /
+// engi hint when the competition is a team one, standing in for the hint
+// rather than sitting beside it (see zekkenApplies above for why settings
+// disables where create hides).
+export const HINT_KIND_ONLY_INDIVIDUAL = "(Only applicable for individual competitions)";
 
 // zekkenApplies / engiApplies: the RULE (zekken display names and engi
 // pairs are individual-only concepts), NOT a presentation instruction.
@@ -345,6 +469,45 @@ export const LABEL_POOL_SIZE = "Players per pool";
 export const LABEL_POOL_WINNERS = "Winners per pool";
 export const LABEL_EXTRA_QUALIFIERS = "Knockout qualifiers";
 
+// --- "Pool size is a" (poolSizeMode) --------------------------------------
+//
+// POOL_SIZE_MODE_MAX / _MIN are the two values the pills write.
+// resolvePoolSizeMode is what a STORED value means, and the distinction
+// matters because the stored field has a third state the pills do not: the
+// empty string.
+//
+// Nothing on the server defaults it. POST /api/competitions trims
+// PoolSizeMode and validates the rest of the record around it, but never
+// fills it in (handlers_competition.go); only the tournament-import path
+// does (handlers_import.go: `if comp.PoolSizeMode == "" { ... = "max" }`)
+// and only the SPA's own buildCompetition supplies one (data.jsx:
+// `poolMode || "max"`). So a competition authored by any other client sits
+// on disk with "", and the engine reads that as MINIMUM sizing -- every
+// consumer spells the test `isMax := PoolSizeMode == "max"`, so "" falls
+// to the min branch.
+//
+// Before the Format editor landed on the settings screen those records
+// could not reach the "Pool size is a" control at all, because it renders
+// only for "mixed" and a knockout-only competition could not be switched
+// to "mixed" from that screen. Now it can, and a bare `=== "max"` /
+// `=== "min"` equality lights NEITHER pill for a stored "" while the draw
+// quietly runs minimum sizing -- the identical failure resolvePoolFormat
+// (above) exists to fix on the sibling field, where an empty poolFormat lit
+// no pill and showed no hint.
+//
+// Also passed to extraQualifiersRadioVisible (qualifier_preview.jsx), whose
+// gate is a strict `poolMode === "min"`: unresolved, it hides the
+// "Knockout qualifiers" radio on exactly the records the SERVER would
+// accept a non-standard qualifier setting for. The predicate keeps its
+// strict contract and the call sites hand it a resolved value, rather than
+// this rule being respelled inside it.
+export const POOL_SIZE_MODE_MAX = "max";
+export const POOL_SIZE_MODE_MIN = "min";
+
+export function resolvePoolSizeMode(poolSizeMode) {
+  return poolSizeMode === POOL_SIZE_MODE_MAX ? POOL_SIZE_MODE_MAX : POOL_SIZE_MODE_MIN;
+}
+
 // --- poolSettingsError ----------------------------------------------------
 //
 // The ONE owner of the mixed-format pool-settings rule (poolSize >= 3,
@@ -385,13 +548,23 @@ export const LABEL_EXTRA_QUALIFIERS = "Knockout qualifiers";
 // retroactively made invalid by a UI-only rule it never agreed to. A
 // maintainer tightening either bound should re-read the other side's
 // comment first: they are meant to stay apart, not converge.
+// MIN_POOL_SIZE / MIN_POOL_WINNERS: the same two floors the check below
+// enforces, exported so the `min=` attributes and decideNumericUpdate
+// clamps on both screens read them instead of repeating a bare 3 and 1.
+// Before this, both screens' comments claimed "poolSettingsError owns both
+// thresholds" -- true of the MESSAGE and not of the input floors, which
+// were literals four call sites over from the constant they had to match.
+// Same pattern as MIN_TEAM_SIZE below.
+export const MIN_POOL_SIZE = 3;
+export const MIN_POOL_WINNERS = 1;
+
 export function poolSettingsError(format, poolSize, winners) {
   if (format !== FORMAT_MIXED) return null;
-  if (!Number.isInteger(poolSize) || poolSize < 3) {
-    return "Players per pool must be a whole number ≥ 3.";
+  if (!Number.isInteger(poolSize) || poolSize < MIN_POOL_SIZE) {
+    return `Players per pool must be a whole number ≥ ${MIN_POOL_SIZE}.`;
   }
-  if (!Number.isInteger(winners) || winners < 1) {
-    return "Winners per pool must be a whole number ≥ 1.";
+  if (!Number.isInteger(winners) || winners < MIN_POOL_WINNERS) {
+    return `Winners per pool must be a whole number ≥ ${MIN_POOL_WINNERS}.`;
   }
   return null;
 }
@@ -524,6 +697,33 @@ export const DEFAULT_TEAM_SIZE = 5;
 // mirrored-cap rationale.
 export const MIN_TEAM_SIZE = 2;
 
+// resolveTeamSize: what a STAGED team size actually means, resolved against
+// the last-saved one. An unusable staged value -- cleared to NaN, or typed
+// below MIN_TEAM_SIZE (the number input's own `min`, so the browser already
+// marks it invalid) -- says "the operator has not supplied a usable team
+// size", not "the operator wants 1", so it reads as the stored value.
+//
+// This has to run BEFORE normalizeConfigForKind, and that ordering is the
+// whole point. normalizeConfigForKind rewrites teamSize on BOTH branches (0
+// going individual, DEFAULT_TEAM_SIZE for a team whose value is under the
+// floor), so its output is ALWAYS a finite integer -- which means a
+// "fall back to the stored value if this isn't usable" guard applied to its
+// output can never fire. admin_competition_settings.jsx had exactly that
+// guard, reading `safeNonNegInt(shaped.teamSize, latestC.teamSize)`, and it
+// was dead: clearing the Team size input on a stored 3 silently saved 5,
+// while the input's own comment promised a fall back to the last-saved
+// value. Resolving first keeps that promise and still lets the normalizer
+// stage its deliberate 0 on a team -> individual flip, because that 0 comes
+// from the KIND branch and never from this function.
+//
+// Both of the settings screen's readers call it -- the payload boundary and
+// the pendingConfigClears notice -- so the warning can't name a value the
+// save will not actually send.
+export function resolveTeamSize(staged, stored) {
+  if (Number.isInteger(staged) && staged >= MIN_TEAM_SIZE) return staged;
+  return Number.isInteger(stored) && stored >= 0 ? stored : 0;
+}
+
 export function normalizeConfigForKind(cfg) {
   const next = { ...cfg };
   if (next.kind === KIND_TEAM) {
@@ -590,16 +790,10 @@ export function kindChangeBlockedReason(playerCount) {
 // Pure, like the rest of this module: computes what Save WOULD clear
 // without staging anything into any state.
 //
-// Returns [] unless a format or kind change is actually STAGED, i.e.
-// staged.format !== stored.format || staged.kind !== stored.kind. An
-// untouched form must never show the notice, even if the record on disk is
-// itself already inconsistent (e.g. hand-edited config.md) -- that is
-// poolSettingsError/courtsErr's job to flag, not this one's; this function
-// only speaks to what THIS edit is about to do.
-//
-// Otherwise runs the same two normalizers saveNow's `shaped` value does,
-// and reports every key where the normalized result differs from what the
-// operator currently has staged -- but only when the staged value is
+// Reports every key where the config the save will actually SEND
+// (shapeConfigForSave, immediately above -- the very function the settings
+// payload boundary calls) differs from what the operator has staged, and
+// only when the staged value is
 // "meaningful" (isMeaningfulValue below): the point is to report DATA LOSS,
 // so a field that was already 0/""/false is not worth naming -- it had
 // nothing in it to lose.
@@ -615,20 +809,69 @@ export function kindChangeBlockedReason(playerCount) {
 // "Knockout qualifiers" label -- this is a leaf with no project imports,
 // same as the rest of this module (see header).
 
+// --- configShapeChangeStaged / shapeConfigForSave --------------------------
+//
+// configShapeChangeStaged: does THIS edit stage a change to one of the two
+// fields the normalizers key on? shapeConfigForSave: the config a save
+// should actually send, which is the staged config UNTOUCHED unless such a
+// change is staged.
+//
+// The scoping is the point, and it is the same scoping the server applies a
+// few lines apart in handlers_competition.go, for the same reason its own
+// comment gives there -- "change-scoped to avoid locking an operator out of
+// an already-stored illegal value".
+//
+// Running the normalizers on EVERY save instead was a real lockout. A
+// competition can be stored as kind "team" with withZekkenName true: no
+// server guard rejects that pairing (POST validates kind, team size, match
+// type and qualifiers around it but never that pair, and the import path
+// carries `with_zekken_name` and `kind` as independent keys), and only the
+// create form's own `kind === "individual" ? withZekken : false` keeps the
+// SPA from producing it. Open Settings on such a record, change nothing but
+// the start time, and an unscoped normalization forces withZekkenName
+// false. At status draw-ready `comp.WithZekkenName != current.WithZekkenName`
+// is in the PUT's output-affecting set, so the save the operator DID ask for
+// dies on a 409 about a change they did not -- on every attempt, with no
+// control on the screen able to undo it, because the zekken checkbox is
+// disabled at that status. Below draw-ready it is quieter and no better:
+// participants.csv is thereafter read with the 3-column layout.
+//
+// Scoping to a staged flip returns those saves to exactly what they did
+// before the normalizers were introduced, so it cannot regress a record
+// this change did not already touch, while a flip -- which is only
+// reachable at setup, since both pill groups carry the draw-ready lock --
+// still gets the legal payload the normalizers exist to produce.
+//
+// pendingConfigClears below is defined in terms of this function rather
+// than re-running the normalizers itself. That is what makes the notice and
+// the payload agree BY CONSTRUCTION: the notice reports the diff between
+// what the operator staged and what this function will send, so there is no
+// arrangement in which a save clears a field the notice did not name.
+export function configShapeChangeStaged(stored, staged) {
+  return staged.format !== stored.format || staged.kind !== stored.kind;
+}
+
+export function shapeConfigForSave(stored, staged) {
+  if (!configShapeChangeStaged(stored, staged)) return { ...staged };
+  return normalizeConfigForKind(normalizeConfigForFormat(staged));
+}
+
 // isMeaningfulValue: a staged value worth reporting as "about to be lost".
 // 0 / "" / false / null / undefined / NaN are all how an unset or
 // already-cleared field looks in this codebase (see safeInt/safeNonNegInt
 // in admin_competition_settings.jsx for the NaN-as-"cleared" convention),
 // so normalizing one of THOSE to the same resting value is not data loss.
+// Those six cases (0, "", false, null, undefined, NaN) are exactly JS's
+// falsy set, so this is Boolean(v) spelled out. Written as `!!v` rather
+// than the enumeration: a reader had to check all six against the falsy
+// table to conclude "truthy", and the trailing NaN branch read as though
+// it were catching something the line above had missed.
 function isMeaningfulValue(v) {
-  if (v === 0 || v === "" || v === false || v === null || v === undefined) return false;
-  if (typeof v === "number" && Number.isNaN(v)) return false;
-  return true;
+  return !!v;
 }
 
 export function pendingConfigClears(stored, staged) {
-  if (staged.format === stored.format && staged.kind === stored.kind) return [];
-  const normalized = normalizeConfigForKind(normalizeConfigForFormat(staged));
+  const normalized = shapeConfigForSave(stored, staged);
   const clears = [];
   Object.keys(normalized).forEach((key) => {
     if (normalized[key] !== staged[key] && isMeaningfulValue(staged[key])) {
@@ -637,3 +880,24 @@ export function pendingConfigClears(stored, staged) {
   });
   return clears;
 }
+
+// CLEARED_FIELD_LABELS: wire key -> the operator-facing name of the field,
+// for the notice that lists what a staged format/kind change is about to
+// clear. It lives HERE, next to the two normalizers, rather than with the
+// renderer: pendingConfigClears above deliberately walks
+// Object.keys(normalized) "so a field a future normalizer starts touching
+// is covered automatically", and a label map kept on the far side of that
+// generality is how such a field reaches the operator as a raw wire key
+// (the renderer falls back to `|| key`). Keeping the map beside the
+// normalizers means the one edit that adds a cleared field has the label
+// table already in front of it. Every value is one of this module's own
+// LABEL_* exports, so each string still has exactly one home.
+export const CLEARED_FIELD_LABELS = {
+  poolSize: LABEL_POOL_SIZE,
+  poolWinners: LABEL_POOL_WINNERS,
+  extraQualifiers: LABEL_EXTRA_QUALIFIERS,
+  teamSize: LABEL_TEAM_SIZE,
+  teamMatchType: LABEL_TEAM_MATCH_TYPE,
+  engi: LABEL_ENGI,
+  withZekkenName: LABEL_ZEKKEN,
+};

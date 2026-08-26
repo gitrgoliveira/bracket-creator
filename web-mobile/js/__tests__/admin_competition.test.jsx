@@ -599,8 +599,18 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // exists for; they differ only in the lower bound, and that bound is
     // per-field semantics:
     //
-    //   poolSize/poolWinners  safeInt (>= 1). Zero is meaningless for both,
-    //                         so flooring is correct.
+    //   poolSize/poolWinners  safeNonNegInt (>= 0), as of
+    //                         bc-symm-settings-create-parity. Previously
+    //                         safeInt (>= 1) on the theory that "zero is
+    //                         meaningless for both" -- true for `effective`,
+    //                         but these now read `shaped`
+    //                         (normalizeConfigForFormat's output), where 0
+    //                         is the correct, deliberate value for any
+    //                         non-"mixed" format (no pool phase to size).
+    //                         Under safeInt's >= 1 floor, that 0 reads as
+    //                         "invalid" and falls back to latestC.<field>,
+    //                         silently re-sending the stale mixed-only value
+    //                         and defeating the clear.
     //   teamSize              safeNonNegInt (>= 0). Zero is teamSize's
     //                         REQUIRED value for an individual competition
     //                         (ValidateCompetitionTeamSize rejects any
@@ -611,8 +621,8 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     //                         team size re-sent, so the PUT failed the very
     //                         rule the flip had just satisfied (bc-symm).
     const GUARD_BY_FIELD = {
-      poolSize: 'safeInt',
-      poolWinners: 'safeInt',
+      poolSize: 'safeNonNegInt',
+      poolWinners: 'safeNonNegInt',
       teamSize: 'safeNonNegInt',
     };
     for (const [field, guard] of Object.entries(GUARD_BY_FIELD)) {

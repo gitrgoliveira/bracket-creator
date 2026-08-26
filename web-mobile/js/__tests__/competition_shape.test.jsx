@@ -18,6 +18,7 @@ import {
   normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE,
   kindChangeBlockedReason,
   poolSettingsError,
+  pendingConfigClears,
 } from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
@@ -515,5 +516,70 @@ describe('poolSettingsError', () => {
 
   it('is null for the smallest legal combination', () => {
     expect(poolSettingsError(FORMAT_MIXED, 3, 1)).toBeNull();
+  });
+});
+
+// bc-symm-settings-create-parity: pendingConfigClears is the other half of
+// the fix for a reproduced round-trip defect. Settings used to STAGE
+// normalizeConfigForFormat/normalizeConfigForKind's result straight into
+// `local` on the Format/Kind pill tap itself. On a stored mixed competition
+// (poolSize: 4, poolWinners: 2), tapping "Knockout only" staged
+// poolSize/poolWinners: 0; tapping "Pools + Knockout" to go straight back
+// was a no-op for those fields going back INTO mixed (normalizeConfigForFormat
+// only clears them on the way OUT of "mixed"), so two taps that cancelled out
+// on `format` destroyed the operator's real values with no way to recover
+// them, and Save was blocked by poolSettingsError. Operator ruling: a config
+// change must never quietly overwrite or delete the operator's data -- it
+// must surface what will happen and let the operator decide.
+// pendingConfigClears computes what a save WOULD clear, without staging
+// anything, so the Settings screen can show it before the operator commits.
+describe('pendingConfigClears', () => {
+  it('returns [] when neither format nor kind changed, even with values present that a stray call would flag', () => {
+    const cfg = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: '' };
+    expect(pendingConfigClears(cfg, { ...cfg })).toEqual([]);
+  });
+
+  it('mixed(poolSize 4, poolWinners 2) -> playoffs reports both keys with their "from" values', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: '' };
+    const staged = { ...stored, format: FORMAT_PLAYOFFS };
+    expect(pendingConfigClears(stored, staged)).toEqual([
+      { key: 'poolSize', from: 4 },
+      { key: 'poolWinners', from: 2 },
+    ]);
+  });
+
+  it('a field already 0/""/false is NOT reported: it had nothing in it to lose', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 0, poolWinners: 0, extraQualifiers: '' };
+    const staged = { ...stored, format: FORMAT_PLAYOFFS };
+    expect(pendingConfigClears(stored, staged)).toEqual([]);
+  });
+
+  it('team(teamSize 5) -> individual reports teamSize', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_TEAM, teamSize: 5, teamMatchType: 'fixed', engi: false, withZekkenName: false };
+    const staged = { ...stored, kind: KIND_INDIVIDUAL };
+    expect(pendingConfigClears(stored, staged)).toEqual([{ key: 'teamSize', from: 5 }]);
+  });
+
+  it('individual -> team reports engi/withZekkenName only when they were truthy', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, teamSize: 0, teamMatchType: 'fixed', engi: true, withZekkenName: true };
+    const staged = { ...stored, kind: KIND_TEAM };
+    expect(pendingConfigClears(stored, staged)).toEqual([
+      { key: 'engi', from: true },
+      { key: 'withZekkenName', from: true },
+    ]);
+  });
+
+  it('individual -> team reports neither engi nor withZekkenName when both were already false', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, teamSize: 0, teamMatchType: 'fixed', engi: false, withZekkenName: false };
+    const staged = { ...stored, kind: KIND_TEAM };
+    expect(pendingConfigClears(stored, staged)).toEqual([]);
+  });
+
+  it('extraQualifiers reported when leaving mixed with a non-standard value', () => {
+    const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: 'larger-pools' };
+    const staged = { ...stored, format: FORMAT_LEAGUE };
+    expect(pendingConfigClears(stored, staged)).toEqual(
+      expect.arrayContaining([{ key: 'extraQualifiers', from: 'larger-pools' }])
+    );
   });
 });

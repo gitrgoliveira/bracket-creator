@@ -482,3 +482,78 @@ export function kindChangeBlockedReason(playerCount) {
   if (n <= 0) return "";
   return `Competition type can't be changed with ${n} participant${n === 1 ? "" : "s"} loaded: individual and team rosters aren't compatible. Clear the participant list first.`;
 }
+
+// --- pendingConfigClears ----------------------------------------------------
+//
+// Operator ruling: a config change must never quietly overwrite or delete
+// the operator's data. It must SURFACE what will happen and let the
+// operator decide.
+//
+// The reproduced failure this exists to prevent: a stored mixed
+// competition (poolSize: 4, poolWinners: 2) had its Format pill tapped to
+// "Knockout only". Settings USED TO stage normalizeConfigForFormat's
+// result straight into `local` on the tap itself, zeroing poolSize/
+// poolWinners immediately. Tapping "Pools + Knockout" to go straight back
+// is a no-op for those fields going back INTO mixed (normalizeConfigForFormat
+// only clears them on the way OUT of "mixed" -- see its own comment), so two
+// taps that cancelled out on `format` left poolSize/poolWinners at 0 with no
+// operator action able to recover them, and Save blocked by
+// poolSettingsError. Normalization now runs only at the PUT-payload boundary
+// (AdminSettings.saveNow's `shaped`), never on the pill tap, so `local`
+// never again holds a value the operator didn't type. This function is the
+// other half of that fix: the clearing itself still genuinely happens on
+// Save whenever it's warranted (a team -> individual flip really does need
+// to drop teamSize, or the server 400s), so the operator needs to be told
+// BEFORE they click Save, not find out via a rejected request or a field
+// that silently reads empty afterward.
+//
+// Pure, like the rest of this module: computes what Save WOULD clear
+// without staging anything into any state.
+//
+// Returns [] unless a format or kind change is actually STAGED, i.e.
+// staged.format !== stored.format || staged.kind !== stored.kind. An
+// untouched form must never show the notice, even if the record on disk is
+// itself already inconsistent (e.g. hand-edited config.md) -- that is
+// poolSettingsError/courtsErr's job to flag, not this one's; this function
+// only speaks to what THIS edit is about to do.
+//
+// Otherwise runs the same two normalizers saveNow's `shaped` value does,
+// and reports every key where the normalized result differs from what the
+// operator currently has staged -- but only when the staged value is
+// "meaningful" (isMeaningfulValue below): the point is to report DATA LOSS,
+// so a field that was already 0/""/false is not worth naming -- it had
+// nothing in it to lose.
+//
+// Iterates Object.keys(normalized) rather than a hardcoded field list, so a
+// field a future normalizer starts touching is covered automatically,
+// without a second edit here.
+//
+// Returns { key, from } pairs -- KEYS only, not labels: this module owns
+// the RULE (what gets cleared, and what it held), the screen owns the
+// RENDER (what to call each key on screen, how to phrase the sentence).
+// That split is also why this can't reach qualifier_preview.jsx for the
+// "Knockout qualifiers" label -- this is a leaf with no project imports,
+// same as the rest of this module (see header).
+
+// isMeaningfulValue: a staged value worth reporting as "about to be lost".
+// 0 / "" / false / null / undefined / NaN are all how an unset or
+// already-cleared field looks in this codebase (see safeInt/safeNonNegInt
+// in admin_competition_settings.jsx for the NaN-as-"cleared" convention),
+// so normalizing one of THOSE to the same resting value is not data loss.
+function isMeaningfulValue(v) {
+  if (v === 0 || v === "" || v === false || v === null || v === undefined) return false;
+  if (typeof v === "number" && Number.isNaN(v)) return false;
+  return true;
+}
+
+export function pendingConfigClears(stored, staged) {
+  if (staged.format === stored.format && staged.kind === stored.kind) return [];
+  const normalized = normalizeConfigForKind(normalizeConfigForFormat(staged));
+  const clears = [];
+  Object.keys(normalized).forEach((key) => {
+    if (normalized[key] !== staged[key] && isMeaningfulValue(staged[key])) {
+      clears.push({ key, from: staged[key] });
+    }
+  });
+  return clears;
+}

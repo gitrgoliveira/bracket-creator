@@ -143,12 +143,12 @@ import {
   FORMAT_MIXED, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
   poolFormatHint, resolvePoolFormat, leagueTiebreakActive,
-  HINT_ZEKKEN, HINT_ENGI,
+  HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, CheckboxField } from './competition_fields.jsx';
+import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -1173,24 +1173,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           <PillGroup label={LABEL_FORMAT} options={FORMAT_OPTIONS} value={format} onChange={setFormat} hint={formatHint(format)} />
 
           {teamFieldsVisible(kind) && (
-            <div className="field">
-              <label className="field__label">{LABEL_TEAM_SIZE}</label>
+            <>
               {/* Non-debounced input: uses onChange directly, not StableInput. */}
               {/* StableInput debounces 200ms; if the user clears the field and */}
               {/* immediately clicks "Create", the parent teamSize would still */}
               {/* hold the previous good value and the guard at create() would */}
               {/* let the stale value through. Direct onChange + decideNumericUpdate */}
               {/* keeps parent state synchronous with what the user sees. */}
-              <input
-                className="input"
-                type="number"
-                min={MIN_TEAM_SIZE}
-                max={MAX_TEAM_SIZE}
-                value={Number.isFinite(teamSize) ? teamSize : ""}
-                onChange={(e) => setTeamSize(decideNumericUpdate(e.target.value, MIN_TEAM_SIZE).value)}
-              />
-              <div className="field__hint">Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).</div>
-            </div>
+              <NumberField label={LABEL_TEAM_SIZE} min={MIN_TEAM_SIZE} max={MAX_TEAM_SIZE}
+                value={teamSize}
+                onChange={(raw) => setTeamSize(decideNumericUpdate(raw, MIN_TEAM_SIZE).value)}
+                hint={HINT_TEAM_SIZE} />
+            </>
           )}
 
           {teamFieldsVisible(kind) && (
@@ -1240,29 +1234,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                 {/* owns both thresholds, shared with the Settings screen; the */}
                 {/* submit-time guard at create() rejects NaN/<min before */}
                 {/* passing to buildCompetition. */}
-                <div className="field"><label className="field__label">{LABEL_POOL_SIZE}</label><input
-                  className="input"
-                  type="number"
-                  min={MIN_POOL_SIZE}
-                  step="1"
-                  value={Number.isFinite(poolSize) ? poolSize : ""}
-                  onChange={(e) => setPoolSize(decideNumericUpdate(e.target.value, MIN_POOL_SIZE).value)}
-                /></div>
-                <div className="field">
-                  <label className="field__label">{LABEL_POOL_WINNERS}</label>
-                  <input
-                    className="input"
-                    type="number"
-                    min={MIN_POOL_WINNERS}
-                    step="1"
-                    value={Number.isFinite(winners) ? winners : ""}
-                    onChange={(e) => setWinners(decideNumericUpdate(e.target.value, MIN_POOL_WINNERS).value)}
-                    disabled={winnersInputDisabled(extraQualifiers)}
-                  />
-                  {winnersInputDisabled(extraQualifiers) && (
-                    <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
-                  )}
-                </div>
+                <NumberField label={LABEL_POOL_SIZE} min={MIN_POOL_SIZE} value={poolSize}
+                  onChange={(raw) => setPoolSize(decideNumericUpdate(raw, MIN_POOL_SIZE).value)} />
+                <NumberField label={LABEL_POOL_WINNERS} min={MIN_POOL_WINNERS} value={winners}
+                  onChange={(raw) => setWinners(decideNumericUpdate(raw, MIN_POOL_WINNERS).value)}
+                  disabled={winnersInputDisabled(extraQualifiers)}
+                  hint={winnersInputDisabled(extraQualifiers) ? HINT_POOL_WINNERS_LOCKED : ""} />
               </div>
 
               {/* Knockout qualifiers (bc-qual LP-5a): only meaningful under
@@ -1316,22 +1293,14 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {/* time rejects NaN / fractional / <1 before the field reaches */}
           {/* the backend. */}
           {swissRoundsVisible(format) && (
-            <div className="field">
-              <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
+            <>
               {/* Floor is MIN_SWISS_ROUNDS (competition_shape.jsx), shared
                   with swissSettingsError and with the settings twin, so the
                   input's min and the submit-time message agree. */}
-              <input
-                className="input"
-                type="number"
-                min={MIN_SWISS_ROUNDS}
-                step="1"
-                value={Number.isFinite(swissRounds) ? swissRounds : ""}
-                onChange={(e) => setSwissRounds(decideNumericUpdate(e.target.value, MIN_SWISS_ROUNDS).value)}
-                style={{ maxWidth: 120 }}
-              />
-              <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
-            </div>
+              <NumberField label={LABEL_SWISS_ROUNDS} min={MIN_SWISS_ROUNDS} value={swissRounds}
+                onChange={(raw) => setSwissRounds(decideNumericUpdate(raw, MIN_SWISS_ROUNDS).value)}
+                hint={HINT_SWISS_ROUNDS} width={120} />
+            </>
           )}
 
           {/* bc-symm: league tie-break band, brought over from Settings
@@ -1350,7 +1319,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <div className="field">
-            <label className="field__label">Assigned shiaijo (courts)</label>
+            <label className="field__label">{LABEL_COURTS}</label>
             <div className="radio-group">
               {safeCourts.map((cc) => (
                 <button key={cc} className={`radio-pill ${selectedCourts.includes(cc) ? "is-active" : ""}`} type="button" onClick={() => toggleCourt(cc)}>Shiaijo (court) {cc}</button>
@@ -1411,11 +1380,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           )}
 
-          <div className="field">
-            <label className="field__label">{LABEL_NUMBER_PREFIX} <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
-            <input className="input" placeholder="e.g. A" maxLength="3" value={numberPrefix} onChange={(e) => setNumberPrefix(e.target.value)} style={{ maxWidth: 80 }} />
-            <div className="field__hint">{HINT_NUMBER_PREFIX}</div>
-          </div>
+          <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
+            value={numberPrefix} onChange={setNumberPrefix}
+            hint={HINT_NUMBER_PREFIX} width={80} />
 
           {zekkenApplies(kind) && (
             <CheckboxField label={LABEL_ZEKKEN} checked={withZekken} onChange={setWithZekken} hint={HINT_ZEKKEN} />

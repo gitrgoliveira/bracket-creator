@@ -753,6 +753,15 @@ a:hover {
   gap: 4px;
 }
 
+.field__label-optional {
+  /* The greyed "(optional)" suffix on a field caption. Was an inline
+     `style={{ fontWeight: 400, color: "var(--ink-3)" }}` written out once per
+     screen on the same field; FieldLabel (competition_fields.jsx) renders it
+     now and this is where it is styled. */
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
 .field__label {
   font-size: 12px;
   font-weight: 600;

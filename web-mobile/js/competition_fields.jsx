@@ -113,3 +113,80 @@ export function CheckboxField({ label, checked, onChange, disabled, hint }) {
     </div>
   );
 }
+
+// FieldLabel: the `<label className="field__label">` both screens render,
+// including the greyed "(optional)" suffix that was two identical inline
+// `<span style={{ fontWeight: 400, color: "var(--ink-3)" }}>` copies -- one
+// per screen, on the same field.
+function FieldLabel({ children, optional }) {
+  return (
+    <label className="field__label">
+      {children}
+      {optional ? <span className="field__label-optional"> (optional)</span> : null}
+    </label>
+  );
+}
+
+// NumberField: label + number input + optional hint and inline error.
+//
+// `onChange` receives the RAW input string, not a parsed number, because the
+// two screens parse it differently on purpose: the create form writes
+// straight to component state, the settings screen also has to mark the field
+// edited and the form dirty. Both funnel through decideNumericUpdate with the
+// same MIN_* constant, so the RULE is already shared; what was not shared was
+// this markup, and it had drifted three ways -- the create form set
+// `step="1"` on the pool inputs where settings did not (so the spinner moved
+// by different amounts for the same field), the create form gave "Team size"
+// a hint naming the five kendo positions where settings gave it none, and the
+// "Set to 1 by the knockout qualifiers setting below." coupling hint was a
+// verbatim literal in both files.
+//
+// `width` is a number of pixels rather than a style object: both screens
+// capped the Swiss-rounds and number-prefix inputs, each with its own inline
+// `style={{ maxWidth: ... }}`.
+export function NumberField({
+  label, optional, value, onChange, min, max, step = "1",
+  disabled, hint, error, width,
+}) {
+  return (
+    <div className="field">
+      <FieldLabel optional={optional}>{label}</FieldLabel>
+      <input
+        className="input"
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={Number.isFinite(value) ? value : ""}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={!!disabled}
+        style={width ? { maxWidth: width } : undefined}
+      />
+      {error ? <window.FieldError>{error}</window.FieldError> : null}
+      {hint ? <div className="field__hint">{hint}</div> : null}
+    </div>
+  );
+}
+
+// TextField: the same shape for a plain text input. One caller per screen
+// today (the player-number prefix), and those two were byte-identical apart
+// from their bindings.
+export function TextField({
+  label, optional, value, onChange, placeholder, maxLength, disabled, hint, width,
+}) {
+  return (
+    <div className="field">
+      <FieldLabel optional={optional}>{label}</FieldLabel>
+      <input
+        className="input"
+        placeholder={placeholder}
+        maxLength={maxLength}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={!!disabled}
+        style={width ? { maxWidth: width } : undefined}
+      />
+      {hint ? <div className="field__hint">{hint}</div> : null}
+    </div>
+  );
+}

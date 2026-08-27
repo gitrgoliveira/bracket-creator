@@ -46,12 +46,12 @@ import {
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
   leagueTiebreakActive, twoThirdPlacesVisible, teamMatchTypeActive, twoThirdPlacesForNaginata,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
-  HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL,
+  HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, LABEL_COURTS,
 } from './competition_shape.jsx';
-import { PillGroup, CheckboxField } from './competition_fields.jsx';
+import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
@@ -1059,8 +1059,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       )}
       {teamFieldsVisible(local.kind) && (
-        <div className="field">
-          <label className="field__label">{LABEL_TEAM_SIZE}</label>
+        <>
           {/* Cap is MAX_TEAM_SIZE (admin_helpers.jsx). TEAM_POSITIONS in */}
           {/* admin_scoring_modal.jsx is built from the same constant, so */}
           {/* this input can't allow a value the scoring UI doesn't render. */}
@@ -1076,16 +1075,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* back to the last-saved teamSize rather than landing on the */}
           {/* backend as a clobbering 0 or as a silent 5. */}
           {/* draw-ready lock: teamSize is output-affecting. */}
-          <input
-            className="input"
-            type="number"
-            min={MIN_TEAM_SIZE}
-            max={MAX_TEAM_SIZE}
-            value={Number.isFinite(local.teamSize) ? local.teamSize : ""}
-            onChange={(e) => updateNumber("teamSize", e.target.value, MIN_TEAM_SIZE)}
-            disabled={isDrawReady}
-          />
-        </div>
+          <NumberField label={LABEL_TEAM_SIZE} min={MIN_TEAM_SIZE} max={MAX_TEAM_SIZE}
+            value={local.teamSize}
+            onChange={(raw) => updateNumber("teamSize", raw, MIN_TEAM_SIZE)}
+            disabled={isDrawReady} hint={HINT_TEAM_SIZE} />
+        </>
       )}
       {teamFieldsVisible(local.kind) && (
         <>
@@ -1166,31 +1160,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             {/* worth running; the server stays looser on purpose so a */}
             {/* hand-edited or imported config is not retroactively invalid. */}
             {/* Shared with the create form via poolSettingsError. */}
-            <div className="field"><label className="field__label">{LABEL_POOL_SIZE}</label><input
-              className="input"
-              type="number"
-              min={MIN_POOL_SIZE}
-              value={Number.isFinite(local.poolSize) ? local.poolSize : ""}
-              onChange={(e) => updateNumber("poolSize", e.target.value, MIN_POOL_SIZE)}
-              disabled={isDrawReady}
-            /></div>
-            <div className="field">
-              <label className="field__label">{LABEL_POOL_WINNERS}</label>
-              <input
-                className="input"
-                type="number"
-                min={MIN_POOL_WINNERS}
-                value={Number.isFinite(local.poolWinners) ? local.poolWinners : ""}
-                onChange={(e) => updateNumber("poolWinners", e.target.value, MIN_POOL_WINNERS)}
-                disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
-              />
-              {/* bc-qual LP-5a: same coupling hint as the create form; */}
-              {/* draw-ready already has its own standing note on the */}
-              {/* Assigned shiaijo field below, so it isn't repeated per-field here. */}
-              {!isDrawReady && winnersInputDisabled(local.extraQualifiers) && (
-                <div className="field__hint">Set to 1 by the knockout qualifiers setting below.</div>
-              )}
-            </div>
+            <NumberField label={LABEL_POOL_SIZE} min={MIN_POOL_SIZE} value={local.poolSize}
+              onChange={(raw) => updateNumber("poolSize", raw, MIN_POOL_SIZE)}
+              disabled={isDrawReady} />
+            {/* bc-qual LP-5a: same coupling hint as the create form; */}
+            {/* draw-ready already has its own standing note on the */}
+            {/* Assigned shiaijo field below, so it isn't repeated per-field here. */}
+            <NumberField label={LABEL_POOL_WINNERS} min={MIN_POOL_WINNERS} value={local.poolWinners}
+              onChange={(raw) => updateNumber("poolWinners", raw, MIN_POOL_WINNERS)}
+              disabled={isDrawReady || winnersInputDisabled(local.extraQualifiers)}
+              hint={!isDrawReady && winnersInputDisabled(local.extraQualifiers) ? HINT_POOL_WINNERS_LOCKED : ""} />
           </div>
           {/* Rendered for ANY invalid poolSize/poolWinners, staged or already
               saved, mirroring courtsErr's own rule (see the ShiaijoCountNotes
@@ -1282,26 +1261,14 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       {/* changing rounds after start is allowed too (the next */}
       {/* "Generate next round" call will respect the new cap). */}
       {swissRoundsVisible(local.format) && (
-        <div className="field">
-          <label className="field__label">{LABEL_SWISS_ROUNDS}</label>
+        <>
           {/* Floor is MIN_SWISS_ROUNDS (competition_shape.jsx), the same
               constant swissSettingsError reads, so the input's own min and
               the message that blocks Save cannot state different numbers. */}
-          <input
-            className="input"
-            type="number"
-            min={MIN_SWISS_ROUNDS}
-            step="1"
-            value={Number.isFinite(local.swissRounds) ? local.swissRounds : ""}
-            onChange={(e) => updateNumber("swissRounds", e.target.value, MIN_SWISS_ROUNDS)}
-            style={{ maxWidth: 120 }}
-          />
-          {/* Inline, like the pool block's error above: the header/footer
-              chip states the blocker, but the operator's eye is on the field
-              they just emptied. */}
-          {swissSettingsErr && <window.FieldError>{swissSettingsErr}</window.FieldError>}
-          <div className="field__hint">{HINT_SWISS_ROUNDS}</div>
-        </div>
+          <NumberField label={LABEL_SWISS_ROUNDS} min={MIN_SWISS_ROUNDS} value={local.swissRounds}
+            onChange={(raw) => updateNumber("swissRounds", raw, MIN_SWISS_ROUNDS)}
+            hint={HINT_SWISS_ROUNDS} error={swissSettingsErr} width={120} />
+        </>
       )}
       {/* League standings settings. The joint-3rd convention applies to ALL
           leagues (team + individual); the "Break ties for top" band is a
@@ -1326,7 +1293,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </div>
       )}
       <div className="field">
-        <label className="field__label">Assigned shiaijo (courts)</label>
+        <label className="field__label">{LABEL_COURTS}</label>
         {/* draw-ready lock: courts is output-affecting. Discard the draw to reassign. */}
         {isDrawReady && (
           <div className="field__hint" style={{ marginBottom: 6, color: "var(--ink-2)", fontWeight: 500 }}>
@@ -1459,11 +1426,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           })()}
         </div>
       )}
-      <div className="field">
-        <label className="field__label">{LABEL_NUMBER_PREFIX} <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>(optional)</span></label>
-        <input className="input" placeholder="e.g. A" maxLength="3" value={local.numberPrefix || ""} onChange={(e) => update("numberPrefix", e.target.value.substring(0, 3))} disabled={isDrawReady} style={{ maxWidth: 80 }} />
-        <div className="field__hint">{HINT_NUMBER_PREFIX}</div>
-      </div>
+      <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
+        value={local.numberPrefix} onChange={(raw) => update("numberPrefix", raw.substring(0, 3))}
+        disabled={isDrawReady} hint={HINT_NUMBER_PREFIX} width={80} />
       <div style={{ display: "flex", flexDirection: "column" }}>
         {/* zekkenApplies/engiApplies express the RULE (competition_shape.jsx);
             this screen keeps its own PRESENTATION of it -- render both

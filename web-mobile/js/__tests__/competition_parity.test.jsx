@@ -375,13 +375,15 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Start time', pattern: '>Start time<' },
     { key: 'Competition type (Kind)', pattern: '{LABEL_KIND}' },
     { key: 'Format', pattern: '{LABEL_FORMAT}' },
-    // Anchored as a JSX text node (`>{...}<`) rather than the bare
-    // `{LABEL_TEAM_SIZE}`: create()'s validator now names the field
+    // Anchored as the NumberField's label prop rather than the bare
+    // `{LABEL_TEAM_SIZE}`: create()'s validator also names the field
     // through the same constant (`${LABEL_TEAM_SIZE} must be a whole
     // number.`), which contains the bare form as a substring and would
-    // make this marker match twice. The label render site is the one
-    // that defines where the control sits, so that is what we anchor to.
-    { key: 'Team size', pattern: '>{LABEL_TEAM_SIZE}<' },
+    // make this marker match twice. The render site is what defines where
+    // the control sits, so that is what we anchor to -- it used to be a
+    // JSX text node (`>{...}<`) and became `label={...}` when both screens
+    // moved onto the shared field components.
+    { key: 'Team size', pattern: 'label={LABEL_TEAM_SIZE}' },
     { key: 'Team match type', pattern: '{LABEL_TEAM_MATCH_TYPE}' },
     { key: 'Pool format (round-robin shape)', pattern: '{LABEL_POOL_FORMAT}' },
     { key: 'Round-robin (round-robin in pools)', pattern: '{LABEL_ROUND_ROBIN}' },
@@ -389,10 +391,10 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Pool size', pattern: '{LABEL_POOL_SIZE}' },
     { key: 'Pool winners', pattern: '{LABEL_POOL_WINNERS}' },
     { key: 'Extra qualifiers', pattern: '{LABEL_EXTRA_QUALIFIERS}' },
-    { key: 'Swiss rounds', pattern: '>{LABEL_SWISS_ROUNDS}<' },
+    { key: 'Swiss rounds', pattern: 'label={LABEL_SWISS_ROUNDS}' },
     { key: 'League tiebreak', pattern: '{LABEL_LEAGUE_TIEBREAK}' },
     { key: 'Two joint 3rd places', pattern: '{LABEL_TWO_THIRD_PLACES}' },
-    { key: 'Assigned shiaijo (courts)', pattern: '>Assigned shiaijo (courts)<' },
+    { key: 'Assigned shiaijo (courts)', pattern: '{LABEL_COURTS}' },
     // Pool duration's <label> is built by a shared helper on each screen
     // (admin_setup.jsx inlines the JSX; admin_competition_settings.jsx
     // calls its own durationField()), so the one substring both render
@@ -627,6 +629,21 @@ describe('competition CREATE vs SETTINGS: shared rules are asked, not re-derived
         '(Knockout qualifiers, Assigned shiaijo). Render option-list controls ' +
         'with <PillGroup> from competition_fields.jsx instead.'
       ).toBe(2);
+
+      // Number and text inputs: the competition forms render all of theirs
+      // through NumberField / TextField. admin_setup.jsx also contains the
+      // TOURNAMENT edit form (AdminEditTournament), which is a different
+      // screen with no twin, so its inputs are counted out by name rather
+      // than by a blanket zero.
+      const tournamentForm = (src.match(/function AdminEditTournament[\s\S]*?\n}/) || [''])[0];
+      const rawNumbers = (src.match(/type="number"/g) || []).length
+        - (tournamentForm.match(/type="number"/g) || []).length;
+      expect(
+        rawNumbers,
+        `${name} hand-writes ${rawNumbers} number input(s) in the competition form. ` +
+        'Render them with <NumberField>, which owns the step, the NaN-renders-empty ' +
+        'rule and the hint slot the two screens had drifted on.'
+      ).toBe(0);
 
       const rawCheckboxes = (src.match(/<label className="checkbox">/g) || []).length;
       expect(

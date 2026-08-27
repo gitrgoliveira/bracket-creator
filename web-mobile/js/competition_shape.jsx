@@ -523,6 +523,22 @@ export const LABEL_EXTRA_QUALIFIERS = "Knockout qualifiers";
 // accept a non-standard qualifier setting for. The predicate keeps its
 // strict contract and the call sites hand it a resolved value, rather than
 // this rule being respelled inside it.
+// LABEL_COURTS: the shiaijo picker's caption. A bare literal on BOTH screens
+// until now -- the one shared control label that never made it into this
+// module, because the picker itself (window.courtPillOptions) is not shared
+// and the label came along with it.
+export const LABEL_COURTS = "Assigned shiaijo (courts)";
+
+// HINT_TEAM_SIZE: the five kendo positions. The create form has always shown
+// this under "Team size"; the settings screen showed the same input with NO
+// hint at all, so an operator editing an existing competition got less help
+// than one creating it. Now both render it.
+export const HINT_TEAM_SIZE = "Standard kendo team is 5 (Senpou, Jihou, Chuken, Fukushou, Taishou).";
+
+// HINT_POOL_WINNERS_LOCKED: shown under "Winners per pool" while the knockout
+// qualifiers setting has pinned it to 1. Verbatim in both files before this.
+export const HINT_POOL_WINNERS_LOCKED = "Set to 1 by the knockout qualifiers setting below.";
+
 export const LABEL_POOL_SIZE_MODE = "Pool size is a";
 export const POOL_SIZE_MODE_MAX = "max";
 export const POOL_SIZE_MODE_MIN = "min";

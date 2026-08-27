@@ -948,3 +948,57 @@ export const CLEARED_FIELD_LABELS = {
   engi: LABEL_ENGI,
   withZekkenName: LABEL_ZEKKEN,
 };
+
+// --- COMPETITION_DEFAULTS -------------------------------------------------
+//
+// Every value a competition starts life with, in ONE object.
+//
+// They were in three places: the create form's ~20 `useStateA(...)` seeds,
+// data.jsx's buildEmptyCompetition fallbacks (`poolMode || "max"`,
+// `roundRobin ?? true`, `teamSize || (kind === "team" ? 5 : 0)`, ...), and
+// Go's zero values for anything the client never sent. Three copies of one
+// answer, and they had already drifted: the create form seeded poolSize to 3
+// while buildEmptyCompetition also said 3 but poolWinners 2 against the
+// form's 2 -- agreeing today by inspection rather than by construction.
+//
+// The rule this exists to serve: if two places have to hold the same value,
+// they must READ it, not restate it. A test asserting two copies agree is
+// still two copies; it just fails louder when they part.
+//
+// Keys are the wire/competition-record names (state.Competition's JSON tags),
+// so a caller can spread this straight into a payload and a reader can look a
+// field up by the name it has everywhere else. Values reference the module's
+// own named constants wherever one exists, so the default and the thing it
+// defaults TO cannot disagree either.
+export const COMPETITION_DEFAULTS = {
+  kind: KIND_INDIVIDUAL,
+  format: FORMAT_PLAYOFFS,
+  poolFormat: POOL_FORMAT_FULL,
+  roundRobin: true,
+  poolSizeMode: POOL_SIZE_MODE_MAX,
+  poolSize: 3,
+  poolWinners: 2,
+  swissRounds: 4,
+  teamSize: DEFAULT_TEAM_SIZE,
+  teamMatchType: TEAM_MATCH_TYPE_FIXED,
+  withZekkenName: false,
+  naginata: false,
+  engi: false,
+  checkInEnabled: false,
+  // Two joint 3rd places is the standard kendo convention; naginata is the
+  // exception and turns it off (twoThirdPlacesForNaginata above). This
+  // default being TRUE while Go's zero value is false is precisely why the
+  // field must reach the wire explicitly -- see state.Competition's own
+  // comment on why it is not omitempty.
+  leagueTwoThirdPlaces: true,
+  // 0, not LEAGUE_TIEBREAK_DEFAULT: the stored zero IS "not yet chosen" and
+  // leagueTiebreakActive resolves it to Top 3 for display. Seeding the
+  // resolved value instead would persist a choice the operator never made.
+  leagueTiebreakTopN: 0,
+  numberPrefix: "",
+  // 0 means "unset, use the scheduler default" for both durations (T047).
+  poolMatchDurationSeconds: 0,
+  playoffMatchDurationSeconds: 0,
+  mirror: true,
+  startTime: "09:00",
+};

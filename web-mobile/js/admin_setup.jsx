@@ -125,6 +125,7 @@ import {
 // screens cannot drift apart. See competition_shape.jsx's header for the
 // full split rationale.
 import {
+  COMPETITION_DEFAULTS,
   LABEL_KIND, KIND_OPTIONS, LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
   LABEL_POOL_FORMAT, POOL_FORMAT_OPTIONS, poolFormatVisible,
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
@@ -137,7 +138,7 @@ import {
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies, teamMatchTypeActive, twoThirdPlacesForNaginata,
-  MIN_TEAM_SIZE, DEFAULT_TEAM_SIZE, poolSettingsError, swissSettingsError,
+  MIN_TEAM_SIZE, poolSettingsError, swissSettingsError,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   FORMAT_MIXED, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
@@ -717,14 +718,14 @@ const MIN_STACK_BLOCK_MIN = 30;
 
 function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onViewerMode, password }) {
   const [name, setName] = useStateA("");
-  const [kind, setKind] = useStateA("individual");
-  const [format, setFormat] = useStateA("playoffs");
+  const [kind, setKind] = useStateA(COMPETITION_DEFAULTS.kind);
+  const [format, setFormat] = useStateA(COMPETITION_DEFAULTS.format);
   // FR-050 / T044: per-phase round-robin shape selector. Only meaningful
   // when the format runs pool play ("mixed", "league"); default
   // "full" (every-vs-every) matches the historical behaviour. "partial"
   // (neighbour-only) is the new option for league-sized fields where a
   // full round-robin would not fit in the day's schedule.
-  const [poolFormat, setPoolFormat] = useStateA("full");
+  const [poolFormat, setPoolFormat] = useStateA(COMPETITION_DEFAULTS.poolFormat);
   // bc-symm: settings-only until now (admin_competition_settings.jsx
   // renders this checkbox, gated on roundRobinVisible -- see that
   // predicate's comment in competition_shape.jsx for why "mixed" +
@@ -733,15 +734,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // add here; default true matches the value data.jsx hardcoded before
   // this control existed, so a create that never touches the checkbox
   // produces the same competition it always did.
-  const [roundRobin, setRoundRobin] = useStateA(true);
+  const [roundRobin, setRoundRobin] = useStateA(COMPETITION_DEFAULTS.roundRobin);
   // Seeded to "max" and only ever written by the two pills below, so unlike
   // the settings screen's stored value this never needs resolvePoolSizeMode
   // -- it cannot hold the empty third state a record authored outside the
   // SPA has. The constants are shared so the two screens still write the
   // same strings.
-  const [poolMode, setPoolMode] = useStateA(POOL_SIZE_MODE_MAX);
-  const [poolSize, setPoolSize] = useStateA(3);
-  const [winners, setWinners] = useStateA(2);
+  const [poolMode, setPoolMode] = useStateA(COMPETITION_DEFAULTS.poolSizeMode);
+  const [poolSize, setPoolSize] = useStateA(COMPETITION_DEFAULTS.poolSize);
+  const [winners, setWinners] = useStateA(COMPETITION_DEFAULTS.poolWinners);
   // Knockout qualifiers (bc-qual LP-5a): "" (standard, default), "larger-pools",
   // or "fill-bracket". Only meaningful under poolMode === "min"; see
   // extraQualifiersRadioVisible / resetExtraQualifiersOnPoolModeChange above.
@@ -749,20 +750,20 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // T190 (FR-050a): Swiss round count. Default 4 is the canonical
   // Swiss tournament size for ~16 players (log2 of typical field): 
   // matches the example in spec.md US13. Only used when format=swiss.
-  const [swissRounds, setSwissRounds] = useStateA(4);
+  const [swissRounds, setSwissRounds] = useStateA(COMPETITION_DEFAULTS.swissRounds);
   // bc-symm: per-phase match durations, settings-only until now. 0 (NaN
   // normalized to 0, see DurationInput's contract) means "unset, use the
   // scheduler default" -- state.Competition's own zero-value meaning, and
   // the correct default for a competition that hasn't run a single match
   // yet to estimate from.
-  const [poolMatchDurationSeconds, setPoolMatchDurationSeconds] = useStateA(0);
-  const [playoffMatchDurationSeconds, setPlayoffMatchDurationSeconds] = useStateA(0);
-  const [startTime, setStartTime] = useStateA("09:00");
+  const [poolMatchDurationSeconds, setPoolMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.poolMatchDurationSeconds);
+  const [playoffMatchDurationSeconds, setPlayoffMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.playoffMatchDurationSeconds);
+  const [startTime, setStartTime] = useStateA(COMPETITION_DEFAULTS.startTime);
   // Once the operator types a start time, stop auto-stacking it (see the
   // effect below) so we never clobber a deliberate choice.
   const startTimeEditedRef = useRefA(false);
   const [date, setDate] = useStateA(tournament.date);
-  const [teamSize, setTeamSize] = useStateA(DEFAULT_TEAM_SIZE);
+  const [teamSize, setTeamSize] = useStateA(COMPETITION_DEFAULTS.teamSize);
   // What teamSize this form would actually SEND, which is not the state var.
   // `teamSize` keeps its 5 while kind is individual (so switching back to
   // Team restores the operator's number instead of resetting it), but the
@@ -774,22 +775,22 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // (which reads a stored teamSize of 0) correctly hides -- the exact
   // create-vs-settings divergence bc-symm exists to remove.
   const effectiveTeamSize = kind === "team" ? teamSize : 0;
-  const [teamMatchType, setTeamMatchType] = useStateA("fixed");
-  const [numberPrefix, setNumberPrefix] = useStateA("");
-  const [withZekken, setWithZekken] = useStateA(false);
-  const [naginata, setNaginata] = useStateA(false);
+  const [teamMatchType, setTeamMatchType] = useStateA(COMPETITION_DEFAULTS.teamMatchType);
+  const [numberPrefix, setNumberPrefix] = useStateA(COMPETITION_DEFAULTS.numberPrefix);
+  const [withZekken, setWithZekken] = useStateA(COMPETITION_DEFAULTS.withZekkenName);
+  const [naginata, setNaginata] = useStateA(COMPETITION_DEFAULTS.naginata);
   // League joint-3rd convention: kendo awards two joint 3rd places, naginata a
   // single 3rd. Defaults by discipline (kendo on, naginata off) and re-syncs
   // when the naginata toggle flips; the operator can still override per league.
-  const [leagueTwoThirdPlaces, setLeagueTwoThirdPlaces] = useStateA(true);
+  const [leagueTwoThirdPlaces, setLeagueTwoThirdPlaces] = useStateA(COMPETITION_DEFAULTS.leagueTwoThirdPlaces);
   // bc-symm: league tie-break band, settings-only until now. 0 reads as
   // "Top 3" (state.Competition's own unset-means-3 default, see
   // LEAGUE_TIEBREAK_OPTIONS' comment in competition_shape.jsx); starting
   // the local state at 0 rather than 3 means an operator who never opens
   // this band still submits the same "unset" payload the field always had.
-  const [leagueTiebreakTopN, setLeagueTiebreakTopN] = useStateA(0);
-  const [engi, setEngi] = useStateA(false);
-  const [checkInEnabled, setCheckInEnabled] = useStateA(false);
+  const [leagueTiebreakTopN, setLeagueTiebreakTopN] = useStateA(COMPETITION_DEFAULTS.leagueTiebreakTopN);
+  const [engi, setEngi] = useStateA(COMPETITION_DEFAULTS.engi);
+  const [checkInEnabled, setCheckInEnabled] = useStateA(COMPETITION_DEFAULTS.checkInEnabled);
   const safeCourts = window.normalizeCourts(tournament.courts);
   const [selectedCourts, setSelectedCourts] = useStateA(safeCourts.slice(0, Math.min(2, safeCourts.length)));
   const prevCourtsRef = useRefA(tournament.courts);

@@ -687,3 +687,92 @@ describe('competition CREATE vs SETTINGS: shared rules are asked, not re-derived
     }
   });
 });
+
+// bc-symm review round: the rule that explains why "Award two joint 3rd
+// places" was missing from disk, written down where it can fail.
+//
+// A `bool` with `omitempty` cannot record FALSE. Go drops it from the JSON
+// and the YAML, so an explicit false and a field nobody ever set are the
+// same bytes, and every later reader sees the zero value. That is fine, and
+// keeps config.md clean, for exactly as long as the CREATE FORM's default
+// for that control is also false -- then "absent" and "the default" agree
+// and nothing is lost.
+//
+// LeagueTwoThirdPlaces was the one field where they disagreed: the create
+// form defaults it to TRUE (two joint 3rds is the standard kendo
+// convention; naginata is the exception), so a competition that had never
+// been a league carried no value, read back as false, and the settings
+// screen's Format editor -- which can now make any competition a league --
+// showed the naginata convention on a kendo competition.
+//
+// RoundRobin is the proof that the pattern was already understood: it also
+// defaults to true, and it is the one bool in the struct that deliberately
+// carries no omitempty. LeagueTwoThirdPlaces now matches it.
+//
+// This reads the Go struct directly rather than mirroring it, because a
+// mirror is the thing that drifts. Reading both sides means the test fails
+// on a change to EITHER: flip a create-form default to true, or add
+// omitempty to a field whose default is true, and it goes red.
+describe('competition CREATE defaults vs the Go wire tags', () => {
+  const MODELS_GO = readFileSync(
+    resolve(__dirname, '..', '..', '..', 'internal', 'state', 'models.go'), 'utf8');
+
+  // JS create-form state variable -> the state.Competition field it becomes.
+  // Explicit because the names differ (withZekken/WithZekkenName) and because
+  // a rename should fail this test loudly rather than skip a field silently.
+  const BOOL_FIELDS = {
+    roundRobin: 'RoundRobin',
+    leagueTwoThirdPlaces: 'LeagueTwoThirdPlaces',
+    naginata: 'Naginata',
+    engi: 'Engi',
+    checkInEnabled: 'CheckInEnabled',
+    withZekken: 'WithZekkenName',
+  };
+
+  const goFieldOmitsEmpty = (field) => {
+    const m = MODELS_GO.match(new RegExp(`\\n\\t${field}\\s+bool\\s+\`([^\`]*)\``));
+    if (!m) return null;
+    return m[1].includes('omitempty');
+  };
+
+  const createDefault = (stateVar) => {
+    const m = SETUP_SRC.match(
+      new RegExp(`const \\[${stateVar}, set\\w+\\] = useStateA\\((true|false)\\)`));
+    return m ? m[1] === 'true' : null;
+  };
+
+  it('found every mapped field on both sides (not a vacuous pass)', () => {
+    for (const [stateVar, goField] of Object.entries(BOOL_FIELDS)) {
+      expect(createDefault(stateVar), `create form has no boolean useStateA seed for "${stateVar}"`).not.toBeNull();
+      expect(goFieldOmitsEmpty(goField), `state.Competition has no bool field "${goField}"`).not.toBeNull();
+    }
+  });
+
+  it('a control the create form defaults to TRUE is never omitempty on the wire', () => {
+    for (const [stateVar, goField] of Object.entries(BOOL_FIELDS)) {
+      if (createDefault(stateVar) !== true) continue;
+      expect(
+        goFieldOmitsEmpty(goField),
+        `${stateVar} defaults to true on the create form, but state.Competition.${goField} ` +
+        'is omitempty -- so an explicit false is dropped from the wire and reads back as ' +
+        'false, while a competition created through the form reads back true. The two ' +
+        'config surfaces then disagree about the same setting depending on which one the ' +
+        'operator used. Drop omitempty (RoundRobin is the precedent), or default the ' +
+        'control to false.'
+      ).toBe(false);
+    }
+  });
+
+  it('an omitempty bool is only safe because its create default is the zero value', () => {
+    // The converse, stated so the safe cases are safe ON PURPOSE rather than
+    // by luck: every field that DOES keep omitempty must default to false.
+    for (const [stateVar, goField] of Object.entries(BOOL_FIELDS)) {
+      if (!goFieldOmitsEmpty(goField)) continue;
+      expect(
+        createDefault(stateVar),
+        `state.Competition.${goField} is omitempty, so it cannot record false; that is ` +
+        `only lossless while ${stateVar} also defaults to false on the create form.`
+      ).toBe(false);
+    }
+  });
+});

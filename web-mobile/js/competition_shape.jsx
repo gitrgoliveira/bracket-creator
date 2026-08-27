@@ -377,10 +377,32 @@ export function twoThirdPlacesVisible(format) {
 // then Kachinuki).
 export const LABEL_TEAM_SIZE = "Team size";
 export const LABEL_TEAM_MATCH_TYPE = "Team match format";
+export const TEAM_MATCH_TYPE_FIXED = "fixed";
+export const TEAM_MATCH_TYPE_KACHINUKI = "kachinuki";
 export const TEAM_MATCH_TYPE_OPTIONS = [
-  { value: "fixed", label: "Regular" },
-  { value: "kachinuki", label: "Kachinuki (winner stays on)" },
+  { value: TEAM_MATCH_TYPE_FIXED, label: "Regular" },
+  { value: TEAM_MATCH_TYPE_KACHINUKI, label: "Kachinuki (winner stays on)" },
 ];
+
+// teamMatchTypeActive: which "Team match format" pill is lit for a stored
+// value. NOT plain equality, and the asymmetry is the rule: a competition
+// can hold a legacy/stored value that is neither exactly "fixed" nor
+// exactly "kachinuki" (the empty sentinel, see normalizeConfigForKind), and
+// ValidateTeamMatchType (internal/state/models.go) reads "" as fixed. So
+// only "kachinuki" is matched exactly and everything else lights Regular.
+//
+// Both screens now read this. The settings screen already did it inline; the
+// create form used plain equality, with a comment arguing it was safe there
+// because its local state can only ever hold one of the two canonical
+// values. That was true and beside the point -- the same question answered
+// two ways in two files is the shape every drift in this module's history
+// started as.
+export function teamMatchTypeActive(option, stored) {
+  return option === TEAM_MATCH_TYPE_KACHINUKI
+    ? stored === TEAM_MATCH_TYPE_KACHINUKI
+    : stored !== TEAM_MATCH_TYPE_KACHINUKI;
+}
+
 
 // teamFieldsVisible: both surfaces gate "Team size" and "Team match
 // format" identically on kind === "team" (admin_setup.jsx:1370,1391;
@@ -501,8 +523,16 @@ export const LABEL_EXTRA_QUALIFIERS = "Knockout qualifiers";
 // accept a non-standard qualifier setting for. The predicate keeps its
 // strict contract and the call sites hand it a resolved value, rather than
 // this rule being respelled inside it.
+export const LABEL_POOL_SIZE_MODE = "Pool size is a";
 export const POOL_SIZE_MODE_MAX = "max";
 export const POOL_SIZE_MODE_MIN = "min";
+// The two pills' own copy. Both screens inlined this array verbatim, which
+// left the label text and the wire values paired up in two places; the
+// option list is the pairing, so it belongs with the values.
+export const POOL_SIZE_MODE_OPTIONS = [
+  { value: POOL_SIZE_MODE_MAX, label: "maximum" },
+  { value: POOL_SIZE_MODE_MIN, label: "minimum" },
+];
 
 export function resolvePoolSizeMode(poolSizeMode) {
   return poolSizeMode === POOL_SIZE_MODE_MAX ? POOL_SIZE_MODE_MAX : POOL_SIZE_MODE_MIN;
@@ -738,6 +768,23 @@ export function normalizeConfigForKind(cfg) {
     next.teamMatchType = "fixed";
   }
   return next;
+}
+
+// twoThirdPlacesForNaginata: ticking "Naginata competition" clears "Award
+// two joint 3rd places", and unticking it restores them. Naginata awards a
+// single 3rd place where kendo awards two -- the two hints say exactly that,
+// and state.Competition's LeagueTwoThirdPlaces comment says it a third time.
+//
+// The create form has always applied this coupling, inline in the naginata
+// checkbox's onChange. The settings screen did not, so ticking Naginata
+// there left the kendo two-joint-3rds convention in place on a naginata
+// competition, and an operator who set the discipline on the screen built
+// for editing got a different config from one who set it at creation.
+// Same shape as resetExtraQualifiersOnPoolModeChange (qualifier_preview.jsx):
+// a coupling between two controls, owned once, called from both screens'
+// onChange.
+export function twoThirdPlacesForNaginata(naginataOn) {
+  return !naginataOn;
 }
 
 // --- kindChangeBlockedReason ----------------------------------------------

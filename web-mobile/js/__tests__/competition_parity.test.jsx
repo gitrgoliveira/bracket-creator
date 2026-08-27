@@ -385,7 +385,7 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     { key: 'Team match type', pattern: '{LABEL_TEAM_MATCH_TYPE}' },
     { key: 'Pool format (round-robin shape)', pattern: '{LABEL_POOL_FORMAT}' },
     { key: 'Round-robin (round-robin in pools)', pattern: '{LABEL_ROUND_ROBIN}' },
-    { key: 'Pool size mode ("Pool size is a")', pattern: '>Pool size is a<' },
+    { key: 'Pool size mode ("Pool size is a")', pattern: '{LABEL_POOL_SIZE_MODE}' },
     { key: 'Pool size', pattern: '{LABEL_POOL_SIZE}' },
     { key: 'Pool winners', pattern: '{LABEL_POOL_WINNERS}' },
     { key: 'Extra qualifiers', pattern: '{LABEL_EXTRA_QUALIFIERS}' },
@@ -600,6 +600,78 @@ describe('competition CREATE vs SETTINGS: shared rules are asked, not re-derived
         `pattern for ${r.rule} does not match its own sample: ${SAMPLES[i]}`
       ).toBe(true);
     });
+  });
+
+  // The markup half of the same rule. Sharing the CONSTANTS stopped the two
+  // screens disagreeing about what a control is called; it did nothing about
+  // the `<div className="field"> <label> <div className="radio-group">` each
+  // screen hand-wrote around them, and four divergences lived in exactly that
+  // gap (see competition_fields.jsx's header). Both screens now render every
+  // shared option-list control through PillGroup and every shared checkbox
+  // through CheckboxField, so a new hand-rolled one is the regression to
+  // catch.
+  //
+  // The two allowances are real controls that are NOT shared: the
+  // "Knockout qualifiers" radio (each pill carries its own coupling side
+  // effect on poolWinners, and its preview line differs by surface) and the
+  // shiaijo picker (driven by window.courtPillOptions, whose flagged-orphan
+  // state exists only on the settings screen). Both are one `radio-group`
+  // each, which is what the count pins -- add a third and this fails until
+  // it is either shared or deliberately allowed here.
+  it('renders every shared control through the shared field components', () => {
+    for (const [name, src] of SCREENS) {
+      const rawGroups = (src.match(/className="radio-group"/g) || []).length;
+      expect(
+        rawGroups,
+        `${name} hand-writes ${rawGroups} radio-group(s); only 2 are sanctioned ` +
+        '(Knockout qualifiers, Assigned shiaijo). Render option-list controls ' +
+        'with <PillGroup> from competition_fields.jsx instead.'
+      ).toBe(2);
+
+      const rawCheckboxes = (src.match(/<label className="checkbox">/g) || []).length;
+      expect(
+        rawCheckboxes,
+        `${name} hand-writes ${rawCheckboxes} checkbox field(s). Render them with ` +
+        '<CheckboxField> from competition_fields.jsx, which owns the label-to-hint ' +
+        'gap the two screens used to spell differently.'
+      ).toBe(0);
+
+      expect(
+        /from '\.\/competition_fields\.jsx'/.test(src),
+        `${name} must import the shared field components`
+      ).toBe(true);
+    }
+  });
+
+  // Both screens must ask the same question about which team-match-format
+  // pill is lit. They did not: settings read anything-but-kachinuki as
+  // Regular (correct for a stored legacy value) while create used plain
+  // equality and carried a comment explaining why that was safe for its own
+  // state. Two spellings of one rule is how the next reader picks the wrong
+  // one.
+  it('both screens light the team-match-format pill by the same predicate', () => {
+    for (const [name, src] of SCREENS) {
+      expect(
+        /teamMatchTypeActive\(/.test(src),
+        `${name} must use teamMatchTypeActive rather than spelling the ` +
+        'fixed-vs-kachinuki comparison inline'
+      ).toBe(true);
+    }
+  });
+
+  // The naginata coupling: ticking "Naginata competition" clears "Award two
+  // joint 3rd places", because naginata awards a single 3rd. The create form
+  // has always done this inline; the settings screen did not, so setting the
+  // discipline on the screen built for editing left the kendo convention in
+  // place.
+  it('both screens apply the naginata / joint-3rd-places coupling', () => {
+    for (const [name, src] of SCREENS) {
+      expect(
+        /twoThirdPlacesForNaginata\(/.test(src),
+        `${name} must clear the joint-3rd-places setting when naginata is ` +
+        'ticked, via the shared twoThirdPlacesForNaginata rule'
+      ).toBe(true);
+    }
   });
 
   it('neither screen re-derives a rule competition_shape.jsx already owns', () => {

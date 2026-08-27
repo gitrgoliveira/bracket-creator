@@ -739,6 +739,20 @@ a:hover {
   margin-bottom: 14px;
 }
 
+.field--checkbox {
+  /* A checkbox field's label IS its control, so it wants a tighter
+     label-to-hint gap than `.field`'s 6px, which is sized for a caption
+     sitting above a separate input. 4px is the value both screens already
+     used -- create as an inline `marginTop: 4` on every checkbox hint,
+     settings as `gap: 4` on a flex wrapper around each pair -- so this is
+     one owner for a number that was already agreed and twice spelled.
+     Sharing the wrapper also settles a rhythm the two screens did NOT
+     agree on: create spaced consecutive checkboxes by `.field`'s 14px
+     while settings used a flex column with `gap: 8`. Inheriting `.field`
+     here puts both on 14px, matching every other control on both forms. */
+  gap: 4px;
+}
+
 .field__label {
   font-size: 12px;
   font-weight: 600;
@@ -776,10 +790,11 @@ a:hover {
    alignment rule has one owner instead of five copies that could drift
    independently -- and then applied to the create form's five twins, which
    had kept a bare `.field__hint` and so rendered the SAME five controls at a
-   different size and indent from the settings page. The two screens supply
-   the 4px gap above the hint differently (settings from its flex column's
-   `gap: 4`, create from an inline marginTop), which is why that spacing is
-   not folded in here. */
+   different size and indent from the settings page. The 4px gap above the
+   hint is NOT set here: it belongs to the field wrapper, and both screens now
+   get it from `.field--checkbox` below rather than supplying it themselves
+   (settings from a flex column's `gap: 4`, create from an inline
+   marginTop) -- see that rule for why one wrapper replaced two spellings. */
 .field__hint--checkbox {
   font-size: 11px;
   padding-left: 22px;

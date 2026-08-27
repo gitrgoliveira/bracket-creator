@@ -444,10 +444,22 @@ type Competition struct {
 	//     falls at position ≥ 3 is treated as non-consequential (both receive 3rd
 	//     place, no bronze decider). See isConsequentialTie (engine).
 	//
-	// When false (default), all ties within [1..LeagueTiebreakTopN] are
-	// consequential and may require a tie-breaker, and the podium shows a single
-	// 3rd place.
-	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places,omitempty" json:"leagueTwoThirdPlaces,omitempty"`
+	// When false, all ties within [1..LeagueTiebreakTopN] are consequential and
+	// may require a tie-breaker, and the podium shows a single 3rd place.
+	//
+	// NOT omitempty, deliberately, and this is the same treatment RoundRobin
+	// gets a few fields up. Both are booleans whose FALSE is a real operator
+	// choice rather than "unset", so dropping it from the wire makes an
+	// explicit "off" indistinguishable from a competition that has never been
+	// asked -- and the create form's default for a league is ON (the kendo
+	// convention this comment describes), so those two readings disagree.
+	// While it was omitempty, a competition created in any other format
+	// carried no value at all, and switching it to League on the settings
+	// screen silently produced the naginata convention: a single 3rd place,
+	// where creating the same league from scratch awards two. The create form
+	// now sends the field for every format, exactly as it does RoundRobin, so
+	// the value is explicit from creation and both routes agree.
+	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places" json:"leagueTwoThirdPlaces"`
 
 	// LeagueTiebreakFinalized is set to true by the operator via
 	// POST /api/competitions/:id/league-tiebreak/finalize to accept the

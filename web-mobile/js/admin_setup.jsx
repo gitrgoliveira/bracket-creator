@@ -136,16 +136,18 @@ import {
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
-  teamFieldsVisible, zekkenApplies, engiApplies,
+  teamFieldsVisible, zekkenApplies, engiApplies, teamMatchTypeActive, twoThirdPlacesForNaginata,
   MIN_TEAM_SIZE, DEFAULT_TEAM_SIZE, poolSettingsError, swissSettingsError,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
-  FORMAT_MIXED, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
+  FORMAT_MIXED, POOL_SIZE_MODE_MAX,
+  LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
   poolFormatHint, resolvePoolFormat, leagueTiebreakActive,
   HINT_ZEKKEN, HINT_ENGI,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
   LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
 } from './competition_shape.jsx';
+import { PillGroup, CheckboxField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
 
 function AdminEditTournament({ tournament, onCancel, onSave, onLogout, onViewerMode, authConfig, password, showToast }) {
@@ -1008,11 +1010,15 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.extraQualifiers = extraQualifiers;
     }
     // League joint-3rd convention (kendo two joint 3rds vs naginata single 3rd).
-    // Emit only for leagues; the backend uses `omitempty` so it stays invisible
-    // on other formats. Same post-construction pattern as poolFormat above.
-    if (twoThirdPlacesVisible(format)) {
-      c.leagueTwoThirdPlaces = leagueTwoThirdPlaces;
-    }
+    // Sent for EVERY format, not just leagues, and for the same reason
+    // roundRobin above is: the settings screen can switch a competition INTO
+    // league, and a competition that carried no value for this field showed
+    // the checkbox unticked there -- the naginata convention -- while creating
+    // the same league from this form ticks it. Emitting it always means the
+    // value is explicit from creation, so the two routes agree; the field is
+    // no longer `omitempty` on the Go side so an explicit false survives the
+    // round trip (see state.Competition's own comment).
+    c.leagueTwoThirdPlaces = leagueTwoThirdPlaces;
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
     // post-construction pattern as poolFormat above: buildCompetition
     // doesn't know about this field; setting it on the result object
@@ -1161,24 +1167,9 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             </div>
           </div>
 
-          <div className="field">
-            <label className="field__label">{LABEL_KIND}</label>
-            <div className="radio-group">
-              {KIND_OPTIONS.map((o) => (
-                <button key={o.value} className={`radio-pill ${kind === o.value ? "is-active" : ""}`} type="button" onClick={() => setKind(o.value)}>{o.label}</button>
-              ))}
-            </div>
-          </div>
+          <PillGroup label={LABEL_KIND} options={KIND_OPTIONS} value={kind} onChange={setKind} />
 
-          <div className="field">
-            <label className="field__label">{LABEL_FORMAT}</label>
-            <div className="radio-group">
-              {FORMAT_OPTIONS.map((o) => (
-                <button key={o.value} className={`radio-pill ${format === o.value ? "is-active" : ""}`} type="button" onClick={() => setFormat(o.value)}>{o.label}</button>
-              ))}
-            </div>
-            <div className="field__hint">{formatHint(format)}</div>
-          </div>
+          <PillGroup label={LABEL_FORMAT} options={FORMAT_OPTIONS} value={format} onChange={setFormat} hint={formatHint(format)} />
 
           {teamFieldsVisible(kind) && (
             <div className="field">
@@ -1202,40 +1193,16 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           {teamFieldsVisible(kind) && (
-            <div className="field">
-              <label className="field__label">{LABEL_TEAM_MATCH_TYPE}</label>
-              <div className="radio-group">
-                {/* Plain o.value === teamMatchType equality is safe here (unlike
-                    the settings screen's asymmetric check): teamMatchType is
-                    local component state initialised to "fixed" and only ever
-                    set to one of TEAM_MATCH_TYPE_OPTIONS' own values below, so
-                    it can never hold a third/legacy value the way a loaded
-                    competition record can. */}
-                {TEAM_MATCH_TYPE_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    className={`radio-pill ${teamMatchType === o.value ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => setTeamMatchType(o.value)}
-                  >{o.label}</button>
-                ))}
-              </div>
-              <div className="field__hint">
-                {teamMatchTypeHint(teamMatchType === "kachinuki")}
-              </div>
-            </div>
+            <PillGroup label={LABEL_TEAM_MATCH_TYPE} options={TEAM_MATCH_TYPE_OPTIONS}
+              isActive={(v) => teamMatchTypeActive(v, teamMatchType)}
+              onChange={setTeamMatchType}
+              hint={teamMatchTypeHint(teamMatchType === "kachinuki")} />
           )}
 
           {poolFormatVisible(format) && (
-            <div className="field">
-              <label className="field__label">{LABEL_POOL_FORMAT}</label>
-              <div className="radio-group">
-                {POOL_FORMAT_OPTIONS.map((o) => (
-                  <button key={o.value} className={`radio-pill ${resolvePoolFormat(poolFormat) === o.value ? "is-active" : ""}`} type="button" onClick={() => setPoolFormat(o.value)}>{o.label}</button>
-                ))}
-              </div>
-              <div className="field__hint">{poolFormatHint(poolFormat)}</div>
-            </div>
+            <PillGroup label={LABEL_POOL_FORMAT} options={POOL_FORMAT_OPTIONS}
+              isActive={(v) => resolvePoolFormat(poolFormat) === v}
+              onChange={setPoolFormat} hint={poolFormatHint(poolFormat)} />
           )}
 
           {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx),
@@ -1246,33 +1213,17 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               showing the checkbox there would let the operator toggle
               something with no effect. */}
           {roundRobinVisible(format, poolFormat) && (
-            <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={roundRobin} onChange={(e) => setRoundRobin(e.target.checked)} /> {LABEL_ROUND_ROBIN}</label>
-            </div>
+            <CheckboxField label={LABEL_ROUND_ROBIN} checked={roundRobin} onChange={setRoundRobin} />
           )}
 
           {format === FORMAT_MIXED && (
             <>
-              <div className="field">
-                <label className="field__label">Pool size is a</label>
-                <div className="radio-group">
-                  <button className={`radio-pill ${poolMode === POOL_SIZE_MODE_MAX ? "is-active" : ""}`} type="button" onClick={() => {
-                    // Leaving minimum-players-per-pool sizing hides the
-                    // "Knockout qualifiers" radio below; reset its value to
-                    // standard so it can't persist as a stale non-standard
-                    // selection under a mode it's no longer valid for. See
-                    // resetExtraQualifiersOnPoolModeChange's own comment.
-                    setPoolMode(POOL_SIZE_MODE_MAX);
-                    setExtraQualifiers((eq) => resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, eq));
-                  }}>maximum</button>
-                  <button className={`radio-pill ${poolMode === POOL_SIZE_MODE_MIN ? "is-active" : ""}`} type="button" onClick={() => setPoolMode(POOL_SIZE_MODE_MIN)}>minimum</button>
-                </div>
-                <div className="field__hint">
-                  {poolMode === POOL_SIZE_MODE_MAX
-                    ? "No pool will have more than the size below (more pools, smaller pools)."
-                    : "Each pool will have at least the size below (fewer pools, larger pools)."}
-                </div>
-              </div>
+              <PillGroup label={LABEL_POOL_SIZE_MODE} options={POOL_SIZE_MODE_OPTIONS}
+                isActive={(v) => poolMode === v}
+                onChange={(v) => { setPoolMode(v); if (v === POOL_SIZE_MODE_MAX) setExtraQualifiers((eq) => resetExtraQualifiersOnPoolModeChange(POOL_SIZE_MODE_MAX, eq)); }}
+                hint={poolMode === POOL_SIZE_MODE_MAX
+                  ? "No pool will have more than the size below (more pools, smaller pools)."
+                  : "Each pool will have at least the size below (fewer pools, larger pools)."} />
               <div className="row">
                 {/* Same NaN-as-"" + decideNumericUpdate pattern as the courts */}
                 {/* field below and admin_competition.jsx AdminSettings. */}
@@ -1388,27 +1339,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               because that's what the server resolves it to at draw time
               (LEAGUE_TIEBREAK_OPTIONS' own comment). */}
           {leagueTiebreakVisible(format, kind, effectiveTeamSize) && (
-            <div className="field">
-              <label className="field__label">{LABEL_LEAGUE_TIEBREAK}</label>
-              <div className="radio-group">
-                {LEAGUE_TIEBREAK_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    className={`radio-pill ${leagueTiebreakActive(o.value, leagueTiebreakTopN) ? "is-active" : ""}`}
-                    type="button"
-                    onClick={() => setLeagueTiebreakTopN(o.value)}
-                  >{o.label}</button>
-                ))}
-              </div>
-              <div className="field__hint">{HINT_LEAGUE_TIEBREAK}</div>
-            </div>
+            <PillGroup label={LABEL_LEAGUE_TIEBREAK} options={LEAGUE_TIEBREAK_OPTIONS}
+              isActive={(v) => leagueTiebreakActive(v, leagueTiebreakTopN)}
+              onChange={setLeagueTiebreakTopN} hint={HINT_LEAGUE_TIEBREAK} />
           )}
 
           {twoThirdPlacesVisible(format) && (
-            <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={leagueTwoThirdPlaces} onChange={(e) => setLeagueTwoThirdPlaces(e.target.checked)} /> {LABEL_TWO_THIRD_PLACES}</label>
-              <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_TWO_THIRD_PLACES}</div>
-            </div>
+            <CheckboxField label={LABEL_TWO_THIRD_PLACES} checked={leagueTwoThirdPlaces} onChange={setLeagueTwoThirdPlaces} hint={HINT_TWO_THIRD_PLACES} />
           )}
 
           <div className="field">
@@ -1480,28 +1417,16 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           </div>
 
           {zekkenApplies(kind) && (
-            <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={withZekken} onChange={(e) => setWithZekken(e.target.checked)} /> {LABEL_ZEKKEN}</label>
-              <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_ZEKKEN}</div>
-            </div>
+            <CheckboxField label={LABEL_ZEKKEN} checked={withZekken} onChange={setWithZekken} hint={HINT_ZEKKEN} />
           )}
 
           {engiApplies(kind) && (
-            <div className="field">
-              <label className="checkbox"><input type="checkbox" checked={engi} onChange={(e) => setEngi(e.target.checked)} /> {LABEL_ENGI}</label>
-              <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_ENGI}</div>
-            </div>
+            <CheckboxField label={LABEL_ENGI} checked={engi} onChange={setEngi} hint={HINT_ENGI} />
           )}
 
-          <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={naginata} onChange={(e) => { setNaginata(e.target.checked); setLeagueTwoThirdPlaces(!e.target.checked); }} /> {LABEL_NAGINATA}</label>
-            <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_NAGINATA}</div>
-          </div>
+          <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setLeagueTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
 
-          <div className="field">
-            <label className="checkbox"><input type="checkbox" checked={checkInEnabled} onChange={(e) => setCheckInEnabled(e.target.checked)} /> {LABEL_CHECK_IN}</label>
-            <div className="field__hint field__hint--checkbox" style={{ marginTop: 4 }}>{HINT_CHECK_IN}</div>
-          </div>
+          <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />
 
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
             <button type="button" className="btn" onClick={onCancel}>Cancel</button>

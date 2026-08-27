@@ -594,6 +594,22 @@ paths:
         Also requires `X-Admin-Password` when the destructive-ops gate is active
         (see the AdminPassword security scheme); returns 503 when locked mode is
         active but `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset.
+
+        Each competition row is validated against the same rules
+        `POST /api/competitions` applies, and two manifest keys are worth
+        calling out because their absence is not neutral:
+
+        - `kind` must be `""`, `"individual"` or `"team"`. Omitting it is
+          fine and means individual.
+        - `team_size` must be stated (and be >= 2) whenever `kind` is
+          `"team"`. An omitted key decodes to 0, which is refused with
+          `teamSize: team competitions require teamSize >= 2` -- the same
+          answer the create endpoint gives. A row that omitted it was
+          accepted by earlier versions; it now fails that row while the
+          rest of the import proceeds.
+
+        `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
+        omitted (to 4 and `"max"`).
       security:
         - TournamentPassword: []
           AdminPassword: []
@@ -895,6 +911,19 @@ paths:
           (`team competitions require teamSize >= 2`).
         - When `kind` is not `"team"` (including omitted or `"individual"`),
           `teamSize` must be 0 (`non-team competitions require teamSize == 0`).
+        - `kind` must be `""`, `"individual"` or `"team"`
+          (`kind: unknown kind "..." (expected "individual" or "team")`).
+          Unlike the PUT endpoint's equivalent check, this runs
+          unconditionally: a create has no stored value to protect from a
+          lockout, so any other value is always rejected.
+        - `format` landing on `"mixed"` requires `poolSize >= 1`
+          (`mixed format requires a pool size of at least 1`); also
+          unconditional on create, unlike its change-scoped PUT
+          counterpart. An OMITTED `poolSize` is not a violation: it is
+          defaulted, matching `POST /api/tournament/import`, so only a
+          stated value below 1 is refused. `teamSize` is NOT defaulted the
+          same way: when `kind` is `"team"` a size must be stated, per the
+          `teamSize >= 2` rule above.
         - `courts`: each label a single character, at most 16 labels, no
           duplicates, and every label must be one the tournament has.
         - `courts` COUNT, when the competition's `format` builds a knockout
@@ -958,9 +987,36 @@ paths:
         **Settings-update (body OMITS `players`):**
         The server applies these fields from the body onto the
         on-disk record: `name`, `date`, `startTime`, `poolSize`,
-        `poolWinners`, `poolSizeMode`, `courts`, `roundRobin`,
-        `withZekkenName`, `teamSize`, `numberPrefix`, `format`,
-        `kind`, `mirror`. String fields are trimmed server-side.
+        `poolWinners`, `poolSizeMode`, `poolFormat`, `extraQualifiers`,
+        `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
+        `numberPrefix`, `format`, `kind`, `mirror`,
+        `poolMatchDurationSeconds`, `playoffMatchDurationSeconds`,
+        `swissRounds`, `naginata`, `engi`, `teamMatchType`,
+        `checkInEnabled`, `leagueTiebreakTopN`, `leagueTwoThirdPlaces`.
+        String fields are trimmed server-side.
+
+        Several of those fields are refused once the competition has
+        started (status past `setup`), always as a change-scoped guard: a
+        save that merely echoes the stored value back is never refused,
+        only a save that actually CHANGES it while started. `format` and
+        `kind` (409, see below) and `teamMatchType` (409, see below) are
+        refused together with the output-affecting draw-ready gate.
+        `naginata`, `engi`, and the pair `leagueTiebreakTopN` /
+        `leagueTwoThirdPlaces` are refused with 400 (`naginata can only be
+        changed before the competition starts`, `engi can only be changed
+        before the competition starts`, `leagueTiebreakTopN and
+        leagueTwoThirdPlaces can only be changed before the competition
+        starts`, respectively). Every other field in the list above
+        (including `poolMatchDurationSeconds` / `playoffMatchDurationSeconds`,
+        `checkInEnabled`, and `swissRounds`) is editable regardless of
+        status through this endpoint; `poolSize`, `poolWinners`,
+        `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
+        `roundRobin`, `teamSize`, `numberPrefix`, `withZekkenName` and
+        `mirror` are additionally subject to the draw-ready
+        output-affecting 409 (see below) while status is exactly
+        `draw-ready`, but are not blocked once the competition has moved
+        past it.
+
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
         if `date` is non-empty and not in canonical `DD-MM-YYYY`
@@ -969,6 +1025,20 @@ paths:
         `teamSize` < 2 (`team competitions require teamSize >= 2`),
         or if `kind` is not `"team"` (including omitted or `"individual"`)
         and `teamSize` > 0 (`non-team competitions require teamSize == 0`).
+
+        `kind` is additionally restricted to `""`, `"individual"` or
+        `"team"` (`unknown kind "..." (expected "individual" or "team")`),
+        but ONLY when `kind` is actually CHANGING: a competition whose
+        stored `kind` is already outside that set (a hand-edited
+        `config.md`, or a record written before this check existed) stays
+        editable for every unrelated field, since the settings page
+        echoes the stored `kind` back unchanged on every save. `format`
+        landing on `"mixed"` additionally requires `poolSize >= 1`
+        (`mixed format requires a pool size of at least 1`), scoped the
+        same way: only when `format` or `poolSize` is actually changing.
+        `POST /api/competitions` enforces both of these unconditionally
+        instead (a create has no stored value to protect from a
+        lockout), see the create endpoint above.
 
         `courts` obeys the same rules as on create (single-character labels,
         16-court cap, no duplicates, only shiaijo the tournament has, and a
@@ -1048,10 +1118,21 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           description: |
-            Conflict. Output-affecting settings (format, courts, pool
-            size/winners/mode, pool format, round-robin, mirror, team size,
-            kind, number prefix, zekken display) were changed while the
-            competition is in `draw-ready` state; discard the draw first.
+            Conflict. Three distinct cases, all 409:
+
+            * Output-affecting settings (format, courts, pool
+              size/winners/mode, extra qualifiers, pool format, round-robin,
+              mirror, team size, kind, team match type, number prefix, zekken
+              display) were changed while the competition is in `draw-ready`
+              state; discard the draw first.
+            * `format` or `kind` was changed after the competition STARTED
+              (status past `setup`). Both repoint generation and scoring while
+              results already exist, so neither can change after the fact.
+            * `teamMatchType` was changed after the competition started.
+
+            A settings save that merely echoes an unchanged `format`, `kind` or
+            `teamMatchType` back is never refused: every one of these gates
+            compares against the stored value and fires only on a real change.
             Duplicate name/number-prefix violations are returned as 400.
           content:
             application/json:

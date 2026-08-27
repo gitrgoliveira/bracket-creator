@@ -32,6 +32,11 @@
 // Match: an atomic fight, owned by a pool or a bracket round. Stores court, scheduledAt,
 // status, score. Score can be edited at any time by an admin.
 
+// COMPETITION_DEFAULTS is the one owner of every create-time default
+// (competition_shape.jsx); buildEmptyCompetition below reads it rather than
+// restating the same literals a second time.
+import { COMPETITION_DEFAULTS } from './competition_shape.jsx';
+
 const DOJOS = ['Team Alpha', 'Team Beta', 'Team Chi', 'Team Delta', 'Team Epsilon', 'Team Eta', 'Team Gamma', 'Team Iota', 'Team Kappa', 'Team Lambda', 'Team Mu', 'Team Nu', 'Team Omega', 'Team Omicron', 'Team Phi', 'Team Pi', 'Team Psi', 'Team Rho', 'Team Sigma', 'Team Tau', 'Team Theta', 'Team Upsilon', 'Team Xi', 'Team Zeta'];
 const FIRST = ['Aaron', 'Albus', 'Arthur', 'Benjamin', 'Bilbo', 'Bram', 'Caleb', 'Cersei', 'Charles', 'Daenerys', 'Daniel', 'Dylan', 'Eddard', 'Elijah', 'Emily', 'Finn', 'Frodo', 'Fyodor', 'Gabriel', 'Gandalf', 'George', 'Herman', 'Hermione', 'Hudson', 'Inigo', 'Isaac', 'Jackson', 'Jane', 'Jon', 'Kaden', 'Katniss', 'Kevin', 'Kurt', 'Legolas', 'Lewis', 'Liam', 'Luke', 'Mary', 'Mason', 'Michael', 'Moby', 'Nathan', 'Nathaniel', 'Neville', 'Nolan', 'Oliver', 'Oscar', 'Othello', 'Owen', 'Parker', 'Paul', 'Petyr', 'Philip', 'Quentin', 'Quinn', 'Quirinus', 'Ray', 'Robert', 'Ron', 'Ryan', 'Samwise', 'Sebastian', 'Steven', 'Sylvia', 'Thomas', 'Tristan', 'Tyrion', 'Ulysses', 'Uriel', 'Ursula', 'Victor', 'Vincent', 'Virginia', 'Voldemort', 'William', 'Willy', 'Xaro', 'Xavier', 'Yann', 'Ygritte', 'Yosef', 'Zachary'];
 const LAST = ['Adams', 'Allen', 'Anderson', 'Asimov', 'Austen', 'Baelish', 'Baggins', 'Blake', 'Bradbury', 'Bronte', 'Carroll', 'Clark', 'Conan', 'Defoe', 'Dick', 'Dickens', 'Dostoevsky', 'Dumbledore', 'Evans', 'Everdeen', 'Gamgee', 'Granger', 'Green', 'Greenleaf', 'Hall', 'Hardy', 'Harris', 'Hawthorne', 'Herbert', 'Hernandez', 'Hill', 'Jackson', 'K Dick', 'K Le Guin', 'King', 'Lannister', 'Lee', 'Lewis', 'Longbottom', 'Lopez', 'Martel', 'Martin', 'Martinez', 'Melville', 'Montoya', 'Moore', 'Orwell', 'Plath', 'Quirrell', 'Rodriguez', 'Scott', 'Shakespeare', 'Shelley', 'Snow', 'Stark', 'Stoker', 'Targaryen', 'Taylor', 'Thomas', 'Thompson', 'Vonnegut', 'Walker', 'Weasley', 'White', 'Wilde', 'Wilson', 'Wonka', 'Woolf', 'Wright', 'Xhoan Daxos', 'Young', 'the Grey'];
@@ -207,24 +212,36 @@ function poolWinners(pools) {
 // format: "playoffs" | "mixed" | "league" | "swiss"
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
-  const { id, name, kind, format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled } = args;
+  const { id, name, kind, format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled, roundRobin } = args;
   const count = sampleRoster ? ({ small: 8, medium: 16, large: 32 }[sampleRoster] || 16) : 0;
   const players = count > 0 ? makeCompetitors(count, kind, id, seedCount) : [];
+  // Every default below READS COMPETITION_DEFAULTS rather than restating a
+  // literal. This function and the create form's ~20 useStateA seeds were two
+  // copies of the same answer, agreeing by inspection: both said poolSize 3,
+  // both said poolWinners 2, both said "max". Two copies that agree today are
+  // still two copies, and the joint-3rd-places divergence this branch fixed
+  // began exactly there -- as a default that only one of the places holding
+  // it knew about.
   return {
     id, name, kind, format, status,
-    teamSize: teamSize || (kind === "team" ? 5 : 0),
-    poolSize: poolSize || 3,
-    poolSizeMode: poolMode || "max",
-    poolWinners: winnersPerPool || 2,
-    roundRobin: true,
-    mirror: true,
-    withZekkenName: withZekkenName || false,
-    numberPrefix: numberPrefix || "",
-    checkInEnabled: checkInEnabled || false,
+    teamSize: teamSize || (kind === "team" ? COMPETITION_DEFAULTS.teamSize : 0),
+    poolSize: poolSize || COMPETITION_DEFAULTS.poolSize,
+    poolSizeMode: poolMode || COMPETITION_DEFAULTS.poolSizeMode,
+    poolWinners: winnersPerPool || COMPETITION_DEFAULTS.poolWinners,
+    // bc-symm: the create form now offers this as an operator choice, so
+    // `??` rather than `||` -- an explicit `false` from the form must not be
+    // coerced back to the default. Every call site that omits the arg (the
+    // sample-data generators below, and anything not yet taught about the
+    // field) still gets it.
+    roundRobin: roundRobin ?? COMPETITION_DEFAULTS.roundRobin,
+    mirror: COMPETITION_DEFAULTS.mirror,
+    withZekkenName: withZekkenName || COMPETITION_DEFAULTS.withZekkenName,
+    numberPrefix: numberPrefix || COMPETITION_DEFAULTS.numberPrefix,
+    checkInEnabled: checkInEnabled || COMPETITION_DEFAULTS.checkInEnabled,
     courts: courts || ["A", "B"],
     players,
     pools: null, bracket: null,
-    startTime: startTime || "09:00",
+    startTime: startTime || COMPETITION_DEFAULTS.startTime,
     date: date || "",
   };
 }

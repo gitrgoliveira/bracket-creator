@@ -392,6 +392,30 @@ func TestValidateCompetitionTeamSize(t *testing.T) {
 	}
 }
 
+func TestValidateCompetitionKind(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    string
+		wantErr bool
+	}{
+		{"empty is legacy/import default, means individual", "", false},
+		{"individual ok", "individual", false},
+		{"team ok", "team", false},
+		{"unknown value errors", "banana", true},
+		{"case-sensitive: Individual errors", "Individual", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCompetitionKind(tc.kind)
+			if tc.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 // --- ExtraQualifiers (bc-qual) ---
 
 // TestValidateExtraQualifiers covers every branch of the switch: the empty

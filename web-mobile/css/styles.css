@@ -739,6 +739,29 @@ a:hover {
   margin-bottom: 14px;
 }
 
+.field--checkbox {
+  /* A checkbox field's label IS its control, so it wants a tighter
+     label-to-hint gap than `.field`'s 6px, which is sized for a caption
+     sitting above a separate input. 4px is the value both screens already
+     used -- create as an inline `marginTop: 4` on every checkbox hint,
+     settings as `gap: 4` on a flex wrapper around each pair -- so this is
+     one owner for a number that was already agreed and twice spelled.
+     Sharing the wrapper also settles a rhythm the two screens did NOT
+     agree on: create spaced consecutive checkboxes by `.field`'s 14px
+     while settings used a flex column with `gap: 8`. Inheriting `.field`
+     here puts both on 14px, matching every other control on both forms. */
+  gap: 4px;
+}
+
+.field__label-optional {
+  /* The greyed "(optional)" suffix on a field caption. Was an inline
+     `style={{ fontWeight: 400, color: "var(--ink-3)" }}` written out once per
+     screen on the same field; FieldLabel (competition_fields.jsx) renders it
+     now and this is where it is styled. */
+  font-weight: 400;
+  color: var(--ink-3);
+}
+
 .field__label {
   font-size: 12px;
   font-weight: 600;
@@ -762,6 +785,44 @@ a:hover {
 
 .field__hint--warn {
   color: var(--warn-ink);
+}
+
+/* The hint that hangs under a checkbox rather than a labeled input: the
+   Zekken / Engi / Naginata / Check-in / joint-3rd-places sub-hints, which
+   BOTH the create form (admin_setup.jsx) and the settings page
+   (admin_competition_settings.jsx) render for the same five controls. The
+   22px indent approximates the checkbox's own box (16px, see .checkbox input
+   above) plus its 8px label gap, so the hint text lines up close to the
+   checkbox's LABEL rather than starting flush under the box itself, which
+   would read as detached from the sentence it explains. Extracted from 5
+   identical inline `style={{ fontSize: 11, paddingLeft: 22 }}` sites so the
+   alignment rule has one owner instead of five copies that could drift
+   independently -- and then applied to the create form's five twins, which
+   had kept a bare `.field__hint` and so rendered the SAME five controls at a
+   different size and indent from the settings page. The 4px gap above the
+   hint is NOT set here: it belongs to the field wrapper, and both screens now
+   get it from `.field--checkbox` below rather than supplying it themselves
+   (settings from a flex column's `gap: 4`, create from an inline
+   marginTop) -- see that rule for why one wrapper replaced two spellings. */
+.field__hint--checkbox {
+  font-size: 11px;
+  padding-left: 22px;
+}
+
+/* Schedule-estimate panel (admin_competition_settings.jsx, mp-zoh Phase 4).
+   marginBottom: 14px matches .field's own 14px so the panel doesn't read as
+   a different rhythm from the fields around it; marginTop: 4px alone left it
+   flush against the next control's label (measured: 0px gap) until the
+   bc-symm reorder gave this panel a successor field to collide with -- see
+   the JSX comment at the call site for the fuller history. Values are
+   unchanged from the inline style this replaces. */
+.settings-estimate {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  margin-top: 4px;
+  margin-bottom: 14px;
 }
 
 .input,
@@ -921,7 +982,17 @@ a:hover {
   flex-wrap: wrap;
 }
 
+/* DESIGN.md Principle 4: >=36px on shared surfaces, >=44px under coarse
+   pointers. Before this rule, padding: 6px 14px + font-size: 13px computed to
+   a 28px-tall pill - the primary control for Competition type, Format,
+   round-robin shape, pool-size mode and shiaijo selection (27 usages across 3
+   JSX files), with none of the file's coarse-pointer blocks covering it.
+   display/align-items keep the label vertically centred once min-height grows
+   past the line box: without them the text would sit top-aligned inside the
+   taller pill. */
 .radio-pill {
+  display: inline-flex;
+  align-items: center;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 6px 14px;
@@ -929,12 +1000,22 @@ a:hover {
   font-size: 13px;
   color: var(--ink-2);
   cursor: pointer;
+  min-height: 36px;
 }
 
 .radio-pill.is-active {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
+}
+
+/* Coarse pointer (tablet/touch, where operators actually score): lift the
+   36px shared-surface floor to the 44px touch floor from DESIGN.md
+   Principle 4/§6 Accessibility. */
+@media (pointer: coarse) {
+  .radio-pill {
+    min-height: 44px;
+  }
 }
 
 /* Segmented control */

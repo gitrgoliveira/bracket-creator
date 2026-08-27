@@ -578,14 +578,14 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     }
   });
 
-  // Numeric finalNext fields (poolSize / poolWinners / teamSize) must
+  // Numeric finalNext fields (poolSize / poolWinners) must
   // wrap their value in the safeInt fallback. The bug shape: cleared
   // number input stores NaN in local; if user then edits a non-numeric
   // field, saveNow PUTs next.poolSize=NaN → JSON encodes null → Go
   // binds 0 → backend transform writes PoolSize=0 → disk clobbered.
   // safeInt(next.X, c.X) preserves disk value when local isn't a
   // usable positive integer.
-  it('finalNext numeric fields are wrapped in safeInt fallback', () => {
+  it('finalNext numeric fields are wrapped in the right NaN-guarding fallback', () => {
     const src = readFileSync(
       resolve(__dirname, '..', 'admin_competition_settings.jsx'),
       'utf8'
@@ -594,13 +594,65 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     expect(fnMatch).not.toBeNull();
     const body = fnMatch[1];
 
-    for (const field of ['poolSize', 'poolWinners', 'teamSize']) {
-      const pattern = new RegExp(`\\b${field}:\\s*safeInt\\(`);
+    // Which guard each field needs, not merely "a guard". Both helpers carry
+    // the identical isFinite + isInteger NaN-clobber protection this test
+    // exists for; they differ only in the lower bound, and that bound is
+    // per-field semantics:
+    //
+    //   poolSize/poolWinners  safeNonNegInt (>= 0), as of
+    //                         bc-symm-settings-create-parity. Previously
+    //                         safeInt (>= 1) on the theory that "zero is
+    //                         meaningless for both" -- true for `effective`,
+    //                         but these now read `shaped`
+    //                         (normalizeConfigForFormat's output), where 0
+    //                         is the correct, deliberate value for any
+    //                         non-"mixed" format (no pool phase to size).
+    //                         Under safeInt's >= 1 floor, that 0 reads as
+    //                         "invalid" and falls back to latestC.<field>,
+    //                         silently re-sending the stale mixed-only value
+    //                         and defeating the clear.
+    // teamSize is deliberately NOT in this table, and the reason is the
+    // point of the separate assertion below it: a guard on `shaped.teamSize`
+    // is DEAD, because normalizeConfigForKind rewrites teamSize on both of
+    // its branches (0 going individual, DEFAULT_TEAM_SIZE for a team under
+    // the floor) and therefore always hands back a finite integer. It was
+    // written as safeNonNegInt(shaped.teamSize, latestC.teamSize) and read
+    // as protection while doing nothing: clearing Team size on a stored 3
+    // silently saved 5. The guard belongs BEFORE the normalizer instead --
+    // resolveTeamSize, asserted below.
+    const GUARD_BY_FIELD = {
+      poolSize: 'safeNonNegInt',
+      poolWinners: 'safeNonNegInt',
+    };
+    for (const [field, guard] of Object.entries(GUARD_BY_FIELD)) {
+      const pattern = new RegExp(`\\b${field}:\\s*${guard}\\(`);
       expect(
         pattern.test(body),
-        `finalNext.${field} must use safeInt(...): raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
+        `finalNext.${field} must use ${guard}(...): raw next.${field} is NaN-clobber prone (JSON.stringify({${field}: NaN}) → "${field}":null → Go zero-value)`
       ).toBe(true);
     }
+
+    // teamSize's guard, in the one position where it can actually fire: on
+    // the way IN to the shaping call, not on its way out. Both halves are
+    // pinned -- the resolveTeamSize call, and the absence of the dead
+    // post-shape guard that used to stand in for it -- because restoring
+    // either alone re-opens the silent-5 save.
+    // Read from `src`, not `body`: this one lives in the shapeConfigForSave
+    // call ABOVE the finalNext literal, which is exactly the placement being
+    // pinned.
+    const shapedMatch = src.match(/const shaped = shapeConfigForSave\(([\s\S]*?)\n\s*\}\);/);
+    expect(
+      shapedMatch,
+      'saveNow must shape the payload through shapeConfigForSave(latestC, ...), which is what scopes the two normalizers to a staged format/kind change'
+    ).not.toBeNull();
+    expect(
+      /teamSize:\s*resolveTeamSize\(effective\.teamSize,\s*latestC\.teamSize\)/.test(shapedMatch[1]),
+      'the staged teamSize must be resolved against the stored value BEFORE shapeConfigForSave: normalizeConfigForKind rewrites teamSize on both branches, so a guard on its output is dead code'
+    ).toBe(true);
+    expect(
+      /teamSize:\s*safe(Non)?NegInt\(shaped\.teamSize/.test(body),
+      'finalNext.teamSize must NOT re-guard shaped.teamSize: shaped.teamSize is always a finite integer, so that guard never fires and reads as protection while providing none'
+    ).toBe(false);
   });
 
   // The safeInt helper itself must check the full set of dimensions
@@ -694,7 +746,16 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     // The fragile name-only Set snapshot must be gone.
     expect(src).not.toContain('new Set(editedFieldsRef.current)');
     // Conditional clear: only delete when the staged value still matches.
-    expect(src).toMatch(/if\s*\(localRef\.current\[k\]\s*===\s*persistingValues\[k\]\)\s*editedFieldsRef\.current\.delete\(k\)/);
+    //
+    // Object.is, NOT ===, and the distinction is load-bearing rather than
+    // stylistic. A cleared number input stages NaN (decideNumericUpdate's
+    // contract), and `NaN === NaN` is false -- so a field saved while
+    // cleared looked to this loop like one re-edited mid-flight, stayed in
+    // editedFieldsRef forever, and could never again be repopulated by the
+    // sync effect (which skips any field in that set). The input stayed
+    // visibly blank against a real stored value and "● Unsaved changes"
+    // never cleared. Reverting to === reddens this assertion.
+    expect(src).toMatch(/if\s*\(Object\.is\(localRef\.current\[k\],\s*persistingValues\[k\]\)\)\s*editedFieldsRef\.current\.delete\(k\)/);
   });
 
   it('user-edit handlers mark fields via editedFieldsRef.add', () => {
@@ -1004,15 +1065,28 @@ describe('AdminSettings engi/naginata checkboxes locked after start (finding 3/6
     expect(src).toContain('local.status !== "draw-ready"');
   });
 
+  it('lockedAfterDraw is exactly isDrawReady || isStarted', () => {
+    // The two checkbox guards below assert on `lockedAfterDraw` rather than
+    // respelling the disjunction, so THIS is what keeps them pinning both
+    // flags: if the named const stopped meaning "draw-ready or started",
+    // those assertions would still pass while the controls silently
+    // unlocked. Pinning the definition is what makes the name safe to use.
+    expect(src).toMatch(/const lockedAfterDraw\s*=\s*isDrawReady \|\| isStarted;/);
+  });
+
   it('Engi checkbox is disabled when isStarted or team (in addition to isDrawReady)', () => {
     // The checkbox input for Engi must gate on isDrawReady + isStarted, and also
-    // on kind==="team" (engi is individual-only; Copilot #326).
-    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted \|\| local\.kind === "team"\}/);
+    // on kind !== individual (engi is individual-only; Copilot #326). bc-symm
+    // Phase 3 replaced the inline `local.kind === "team"` literal with the
+    // shared engiApplies(kind) predicate from competition_shape.jsx (the same
+    // rule, expressed once so the create form and this screen can't drift),
+    // so the regex now matches its negation, !engiApplies(local.kind).
+    expect(src).toMatch(/checked=\{!!local\.engi\}[\s\S]{0,200}disabled=\{lockedAfterDraw \|\| !engiApplies\(local\.kind\)\}/);
   });
 
   it('Naginata checkbox is disabled when isStarted (in addition to isDrawReady)', () => {
     // The checkbox input for Naginata must gate on both flags.
-    expect(src).toMatch(/checked=\{!!local\.naginata\}[\s\S]{0,200}disabled=\{isDrawReady \|\| isStarted\}/);
+    expect(src).toMatch(/checked=\{!!local\.naginata\}[\s\S]{0,200}disabled=\{lockedAfterDraw\}/);
   });
 });
 

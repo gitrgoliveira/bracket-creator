@@ -445,8 +445,21 @@ type Competition struct {
 	//     place, no bronze decider). See isConsequentialTie (engine).
 	//
 	// When false (default), all ties within [1..LeagueTiebreakTopN] are
-	// consequential and may require a tie-breaker, and the podium shows a single
-	// 3rd place.
+	// consequential and may require a tie-breaker, and the podium shows a
+	// single 3rd place.
+	//
+	// The create form's default for this control is TRUE (the kendo convention
+	// above), which is NOT this field's Go zero value -- so the form has to
+	// send it for EVERY format, not just leagues, or a competition that was
+	// never a league carries no value, reads back false, and the settings
+	// screen's Format editor turns it into a league running the naginata
+	// convention. It does now (admin_setup.jsx, alongside roundRobin, which
+	// defaults to true for the same reason).
+	//
+	// `omitempty` is fine here and is NOT what caused that: a bool with
+	// omitempty is value-lossless, since false marshals to an absent key and
+	// an absent key unmarshals back to false. The bug was only ever the
+	// conditional send.
 	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places,omitempty" json:"leagueTwoThirdPlaces,omitempty"`
 
 	// LeagueTiebreakFinalized is set to true by the operator via
@@ -902,6 +915,29 @@ func ValidateCompetitionTeamSize(kind string, teamSize int) error {
 		return fmt.Errorf("team competitions require teamSize >= 2")
 	}
 	return nil
+}
+
+// ValidateCompetitionKind rejects a Kind outside the set the server
+// recognises. Engine code identifies a team competition by Kind == "team"
+// in some paths and TeamSize > 0 in others (ValidateCompetitionTeamSize's
+// doc comment above names the same split); nothing checked Kind against a
+// set of legal values anywhere, so an unrecognised kind such as "banana"
+// silently fell through every one of those checks and ran as an
+// individual competition with no error at any layer.
+//
+// "" is a first-class member of the set, not merely tolerated: an
+// omitted `kind:` key in an import manifest (handlers_import.go,
+// ImportManifestComp.Kind has no required tag) decodes to "", and
+// state.Competition's Go zero value stores the same "", so both the
+// legacy import path and any hand-seeded record depend on "" meaning
+// individual.
+func ValidateCompetitionKind(kind string) error {
+	switch kind {
+	case "", "individual", "team":
+		return nil
+	default:
+		return fmt.Errorf("unknown kind %q (expected \"individual\" or \"team\")", kind)
+	}
 }
 
 // DecisionDraw is the canonical value for a tied (hikiwake) match.

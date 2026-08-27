@@ -124,7 +124,7 @@ name order as the final deterministic fallback.
 !!! note
     When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), what happens next depends on format:
 
-    - **Mixed-format pools**: the app schedules a daihyosen automatically to break the tie.
+    - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
     - **League**: the operator decides. From the League tab, either run a daihyosen among the tied teams or accept the shared ranks to finalise standings with the tie left in place. This choice is available for any tied position, including joint first, once every regular league match is complete.
 
     A tie that does not affect advancement is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). See [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.

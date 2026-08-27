@@ -229,6 +229,59 @@ func normalizePoolConfig(comp *state.Competition) {
 	normalizeExtraQualifiers(comp)
 }
 
+// validateMixedPoolSize rejects a competition that lands on mixed format
+// with no usable pool size. normalizePoolConfig above only zeroes PoolSize
+// for league/playoffs; nothing on the way TO mixed requires one, so
+// without this a competition could persist a combination the draw can
+// never build, and the only failure would surface much later at draw
+// time (engine/pools.go: "pool size must be at least 1"), far from the
+// request that caused it.
+//
+// Shared by POST and PUT so both doors read the same message. The two
+// callers apply it under different scoping rules (see each call site):
+// POST runs it unconditionally, since a create authors a brand-new
+// record with nothing to inherit; PUT runs it only when format or
+// poolSize is actually CHANGING, so a competition already carrying this
+// combination (hand-edited config.md, or one saved before this guard
+// existed) stays editable for unrelated fields.
+//
+// The <= 0 threshold here is DELIBERATELY looser than the client's: both
+// admin_setup.jsx and admin_competition_settings.jsx refuse a "Players per
+// pool" value below 3 (poolSettingsError, web-mobile/js/
+// competition_shape.jsx) before a save ever reaches this handler. The gap
+// is intentional, not a mismatch to close -- 3 is a UI-only PRODUCT floor
+// (the smallest pool a round-robin is worth running), while this function
+// stays at the engine's actual functional minimum ("pool size must be at
+// least 1", internal/engine/pools.go) so a hand-edited config.md or an
+// imported competition is not retroactively rejected by a rule the client
+// invented for its own form, not one the draw itself needs. A maintainer
+// tightening this bound to match the client's 3 should re-read
+// poolSettingsError's comment first: the two are meant to stay apart.
+func validateMixedPoolSize(comp *state.Competition) error {
+	if comp.Format == state.CompFormatMixed && comp.PoolSize <= 0 {
+		return fmt.Errorf("mixed format requires a pool size of at least 1")
+	}
+	return nil
+}
+
+// defaultPoolSize is the pool size an authoring door fills in when the
+// caller omits one. Shared by POST /api/competitions and
+// /api/tournament/import so the two doors cannot answer the same body
+// differently: import has defaulted an omitted pool size to this number
+// for as long as it has existed, and a create that refused the identical
+// omission would mean a manifest imported fine while the same competition
+// authored over REST took a 400.
+//
+// Scoped to "mixed" at the POST call site and unscoped at the import one,
+// which is a real difference and a deliberately unchanged one: POST runs
+// normalizePoolConfig first, so a league/playoffs competition has already
+// had PoolSize zeroed by the time the default is considered and must stay
+// that way. Import does not normalize, so it has always stored this number
+// on every format; that is inert (nothing reads PoolSize for a bare
+// bracket) and predates this constant, so it is left alone rather than
+// changed under cover of a shared name.
+const defaultPoolSize = 4
+
 // competitionUpdateRequest is the PUT /competitions/:id body.
 //
 // It exists for ONE field. Every other setting can be merged from the decoded
@@ -540,6 +593,29 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// the engine actually uses. See normalizePoolConfig for full rationale.
 		normalizePoolConfig(&comp)
 
+		// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
+		// defaulted to the same number /api/tournament/import has always
+		// used (see defaultPoolSize). Refusing it instead made
+		// `POST {"name":"X","format":"mixed","courts":["A"]}` -- a body that
+		// returned 201 for the whole life of the endpoint, and that four
+		// existing tests in this package send -- start returning 400, while
+		// the identical competition arriving through the import door landed
+		// fine. Runs after normalizePoolConfig above, so it can only ever
+		// fire for "mixed": league and playoffs have had PoolSize zeroed by
+		// then and must keep it.
+		if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
+			comp.PoolSize = defaultPoolSize
+		}
+		// What remains for the guard is the value a caller STATED and that
+		// the draw could never build (a negative). Unlike the PUT twin
+		// (change-scoped, see its call site) POST authors a brand-new
+		// record: nothing here is inherited, so there is no stored value to
+		// protect and no lockout risk in checking unconditionally.
+		if err := validateMixedPoolSize(&comp); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
 		// FR-050a: swiss-specific config validation.
 		if err := validateSwissConfig(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -556,6 +632,17 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// "kachinuki" requires TeamSize >= 2. FR-044.
 		if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Kind must be one of the values the server recognises ("",
+		// "individual" or "team"; see state.ValidateCompetitionKind for why
+		// "" belongs in that set). POST authors a brand-new record with
+		// nothing to inherit, so unlike the PUT guard below (change-scoped
+		// to avoid locking an operator out of an already-stored illegal
+		// value) this check runs unconditionally.
+		if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "kind: " + err.Error()})
 			return
 		}
 
@@ -1078,6 +1165,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var notFoundFlag bool
 		var drawReadyFlag bool
 		var teamMatchTypeStartedFlag bool
+		// bc-symm: format and kind repoint pool-vs-bracket generation and
+		// team-vs-individual scoring while results already exist (see
+		// comp.Format read live in engine/scoring_tx.go's mixed-pool
+		// rescoring gate, and comp.Kind read throughout internal/engine's
+		// scheduling/scoring/PDF paths). Sibling of teamMatchTypeStartedFlag
+		// below, same 409 class: both fields are already members of the
+		// draw-ready output-affecting set, so a started-state conflict on
+		// them is that same refusal, not a validation error.
+		var formatOrKindStartedFlag bool
 		var changed bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
@@ -1126,6 +1222,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return current, nil
 				}
 
+				// formatChanged / kindChanged: the same "is this PUT actually
+				// changing Format / Kind?" question this closure used to spell
+				// out independently at every guard that cares (the draw-ready
+				// output-affecting set, the courts-format re-check, the
+				// mixed-pool-size re-check, the started-state 409, and the
+				// illegal-Kind check) -- mirrors this file's own
+				// formatChanged/courtsChanged hoisting in
+				// admin_competition_settings.jsx, which exists for the same
+				// reason: two independent spellings of the same question are
+				// how one of them ends up answering differently. Safe to
+				// compute here, ahead of every guard below: unlike TeamMatchType
+				// and ExtraQualifiers (inherited from `current` just below when
+				// the client omits them), neither Format nor Kind has an
+				// inherit-if-omitted step anywhere in this closure -- comp.Format
+				// and comp.Kind are compared against current.Format/current.Kind
+				// as-sent, all the way down to the current.Format = comp.Format /
+				// current.Kind = comp.Kind merge far below, so the answer cannot
+				// change between here and there.
+				formatChanged := comp.Format != current.Format
+				kindChanged := comp.Kind != current.Kind
+
 				// Settings-only PUT (Players field absent in body).
 				// Team match format (FR-044) wire contract, applied BEFORE the
 				// draw-ready guard below so both it and the started guard
@@ -1136,8 +1253,48 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// field on a draw-ready kachinuki competition trips a false
 				// 409 (the draw-ready comment promises effective-value
 				// comparison; "" is an omission, not a value).
-				if comp.TeamMatchType == "" {
+				inheritedTeamMatchType := comp.TeamMatchType == ""
+				if inheritedTeamMatchType {
 					comp.TeamMatchType = current.TeamMatchType
+				}
+				// bc-symm: re-validate the EFFECTIVE (teamMatchType, teamSize)
+				// pair. The settings block above validated the WIRE
+				// teamMatchType ("" passes ValidateTeamMatchType vacuously)
+				// against the WIRE teamSize, which says nothing about a value
+				// just inherited from storage. A PUT that omits teamMatchType
+				// while switching kind/teamSize to individual (0) -- exactly
+				// what a kind editor does -- would otherwise persist a stored
+				// "kachinuki" alongside teamSize 0, the pair
+				// ValidateTeamMatchType exists to forbid. That pair is inert at
+				// runtime (IsKachinuki() requires teamSize >= 2), but every
+				// later settings PUT echoes it straight back on the wire and
+				// fails the WIRE-value check above, locking the operator out of
+				// the settings screen entirely.
+				//
+				// It COERCES rather than rejects, and the distinction is whose
+				// fault the bad pair is. This check is reachable only for a
+				// value the write INHERITED: a client that SENDS an illegal
+				// pairing is already refused by the wire-value check above,
+				// which runs in the same settings-only branch, so by the time
+				// control reaches here comp.TeamMatchType is either a value
+				// that just passed that check or one copied off disk a moment
+				// ago. Rejecting the second case answers an operator's PUT
+				// with a 400 naming a field their request never mentioned,
+				// forever, with nothing on the settings screen able to repair
+				// it -- the same trap stripInvalidHantei (engine/scoring.go)
+				// is written to avoid, and the same rule: a write answers for
+				// what it introduces, not for what it inherited. Resetting to
+				// the fixed default changes no behaviour (the pair was already
+				// inert) and leaves the record legal, so the NEXT save is a
+				// normal one.
+				if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
+					if !inheritedTeamMatchType {
+						validationErr = fmt.Errorf("teamMatchType: %w", err)
+						return nil, nil
+					}
+					log.Printf("competition %s: stored teamMatchType %q is invalid for teamSize %d (%v); resetting to %q",
+						id, comp.TeamMatchType, comp.TeamSize, err, state.TeamMatchTypeFixed)
+					comp.TeamMatchType = state.TeamMatchTypeFixed
 				}
 				// ExtraQualifiers (bc-qual LP-5a) needs the same "omitted
 				// keeps stored" contract as TeamMatchType above, but cannot
@@ -1234,12 +1391,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							// in the same output-affecting set.
 							comp.ExtraQualifiers != current.ExtraQualifiers ||
 							courtsChanged ||
-							comp.Format != current.Format ||
+							formatChanged ||
 							comp.PoolFormat != current.PoolFormat ||
 							comp.RoundRobin != current.RoundRobin ||
 							comp.Mirror != current.Mirror ||
 							comp.TeamSize != current.TeamSize ||
-							comp.Kind != current.Kind ||
+							kindChanged ||
 							// TeamMatchType selects fixed vs kachinuki bout sequencing; changing
 							// it after draw-ready desyncs the match structure from config.
 							// sameTeamMatchType is the normalized effective-value comparison
@@ -1331,9 +1488,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// a fourth one would reach POST and the importer but not this
 				// path. The label check inside it is redundant (line 823 ran it
 				// on this same list) and idempotent.
-				if courtsChanged || comp.Format != current.Format {
+				if courtsChanged || formatChanged {
 					if err := validateCompetitionCourts(comp.Courts, comp.Format, putTourn); err != nil {
 						validationErr = fmt.Errorf("courts: %w", err)
+						return nil, nil
+					}
+				}
+				// bc-symm: a flip into (or an edit that lands on) mixed format
+				// with no usable pool size persists a competition draw time can
+				// never build. See validateMixedPoolSize for the shared check
+				// (and its POST twin, which runs unconditionally). Scoped here
+				// to an actual CHANGE (format or poolSize), same as every other
+				// guard in this handler: a competition already carrying this
+				// combination (hand-edited config.md, or one saved before this
+				// guard existed) must stay editable for unrelated fields, or
+				// the operator is locked out of settings entirely.
+				if formatChanged || comp.PoolSize != current.PoolSize {
+					if err := validateMixedPoolSize(&comp); err != nil {
+						validationErr = err
 						return nil, nil
 					}
 				}
@@ -1366,6 +1538,69 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.WithZekkenName = comp.WithZekkenName
 				current.TeamSize = comp.TeamSize
 				current.NumberPrefix = comp.NumberPrefix
+				// started is computed here, ahead of the Format/Kind gate that
+				// needs it, rather than down by the Naginata/Engi guards below
+				// (its original position): those guards run AFTER their own
+				// field's merge and compare against the FRESH current value, but
+				// Format/Kind are merged right here, so the comparison has to
+				// happen before these two assignments or it would compare a
+				// value against itself. Reused unchanged by every started-guard
+				// below.
+				started := current.Status != state.CompStatusSetup && current.Status != ""
+				// Format and Kind repoint pool-vs-bracket generation and
+				// team-vs-individual scoring while results already exist (see
+				// comp.Format read live in engine/scoring_tx.go's mixed-pool
+				// rescoring gate, and comp.Kind read throughout
+				// internal/engine's scheduling/scoring/PDF paths): a
+				// competition already in pools / playoffs / completed cannot
+				// safely change either after the fact. Surfaced as a 409
+				// (matching teamMatchTypeStartedFlag below), not the 400
+				// validationErr path Naginata/Engi use just below: format and
+				// kind are already members of the draw-ready output-affecting
+				// set above, so a started-state conflict on them is that same
+				// class of refusal.
+				//
+				// Gated on an actual CHANGE, like every guard in this handler: a
+				// settings save that leaves format/kind untouched (the common
+				// case even now that both screens have Format/Kind editors --
+				// the SPA always PUTs the full config, including fields the
+				// operator did not touch this save) must not 409 just because
+				// the competition happens to be started.
+				if started && (formatChanged || kindChanged) {
+					formatOrKindStartedFlag = true
+					return nil, nil
+				}
+				// bc-symm: reject an illegal Kind ("banana"), but ONLY when
+				// it is actually CHANGING. Kind selects team-vs-individual
+				// scoring and generation throughout internal/engine (see
+				// ValidateCompetitionTeamSize's doc comment above), and
+				// nothing checked it against the values the server
+				// recognises, so a hand-crafted request could persist an
+				// unrecognised kind that silently ran as individual with no
+				// error anywhere.
+				//
+				// The scoping is deliberate and NOT tied to `started`: a
+				// competition whose STORED kind is already illegal (a
+				// hand-edited config.md, or a record written before this
+				// guard existed) must stay editable for every unrelated
+				// field on every future save, because the settings page
+				// echoes the stored kind back verbatim on every save. An
+				// unconditional check here would 400 every subsequent save
+				// and lock the operator out of the settings screen
+				// entirely -- the same lockout shape CLAUDE.md's "a write
+				// answers for what it introduces, not for what it
+				// inherited" rule exists to prevent (and the same shape
+				// this codebase has already had to fix twice). A write
+				// that actually changes Kind to something illegal is the
+				// caller's own new input, so it is judged normally, ahead
+				// of the started-state 409 above having already ruled out
+				// the "started and changing" case.
+				if kindChanged {
+					if err := state.ValidateCompetitionKind(comp.Kind); err != nil {
+						validationErr = fmt.Errorf("kind: %w", err)
+						return nil, nil
+					}
+				}
 				current.Format = comp.Format
 				current.PoolFormat = comp.PoolFormat
 				current.Kind = comp.Kind
@@ -1376,16 +1611,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// fields are already zero.
 				current.PoolMatchDurationSeconds = comp.PoolMatchDurationSeconds
 				current.PlayoffMatchDurationSeconds = comp.PlayoffMatchDurationSeconds
-				// FR-050a: swiss round budget is admin-editable from
-				// settings until the competition starts (the engine
-				// gates StartCompetition on Status=setup). After start,
-				// the field is read-only via the same Status gate.
+				// FR-050a: the swiss round budget is admin-editable at ANY
+				// status, deliberately and with no `started` guard. This
+				// comment used to claim the field went "read-only via the
+				// same Status gate" after start; that was never true (there
+				// is no such guard here, and the Status=setup gate it
+				// pointed at governs StartCompetition, not this write), and
+				// it contradicted both the settings screen
+				// (admin_competition_settings.jsx: "changing rounds after
+				// start is allowed too") and the published behaviour in
+				// docs/user-guide/organisers/formats.md ("You can change
+				// this number later, including after rounds have started").
+				// Editing mid-competition is the POINT: the next "Generate
+				// next round" call respects the new cap, which is how an
+				// operator shortens or extends a Swiss competition already
+				// in progress. Do not "restore" a guard here.
 				current.SwissRounds = comp.SwissRounds
 				// Naginata (3rd-place play-off) is only settable before the
 				// competition starts. Changing it after start would add or remove a
 				// bronze match while results are already in flight. Reject rather than
 				// silently ignoring it (Finding 8; mirrors the Engi guard below).
-				started := current.Status != state.CompStatusSetup && current.Status != ""
+				// started was computed earlier, ahead of the Format/Kind gate.
 				if started && comp.Naginata != current.Naginata {
 					validationErr = fmt.Errorf("naginata can only be changed before the competition starts")
 					return nil, nil
@@ -1451,11 +1697,15 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, pool format, round-robin, mirror, team size, kind, number prefix, zekken display) while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, mirror, team size, kind, team match type, number prefix, zekken display) while a draw is pending; discard the draw first"})
 			return
 		}
 		if teamMatchTypeStartedFlag {
 			c.JSON(http.StatusConflict, gin.H{"error": "teamMatchType can only be changed before the competition starts"})
+			return
+		}
+		if formatOrKindStartedFlag {
+			c.JSON(http.StatusConflict, gin.H{"error": "format and kind can only be changed before the competition starts"})
 			return
 		}
 		if validationErr != nil {

@@ -281,3 +281,141 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
     expect(armed(container), 'the rep-bout panel must show the stored verdict').toBe(true);
   });
 });
+
+// bc-tsub. The same rule again, for the half of the team editor the daihyosen
+// work did not reach: the NUMBERED bouts. Their rows were seeded once at mount
+// and the only path that revisited them appended kachinuki growth, so a bout
+// scored on another device never appeared — and the damage is not only on
+// screen. buildPatch sends the FULL subResults snapshot, so the operator's next
+// write carries the stale row out over the newer one.
+//
+// The seed baseline was a ref frozen at mount, which is why "just gate a
+// re-seed on isDirty" does not work and is pinned below: nothing ever re-based
+// it, so a single tap left the editor dirty for the rest of its life, even once
+// its own autosave had landed and the server agreed. The gate would have been
+// shut from the operator's first tap onward — which is precisely when another
+// device's result turns up.
+describe('the team editor shows the bout scoreline the server holds', () => {
+  const KYOTO = 'Kyoto', OSAKA = 'Osaka';
+  // A fixed-order (non-kachinuki) 3-person encounter: `positions` is pinned at
+  // teamSize, so scoring a bout does NOT change the row count. That keeps these
+  // tests on the re-seed itself, away from the growth path and away from the
+  // subResults.length remount key two mount sites carry.
+  function teamMatch(subs, extra = {}) {
+    return {
+      id: 'tm2',
+      status: 'running',
+      phase: 'pool',
+      court: 'A',
+      compKind: 'team',
+      teamSize: 3,
+      sideA: { id: 'teamA', name: KYOTO },
+      sideB: { id: 'teamB', name: OSAKA },
+      subResults: subs,
+      ...extra,
+    };
+  }
+  // One decided bout: `winnerSide` takes both ippons, so it is worth IV 1, PW 2.
+  const bout = (position, winnerSide) => ({
+    position,
+    sideA: KYOTO,
+    sideB: OSAKA,
+    ipponsA: winnerSide === 'a' ? ['M', 'K'] : [],
+    ipponsB: winnerSide === 'b' ? ['M', 'K'] : [],
+  });
+  const open = (match, onSubmit = vi.fn()) =>
+    render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+  const reopenWith = async (rerender, match) => {
+    await act(async () => { rerender(
+      <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+  };
+  // Award one ippon to Kyoto on bout 2, through the real control. Bout rows
+  // render Shiro's buttons then Aka's; Kyoto is sideA (AKA), so its buttons are
+  // the second group in the row.
+  const scoreOneForKyoto = async (container) => {
+    const rows = [...container.querySelectorAll('.team-sub-match')];
+    const akaButtons = [...rows[1].querySelectorAll('button')].filter(b => b.textContent.trim() === 'M');
+    expect(akaButtons.length, 'each side offers an M button').toBe(2);
+    await act(async () => { fireEvent.click(akaButtons[1]); });
+  };
+
+  it('adopts a bout scored on another device', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    expect(container.textContent).toContain('IV: 0 · PW: 0');
+
+    await reopenWith(rerender, teamMatch([bout(1, 'a')]));
+
+    expect(container.textContent, "Kyoto's bout must appear").toContain('IV: 1 · PW: 2');
+  });
+
+  it('keeps UNSAVED operator edits rather than overwriting them', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    await scoreOneForKyoto(container);
+    expect(container.textContent).toContain('PW: 1');
+
+    await reopenWith(rerender, teamMatch([bout(1, 'b')]));
+
+    // Their edit is not ours to discard. Osaka's newer bout is NOT adopted, so
+    // it cannot be showing PW: 2 for Osaka.
+    expect(container.textContent, "the operator's own ippon must survive").toContain('PW: 1');
+    expect(container.textContent, 'the remote bout must not overwrite it').not.toContain('PW: 2');
+  });
+
+  it('adopting is not an unsaved change of the operators', async () => {
+    window.confirmDialog.mockClear();
+    const { rerender } = open(teamMatch([]));
+    await reopenWith(rerender, teamMatch([bout(1, 'a')]));
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-root')); });
+
+    // A discard prompt on an editor nobody touched trains operators to dismiss
+    // the one prompt that protects real work.
+    expect(window.confirmDialog, 'no discard prompt for a result we merely adopted').not.toHaveBeenCalled();
+  });
+
+  it('still adopts after the operator has saved an edit of their own', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    await scoreOneForKyoto(container);
+
+    // Their autosave lands: the server now holds exactly what they typed, so
+    // nothing is unsaved any more. With a mount-frozen baseline the editor
+    // stays dirty here forever, and every later adopt is skipped.
+    await reopenWith(rerender, teamMatch([{ ...bout(2, 'a'), ipponsA: ['M'] }]));
+
+    // Device B then scores bout 1. This must still arrive.
+    await reopenWith(rerender, teamMatch([
+      { ...bout(2, 'a'), ipponsA: ['M'] },
+      bout(1, 'b'),
+    ]));
+
+    expect(container.textContent, "Osaka's bout must arrive after the operator's own save").toContain('PW: 2');
+  });
+
+  it('adopts overtime recorded on another device', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    // "Overtime" alone is the encho control's own label and is always present;
+    // the header eyebrow carries the COUNT, which is the server value.
+    expect(container.textContent).not.toContain('Overtime ×');
+
+    await reopenWith(rerender, teamMatch([], { encho: { periodCount: 1 } }));
+
+    expect(container.textContent, 'the overtime count is a server value too').toContain('Overtime ×1');
+  });
+
+  it('covers a daihyosen added on another device without being remounted', async () => {
+    const { rerender } = open(teamMatch([bout(1, 'a'), bout(2, 'b')]));
+
+    // Adding a rep bout grows `positions` by one. The row list has to cover it
+    // in the SAME render that first indexes it: subTotals[daihyosenIdx] is read
+    // unconditionally once hasDaihyosen flips. Two mount sites paper over this
+    // by keying the editor on subResults.length so it remounts, which throws
+    // away whatever the operator had not saved.
+    await reopenWith(rerender, teamMatch([
+      bout(1, 'a'), bout(2, 'b'),
+      { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: ['M'], ipponsB: ['K'], decision: 'daihyosen' },
+    ]));
+
+    expect(screen.queryByTestId('team-daihyosen-hantei-row'), 'the rep bout must render').toBeTruthy();
+  });
+});

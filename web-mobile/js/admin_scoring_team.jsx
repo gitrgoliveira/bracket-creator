@@ -29,6 +29,7 @@ import {
   ReasonPrompt,
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
+  useAdoptFromServer,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -594,13 +595,19 @@ export function subBoutHasBeenPlayed(s) {
 }
 
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
-  // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, but
-  // the parent does NOT refresh the openMatch snapshot on an out-of-band
-  // mutation (SSE refreshes the LIST, not this prop — the same reason
-  // Record-bout growth rides onSubmit's return, see admin_schedule_score_editor).
-  // matchOverride shadows the prop so the removed bout disappears at once. It is
-  // cleared whenever the parent passes a genuinely new match object (the next
-  // Record / prev / next), after which the prop is authoritative again.
+  // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
+  // the parent may not have caught up when this render runs. matchOverride
+  // shadows the prop so the removed bout disappears at once, and is cleared
+  // whenever the parent passes a genuinely new match object (the next Record /
+  // prev / next), after which the prop is authoritative again.
+  //
+  // The original justification said the parent never refreshes this prop at all
+  // ("SSE refreshes the LIST, not this prop"). That stopped being true in
+  // f3ca05bd, which made all four mount sites hold a key and resolve the match
+  // from live data every render; the override is now a latency shim, not a
+  // substitute for a refresh that never comes. Note it shadows the LIVE prop
+  // while set, and the clear-effect keys on id + bout-log length only, so a
+  // same-length edit from another device is not seen until it clears.
   const [matchOverride, setMatchOverride] = useStateA(null);
   // Clear the override once the prop actually MOVES off the pre-removal state —
   // a genuine match switch (id) OR the bout-log length changing (the parent
@@ -663,6 +670,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // across re-renders because m may mutate).
   const initialEnchoPeriods = initialEnchoPeriodsForMatch(m);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // The third verdict channel, and the one that was missing. It is a server-live
+  // baseline (initialEnchoPeriods re-derives from m) feeding daihyosenVerdictDirty
+  // below, so without an adopt an overtime count recorded on another device left
+  // this editor showing the old one AND permanently dirty — which fires the
+  // discard prompt on an editor nobody touched, and would have held the re-seed
+  // gate shut for the rest of the session. Unconditional for the same reason as
+  // the hantei channel beside it: keyed on the server's value, a local bump does
+  // not move it, so the operator's own count stands.
+  useAdoptFromServer({
+    signature: initialEnchoPeriods,
+    apply: () => setEnchoPeriodCount(initialEnchoPeriods),
+  });
   const [submitting, setSubmitting] = useStateA(false);
   // F5 (mirrors ScoreEditorModal): explicit "not saved" state for THIS match.
   // Set either by the subscribeTerminalWriteFailed broadcast (a queued write
@@ -777,15 +796,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(daihyosenHanteiRecorded);
   // ADOPT a verdict recorded on another device, so this editor cannot sit
   // showing an un-armed hantei panel while the viewer, the bracket, the TV
-  // board and the export all show the Ht.
-  //
-  // Keyed on the two VALUES, not on `m`: an SSE reload re-creates the match
-  // object on every broadcast, so an object-keyed effect would fight the
-  // operator's every tap. Keyed on the primitives it fires only when the
-  // SERVER's verdict actually moves, which leaves a local pick or cancel
-  // standing (those do not move the server value) while still following a real
-  // change in either direction. It touches the verdict only, so the bout
-  // scores being edited are untouched.
+  // board and the export all show the Ht. It touches the verdict only, so the
+  // bout scores being edited are untouched.
   //
   // This replaces a pair of mount-frozen baselines. Freezing stopped the
   // erase, but by making the editor show something other than the stored
@@ -794,10 +806,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // stored verdict, an explicit `false` from it is always the operator ruling
   // on something in front of them, which is what let buildPatch's hanteiKnown
   // guard go away entirely.
-  useEffectA(() => {
-    setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
-    setDaihyosenHantei(recordedDaihyosenSide);
-  }, [daihyosenHanteiRecorded, recordedDaihyosenSide]);
+  useAdoptFromServer({
+    signature: JSON.stringify([daihyosenHanteiRecorded, recordedDaihyosenSide]),
+    apply: () => {
+      setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
+      setDaihyosenHantei(recordedDaihyosenSide);
+    },
+  });
   // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
   // has moved the daihyosen VERDICT (encho count, hantei pick, or hantei arm)
   // away from what the SERVER currently holds. The verdict terms compare
@@ -1122,35 +1137,39 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         encho: idx === daihyosenIdx ? 0 : (existing?.encho?.periodCount || 0),
       };
   };
-  const initSubsRef = React.useRef(null);
-  if (initSubsRef.current === null) {
-    initSubsRef.current = positions.map((_, idx) => seedSubAt(idx));
-  }
-  const [subsRaw, setSubs] = useStateA(initSubsRef.current);
-  // mp-gmcg growth: a kachinuki Record-bout write appends the next pairing
-  // server-side and the host adopts the fresh bout log into the match prop,
-  // so `positions` can GROW while the modal is mounted. The extension must
-  // be RENDER-SYNCHRONOUS: this very render already indexes subs for the
-  // new position (an effect would run after the crash). Extend the dirty
-  // baseline once (length-guarded, so re-renders never double-append) and
-  // derive a row list that always covers positions; the effect below then
-  // commits the extension into state so updateSub can edit the new row.
-  // Rows the operator already has are never touched. Kachinuki only, and
-  // kachinuki has no daihyosen row (daihyosenIdx -1), so appending keeps
-  // the idx↔position mapping stable.
-  let subs = subsRaw;
-  if (isKachinuki && daihyosenIdx < 0 && positions.length > subsRaw.length) {
-    if (positions.length > initSubsRef.current.length) {
-      const added = [];
-      for (let i = initSubsRef.current.length; i < positions.length; i++) added.push(seedSubAt(i));
-      initSubsRef.current = [...initSubsRef.current, ...added];
-    }
-    subs = [...subsRaw, ...initSubsRef.current.slice(subsRaw.length, positions.length)];
-  }
+  // The LIVE baseline: what the SERVER currently holds for every visible
+  // position, re-derived each render. This used to be a ref frozen at mount,
+  // which made isDirty mean "differs from what this editor opened with" — and
+  // since nothing ever re-based it, a single tap left the editor dirty FOREVER,
+  // even after its own autosave landed and the server agreed. Any re-seed gated
+  // on "operator has nothing unsaved" was therefore dead from the operator's
+  // first tap onward, which is exactly when another device's result arrives
+  // (bc-tsub). Derived, it cannot go stale, and isDirty now means what the
+  // individual editor's has always meant: local state differs from the server
+  // NOW. It also removes a ref that was mutated during render.
+  const serverSubs = positions.map((_, idx) => seedSubAt(idx));
+  const [subsRaw, setSubs] = useStateA(serverSubs);
+  // `positions` can GROW while the modal is mounted: a kachinuki Record-bout
+  // write appends the next pairing server-side, and adding a daihyosen appends
+  // the rep-bout row. The extension must be RENDER-SYNCHRONOUS, because this
+  // very render already indexes subs for the new position — an effect would run
+  // after the crash. The effect below then commits it so updateSub can edit the
+  // new row. Rows the operator already has are never touched, and this never
+  // TRIMS: shrinking is removeCurrentBout's job, via resizeSubsTo.
+  //
+  // Deliberately NOT gated on kachinuki any more. It was, and the daihyosen
+  // case it excluded is a real crash (subTotals[daihyosenIdx] undefined once
+  // hasDaihyosen flips), which two mount sites work around by keying the editor
+  // on subResults.length so it REMOUNTS — throwing away the operator's unsaved
+  // bout in the process. Covering every position growth here fixes it without
+  // discarding their work, and appending keeps the idx↔position mapping stable
+  // either way (the daihyosen row is always last).
+  const subs = positions.length > subsRaw.length
+    ? [...subsRaw, ...serverSubs.slice(subsRaw.length, positions.length)]
+    : subsRaw;
   useEffectA(() => {
-    if (!isKachinuki || daihyosenIdx >= 0) return;
     const target = positions.length;
-    setSubs(prev => prev.length >= target ? prev : [...prev, ...initSubsRef.current.slice(prev.length, target)]);
+    setSubs(prev => prev.length >= target ? prev : [...prev, ...serverSubs.slice(prev.length, target)]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positions.length]);
   // C1: updateSub is the single choke-point for all sub-bout state
@@ -1196,6 +1215,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
+  // Who the SERVER says won a bout, through the same one winner rule as
+  // subTotals above (the local-state answer). Only the re-seed needs this, to
+  // re-baseline an open correction against the row it is about to adopt; the
+  // hantei input is the RECORDED side for the same reason.
+  const serverBoutWinner = (idx) => {
+    const s = serverSubs[idx];
+    if (!s) return null;
+    return boutWinnerSide({
+      aCount: realIppons(s.aPts).length,
+      bCount: realIppons(s.bPts).length,
+      draw: s.draw,
+      fusenshoSide: s.fusensho,
+      hanteiSide: idx === daihyosenIdx ? recordedDaihyosenSide : "",
+    });
+  };
 
   // mp-4pc: the daihyosen row (when present) is excluded from IV/PW: it
   // is a tiebreaker, not an individual victory. Its own winner (hantei
@@ -1432,10 +1466,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // rows, and the [subs] disarm effect thrashes on a fresh identity each render
   // (mp-gmcg review F1). Resize to exactly the post-removal positionCount, via
   // the SAME clampPositionCount that sizes positionCount above — trailing rows
-  // the floor still shows are re-seeded from initSubsRef.
+  // the floor still shows are re-seeded from the server baseline.
   const resizeSubsTo = (prev, target) => {
     const kept = prev.slice(0, target);
-    return kept.length >= target ? kept : [...kept, ...initSubsRef.current.slice(kept.length, target)];
+    return kept.length >= target ? kept : [...kept, ...serverSubs.slice(kept.length, target)];
   };
   const removeCurrentBout = async () => {
     if (!kachinukiBoutRemovable || kachinukiCurBoutPos <= 0) return;
@@ -1752,14 +1786,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // adopted a verdict recorded elsewhere (an SSE gap, or an offline-queue
     // replay saving an unrelated bout) erased that verdict on its next save,
     // indistinguishable on the wire from an operator actually cancelling it.
-    // A row is genuinely silent only when BOTH halves hold: the operator
-    // never touched it THIS session (identical to its mount-time seed,
-    // including the hantei arm/pick and the daihyosen encho counter) AND
-    // nothing about it is known locally either (no recorded verdict, no
-    // scored points/fouls/draw, no overtime). An editor that mounted AFTER a
-    // verdict/score existed is not silent even if untouched - it is
-    // re-stating what it was shown, which is the existing, correct
-    // behaviour (daihyosenEnchoFields below re-derives and re-sends it).
+    // A row is genuinely silent only when BOTH halves hold: the operator has
+    // not moved it away from what the SERVER holds (including the hantei
+    // arm/pick and the daihyosen encho counter) AND nothing about it is known
+    // locally either (no recorded verdict, no scored points/fouls/draw, no
+    // overtime). An editor that mounted AFTER a verdict/score existed is not
+    // silent even if untouched - it is re-stating what it was shown, which is
+    // the existing, correct behaviour (daihyosenEnchoFields below re-derives
+    // and re-sends it). The first half compares against the live server
+    // baseline, not a mount-time snapshot, so it now agrees with
+    // daihyosenVerdictDirty beside it rather than answering from a different
+    // clock: adopting a row recorded elsewhere is not this operator touching
+    // it, and re-sending what we just adopted is exactly what we want.
     // Scope: the restore this omission enables only protects a stored
     // HANTEI verdict - preserveSubHantei bails when the stored row's
     // `HanteiDecided()` is false, so a rep bout settled by a real strike is
@@ -1767,7 +1805,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // pre-gate explicit-[] behaviour (not a regression this change
     // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
-      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(initSubsRef.current[daihyosenIdx]) ||
+      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(serverSubs[daihyosenIdx]) ||
       daihyosenVerdictDirty
     );
     const daihyosenKnownLocally = hasDaihyosen && (
@@ -1983,10 +2021,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return res;
   };
 
-  // Mirrors ScoreEditorModal.isDirty: structural compare of current subs
-  // to the initial snapshot. Used by handleDismiss below to prompt before
-  // discarding multi-sub-match edits. Team scoring typically has 3–9 sub
-  // entries; the JSON serialize approach is fine for that size and keeps
+  // Mirrors ScoreEditorModal.isDirty: "has the OPERATOR changed anything",
+  // measured against what the SERVER holds — not against a mount-time snapshot,
+  // which never re-based and so read dirty forever after the first tap. Used by
+  // handleDismiss below to prompt before discarding multi-sub-match edits, and
+  // as the keep-local-edits gate on the re-seed. Team scoring typically has 3–9
+  // sub entries; the JSON serialize approach is fine for that size and keeps
   // the comparison robust against array identity drift from setSubs.
   // Encho toggle is included (via daihyosenVerdictDirty) so an operator-only
   // encho change still triggers the discard confirm. A "discard unsaved
@@ -1994,7 +2034,37 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // dismiss the one prompt that protects real work, which is why
   // daihyosenVerdictDirty's server-compare (not mount-time-snapshot) behaviour
   // matters here too.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || daihyosenVerdictDirty;
+  const isDirty = JSON.stringify(subs) !== JSON.stringify(serverSubs) || daihyosenVerdictDirty;
+  // RE-SEED every bout row when the stored result moves and the operator has
+  // nothing unsaved. The scoreline half of the rule the verdict adopts above
+  // already followed: without this, an editor left open kept showing the board
+  // it opened with while the viewer, the bracket, the TV board and the export
+  // all moved on — and the damage is not only the display. The next write sends
+  // the FULL subResults snapshot (buildPatch above), so a stale row rides out
+  // over a newer one recorded elsewhere.
+  //
+  // Scope, stated honestly: this removes the ARTIFICIAL conflict, where an
+  // editor that was never shown a result writes back over it. It does NOT
+  // resolve a genuine one — an operator already mid-edit keeps their work, and
+  // their next save still carries their whole board. Server-side timestamp LWW
+  // (mp-y3nk) orders those writes but is per-MATCH, not per-bout, so it cannot
+  // merge two people's rows. That case is theirs to resolve.
+  useAdoptFromServer({
+    signature: JSON.stringify(serverSubs),
+    apply: () => {
+      setSubs(serverSubs);
+      // Keep the correction baseline in step. It snapshots who won the bout
+      // being corrected so renderCorrectionWarning can say "you changed who won
+      // bout N"; left alone across a re-seed it would compare the SERVER's new
+      // winner against the old one and accuse the operator of a change another
+      // device made.
+      if (editingDoneBoutIdx >= 0 && editingDoneOriginalRef.current) {
+        editingDoneOriginalRef.current = { winner: serverBoutWinner(editingDoneBoutIdx) };
+      }
+    },
+    keepLocalEdits: true,
+    isDirty,
+  });
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has

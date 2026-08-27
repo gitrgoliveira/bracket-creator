@@ -1007,6 +1007,61 @@ const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "
 // instead of a comment-only obligation that drifts on the next edit.
 const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 
+// A match has ONE result and every surface asking for it shows the same one,
+// and the score editors are such surfaces: while one is open, the viewer card,
+// the bracket, the TV board, the lobby and the export are all already showing
+// whatever the server holds, so an editor showing something else is a
+// divergence whatever its reason. Every editor field is local state seeded at
+// MOUNT, so following the server takes a deliberate effect per channel — and
+// each channel written by hand is a channel a later reader has to NOTICE is
+// missing. Three were written by hand, in three shapes, and the team editor's
+// numbered bouts were the one nobody noticed (bc-tsub). This is that rule as
+// ONE primitive, so a new channel either calls it or is visibly absent.
+//
+// `signature` must change exactly when the SERVER's value for this channel
+// moves — key on the values the effect WRITES, not the fields it reads: those
+// two lists drift (the individual editor's did), and a signature built from
+// the seeds cannot, since whatever the derivation starts reading is
+// automatically part of the key. NEVER key on the match object: SSE re-creates
+// it on every broadcast, so an object-keyed effect fights the operator's every
+// tap.
+//
+// `keepLocalEdits` picks the policy, and the two are deliberately different:
+//
+//   false (verdict channels: hantei, encho) — adopt unconditionally. Keying on
+//     the VALUE already means a local arm/pick/cancel stands, because that does
+//     not move the server's value; a real server change is followed in either
+//     direction, which is the point.
+//
+//   true (scoreline channels) — an operator with UNSAVED work keeps it: their
+//     edits are not ours to discard. What this removes is the ARTIFICIAL
+//     conflict, where an editor holding a mount-time snapshot writes back state
+//     it was never showing. A genuine disagreement between two people who both
+//     typed something is theirs to resolve (timestamp LWW server-side is the
+//     floor under it, not a resolution protocol).
+//
+// The dirty flag read is the PREVIOUS render's, which is the subtle bit this
+// hook exists to own: `isDirty` measures local state against what the server
+// holds NOW, so on the very render a server change lands it reads true for an
+// editor nobody touched — the exact case being corrected. Callers pass the
+// current value and the hook remembers it; the tracking effect is registered
+// AFTER the adopt effect, so the adopt always sees the value from the render
+// BEFORE the change. It self-corrects: adopting makes the next render clean.
+function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty = false }) {
+  // Read through a ref so the effect can depend on `signature` ALONE. `apply`
+  // is a fresh closure every render and would otherwise have to be a dep,
+  // which would re-run the adopt on every render and stomp the operator.
+  const applyRef = useRefA(apply);
+  applyRef.current = apply;
+  const wasDirtyRef = useRefA(false);
+  useEffectA(() => {
+    if (keepLocalEdits && wasDirtyRef.current) return;
+    applyRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+  useEffectA(() => { wasDirtyRef.current = !!isDirty; });
+}
+
 // ES exports: the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
@@ -1033,6 +1088,7 @@ export {
   daihyosenEnchoFields,
   decideDrawToggle,
   shouldBlockScoringKeys,
+  useAdoptFromServer,
   EnchoControl,
   DecisionPrompt,
   RemainingMatchesPanel,

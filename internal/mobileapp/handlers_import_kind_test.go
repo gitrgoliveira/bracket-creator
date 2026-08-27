@@ -98,7 +98,10 @@ func TestImport_RejectsATeamSizeItsKindForbids(t *testing.T) {
 		{"individual with a team size", "ts-individual", "individual", 3},
 		// ... and 1 is rejected for every kind, being neither.
 		{"team size of one", "ts-one", "team", 1},
-		// ... and a team needs at least 2.
+		// ... and a team needs at least 2. This one also covers an OMITTED
+		// `team_size:` key, which decodes to the same 0 -- see
+		// TestImport_RequiresATeamCompetitionToStateItsSize below for why
+		// that is a refusal here rather than a default.
 		{"team with no size", "ts-team-zero", "team", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,4 +126,48 @@ competitions:
 			assert.Nil(t, comp, "a refused row must not reach disk")
 		})
 	}
+}
+
+// An omitted `team_size:` is REFUSED, not defaulted, and this pins the
+// reasoning because a review round proposed the opposite.
+//
+// The argument for defaulting was local and looked strong: fifteen lines
+// below the TeamSize check, this same function fills in an omitted
+// `pool_size` and an omitted `pool_size_mode`, so refusing a third omitted
+// key reads as an inconsistency a caller cannot reason about.
+//
+// The deciding evidence is not local. POST /api/competitions has refused
+// `kind: "team"` with teamSize 0 since commit 839e7cc8 ("validate team
+// competitions require teamSize >= 2"), pinned there by
+// TestCreateCompetitionTeamSizeValidation's "POST team with teamSize=0
+// returns 400" subtest. So the create door already had a settled answer,
+// and the guard this test covers was written to bring the import door into
+// line with it. Defaulting here would have split the two doors again,
+// merely in the other direction -- and silently, since nothing would have
+// failed. A pool size has an obvious neutral default; the number of people
+// in a team is not the server's to guess.
+//
+// The residual objection -- that this breaks a manifest which used to
+// import -- is real, and answered by stating the requirement in
+// specs/openapi.yaml rather than by weakening the guard.
+func TestImport_RequiresATeamCompetitionToStateItsSize(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// No `team_size:` key at all -- the shape the default was proposed for.
+	res := importOneComp(t, r, `
+competitions:
+  - id: "ts-omitted"
+    name: "Team, no size"
+    kind: "team"
+    format: "playoffs"
+    courts: ["A"]
+    participants: "players.csv"
+`)
+	assert.Contains(t, res.Error, "teamSize",
+		"an omitted team_size decodes to 0, which POST /competitions has refused for a team competition since 839e7cc8; the import door must agree with it")
+
+	comp, err := store.LoadCompetition("ts-omitted")
+	require.NoError(t, err)
+	assert.Nil(t, comp, "a refused row must not reach disk")
 }

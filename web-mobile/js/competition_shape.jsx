@@ -404,11 +404,36 @@ export function teamMatchTypeActive(option, stored) {
 }
 
 
+// resolveKind: what a stored `kind` MEANS, as opposed to what it says.
+//
+// Every other loose field in this module has one of these
+// (resolvePoolFormat, resolvePoolSizeMode, resolveTeamSize) and kind needs
+// it for the same reason: "" is a first-class member of the set, not a
+// straggler. state.ValidateCompetitionKind accepts `""`, `"individual"`
+// and `"team"`, and its doc comment spells out that "" MEANS individual --
+// an import manifest with no `kind:` key decodes to "", and
+// state.Competition's Go zero value stores the same "", so both the legacy
+// import path and any hand-seeded record depend on that reading.
+//
+// So the predicates below must ask "is this team?" and not "is this
+// exactly the string 'individual'?". Written the second way, a legacy
+// record whose kind is "" got Zekken and Engi rendered DISABLED under the
+// hint "(Only applicable for individual competitions)" -- on a competition
+// that is individual. Anything not exactly "team" resolves to individual
+// here, matching how the engine already behaves: Kind is checked as
+// `== "team"` at every site that branches on it, so an unrecognised value
+// has always run as an individual competition (which is the hole
+// ValidateCompetitionKind was added to close at the write doors, leaving
+// this function to agree with the engine about everything already stored).
+export function resolveKind(kind) {
+  return kind === KIND_TEAM ? KIND_TEAM : KIND_INDIVIDUAL;
+}
+
 // teamFieldsVisible: both surfaces gate "Team size" and "Team match
 // format" identically on kind === "team" (admin_setup.jsx:1370,1391;
 // admin_competition_settings.jsx:858,884).
 export function teamFieldsVisible(kind) {
-  return kind === KIND_TEAM;
+  return resolveKind(kind) === KIND_TEAM;
 }
 
 // LABEL_ZEKKEN / LABEL_ENGI: verbatim from admin_setup.jsx's "Use Zekken
@@ -468,12 +493,16 @@ export const HINT_KIND_ONLY_INDIVIDUAL = "(Only applicable for individual compet
 // "does this concept apply to this kind" and then applies its own
 // show-vs-disable policy, the same way it already layers isDrawReady /
 // isStarted on top.
+// Both read through resolveKind (above) rather than comparing against
+// KIND_INDIVIDUAL directly: a stored "" MEANS individual, and asking the
+// question the other way round disabled both controls on a legacy record
+// under a hint saying they are for individual competitions.
 export function zekkenApplies(kind) {
-  return kind === KIND_INDIVIDUAL;
+  return resolveKind(kind) === KIND_INDIVIDUAL;
 }
 
 export function engiApplies(kind) {
-  return kind === KIND_INDIVIDUAL;
+  return resolveKind(kind) === KIND_INDIVIDUAL;
 }
 
 // --- Pool sizing field labels (mixed format only) -----------------------
@@ -606,11 +635,15 @@ export const MIN_POOL_WINNERS = 1;
 
 export function poolSettingsError(format, poolSize, winners) {
   if (format !== FORMAT_MIXED) return null;
+  // Interpolate the field's own caption rather than restating it, the way
+  // swissSettingsError already does with LABEL_SWISS_ROUNDS: spelled as a
+  // literal, renaming the "Players per pool" control changed the caption and
+  // left the error message naming the old one.
   if (!Number.isInteger(poolSize) || poolSize < MIN_POOL_SIZE) {
-    return `Players per pool must be a whole number ≥ ${MIN_POOL_SIZE}.`;
+    return `${LABEL_POOL_SIZE} must be a whole number ≥ ${MIN_POOL_SIZE}.`;
   }
   if (!Number.isInteger(winners) || winners < MIN_POOL_WINNERS) {
-    return `Winners per pool must be a whole number ≥ ${MIN_POOL_WINNERS}.`;
+    return `${LABEL_POOL_WINNERS} must be a whole number ≥ ${MIN_POOL_WINNERS}.`;
   }
   return null;
 }
@@ -655,6 +688,21 @@ export function poolSettingsError(format, poolSize, winners) {
 // - league / playoffs / swiss: ExtraQualifiers is forced to the standard
 //   sentinel ("") -- the "Knockout qualifiers" radio only ever means
 //   something on a pools-then-knockout ("mixed") competition.
+//
+// PoolFormat is DELIBERATELY not in that list, and the omission has been
+// re-raised in review, so here is why it stays out. This function is a
+// mirror of the server's normalizePoolConfig, and the server does not
+// touch PoolFormat for any format -- so clearing it here would make the
+// client destroy a field the server preserves, which is a new divergence
+// rather than a closed one. It would also be the very failure the
+// paragraph above documents for poolSize: PoolFormat is meaningful for
+// BOTH "mixed" and "league" (poolFormatVisible), so a league operator who
+// taps "Knockout only" and taps straight back would lose the
+// neighbour-only shape they chose, with the round trip cancelling out on
+// `format` and silently not on this field. Carrying it across a format
+// the field has no meaning for is what PRESERVING it looks like; a value
+// that reappears when the control that owns it comes back on screen is
+// the control working.
 export function normalizeConfigForFormat(cfg) {
   const next = { ...cfg };
   if (next.format === FORMAT_LEAGUE || next.format === FORMAT_PLAYOFFS) {
@@ -770,18 +818,54 @@ export function resolveTeamSize(staged, stored) {
   return Number.isInteger(stored) && stored >= 0 ? stored : 0;
 }
 
+// teamSizeError: the same shape as poolSettingsError / swissSettingsError,
+// and it exists because Team size was the one bounded numeric field with a
+// silent failure instead of a visible one.
+//
+// The create form has always refused an out-of-range team size at submit
+// (two inline branches, "must be a whole number" / "must be between N and
+// M"). The settings screen had NO equivalent: resolveTeamSize above
+// deliberately falls back to the stored value rather than sending a
+// clobbering 0, which is right for the PAYLOAD and wrong as the operator's
+// only feedback -- typing 1 into Team size and clicking Save stored the
+// OLD value and reported "✓ Saved", so the screen claimed to have saved
+// something it had discarded. That is the divergence this module exists to
+// close, so the rule moves here and both screens read it.
+//
+// `maxTeamSize` is a PARAMETER rather than a constant of this module: the
+// ceiling is not a config rule, it is how many bout positions the scoring
+// UI can render (MAX_TEAM_SIZE in admin_helpers.jsx, which TEAM_POSITIONS
+// in admin_scoring_modal.jsx is built from). This module is a leaf with no
+// project imports, and inventing a second copy of that number here is
+// exactly the drift it is meant to prevent. Callers pass their own
+// MAX_TEAM_SIZE; omitting it checks the floor alone.
+//
+// Returns null when the field does not apply (individual competitions send
+// teamSize 0 by rule), so a caller can gate on the error without first
+// repeating the kind test.
+export function teamSizeError(kind, teamSize, maxTeamSize) {
+  if (!teamFieldsVisible(kind)) return null;
+  if (!Number.isInteger(teamSize) || teamSize < MIN_TEAM_SIZE) {
+    return `${LABEL_TEAM_SIZE} must be a whole number ≥ ${MIN_TEAM_SIZE}.`;
+  }
+  if (Number.isInteger(maxTeamSize) && teamSize > maxTeamSize) {
+    return `${LABEL_TEAM_SIZE} must be between ${MIN_TEAM_SIZE} and ${maxTeamSize}.`;
+  }
+  return null;
+}
+
 export function normalizeConfigForKind(cfg) {
   const next = { ...cfg };
   if (next.kind === KIND_TEAM) {
     if (!(Number.isFinite(next.teamSize) && next.teamSize >= MIN_TEAM_SIZE)) {
       next.teamSize = DEFAULT_TEAM_SIZE;
     }
-    if (!next.teamMatchType) next.teamMatchType = "fixed";
+    if (!next.teamMatchType) next.teamMatchType = TEAM_MATCH_TYPE_FIXED;
     next.engi = false;
     next.withZekkenName = false;
   } else {
     next.teamSize = 0;
-    next.teamMatchType = "fixed";
+    next.teamMatchType = TEAM_MATCH_TYPE_FIXED;
   }
   return next;
 }
@@ -914,9 +998,31 @@ export function configShapeChangeStaged(stored, staged) {
   return staged.format !== stored.format || staged.kind !== stored.kind;
 }
 
+// The two normalizers are gated INDEPENDENTLY, and that is the whole
+// point of the scoping rather than a refinement of it.
+//
+// Running both whenever EITHER field moved re-creates the lockout the
+// paragraph above describes, just through the other door: a stored
+// `{kind: "team", withZekkenName: true}` (reachable -- no server guard
+// rejects that pairing, and the import manifest carries `with_zekken_name`
+// and `kind` as independent keys) meets an operator who changes nothing
+// but the Format. The kind normalizer would run anyway and force
+// withZekkenName and engi to false, on a kind that did not move, with the
+// zekken checkbox disabled behind teamFieldsVisible so nothing on screen
+// can put it back. participants.csv is thereafter read with the 3-column
+// layout. The pendingConfigClears notice compounds it rather than saving
+// the operator: it derives from this function, so it would faithfully
+// announce "Saving will clear these settings, which do not apply to
+// League: Use Zekken display name (on)" -- attributing a kind-driven clear
+// to a format change with nothing to do with it.
+//
+// A normalizer answers for the field it is named after. Gate it on that
+// field.
 export function shapeConfigForSave(stored, staged) {
-  if (!configShapeChangeStaged(stored, staged)) return { ...staged };
-  return normalizeConfigForKind(normalizeConfigForFormat(staged));
+  let next = { ...staged };
+  if (staged.format !== stored.format) next = normalizeConfigForFormat(next);
+  if (staged.kind !== stored.kind) next = normalizeConfigForKind(next);
+  return next;
 }
 
 // isMeaningfulValue: a staged value worth reporting as "about to be lost".
@@ -1004,8 +1110,12 @@ export const COMPETITION_DEFAULTS = {
   // Two joint 3rd places is the standard kendo convention; naginata is the
   // exception and turns it off (twoThirdPlacesForNaginata above). This
   // default being TRUE while Go's zero value is false is precisely why the
-  // field must reach the wire explicitly -- see state.Competition's own
-  // comment on why it is not omitempty.
+  // field must reach the wire explicitly on every format, rather than only
+  // when the league controls are on screen. The Go tag keeps its
+  // `omitempty` and always could: a bool with omitempty is value-lossless
+  // (false marshals to an absent key, an absent key unmarshals back to
+  // false), so the conditional send was the entire bug. See
+  // state.Competition's own comment on this field.
   leagueTwoThirdPlaces: true,
   // 0, not LEAGUE_TIEBREAK_DEFAULT: the stored zero IS "not yet chosen" and
   // leagueTiebreakActive resolves it to Top 3 for display. Seeding the

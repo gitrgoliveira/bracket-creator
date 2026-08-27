@@ -264,6 +264,24 @@ func validateMixedPoolSize(comp *state.Competition) error {
 	return nil
 }
 
+// defaultPoolSize is the pool size an authoring door fills in when the
+// caller omits one. Shared by POST /api/competitions and
+// /api/tournament/import so the two doors cannot answer the same body
+// differently: import has defaulted an omitted pool size to this number
+// for as long as it has existed, and a create that refused the identical
+// omission would mean a manifest imported fine while the same competition
+// authored over REST took a 400.
+//
+// Scoped to "mixed" at the POST call site and unscoped at the import one,
+// which is a real difference and a deliberately unchanged one: POST runs
+// normalizePoolConfig first, so a league/playoffs competition has already
+// had PoolSize zeroed by the time the default is considered and must stay
+// that way. Import does not normalize, so it has always stored this number
+// on every format; that is inert (nothing reads PoolSize for a bare
+// bracket) and predates this constant, so it is left alone rather than
+// changed under cover of a shared name.
+const defaultPoolSize = 4
+
 // competitionUpdateRequest is the PUT /competitions/:id body.
 //
 // It exists for ONE field. Every other setting can be merged from the decoded
@@ -575,12 +593,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// the engine actually uses. See normalizePoolConfig for full rationale.
 		normalizePoolConfig(&comp)
 
-		// bc-symm: reject a create that lands on mixed format with no
-		// usable pool size outright. Unlike the PUT twin (change-scoped, see
-		// its call site) POST authors a brand-new record: nothing here is
-		// inherited, the caller wrote every field on the body, so there is
-		// no stored value to protect and no lockout risk in checking
-		// unconditionally.
+		// bc-symm: an omitted pool size is DEFAULTED, not refused, and it is
+		// defaulted to the same number /api/tournament/import has always
+		// used (see defaultPoolSize). Refusing it instead made
+		// `POST {"name":"X","format":"mixed","courts":["A"]}` -- a body that
+		// returned 201 for the whole life of the endpoint, and that four
+		// existing tests in this package send -- start returning 400, while
+		// the identical competition arriving through the import door landed
+		// fine. Runs after normalizePoolConfig above, so it can only ever
+		// fire for "mixed": league and playoffs have had PoolSize zeroed by
+		// then and must keep it.
+		if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
+			comp.PoolSize = defaultPoolSize
+		}
+		// What remains for the guard is the value a caller STATED and that
+		// the draw could never build (a negative). Unlike the PUT twin
+		// (change-scoped, see its call site) POST authors a brand-new
+		// record: nothing here is inherited, so there is no stored value to
+		// protect and no lockout risk in checking unconditionally.
 		if err := validateMixedPoolSize(&comp); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -1223,7 +1253,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// field on a draw-ready kachinuki competition trips a false
 				// 409 (the draw-ready comment promises effective-value
 				// comparison; "" is an omission, not a value).
-				if comp.TeamMatchType == "" {
+				inheritedTeamMatchType := comp.TeamMatchType == ""
+				if inheritedTeamMatchType {
 					comp.TeamMatchType = current.TeamMatchType
 				}
 				// bc-symm: re-validate the EFFECTIVE (teamMatchType, teamSize)
@@ -1238,11 +1269,32 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// runtime (IsKachinuki() requires teamSize >= 2), but every
 				// later settings PUT echoes it straight back on the wire and
 				// fails the WIRE-value check above, locking the operator out of
-				// the settings screen entirely. Same shape as the
-				// ExtraQualifiers re-validation below.
+				// the settings screen entirely.
+				//
+				// It COERCES rather than rejects, and the distinction is whose
+				// fault the bad pair is. This check is reachable only for a
+				// value the write INHERITED: a client that SENDS an illegal
+				// pairing is already refused by the wire-value check above,
+				// which runs in the same settings-only branch, so by the time
+				// control reaches here comp.TeamMatchType is either a value
+				// that just passed that check or one copied off disk a moment
+				// ago. Rejecting the second case answers an operator's PUT
+				// with a 400 naming a field their request never mentioned,
+				// forever, with nothing on the settings screen able to repair
+				// it -- the same trap stripInvalidHantei (engine/scoring.go)
+				// is written to avoid, and the same rule: a write answers for
+				// what it introduces, not for what it inherited. Resetting to
+				// the fixed default changes no behaviour (the pair was already
+				// inert) and leaves the record legal, so the NEXT save is a
+				// normal one.
 				if err := state.ValidateTeamMatchType(comp.TeamMatchType, comp.TeamSize); err != nil {
-					validationErr = fmt.Errorf("teamMatchType: %w", err)
-					return nil, nil
+					if !inheritedTeamMatchType {
+						validationErr = fmt.Errorf("teamMatchType: %w", err)
+						return nil, nil
+					}
+					log.Printf("competition %s: stored teamMatchType %q is invalid for teamSize %d (%v); resetting to %q",
+						id, comp.TeamMatchType, comp.TeamSize, err, state.TeamMatchTypeFixed)
+					comp.TeamMatchType = state.TeamMatchTypeFixed
 				}
 				// ExtraQualifiers (bc-qual LP-5a) needs the same "omitted
 				// keeps stored" contract as TeamMatchType above, but cannot

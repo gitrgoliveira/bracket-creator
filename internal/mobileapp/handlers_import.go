@@ -272,13 +272,31 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		res.Error = "kind: " + err.Error()
 		return res
 	}
+	// NOTE this one REFUSES an omitted `team_size:` rather than defaulting
+	// it, unlike PoolSize and PoolSizeMode a few lines below, and the
+	// asymmetry is deliberate rather than an oversight. A review round read
+	// it the other way and proposed defaulting to 5; the deciding evidence
+	// is that POST /api/competitions has refused the identical pair since
+	// commit 839e7cc8 ("validate team competitions require teamSize >= 2"),
+	// pinned by TestCreateCompetitionTeamSizeValidation's own
+	// "POST team with teamSize=0 returns 400" subtest. The repo's settled
+	// position is that a team competition must STATE its size, so this
+	// check brings the import door into line with the create door -- which
+	// is the whole point of the cross-file symmetry noted above -- and
+	// defaulting here would have split them again in the other direction.
+	// A pool size has an obvious neutral default; the number of people in a
+	// team is not the server's to guess.
+	//
+	// It IS a breaking change for a manifest that omitted the key, so the
+	// requirement is now stated in specs/openapi.yaml alongside the other
+	// import rules rather than left for a caller to discover from a 400.
 	if err := state.ValidateCompetitionTeamSize(comp.Kind, comp.TeamSize); err != nil {
 		res.Error = "teamSize: " + err.Error()
 		return res
 	}
 
 	if comp.PoolSize == 0 {
-		comp.PoolSize = 4
+		comp.PoolSize = defaultPoolSize
 	}
 	if comp.PoolSizeMode == "" {
 		comp.PoolSizeMode = "max"

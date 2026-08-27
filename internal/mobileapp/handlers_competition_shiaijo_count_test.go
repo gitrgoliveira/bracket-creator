@@ -69,10 +69,9 @@ func TestCreateCompetitionShiaijoCount(t *testing.T) {
 			saveTournamentCourts(t, store, helper.MaxCourts)
 
 			w := shiaijoPostComp(t, r, map[string]any{
-				"name":     fmt.Sprintf("Comp %d", n),
-				"format":   "mixed",
-				"courts":   shiaijoLabels(n),
-				"poolSize": 4, // bc-symm: mixed format now requires a usable pool size on create
+				"name":   fmt.Sprintf("Comp %d", n),
+				"format": "mixed",
+				"courts": shiaijoLabels(n),
 			}, "")
 			if bctest.LegalShiaijoCount(n) {
 				require.Equalf(t, http.StatusCreated, w.Code, "%d shiaijo must be accepted: %s", n, w.Body.String())
@@ -177,7 +176,7 @@ func TestCreateCompetitionInheritedCourtsAcceptedWhenLegal(t *testing.T) {
 			saveTournamentCourts(t, store, venue)
 
 			w := shiaijoPostComp(t, r, map[string]any{
-				"name": "Inherited", "format": "mixed", "poolSize": 4,
+				"name": "Inherited", "format": "mixed",
 			}, "")
 			require.Equalf(t, http.StatusCreated, w.Code, "resp: %s", w.Body.String())
 
@@ -311,7 +310,7 @@ func TestTournamentCourtsMayBeAnyCount(t *testing.T) {
 		{"Small Comp", []string{"E"}},
 	} {
 		w := shiaijoPostComp(t, r, map[string]any{
-			"name": tc.name, "format": "mixed", "courts": tc.courts, "poolSize": 4,
+			"name": tc.name, "format": "mixed", "courts": tc.courts,
 		}, "secret")
 		require.Equalf(t, http.StatusCreated, w.Code, "%s: %s", tc.name, w.Body.String())
 	}

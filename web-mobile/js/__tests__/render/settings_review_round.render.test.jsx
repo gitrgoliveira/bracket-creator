@@ -11,7 +11,10 @@ import { installSettingsHarness, mountSettings } from './settings_mount_harness.
 //   1. A cleared "Team size" saved 5, not the last-saved value. The guard
 //      was `safeNonNegInt(shaped.teamSize, latestC.teamSize)`, applied to
 //      normalizeConfigForKind's OUTPUT -- which is always a finite integer,
-//      so it never fired.
+//      so it never fired. resolveTeamSize replaced it, and then a later
+//      round found that the fallback was ALSO the operator's only feedback:
+//      an invalid Team size is now refused visibly instead of discarded
+//      quietly (see that describe block).
 //   2. The pendingConfigClears notice named a value the save would not send.
 //   3. Switching to "Swiss" on a record with no round count left Save live
 //      and took validateSwissConfig's raw server string.
@@ -76,8 +79,31 @@ async function saveAndCapture(container) {
   return sent;
 }
 
-describe('bc-symm review: a cleared or under-floor Team size falls back to the last-saved value', () => {
-  it('clearing "Team size" on a stored team competition sends the stored size, not DEFAULT_TEAM_SIZE', async () => {
+// A cleared or under-floor "Team size" is REFUSED, visibly, rather than
+// quietly discarded. resolveTeamSize (competition_shape.jsx) still resolves
+// the payload -- it is the last line of defence, unit-tested there, and it
+// is what stops a NaN reaching the wire on a save the operator IS allowed
+// to make -- but it was never meant to be the operator's only feedback.
+// While it was, typing 1 into Team size and clicking Save stored the OLD
+// size and reported "✓ Saved at HH:MM:SS": the screen claimed to have
+// saved a number it had thrown away. The create form has refused the same
+// value at submit all along, so this was also a create/settings divergence.
+//
+// These three subtests previously asserted the silent fallback FROM the
+// save payload, which is why they now read the opposite way round: the
+// question is no longer "what did a save send" but "was a save offered at
+// all".
+describe('bc-symm review: a cleared or under-floor Team size blocks Save with a visible error', () => {
+  const TEAM_SIZE_ERR = 'Team size must be a whole number ≥ 2.';
+
+  const expectBlocked = (container, why) => {
+    const buttons = saveButtons(container);
+    expect(buttons.length, 'expected both the header and footer "Save changes" buttons').toBe(2);
+    for (const b of buttons) expect(b.disabled, why).toBe(true);
+    expect(container.textContent, 'the operator must be told WHY, not just left with a dead button').toContain(TEAM_SIZE_ERR);
+  };
+
+  it('clearing "Team size" on a stored team competition blocks the save instead of silently keeping the stored size', async () => {
     let sent = null;
     const comp = makeCompetition({ kind: 'team', teamSize: 3, format: 'mixed', poolSize: 4, poolWinners: 2 });
     const { container } = await mountSettings(comp, (payload) => { sent = payload; });
@@ -89,21 +115,24 @@ describe('bc-symm review: a cleared or under-floor Team size falls back to the l
     await act(async () => { fireEvent.change(teamSizeInput, { target: { value: '' } }); });
     expect(teamSizeInput.value, 'a cleared number input must render empty, not collapse to 0').toBe('');
 
+    expectBlocked(container, 'a cleared Team size must block Save; saving the stored 3 under a "✓ Saved" is the silent discard this closes');
+    expect(sent, 'nothing may be PUT while the field is invalid').toBeNull();
+
+    // And the way out works: a valid size re-enables Save and is what lands.
+    await act(async () => { fireEvent.change(teamSizeInput, { target: { value: '4' } }); });
+    expect(container.textContent).not.toContain(TEAM_SIZE_ERR);
     await saveAndCapture(container);
-    expect(sent, 'expected the settings PUT payload via onUpdate').not.toBeNull();
-    expect(
-      sent.teamSize,
-      'a cleared Team size must fall back to the last-saved 3; saving 5 is the silent default the dead post-shape guard allowed'
-    ).toBe(3);
+    expect(sent.teamSize).toBe(4);
   });
 
   // The discriminating case for the ORDER of the two guards. With no
   // format/kind change staged, shapeConfigForSave passes the config through
-  // untouched, so a post-shape safeNonNegInt would still catch a cleared
-  // NaN and the bug hides. Stage a format flip and the normalizer runs: the
-  // cleared NaN becomes DEFAULT_TEAM_SIZE before any post-shape guard sees
-  // it, and 5 lands on the wire over the operator's 3.
-  it('clearing "Team size" while ALSO staging a format flip still sends the stored size', async () => {
+  // untouched; stage a format flip and normalizeConfigForKind's under-floor
+  // branch would turn a cleared NaN into DEFAULT_TEAM_SIZE. Save being
+  // blocked means that branch is never reached with the operator's cleared
+  // input, and resolveTeamSize's ordering keeps it unreachable even if a
+  // later change re-enabled the button.
+  it('clearing "Team size" while ALSO staging a format flip blocks the save', async () => {
     let sent = null;
     const comp = makeCompetition({ kind: 'team', teamSize: 3, format: 'playoffs' });
     const { container } = await mountSettings(comp, (payload) => { sent = payload; });
@@ -113,26 +142,52 @@ describe('bc-symm review: a cleared or under-floor Team size falls back to the l
     const mixedPill = byText(container, 'button', 'Pools + Knockout');
     expect(mixedPill, 'expected a "Pools + Knockout" Format pill').toBeDefined();
     await act(async () => { fireEvent.click(mixedPill); });
-    // The flip lands on poolSize 0, which blocks Save -- repair it, since
-    // the team size is what is under test here.
+    // Repair the pool fields the flip invalidated, so the ONLY remaining
+    // blocker is the team size under test.
     await act(async () => { fireEvent.change(fieldInput(container, 'Players per pool'), { target: { value: '4' } }); });
     await act(async () => { fireEvent.change(fieldInput(container, 'Winners per pool'), { target: { value: '2' } }); });
 
-    await saveAndCapture(container);
-    expect(
-      sent.teamSize,
-      'the staged team size must be resolved BEFORE normalizeConfigForKind, or its under-floor branch turns the cleared input into 5'
-    ).toBe(3);
+    expectBlocked(container, 'a cleared Team size must block Save even when the pool fields have been repaired');
+    expect(sent).toBeNull();
   });
 
-  it('typing a 1 -- below the field\'s own min -- also falls back rather than saving 5', async () => {
+  it('typing a 1 -- below the field\'s own min -- is refused the same way', async () => {
     let sent = null;
     const comp = makeCompetition({ kind: 'team', teamSize: 3, format: 'mixed', poolSize: 4, poolWinners: 2 });
     const { container } = await mountSettings(comp, (payload) => { sent = payload; });
 
     await act(async () => { fireEvent.change(fieldInput(container, 'Team size'), { target: { value: '1' } }); });
+    expectBlocked(container, 'teamSize 1 is rejected unconditionally by ValidateCompetitionTeamSize, so the client must not offer to send it');
+    expect(sent).toBeNull();
+  });
+
+  // The change-scoping, and the reason resolveTeamSize's fallback is still
+  // load-bearing. A record already carrying an invalid team size (a
+  // hand-edited config.md) must not have every unrelated edit blocked by a
+  // value the operator never touched -- the same rule savedCourtsErr and
+  // blockingPoolSettingsErr follow. The error is still on screen; only Save
+  // is unblocked.
+  it('a stored team competition with an invalid teamSize still allows saving an unrelated field', async () => {
+    let sent = null;
+    const comp = makeCompetition({ kind: 'team', teamSize: 0, format: 'mixed', poolSize: 4, poolWinners: 2 });
+    const { container } = await mountSettings(comp, (payload) => { sent = payload; });
+
+    expect(container.textContent, 'the stored value is invalid, so the error renders on load').toContain(TEAM_SIZE_ERR);
+    for (const b of saveButtons(container)) {
+      expect(b.disabled, 'nothing edited yet: Save is disabled by !isDirty, not by the team-size error').toBe(true);
+    }
+
+    await act(async () => { fireEvent.change(fieldInput(container, 'Display name'), { target: { value: 'Autumn Cup (renamed)' } }); });
+
+    expect(container.textContent).toContain(TEAM_SIZE_ERR);
+    for (const b of saveButtons(container)) {
+      expect(
+        b.disabled,
+        'the operator only edited the name; blocking that on a pre-existing invalid team size is the lockout the change-scoping prevents'
+      ).toBe(false);
+    }
     await saveAndCapture(container);
-    expect(sent.teamSize).toBe(3);
+    expect(sent.name).toBe('Autumn Cup (renamed)');
   });
 
   it('a real edit still saves what the operator typed', async () => {

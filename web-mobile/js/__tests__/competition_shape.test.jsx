@@ -15,11 +15,11 @@ import {
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat,
-  normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE,
+  normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE, LABEL_TEAM_SIZE,
   kindChangeBlockedReason,
   poolSettingsError,
   swissSettingsError, MIN_SWISS_ROUNDS,
-  resolveTeamSize,
+  resolveTeamSize, teamSizeError,
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
@@ -294,10 +294,20 @@ describe('kind-gated fields', () => {
   const teamTable = [];
   const zekkenTable = [];
   const engiTable = [];
+  // The expectation for "" and undefined is the point of this table, not a
+  // straggler it tolerates. state.ValidateCompetitionKind blesses "" as a
+  // first-class member of the kind set MEANING individual (an import
+  // manifest with no `kind:` key decodes to it, and so does
+  // state.Competition's Go zero value), so a record carrying it IS an
+  // individual competition and the zekken / engi controls apply to it.
+  // These three predicates read through resolveKind for exactly that
+  // reason; before they did, both controls rendered DISABLED on such a
+  // record under the hint "(Only applicable for individual competitions)".
   for (const kind of ALL_KINDS) {
-    teamTable.push([kind, kind === KIND_TEAM]);
-    zekkenTable.push([kind, kind === KIND_INDIVIDUAL]);
-    engiTable.push([kind, kind === KIND_INDIVIDUAL]);
+    const isTeam = kind === KIND_TEAM;
+    teamTable.push([kind, isTeam]);
+    zekkenTable.push([kind, !isTeam]);
+    engiTable.push([kind, !isTeam]);
   }
   it.each(teamTable)('teamFieldsVisible(%j) -> %j', (kind, expected) => {
     expect(teamFieldsVisible(kind)).toBe(expected);
@@ -311,13 +321,19 @@ describe('kind-gated fields', () => {
 
   // teamFieldsVisible and zekkenApplies/engiApplies partition kind into
   // complementary halves: a competition is never both "team fields
-  // visible" and "zekken/engi applies" at once, for every kind value this
-  // module recognises (not for the "" / undefined stragglers, which are
-  // neither).
-  it('team-only and individual-only fields never overlap for a real kind value', () => {
-    for (const kind of [KIND_INDIVIDUAL, KIND_TEAM]) {
-      expect(teamFieldsVisible(kind) && zekkenApplies(kind)).toBe(false);
-      expect(teamFieldsVisible(kind) && engiApplies(kind)).toBe(false);
+  // visible" and "zekken/engi applies" at once, and never NEITHER. The
+  // second half is the one that used to fail: "" and undefined fell
+  // through both predicates, so a legacy record got the team fields hidden
+  // (right) and the individual-only ones disabled (wrong), which is a
+  // competition the screen could describe as neither kind. resolveKind
+  // makes the halves exhaustive, so the table covers every value in
+  // ALL_KINDS rather than the two spelled-out ones.
+  it('team-only and individual-only fields partition every kind value, with no overlap and no gap', () => {
+    for (const kind of ALL_KINDS) {
+      expect(teamFieldsVisible(kind) && zekkenApplies(kind), `kind ${JSON.stringify(kind)} claims both halves`).toBe(false);
+      expect(teamFieldsVisible(kind) && engiApplies(kind), `kind ${JSON.stringify(kind)} claims both halves`).toBe(false);
+      expect(teamFieldsVisible(kind) || zekkenApplies(kind), `kind ${JSON.stringify(kind)} falls through both halves`).toBe(true);
+      expect(teamFieldsVisible(kind) || engiApplies(kind), `kind ${JSON.stringify(kind)} falls through both halves`).toBe(true);
     }
   });
 });
@@ -628,6 +644,54 @@ describe('pendingConfigClears', () => {
 // is always a finite integer and the fallback could never fire. The visible
 // consequence: clearing the Team size input on a stored 3 saved 5, while the
 // input's own comment promised the last-saved value.
+// teamSizeError is the visible half of the same rule resolveTeamSize
+// enforces silently. resolveTeamSize decides what the PAYLOAD carries;
+// this decides whether a save is offered at all. Both screens read it --
+// the create form at submit (where it replaced two inline branches) and
+// the settings screen as an inline error plus a change-scoped Save gate,
+// which it had NO equivalent of: an out-of-range team size was discarded
+// by resolveTeamSize and reported as "✓ Saved".
+describe('teamSizeError', () => {
+  it('is null for every kind the field does not apply to, whatever the number', () => {
+    for (const kind of [KIND_INDIVIDUAL, '', undefined]) {
+      for (const size of [0, 1, NaN, 5, -3]) {
+        expect(teamSizeError(kind, size, 10), `kind ${JSON.stringify(kind)} / size ${size}`).toBeNull();
+      }
+    }
+  });
+
+  it('accepts the legal domain for a team competition', () => {
+    for (const size of [MIN_TEAM_SIZE, 3, 5, 10]) {
+      expect(teamSizeError(KIND_TEAM, size, 10)).toBeNull();
+    }
+  });
+
+  it('rejects a cleared, fractional, zero, one or negative size, naming the field', () => {
+    for (const size of [NaN, undefined, null, 1.5, 0, 1, -2]) {
+      const err = teamSizeError(KIND_TEAM, size, 10);
+      expect(err, `size ${JSON.stringify(size)} must be refused`).toBeTruthy();
+      expect(err, 'the message must name the control the operator is looking at').toContain(LABEL_TEAM_SIZE);
+    }
+  });
+
+  // teamSize 1 is the one an operator can reach by typing and the one
+  // ValidateCompetitionTeamSize (state/models.go) rejects outright, on the
+  // grounds that TeamSize > 0 makes it read as a team elsewhere in the
+  // engine. It must never leave the client.
+  it('rejects teamSize 1 specifically, the value the server refuses unconditionally', () => {
+    expect(teamSizeError(KIND_TEAM, 1, 10)).toBeTruthy();
+  });
+
+  // The ceiling is a parameter because it belongs to the scoring UI's
+  // position list (MAX_TEAM_SIZE, admin_helpers.jsx), not to this module.
+  // Omitting it checks the floor alone rather than silently inventing a
+  // second copy of that number here.
+  it('checks the ceiling only when the caller supplies one', () => {
+    expect(teamSizeError(KIND_TEAM, 99, 10)).toBeTruthy();
+    expect(teamSizeError(KIND_TEAM, 99, undefined)).toBeNull();
+  });
+});
+
 describe('resolveTeamSize', () => {
   it('keeps a usable staged value', () => {
     expect(resolveTeamSize(2, 5)).toBe(2);
@@ -767,5 +831,68 @@ describe('shapeConfigForSave', () => {
     expect(configShapeChangeStaged(stored, { ...stored })).toBe(false);
     expect(configShapeChangeStaged(stored, { ...stored, format: FORMAT_LEAGUE })).toBe(true);
     expect(configShapeChangeStaged(stored, { ...stored, kind: KIND_INDIVIDUAL })).toBe(true);
+  });
+
+  // The two normalizers are gated INDEPENDENTLY, which is a stronger
+  // property than "gated at all" and the one a review round found missing.
+  // Running both whenever EITHER field moved reproduced the very lockout
+  // the scoping exists to prevent, through the other door: a format-only
+  // save on a stored team competition ran the KIND normalizer too and
+  // forced withZekkenName / engi false on a kind that had not moved, with
+  // the zekken checkbox disabled behind teamFieldsVisible so nothing on
+  // screen could put it back. Reverting shapeConfigForSave to
+  // `if (configShapeChangeStaged(...)) return normalizeConfigForKind(
+  // normalizeConfigForFormat(staged))` reddens both subtests below.
+  it('a format-only change does not run the kind normalizer', () => {
+    const staged = { ...TEAM_WITH_ZEKKEN, format: FORMAT_LEAGUE };
+    const sent = shapeConfigForSave(TEAM_WITH_ZEKKEN, staged);
+
+    // The format half DID run.
+    expect(sent.poolSize, 'league has no pool phase to size').toBe(0);
+    expect(sent.poolWinners).toBe(0);
+
+    // The kind half did NOT: kind never moved, so nothing it owns may be
+    // touched by this save.
+    expect(sent.withZekkenName, 'a format change must not clear a zekken setting the operator did not touch').toBe(true);
+    expect(sent.teamSize, 'nor rewrite the team size').toBe(5);
+    expect(sent.engi).toBe(false);
+  });
+
+  // The mirror case, and it needs a LEAGUE fixture to discriminate: with a
+  // stored "mixed", normalizeConfigForFormat is a no-op, so an unscoped
+  // call looks identical to a scoped one. A stored league carrying a
+  // non-zero poolSize is not a contrived shape -- /api/tournament/import
+  // defaults PoolSize on every format and never runs normalizePoolConfig,
+  // so an imported league sits on disk with exactly this pairing.
+  it('a kind-only change does not run the format normalizer', () => {
+    const stored = {
+      format: FORMAT_LEAGUE, kind: KIND_TEAM, teamSize: 5, teamMatchType: 'fixed',
+      engi: false, withZekkenName: false, poolSize: 4, poolWinners: 2,
+      extraQualifiers: '',
+    };
+    const sent = shapeConfigForSave(stored, { ...stored, kind: KIND_INDIVIDUAL });
+
+    // The kind half DID run.
+    expect(sent.teamSize).toBe(0);
+    expect(sent.teamMatchType).toBe('fixed');
+
+    // The format half did NOT: format never moved, so a save about kind may
+    // not quietly rewrite fields format owns.
+    expect(sent.poolSize, 'a kind change must not zero a stored pool size').toBe(4);
+    expect(sent.poolWinners).toBe(2);
+  });
+
+  // pendingConfigClears derives from shapeConfigForSave, so the notice
+  // inherits the scoping rather than restating it -- which is what stops it
+  // announcing a clear the save will not make (or, worse, staying silent
+  // about one it will).
+  it('the pending-clears notice follows the same scoping, naming no kind field on a format-only change', () => {
+    const staged = { ...TEAM_WITH_ZEKKEN, format: FORMAT_LEAGUE };
+    const named = pendingConfigClears(TEAM_WITH_ZEKKEN, staged).map((e) => e.key);
+    expect(named, 'the notice must not blame a format change for clearing a kind-owned field').not.toContain('withZekkenName');
+    expect(named, 'nor for a team size the save leaves alone').not.toContain('teamSize');
+    expect(named, 'it should still name what the format change really does clear').toEqual(
+      expect.arrayContaining(['poolSize', 'poolWinners'])
+    );
   });
 });

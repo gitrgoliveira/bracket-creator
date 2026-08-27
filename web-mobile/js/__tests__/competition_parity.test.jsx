@@ -2,21 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import {
-  LABEL_KIND, LABEL_FORMAT, LABEL_POOL_FORMAT,
-  LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS,
-  LABEL_ROUND_ROBIN,
-  LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK,
-  LABEL_POOL_DURATION, HINT_POOL_DURATION,
-  LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
-  LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
-  LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
-  LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, LABEL_ZEKKEN, LABEL_ENGI,
-  HINT_ZEKKEN, HINT_ENGI,
-  LABEL_NAGINATA, HINT_NAGINATA,
-  LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
-} from '../competition_shape.jsx';
+import * as SHAPE from '../competition_shape.jsx';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (f) => readFileSync(resolve(__dirname, '..', f), 'utf8');
@@ -209,43 +195,63 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   const setupSrc = SETUP_STRIPPED;
   const settingsSrc = SETTINGS_STRIPPED;
 
-  // Every LABEL_*/HINT_* string competition_shape.jsx exports (verified
-  // against `grep -n '^export const LABEL_\|^export const HINT_'
-  // competition_shape.jsx` 2026-08-26: exactly these 21). Wire-value
-  // constants (FORMAT_LEAGUE, KIND_TEAM, POOL_FORMAT_FULL, ...) are
-  // deliberately excluded: those are expected to appear literally in both
-  // screens' own comparison logic (`local.format === "league"` and the
-  // like) and are not operator-facing copy, so testing them this way would
-  // just be noise. Likewise *_OPTIONS array literals (TEAM_MATCH_TYPE_OPTIONS
-  // and friends) are not listed here -- Task 1's structural check above
-  // already covers them (they end in `_OPTIONS`, so `isControlBearing`
-  // catches a missing import), and their per-option `label` strings are
-  // asserted where they are used (e.g. formatHint) rather than restated in
-  // this flat list.
-  const COPY = {
-    LABEL_KIND, LABEL_FORMAT, LABEL_POOL_FORMAT,
-    LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS,
-    LABEL_ROUND_ROBIN,
-    LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK,
-    LABEL_POOL_DURATION, HINT_POOL_DURATION,
-    LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
-    LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
-    LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
-    LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, LABEL_ZEKKEN, LABEL_ENGI,
-    HINT_ZEKKEN, HINT_ENGI,
-    LABEL_NAGINATA, HINT_NAGINATA,
-    LABEL_CHECK_IN, HINT_CHECK_IN,
-    LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX,
-  };
+  // Every LABEL_*/HINT_* string competition_shape.jsx exports, DERIVED from
+  // the module rather than transcribed. The list used to be a hand-written
+  // object literal, and it went stale exactly the way a hand-written list
+  // does: its own comment claimed "exactly these 21" while the literal below
+  // it named 29 and the module exported 34. The five it had drifted past --
+  // LABEL_COURTS, LABEL_POOL_SIZE_MODE, HINT_TEAM_SIZE,
+  // HINT_POOL_WINNERS_LOCKED, HINT_KIND_ONLY_INDIVIDUAL -- were the four
+  // newest hoists plus one, i.e. the most drift-prone constants in the file
+  // and the ones this guard was least able to protect. Nothing was wrong
+  // with any of them; they had simply been forgotten, and a forgotten entry
+  // is silent: re-inlining "Assigned shiaijo (courts)" on one screen left
+  // the whole suite green.
+  //
+  // Reading the namespace closes that permanently -- a constant is covered
+  // the moment it is exported, and the stale count cannot come back because
+  // there is no count to keep. Two filters, both structural rather than a
+  // list of names:
+  //
+  //   - the LABEL_/HINT_ prefix picks out operator-facing copy. Wire-value
+  //     constants (FORMAT_LEAGUE, KIND_TEAM, POOL_FORMAT_FULL, ...) are
+  //     deliberately not copy: both screens are EXPECTED to contain them
+  //     literally in their own comparison logic (`local.format === "league"`
+  //     and the like), so asserting on them would be noise.
+  //   - typeof === 'string' drops MIN_POOL_SIZE and friends, and would drop
+  //     a LABEL_ that ever became a function; the vacuous-pass test below
+  //     then proves the survivors are non-empty.
+  //
+  // *_OPTIONS array literals are covered by Task 1's structural check above
+  // (they end in `_OPTIONS`, so `isControlBearing` catches a missing
+  // import); their per-option `label` strings are asserted where they are
+  // used (e.g. formatHint) rather than restated here.
+  const COPY = Object.fromEntries(
+    Object.entries(SHAPE).filter(
+      ([name, value]) =>
+        (name.startsWith('LABEL_') || name.startsWith('HINT_')) && typeof value === 'string'
+    )
+  );
 
-  it('every listed constant is still a non-trivial string export (not a vacuous pass)', () => {
-    // If competition_shape.jsx ever drops one of these exports, the named
-    // import above resolves to `undefined` rather than throwing (ESM named
-    // imports are not checked by esbuild transpile-only or vitest -- see
-    // check-imports.mjs's own header), which would silently exclude that
-    // constant from every assertion below instead of failing loudly.
+  it('the derived COPY set is not empty and covers every LABEL_/HINT_ string export', () => {
+    // A namespace import that silently resolved to {} (a moved or renamed
+    // module) would make every generated assertion below vanish rather than
+    // fail, which is the failure mode this whole block exists to prevent.
+    const exported = Object.keys(SHAPE).filter(
+      (n) => n.startsWith('LABEL_') || n.startsWith('HINT_')
+    );
+    expect(exported.length, 'competition_shape.jsx exports no LABEL_/HINT_ constants; is the import path still right?').toBeGreaterThan(20);
+    expect(Object.keys(COPY).sort(), 'a LABEL_/HINT_ export is not a string, so it silently left the copy guard').toEqual(exported.sort());
+  });
+
+  it('every derived constant is a non-trivial string (not a vacuous pass)', () => {
+    // COPY is filtered on `typeof value === 'string'`, so an emptied
+    // constant is the one degradation that survives the filter: it would
+    // still be a string, and `SOURCES[key].includes('')` is true for every
+    // file, turning that constant's re-spelling assertion into a
+    // permanently failing one and its render assertion into a meaningless
+    // pass. Catch it here, once, with a message that names the constant.
     for (const [name, value] of Object.entries(COPY)) {
-      expect(typeof value, `${name} is not a string export of competition_shape.jsx any more; update the COPY list above`).toBe('string');
       expect(value.length, `${name} is an empty string; nothing to assert`).toBeGreaterThan(0);
     }
   });
@@ -307,10 +313,31 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   // Two or more occurrences of the bare name = the import line plus at least
   // one render site. One occurrence = imported and never used, which is the
   // shape a re-inlined literal leaves behind.
-  const VIA_HELPER = new Set(['LABEL_POOL_DURATION', 'HINT_POOL_DURATION']);
+  //
+  // Two constants are exempt on BOTH screens (durationField wraps them, so
+  // each screen names them once, at the helper call) and one is exempt on
+  // create only:
+  //
+  //   HINT_KIND_ONLY_INDIVIDUAL is the stand-in hint the SETTINGS screen
+  //   shows in place of the Zekken / Engi hints when the competition is a
+  //   team one. The create form has no use for it and correctly never
+  //   names it, because the two screens deliberately differ on
+  //   presentation there: create HIDES both controls for a team
+  //   competition (kind is freely switchable on an empty form, so a hidden
+  //   control comes straight back), settings RENDERS them disabled with
+  //   this hint (once a roster exists the kind toggle is itself locked, so
+  //   hiding them would leave an operator unable to see why a setting they
+  //   remember is gone). See zekkenApplies' own comment for that split.
+  //   It is copy with ONE home by design, not drift.
+  const RENDER_EXEMPT = {
+    LABEL_POOL_DURATION: new Set(['setup', 'settings']),
+    HINT_POOL_DURATION: new Set(['setup', 'settings']),
+    HINT_KIND_ONLY_INDIVIDUAL: new Set(['setup']),
+  };
   for (const name of Object.keys(COPY)) {
-    if (VIA_HELPER.has(name)) continue;
+    const renderExempt = RENDER_EXEMPT[name] || new Set();
     for (const key of ['setup', 'settings']) {
+      if (renderExempt.has(key)) continue;
       it(`${FILE_NAMES[key]} actually renders ${name}, not just imports it`, () => {
         const uses = (SOURCES[key].match(new RegExp(`\\b${name}\\b`, 'g')) || []).length;
         expect(

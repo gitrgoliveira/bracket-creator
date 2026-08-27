@@ -37,7 +37,7 @@ import {
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
-  teamFieldsVisible, zekkenApplies, engiApplies,
+  teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
   shapeConfigForSave, resolveTeamSize, kindChangeBlockedReason,
   FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_PARTIAL,
   MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears, swissSettingsError,
@@ -505,8 +505,23 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // sync effect can absorb the server-confirmed values on the next SSE
       // round-trip. Fields re-edited DURING the in-flight save (value differs)
       // stay in the set and roll into the next save.
+      //
+      // Object.is, not ===, and the difference is NaN. A cleared number
+      // input stages NaN (decideNumericUpdate's contract, see updateNumber
+      // below), and `NaN === NaN` is false -- so a saved-while-cleared
+      // field looked to this loop like one re-edited mid-flight and stayed
+      // in editedFieldsRef forever. The consequences compound: the sync
+      // effect skips any field in that set, so the input could never be
+      // repopulated from the server and stayed visibly blank against a real
+      // stored value, and `stillDirty` below stayed true, so "● Unsaved
+      // changes" never cleared and Save never settled. Every numeric field
+      // with a blocking error gate (pool size, pool winners, Swiss rounds,
+      // the durations) is protected from reaching here as NaN by that gate
+      // -- teamSize was the one without one, which is how this was found.
+      // The gate is now there too (blockingTeamSizeErr), but the comparison
+      // is what makes the mechanism safe for the next ungated field.
       Object.keys(persistingValues).forEach(k => {
-        if (localRef.current[k] === persistingValues[k]) editedFieldsRef.current.delete(k);
+        if (Object.is(localRef.current[k], persistingValues[k])) editedFieldsRef.current.delete(k);
       });
       const now = new Date();
       setLastSaved(`${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`);
@@ -806,6 +821,30 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const swissSettingsErr = swissSettingsError(local.format, local.swissRounds);
   const blockingSwissSettingsErr = !!swissSettingsErr && (formatChanged || swissFieldsChanged);
 
+  // The Team size twin of the two gates above. It closes a SILENT failure
+  // rather than a raw-server-string one, which is why it was the last of
+  // the three to be noticed: resolveTeamSize (competition_shape.jsx)
+  // deliberately falls back to the last-saved value rather than sending a
+  // clobbering 0, so typing 1 into Team size and clicking Save stored the
+  // OLD size and reported "✓ Saved at HH:MM:SS". No 400, no inline error,
+  // no indication that the number on screen was not the number on disk.
+  // The create form has refused the same value at submit all along
+  // (teamSizeError, now shared).
+  //
+  // Change-scoped like its siblings: a stored team competition already
+  // carrying an invalid teamSize -- kind "team" with teamSize 0 is what
+  // /api/tournament/import produces from a manifest that omits `team_size`
+  // -- must stay editable for every unrelated field.
+  //
+  // Gating Save here is also what keeps a cleared (NaN) team size out of
+  // saveNow entirely. That matters beyond this field: see the Object.is
+  // comparison in saveNow's post-save cleanup for the trap a persisted NaN
+  // used to spring.
+  const teamSizeChanged = !Object.is(local.teamSize, c.teamSize);
+  const kindChanged = local.kind !== c.kind;
+  const teamSizeErr = teamSizeError(local.kind, local.teamSize, MAX_TEAM_SIZE);
+  const blockingTeamSizeErr = !!teamSizeErr && (kindChanged || teamSizeChanged);
+
   // What THIS save is about to clear, per the operator ruling that a config
   // change must never quietly overwrite or delete the operator's data --
   // it must surface what will happen and let the operator decide.
@@ -835,7 +874,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // return does not supply.
   const pendingClearsTarget = [
     formatChanged ? (optionLabel(FORMAT_OPTIONS, local.format) || local.format) : null,
-    local.kind !== c.kind ? (optionLabel(KIND_OPTIONS, local.kind) || local.kind) : null,
+    kindChanged ? (optionLabel(KIND_OPTIONS, local.kind) || local.kind) : null,
   ].filter(Boolean).join(" / ");
   // The mechanism sentence is dropped from the standing hint while the red
   // error is on screen: the error states it one line above, and printing it
@@ -860,7 +899,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // an invalid shiaijo count the header button greyed out while the footer
   // one stayed live, fired the PUT and took a 400. Anything that should block
   // saving belongs here, never at a call site.
-  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr;
+  const saveDisabled = !isDirty || saving || hasDurationError || blockingCourtsErr || blockingPoolSettingsErr || blockingSwissSettingsErr || blockingTeamSizeErr;
 
   // The blocking message and its precedence, shared by the header chip and the
   // footer for the same reason saveDisabled is: the footer used to restate the
@@ -884,7 +923,8 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         : blockingPoolSettingsErr ? `⚠ ${poolSettingsErr}`
           // Same reasoning as the pool arm above: swissSettingsError already
           // names the field and the rule, so it prints directly.
-          : blockingSwissSettingsErr ? `⚠ ${swissSettingsErr}` : "";
+          : blockingSwissSettingsErr ? `⚠ ${swissSettingsErr}`
+            : blockingTeamSizeErr ? `⚠ ${teamSizeErr}` : "";
   const saveBlocked = !!saveBlockMessage;
 
   return (
@@ -1078,7 +1118,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           <NumberField label={LABEL_TEAM_SIZE} min={MIN_TEAM_SIZE} max={MAX_TEAM_SIZE}
             value={local.teamSize}
             onChange={(raw) => updateNumber("teamSize", raw, MIN_TEAM_SIZE)}
-            disabled={isDrawReady} hint={HINT_TEAM_SIZE} />
+            disabled={isDrawReady} hint={HINT_TEAM_SIZE} error={teamSizeErr} />
         </>
       )}
       {teamFieldsVisible(local.kind) && (

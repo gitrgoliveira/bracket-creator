@@ -3438,6 +3438,15 @@ func TestUpdateCompetition_FormatKindLockedWhenStarted(t *testing.T) {
 // IsKachinuki() requires teamSize >= 2, but every LATER settings PUT would
 // echo that same pair back on the wire and now fail the WIRE-value check,
 // locking the operator out of the settings screen entirely).
+//
+// The re-check COERCES rather than rejects, which is what this asserts. The
+// value it judges is one the write INHERITED, never one a client sent (a
+// sent value has already met the wire check in the same branch), so a 400
+// would answer the operator's PUT with an error naming a field their
+// request never mentioned. Resetting to the fixed default lands exactly
+// the record the operator asked for -- an individual competition -- and
+// leaves nothing illegal on disk. See the sibling test below for the case
+// where rejecting would have been an outright lockout.
 func TestUpdateCompetition_KachinukiZeroTeamSizeCannotPersist(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 
@@ -3473,13 +3482,77 @@ func TestUpdateCompetition_KachinukiZeroTeamSizeCannotPersist(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code,
-		"a write that would persist kachinuki alongside teamSize 0 must be rejected, not silently stored: %s", w.Body.String())
+	require.Equal(t, http.StatusOK, w.Code,
+		"the operator asked for an individual competition and may have it; the inherited kachinuki is the server's problem to resolve, not theirs: %s", w.Body.String())
 
 	stored, err := store.LoadCompetition(cid)
 	require.NoError(t, err)
-	assert.Equal(t, state.TeamMatchTypeKachinuki, stored.TeamMatchType, "rejected write must not touch the stored record")
-	assert.Equal(t, 5, stored.TeamSize, "rejected write must not touch the stored record")
+	assert.Equal(t, state.TeamMatchTypeFixed, stored.TeamMatchType,
+		"the pair (kachinuki, teamSize 0) is what ValidateTeamMatchType forbids; it must not reach disk by way of the inherit")
+	assert.Equal(t, 0, stored.TeamSize)
+	assert.Equal(t, "individual", stored.Kind)
+
+	require.NoError(t, state.ValidateTeamMatchType(stored.TeamMatchType, stored.TeamSize),
+		"whatever the route, the record left behind must satisfy the rule the re-check enforces")
+}
+
+// The lockout the coercion above exists to prevent, driven from the state a
+// PRE-FIX server could leave on disk: (teamMatchType kachinuki, teamSize 0).
+// Rejecting an inherited value there is not a one-off 400 -- it is
+// permanent. Every later settings PUT from a client that omits
+// teamMatchType (a non-SPA API caller, or a browser tab cached from before
+// the field shipped) inherits the same stored pair and fails the same way,
+// over a field the request never mentions, with nothing on the settings
+// screen able to repair it.
+//
+// CLAUDE.md states the rule this pins: a write answers for what it
+// introduces, not for what it inherited. Same shape as stripInvalidHantei
+// (engine/scoring.go), which strips an inherited mark and logs rather than
+// blaming the operator for state already on disk.
+func TestUpdateCompetition_InheritedIllegalTeamMatchTypeIsRepairedNotRejected(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "kachinuki-zero-stored"
+	// SaveCompetition writes straight through, so this is the record a
+	// pre-fix PUT would have produced -- not a shape any handler accepts
+	// today.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            cid,
+		Name:          "Stored Illegal Pair",
+		Format:        state.CompFormatMixed,
+		Kind:          "individual",
+		TeamSize:      0,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		Courts:        []string{"A"},
+		PoolSize:      4,
+		PoolWinners:   2,
+		Status:        state.CompStatusSetup,
+	}))
+
+	// A rename. Nothing about teams, nothing about match format.
+	body, _ := json.Marshal(map[string]any{
+		"id":          cid,
+		"name":        "Renamed",
+		"format":      state.CompFormatMixed,
+		"kind":        "individual",
+		"teamSize":    0,
+		"courts":      []string{"A"},
+		"poolSize":    4,
+		"poolWinners": 2,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"a rename must not 400 over a stored value the request never mentioned: %s", w.Body.String())
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, "Renamed", stored.Name, "the edit the operator actually asked for must land")
+	assert.Equal(t, state.TeamMatchTypeFixed, stored.TeamMatchType,
+		"and the write repairs what it inherited on its way past, so the NEXT save is an ordinary one")
 }
 
 // TestUpdateCompetition_MixedFormatRequiresUsablePoolSize verifies bc-symm's
@@ -3544,16 +3617,24 @@ func TestUpdateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 }
 
 // TestCreateCompetition_MixedFormatRequiresUsablePoolSize is the POST twin of
-// TestUpdateCompetition_MixedFormatRequiresUsablePoolSize above. Unlike the
-// PUT guard (change-scoped to protect a stored value from a lockout), POST
-// authors a brand-new record with nothing to inherit, so the check is
-// unconditional: create must reject the combination outright, not merely
-// when some other field also happens to differ.
+// TestUpdateCompetition_MixedFormatRequiresUsablePoolSize above, and the two
+// doors deliberately differ: the PUT guard is change-scoped to protect a
+// stored value from a lockout, while POST authors a brand-new record with
+// nothing to inherit and so runs unconditionally.
+//
+// What POST does NOT do is refuse an OMITTED pool size. That body
+// (`{"name","format":"mixed","courts"}`) returned 201 for the whole life of
+// the endpoint, four other tests in this package send it, and the identical
+// competition arriving through /api/tournament/import lands fine because
+// that door has always defaulted PoolSize. Both doors now read the same
+// defaultPoolSize constant, so an omission cannot succeed at one and fail
+// at the other. The guard keeps the case a caller STATES and the draw could
+// never build.
 func TestCreateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	t.Run("REJECT create with mixed format and no usable pool size", func(t *testing.T) {
+	t.Run("DEFAULT an omitted pool size rather than refusing the create", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
 			"id":     "create-mixed-no-poolsize",
 			"name":   "Create Mixed No PoolSize",
@@ -3566,13 +3647,58 @@ func TestCreateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusBadRequest, w.Code,
-			"a create landing on mixed with no usable pool size must be rejected: %s", w.Body.String())
-		assert.Contains(t, w.Body.String(), "mixed format requires a pool size of at least 1")
+		require.Equal(t, http.StatusCreated, w.Code,
+			"an omitted pool size must be defaulted, as /api/tournament/import has always defaulted it: %s", w.Body.String())
 
 		stored, err := store.LoadCompetition("create-mixed-no-poolsize")
 		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, defaultPoolSize, stored.PoolSize,
+			"and it must be the SAME default the import door uses, or the two authoring doors answer one body differently")
+	})
+
+	t.Run("REJECT a stated pool size the draw could never build", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":       "create-mixed-negative-poolsize",
+			"name":     "Create Mixed Negative PoolSize",
+			"format":   state.CompFormatMixed,
+			"courts":   []string{"A"},
+			"poolSize": -1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code,
+			"a stated impossible pool size is the caller's own value and must be refused: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "mixed format requires a pool size of at least 1")
+
+		stored, err := store.LoadCompetition("create-mixed-negative-poolsize")
+		require.NoError(t, err)
 		assert.Nil(t, stored, "a rejected create must persist nothing")
+	})
+
+	// The default is scoped to "mixed" on this door: normalizePoolConfig
+	// runs first and zeroes PoolSize for league/playoffs, and it must stay
+	// zeroed -- a bare bracket has no pool phase to size.
+	t.Run("does not default a pool size for a format that has no pool phase", func(t *testing.T) {
+		body, _ := json.Marshal(map[string]any{
+			"id":     "create-playoffs-no-poolsize",
+			"name":   "Create Playoffs No PoolSize",
+			"format": state.CompFormatPlayoffs,
+			"courts": []string{"A"},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+		stored, err := store.LoadCompetition("create-playoffs-no-poolsize")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, 0, stored.PoolSize, "normalizePoolConfig zeroed this; the default must not undo it")
 	})
 
 	t.Run("ALLOW create with mixed format and a usable pool size", func(t *testing.T) {

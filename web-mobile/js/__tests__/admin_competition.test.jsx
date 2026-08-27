@@ -746,7 +746,16 @@ describe('AdminSettings saveNow stale-snapshot fix (Copilot round-15)', () => {
     // The fragile name-only Set snapshot must be gone.
     expect(src).not.toContain('new Set(editedFieldsRef.current)');
     // Conditional clear: only delete when the staged value still matches.
-    expect(src).toMatch(/if\s*\(localRef\.current\[k\]\s*===\s*persistingValues\[k\]\)\s*editedFieldsRef\.current\.delete\(k\)/);
+    //
+    // Object.is, NOT ===, and the distinction is load-bearing rather than
+    // stylistic. A cleared number input stages NaN (decideNumericUpdate's
+    // contract), and `NaN === NaN` is false -- so a field saved while
+    // cleared looked to this loop like one re-edited mid-flight, stayed in
+    // editedFieldsRef forever, and could never again be repopulated by the
+    // sync effect (which skips any field in that set). The input stayed
+    // visibly blank against a real stored value and "● Unsaved changes"
+    // never cleared. Reverting to === reddens this assertion.
+    expect(src).toMatch(/if\s*\(Object\.is\(localRef\.current\[k\],\s*persistingValues\[k\]\)\)\s*editedFieldsRef\.current\.delete\(k\)/);
   });
 
   it('user-edit handlers mark fields via editedFieldsRef.add', () => {

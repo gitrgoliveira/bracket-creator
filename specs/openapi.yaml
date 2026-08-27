@@ -594,6 +594,22 @@ paths:
         Also requires `X-Admin-Password` when the destructive-ops gate is active
         (see the AdminPassword security scheme); returns 503 when locked mode is
         active but `TOURNAMENT_ADMIN_PASSWORD_HASH` is unset.
+
+        Each competition row is validated against the same rules
+        `POST /api/competitions` applies, and two manifest keys are worth
+        calling out because their absence is not neutral:
+
+        - `kind` must be `""`, `"individual"` or `"team"`. Omitting it is
+          fine and means individual.
+        - `team_size` must be stated (and be >= 2) whenever `kind` is
+          `"team"`. An omitted key decodes to 0, which is refused with
+          `teamSize: team competitions require teamSize >= 2` -- the same
+          answer the create endpoint gives. A row that omitted it was
+          accepted by earlier versions; it now fails that row while the
+          rest of the import proceeds.
+
+        `pool_size` and `pool_size_mode`, by contrast, ARE defaulted when
+        omitted (to 4 and `"max"`).
       security:
         - TournamentPassword: []
           AdminPassword: []
@@ -903,7 +919,11 @@ paths:
         - `format` landing on `"mixed"` requires `poolSize >= 1`
           (`mixed format requires a pool size of at least 1`); also
           unconditional on create, unlike its change-scoped PUT
-          counterpart.
+          counterpart. An OMITTED `poolSize` is not a violation: it is
+          defaulted, matching `POST /api/tournament/import`, so only a
+          stated value below 1 is refused. `teamSize` is NOT defaulted the
+          same way: when `kind` is `"team"` a size must be stated, per the
+          `teamSize >= 2` rule above.
         - `courts`: each label a single character, at most 16 labels, no
           duplicates, and every label must be one the tournament has.
         - `courts` COUNT, when the competition's `format` builds a knockout

@@ -138,7 +138,7 @@ import {
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
   teamFieldsVisible, zekkenApplies, engiApplies, teamMatchTypeActive, twoThirdPlacesForNaginata,
-  MIN_TEAM_SIZE, poolSettingsError, swissSettingsError,
+  MIN_TEAM_SIZE, poolSettingsError, swissSettingsError, teamSizeError,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   FORMAT_MIXED, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
@@ -916,16 +916,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // fall back to 5 via `teamSize || 5`, so the user's cleared input
     // produces a different stored value than they see. Reject early
     // when kind=team. (Individual competitions don't expose this field;
-    // teamSize=0 is the canonical value there.)
-    if (teamFieldsVisible(kind)) {
-      if (!Number.isInteger(teamSize)) {
-        setError(`${LABEL_TEAM_SIZE} must be a whole number.`);
-        return;
-      }
-      if (teamSize < MIN_TEAM_SIZE || teamSize > MAX_TEAM_SIZE) {
-        setError(`A team needs at least ${MIN_TEAM_SIZE} members (max ${MAX_TEAM_SIZE}).`);
-        return;
-      }
+    // teamSize=0 is the canonical value there, which is why the shared
+    // rule returns null for them rather than needing a kind test here.)
+    //
+    // The rule itself is teamSizeError (competition_shape.jsx), shared with
+    // the settings screen, which had no equivalent check at all and
+    // silently discarded an out-of-range value while reporting a
+    // successful save. Same route poolSettingsError and swissSettingsError
+    // took out of this file.
+    const teamSizeErr = teamSizeError(kind, teamSize, MAX_TEAM_SIZE);
+    if (teamSizeErr) {
+      setError(teamSizeErr);
+      return;
     }
 
     // Two distinct names can normalize to the same slug (e.g. "Men's" vs
@@ -1016,9 +1018,13 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // league, and a competition that carried no value for this field showed
     // the checkbox unticked there -- the naginata convention -- while creating
     // the same league from this form ticks it. Emitting it always means the
-    // value is explicit from creation, so the two routes agree; the field is
-    // no longer `omitempty` on the Go side so an explicit false survives the
-    // round trip (see state.Competition's own comment).
+    // value is explicit from creation, so the two routes agree.
+    //
+    // The `omitempty` on the Go side is NOT what caused that and did not
+    // need changing: a bool with omitempty is value-lossless, since false
+    // marshals to an absent key and an absent key unmarshals back to
+    // false. The conditional SEND was the whole bug (see
+    // state.Competition's own comment on this field).
     c.leagueTwoThirdPlaces = leagueTwoThirdPlaces;
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
     // post-construction pattern as poolFormat above: buildCompetition

@@ -1055,13 +1055,23 @@ const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 // AFTER the adopt effect, so the adopt always sees the value from the render
 // BEFORE the change. It self-corrects: adopting makes the next render clean.
 //
-// KNOWN UNREACHED CHANNEL: EngiScoreEditorModal (admin_scoring_engi.jsx) holds
-// its flag counts in mount-seeded state and calls nothing here, so an engi
-// result recorded elsewhere is neither shown nor protected. That editor writes
-// only on an explicit submit (it deliberately skips autosave, since flags are
-// entered in one go), which narrows the window but does not close it. Named
-// here rather than left to be noticed, because "visibly absent" is only true of
-// channels a reader knows to look for.
+// THE FULL SET, because "visibly absent" is only true of a set a reader can
+// enumerate. There are THREE editor bodies behind ONE entry point, and every
+// host mounts the entry point, never a body:
+//
+//   ScoreEditorModal      admin_scoring_individual.jsx — the entry point AND
+//                         the individual editor; dispatches the other two
+//   EngiScoreEditorModal  admin_scoring_engi.jsx       — flag counts
+//   TeamScoreEditorModal  admin_scoring_team.jsx       — the bout board
+//
+// Four hosts mount ScoreEditorModal: the shiaijo inline scorer, the admin
+// schedule editor, the pools tab and the competition bracket. Which body runs
+// is decided by the competition, not the host, so a channel missing from a body
+// is missing on ALL FOUR surfaces — which is why the count that matters here is
+// three, not four.
+//
+// All three call this hook. If you add a fourth body, or a new piece of local
+// state to one of these three, it needs a channel or an explicit reason.
 function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty = false }) {
   // Hold `apply` in a ref so the adopt effect can depend on `signature` ALONE:
   // `apply` is a fresh closure every render and would otherwise re-run the

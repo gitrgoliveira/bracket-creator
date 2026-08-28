@@ -295,12 +295,59 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
 // its own autosave had landed and the server agreed. The gate would have been
 // shut from the operator's first tap onward — which is precisely when another
 // device's result turns up.
+// The third editor body. All four hosts mount ScoreEditorModal, which dispatches
+// to this one for an engi competition, so a channel missing here is missing on
+// every surface an engi match can be scored from. It has no autosave (flags are
+// entered in one go), which makes the divergence window WIDER than the kendo
+// editors', not narrower: nothing it holds reaches the server until submit.
+describe('the engi editor shows the flag count the server holds', () => {
+  const engiMatch = (over = {}) => ({
+    id: 'e1', status: 'running', phase: 'pool', court: 'A',
+    compEngi: true,
+    sideA: { id: 'p1', name: 'Ito - Mori' },
+    sideB: { id: 'p2', name: 'Sato - Abe' },
+    flagsA: 0, flagsB: 0,
+    ...over,
+  });
+  const openEngi = (match) =>
+    render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={vi.fn()} password="" />);
+  const counts = (c) => ({
+    aka: c.querySelector('[data-testid="engi-aka-count"]')?.textContent,
+    shiro: c.querySelector('[data-testid="engi-shiro-count"]')?.textContent,
+  });
+
+  it('adopts a flag count recorded on another device', async () => {
+    const { rerender, container } = openEngi(engiMatch());
+    expect(container.querySelector('[data-testid="engi-score-editor"]'), 'the engi editor must be the one shown').toBeTruthy();
+    expect(counts(container)).toEqual({ aka: '0', shiro: '0' });
+
+    await act(async () => { rerender(
+      <ScoreEditorModal match={engiMatch({ flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect(counts(container), 'the server holds 3-2, so this editor shows 3-2').toEqual({ aka: '3', shiro: '2' });
+  });
+
+  it('keeps the operator\'s unsaved flags rather than overwriting them', async () => {
+    // A pair of flag counts is ONE reading of ONE performance: no seam to merge
+    // along, so an operator mid-entry keeps everything they typed.
+    const { rerender, container } = openEngi(engiMatch());
+    await act(async () => { fireEvent.click(container.querySelector('[data-testid="engi-aka-inc"]')); });
+    expect(counts(container)).toEqual({ aka: '1', shiro: '0' });
+
+    await act(async () => { rerender(
+      <ScoreEditorModal match={engiMatch({ flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect(counts(container), "the operator's own entry survives").toEqual({ aka: '1', shiro: '0' });
+  });
+});
+
 describe('the team editor shows the bout scoreline the server holds', () => {
   const KYOTO = 'Kyoto', OSAKA = 'Osaka';
   // A fixed-order (non-kachinuki) 3-person encounter: `positions` is pinned at
   // teamSize, so scoring a bout does NOT change the row count. That keeps these
-  // tests on the re-seed itself, away from the growth path and away from the
-  // subResults.length remount key two mount sites carry.
+  // tests on the re-seed itself, away from the growth path.
   function teamMatch(subs, extra = {}) {
     return {
       id: 'tm2',

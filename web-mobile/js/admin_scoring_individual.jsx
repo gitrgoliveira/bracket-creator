@@ -36,6 +36,7 @@ import {
   FoulCounter,
   ReasonPrompt,
   CORRECTION_PRESETS,
+  useAdoptFromServer,
 } from './admin_scoring_shared.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
@@ -112,22 +113,21 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // mark it distinctly (vs an ippon-derived win).
   const [decidedByHantei, setDecidedByHantei] = useStateA(hanteiRecorded);
   // ADOPT a verdict recorded on another device, so this editor cannot sit
-  // showing "Decide by hantei…" while every other surface shows the Ht.
-  //
-  // Keyed on the VALUE, not on `m`: an SSE reload re-creates the match object
-  // on every broadcast, so a `[m]`-keyed effect would fight the operator's
-  // every tap. Keyed on the boolean it fires only when the SERVER's verdict
-  // actually flips, which leaves a local arm or cancel standing (the server
-  // value did not move) while still following a real change in either
-  // direction. It touches the verdict only: aPts/bPts and the fouls are
-  // untouched, so an edit in progress survives.
+  // showing "Decide by hantei…" while every other surface shows the Ht. The
+  // policy (unconditional, because keying on the VALUE already leaves a local
+  // arm or cancel standing) lives in useAdoptFromServer; see that comment. It
+  // touches the verdict only: aPts/bPts and the fouls are untouched, so an edit
+  // in progress survives.
   //
   // The alternative — freeze at mount and stay silent about what you never saw
   // — trades the erase for a divergence, and a result that reads differently
   // depending on which screen you look at is the worse failure. Adopting means
   // an explicit `false` below is always the operator ruling on something in
   // front of them.
-  useEffectA(() => { setDecidedByHantei(hanteiRecorded); }, [hanteiRecorded]);
+  useAdoptFromServer({
+    signature: hanteiRecorded,
+    apply: () => setDecidedByHantei(hanteiRecorded),
+  });
   // Which side ("a"/"b"/"") holds a RECORDED hantei verdict, for the display
   // chip in the slot grid. Gated on the SERVER's verdict — not the local armed
   // state: arming a hantei on a reopened match must not resolve the stale
@@ -174,6 +174,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
   const [repPlayerA, setRepPlayerA] = useStateA(m.repPlayerA || "");
   const [repPlayerB, setRepPlayerB] = useStateA(m.repPlayerB || "");
+  // Follow a pick made on another device, same rule as every other channel.
+  //
+  // The narrow reading first, because it bounds what this is worth: an UNSET
+  // dropdown was never the danger. repBlock rides every write, but the server
+  // preserves these on empty (backfillMatchIdentity, engine/scoring.go), so an
+  // editor that mounted before anyone picked sends "" and wipes nothing. What
+  // it does NOT protect is a mount-time value that has since been CHANGED
+  // elsewhere: "an explicit value in result always wins", so this editor would
+  // put its stale name back. That is the case this closes.
+  useAdoptFromServer({
+    signature: `${m.repPlayerA || ""} ${m.repPlayerB || ""}`,
+    apply: () => { setRepPlayerA(m.repPlayerA || ""); setRepPlayerB(m.repPlayerB || ""); },
+  });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
   // AdminScoreEditor unmounts), gate the setState. handleDismiss
@@ -440,11 +453,9 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // OLD score left free, so the editor showed `Ht` at 0-0 against a stored 1-1.
   //
   // Keyed on a signature of the SERVER's result, so it fires when that changes
-  // and not on every SSE re-render. `wasDirtyRef` holds the PREVIOUS render's
-  // isDirty — i.e. dirtiness measured before this change landed — because this
-  // render's isDirty compares against the new server values and would read true
-  // for an untouched editor, which is the very thing being corrected. An
-  // operator with unsaved work keeps it: their edits are not ours to discard.
+  // and not on every SSE re-render. The keep-local-edits policy and the
+  // previous-render dirty read both live in useAdoptFromServer now; the call
+  // site is below isDirty, which is what it needs.
   //
   // Be precise about what happens if they then save over a newer result.
   // Timestamp last-write-wins (mp-y3nk) now covers EVERY match, pool and
@@ -473,17 +484,14 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     initialAPts, initialBPts, initialAFouls, initialBFouls,
     initialEnchoPeriods, initialIsDrawToggled,
   ]);
-  const wasDirtyRef = useRefA(false);
-  useEffectA(() => {
-    if (wasDirtyRef.current) return;
+  const applyServerScore = () => {
     setAPts(initialAPts);
     setBPts(initialBPts);
     setAFouls(initialAFouls);
     setBFouls(initialBFouls);
     setEnchoPeriodCount(initialEnchoPeriods);
     setIsDrawToggled(initialIsDrawToggled);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverScoreSig]);
+  };
 
   // Arranged as [left, right]: left is always SHIRO (White), right is always AKA (Red).
   // onIncrement applies the FIK 2-foul auto-award rule via applyFoulIncrement:
@@ -581,10 +589,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     isDrawToggled !== initialIsDrawToggled ||
     enchoPeriodCount !== initialEnchoPeriods ||
     decidedByHantei !== hanteiRecorded;
-  // Declared AFTER the re-seed effect above so that effect reads the value from
-  // the render BEFORE the server change. It self-corrects: a re-seed makes the
-  // next render's isDirty false again.
-  useEffectA(() => { wasDirtyRef.current = isDirty; });
+  // The scoreline half of the same rule, declared HERE because the hook needs
+  // isDirty: it reads the value from the render BEFORE the server change (see
+  // useAdoptFromServer). It self-corrects: a re-seed makes the next render's
+  // isDirty false again.
+  useAdoptFromServer({
+    signature: serverScoreSig,
+    apply: applyServerScore,
+    keepLocalEdits: true,
+    isDirty,
+  });
   const handleDismiss = async () => {
     // Don't close while any save/decision request is in flight: letting
     // the modal unmount would orphan the pending fetch and lose the

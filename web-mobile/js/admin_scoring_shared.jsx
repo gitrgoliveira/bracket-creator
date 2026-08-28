@@ -1007,6 +1007,95 @@ const CORRECTION_PRESETS = ["Scoring error", "Wrong competitor", "Data entry", "
 // instead of a comment-only obligation that drifts on the next edit.
 const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 
+// A match has ONE result and every surface asking for it shows the same one,
+// and the score editors are such surfaces: while one is open, the viewer card,
+// the bracket, the TV board, the lobby and the export are all already showing
+// whatever the server holds, so an editor showing something else is a
+// divergence whatever its reason. Every editor field is local state seeded at
+// MOUNT, so following the server takes a deliberate effect per channel — and
+// each channel written by hand is a channel a later reader has to NOTICE is
+// missing. Three were written by hand, in three shapes, and the team editor's
+// numbered bouts were the one nobody noticed (bc-tsub). This is that rule as
+// ONE primitive, so a new channel either calls it or is visibly absent.
+//
+// `signature` must change exactly when the SERVER's value for this channel
+// moves — key on the values the effect WRITES, not the fields it reads: those
+// two lists drift (the individual editor's did), and a signature built from
+// the seeds cannot, since whatever the derivation starts reading is
+// automatically part of the key. NEVER key on the match object: SSE re-creates
+// it on every broadcast, so an object-keyed effect fights the operator's every
+// tap.
+//
+// `keepLocalEdits` picks the policy, and the two are deliberately different:
+//
+//   false — adopt unconditionally. Right for a channel that is ONE indivisible
+//     value (the hantei verdict, the encho count): keying on the VALUE already
+//     means a local arm/pick/cancel stands, because that does not move the
+//     server's value. Also right for a channel whose `apply` MERGES rather than
+//     replaces — the team editor's bout board does exactly that, keeping the
+//     rows the operator touched and taking the server's for the rest, which is
+//     strictly better than the all-or-nothing gate below and is why that
+//     channel does NOT set this flag.
+//
+//   true — an operator with UNSAVED work keeps ALL of it, and the server's
+//     change is dropped for as long as they are dirty. Use this only where the
+//     channel cannot be merged, i.e. where local and server are rival readings
+//     of the SAME indivisible thing: the individual editor's scoreline is one
+//     fight, so there is no per-row seam to merge along. Prefer a merging
+//     `apply` wherever the channel has independent parts, because this policy
+//     necessarily discards the newer reading of the parts the operator never
+//     touched — and the next full-snapshot write then sends the stale ones
+//     back out over it.
+//
+// The dirty flag read is the PREVIOUS render's, which is the subtle bit this
+// hook exists to own: `isDirty` measures local state against what the server
+// holds NOW, so on the very render a server change lands it reads true for an
+// editor nobody touched — the exact case being corrected. Callers pass the
+// current value and the hook remembers it; the tracking effect is registered
+// AFTER the adopt effect, so the adopt always sees the value from the render
+// BEFORE the change. It self-corrects: adopting makes the next render clean.
+//
+// THE FULL SET, because "visibly absent" is only true of a set a reader can
+// enumerate. There are THREE editor bodies behind ONE entry point, and every
+// host mounts the entry point, never a body:
+//
+//   ScoreEditorModal      admin_scoring_individual.jsx — the entry point AND
+//                         the individual editor; dispatches the other two
+//   EngiScoreEditorModal  admin_scoring_engi.jsx       — flag counts
+//   TeamScoreEditorModal  admin_scoring_team.jsx       — the bout board
+//
+// Four hosts mount ScoreEditorModal: the shiaijo inline scorer, the admin
+// schedule editor, the pools tab and the competition bracket. Which body runs
+// is decided by the competition, not the host, so a channel missing from a body
+// is missing on ALL FOUR surfaces — which is why the count that matters here is
+// three, not four.
+//
+// All three call this hook. If you add a fourth body, or a new piece of local
+// state to one of these three, it needs a channel or an explicit reason.
+function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty = false }) {
+  // Hold `apply` in a ref so the adopt effect can depend on `signature` ALONE:
+  // `apply` is a fresh closure every render and would otherwise re-run the
+  // adopt on every render and stomp the operator.
+  //
+  // Assigned in an effect, NOT during render. A render React starts and then
+  // discards (concurrent rendering; StrictMode's double invoke) must not leave
+  // the ref holding a closure over props that were never committed — the adopt
+  // would then seed from a board nobody was shown. Effects run in declaration
+  // order after commit, so this one always refreshes the ref BEFORE the adopt
+  // below reads it, and both see the committed render.
+  const applyRef = useRefA(apply);
+  useEffectA(() => { applyRef.current = apply; });
+  const wasDirtyRef = useRefA(false);
+  useEffectA(() => {
+    if (keepLocalEdits && wasDirtyRef.current) return;
+    applyRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+  // Only the keepLocalEdits policy reads this, but the hook call itself must be
+  // unconditional (rules of hooks), so the CHEAP part is the branch inside.
+  useEffectA(() => { if (keepLocalEdits) wasDirtyRef.current = !!isDirty; });
+}
+
 // ES exports: the modal file imports these and re-exports the test-facing
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
@@ -1033,6 +1122,7 @@ export {
   daihyosenEnchoFields,
   decideDrawToggle,
   shouldBlockScoringKeys,
+  useAdoptFromServer,
   EnchoControl,
   DecisionPrompt,
   RemainingMatchesPanel,

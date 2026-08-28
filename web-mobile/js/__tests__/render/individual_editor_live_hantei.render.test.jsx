@@ -281,3 +281,308 @@ describe('the team editor shows the daihyosen verdict the server holds', () => {
     expect(armed(container), 'the rep-bout panel must show the stored verdict').toBe(true);
   });
 });
+
+// bc-tsub. The same rule again, for the half of the team editor the daihyosen
+// work did not reach: the NUMBERED bouts. Their rows were seeded once at mount
+// and the only path that revisited them appended kachinuki growth, so a bout
+// scored on another device never appeared — and the damage is not only on
+// screen. buildPatch sends the FULL subResults snapshot, so the operator's next
+// write carries the stale row out over the newer one.
+//
+// The seed baseline was a ref frozen at mount, which is why "just gate a
+// re-seed on isDirty" does not work and is pinned below: nothing ever re-based
+// it, so a single tap left the editor dirty for the rest of its life, even once
+// its own autosave had landed and the server agreed. The gate would have been
+// shut from the operator's first tap onward — which is precisely when another
+// device's result turns up.
+// The third editor body. All four hosts mount ScoreEditorModal, which dispatches
+// to this one for an engi competition, so a channel missing here is missing on
+// every surface an engi match can be scored from. It has no autosave (flags are
+// entered in one go), which makes the divergence window WIDER than the kendo
+// editors', not narrower: nothing it holds reaches the server until submit.
+describe('the engi editor shows the flag count the server holds', () => {
+  const engiMatch = (over = {}) => ({
+    id: 'e1', status: 'running', phase: 'pool', court: 'A',
+    compEngi: true,
+    sideA: { id: 'p1', name: 'Ito - Mori' },
+    sideB: { id: 'p2', name: 'Sato - Abe' },
+    flagsA: 0, flagsB: 0,
+    ...over,
+  });
+  const openEngi = (match) =>
+    render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={vi.fn()} password="" />);
+  const counts = (c) => ({
+    aka: c.querySelector('[data-testid="engi-aka-count"]')?.textContent,
+    shiro: c.querySelector('[data-testid="engi-shiro-count"]')?.textContent,
+  });
+
+  it('adopts a flag count recorded on another device', async () => {
+    const { rerender, container } = openEngi(engiMatch());
+    expect(container.querySelector('[data-testid="engi-score-editor"]'), 'the engi editor must be the one shown').toBeTruthy();
+    expect(counts(container)).toEqual({ aka: '0', shiro: '0' });
+
+    await act(async () => { rerender(
+      <ScoreEditorModal match={engiMatch({ flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect(counts(container), 'the server holds 3-2, so this editor shows 3-2').toEqual({ aka: '3', shiro: '2' });
+  });
+
+  it('keeps the operator\'s unsaved flags rather than overwriting them', async () => {
+    // A pair of flag counts is ONE reading of ONE performance: no seam to merge
+    // along, so an operator mid-entry keeps everything they typed.
+    const { rerender, container } = openEngi(engiMatch());
+    await act(async () => { fireEvent.click(container.querySelector('[data-testid="engi-aka-inc"]')); });
+    expect(counts(container)).toEqual({ aka: '1', shiro: '0' });
+
+    await act(async () => { rerender(
+      <ScoreEditorModal match={engiMatch({ flagsA: 3, flagsB: 2 })} onClose={vi.fn()} onSubmit={vi.fn()} password="" />
+    ); });
+
+    expect(counts(container), "the operator's own entry survives").toEqual({ aka: '1', shiro: '0' });
+  });
+});
+
+describe('the team editor shows the bout scoreline the server holds', () => {
+  const KYOTO = 'Kyoto', OSAKA = 'Osaka';
+  // A fixed-order (non-kachinuki) 3-person encounter: `positions` is pinned at
+  // teamSize, so scoring a bout does NOT change the row count. That keeps these
+  // tests on the re-seed itself, away from the growth path.
+  function teamMatch(subs, extra = {}) {
+    return {
+      id: 'tm2',
+      status: 'running',
+      phase: 'pool',
+      court: 'A',
+      compKind: 'team',
+      teamSize: 3,
+      sideA: { id: 'teamA', name: KYOTO },
+      sideB: { id: 'teamB', name: OSAKA },
+      subResults: subs,
+      ...extra,
+    };
+  }
+  // One decided bout: `winnerSide` takes both ippons, so it is worth IV 1, PW 2.
+  const bout = (position, winnerSide) => ({
+    position,
+    sideA: KYOTO,
+    sideB: OSAKA,
+    ipponsA: winnerSide === 'a' ? ['M', 'K'] : [],
+    ipponsB: winnerSide === 'b' ? ['M', 'K'] : [],
+  });
+  const open = (match, onSubmit = vi.fn()) =>
+    render(<ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />);
+  // onSubmit is threaded so a test can keep ONE spy across the re-render and
+  // then read the patch the editor actually emits; the default keeps the
+  // display-only tests terse.
+  const reopenWith = async (rerender, match, onSubmit = vi.fn()) => {
+    await act(async () => { rerender(
+      <ScoreEditorModal match={match} onClose={vi.fn()} onSubmit={onSubmit} password="" />
+    ); });
+  };
+  // Read the IV/PW strip STRUCTURALLY, one entry per side. A whole-container
+  // substring check cannot say which side a total belongs to, passes for any
+  // reason the string is absent (including a render that threw the strip away),
+  // and matches a prefix of a larger number — so `not.toContain('PW: 2')` was
+  // three different ways of not testing this.
+  const AKA = 'AKA (Red)', SHIRO = 'SHIRO (White)';
+  const totalsBySide = (container) => Object.fromEntries(
+    [...container.querySelectorAll('.team-summary__side')]
+      .map(el => [
+        el.querySelector('.team-summary__label')?.textContent?.trim(),
+        el.querySelector('.team-summary__stats')?.textContent?.trim(),
+      ])
+      .filter(([label, stats]) => label && stats)
+  );
+  // Award one ippon to Kyoto on bout 2, through the real control. Bout rows
+  // render Shiro's buttons then Aka's; Kyoto is sideA (AKA), so its buttons are
+  // the second group in the row.
+  const scoreOneForKyoto = async (container) => {
+    const rows = [...container.querySelectorAll('.team-sub-match')];
+    const akaButtons = [...rows[1].querySelectorAll('button')].filter(b => b.textContent.trim() === 'M');
+    expect(akaButtons.length, 'each side offers an M button').toBe(2);
+    await act(async () => { fireEvent.click(akaButtons[1]); });
+  };
+
+  it('adopts a bout scored on another device', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    expect(totalsBySide(container)).toEqual({ [AKA]: 'IV: 0 · PW: 0', [SHIRO]: 'IV: 0 · PW: 0' });
+
+    await reopenWith(rerender, teamMatch([bout(1, 'a')]));
+
+    expect(totalsBySide(container), "Kyoto's bout must appear on Kyoto's side")
+      .toEqual({ [AKA]: 'IV: 1 · PW: 2', [SHIRO]: 'IV: 0 · PW: 0' });
+  });
+
+  it('keeps the operator\'s UNSAVED row and still takes the one they never touched', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    await scoreOneForKyoto(container);
+    expect(totalsBySide(container), "the operator's own ippon shows").toEqual({
+      [AKA]: 'IV: 1 · PW: 1', [SHIRO]: 'IV: 0 · PW: 0',
+    });
+
+    // Device B records bout 1 — a DIFFERENT row from the one being edited.
+    await reopenWith(rerender, teamMatch([bout(1, 'b')]));
+
+    // Both must hold. Their bout-2 edit is not ours to discard, and bout 1 is
+    // not theirs to overwrite: an all-or-nothing gate keeps the first and
+    // loses the second, and because the next write is a full snapshot, losing
+    // it means blanking it on the server.
+    expect(totalsBySide(container)).toEqual({
+      [AKA]: 'IV: 1 · PW: 1',     // the operator's unsaved bout 2
+      [SHIRO]: 'IV: 1 · PW: 2',   // Osaka's bout 1, adopted
+    });
+  });
+
+  it('does not blank a bout recorded elsewhere when the operator saves', async () => {
+    const onSubmit = vi.fn();
+    const { rerender, container } = open(teamMatch([]), onSubmit);
+    await scoreOneForKyoto(container);
+    await reopenWith(rerender, teamMatch([bout(1, 'b')]), onSubmit);
+
+    const finish = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
+    for (let i = 0; i < 2 && finish(); i++) { await act(async () => { fireEvent.click(finish()); }); }
+
+    // The display half is not the whole rule: buildPatch sends the FULL board,
+    // so a row the editor dropped is a row it overwrites.
+    const b1 = (onSubmit.mock.calls[0]?.[0]?.subResults || []).find(s => s.position === 1);
+    expect(b1 && { ipponsA: b1.ipponsA, ipponsB: b1.ipponsB, decision: b1.decision })
+      .toEqual({ ipponsA: [], ipponsB: ['M', 'K'], decision: '' });
+  });
+
+  it('adopting is not an unsaved change of the operators', async () => {
+    window.confirmDialog.mockClear();
+    const { rerender } = open(teamMatch([]));
+    await reopenWith(rerender, teamMatch([bout(1, 'a')]));
+
+    await act(async () => { fireEvent.click(screen.getByTestId('scoring-modal-root')); });
+
+    // A discard prompt on an editor nobody touched trains operators to dismiss
+    // the one prompt that protects real work.
+    expect(window.confirmDialog, 'no discard prompt for a result we merely adopted').not.toHaveBeenCalled();
+  });
+
+  it('still adopts after the operator has saved an edit of their own', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    await scoreOneForKyoto(container);
+
+    // Their autosave lands: the server now holds exactly what they typed, so
+    // nothing is unsaved any more. With a mount-frozen baseline the editor
+    // stays dirty here forever, and every later adopt is skipped.
+    await reopenWith(rerender, teamMatch([{ ...bout(2, 'a'), ipponsA: ['M'] }]));
+
+    // Device B then scores bout 1. This must still arrive.
+    await reopenWith(rerender, teamMatch([
+      { ...bout(2, 'a'), ipponsA: ['M'] },
+      bout(1, 'b'),
+    ]));
+
+    expect(totalsBySide(container), "Osaka's bout must arrive after the operator's own save")
+      .toEqual({ [AKA]: 'IV: 1 · PW: 1', [SHIRO]: 'IV: 1 · PW: 2' });
+  });
+
+  it('adopts overtime recorded on another device', async () => {
+    const { rerender, container } = open(teamMatch([]));
+    // "Overtime" alone is the encho control's own label and is always present;
+    // the header eyebrow carries the COUNT, which is the server value.
+    expect(container.textContent).not.toContain('Overtime ×');
+
+    await reopenWith(rerender, teamMatch([], { encho: { periodCount: 1 } }));
+
+    expect(container.textContent, 'the overtime count is a server value too').toContain('Overtime ×1');
+  });
+
+  it('follows a daihyosen DELETED on another device, without stranding its row', async () => {
+    // The mirror of the growth case, and the one that used to go wrong in a way
+    // no display test could see. `positions` shrinks, but the local board only
+    // ever grew, so it kept a fourth row — and buildPatch derives each row's
+    // wire position from its INDEX, so the stranded rep bout went out as
+    // `position: 4`, a fourth numbered bout in a three-person team.
+    const onSubmit = vi.fn();
+    const dh = { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: ['M'], ipponsB: ['K'], decision: 'daihyosen' };
+    const { rerender, container } = open(teamMatch([bout(1, 'a'), dh]), onSubmit);
+    await scoreOneForKyoto(container);   // dirty, so the adopt cannot paper over it
+
+    await reopenWith(rerender, teamMatch([bout(1, 'a')]), onSubmit);
+
+    const finishBtn = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
+    for (let i = 0; i < 2 && finishBtn(); i++) { await act(async () => { fireEvent.click(finishBtn()); }); }
+    expect((onSubmit.mock.calls[0]?.[0]?.subResults || []).map(s => s.position),
+      'a 3-person team never has a bout 4').toEqual([1, 2, 3]);
+  });
+
+  it('keeps following the server after a shrink arrives mid-edit', async () => {
+    // The same stranded row also wedged adoption: a board one row longer than
+    // `positions` can never equal it, so isDirty was structurally true forever
+    // and every later adopt was skipped for the life of the editor.
+    const dh = { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: ['M'], ipponsB: ['K'], decision: 'daihyosen' };
+    const { rerender, container } = open(teamMatch([bout(1, 'a'), dh]));
+    await scoreOneForKyoto(container);
+    await reopenWith(rerender, teamMatch([bout(1, 'a')]));          // remote DH delete
+
+    await reopenWith(rerender, teamMatch([bout(1, 'a'), bout(3, 'b')])); // later remote bout
+
+    expect(totalsBySide(container)[SHIRO], "Osaka's later bout must still arrive")
+      .toBe('IV: 1 · PW: 2');
+  });
+
+  it('lets the operator score a row appended while they were mid-edit', async () => {
+    // Covering the growth in the RENDER is only half of it: the row also has to
+    // be COMMITTED to state, or updateSub writes to an index the committed
+    // array does not have and the operator's tap does nothing. Asserted on the
+    // emitted patch, since the rep bout is excluded from IV/PW by design and so
+    // leaves no trace in the summary strip.
+    const onSubmit = vi.fn();
+    const { rerender, container } = open(teamMatch([bout(1, 'a'), bout(2, 'b')]), onSubmit);
+    await reopenWith(rerender, teamMatch([
+      bout(1, 'a'), bout(2, 'b'),
+      { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: [], ipponsB: [], decision: 'daihyosen' },
+    ]), onSubmit);
+
+    const rows = [...container.querySelectorAll('.team-sub-match')];
+    const akaM = [...rows[rows.length - 1].querySelectorAll('button')].filter(b => b.textContent.trim() === 'M');
+    await act(async () => { fireEvent.click(akaM[1]); });
+
+    const finishBtn = () => [...container.querySelectorAll('button')].find(b => /finish/i.test(b.textContent));
+    for (let i = 0; i < 2 && finishBtn(); i++) { await act(async () => { fireEvent.click(finishBtn()); }); }
+    const dhRow = (onSubmit.mock.calls[0]?.[0]?.subResults || []).find(s => s.position === -1);
+    expect(dhRow?.ipponsA, 'the appended rep bout must accept a score').toEqual(['M']);
+  });
+
+  it('does not close an open correction prompt when another device scores', async () => {
+    // ReasonPrompt holds the half-typed note in its OWN state, so closing it
+    // discards what the operator wrote. The disarm effect used to key on the
+    // bout array, which the editor now changes itself whenever it follows the
+    // server — turning every remote score into a discarded audit note.
+    const completed = teamMatch([bout(1, 'a'), bout(2, 'a'), bout(3, 'b')], { status: 'completed', winner: KYOTO });
+    const { rerender, container } = open(completed);
+    // On a completed match the primary action is "Save correction", and it
+    // opens the prompt in ONE tap: the prompt's own Confirm is the commit.
+    const saveBtn = [...container.querySelectorAll('button')].find(b => /save correction/i.test(b.textContent));
+    await act(async () => { fireEvent.click(saveBtn); });
+    expect(container.querySelector('.reason-prompt'), 'the prompt must be open to start').toBeTruthy();
+
+    await reopenWith(rerender, teamMatch(
+      [bout(1, 'a'), bout(2, 'a'), bout(3, 'b'), { position: 4, sideA: KYOTO, sideB: OSAKA, ipponsA: [], ipponsB: ['M'] }],
+      { status: 'completed', winner: KYOTO },
+    ));
+
+    expect(container.querySelector('.reason-prompt'), 'a remote score is not the operator changing their mind').toBeTruthy();
+  });
+
+  it('covers a daihyosen added on another device without being remounted', async () => {
+    const { rerender } = open(teamMatch([bout(1, 'a'), bout(2, 'b')]));
+
+    // Adding a rep bout grows `positions` by one. The row list has to cover it
+    // in the SAME render that first indexes it: subTotals[daihyosenIdx] is read
+    // unconditionally once hasDaihyosen flips. Two mount sites paper over this
+    // by keying the editor on subResults.length so it remounts, which throws
+    // away whatever the operator had not saved.
+    await reopenWith(rerender, teamMatch([
+      bout(1, 'a'), bout(2, 'b'),
+      { position: -1, sideA: KYOTO, sideB: OSAKA, ipponsA: ['M'], ipponsB: ['K'], decision: 'daihyosen' },
+    ]));
+
+    expect(screen.queryByTestId('team-daihyosen-hantei-row'), 'the rep bout must render').toBeTruthy();
+  });
+});

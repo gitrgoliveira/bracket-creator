@@ -29,6 +29,7 @@ import {
   ReasonPrompt,
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
+  useAdoptFromServer,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -593,23 +594,69 @@ export function subBoutHasBeenPlayed(s) {
   return (s.aPts?.length > 0) || (s.bPts?.length > 0) || (s.aFouls > 0) || (s.bFouls > 0) || !!s.fusensho || !!s.draw || (s.encho > 0);
 }
 
+// Align a local bout board to the positions the server board currently has,
+// matching rows by POSITION (`_pos`) and never by index.
+//
+// The editor's grid can change shape while it is open, in both directions: a
+// kachinuki Record-bout write appends the next pairing, adding a daihyosen
+// appends the rep-bout row, deleting one on another device removes it, and a
+// late-arriving teamSize moves the numbered count either way. Index alignment
+// survives none of those on its own, because the daihyosen sits at the TAIL —
+// so a tail change silently re-points a row at a different position. That is
+// not a cosmetic problem: buildPatch derives each row's wire `position` from
+// its index, so a mis-aligned board sends wrong rows. Two shipped symptoms: a
+// stale-long board emitted `position: 4` for a three-person team, and the rep
+// bout's ippons were counted as a numbered bout's IV/PW.
+//
+// Matching on position makes growth, shrink, and a daihyosen appearing or
+// vanishing ONE rule instead of three cases. `serverRows` supplies both the
+// target shape and the fallback for a position the local board does not have.
+//
+// Returns `rows` UNCHANGED when it already aligns: rebuilding unconditionally
+// would hand a fresh array identity to every consumer on every render, which is
+// the mp-gmcg F1 thrash.
+//
+// Exported for its own test. In the app the adopt merge also re-shapes the
+// committed state, so an append-only version would usually look fine — this is
+// deliberately not left to depend on that ordering, and the test is what keeps
+// the distinction from being quietly refactored away.
+export function reconcileRowsToPositions(rows, serverRows) {
+  const aligned = rows.length === serverRows.length
+    && serverRows.every((ss, i) => rows[i] && rows[i]._pos === ss._pos);
+  if (aligned) return rows;
+  const byPos = new Map(rows.map(s => [s._pos, s]));
+  return serverRows.map(ss => byPos.get(ss._pos) || ss);
+}
+
 export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSubmitAndNext, onAfterDecision, prevMatch, nextMatch, onPrev, onNext, password, selfReport, variant = "modal", canClose = true }) {
-  // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, but
-  // the parent does NOT refresh the openMatch snapshot on an out-of-band
-  // mutation (SSE refreshes the LIST, not this prop — the same reason
-  // Record-bout growth rides onSubmit's return, see admin_schedule_score_editor).
-  // matchOverride shadows the prop so the removed bout disappears at once. It is
-  // cleared whenever the parent passes a genuinely new match object (the next
-  // Record / prev / next), after which the prop is authoritative again.
+  // mp-gmcg: a successful [× Remove this bout] shrinks the SERVER bout log, and
+  // the parent may not have caught up when this render runs. matchOverride
+  // shadows the prop so the removed bout disappears at once, and is cleared
+  // whenever the parent passes a genuinely new match object (the next Record /
+  // prev / next), after which the prop is authoritative again.
+  //
+  // The original justification said the parent never refreshes this prop at all
+  // ("SSE refreshes the LIST, not this prop"). That stopped being true in
+  // f3ca05bd, which made all four mount sites hold a key and resolve the match
+  // from live data every render; the override is now a latency shim, not a
+  // substitute for a refresh that never comes.
   const [matchOverride, setMatchOverride] = useStateA(null);
-  // Clear the override once the prop actually MOVES off the pre-removal state —
-  // a genuine match switch (id) OR the bout-log length changing (the parent
-  // catching up to the removal, or a later Record-bout re-growing it). Keying
-  // on the object identity alone (`[match]`) cleared on every same-content SSE
-  // reload, so the removed bout flashed back; keying on id alone would never
-  // clear on a same-id Record-bout and the stale shorter override would then
-  // shadow the freshly-grown log (mp-gmcg review F4).
-  useEffectA(() => { setMatchOverride(null); }, [match?.id, (match?.subResults || []).length]);
+  // Clear the override once the prop actually MOVES off the pre-removal state.
+  // Keyed on the bout log's CONTENT, which is the only version of this that is
+  // both quiet enough and complete:
+  //   - `[match]` (object identity) cleared on every same-content SSE reload,
+  //     so the removed bout flashed back (mp-gmcg review F4).
+  //   - `[match?.id]` alone never cleared on a same-id Record-bout, so a stale
+  //     shorter override shadowed the freshly-grown log.
+  //   - bout-log LENGTH cleared on both of those but not on a same-length edit
+  //     from another device — and since the override shadows the LIVE prop, that
+  //     left the editor showing, and then re-sending, a scoreline the server had
+  //     already moved past. Exactly the divergence bc-tsub exists to remove,
+  //     surviving on the one path that opts out of the live prop.
+  // Content-keying is quiet for a same-content reload (identical string) and
+  // fires for every real change, including that last one.
+  const matchSubsKey = JSON.stringify(match?.subResults || []);
+  useEffectA(() => { setMatchOverride(null); }, [match?.id, matchSubsKey]);
   // mp-gmcg: never carry an open past-bout correction across a match SWITCH,
   // but DO survive a same-match reload. Autosave persists each correction as a
   // running write, which round-trips back over SSE as a fresh `match` object
@@ -663,6 +710,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // across re-renders because m may mutate).
   const initialEnchoPeriods = initialEnchoPeriodsForMatch(m);
   const [enchoPeriodCount, setEnchoPeriodCount] = useStateA(initialEnchoPeriods);
+  // The third verdict channel, and the one that was missing. It is a server-live
+  // baseline (initialEnchoPeriods re-derives from m) feeding daihyosenVerdictDirty
+  // below, so without an adopt an overtime count recorded on another device left
+  // this editor showing the old one AND permanently dirty — which fires the
+  // discard prompt on an editor nobody touched, and would have held the re-seed
+  // gate shut for the rest of the session. Unconditional for the same reason as
+  // the hantei channel beside it: keyed on the server's value, a local bump does
+  // not move it, so the operator's own count stands.
+  useAdoptFromServer({
+    signature: initialEnchoPeriods,
+    apply: () => setEnchoPeriodCount(initialEnchoPeriods),
+  });
   const [submitting, setSubmitting] = useStateA(false);
   // F5 (mirrors ScoreEditorModal): explicit "not saved" state for THIS match.
   // Set either by the subscribeTerminalWriteFailed broadcast (a queued write
@@ -777,15 +836,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const [daihyosenHanteiArmed, setDaihyosenHanteiArmed] = useStateA(daihyosenHanteiRecorded);
   // ADOPT a verdict recorded on another device, so this editor cannot sit
   // showing an un-armed hantei panel while the viewer, the bracket, the TV
-  // board and the export all show the Ht.
-  //
-  // Keyed on the two VALUES, not on `m`: an SSE reload re-creates the match
-  // object on every broadcast, so an object-keyed effect would fight the
-  // operator's every tap. Keyed on the primitives it fires only when the
-  // SERVER's verdict actually moves, which leaves a local pick or cancel
-  // standing (those do not move the server value) while still following a real
-  // change in either direction. It touches the verdict only, so the bout
-  // scores being edited are untouched.
+  // board and the export all show the Ht. It touches the verdict only, so the
+  // bout scores being edited are untouched.
   //
   // This replaces a pair of mount-frozen baselines. Freezing stopped the
   // erase, but by making the editor show something other than the stored
@@ -794,10 +846,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // stored verdict, an explicit `false` from it is always the operator ruling
   // on something in front of them, which is what let buildPatch's hanteiKnown
   // guard go away entirely.
-  useEffectA(() => {
-    setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
-    setDaihyosenHantei(recordedDaihyosenSide);
-  }, [daihyosenHanteiRecorded, recordedDaihyosenSide]);
+  useAdoptFromServer({
+    signature: JSON.stringify([daihyosenHanteiRecorded, recordedDaihyosenSide]),
+    apply: () => {
+      setDaihyosenHanteiArmed(daihyosenHanteiRecorded);
+      setDaihyosenHantei(recordedDaihyosenSide);
+    },
+  });
   // Shared by daihyosenTouched (buildPatch) and isDirty: whether the operator
   // has moved the daihyosen VERDICT (encho count, hantei pick, or hantei arm)
   // away from what the SERVER currently holds. The verdict terms compare
@@ -1101,6 +1156,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const reconA = reconcileFoulsAtOpen(rawAFouls, seedBPts);
       const reconB = reconcileFoulsAtOpen(rawBFouls, seedAPts);
       return {
+        // The row's POSITION, carried on the row itself. Everything else here
+        // is scoring state; this is identity, and it exists because `positions`
+        // can change SHAPE under a mounted editor (a kachinuki append, a
+        // daihyosen added or deleted on another device, a late teamSize). Index
+        // alignment survives none of those on its own — the daihyosen sits at
+        // the tail, so a tail change silently re-points a row at a different
+        // position — and buildPatch derives `position` from the index, so a
+        // mis-aligned row is not a display glitch but a wrong row on the wire.
+        // Reconciliation below matches on this and never on the index.
+        // Stripped from the wire: buildPatch names every field it sends.
+        _pos: pos,
         aPts: reconB.opponentPts,
         bPts: reconA.opponentPts,
         aFouls: reconA.outstandingFouls,
@@ -1122,41 +1188,50 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         encho: idx === daihyosenIdx ? 0 : (existing?.encho?.periodCount || 0),
       };
   };
-  const initSubsRef = React.useRef(null);
-  if (initSubsRef.current === null) {
-    initSubsRef.current = positions.map((_, idx) => seedSubAt(idx));
-  }
-  const [subsRaw, setSubs] = useStateA(initSubsRef.current);
-  // mp-gmcg growth: a kachinuki Record-bout write appends the next pairing
-  // server-side and the host adopts the fresh bout log into the match prop,
-  // so `positions` can GROW while the modal is mounted. The extension must
-  // be RENDER-SYNCHRONOUS: this very render already indexes subs for the
-  // new position (an effect would run after the crash). Extend the dirty
-  // baseline once (length-guarded, so re-renders never double-append) and
-  // derive a row list that always covers positions; the effect below then
-  // commits the extension into state so updateSub can edit the new row.
-  // Rows the operator already has are never touched. Kachinuki only, and
-  // kachinuki has no daihyosen row (daihyosenIdx -1), so appending keeps
-  // the idx↔position mapping stable.
-  let subs = subsRaw;
-  if (isKachinuki && daihyosenIdx < 0 && positions.length > subsRaw.length) {
-    if (positions.length > initSubsRef.current.length) {
-      const added = [];
-      for (let i = initSubsRef.current.length; i < positions.length; i++) added.push(seedSubAt(i));
-      initSubsRef.current = [...initSubsRef.current, ...added];
-    }
-    subs = [...subsRaw, ...initSubsRef.current.slice(subsRaw.length, positions.length)];
-  }
-  useEffectA(() => {
-    if (!isKachinuki || daihyosenIdx >= 0) return;
-    const target = positions.length;
-    setSubs(prev => prev.length >= target ? prev : [...prev, ...initSubsRef.current.slice(prev.length, target)]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [positions.length]);
+  // The LIVE baseline: what the SERVER currently holds for every visible
+  // position, re-derived each render. This used to be a ref frozen at mount,
+  // which made isDirty mean "differs from what this editor opened with" — and
+  // since nothing ever re-based it, a single tap left the editor dirty FOREVER,
+  // even after its own autosave landed and the server agreed. Any re-seed gated
+  // on "operator has nothing unsaved" was therefore dead from the operator's
+  // first tap onward, which is exactly when another device's result arrives
+  // (bc-tsub). Derived, it cannot go stale, and isDirty now means what the
+  // individual editor's has always meant: local state differs from the server
+  // NOW. It also removes a ref that was mutated during render.
+  const serverSubs = positions.map((_, idx) => seedSubAt(idx));
+  const [subsRaw, setSubs] = useStateA(serverSubs);
+  // `positions` can change SHAPE under a mounted editor, in BOTH directions,
+  // so the local board is reconciled against it (reconcileRowsToPositions).
+  // RENDER-SYNCHRONOUS because this very render already indexes subs for the
+  // new positions — an effect would run after the crash.
+  const subs = reconcileRowsToPositions(subsRaw, serverSubs);
+  // Two kinds of write reach `subs`, and one arming rule has to tell them
+  // apart: the OPERATOR editing (which disarms Finish/End and closes an open
+  // reason prompt, because what they were about to confirm has changed under
+  // them), and this editor FOLLOWING the server (which must not, or a bout
+  // recorded on another court would silently discard a half-typed audit note).
+  // Array identity cannot distinguish them, so operator writes go through here
+  // and bump a counter the disarm effect keys on; the adopt and the shape
+  // reconciliation above use the bare setSubs. A new operator-driven mutation
+  // that reaches for setSubs directly is therefore visibly out of pattern.
+  const [operatorEditSeq, setOperatorEditSeq] = useStateA(0);
+  const setSubsByOperator = (updater) => { setSubs(updater); setOperatorEditSeq(n => n + 1); };
   // C1: updateSub is the single choke-point for all sub-bout state
   // mutations. Calling markScoringDirty() here captures every edit
   // (pts add/remove, fouls, fusensho, draw) without repetition.
-  const updateSub = (idx, fn) => { setSubs(prev => prev.map((s, i) => i === idx ? fn(s) : s)); markScoringDirty(); };
+  // Reconcile INSIDE the write, not in a separate commit effect. `idx` indexes
+  // the board the operator is looking at, so the write has to land on the same
+  // one the render produced; against a stale `prev` an append lands nowhere and
+  // the tap is silently lost. Doing it here means the operator can never edit a
+  // row that is not theirs to edit, without a second mechanism racing the
+  // render to commit the shape first.
+  const updateSub = (idx, fn) => {
+    setSubsByOperator(prev => {
+      const rows = reconcileRowsToPositions(prev, serverSubs);
+      return rows.map((s, i) => i === idx ? fn(s) : s);
+    });
+    markScoringDirty();
+  };
 
   // T096/FR-031: per-bout Fusensho: award a 2-0 default win to the
   // present side. Re-clicking the active side undoes the fusensho and
@@ -1196,6 +1271,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
+  // Who the SERVER says won a bout, through the same one winner rule as
+  // subTotals above (the local-state answer). Only the re-seed needs this, to
+  // re-baseline an open correction against the row it is about to adopt; the
+  // hantei input is the RECORDED side for the same reason.
+  const serverBoutWinner = (idx) => {
+    const s = serverSubs[idx];
+    if (!s) return null;
+    return boutWinnerSide({
+      aCount: realIppons(s.aPts).length,
+      bCount: realIppons(s.bPts).length,
+      draw: s.draw,
+      fusenshoSide: s.fusensho,
+      hanteiSide: idx === daihyosenIdx ? recordedDaihyosenSide : "",
+    });
+  };
 
   // mp-4pc: the daihyosen row (when present) is excluded from IV/PW: it
   // is a tiebreaker, not an individual victory. Its own winner (hantei
@@ -1401,9 +1491,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const nextPos = kachinukiNextManualPos;
     if (nextPos > kachinukiMaxBouts) return;
     setManualBouts(prev => [...prev, nextPos]);
-    setSubs(prev => {
+    setSubsByOperator(prev => {
       const out = [...prev];
-      while (out.length < nextPos) out.push({ aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false, encho: 0 });
+      // _pos, like every other row: a manual bout is always NUMBERED (the
+      // daihyosen is never added this way), so its position is its 1-based
+      // index. Without it the row has no identity for the position-keyed
+      // reconciliation above and would be dropped back to the server seed.
+      while (out.length < nextPos) {
+        out.push({ _pos: out.length + 1, aPts: [], bPts: [], aFouls: 0, bFouls: 0, fusensho: "", draw: false, encho: 0 });
+      }
       return out;
     });
     setFinishArmed(false);
@@ -1432,10 +1528,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // rows, and the [subs] disarm effect thrashes on a fresh identity each render
   // (mp-gmcg review F1). Resize to exactly the post-removal positionCount, via
   // the SAME clampPositionCount that sizes positionCount above — trailing rows
-  // the floor still shows are re-seeded from initSubsRef.
+  // the floor still shows are re-seeded from the server baseline.
   const resizeSubsTo = (prev, target) => {
     const kept = prev.slice(0, target);
-    return kept.length >= target ? kept : [...kept, ...initSubsRef.current.slice(kept.length, target)];
+    return kept.length >= target ? kept : [...kept, ...serverSubs.slice(kept.length, target)];
   };
   const removeCurrentBout = async () => {
     if (!kachinukiBoutRemovable || kachinukiCurBoutPos <= 0) return;
@@ -1448,7 +1544,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const remaining = manualBouts.filter(p => p !== pos);
       setManualBouts(remaining);
       const target = clampPositionCount(maxSubPos, remaining.length ? Math.max(...remaining) : 0);
-      setSubs(prev => resizeSubsTo(prev, target));
+      setSubsByOperator(prev => resizeSubsTo(prev, target));
       setEndArmed(false);
       setFinishArmed(false);
       setRemoveBoutErr("");
@@ -1467,7 +1563,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       setMatchOverride({ ...match, subResults: nextSubs });
       // The server strips exactly the trailing bout at `pos`, so the new log
       // ceiling is pos-1; keep the teamSize floor (clampPositionCount).
-      setSubs(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
+      setSubsByOperator(prev => resizeSubsTo(prev, clampPositionCount(pos - 1, manualMaxPos)));
       setEndArmed(false);
       setFinishArmed(false);
     } catch (e) {
@@ -1483,7 +1579,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // End-match prompt commits the verdict shown when it opened — an operator
   // who scores another point while the prompt is up must not have the stale
   // verdict confirmed out from under them.
-  useEffectA(() => { setFinishArmed(false); setEndArmed(false); setReasonPromptKind(""); }, [subs, daihyosenHantei]);
+  // Disarm on an OPERATOR edit, not on any change to `subs`. Arming means "you
+  // are one tap from confirming THIS board", so their own edit must revoke it —
+  // but a bout recorded on another court must not, and since the editor started
+  // following the server that is a change to `subs` too. Keyed on the object it
+  // would also close an open reason prompt (ReasonPrompt holds the half-typed
+  // note in its own state, so the note goes with it) on every remote score.
+  // operatorEditSeq moves only for writes made through setSubsByOperator.
+  useEffectA(() => { setFinishArmed(false); setEndArmed(false); setReasonPromptKind(""); }, [operatorEditSeq, daihyosenHantei]);
 
   // mp-gmcg: reopen a completed kachinuki match (POST .../reopen): status
   // back to running, winner/decision cleared, bout log kept. This POST is a
@@ -1752,14 +1855,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // adopted a verdict recorded elsewhere (an SSE gap, or an offline-queue
     // replay saving an unrelated bout) erased that verdict on its next save,
     // indistinguishable on the wire from an operator actually cancelling it.
-    // A row is genuinely silent only when BOTH halves hold: the operator
-    // never touched it THIS session (identical to its mount-time seed,
-    // including the hantei arm/pick and the daihyosen encho counter) AND
-    // nothing about it is known locally either (no recorded verdict, no
-    // scored points/fouls/draw, no overtime). An editor that mounted AFTER a
-    // verdict/score existed is not silent even if untouched - it is
-    // re-stating what it was shown, which is the existing, correct
-    // behaviour (daihyosenEnchoFields below re-derives and re-sends it).
+    // A row is genuinely silent only when BOTH halves hold: the operator has
+    // not moved it away from what the SERVER holds (including the hantei
+    // arm/pick and the daihyosen encho counter) AND nothing about it is known
+    // locally either (no recorded verdict, no scored points/fouls/draw, no
+    // overtime). An editor that mounted AFTER a verdict/score existed is not
+    // silent even if untouched - it is re-stating what it was shown, which is
+    // the existing, correct behaviour (daihyosenEnchoFields below re-derives
+    // and re-sends it). The first half compares against the live server
+    // baseline, not a mount-time snapshot, so it now agrees with
+    // daihyosenVerdictDirty beside it rather than answering from a different
+    // clock: adopting a row recorded elsewhere is not this operator touching
+    // it, and re-sending what we just adopted is exactly what we want.
     // Scope: the restore this omission enables only protects a stored
     // HANTEI verdict - preserveSubHantei bails when the stored row's
     // `HanteiDecided()` is false, so a rep bout settled by a real strike is
@@ -1767,7 +1874,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // pre-gate explicit-[] behaviour (not a regression this change
     // introduces), not a gap this gate closes.
     const daihyosenTouched = hasDaihyosen && (
-      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(initSubsRef.current[daihyosenIdx]) ||
+      JSON.stringify(subs[daihyosenIdx]) !== JSON.stringify(serverSubs[daihyosenIdx]) ||
       daihyosenVerdictDirty
     );
     const daihyosenKnownLocally = hasDaihyosen && (
@@ -1983,10 +2090,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return res;
   };
 
-  // Mirrors ScoreEditorModal.isDirty: structural compare of current subs
-  // to the initial snapshot. Used by handleDismiss below to prompt before
-  // discarding multi-sub-match edits. Team scoring typically has 3–9 sub
-  // entries; the JSON serialize approach is fine for that size and keeps
+  // Mirrors ScoreEditorModal.isDirty: "has the OPERATOR changed anything",
+  // measured against what the SERVER holds — not against a mount-time snapshot,
+  // which never re-based and so read dirty forever after the first tap. Used by
+  // handleDismiss below to prompt before discarding multi-sub-match edits, and
+  // as the keep-local-edits gate on the re-seed. Team scoring typically has 3–9
+  // sub entries; the JSON serialize approach is fine for that size and keeps
   // the comparison robust against array identity drift from setSubs.
   // Encho toggle is included (via daihyosenVerdictDirty) so an operator-only
   // encho change still triggers the discard confirm. A "discard unsaved
@@ -1994,7 +2103,72 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // dismiss the one prompt that protects real work, which is why
   // daihyosenVerdictDirty's server-compare (not mount-time-snapshot) behaviour
   // matters here too.
-  const isDirty = JSON.stringify(subs) !== JSON.stringify(initSubsRef.current) || daihyosenVerdictDirty;
+  // One serialisation, read three times (isDirty, the adopt signature, and the
+  // per-row merge below). This editor re-renders on every SSE broadcast for the
+  // competition, so serialising the same board once per consumer was pure
+  // repetition on the busiest path in the file.
+  const serverSubsSig = JSON.stringify(serverSubs);
+  const isDirty = JSON.stringify(subs) !== serverSubsSig || daihyosenVerdictDirty;
+  // RE-SEED the bout rows when the stored result moves, PER ROW.
+  //
+  // Without this an editor left open kept showing the board it opened with
+  // while the viewer, the bracket, the TV board and the export all moved on —
+  // and the damage is not only the display. The next write sends the FULL
+  // subResults snapshot (buildPatch above), so a stale row rides back out over
+  // a newer one recorded elsewhere.
+  //
+  // PER ROW is the whole point, and it is why this channel does not use the
+  // hook's keepLocalEdits gate. A team board is not one value; it is up to nine
+  // independent fights. An all-or-nothing gate protects the operator's row by
+  // dropping the server's view of every OTHER row, and because the next write
+  // is a full snapshot, "dropped" means overwritten: an operator part-way
+  // through bout 2 would blank a bout 1 recorded on another device back to a
+  // 0-0 hikiwake. Matching each row against the PREVIOUS server value tells
+  // touched from untouched, so the operator's own work is kept and every row
+  // they never touched follows the server.
+  //
+  // Scope, stated honestly: this removes the ARTIFICIAL conflict, where an
+  // editor writes back a row it was never shown. It does NOT resolve a genuine
+  // one — if two people edit the SAME bout, the local edit wins here and
+  // server-side timestamp LWW (mp-y3nk) orders the writes, but that is
+  // per-MATCH, not per-bout, so it cannot merge two people's rows. That case is
+  // theirs to resolve.
+  const prevServerSubsRef = useRefA(serverSubs);
+  useAdoptFromServer({
+    signature: serverSubsSig,
+    apply: () => {
+      setSubs(prev => {
+        const localByPos = new Map(prev.map(s => [s._pos, s]));
+        const priorByPos = new Map((prevServerSubsRef.current || []).map(s => [s._pos, s]));
+        return serverSubs.map(ss => {
+          const local = localByPos.get(ss._pos);
+          if (!local) return ss;
+          const prior = priorByPos.get(ss._pos);
+          // Untouched: the operator's row still equals what the server last
+          // said, so there is nothing of theirs to keep — take the new value.
+          if (prior && JSON.stringify(local) === JSON.stringify(prior)) return ss;
+          return local;
+        });
+      });
+      // Keep the correction baseline in step. It snapshots who won the bout
+      // being corrected so renderCorrectionWarning can say "you changed who won
+      // bout N"; left alone across a re-seed it would compare the SERVER's new
+      // winner against the old one and accuse the operator of a change another
+      // device made.
+      if (editingDoneBoutIdx >= 0 && editingDoneOriginalRef.current) {
+        editingDoneOriginalRef.current = { winner: serverBoutWinner(editingDoneBoutIdx) };
+      }
+    },
+    // No keepLocalEdits: the merge above already keeps the operator's rows, and
+    // an outer all-or-nothing gate would only stop it from running at all.
+  });
+  // The server board as of the PREVIOUS committed render, which is what makes
+  // "did the operator touch this row?" answerable: local === prior means they
+  // did not. Updated AFTER the adopt is registered, so the adopt reads the
+  // value from the render BEFORE the change — the same ordering rule the hook
+  // uses for its dirty flag. In an effect, never during render, so a discarded
+  // render cannot advance the baseline past a board that was never shown.
+  useEffectA(() => { prevServerSubsRef.current = serverSubs; });
 
   // Match ScoreEditorModal's dismiss contract: never close mid-submit
   // (setState-after-unmount), AND confirm-then-discard when the user has

@@ -20,7 +20,7 @@
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS } from './admin_scoring_shared.jsx';
+import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer } from './admin_scoring_shared.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
 
 const MAX_FLAGS = 5;
@@ -119,6 +119,27 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   const winnerSide = deriveWinner(flagsA, flagsB);
   const canSubmit = isValidTotal && !submitting;
   const isDirty = flagsA !== initialFlagsA || flagsB !== initialFlagsB;
+  // Follow a flag count recorded on another device — the same rule the kendo
+  // editors follow, because this is the same rule: an engi match has ONE result
+  // and every surface asking for it shows the same one, and while this editor
+  // is open the viewer card, the board and the export are all already showing
+  // whatever the server holds.
+  //
+  // keepLocalEdits, like the individual editor's scoreline and unlike the team
+  // board: a pair of flag counts is ONE reading of ONE kata performance, so
+  // there is no per-row seam to merge along. An operator with unsaved flags
+  // keeps all of them.
+  //
+  // No autosave here (flags are entered in one go), which makes the window
+  // WIDER than the kendo editors', not narrower: nothing this editor holds
+  // reaches the server until the operator submits, so a stale reading can sit
+  // in front of them for as long as the match is open.
+  useAdoptFromServer({
+    signature: `${initialFlagsA}:${initialFlagsB}`,
+    apply: () => { setFlagsA(initialFlagsA); setFlagsB(initialFlagsB); },
+    keepLocalEdits: true,
+    isDirty,
+  });
 
   const handleDismiss = async () => {
     if (submitting) return;

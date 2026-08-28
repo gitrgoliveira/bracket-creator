@@ -142,11 +142,15 @@ const RunningMatchPanel = React.memo(({ match, compId, courts, matchNum, onMoveC
       {showEditor ? (
         ScoreEditorModal && (
           <ScoreEditorModal
-            // Include subResults.length: the editor reads team sub-bouts into
-            // refs on mount, so an SSE update that adds/removes a daihyosen
-            // sub-bout from another surface must remount to avoid a stale board
-            // (mirrors the shiaijo inline embed's key: admin_shiaijo.jsx).
-            key={`${match.id}:${match.status}:${(match.subResults || []).length}`}
+            // NO subResults.length here. It used to be in the key because the
+            // editor read team sub-bouts into refs at mount, so a daihyosen
+            // added or removed elsewhere could only be picked up by remounting.
+            // Those refs are gone (bc-tsub): the board is derived from the live
+            // prop and reconciled by position, so it follows a shape change in
+            // place. Remounting on every bout-log change also DISCARDED the
+            // operator's unsaved scores — on a kachinuki encounter that is every
+            // appended pairing — which is the harm, not the fix.
+            key={`${match.id}:${match.status}`}
             variant="inline"
             match={match}
             // Offer "close" only when there's a result card to fall back to

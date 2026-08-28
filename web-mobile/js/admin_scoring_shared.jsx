@@ -1028,17 +1028,24 @@ const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 //
 // `keepLocalEdits` picks the policy, and the two are deliberately different:
 //
-//   false (verdict channels: hantei, encho) — adopt unconditionally. Keying on
-//     the VALUE already means a local arm/pick/cancel stands, because that does
-//     not move the server's value; a real server change is followed in either
-//     direction, which is the point.
+//   false — adopt unconditionally. Right for a channel that is ONE indivisible
+//     value (the hantei verdict, the encho count): keying on the VALUE already
+//     means a local arm/pick/cancel stands, because that does not move the
+//     server's value. Also right for a channel whose `apply` MERGES rather than
+//     replaces — the team editor's bout board does exactly that, keeping the
+//     rows the operator touched and taking the server's for the rest, which is
+//     strictly better than the all-or-nothing gate below and is why that
+//     channel does NOT set this flag.
 //
-//   true (scoreline channels) — an operator with UNSAVED work keeps it: their
-//     edits are not ours to discard. What this removes is the ARTIFICIAL
-//     conflict, where an editor holding a mount-time snapshot writes back state
-//     it was never showing. A genuine disagreement between two people who both
-//     typed something is theirs to resolve (timestamp LWW server-side is the
-//     floor under it, not a resolution protocol).
+//   true — an operator with UNSAVED work keeps ALL of it, and the server's
+//     change is dropped for as long as they are dirty. Use this only where the
+//     channel cannot be merged, i.e. where local and server are rival readings
+//     of the SAME indivisible thing: the individual editor's scoreline is one
+//     fight, so there is no per-row seam to merge along. Prefer a merging
+//     `apply` wherever the channel has independent parts, because this policy
+//     necessarily discards the newer reading of the parts the operator never
+//     touched — and the next full-snapshot write then sends the stale ones
+//     back out over it.
 //
 // The dirty flag read is the PREVIOUS render's, which is the subtle bit this
 // hook exists to own: `isDirty` measures local state against what the server
@@ -1047,19 +1054,36 @@ const REOPEN_PRESETS = ["Ended by mistake", ...CORRECTION_PRESETS];
 // current value and the hook remembers it; the tracking effect is registered
 // AFTER the adopt effect, so the adopt always sees the value from the render
 // BEFORE the change. It self-corrects: adopting makes the next render clean.
+//
+// KNOWN UNREACHED CHANNEL: EngiScoreEditorModal (admin_scoring_engi.jsx) holds
+// its flag counts in mount-seeded state and calls nothing here, so an engi
+// result recorded elsewhere is neither shown nor protected. That editor writes
+// only on an explicit submit (it deliberately skips autosave, since flags are
+// entered in one go), which narrows the window but does not close it. Named
+// here rather than left to be noticed, because "visibly absent" is only true of
+// channels a reader knows to look for.
 function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty = false }) {
-  // Read through a ref so the effect can depend on `signature` ALONE. `apply`
-  // is a fresh closure every render and would otherwise have to be a dep,
-  // which would re-run the adopt on every render and stomp the operator.
+  // Hold `apply` in a ref so the adopt effect can depend on `signature` ALONE:
+  // `apply` is a fresh closure every render and would otherwise re-run the
+  // adopt on every render and stomp the operator.
+  //
+  // Assigned in an effect, NOT during render. A render React starts and then
+  // discards (concurrent rendering; StrictMode's double invoke) must not leave
+  // the ref holding a closure over props that were never committed — the adopt
+  // would then seed from a board nobody was shown. Effects run in declaration
+  // order after commit, so this one always refreshes the ref BEFORE the adopt
+  // below reads it, and both see the committed render.
   const applyRef = useRefA(apply);
-  applyRef.current = apply;
+  useEffectA(() => { applyRef.current = apply; });
   const wasDirtyRef = useRefA(false);
   useEffectA(() => {
     if (keepLocalEdits && wasDirtyRef.current) return;
     applyRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
-  useEffectA(() => { wasDirtyRef.current = !!isDirty; });
+  // Only the keepLocalEdits policy reads this, but the hook call itself must be
+  // unconditional (rules of hooks), so the CHEAP part is the branch inside.
+  useEffectA(() => { if (keepLocalEdits) wasDirtyRef.current = !!isDirty; });
 }
 
 // ES exports: the modal file imports these and re-exports the test-facing

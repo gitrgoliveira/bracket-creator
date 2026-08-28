@@ -1358,7 +1358,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 
                             {(!allDone || correctingMatch) && selectedMatch && (
                                 <ScoreEditorModal
-                                    key={`${matchKey(selectedMatch)}:${(selectedMatch.subResults || []).length}`}
+                                    // No subResults.length: see the same key in
+                                    // admin_competition_bracket.jsx. Remounting
+                                    // on every bout-log change threw away the
+                                    // operator's unsaved scores, and the stale-
+                                    // board problem it worked around is gone.
+                                    key={matchKey(selectedMatch)}
                                     variant="inline"
                                     match={editorMatch}
                                     onClose={() => {}}

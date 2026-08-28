@@ -174,6 +174,19 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // = Aka (sideA), repPlayerB = Shiro (sideB). Only rendered when m.repIsTeam.
   const [repPlayerA, setRepPlayerA] = useStateA(m.repPlayerA || "");
   const [repPlayerB, setRepPlayerB] = useStateA(m.repPlayerB || "");
+  // Follow a pick made on another device, same rule as every other channel.
+  //
+  // The narrow reading first, because it bounds what this is worth: an UNSET
+  // dropdown was never the danger. repBlock rides every write, but the server
+  // preserves these on empty (backfillMatchIdentity, engine/scoring.go), so an
+  // editor that mounted before anyone picked sends "" and wipes nothing. What
+  // it does NOT protect is a mount-time value that has since been CHANGED
+  // elsewhere: "an explicit value in result always wins", so this editor would
+  // put its stale name back. That is the case this closes.
+  useAdoptFromServer({
+    signature: `${m.repPlayerA || ""} ${m.repPlayerB || ""}`,
+    apply: () => { setRepPlayerA(m.repPlayerA || ""); setRepPlayerB(m.repPlayerB || ""); },
+  });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the
   // parent unmounts the modal during the in-flight save (e.g.
   // AdminScoreEditor unmounts), gate the setState. handleDismiss

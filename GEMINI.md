@@ -126,16 +126,24 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 ## PR Workflow
 
 - **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section: `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
-- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main): `gh api --method PUT .../contents/pr-assets/<pr>/shot.png -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"`, then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)`. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation: never silently skip the section.
+- **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main) by PIPING the base64 in — it must never pass through argv, or any shot over ~96 KiB dies with `Argument list too long` (Linux caps a single argument at 128 KiB, and base64 inflates by 4/3):
+  ```bash
+  base64 < shot.png | tr -d '\n' \
+    | jq -Rs --arg m 'pr <pr> screenshot' '{message:$m, branch:"pr-assets", content:.}' \
+    | gh api --method PUT /repos/gitrgoliveira/bracket-creator/contents/pr-assets/<pr>/shot.png \
+        --input - --jq '.content.path'
+  ```
+  Then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)` and `curl` that raw URL back to confirm it resolves, rather than trusting the 201. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation: never silently skip the section.
 - **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional: execute them, then check them.
 - **Keep the issue (bead) `in_progress` until the PR actually merges.** A green review is not a merge. Only close the issue after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run full cleanup**: close the issue → fast-forward `main` → remove the worktree → delete the local and remote branch → prune.
 
 ## Code Review
 
-- **Never report an automated-review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix, or dismissal with a reason), then re-verify the count is zero.
-- When re-requesting a GitHub Copilot review, use the REST endpoint (the `gh pr edit --add-reviewer` form lowercases the login and fails):
-  `gh api repos/<owner>/<repo>/pulls/<pr>/requested_reviewers -X POST -f "reviewers[]=Copilot"`
+- **There is no automated Copilot review loop.** It was retired on 2026-07-24. Do not run `/review-loop`, do not re-request Copilot, and never treat "waiting for a bot review" as a merge gate.
+- **Review threads still appear — the repo owner posts them by hand.** Read and address them like any other review feedback. What is retired is the bot and the loop around it, not the reviewing.
+- **Never report a review round "clean" until a fresh fetch shows zero unresolved threads.** State the total unresolved count first, give every thread an explicit disposition (fix, or dismissal with a reason), then re-verify the count is zero. Report `resolved` and `outdated` threads separately: a query that filters out outdated-but-visible threads produces a false "clean" that contradicts what the user sees.
+- **Paginate when counting or resolving threads.** GitHub's `reviewThreads(first:100)` caps at 100; a capped lookup silently finds nothing past #100 and falsely prints "already resolved" while leaving them unresolved.
 - Run `make go/test` after fixes and before pushing: a red gate means fix-or-revert, never push.
 
 ## Testing & Verification

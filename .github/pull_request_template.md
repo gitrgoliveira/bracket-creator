@@ -36,9 +36,12 @@ visual, layout, copy, or behavior changes. Attach before/after images.
 Delete this section only if the change has no UI impact whatsoever.
 
 Agents: `gh gist create` rejects binaries. Push the PNG to the `pr-assets`
-branch (never merged to main) and embed the raw URL:
-  gh api --method PUT .../contents/pr-assets/<pr>/shot.png \
-    -f branch=pr-assets -f content="$(base64 < shot.png | tr -d '\n')"
+branch (never merged to main) and embed the raw URL. PIPE the base64 in: passing
+it through argv dies with "Argument list too long" on any shot over ~96 KiB.
+  base64 < shot.png | tr -d '\n' \
+    | jq -Rs --arg m 'pr <pr> screenshot' '{message:$m, branch:"pr-assets", content:.}' \
+    | gh api --method PUT /repos/gitrgoliveira/bracket-creator/contents/pr-assets/<pr>/shot.png \
+        --input - --jq '.content.path'
   ![desc](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)
 A real browser/MCP screenshot is MANDATORY: there is no textual / DOM /
 geometry substitute. If you have not captured one yet, the PR is not ready:

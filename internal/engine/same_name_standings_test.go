@@ -266,3 +266,89 @@ func TestSwissStandings_SameNameDifferentDojo(t *testing.T) {
 	assert.Equal(t, 1, byID[snIDWatanabe].Wins)
 	assert.Equal(t, 2, byID[snIDWatanabe].Losses)
 }
+
+// TestSwissStandings_Engi_SameNameDifferentDojo is the engi twin of
+// TestSwissStandings_SameNameDifferentDojo above. computeEngiSwissStandings
+// used to key its roster and match-side lookups purely by display name (see
+// the historical note in its doc comment): the premise at the time was that
+// buildSwissMatches persisted no per-side id at all, so an id-aware scheme
+// would have had nothing to key on for engi Swiss matches. That premise no
+// longer holds -- buildSwissMatches stamps SideAID/SideBID on every match it
+// generates, engi included -- so two same-name, different-dojo competitors
+// in one engi Swiss field must appear as two distinct rows, each with its
+// own Wins/Flags record, rather than collapsing into one (with every derby
+// win misattributed to whichever pointer the name-keyed map happened to
+// hold last).
+func TestSwissStandings_Engi_SameNameDifferentDojo(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-engi-samename"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       compID,
+		Name:                     "Swiss Engi Same Name",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		Engi:                     true,
+		SwissRounds:              3,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
+	}))
+	players := snPlayers()
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// Full round robin (6 matches), stamped exactly as buildSwissMatches + the
+	// engi scoring write path would produce it: SideAID/SideBID at
+	// generation, WinnerID resolved from the actual winner. Every match
+	// awards the winner 3 flags and the loser 2 (a valid odd {1,3,5}-total
+	// engi score), so the accumulated Flags column tracks Wins one-for-one
+	// and both columns pin the same per-competitor identity.
+	var matches []state.MatchResult
+	idx := 0
+	for i := 0; i < len(players); i++ {
+		for j := i + 1; j < len(players); j++ {
+			a, b := players[i], players[j]
+			winner, winnerID := a, a.ID
+			flagsA, flagsB := 3, 2
+			if snRank(b.ID) > snRank(a.ID) {
+				winner, winnerID = b, b.ID
+				flagsA, flagsB = 2, 3
+			}
+			matches = append(matches, state.MatchResult{
+				ID:       "Swiss-R1-" + strconv.Itoa(idx),
+				SideA:    a.Name,
+				SideB:    b.Name,
+				SideAID:  a.ID,
+				SideBID:  b.ID,
+				Winner:   winner.Name,
+				WinnerID: winnerID,
+				Status:   state.MatchStatusCompleted,
+				FlagsA:   flagsA,
+				FlagsB:   flagsB,
+			})
+			idx++
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, 4, "same-name-different-dojo competitors must both appear")
+
+	byID := make(map[string]state.PlayerStanding, len(standings))
+	for _, s := range standings {
+		byID[s.Player.ID] = s
+	}
+	require.Contains(t, byID, snIDTokyo)
+	require.Contains(t, byID, snIDOsaka)
+
+	assert.Equal(t, 3, byID[snIDOsaka].Wins, "Osaka Tanaka beats everyone, including the derby")
+	assert.Equal(t, 9, byID[snIDOsaka].Flags, "Osaka accrues 3 winner-flags per win across 3 wins")
+	assert.Equal(t, 0, byID[snIDTokyo].Wins, "Tokyo Tanaka loses every match, including the derby")
+	assert.Equal(t, 6, byID[snIDTokyo].Flags, "Tokyo accrues 2 loser-flags per loss across 3 losses")
+	assert.Equal(t, 2, byID[snIDSuzuki].Wins)
+	assert.Equal(t, 8, byID[snIDSuzuki].Flags, "2 wins x 3 flags + 1 loss x 2 flags")
+	assert.Equal(t, 1, byID[snIDWatanabe].Wins)
+	assert.Equal(t, 7, byID[snIDWatanabe].Flags, "1 win x 3 flags + 2 losses x 2 flags")
+}

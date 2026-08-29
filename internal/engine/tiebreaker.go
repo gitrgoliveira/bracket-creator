@@ -139,18 +139,7 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 			groupKeys[ck] = true
 			byName[standingsPlayerKey("", sorted[k].Player.Name)] = ck
 		}
-		resolveGroupMatchKey := func(id, name string) (string, bool) {
-			if id != "" {
-				if ck := standingsPlayerKey(id, ""); groupKeys[ck] {
-					return ck, true
-				}
-				// A non-empty id that isn't one of this group's members
-				// (foreign/stale data) falls through to the name lookup
-				// below rather than resolving to nothing.
-			}
-			ck, ok := byName[standingsPlayerKey("", name)]
-			return ck, ok
-		}
+		resolveGroupMatchKey := newGroupKeyResolver(groupKeys, byName)
 
 		groupWins := map[string]int{}
 		for _, m := range matches {
@@ -457,4 +446,30 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	e.standingsFlight.Delete(compID)
 
 	return injected, nil
+}
+
+// newGroupKeyResolver returns the (id, name) -> canonical member key resolution
+// shared by applyTiebreakSort and groupNeedsChusen (chusen.go). Both ask the
+// same question of the same kind of data: a supplementary bout names two sides,
+// and the caller needs to know which member of THIS tied group each side is.
+//
+// An id is preferred because two members can share a display name across dojos
+// (competitor identity is name+dojo, never name alone). A non-empty id that is
+// not one of this group's members -- foreign or stale data -- falls through to
+// the name lookup rather than resolving to nothing. When the bout carries no id
+// for that side (a row written before TB/DH generation stamped them), the name
+// lookup is all there is, and a genuine same-name collision there degrades to
+// the single entry byName holds, which is exactly the behaviour that predates
+// ids. A correctly stamped bout is never misattributed just because some other
+// row in the same pool lacks an id.
+func newGroupKeyResolver(groupKeys map[string]bool, byName map[string]string) func(id, name string) (string, bool) {
+	return func(id, name string) (string, bool) {
+		if id != "" {
+			if ck := standingsPlayerKey(id, ""); groupKeys[ck] {
+				return ck, true
+			}
+		}
+		ck, ok := byName[standingsPlayerKey("", name)]
+		return ck, ok
+	}
 }

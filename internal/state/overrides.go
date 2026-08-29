@@ -4,11 +4,23 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
+// Overrides.PoolRanks is keyed PoolID -> overrideKey -> Rank. overrideKey is
+// helper.CompetitorKey(id, name, dojo) for every override written since
+// bc-cse (id-preferred, normalized name+dojo composite fallback -- see that
+// function's doc comment for the operator identity rule: (name, dojo), not
+// name, so two same-name competitors from different dojos never share one
+// override entry). A file written BEFORE bc-cse instead holds bare player
+// names as keys: those legacy entries are never rewritten (read-only
+// compatibility, see lookupPoolRankOverride in internal/engine for the
+// read-side fallback and the tradeoff it documents) -- SaveRankOverride*
+// below always writes the new identity-keyed form.
 type Overrides struct {
-	PoolRanks map[string]map[string]int `json:"poolRanks"` // PoolID -> PlayerName -> Rank
-	Winners   map[string]string         `json:"winners"`   // MatchID -> WinnerName
+	PoolRanks map[string]map[string]int `json:"poolRanks"`
+	Winners   map[string]string         `json:"winners"` // MatchID -> WinnerName
 }
 
 func (s *Store) LoadOverrides(compID string) (*Overrides, error) {
@@ -119,19 +131,33 @@ func (s *Store) modifyOverrides(compID string, fn func(*Overrides)) error {
 	return err
 }
 
-// SaveRankOverrideChanged saves the rank override and reports whether the
-// overrides file actually changed. Use this to gate broadcasts.
-func (s *Store) SaveRankOverrideChanged(compID, poolID, playerName string, rank int) (bool, error) {
+// SaveRankOverrideChanged saves a manual pool-rank override for one
+// competitor and reports whether the overrides file actually changed. Use
+// this to gate broadcasts.
+//
+// The override is keyed by helper.CompetitorKey(playerID, playerName,
+// playerDojo) (bc-cse), never by bare playerName: two competitors sharing a
+// display name from different dojos are legal (operator identity rule,
+// CLAUDE.md) and must not collide on one override entry. playerID and
+// playerDojo may be empty (an older API client sending only playerName), in
+// which case CompetitorKey degrades to its normalized-name(+empty dojo)
+// composite -- callers that can resolve the competitor's real id/dojo from
+// the roster before calling this (as the mobileapp handler does) should
+// always do so, since that is what actually disambiguates a same-name pair.
+// This function never touches a pre-existing legacy bare-name key; see
+// Overrides.PoolRanks' doc comment for the read-side compatibility story.
+func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID, playerName, playerDojo string, rank int) (bool, error) {
+	key := helper.CompetitorKey(playerID, playerName, playerDojo)
 	return s.modifyOverridesChanged(compID, func(o *Overrides) {
 		if o.PoolRanks[poolID] == nil {
 			o.PoolRanks[poolID] = make(map[string]int)
 		}
-		o.PoolRanks[poolID][playerName] = rank
+		o.PoolRanks[poolID][key] = rank
 	})
 }
 
-func (s *Store) SaveRankOverride(compID, poolID, playerName string, rank int) error {
-	_, err := s.SaveRankOverrideChanged(compID, poolID, playerName, rank)
+func (s *Store) SaveRankOverride(compID, poolID, playerID, playerName, playerDojo string, rank int) error {
+	_, err := s.SaveRankOverrideChanged(compID, poolID, playerID, playerName, playerDojo, rank)
 	return err
 }
 

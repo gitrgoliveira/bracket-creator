@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -107,15 +108,22 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank Trims Whitespace From Player Name", func(t *testing.T) {
-		// Padded names must be stored under the trimmed key so subsequent
-		// lookups (which use the canonical participant name) match.
+		// Padded names must be resolved (and looked up against the roster)
+		// under the TRIMMED name, so the override lands on the same
+		// competitor a subsequent read resolves. Since bc-cse the override
+		// key itself is the competitor's identity key (helper.CompetitorKey),
+		// not the bare name -- "Player Trim" is placed in the roster with a
+		// real id/dojo so this also exercises that resolution, not just the
+		// trim.
 		comp := state.Competition{ID: "rank-trim-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
-		// Seed a pool with at least 7 players (rank=7 below).
+		// Seed a pool with at least 7 players (rank=7 below), the 7th being
+		// the trim target.
 		players := make([]helper.Player, 8)
 		for i := range players {
 			players[i] = helper.Player{Name: fmt.Sprintf("Player %d", i+1)}
 		}
+		players[6] = helper.Player{ID: "trim-player-id", Name: "Player Trim", Dojo: "Trim Dojo"}
 		require.NoError(t, store.SavePools("rank-trim-comp", []helper.Pool{
 			{PoolName: "pool-1", Players: players},
 		}))
@@ -130,14 +138,20 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 
-		// Read the persisted override back; key must be the trimmed name.
+		// Read the persisted override back; key must be the resolved
+		// competitor's identity key, built from the TRIMMED name matched
+		// against the roster (not the padded request string, and not a bare
+		// name).
 		overrides, err := store.LoadOverrides("rank-trim-comp")
 		require.NoError(t, err)
 		require.NotNil(t, overrides)
-		_, hasTrimmed := overrides.PoolRanks["pool-1"]["Player Trim"]
-		assert.True(t, hasTrimmed, "rank override should be keyed under trimmed name")
+		trimmedKey := helper.CompetitorKey("trim-player-id", "Player Trim", "Trim Dojo")
+		_, hasTrimmed := overrides.PoolRanks["pool-1"][trimmedKey]
+		assert.True(t, hasTrimmed, "rank override should be keyed under the resolved competitor's identity key")
 		_, hasPadded := overrides.PoolRanks["pool-1"]["  Player Trim  "]
-		assert.False(t, hasPadded, "rank override should not be keyed under padded name")
+		assert.False(t, hasPadded, "rank override should not be keyed under the padded raw name")
+		_, hasBareName := overrides.PoolRanks["pool-1"]["Player Trim"]
+		assert.False(t, hasBareName, "rank override should not be keyed under the bare trimmed name either")
 	})
 
 	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
@@ -222,6 +236,99 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "pools stage",
 				"error body should mention pools stage for status=%q", status)
 		}
+	})
+
+	// Same-name-different-dojo disambiguation (bc-cse): two pool members can
+	// legally share a display name (operator identity rule is (name, dojo),
+	// not name -- helper.CheckDuplicateEntriesByNameDojo only refuses a true
+	// (name, dojo) collision). The override-rank endpoint must resolve each
+	// request to exactly one of them, never both.
+	t.Run("Override Rank Disambiguates Same-Name Different-Dojo By PlayerId", func(t *testing.T) {
+		comp := state.Competition{ID: "rank-dup-id", Status: state.CompStatusPools}
+		store.SaveCompetition(&comp)
+		require.NoError(t, store.SavePools("rank-dup-id", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{ID: "dup-tokyo", Name: "Tanaka Kenji", Dojo: "Tokyo"},
+				{ID: "dup-osaka", Name: "Tanaka Kenji", Dojo: "Osaka"},
+				{ID: "dup-third", Name: "Suzuki Hiro", Dojo: "Nagoya"},
+			}},
+		}))
+
+		reqBody, _ := json.Marshal(map[string]any{
+			"playerId":   "dup-osaka",
+			"playerName": "Tanaka Kenji",
+			"rank":       1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-dup-id/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		overrides, err := store.LoadOverrides("rank-dup-id")
+		require.NoError(t, err)
+		osakaKey := helper.CompetitorKey("dup-osaka", "Tanaka Kenji", "Osaka")
+		tokyoKey := helper.CompetitorKey("dup-tokyo", "Tanaka Kenji", "Tokyo")
+		_, hasOsaka := overrides.PoolRanks["pool-1"][osakaKey]
+		assert.True(t, hasOsaka, "the override must land under the id-identified Osaka Tanaka")
+		_, hasTokyo := overrides.PoolRanks["pool-1"][tokyoKey]
+		assert.False(t, hasTokyo, "the namesake Tokyo Tanaka must not receive an override meant for Osaka")
+	})
+
+	t.Run("Override Rank Disambiguates Same-Name Different-Dojo By PlayerDojo", func(t *testing.T) {
+		comp := state.Competition{ID: "rank-dup-dojo", Status: state.CompStatusPools}
+		store.SaveCompetition(&comp)
+		require.NoError(t, store.SavePools("rank-dup-dojo", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{ID: "dup2-tokyo", Name: "Tanaka Kenji", Dojo: "Tokyo"},
+				{ID: "dup2-osaka", Name: "Tanaka Kenji", Dojo: "Osaka"},
+				{ID: "dup2-third", Name: "Suzuki Hiro", Dojo: "Nagoya"},
+			}},
+		}))
+
+		// No playerId, only playerDojo -- exercises the name+dojo resolution
+		// branch a client that only knows the dojo (not the id) would take.
+		reqBody, _ := json.Marshal(map[string]any{
+			"playerName": "Tanaka Kenji",
+			"playerDojo": "Tokyo",
+			"rank":       2,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-dup-dojo/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		overrides, err := store.LoadOverrides("rank-dup-dojo")
+		require.NoError(t, err)
+		tokyoKey := helper.CompetitorKey("dup2-tokyo", "Tanaka Kenji", "Tokyo")
+		osakaKey := helper.CompetitorKey("dup2-osaka", "Tanaka Kenji", "Osaka")
+		_, hasTokyo := overrides.PoolRanks["pool-1"][tokyoKey]
+		assert.True(t, hasTokyo, "the override must land under the dojo-identified Tokyo Tanaka")
+		_, hasOsaka := overrides.PoolRanks["pool-1"][osakaKey]
+		assert.False(t, hasOsaka, "the namesake Osaka Tanaka must not receive an override meant for Tokyo")
+	})
+
+	t.Run("Override Rank Rejects Ambiguous Same-Name Request With 400", func(t *testing.T) {
+		comp := state.Competition{ID: "rank-dup-ambiguous", Status: state.CompStatusPools}
+		store.SaveCompetition(&comp)
+		require.NoError(t, store.SavePools("rank-dup-ambiguous", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{ID: "dup3-tokyo", Name: "Tanaka Kenji", Dojo: "Tokyo"},
+				{ID: "dup3-osaka", Name: "Tanaka Kenji", Dojo: "Osaka"},
+			}},
+		}))
+
+		// No playerId, no playerDojo: the request cannot disambiguate which
+		// Tanaka Kenji it means, so it must be rejected rather than silently
+		// applied to an arbitrary one of them (the exact bug bc-cse closes).
+		reqBody, _ := json.Marshal(map[string]any{"playerName": "Tanaka Kenji", "rank": 1})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-dup-ambiguous/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "ambiguous")
 	})
 
 	t.Run("Reset Overrides", func(t *testing.T) {
@@ -2933,6 +3040,86 @@ func TestChusenCandidates_NotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestChusenCandidates_IncludesTeamIdentity verifies that a non-empty chusen
+// candidate carries a "teams" array (id/name/dojo per member), not just the
+// legacy "teamNames" strings (bc-cse). The SPA's chusen resolver needs the id
+// (or dojo) to call PUT .../override-rank unambiguously: two teams CAN
+// legally share a display name from different dojos (operator identity
+// rule), and teamNames alone cannot tell them apart.
+func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
+	r, store, eng, _, _ := setupTestRouter(t)
+	compID := "chusen-identity"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Chusen Identity", Status: state.CompStatusPools,
+		Kind: "team", TeamSize: 2, Format: state.CompFormatLeague, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "alpha-id", Name: "Alpha", Dojo: "Dojo A"},
+			{ID: "beta-id", Name: "Beta", Dojo: "Dojo B"},
+			{ID: "gamma-id", Name: "Gamma", Dojo: "Dojo C"},
+		}},
+	}))
+	// Fully drawn round robin puts all three teams in one tied group,
+	// mirroring engine's TestChusenCandidates_CycleNeedsChusen.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta", SideAID: "alpha-id", SideBID: "beta-id",
+			Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake), Court: "A"},
+		{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma", SideAID: "alpha-id", SideBID: "gamma-id",
+			Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake), Court: "A"},
+		{ID: "Pool A-2", SideA: "Beta", SideB: "Gamma", SideAID: "beta-id", SideBID: "gamma-id",
+			Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake), Court: "A"},
+	}))
+
+	_, err := eng.InjectPoolDaihyosenMatches(compID)
+	require.NoError(t, err)
+
+	// Score the injected daihyosen bouts into a genuine cycle (no chusen
+	// override yet): Alpha>Beta, Beta>Gamma, Gamma>Alpha.
+	all, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	cycleBeats := map[string]string{"Alpha": "Beta", "Beta": "Gamma", "Gamma": "Alpha"}
+	for i := range all {
+		if !engine.IsPoolDaihyosenMatchID(all[i].ID) {
+			continue
+		}
+		all[i].Status = state.MatchStatusCompleted
+		if cycleBeats[all[i].SideA] == all[i].SideB {
+			all[i].Winner = all[i].SideA
+		} else {
+			all[i].Winner = all[i].SideB
+		}
+	}
+	require.NoError(t, store.SavePoolMatches(compID, all))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/competitions/"+compID+"/chusen-candidates", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	cands, ok := body["candidates"].([]any)
+	require.True(t, ok)
+	require.Len(t, cands, 1, "the 3-way cycle must surface as one chusen candidate")
+
+	group := cands[0].(map[string]any)
+	teams, ok := group["teams"].([]any)
+	require.True(t, ok, "candidate must carry a teams array")
+	require.Len(t, teams, 3)
+
+	byName := make(map[string]map[string]any, len(teams))
+	for _, raw := range teams {
+		team := raw.(map[string]any)
+		byName[team["name"].(string)] = team
+	}
+	assert.Equal(t, "alpha-id", byName["Alpha"]["id"])
+	assert.Equal(t, "Dojo A", byName["Alpha"]["dojo"])
+	assert.Equal(t, "beta-id", byName["Beta"]["id"])
+	assert.Equal(t, "Dojo B", byName["Beta"]["dojo"])
 }
 
 // TestUpdateCompetition_TeamMatchTypeLockedWhenStarted verifies that changing

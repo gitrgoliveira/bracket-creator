@@ -275,12 +275,12 @@ func TestMpN6keOverridesSaveInvalidatesStandings(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID}))
 
 	before := store.FileVersion(compID, "overrides.json")
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "A1", 1))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "", "A1", "", 1))
 	mid := store.FileVersion(compID, "overrides.json")
 	assert.Greater(t, mid, before, "an overrides write must advance the version")
 
 	// Immediately again, no sleep: still must be distinguishable.
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "A2", 2))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "", "A2", "", 2))
 	assert.Greater(t, store.FileVersion(compID, "overrides.json"), mid,
 		"a same-millisecond second overrides write must advance the version again")
 }

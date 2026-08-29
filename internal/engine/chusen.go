@@ -37,11 +37,18 @@ type ChusenGroup struct {
 // or more members finish the completed round on the same daihyosen win count
 // (a true win/loss cycle, an all-drawn round, or any other partial tie) so the
 // order is undetermined.
+//
+// groupOverrides is resolved per member via lookupPoolRankOverride (bc-cse):
+// identity-keyed first (id-preferred, name+dojo fallback), then a legacy
+// bare-name key for pre-fix overrides.json data. Two same-name,
+// different-dojo teammates in one tied group therefore no longer share a
+// single "already recorded" verdict -- each is checked against its own
+// override entry.
 func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
 	if len(groupOverrides) > 0 {
 		allOverridden := true
 		for _, s := range group {
-			if _, ok := groupOverrides[s.Player.Name]; !ok {
+			if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID, s.Player.Name, s.Player.Dojo); !ok {
 				allOverridden = false
 				break
 			}
@@ -50,23 +57,45 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 			return false
 		}
 	}
-	names := make(map[string]bool, len(group))
+	// Membership and win counts key on competitor IDENTITY rather than the
+	// display name, matching applyTiebreakSort next door. Note what this is
+	// and is not: chusen is team-only (ChusenCandidates returns nil for an
+	// individual competition) and two TEAMS may not share a name even across
+	// dojos (checkNewTeamNameCollisions, state/participants.go), so unlike the
+	// individual tiebreak path this is NOT a routinely reachable collision.
+	// It is kept because the team-name rule has one documented hole -- an
+	// unreadable config.md disables it for that write, logged and allowed
+	// through -- and because a bare-name key would then credit one namesake's
+	// daihyosen win to the other, reading a decided group as still tied or a
+	// genuine tie as decided; either answer changes who advances.
+	// generatePoolDaihyosenMatches stamps SideAID/SideBID/WinnerID, so the
+	// ids are there to key on and the hardening costs nothing.
+	groupKeys := make(map[string]bool, len(group))
+	byName := make(map[string]string, len(group))
 	for _, s := range group {
-		names[s.Player.Name] = true
+		ck := standingsPlayerKey(s.Player.ID, s.Player.Name)
+		groupKeys[ck] = true
+		byName[standingsPlayerKey("", s.Player.Name)] = ck
 	}
+	resolve := newGroupKeyResolver(groupKeys, byName)
+
 	dhWins := make(map[string]int, len(group))
 	dhCompleted := 0
 	for _, m := range allMatches {
 		if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted {
 			continue
 		}
-		if names[m.SideA] && names[m.SideB] {
+		keyA, okA := resolve(m.SideAID, m.SideA)
+		keyB, okB := resolve(m.SideBID, m.SideB)
+		if okA && okB && keyA != keyB {
 			dhCompleted++
 			// A hikiwake (Winner == "") counts toward round completeness but adds
 			// no win, so an all-drawn round leaves every member on 0 wins - a
 			// duplicate, which correctly surfaces as needing chusen below.
 			if m.Winner != "" {
-				dhWins[m.Winner]++
+				if wk, ok := resolve(m.WinnerID, m.Winner); ok {
+					dhWins[wk]++
+				}
 			}
 		}
 	}
@@ -85,7 +114,7 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	}
 	seen := make(map[int]bool, len(group))
 	for _, s := range group {
-		count := dhWins[s.Player.Name]
+		count := dhWins[standingsPlayerKey(s.Player.ID, s.Player.Name)]
 		if seen[count] {
 			return true
 		}

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,14 +33,19 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.PoolRanks)
 	assert.Empty(t, overrides.Winners)
 
-	// 2. Save rank override
-	err = store.SaveRankOverride(compID, "Pool A", "Alice", 1)
+	// 2. Save rank override. No id/dojo (an older/plumbing-only caller): the
+	// key is helper.CompetitorKey("", "Alice", ""), NOT the bare name -- see
+	// Overrides.PoolRanks' doc comment. Identity is verified in
+	// TestSaveRankOverride_SameNameDifferentDojo below; this test is plumbing
+	// only.
+	aliceKey := helper.CompetitorKey("", "Alice", "")
+	err = store.SaveRankOverride(compID, "Pool A", "", "Alice", "", 1)
 	require.NoError(t, err)
 
 	// 3. Load overrides after save
 	overrides, err = store.LoadOverrides(compID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, overrides.PoolRanks["Pool A"]["Alice"])
+	assert.Equal(t, 1, overrides.PoolRanks["Pool A"][aliceKey])
 
 	// 4. Save winner override
 	err = store.SaveWinnerOverride(compID, "Match-1", "Bob")
@@ -49,7 +55,7 @@ func TestOverrides(t *testing.T) {
 	overrides, err = store.LoadOverrides(compID)
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", overrides.Winners["Match-1"])
-	assert.Equal(t, 1, overrides.PoolRanks["Pool A"]["Alice"])
+	assert.Equal(t, 1, overrides.PoolRanks["Pool A"][aliceKey])
 
 	// 6. Reset overrides
 	err = store.ResetOverrides(compID)
@@ -148,12 +154,12 @@ func TestModifyOverridesChanged_NoChange(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "No Change"}))
 
 	// First save sets a rank
-	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "Alice", 1)
+	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "", "Alice", "", 1)
 	require.NoError(t, err)
 	assert.True(t, changed1)
 
 	// Saving the same value again should return false (no change)
-	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "Alice", 1)
+	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "", "Alice", "", 1)
 	require.NoError(t, err)
 	assert.False(t, changed2)
 }

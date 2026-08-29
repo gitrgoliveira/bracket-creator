@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -63,15 +64,15 @@ func parseSwissMatchRound(id string) (int, bool) {
 // buildSwissRosterIndex builds identity-lookup tables over roster (the FULL
 // participant list for the competition, not yet narrowed to this round's
 // active/eligible set): byID maps a participant ID straight to its
-// competitorKey (trivial, but keeps every lookup going through one helper);
-// byName maps a display name to every competitorKey sharing that name, in
+// CompetitorKey (trivial, but keeps every lookup going through one helper);
+// byName maps a display name to every CompetitorKey sharing that name, in
 // roster order.
 //
 // The byName fallback exists for resolving a Swiss match SIDE that predates
 // this fix (bc-cse): before buildSwissMatches stamped SideAID/SideBID, a
 // persisted Swiss row carried only a name. Once every match this engine
 // generates carries an id for a roster member who has one (effectively
-// always -- see competitorKey), the byID branch of resolveSwissRosterKey is
+// always -- see CompetitorKey), the byID branch of resolveSwissRosterKey is
 // what actually resolves it; byName is the legacy fallback and reproduces
 // the OLD bare-name behaviour exactly (first roster entry sharing the name),
 // so an already-persisted same-name row is neither fixed nor further broken
@@ -81,7 +82,7 @@ func buildSwissRosterIndex(roster []domain.Player) (byID map[string]string, byNa
 	byID = make(map[string]string, len(roster))
 	byName = make(map[string][]string, len(roster))
 	for _, p := range roster {
-		k := competitorKey(p.ID, p.Name, p.Dojo)
+		k := helper.CompetitorKey(p.ID, p.Name, p.Dojo)
 		if p.ID != "" {
 			byID[p.ID] = k
 		}
@@ -107,7 +108,7 @@ func resolveSwissRosterKey(byID map[string]string, byName map[string][]string, i
 }
 
 // swissFieldKeysFromMatches returns the set of competitor identity keys
-// (competitorKey, resolved against byID/byName) that have appeared in prior
+// (CompetitorKey, resolved against byID/byName) that have appeared in prior
 // Swiss matches (players and bye recipients alike), i.e. the frozen round-1
 // field. Used by GenerateSwissRound for rounds > 1 to keep the field stable
 // across rounds regardless of later check-in toggles (mp-w7x; PR #199
@@ -236,7 +237,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		field := swissFieldKeysFromMatches(priorMatches, rosterByID, rosterByName)
 		frozen := make([]domain.Player, 0, len(participants))
 		for _, p := range participants {
-			if field[competitorKey(p.ID, p.Name, p.Dojo)] {
+			if field[helper.CompetitorKey(p.ID, p.Name, p.Dojo)] {
 				frozen = append(frozen, p)
 			}
 		}
@@ -265,7 +266,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// SideA/SideB/SideAID/SideBID once pairing has settled on identities.
 	keyToPlayer := make(map[string]domain.Player, len(active))
 	for _, p := range active {
-		keyToPlayer[competitorKey(p.ID, p.Name, p.Dojo)] = p
+		keyToPlayer[helper.CompetitorKey(p.ID, p.Name, p.Dojo)] = p
 	}
 
 	// Build the prior-pairings set (for rematch avoidance) and the
@@ -334,7 +335,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 
 // pairKey returns a canonical (order-independent) key for the pair (a, b).
 // Generic over any ordered string token: the Swiss pipeline passes
-// competitor identity keys (competitorKey), not names, but the
+// competitor identity keys (CompetitorKey), not names, but the
 // order-independence rule is the same either way.
 func pairKey(a, b string) string {
 	if a < b {
@@ -349,10 +350,10 @@ func pairKey(a, b string) string {
 // ones by name alphabetical order (with ties among identical names
 // broken by their existing order in `players`, i.e. stable, so two
 // same-name-different-dojo competitors get a fully deterministic order).
-// The returned map is keyed by competitorKey (bc-cse), not display name:
+// The returned map is keyed by CompetitorKey (bc-cse), not display name:
 // the rest of the Swiss pipeline uses that identity end to end so two
 // competitors sharing a name from different dojos are never merged (see
-// competitorKey's doc comment, engi.go).
+// CompetitorKey's doc comment, engi.go).
 func buildRankByKey(players []domain.Player) map[string]int {
 	type ranked struct {
 		key  string
@@ -361,7 +362,7 @@ func buildRankByKey(players []domain.Player) map[string]int {
 	}
 	rs := make([]ranked, len(players))
 	for i, p := range players {
-		rs[i] = ranked{key: competitorKey(p.ID, p.Name, p.Dojo), name: p.Name, seed: p.Seed}
+		rs[i] = ranked{key: helper.CompetitorKey(p.ID, p.Name, p.Dojo), name: p.Name, seed: p.Seed}
 	}
 	sort.SliceStable(rs, func(i, j int) bool {
 		si, sj := rs[i].seed, rs[j].seed
@@ -385,9 +386,9 @@ func buildRankByKey(players []domain.Player) map[string]int {
 
 // computeSwissPairings is the pairing core. It returns (pairs, bye, err)
 // where pairs is the list of (sideA, sideB) tuples and bye is the
-// identity key (competitorKey) of the bye recipient (empty string when no
+// identity key (CompetitorKey) of the bye recipient (empty string when no
 // bye applies). Every map here (wins, priorPair, hadBye, rankByKey) is keyed
-// by competitorKey, not display name (bc-cse).
+// by CompetitorKey, not display name (bc-cse).
 func (e *Engine) computeSwissPairings(
 	active []domain.Player,
 	wins map[string]int,
@@ -419,7 +420,7 @@ func (e *Engine) computeSwissPairings(
 //     pairing keyed on compID so retries produce the same result
 //     (important for SSE replay / handler-retry semantics).
 //
-// Operates on competitor identity keys (competitorKey), not display names,
+// Operates on competitor identity keys (CompetitorKey), not display names,
 // throughout (bc-cse): the deterministic shuffle's OUTPUT ORDER depends only
 // on the RNG sequence and slice length, not on the string values being
 // permuted, so switching from names to keys does not change the pairing
@@ -443,7 +444,7 @@ func (e *Engine) firstRoundPairings(
 	// (fold) or as a starting permutation (random).
 	keys := make([]string, len(active))
 	for i, p := range active {
-		keys[i] = competitorKey(p.ID, p.Name, p.Dojo)
+		keys[i] = helper.CompetitorKey(p.ID, p.Name, p.Dojo)
 	}
 	sort.SliceStable(keys, func(i, j int) bool {
 		return rankByKey[keys[i]] < rankByKey[keys[j]]
@@ -527,7 +528,7 @@ func removeName(names []string, target string) []string {
 //     group when a rematch can't be avoided.
 //  4. Within each group, players are ordered by rank (seed → name).
 //
-// wins/priorPair/hadBye/rankByKey are all keyed by competitorKey (bc-cse),
+// wins/priorPair/hadBye/rankByKey are all keyed by CompetitorKey (bc-cse),
 // not display name, so two same-name-different-dojo competitors are paired,
 // win-tracked, and bye-tracked independently.
 func (e *Engine) subsequentRoundPairings(
@@ -540,7 +541,7 @@ func (e *Engine) subsequentRoundPairings(
 	// Sort all active players by (-wins, rank).
 	ordered := make([]string, len(active))
 	for i, p := range active {
-		ordered[i] = competitorKey(p.ID, p.Name, p.Dojo)
+		ordered[i] = helper.CompetitorKey(p.ID, p.Name, p.Dojo)
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		wi, wj := wins[ordered[i]], wins[ordered[j]]
@@ -599,7 +600,7 @@ func lowestWinBucketNames(ordered []string, wins map[string]int) []string {
 // matcher could replace this, the test suite (T175) covers the
 // happy-path correctness.
 //
-// ordered/wins/priorPair carry competitor identity keys (competitorKey),
+// ordered/wins/priorPair carry competitor identity keys (CompetitorKey),
 // not display names (bc-cse), so rematch avoidance (priorPair) correctly
 // distinguishes two same-name-different-dojo competitors.
 func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[string]bool, rankByKey map[string]int) [][2]string {
@@ -640,7 +641,7 @@ func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[st
 // MatchResult entries with synthetic IDs, round-robin court assignment, and
 // the appropriate Status for played-vs-bye matches.
 //
-// pairings and byeKey carry competitor IDENTITY KEYS (competitorKey), not
+// pairings and byeKey carry competitor IDENTITY KEYS (CompetitorKey), not
 // display names (bc-cse) -- resolved back to a display Name (and, when
 // available, participant ID) via keyToPlayer, exactly mirroring pools.go's
 // regular-match generation (pools.go:207, `SideAID: m.SideA.ID`). This is

@@ -22,7 +22,6 @@ import (
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
-	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -220,11 +219,10 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 // standings row.
 //
 // Used by kendo SwissStandings (bc-cse) as well as the pool/league standings
-// core: buildSwissMatches now stamps SideAID/SideBID on every match it
-// generates (mirroring pools.go), so the id branch is populated for Swiss
-// exactly as it is for pools. NOT used by computeEngiSwissStandings: that
-// function still keys purely by name (see its doc comment) -- closing that
-// gap for the engi Swiss twin is tracked separately and out of scope here.
+// core, and by computeEngiSwissStandings below: buildSwissMatches now stamps
+// SideAID/SideBID on every match it generates (mirroring pools.go), so the id
+// branch is populated for Swiss exactly as it is for pools, kendo and engi
+// alike.
 func standingsPlayerKey(id, name string) string {
 	if id != "" {
 		return "id:" + id
@@ -232,35 +230,15 @@ func standingsPlayerKey(id, name string) string {
 	return "name:" + name
 }
 
-// competitorKey returns the competitor IDENTITY used by the Swiss pairing
-// pipeline (swiss.go): the participant ID when present -- globally unique,
-// and minted for essentially every stored participant, see
-// state.saveParticipantsNoLock's ID-fill branch -- falling back to a
-// normalized (name, dojo) composite otherwise. This is the operator identity
-// rule (CLAUDE.md): competitor identity is (name, dojo), not name; two
-// competitors sharing a name from different dojos are different people and
-// are legal (helper.CheckDuplicateEntriesByNameDojo only refuses a true
-// (name, dojo) collision), so a name-only fallback would silently collide
-// two distinct, ID-less competitors.
-//
-// This differs from standingsPlayerKey on purpose: standingsPlayerKey
-// resolves a MATCH SIDE (id, name) against an already-registered roster,
-// where dojo isn't available on the wire, so its fallback is a bare name.
-// competitorKey instead establishes identity FROM THE ROSTER ITSELF, where
-// dojo is always available, so its own fallback can be collision-resistant
-// without needing a second lookup. Swiss uses competitorKey to key its
-// pairing-generation state (wins, byes, rematch-avoidance, rank); once a
-// pairing is resolved to MatchResult.SideA/SideAID for persistence, every
-// later READ (SwissStandings, GenerateSwissRound's own prior-round scan) goes
-// back through standingsPlayerKey / registerStandingsPlayer /
-// lookupStandingsPlayer like every other match-reading consumer, so the
-// whole codebase has exactly one match-side resolution scheme.
-func competitorKey(id, name, dojo string) string {
-	if id != "" {
-		return "id:" + id
-	}
-	return "nd:" + helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
-}
+// CompetitorKey is the shared identity-key builder for competitor identity
+// (operator rule: (name, dojo), not name); see its doc comment in
+// internal/helper/identity.go for the full rationale. It was originally
+// engine-local (Swiss pairing only) and was moved to helper (bc-cse) so
+// internal/state -- which cannot import internal/engine without a cycle --
+// can key manual pool-rank overrides (state.Overrides.PoolRanks) with the
+// same scheme. Swiss (swiss.go) and computeEngiSwissStandings /
+// computeEngiStandings (this file, via standingsPlayerKey) both still call
+// helper.CompetitorKey directly.
 
 // registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
 // into m under BOTH its name key AND (when player.ID is non-empty) its id
@@ -435,36 +413,37 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 // before name) but ranks by (1) Wins then (2) accumulated OWN-SIDE flags,
 // exactly like the pool/league computeEngiStandings.
 //
-// Identity is keyed by display NAME, UNLIKE the kendo SwissStandings it
-// twins (bc-cse fixed that one to key on standingsPlayerKey /
-// registerStandingsPlayer / lookupStandingsPlayer, id-preferred with a name
-// fallback for legacy rows). buildSwissMatches now stamps SideAID/SideBID on
-// every match it generates (mirroring pools.go), including engi Swiss
-// matches -- GenerateSwissRound has no engi/kendo fork, so the same
-// generator produces both -- so the data this function needs is now on
-// disk. This function was deliberately left on its ORIGINAL name-only
-// scheme rather than switched over in the same change: the actual
-// duplicate-name rule is name+dojo (CheckDuplicateEntriesByNameDojo), not
-// the whole-row CheckDuplicateEntries, so a same-name-different-dojo pair in
-// an engi Swiss field still collapses today. Closing it is a follow-up
-// (mirror computeEngiStandings' registerStandingsPlayer/lookupStandingsPlayer
-// use), not a rule -- do not read this comment as saying the gap is
-// permanent or intentional, only that this function hasn't been converted
-// yet.
+// Identity is keyed via standingsPlayerKey / registerStandingsPlayer /
+// lookupStandingsPlayer, id-preferred with a name fallback for legacy rows,
+// exactly like the kendo SwissStandings it twins (bc-cse). This function
+// used to be keyed by bare display name: at the time, the premise was that
+// buildSwissMatches persisted no per-side id at all, so an id-aware scheme
+// would have had nothing to key on. That premise no longer holds --
+// buildSwissMatches now stamps SideAID/SideBID on every match it generates
+// (mirroring pools.go), including engi Swiss matches, since
+// GenerateSwissRound has no engi/kendo fork and the same generator produces
+// both -- so a same-name-different-dojo pair in an engi Swiss field no
+// longer collapses to one standings row.
 func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
-	byName := make(map[string]*state.PlayerStanding, len(participants))
+	// order holds one *PlayerStanding per participant, in roster order: the
+	// assembly loop below ranges over THIS, not over byKey's values, because
+	// registerStandingsPlayer indexes the SAME pointer under two keys and a
+	// range over the map's values would visit -- and append -- each
+	// participant twice (mirrors SwissStandings / computeEngiStandings).
+	byKey := make(map[string]*state.PlayerStanding, len(participants))
+	order := make([]*state.PlayerStanding, 0, len(participants))
 	for _, p := range participants {
-		byName[p.Name] = &state.PlayerStanding{Player: p}
+		order = append(order, registerStandingsPlayer(byKey, p))
 	}
 
-	headToHead := make(map[string]map[string]string) // sideA → sideB → who won
+	headToHead := make(map[string]map[string]string) // winner key → opponent key → winner key
 	for _, m := range matches {
 		if _, ok := parseSwissMatchRound(m.ID); !ok {
 			continue
 		}
 		// Bye: SideA wins, no flags accrued, no head-to-head.
 		if m.SideB == "" {
-			if sA := byName[m.SideA]; sA != nil {
+			if sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA); sA != nil {
 				sA.Wins++
 			}
 			continue
@@ -472,21 +451,27 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 		if m.Status != state.MatchStatusCompleted {
 			continue
 		}
-		sA := byName[m.SideA]
-		sB := byName[m.SideB]
+		sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA)
+		sB := lookupStandingsPlayer(byKey, m.SideBID, m.SideB)
 		if sA == nil || sB == nil {
 			continue
 		}
 		// Engi has no draws (odd flag total) and records no losses: ranking is
-		// Wins then accumulated own-side Flags. Winner resolves by name (Swiss
-		// stores no WinnerID); a completed engi bout always names a winner.
-		switch m.Winner {
-		case m.SideA:
+		// Wins then accumulated own-side Flags. Resolve the winning side by
+		// WinnerID when available (unambiguous even when both sides share a
+		// display name); fall back to the Winner name for legacy data recorded
+		// before WinnerID was set, mirroring computeEngiStandings / SwissStandings.
+		winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
+		winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+		keyA := standingsPlayerKey(sA.Player.ID, sA.Player.Name)
+		keyB := standingsPlayerKey(sB.Player.ID, sB.Player.Name)
+		switch {
+		case winnerIsA:
 			sA.Wins++
-			recordHeadToHead(headToHead, m.SideA, m.SideB, m.SideA)
-		case m.SideB:
+			recordHeadToHead(headToHead, keyA, keyB, keyA)
+		case winnerIsB:
 			sB.Wins++
-			recordHeadToHead(headToHead, m.SideA, m.SideB, m.SideB)
+			recordHeadToHead(headToHead, keyA, keyB, keyB)
 		}
 		// Own-side flag accrual: winner AND loser both accumulate the flags
 		// raised for their own side.
@@ -494,8 +479,8 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 		sB.Flags += m.FlagsB
 	}
 
-	standings := make([]state.PlayerStanding, 0, len(byName))
-	for _, s := range byName {
+	standings := make([]state.PlayerStanding, 0, len(order))
+	for _, s := range order {
 		s.ScoreSummary = engiScoreSummary(s)
 		standings = append(standings, *s)
 	}
@@ -508,11 +493,13 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 			return a.Flags > b.Flags
 		}
 		// Head-to-head: if a beat b directly, a ranks higher.
-		if winner, ok := lookupH2H(headToHead, a.Player.Name, b.Player.Name); ok {
-			if winner == a.Player.Name {
+		keyA := standingsPlayerKey(a.Player.ID, a.Player.Name)
+		keyB := standingsPlayerKey(b.Player.ID, b.Player.Name)
+		if winner, ok := lookupH2H(headToHead, keyA, keyB); ok {
+			if winner == keyA {
 				return true
 			}
-			if winner == b.Player.Name {
+			if winner == keyB {
 				return false
 			}
 		}

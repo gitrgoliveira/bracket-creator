@@ -277,6 +277,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {chusenCandidates.map((group) => {
         const { poolName, teamNames, minPosition } = group;
+        // Identity lookup (bc-cse): teams carries {id, name, dojo} per member
+        // alongside the legacy teamNames strings, so the override-rank call
+        // below can disambiguate two teams that legally share a display name
+        // from different dojos (operator identity rule). Falls back to an
+        // empty object per name (no id/dojo sent) if an older server response
+        // lacks the teams field, matching the pre-bc-cse behaviour exactly.
+        const identityByName = {};
+        (group.teams || []).forEach(team => { identityByName[team.name] = team; });
         // A pool can hold more than one unresolved tied group (e.g. a cycle at
         // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
         // so the React key and the busy/error maps never collide across groups.
@@ -315,7 +323,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           setChusenBusy(prev => ({ ...prev, [groupKey]: true }));
           try {
             for (const name of teamNames) {
-              await window.API.overridePoolRank(c.id, poolName, name, effRank(name), password);
+              const identity = identityByName[name] || {};
+              await window.API.overridePoolRank(c.id, poolName, name, effRank(name), password, identity.id, identity.dojo);
             }
             // Optimistically hide THIS group only (a pool can hold several) - the
             // effect re-fetches on the next update to reconcile.

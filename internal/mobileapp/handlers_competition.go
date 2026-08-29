@@ -417,6 +417,71 @@ func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (
 	return nil, nil
 }
 
+// resolvePoolOverrideTarget resolves the pool-rank override request's target
+// competitor to a canonical (id, dojo) pair, looked up against the pool's OWN
+// roster rather than trusted verbatim from the request (bc-cse). This is what
+// lets the PUT .../override-rank handler disambiguate two same-name,
+// different-dojo pool members: the operator identity rule (CLAUDE.md) is
+// (name, dojo), not name, so a bare playerName is not enough on its own to
+// pick one of them.
+//
+// Resolution order:
+//  1. playerID, when given, must name a player actually in this pool; that
+//     player's own id/dojo is returned. (Wrong/foreign id is a 400, not a
+//     silent fallback to name matching -- a client that HAS an id and gets it
+//     wrong should be told, not silently corrected.)
+//  2. Otherwise, match by playerName against the pool roster. Exactly one
+//     match resolves immediately -- this is what keeps an older client that
+//     sends only playerName working: most pools have no name collision at
+//     all, so nothing else needs to change for them.
+//  3. Two or more players share playerName in this pool (a genuine
+//     same-name-different-dojo pair): playerDojo, when it narrows the match
+//     set to exactly one, resolves it.
+//  4. Anything left ambiguous (no playerDojo, or a playerDojo that still
+//     matches more than one, or matches none) is a 400: writing an override
+//     under an arbitrarily-chosen namesake would silently misapply a chusen
+//     result to the wrong competitor, which is the exact bug bc-cse closes.
+//
+// A playerName with NO roster match at all (case 0) is not an error: it
+// returns empty id/dojo, matching the pre-fix behaviour of accepting
+// whatever name the operator supplied (e.g. correcting an override before
+// the roster catches up). CompetitorKey("", name, "") still gives that write
+// a deterministic key.
+func resolvePoolOverrideTarget(players []domain.Player, playerID, playerName, playerDojo string) (id, dojo string, err error) {
+	if playerID != "" {
+		for _, p := range players {
+			if p.ID == playerID {
+				return p.ID, p.Dojo, nil
+			}
+		}
+		return "", "", fmt.Errorf("playerId %q not found in this pool", playerID)
+	}
+	var matches []domain.Player
+	for _, p := range players {
+		if p.Name == playerName {
+			matches = append(matches, p)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", "", nil
+	case 1:
+		return matches[0].ID, matches[0].Dojo, nil
+	}
+	if playerDojo != "" {
+		var dojoMatches []domain.Player
+		for _, p := range matches {
+			if p.Dojo == playerDojo {
+				dojoMatches = append(dojoMatches, p)
+			}
+		}
+		if len(dojoMatches) == 1 {
+			return dojoMatches[0].ID, dojoMatches[0].Dojo, nil
+		}
+	}
+	return "", "", fmt.Errorf("playerName %q is ambiguous in pool: multiple competitors share this name; include playerId or playerDojo to disambiguate", playerName)
+}
+
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		ids, err := store.ListCompetitions()
@@ -2186,6 +2251,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		poolId := c.Param("poolId")
 		var req struct {
 			PlayerName string `json:"playerName"`
+			// PlayerID and PlayerDojo are optional (bc-cse), added so the
+			// operator's rank override can be pinned to one competitor even
+			// when two pool members share a display name from different
+			// dojos (operator identity rule: (name, dojo), not name -- see
+			// helper.CompetitorKey). An older client that only ever sends
+			// playerName still works: it is resolved below against the
+			// pool's own roster, which disambiguates automatically whenever
+			// the name happens to be unique in this pool (the common case).
+			PlayerID   string `json:"playerId"`
+			PlayerDojo string `json:"playerDojo"`
 			Rank       int    `json:"rank"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -2206,6 +2281,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		playerID := strings.TrimSpace(req.PlayerID)
+		playerDojo := strings.TrimSpace(req.PlayerDojo)
 		if req.Rank <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer"})
 			return
@@ -2261,7 +2338,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		changed, err := store.SaveRankOverrideChanged(id, poolId, playerName, req.Rank)
+		// Resolve the override target's canonical identity from the pool's
+		// OWN roster rather than trusting the client's playerDojo outright:
+		// this is what lets an unmodified legacy client (playerName only)
+		// still disambiguate correctly whenever the name is unique in this
+		// pool, and it is the sole place that can tell a genuine same-name
+		// collision from an ordinary single match.
+		resolvedID, resolvedDojo, resolveErr := resolvePoolOverrideTarget(targetPool.Players, playerID, playerName, playerDojo)
+		if resolveErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
+			return
+		}
+
+		changed, err := store.SaveRankOverrideChanged(id, poolId, resolvedID, playerName, resolvedDojo, req.Rank)
 		if err != nil {
 			internalError(c, err)
 			return
@@ -2300,10 +2389,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		out := make([]gin.H, 0, len(candidates))
 		for _, g := range candidates {
 			names := make([]string, len(g.Teams))
+			// teams carries id/dojo alongside each name (bc-cse) so the SPA's
+			// chusen resolver can call PUT .../override-rank with playerId
+			// (falling back to playerDojo), the same identity disambiguation
+			// the operator rule requires: two teams CAN legally share a
+			// display name from different dojos, and teamNames alone (kept
+			// for older clients) is not enough to tell them apart.
+			teams := make([]gin.H, len(g.Teams))
 			for i, t := range g.Teams {
 				names[i] = t.Player.Name
+				teams[i] = gin.H{"id": t.Player.ID, "name": t.Player.Name, "dojo": t.Player.Dojo}
 			}
-			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "minPosition": g.MinPosition})
+			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "teams": teams, "minPosition": g.MinPosition})
 		}
 		c.JSON(http.StatusOK, gin.H{"candidates": out})
 	})

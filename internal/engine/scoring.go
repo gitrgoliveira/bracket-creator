@@ -1450,13 +1450,20 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// regardless of how the operator chose to resolve it.
 		markTiedStandings(comp, sorted, poolResults[p.PoolName])
 
-		// Apply manual rank overrides
+		// Apply manual rank overrides. Overrides are keyed by competitor
+		// IDENTITY (helper.CompetitorKey: id-preferred, name+dojo fallback),
+		// not bare name (bc-cse) -- lookupPoolRankOverride also honours a
+		// legacy bare-name key for an overrides.json written before this fix,
+		// see its doc comment for the read-only compatibility decision.
 		overrides, _ := e.store.LoadOverrides(compId)
-		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
-			poolOverrides := overrides.PoolRanks[p.PoolName]
+		var poolOverrides map[string]int
+		if overrides != nil {
+			poolOverrides = overrides.PoolRanks[p.PoolName]
+		}
+		if len(poolOverrides) > 0 {
 			sort.Slice(sorted, func(i, j int) bool {
-				rankI, okI := poolOverrides[sorted[i].Player.Name]
-				rankJ, okJ := poolOverrides[sorted[j].Player.Name]
+				rankI, okI := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo)
+				rankJ, okJ := lookupPoolRankOverride(poolOverrides, sorted[j].Player.ID, sorted[j].Player.Name, sorted[j].Player.Dojo)
 				if okI && okJ {
 					return rankI < rankJ
 				}
@@ -1470,11 +1477,11 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			})
 		}
 
-		poolHasOverrides := overrides != nil && overrides.PoolRanks[p.PoolName] != nil
+		poolHasOverrides := len(poolOverrides) > 0
 		for i := range sorted {
 			sorted[i].Rank = i + 1
 			if poolHasOverrides {
-				if _, ok := overrides.PoolRanks[p.PoolName][sorted[i].Player.Name]; ok {
+				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo); ok {
 					sorted[i].IsOverridden = true
 				}
 			}

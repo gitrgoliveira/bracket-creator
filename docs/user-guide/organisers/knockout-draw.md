@@ -2,7 +2,7 @@
 
 In a competition with a pool phase, the knockout bracket is not redrawn once the pools finish. It is built when you generate the draw: every qualifying place has a slot waiting for it before a single pool match is played, and the preview shows you which pool feeds which slot.
 
-This page explains how those slots are worked out, so you can check a draw before you publish it and answer questions about it at the desk.
+This page explains how those slots are worked out, so you can check a draw before you publish it and answer questions about it at the desk. For the phase before this one, how the pools themselves are drawn, see [The pool draw](pool-draw.md).
 
 It describes the **Pools + Knockout** format, pools followed by a knockout. A **Knockout only** competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
 

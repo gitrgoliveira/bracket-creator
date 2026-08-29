@@ -28,7 +28,7 @@ A playoffs competition splits its bracket across shiai-jo just as a mixed one do
 
 Mixed runs two phases. First, competitors are divided into pools and play a round-robin within each pool. Then the top finishers from each pool advance to a knockout bracket.
 
-Use mixed for most events. Pools give every competitor several matches before the knockout begins.
+Use mixed for most events. Pools give every competitor several matches before the knockout begins. See [The pool draw](pool-draw.md) for how competitors are placed into pools, including how members of the same dojo are kept apart.
 
 The knockout half is not a fresh random draw. Each shiai-jo gets its own block of the bracket; a pool's winner stays in that block and its other qualifiers cross into a partner shiai-jo's block, which keeps two competitors from the same pool apart for as long as the bracket allows. Byes are worked out within each block, and the seeds you set decide which quarter of the draw the top competitors land in. See [The knockout draw](knockout-draw.md) for the full rules and worked examples.
 

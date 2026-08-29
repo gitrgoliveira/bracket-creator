@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -216,18 +217,49 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 // participants from different dojos are explicitly allowed
 // (CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo), so
 // keying by name alone silently merges distinct competitors into one
-// standings row. NOT used by Swiss (SwissStandings / computeEngiSwissStandings):
-// Swiss matches persist no per-side UUIDs at all (buildSwissMatches never
-// sets SideAID/SideBID, and the SPA only echoes an id it already received),
-// so an id-preferring key there would build "id:<uuid>" roster entries that
-// no match lookup (always "name:...", since the match side id is always
-// empty) could ever find -- silently dropping every Swiss tally rather than
-// fixing the same-name case. See computeEngiSwissStandings's doc comment.
+// standings row.
+//
+// Used by kendo SwissStandings (bc-cse) as well as the pool/league standings
+// core: buildSwissMatches now stamps SideAID/SideBID on every match it
+// generates (mirroring pools.go), so the id branch is populated for Swiss
+// exactly as it is for pools. NOT used by computeEngiSwissStandings: that
+// function still keys purely by name (see its doc comment) -- closing that
+// gap for the engi Swiss twin is tracked separately and out of scope here.
 func standingsPlayerKey(id, name string) string {
 	if id != "" {
 		return "id:" + id
 	}
 	return "name:" + name
+}
+
+// competitorKey returns the competitor IDENTITY used by the Swiss pairing
+// pipeline (swiss.go): the participant ID when present -- globally unique,
+// and minted for essentially every stored participant, see
+// state.saveParticipantsNoLock's ID-fill branch -- falling back to a
+// normalized (name, dojo) composite otherwise. This is the operator identity
+// rule (CLAUDE.md): competitor identity is (name, dojo), not name; two
+// competitors sharing a name from different dojos are different people and
+// are legal (helper.CheckDuplicateEntriesByNameDojo only refuses a true
+// (name, dojo) collision), so a name-only fallback would silently collide
+// two distinct, ID-less competitors.
+//
+// This differs from standingsPlayerKey on purpose: standingsPlayerKey
+// resolves a MATCH SIDE (id, name) against an already-registered roster,
+// where dojo isn't available on the wire, so its fallback is a bare name.
+// competitorKey instead establishes identity FROM THE ROSTER ITSELF, where
+// dojo is always available, so its own fallback can be collision-resistant
+// without needing a second lookup. Swiss uses competitorKey to key its
+// pairing-generation state (wins, byes, rematch-avoidance, rank); once a
+// pairing is resolved to MatchResult.SideA/SideAID for persistence, every
+// later READ (SwissStandings, GenerateSwissRound's own prior-round scan) goes
+// back through standingsPlayerKey / registerStandingsPlayer /
+// lookupStandingsPlayer like every other match-reading consumer, so the
+// whole codebase has exactly one match-side resolution scheme.
+func competitorKey(id, name, dojo string) string {
+	if id != "" {
+		return "id:" + id
+	}
+	return "nd:" + helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
 }
 
 // registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
@@ -403,16 +435,22 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 // before name) but ranks by (1) Wins then (2) accumulated OWN-SIDE flags,
 // exactly like the pool/league computeEngiStandings.
 //
-// Identity is keyed by display NAME, exactly like the kendo SwissStandings it
-// twins: Swiss matches persist no per-side UUIDs (SideAID/SideBID/WinnerID are
-// empty in pool-matches.csv), and the Swiss pairing pipeline (rematch
-// avoidance, win/bye tracking, rank ordering) already treats names as the
-// pairing identity end to end -- see the correction in swissFieldNamesFromMatches's
-// doc comment: the actual duplicate-name rule is name+dojo
-// (CheckDuplicateEntriesByNameDojo), not the whole-row CheckDuplicateEntries,
-// so this is a known, accepted gap for a same-name pair in Swiss, not a rule.
-// Keying by standingsPlayerKey would build "id:<uuid>" roster keys that never
-// match the name-only lookups the empty-ID matches produce, tallying nothing.
+// Identity is keyed by display NAME, UNLIKE the kendo SwissStandings it
+// twins (bc-cse fixed that one to key on standingsPlayerKey /
+// registerStandingsPlayer / lookupStandingsPlayer, id-preferred with a name
+// fallback for legacy rows). buildSwissMatches now stamps SideAID/SideBID on
+// every match it generates (mirroring pools.go), including engi Swiss
+// matches -- GenerateSwissRound has no engi/kendo fork, so the same
+// generator produces both -- so the data this function needs is now on
+// disk. This function was deliberately left on its ORIGINAL name-only
+// scheme rather than switched over in the same change: the actual
+// duplicate-name rule is name+dojo (CheckDuplicateEntriesByNameDojo), not
+// the whole-row CheckDuplicateEntries, so a same-name-different-dojo pair in
+// an engi Swiss field still collapses today. Closing it is a follow-up
+// (mirror computeEngiStandings' registerStandingsPlayer/lookupStandingsPlayer
+// use), not a rule -- do not read this comment as saying the gap is
+// permanent or intentional, only that this function hasn't been converted
+// yet.
 func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
 	byName := make(map[string]*state.PlayerStanding, len(participants))
 	for _, p := range participants {

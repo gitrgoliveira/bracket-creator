@@ -178,30 +178,30 @@ func TestLeagueStandings_SameNameDifferentDojo(t *testing.T) {
 	assert.Equal(t, 1, byID[snIDWatanabe].Wins)
 }
 
-// TestSwissStandings_SameNameDifferentDojo_KnownLimitation is NOT a fix
-// verification: it pins the CURRENT, still-unfixed behavior for Swiss.
+// TestSwissStandings_SameNameDifferentDojo is the Swiss regression: two
+// same-name, different-dojo competitors in one Swiss field must appear as
+// two distinct standings rows, each with its own W/L record. This used to
+// be TestSwissStandings_SameNameDifferentDojo_KnownLimitation, which pinned
+// the (then still unfixed) collapse: buildSwissMatches persisted no per-side
+// id at all, so the whole pairing pipeline -- rematch avoidance, win/bye
+// tracking, rank ordering, and the final standings tally -- treated display
+// name as the pairing identity end to end. bc-cse closed the gap:
+// buildSwissMatches now stamps SideAID/SideBID/WinnerID exactly like
+// pools.go, and SwissStandings resolves match sides via
+// lookupStandingsPlayer (id-preferred, name fallback) instead of a bare-name
+// map, so the roster and the match tally agree.
 //
-// Unlike pool/league matches, a Swiss match persists no per-side id at all
-// (buildSwissMatches in swiss.go sets only SideA/SideB; the SPA's write
-// payload only ever echoes an id it already received from the server, so it
-// never invents one either). The whole Swiss pairing pipeline -- rematch
-// avoidance (priorPair), win/bye tracking (wins, hadBye), and rank ordering
-// (buildRankByName) -- treats display name as the pairing identity end to
-// end, not just the final standings tally.
-//
-// Applying the same standingsPlayerKey fix used for computeStandingsFrom
-// here would NOT close this gap: the roster would key by "id:<uuid>" (real
-// participant ids are available) while every match lookup would still
-// resolve to "name:<name>" (match-side ids are always empty), so the two
-// could never agree and EVERY Swiss standings tally would silently stop
-// working, not just the same-name case. This is exactly the failure mode
-// computeEngiSwissStandings' doc comment (engi.go) already documents and
-// deliberately avoids for its own Swiss twin. Closing it for real requires
-// threading participant ids through the pairing generation itself
-// (computeSwissPairings / buildSwissMatches and their name-keyed maps), which
-// is a materially larger change than this fix and is reported separately
-// rather than shipped as a partial/no-op edit here.
-func TestSwissStandings_SameNameDifferentDojo_KnownLimitation(t *testing.T) {
+// This test hand-crafts the full round-robin directly onto pool-matches.csv
+// (mirroring TestCalculatePoolStandings_SameNameDifferentDojo), rather than
+// driving GenerateSwissRound's pairing algorithm, because SwissStandings
+// tallies every row whose ID parses as Swiss regardless of which "round" it
+// claims -- the roster-collapse defect fires at standings-assembly time,
+// independent of how the pairing engine chose to match people up. The
+// pairing engine's OWN identity handling (derby pairing, win
+// non-cross-attribution, bye independence) is covered separately by
+// TestSwissPairing_SameNameDifferentDojo_Derby and
+// TestSwissPairing_SameNameDifferentDojo_ByeIndependence in swiss_test.go.
+func TestSwissStandings_SameNameDifferentDojo(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "swiss-samename"
 
@@ -210,30 +210,59 @@ func TestSwissStandings_SameNameDifferentDojo_KnownLimitation(t *testing.T) {
 		Name:                     "Swiss Same Name",
 		Kind:                     "individual",
 		Format:                   state.CompFormatSwiss,
-		SwissRounds:              1,
+		SwissRounds:              3,
 		Courts:                   []string{"A"},
 		StartTime:                "09:00",
 		Status:                   state.CompStatusSetup,
 		PoolMatchDurationSeconds: 180,
 	}))
-	require.NoError(t, store.SaveParticipants(compID, snPlayers()))
+	players := snPlayers()
+	require.NoError(t, store.SaveParticipants(compID, players))
 
-	ms, err := eng.GenerateSwissRound(compID, 1)
-	require.NoError(t, err)
-	require.NoError(t, store.SavePoolMatches(compID, ms))
-
-	for i := range ms {
-		if ms[i].SideB == "" {
-			continue // bye, already completed
+	// Full round robin (6 matches), stamped exactly as buildSwissMatches +
+	// the scoring write path would produce it: SideAID/SideBID at
+	// generation, WinnerID resolved from the actual winner.
+	var matches []state.MatchResult
+	idx := 0
+	for i := 0; i < len(players); i++ {
+		for j := i + 1; j < len(players); j++ {
+			a, b := players[i], players[j]
+			winner, winnerID := a, a.ID
+			if snRank(b.ID) > snRank(a.ID) {
+				winner, winnerID = b, b.ID
+			}
+			matches = append(matches, state.MatchResult{
+				ID:       "Swiss-R1-" + strconv.Itoa(idx),
+				SideA:    a.Name,
+				SideB:    b.Name,
+				SideAID:  a.ID,
+				SideBID:  b.ID,
+				Winner:   winner.Name,
+				WinnerID: winnerID,
+				Status:   state.MatchStatusCompleted,
+			})
+			idx++
 		}
-		completeSwissMatch(t, store, compID, ms[i].ID, ms[i].SideA)
 	}
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.SwissStandings(compID)
 	require.NoError(t, err)
-	// Known limitation: the two "Tanaka Kenji" entries collapse to one row
-	// (3, not 4). If this ever starts asserting 4, the underlying data gap
-	// described above has been closed -- update this test to assert the
-	// fixed behavior instead of the limitation.
-	assert.Len(t, standings, 3, "documents the current same-name collapse in Swiss standings (see doc comment)")
+	require.Len(t, standings, 4, "same-name-different-dojo competitors must both appear")
+
+	byID := make(map[string]state.PlayerStanding, len(standings))
+	for _, s := range standings {
+		byID[s.Player.ID] = s
+	}
+	require.Contains(t, byID, snIDTokyo)
+	require.Contains(t, byID, snIDOsaka)
+
+	assert.Equal(t, 3, byID[snIDOsaka].Wins, "Osaka Tanaka beats everyone, including the derby")
+	assert.Equal(t, 0, byID[snIDOsaka].Losses)
+	assert.Equal(t, 0, byID[snIDTokyo].Wins, "Tokyo Tanaka loses every match, including the derby")
+	assert.Equal(t, 3, byID[snIDTokyo].Losses)
+	assert.Equal(t, 2, byID[snIDSuzuki].Wins)
+	assert.Equal(t, 1, byID[snIDSuzuki].Losses)
+	assert.Equal(t, 1, byID[snIDWatanabe].Wins)
+	assert.Equal(t, 2, byID[snIDWatanabe].Losses)
 }

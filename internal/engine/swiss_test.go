@@ -953,3 +953,215 @@ func TestSwissStandings_Engi(t *testing.T) {
 	assert.Contains(t, byName["E1"].ScoreSummary, "Flags:",
 		"engi standings summary must expose the accumulated-flags column")
 }
+
+// TestGenerateSwissRound_SideIDsRoundTripThroughPersistence verifies that
+// SideAID/SideBID stamped by buildSwissMatches at generation (bc-cse) are
+// not merely computed in memory: they must survive a save to
+// pool-matches.csv and a subsequent reload, exactly like every other
+// pool-match field. Without this, GenerateSwissRound's own later reads
+// (rematch avoidance, win/bye tracking on rounds 2+) would resolve prior
+// rounds by name only, defeating the fix.
+func TestGenerateSwissRound_SideIDsRoundTripThroughPersistence(t *testing.T) {
+	names := []string{"P1", "P2", "P3", "P4"}
+	eng, store, compID, byName := setupSwissCompetition(t, names, nil, 3)
+
+	matches, err := eng.GenerateSwissRound(compID, 1)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	for _, m := range matches {
+		assert.NotEmptyf(t, m.SideAID, "match %s missing SideAID at generation", m.ID)
+		if m.SideB != "" {
+			assert.NotEmptyf(t, m.SideBID, "match %s missing SideBID at generation", m.ID)
+		}
+	}
+
+	require.NoError(t, store.SavePoolMatches(compID, matches))
+	reloaded, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, reloaded, len(matches))
+
+	byIDGot := make(map[string]state.MatchResult, len(reloaded))
+	for _, m := range reloaded {
+		byIDGot[m.ID] = m
+	}
+	for _, m := range matches {
+		got, ok := byIDGot[m.ID]
+		require.Truef(t, ok, "match %s missing after reload", m.ID)
+		assert.Equal(t, byName[m.SideA].ID, got.SideAID, "SideAID for %s must survive save+reload", m.ID)
+		if m.SideB != "" {
+			assert.Equal(t, byName[m.SideB].ID, got.SideBID, "SideBID for %s must survive save+reload", m.ID)
+		}
+	}
+}
+
+// TestSwissPairing_SameNameDifferentDojo_Derby verifies the pairing half of
+// bc-cse: two same-name-different-dojo competitors (the snPlayers() fixture,
+// see same_name_standings_test.go) must be pairable against EACH OTHER, and
+// once they are, a win by one must not be counted for the other.
+//
+// Fold seeding (1 vs N) forces the two Tanakas together in round 1, which is
+// itself part of what's being verified: buildSwissMatches must stamp
+// distinct SideAID/SideBID for the pairing engine's chosen pair, not leave
+// them empty or collapse onto a shared SideA/SideB string.
+func TestSwissPairing_SameNameDifferentDojo_Derby(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-samename-derby"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       compID,
+		Name:                     "Swiss Derby",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		SwissRounds:              2,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
+	}))
+	players := snPlayers() // Tokyo, Osaka, Suzuki, Watanabe
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// Fold pairing: seed 1 vs seed 4, seed 2 vs seed 3. Osaka=1, Tokyo=4
+	// forces the derby; Suzuki=2, Watanabe=3 pair each other.
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Tanaka Kenji", Dojo: "Osaka", SeedRank: 1},
+		{Name: "Suzuki Hiro", Dojo: "Nagoya", SeedRank: 2},
+		{Name: "Watanabe Ryo", Dojo: "Kyoto", SeedRank: 3},
+		{Name: "Tanaka Kenji", Dojo: "Tokyo", SeedRank: 4},
+	}))
+
+	r1, err := eng.GenerateSwissRound(compID, 1)
+	require.NoError(t, err)
+	require.Len(t, r1, 2, "4 players, no bye -> 2 matches")
+
+	var derbyIdx = -1
+	for i := range r1 {
+		if r1[i].SideA == "Tanaka Kenji" && r1[i].SideB == "Tanaka Kenji" {
+			derbyIdx = i
+		}
+	}
+	require.GreaterOrEqualf(t, derbyIdx, 0, "fold seeding (1 vs 4) must pit the two Tanakas against each other; got %+v", r1)
+	derby := r1[derbyIdx]
+	assert.ElementsMatch(t, []string{snIDOsaka, snIDTokyo}, []string{derby.SideAID, derby.SideBID},
+		"buildSwissMatches must stamp distinct SideAID/SideBID for the two same-name competitors")
+
+	require.NoError(t, store.SavePoolMatches(compID, r1))
+
+	// Complete the derby via the REAL write path (RecordMatchResult) so
+	// WinnerID is backfilled from WinnerSide + SideAID/SideBID exactly as
+	// the mobile-app handler would; hand-setting WinnerID would prove
+	// nothing about the production backfill path.
+	winnerSide := "A"
+	if derby.SideBID == snIDOsaka {
+		winnerSide = "B"
+	}
+	require.NoError(t, eng.RecordMatchResult(compID, derby.ID, &state.MatchResult{
+		ID: derby.ID, SideA: derby.SideA, SideB: derby.SideB,
+		Winner: "Tanaka Kenji", WinnerSide: winnerSide, Status: state.MatchStatusCompleted,
+	}))
+	// Complete the other round-1 match (SideA wins, arbitrary) so round 2
+	// can be generated without an incomplete-round gate tripping.
+	other := r1[1-derbyIdx]
+	require.NoError(t, eng.RecordMatchResult(compID, other.ID, &state.MatchResult{
+		ID: other.ID, SideA: other.SideA, SideB: other.SideB,
+		Winner: other.SideA, WinnerSide: "A", Status: state.MatchStatusCompleted,
+	}))
+
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings, 4)
+	byID := make(map[string]state.PlayerStanding, len(standings))
+	for _, s := range standings {
+		byID[s.Player.ID] = s
+	}
+	assert.Equal(t, 1, byID[snIDOsaka].Wins, "Osaka Tanaka's derby win must count for HER, not both Tanakas")
+	assert.Equal(t, 0, byID[snIDOsaka].Losses)
+	assert.Equal(t, 0, byID[snIDTokyo].Wins, "Tokyo Tanaka's derby loss must not be credited as a win")
+	assert.Equal(t, 1, byID[snIDTokyo].Losses)
+
+	// Rematch avoidance: round 2 must not pair the two Tanakas together
+	// again purely because they share a display name (priorPair is keyed by
+	// competitor identity, not name).
+	r2, err := eng.GenerateSwissRound(compID, 2)
+	require.NoError(t, err)
+	for _, m := range r2 {
+		bothTanaka := (m.SideAID == snIDOsaka && m.SideBID == snIDTokyo) || (m.SideAID == snIDTokyo && m.SideBID == snIDOsaka)
+		assert.False(t, bothTanaka, "round 2 must not rematch the two Tanakas who already played in round 1")
+	}
+}
+
+// TestSwissPairing_SameNameDifferentDojo_ByeIndependence verifies that one
+// namesake's bye does not suppress the other's eligibility for a LATER bye:
+// hadBye must be tracked per competitor identity, not per display name.
+//
+// Setup: 5 players (the snPlayers() fixture + one more). Round 1 is
+// hand-crafted (not generated) so the test controls exactly who gets the
+// round-1 bye: Osaka Tanaka. Seeds rank Watanabe (4) ahead of Tokyo Tanaka
+// (5, worst) within the 0-win group, so round 2's bye-selection scan (which
+// walks the lowest-win bucket from the bottom, preferring "no prior bye")
+// reaches Tokyo FIRST. Under the pre-fix name-keyed hadBye, Tokyo would be
+// wrongly seen as "already had a bye" (because Osaka, same display name,
+// had one) and the algorithm would fall through to Watanabe instead.
+func TestSwissPairing_SameNameDifferentDojo_ByeIndependence(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-samename-bye"
+	const extraID = "55555555-5555-4555-8555-555555555555"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       compID,
+		Name:                     "Swiss Bye Independence",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		SwissRounds:              2,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
+	}))
+	players := append(snPlayers(), domain.Player{ID: extraID, Name: "Extra Player", Dojo: "Kobe"})
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Tanaka Kenji", Dojo: "Osaka", SeedRank: 1},
+		{Name: "Suzuki Hiro", Dojo: "Nagoya", SeedRank: 2},
+		{Name: "Extra Player", Dojo: "Kobe", SeedRank: 3},
+		{Name: "Watanabe Ryo", Dojo: "Kyoto", SeedRank: 4},
+		{Name: "Tanaka Kenji", Dojo: "Tokyo", SeedRank: 5},
+	}))
+
+	// Hand-craft round 1: Suzuki beats Watanabe, Extra beats Tokyo, Osaka
+	// gets the bye. Wins after round 1: Osaka=1 (bye), Suzuki=1, Extra=1,
+	// Watanabe=0, Tokyo=0.
+	round1 := []state.MatchResult{
+		{
+			ID: "Swiss-R1-0", SideA: "Suzuki Hiro", SideB: "Watanabe Ryo",
+			SideAID: snIDSuzuki, SideBID: snIDWatanabe,
+			Winner: "Suzuki Hiro", WinnerID: snIDSuzuki, Status: state.MatchStatusCompleted,
+		},
+		{
+			ID: "Swiss-R1-1", SideA: "Extra Player", SideB: "Tanaka Kenji",
+			SideAID: extraID, SideBID: snIDTokyo,
+			Winner: "Extra Player", WinnerID: extraID, Status: state.MatchStatusCompleted,
+		},
+		{
+			ID: "Swiss-R1-2", SideA: "Tanaka Kenji", SideB: "",
+			SideAID: snIDOsaka,
+			Winner:  "Tanaka Kenji", WinnerID: snIDOsaka, Status: state.MatchStatusCompleted,
+		},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, round1))
+
+	r2, err := eng.GenerateSwissRound(compID, 2)
+	require.NoError(t, err)
+	require.Len(t, r2, 3, "5 active players -> 2 played matches + 1 bye")
+
+	var byeMatch *state.MatchResult
+	for i := range r2 {
+		if r2[i].SideB == "" {
+			byeMatch = &r2[i]
+		}
+	}
+	require.NotNil(t, byeMatch, "round 2 (5 active players, odd) must include a bye")
+	assert.Equal(t, snIDTokyo, byeMatch.SideAID,
+		"Tokyo Tanaka -- who has never personally had a bye -- must receive round 2's bye, "+
+			"not be skipped because Osaka Tanaka (same display name, different dojo) already had one")
+}

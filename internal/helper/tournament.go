@@ -453,16 +453,14 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	totalPools := len(targetSizes)
 	pools := make([]Pool, totalPools)
 
-	// Per-pool sets for O(1) dojo-conflict and duplicate-name detection.
+	// Per-pool sets for O(1) dojo-conflict detection.
 	dojoSets := make([]map[string]bool, totalPools)
-	nameSets := make([]map[string]bool, totalPools)
 	for i := range dojoSets {
 		dojoSets[i] = make(map[string]bool)
-		nameSets[i] = make(map[string]bool)
 	}
 
 	for i, player := range players {
-		poolN := discoverPool(pools, dojoSets, nameSets, player, targetSizes, i%totalPools)
+		poolN := discoverPool(pools, dojoSets, player, targetSizes, i%totalPools)
 		// no conflict-free pool available: pick the least-conflicted one
 		if poolN < 0 {
 			poolN = leastConflictedPool(pools, targetSizes, player.Dojo)
@@ -475,7 +473,6 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
 		dojoSets[poolN][player.Dojo] = true
-		nameSets[poolN][player.Name] = true
 	}
 
 	for i := 0; i < len(pools); i++ {
@@ -489,7 +486,21 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	return pools
 }
 
-func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {
+// discoverPool returns the first pool, scanning from startIndex, that has room
+// and holds nobody from the player's dojo, or -1 when no such pool exists (the
+// caller then falls back to leastConflictedPool).
+//
+// Sharing a NAME is deliberately not a conflict. Two competitors can only share
+// a name when their dojos differ, because a second entry with the same name AND
+// dojo is refused as a duplicate of the same person, so namesakes are distinct
+// people who may fight in one pool; they are told apart on the sheet by dojo and
+// by competitor number. This function used to reject a same-name pool as well,
+// which was measured to change nothing: across 414 pool shapes built from
+// rosters of same-name pairs, dropping the name test moved no competitor,
+// because PoolSeeding's dojo clustering and the rotating start already separate
+// them. It is dropped rather than kept as a no-op so the draw has one stated
+// separation rule instead of a second, silent one.
+func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {
 	totalPools := len(pools)
 	if totalPools == 0 {
 		return -1
@@ -503,8 +514,8 @@ func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Pla
 			continue
 		}
 
-		// O(1): reject if dojo or name already present in this pool
-		if dojoSets[curr][player.Dojo] || nameSets[curr][player.Name] {
+		// O(1): reject if this dojo is already present in the pool
+		if dojoSets[curr][player.Dojo] {
 			continue
 		}
 

@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"math/bits"
 	"sort"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -224,89 +225,146 @@ func StandardSeeding(players []Player) []Player {
 			}
 		}
 	}
-	separateFirstRoundDojos(result, occupied)
+	delayDojoMeetings(result, occupied)
 	return result
 }
 
-// separateFirstRoundDojos swaps UNSEEDED competitors so that, where the draw
-// allows it, no first-round match is between two members of the same dojo.
+// delayDojoMeetings swaps UNSEEDED competitors so that two members of one dojo
+// meet as LATE in the knockout as the draw allows, and in particular never in
+// the first round.
 //
-// Why it is needed: unseeded competitors fill the bracket in roster order, and
+// Why it is needed: unseeded competitors fill bracket slots in roster order and
 // CreateBalancedTree pairs adjacent slots, so a roster entered club by club --
-// which is how operators paste one -- produces a first round of club-mate
-// against club-mate. Measured before this existed: 16 competitors from four
-// dojos of four produced EIGHT first-round matches, every one of them
-// intra-club.
+// which is how operators paste one -- opens with club-mate against club-mate.
+// Measured before this existed: 16 competitors from four dojos of four gave
+// EIGHT first-round matches, every one intra-club.
 //
-// Why it is a repair pass rather than a smarter fill: reordering the unseeded
-// list up front would reorder EVERY draw, including the ones with no dojo
-// collision at all, changing published brackets for no benefit. This walks the
-// pairs and touches only the ones that are actually wrong, so a roster with no
-// same-dojo first round is returned byte-identical.
+// Not first is only half the rule. Two competitors from one dojo placed in the
+// same half still meet in the semi-final when the bracket could have held them
+// apart until the final, so this maximises the round in which each dojo's
+// members first meet rather than merely pushing them out of round one.
 //
-// Seeded slots are never moved, on EITHER side of the pair: their placement is
-// the seeding contract, and a dojo is not a reason to break it. So a pairing
-// that could only be fixed by moving a seed is left alone, as is one where no
-// partner swap is conflict-free. The draw still happens; it is just not
-// improvable here.
-func separateFirstRoundDojos(result []Player, occupied map[int]bool) {
-	// A swap is only legal into a slot that is unseeded, present, and whose own
-	// pair does not become same-dojo as a result.
-	sameDojo := func(a, b Player) bool {
-		return a.Name != "" && b.Name != "" && a.Dojo == b.Dojo
+// It is a repair pass rather than a smarter fill: reordering the unseeded list
+// up front would reorder EVERY draw, including the ones with no dojo collision
+// at all, changing published brackets for no benefit. This only moves
+// competitors when doing so strictly improves the meeting rounds, so a roster
+// with nothing to fix is returned byte-identical.
+//
+// Seeded slots are never moved, on EITHER side of a swap: their placement is
+// the seeding contract, and a dojo is not a reason to break it. Two seeds from
+// one dojo therefore keep whatever pairing their ranks produced.
+func delayDojoMeetings(result []Player, occupied map[int]bool) {
+	movable := func(i int) bool {
+		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
-	partner := func(i int) int {
-		if i%2 == 0 {
-			return i + 1
+
+	// A hill climb on the total of every same-dojo pair's meeting round: the
+	// higher the total, the later club-mates meet. A first-round pairing
+	// scores the minimum, so removing one is always the largest single gain
+	// available, which is why "never first" falls out of maximising this
+	// rather than needing a rule of its own.
+	for iter := 0; iter < len(result)*len(result); iter++ {
+		worstA, worstB, worstRound := -1, -1, 1<<30
+		for i := range result {
+			for j := i + 1; j < len(result); j++ {
+				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+					continue
+				}
+				if result[i].Dojo != result[j].Dojo {
+					continue
+				}
+				if r := dojoMeetRound(i, j); r < worstRound {
+					worstA, worstB, worstRound = i, j, r
+				}
+			}
 		}
-		return i - 1
-	}
-	for i := 0; i+1 < len(result); i += 2 {
-		if !sameDojo(result[i], result[i+1]) {
-			continue
+		if worstA < 0 {
+			return // no dojo shares two slots: nothing to delay
 		}
-		// Try to move the SECOND member somewhere it does not clash. Scan from
-		// the far end of the bracket first: the further the swap partner sits,
-		// the more likely the two club-mates also end up in opposite halves,
-		// so they meet as late as the draw allows rather than merely not in
-		// round one.
-		if occupied[i+1] {
-			// The competitor this pass would move is a SEED. Its slot comes
-			// from the rank the operator set, and a shared dojo is not a
-			// reason to override that, so the pairing stands.
-			//
-			// Honest about its status: this guard is defence in depth, not a
-			// fix for an observed case. Seeds land on even slots in a
-			// power-of-two draw, so the second member of a pair is normally
-			// unseeded; a displaced seed on a non-power-of-two roster CAN
-			// reach an odd slot (measured), but no roster was found where such
-			// a seed also shares a dojo with its even partner AND a legal swap
-			// partner exists, so removing this line reddens no test. It is
-			// here because "seeds never move" should be enforced by the code
-			// rather than hold by accident of where generateBracketOrder puts
-			// them.
-			continue
-		}
-		moved := false
-		for d := len(result) - 1; d >= 0 && !moved; d-- {
-			if d == i || d == i+1 || occupied[d] {
+
+		// Try relocating either member of the worst pair. Accept the swap that
+		// improves the overall total by the most; ties keep the earlier
+		// candidate so the result does not depend on scan order.
+		bestGain, bestX, bestY := 0, -1, -1
+		for _, x := range []int{worstA, worstB} {
+			if !movable(x) {
 				continue
 			}
-			dp := partner(d)
-			if dp < 0 || dp >= len(result) {
+			for y := range result {
+				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
+					continue
+				}
+				if gain := dojoSwapGain(result, x, y); gain > bestGain {
+					bestGain, bestX, bestY = gain, x, y
+				}
+			}
+		}
+		if bestGain <= 0 {
+			return // nothing left that improves matters
+		}
+		result[bestX], result[bestY] = result[bestY], result[bestX]
+	}
+}
+
+// dojoMeetRound returns the bracket round in which slots i and j would meet,
+// counting the first round as 1. Two slots meet in the smallest sub-branch
+// holding both, and CreateBalancedTree builds those sub-branches by repeatedly
+// halving, so the round is the position of the highest bit in which the two
+// slot numbers differ: adjacent slots (differing only in bit 0) meet in round
+// 1, slots in opposite halves meet in the last round.
+func dojoMeetRound(i, j int) int {
+	// Slot numbers are indexes into the draw, so the XOR is non-negative and
+	// the conversion below cannot wrap. Checked rather than asserted, both to
+	// say so to a reader and because gosec cannot see it (G115).
+	d := i ^ j
+	if d <= 0 {
+		return 0
+	}
+	return bits.Len(uint(d))
+}
+
+// dojoSumMeetRounds totals the meeting round of every same-dojo pair. Only
+// slots x and y can change when those two are swapped, so callers score a
+// candidate swap with dojoSwapGain instead of recomputing this over the whole
+// draw.
+func dojoSumMeetRounds(result []Player, only ...int) int {
+	touched := func(i int) bool {
+		if len(only) == 0 {
+			return true
+		}
+		for _, o := range only {
+			if i == o {
+				return true
+			}
+		}
+		return false
+	}
+	sum := 0
+	for i := range result {
+		for j := i + 1; j < len(result); j++ {
+			if !touched(i) && !touched(j) {
 				continue
 			}
-			// After the swap: slot i+1 holds result[d], slot d holds result[i+1].
-			if sameDojo(result[i], result[d]) {
-				continue // would not fix this pair
+			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+				continue
 			}
-			if sameDojo(result[i+1], result[dp]) {
-				continue // would break the donor pair
+			if result[i].Dojo != result[j].Dojo {
+				continue
 			}
-			result[i+1], result[d] = result[d], result[i+1]
-			moved = true
+			sum += dojoMeetRound(i, j)
 		}
 	}
+	return sum
+}
+
+// dojoSwapGain reports how much later same-dojo competitors would meet if the
+// occupants of slots x and y traded places. Positive means an improvement.
+func dojoSwapGain(result []Player, x, y int) int {
+	before := dojoSumMeetRounds(result, x, y)
+	result[x], result[y] = result[y], result[x]
+	after := dojoSumMeetRounds(result, x, y)
+	result[x], result[y] = result[y], result[x]
+	return after - before
 }
 
 // PoolSeeding reorders players for pool distribution so that top seeds land

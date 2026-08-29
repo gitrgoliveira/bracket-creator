@@ -3,6 +3,7 @@ package helper
 import (
 	"encoding/csv"
 	"fmt"
+	"math/bits"
 	"os"
 	"sort"
 	"strings"
@@ -2414,15 +2415,18 @@ func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
 	}
 }
 
-// TestStandardSeeding_SeparatesFirstRoundDojos pins the knockout counterpart of
-// the pool draw's dojo avoidance.
+// TestStandardSeeding_DelaysDojoMeetings pins the knockout counterpart of the
+// pool draw's dojo avoidance: club-mates must not meet in the first round, and
+// beyond that must meet as LATE as the bracket allows.
 //
 // Operators paste a roster club by club, unseeded competitors fill bracket
 // slots in roster order, and CreateBalancedTree pairs adjacent slots, so
-// before separateFirstRoundDojos existed a roster of four dojos of four
-// produced a first round in which EVERY match was club-mate against
-// club-mate.
-func TestStandardSeeding_SeparatesFirstRoundDojos(t *testing.T) {
+// before delayDojoMeetings existed a roster of four dojos of four produced a
+// first round in which EVERY match was club-mate against club-mate. Pushing
+// them out of round one is only half of it: two club-mates left in the same
+// half still meet in the semi-final when the draw could have held them apart
+// until the final.
+func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 	countR1Clashes := func(out []Player) int {
 		n := 0
 		for i := 0; i+1 < len(out); i += 2 {
@@ -2449,6 +2453,48 @@ func TestStandardSeeding_SeparatesFirstRoundDojos(t *testing.T) {
 	t.Run("club-grouped roster gets no same-dojo first round", func(t *testing.T) {
 		assert.Equal(t, 0, countR1Clashes(StandardSeeding(clubGrouped(4, 4))),
 			"no first-round match may be between two members of one dojo when the draw allows otherwise")
+	})
+
+	t.Run("club-mates meet as late as the bracket allows", func(t *testing.T) {
+		// The bracket halves at every round, so N competitors can be kept
+		// apart until round N-ceil(log2(clubSize))+1 and no later: a club of
+		// two can be split across the halves and meet only in the final, a
+		// club of four across the quarters and meet in the semi-final.
+		// Anything earlier than that bound is a draw that gave up too soon.
+		for _, tc := range []struct{ n, nClubs, clubSize int }{
+			{8, 2, 2}, {16, 2, 2}, {16, 3, 2}, {16, 2, 4}, {32, 4, 4},
+		} {
+			roster := clubGrouped(tc.nClubs, tc.clubSize)
+			for i := len(roster) + 1; i <= tc.n; i++ {
+				roster = append(roster, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
+			}
+			out := StandardSeeding(roster)
+
+			rounds := bits.Len(uint(tc.n)) - 1
+			best := rounds - (bits.Len(uint(tc.clubSize - 1))) + 1
+			slots := map[string][]int{}
+			for slot, p := range out {
+				if p.Name != "" {
+					slots[p.Dojo] = append(slots[p.Dojo], slot)
+				}
+			}
+			for dojo, ss := range slots {
+				if len(ss) < 2 {
+					continue
+				}
+				earliest := 1 << 30
+				for a := range ss {
+					for b := a + 1; b < len(ss); b++ {
+						if r := dojoMeetRound(ss[a], ss[b]); r < earliest {
+							earliest = r
+						}
+					}
+				}
+				assert.GreaterOrEqual(t, earliest, best,
+					"n=%d clubs=%dx%d: %s meets in round %d, but the bracket allows round %d",
+					tc.n, tc.nClubs, tc.clubSize, dojo, earliest, best)
+			}
+		}
 	})
 
 	t.Run("a roster with no dojo collision is returned untouched", func(t *testing.T) {

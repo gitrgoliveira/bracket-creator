@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -194,51 +193,74 @@ func TestPoolDistribution_UniqueDojoIdentity(t *testing.T) {
 
 // TestPoolQualifiers_KnownGap_ClubWinnersCanMeetInRoundOne pins the defect
 // the region-aware rebuild exists to close, AS CURRENT BEHAVIOUR (the same
-// known-limitation pattern the Swiss standings fix used): the pool
+// known-limitation pattern the Swiss standings fix used): the shipped pool
 // distributor is blind to which part of the knockout tree each pool feeds,
-// so in these three measured configurations two club-mates in DIFFERENT
-// pools can both qualify and be drawn against each other in the FIRST
-// knockout match.
+// so in these measured configurations two club-mates in DIFFERENT pools are
+// drawn to meet in the FIRST knockout match even though the tree could hold
+// them apart until round 2 (the brute-force ceiling for both shapes, see
+// bruteForceMeetingCeiling in the gate test).
 //
-// When the rebuild lands, flip each assertion to require the meeting round
-// be as late as the tree allows; until then this documents the gap and
-// fails loudly if the gap silently moves.
+// When the tree-aware distributor is swapped in, flip each assertion to
+// require the meeting round EQUAL the shape's brute-force ceiling; until
+// then this documents the gap and fails loudly if it silently moves.
+//
+// HISTORY, recorded because the first version of this test got it wrong:
+// it originally pinned {4,3}, {4,4} and {5,4} as "the defect the rebuild
+// exists to close". Exhaustive brute force during Phase 3 proved those three
+// shapes are PIGEONHOLE-LIMITED -- the club occupies more than half the
+// qualifying pools, so at one winner per pool some round-1 pair must be
+// entirely the club's own no matter which pools are chosen. Their ceiling is
+// 1 for ANY algorithm; they are pinned separately below as ceilings, not
+// gaps.
 func TestPoolQualifiers_KnownGap_ClubWinnersCanMeetInRoundOne(t *testing.T) {
+	cases := []struct{ numPools, clubSize int }{
+		{7, 3}, {7, 4},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("pools=%d club=%d", tc.numPools, tc.clubSize), func(t *testing.T) {
+			earliest, ceiling := clubMeetingVsCeiling(t, tc.numPools, tc.clubSize)
+			require.Equal(t, 2, ceiling, "fixture drifted: this shape's ceiling should be round 2")
+			assert.Equal(t, 1, earliest,
+				"KNOWN GAP: the shipped distributor draws club winners to meet in round 1 though the tree allows round %d; if this now fails, the tree-aware rebuild has landed and this must flip to assert earliest == ceiling", ceiling)
+		})
+	}
+}
+
+// TestPoolQualifiers_PigeonholeCeilingIsRoundOne pins the three shapes the
+// known-gap test ORIGINALLY blamed on the distributor, as what they really
+// are: mathematical ceilings. The club spans more than half the qualifying
+// pools, so a round-1 club pairing is forced for any algorithm; the honest
+// assertion is that the ceiling itself is 1, and no rebuild may be judged
+// against these shapes.
+func TestPoolQualifiers_PigeonholeCeilingIsRoundOne(t *testing.T) {
 	cases := []struct{ numPools, clubSize int }{
 		{4, 3}, {4, 4}, {5, 4},
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("pools=%d club=%d", tc.numPools, tc.clubSize), func(t *testing.T) {
-			r := buildClubRoster(tc.numPools, 4, 1, tc.clubSize, 0)
-			pools, drawCourts, err := BuildPoolPhase(r, 4, false, 2)
-			require.NoError(t, err)
-			draw := BuildKnockoutDraw(pools, 1, drawCourts)
-			require.NotNil(t, draw)
-
-			clubPools := map[string]bool{}
-			for _, p := range pools {
-				if countDojoInPool(p, "Club0") > 0 {
-					clubPools[p.PoolName] = true
-				}
-			}
-			var slots []int
-			for slot, v := range TreeToLeafArray(draw.Root) {
-				if i := strings.LastIndex(v, "-"); i > 0 && clubPools[v[:i]] {
-					slots = append(slots, slot)
-				}
-			}
-			require.GreaterOrEqual(t, len(slots), 2, "fixture drifted: the club no longer spans two pools")
-
-			earliest := 1 << 30
-			for a := range slots {
-				for b := a + 1; b < len(slots); b++ {
-					if rd := dojoMeetRound(slots[a], slots[b]); rd > 0 && rd < earliest {
-						earliest = rd
-					}
-				}
-			}
-			assert.Equal(t, 1, earliest,
-				"KNOWN GAP: club winners are currently drawn to meet in knockout round 1; if this now fails, the region-aware rebuild has landed and this must flip to assert the meeting is maximally late")
+			earliest, ceiling := clubMeetingVsCeiling(t, tc.numPools, tc.clubSize)
+			assert.Equal(t, 1, ceiling, "the pigeonhole argument no longer holds for this shape; re-derive before trusting either assertion")
+			assert.Equal(t, 1, earliest)
 		})
 	}
+}
+
+// clubMeetingVsCeiling runs the shipped pipeline for one club of clubSize
+// over numPools pools of 4 at two shiaijo, one winner per pool, and returns
+// the earliest knockout round two of the club's qualifying pools are drawn
+// to meet, alongside the shape's brute-force ceiling.
+func clubMeetingVsCeiling(t *testing.T, numPools, clubSize int) (earliest, ceiling int) {
+	t.Helper()
+	r := buildClubRoster(numPools, 4, 1, clubSize, 0)
+	pools, drawCourts, err := BuildPoolPhase(r, 4, false, 2)
+	require.NoError(t, err)
+	earliest = earliestClubMeetingRound(pools, 1, drawCourts, "Club0")
+	_, sizes, err := poolTargetSizes(len(r), 4, false)
+	require.NoError(t, err)
+	span := clubSize
+	if span > numPools {
+		span = numPools
+	}
+	ceiling = bruteForceMeetingCeiling(sizes, 1, drawCourts, span)
+	return earliest, ceiling
 }

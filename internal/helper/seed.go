@@ -393,27 +393,37 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 	// Both ends, through the one owner: numCourts is the spread modulus below.
 	numCourts = clampCourts(numCourts)
 
-	seeded := make([]Player, 0)
-	unseeded := make([]Player, 0)
+	seeded, unseeded := partitionSeeded(players)
+	sortUnseededByDojoCluster(unseeded)
 
-	for _, p := range players {
-		if p.Seed > 0 {
-			seeded = append(seeded, p)
-		} else {
-			unseeded = append(unseeded, p)
+	// We want to interleave players such that CreatePools (which fills linearly)
+	// puts them in the correct pools.
+	result, occupied := placeSeedsForPools(seeded, numPools, numCourts, len(players))
+
+	unIdx := 0
+	for i := 0; i < len(players); i++ {
+		if !occupied[i] {
+			if unIdx < len(unseeded) {
+				result[i] = unseeded[unIdx]
+				unIdx++
+			}
 		}
 	}
 
-	// Sort seeded players by their Seed rank
-	sort.SliceStable(seeded, func(i, j int) bool {
-		return seeded[i].Seed < seeded[j].Seed
-	})
+	return result
+}
 
-	// Cluster unseeded players by dojo (largest groups first) so that players
-	// from the same dojo occupy consecutive result slots. Consecutive slots map
-	// to distinct start-pool indices mod numPools, preventing the
-	// leastConflictedPool fallback from landing same-dojo players in the same
-	// pool.
+// sortUnseededByDojoCluster sorts unseeded IN PLACE by dojo (largest groups
+// first, then dojo name) so that players from the same dojo occupy
+// consecutive result slots. Consecutive slots map to distinct start-pool
+// indices mod numPools, preventing the leastConflictedPool fallback from
+// landing same-dojo players in the same pool.
+//
+// Extracted out of PoolSeeding so BuildPoolPhaseTreeAware (bc-dojo Phase 2)
+// can process the unseeded roster in the SAME clustering order its one-pass
+// distribution loop is specified to use, without a second copy of this sort
+// that could drift from PoolSeeding's own.
+func sortUnseededByDojoCluster(unseeded []Player) {
 	dojoCount := make(map[string]int)
 	for _, p := range unseeded {
 		dojoCount[p.Dojo]++
@@ -428,43 +438,64 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 		}
 		return false
 	})
+}
 
-	// Determine how many pools are assigned to each court
+// placeSeedIndices computes, for each seeded player in `seeded` (already
+// sorted by Seed rank ascending, as partitionSeeded returns it), the index it
+// occupies in PoolSeeding's permuted roster: the same court-aware
+// seedPoolRank/seedCourtOrder/generatePoolPriority arithmetic PoolSeeding has
+// always used, returned as a slice PARALLEL to `seeded` rather than folded
+// into a sparse array, so a caller does not have to recover seed order from
+// map iteration (which Go leaves unspecified).
+//
+// It is stateful in the same way PoolSeeding's own loop is: a later seed's
+// placement avoids whatever index an earlier seed already claimed
+// (`occupied`), so processing order matters and must stay `seeded`'s order.
+//
+// numCourts must already be clamped by the caller (clampCourts); PoolSeeding
+// clamps once before calling this. totalLen is the FULL roster length (every
+// player, not just the seeded ones) -- a seed's target index is computed
+// against that whole slot space.
+func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int {
+	// -1 means "never placed" (only reachable when there are more seeds than
+	// roster slots, i.e. totalLen has no room left at all): placeSeedsForPools
+	// must skip those rather than default them to index 0, which would
+	// silently overwrite whatever legitimately occupies slot 0.
+	indices := make([]int, len(seeded))
+	for i := range indices {
+		indices[i] = -1
+	}
+	if numPools <= 0 || numCourts <= 0 {
+		return indices
+	}
+
+	// Determine how many pools are assigned to each court.
 	courtPoolCounts := make([]int, numCourts)
 	for i := 0; i < numPools; i++ {
 		courtPoolCounts[i%numCourts]++
 	}
 
-	// Generate priority for each court
+	// Generate priority for each court.
 	courtPriorities := make([][]int, numCourts)
 	for c := 0; c < numCourts; c++ {
 		courtPriorities[c] = generatePoolPriority(courtPoolCounts[c])
 	}
 
-	// We want to interleave players such that CreatePools (which fills linearly)
-	// puts them in the correct pools.
-	result := make([]Player, len(players))
-	occupied := make(map[int]bool)
+	occupied := make(map[int]bool, len(seeded))
 
-	// Assign seeded players based on court-aware priority order.
-	for _, p := range seeded {
-		// si is the seed's RANK minus one, NOT its position in the sorted
-		// list. The two coincide for a contiguous set 1..N, but the set that
-		// reaches here can be GAPPED: engine.dropSeedAssignments removes the
-		// assignments of seeds who did not check in, after the validating load
-		// has already run, and the survivors keep their raw ranks (e.g.
-		// {1, 3, 4}). Reading the position would then place rank 3 in rank 2's
-		// quarter -- and helper.SeedPlacementWarnings, which reads the RANK,
-		// would report the resulting spread as a configuration the operator
-		// chose. Both derived quantities below read the rank space, so the two
-		// stay in the same space as the warnings.
-		si := p.Seed - 1
+	for si, p := range seeded {
+		// si is p's POSITION in `seeded` (this function's own output index);
+		// rankIdx is p's RANK minus one, which is what the placement
+		// arithmetic below actually keys on. The two coincide for a
+		// contiguous seed set 1..N but not for a gapped one (see
+		// seedCourtOrder's doc comment), so they must never be conflated.
+		rankIdx := p.Seed - 1
 		// global pool rank (0 to numPools-1). Pool rank r lands on court
 		// r%numCourts (the deinterleave ReorderPoolsForCourts applies), so
 		// targeting a rank whose court is seedCourtOrder's is what puts the
 		// seed in D6's half and quarter.
-		poolRank := seedPoolRank(si, numPools, numCourts)
-		posInPool := si / numPools // which slot within the pool
+		poolRank := seedPoolRank(rankIdx, numPools, numCourts)
+		posInPool := rankIdx / numPools // which slot within the pool
 
 		placed := false
 		for offset := 0; offset < numPools && !placed; offset++ {
@@ -483,17 +514,17 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 			}
 
 			targetIdx := posInPool*numPools + globalPoolIdx
-			if targetIdx < len(players) && !occupied[targetIdx] {
-				result[targetIdx] = p
+			if targetIdx < totalLen && !occupied[targetIdx] {
+				indices[si] = targetIdx
 				occupied[targetIdx] = true
 				placed = true
 			}
 		}
 		if !placed {
 			// Last resort: take the first available slot.
-			for j := 0; j < len(players); j++ {
+			for j := 0; j < totalLen; j++ {
 				if !occupied[j] {
-					result[j] = p
+					indices[si] = j
 					occupied[j] = true
 					break
 				}
@@ -501,17 +532,35 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 		}
 	}
 
-	unIdx := 0
-	for i := 0; i < len(players); i++ {
-		if !occupied[i] {
-			if unIdx < len(unseeded) {
-				result[i] = unseeded[unIdx]
-				unIdx++
-			}
-		}
-	}
+	return indices
+}
 
-	return result
+// placeSeedsForPools is PoolSeeding's seed-placement half, extracted so
+// BuildPoolPhaseTreeAware (bc-dojo Phase 2) can put seeds in EXACTLY the
+// pools today's pipeline puts them in, without re-deriving --or drifting
+// from-- seedPoolRank/seedCourtOrder's arithmetic a second time. It returns
+// PoolSeeding's own `result`/`occupied` pair: a dense slice of length
+// totalLen with each seeded player at its target index and every other index
+// left zero, and the set of indices a seed claims.
+//
+// Deriving the pool a seed ends up in from an index here is a SEPARATE step
+// (index i lands in pool i%numPools once CreatePools' straight fill runs
+// over the full permuted roster, absent a dojo conflict against an
+// already-placed unseeded club-mate) -- verified byte-identical against the
+// real fill across 24000+ seeded/dojo configurations during bc-dojo Phase 2
+// (see the seed-equality pin test), never assumed.
+func placeSeedsForPools(seeded []Player, numPools, numCourts, totalLen int) (result []Player, occupied map[int]bool) {
+	result = make([]Player, totalLen)
+	occupied = make(map[int]bool, len(seeded))
+	indices := placeSeedIndices(seeded, numPools, numCourts, totalLen)
+	for si, idx := range indices {
+		if idx < 0 {
+			continue
+		}
+		result[idx] = seeded[si]
+		occupied[idx] = true
+	}
+	return result, occupied
 }
 
 // generatePoolPriority returns an ordering of pool indices (0..n-1) designed

@@ -359,25 +359,33 @@ func BuildPoolPhaseFillBracket(players []Player, minSize int, numCourts int) ([]
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
 }
 
-func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+// poolTargetSizes is CreatePools' pool-COUNT-and-SIZE arithmetic, extracted
+// so a second caller can derive the exact same shape CreatePools would
+// without re-deriving -- or drifting from -- it (bc-dojo Phase 2:
+// BuildPoolPhaseTreeAware needs the shape before it can place anyone, and
+// "reuse, do not copy" is the constraint this exists to satisfy).
+// CreatePools itself now calls this rather than carrying its own copy of the
+// arithmetic; the error text and the max-mode remainder spread are both
+// unchanged.
+func poolTargetSizes(numPlayers, poolSize int, isMax bool) (totalPools int, targetSizes []int, err error) {
 	// Guard before the division below: poolSize is the divisor in both the
 	// "max" and fixed-size branches, so a zero/negative value panics with an
 	// integer divide-by-zero. Reject it here, the lowest shared point, so
 	// every caller (engine draw, schedule estimator, CLI) is panic-proof
 	// regardless of how PoolSize reached it. (mp-ebgz)
 	if poolSize <= 0 {
-		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
+		return 0, nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
 	}
-	totalPools := PoolCount(len(players), poolSize, isMax)
+	totalPools = PoolCount(numPlayers, poolSize, isMax)
 
-	if totalPools == 0 && len(players) > 0 {
-		return nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", len(players), poolSize)
+	if totalPools == 0 && numPlayers > 0 {
+		return 0, nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", numPlayers, poolSize)
 	}
 
-	targetSizes := make([]int, totalPools)
+	targetSizes = make([]int, totalPools)
 	if isMax && totalPools > 0 {
-		base := len(players) / totalPools
-		rem := len(players) % totalPools
+		base := numPlayers / totalPools
+		rem := numPlayers % totalPools
 		for i := 0; i < totalPools; i++ {
 			if i < rem {
 				targetSizes[i] = base + 1
@@ -390,8 +398,32 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 			targetSizes[i] = poolSize
 		}
 	}
+	return totalPools, targetSizes, nil
+}
 
+func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+	_, targetSizes, err := poolTargetSizes(len(players), poolSize, isMax)
+	if err != nil {
+		return nil, err
+	}
 	return assignPlayersToPools(players, targetSizes), nil
+}
+
+// poolPositionName is the "Pool A".."Pool Z", then "Pool AA", "Pool BB", ...
+// naming assignPlayersToPools gives the pool at position i (0-based),
+// exposed as its own function so a caller that needs to name a pool by
+// position WITHOUT going through assignPlayersToPools -- Phase 1's
+// poolQualifierPaths seam builds placeholder pools before any player
+// exists -- uses the identical scheme rather than a second copy that could
+// drift from it. assignPlayersToPools is under a hard "do not modify"
+// constraint for bc-dojo, so its own naming loop is left as it is rather
+// than rewritten to call this; the two are pinned equal by test.
+func poolPositionName(i int) string {
+	char := string(rune('A' + i%26))
+	if i > 25 {
+		char = char + char
+	}
+	return fmt.Sprintf("Pool %s", char)
 }
 
 // CreatePoolsForCount is CreatePools with the pool COUNT supplied directly

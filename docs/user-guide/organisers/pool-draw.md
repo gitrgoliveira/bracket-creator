@@ -15,10 +15,12 @@ The draw itself is deterministic: the same entrants, in the same order, with the
 
 **Pool size** in competition setup is either a maximum or a minimum, and the two modes divide differently:
 
-- **Maximum players per pool**: the entrant count is divided up, rounding the pool count upwards, and the entrants are then spread as evenly as possible. With 22 entrants and a maximum of 4 you get 6 pools: four pools of 4 and two pools of 3.
-- **Minimum players per pool**: the entrant count is divided down, so every pool reaches the minimum and no extra pool opens for the remainder. The players left over join existing pools, one each, so with 22 entrants and a minimum of 4 you get 5 pools: three of 4 and two of 5.
+- **Maximum players per pool**: the entrant count is divided up, rounding the pool count upwards, and the entrants are then spread as evenly as possible. With 22 entrants and a maximum of 4 you get six pools: four of 4 and two of 3.
+- **Minimum players per pool**: the entrant count is divided down, so every pool reaches the minimum and no extra pool opens for the remainder. The players left over join existing pools, one each, so with 22 entrants and a minimum of 4 you get five pools: three of 4 and two of 5.
 
-Where the differently sized pools end up on the sheet is decided by the shiai-jo arrangement described below, not by size, so do not expect the larger pools to be listed first.
+Where the differently sized pools end up on the sheet is decided by the shiai-jo arrangement in [Pools onto shiai-jo](#pools-onto-shiai-jo), not by size, so do not expect the larger pools to be listed first.
+
+Two settings are refused rather than drawn. A minimum pool size larger than the entrant count cannot form a single pool, and a **Pools + Knockout** competition whose entrants would form only one pool is refused when you start it, because one pool with a two-competitor final is a league in all but name. Both refusals name the entrant count and the pool size, and both are resolved the same way: reduce the pool size, add entrants, or change the format to League.
 
 The **Fit the knockout** qualifier option chooses its own pool count so that the qualifiers fill the bracket exactly; see [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool). Which pool each competitor lands in still follows the rules below.
 
@@ -26,10 +28,10 @@ The **Fit the knockout** qualifier option chooses its own pool count so that the
 
 Before the pools are filled, the entry list is arranged:
 
-1. **Seeded competitors** come first, in rank order. They are placed so the top seeds land in different pools, on different shiai-jo, and at opposite ends of each shiai-jo's set of pools. [Seeding](knockout-draw.md#seeding) describes how far apart the draw keeps them.
+1. **Seeded competitors** come first, in rank order. They are placed in different pools and, as far as the shape allows, on different shiai-jo and at opposite ends of each shiai-jo's set of pools. Two seeds never share a pool; where a configuration cannot satisfy every constraint, the deepest one gives way and the draw warns you which. [Seeding](knockout-draw.md#seeding) describes how far apart the draw keeps them.
 2. **Everyone else** is grouped by dojo, largest dojo first. This grouping is what keeps members of the same dojo apart: they occupy consecutive positions in the arranged list, and consecutive positions start their placement at different pools.
 
-The pools then fill one competitor at a time. Each competitor starts at a different pool, in rotation, and takes the first pool with space that holds nobody from their dojo and nobody with the same name. Keeping exact name matches apart means two entrants who happen to share a name never land in the same pool, where the sheet could not tell them apart.
+The pools then fill one competitor at a time. Each competitor starts at a different pool, in rotation, and takes the first pool with space that holds nobody from their dojo and nobody with the same name. Two entrants can share a name only when they come from different dojos: a second entry with both the same name and the same dojo is refused as a duplicate of the same person, in the app and at the API. Separating namesakes keeps two identical names off one pool sheet. Like the dojo rule, it is an avoidance rather than a guarantee, and the placement in [When a dojo has more members than pools](#when-a-dojo-has-more-members-than-pools) ranks pools by dojo alone.
 
 ## When a dojo has more members than pools
 

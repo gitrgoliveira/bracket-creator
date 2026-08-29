@@ -2413,3 +2413,124 @@ func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
 		})
 	}
 }
+
+// TestStandardSeeding_SeparatesFirstRoundDojos pins the knockout counterpart of
+// the pool draw's dojo avoidance.
+//
+// Operators paste a roster club by club, unseeded competitors fill bracket
+// slots in roster order, and CreateBalancedTree pairs adjacent slots, so
+// before separateFirstRoundDojos existed a roster of four dojos of four
+// produced a first round in which EVERY match was club-mate against
+// club-mate.
+func TestStandardSeeding_SeparatesFirstRoundDojos(t *testing.T) {
+	countR1Clashes := func(out []Player) int {
+		n := 0
+		for i := 0; i+1 < len(out); i += 2 {
+			a, b := out[i], out[i+1]
+			if a.Name != "" && b.Name != "" && a.Dojo == b.Dojo {
+				n++
+			}
+		}
+		return n
+	}
+	clubGrouped := func(nClubs, clubSize int) []Player {
+		var roster []Player
+		for c := 0; c < nClubs; c++ {
+			for i := 1; i <= clubSize; i++ {
+				roster = append(roster, Player{
+					Name: fmt.Sprintf("C%d_%d", c, i),
+					Dojo: fmt.Sprintf("Club%d", c),
+				})
+			}
+		}
+		return roster
+	}
+
+	t.Run("club-grouped roster gets no same-dojo first round", func(t *testing.T) {
+		assert.Equal(t, 0, countR1Clashes(StandardSeeding(clubGrouped(4, 4))),
+			"no first-round match may be between two members of one dojo when the draw allows otherwise")
+	})
+
+	t.Run("a roster with no dojo collision is returned untouched", func(t *testing.T) {
+		// The pass must be a no-op when there is nothing to repair, which is
+		// what keeps existing published draws and the goldens byte-identical.
+		roster := make([]Player, 16)
+		for i := range roster {
+			roster[i] = Player{Name: fmt.Sprintf("P%03d", i+1), Dojo: fmt.Sprintf("Dojo %03d", i+1)}
+		}
+		out := StandardSeeding(roster)
+		for i := range out {
+			assert.Equal(t, roster[i].Name, out[i].Name, "slot %d moved on a roster with no dojo collision", i)
+		}
+	})
+
+	t.Run("seeds are never moved, on either side of a pair", func(t *testing.T) {
+		// Compared against a REFERENCE draw, not against the output itself: an
+		// earlier version of this assertion compared out[slot].Name with
+		// itself, which holds for any input and pinned nothing. The reference
+		// is the same roster with every dojo made unique, so the pass is a
+		// no-op on it and its seed slots are the untouched seeding.
+		//
+		// The sizes are deliberate: a competitor count that is NOT a power of
+		// two, with more seeds than the top bracket positions, forces
+		// displaced-seed placement, which is the only way a seed reaches an
+		// ODD slot and so the only way it could be the side this pass moves.
+		//
+		// What this does NOT pin, stated so nobody reads more into it:
+		// removing the occupied[i+1] guard from separateFirstRoundDojos
+		// leaves this subtest green (verified). No roster was found where a
+		// seed sits on an odd slot, shares a dojo with its even partner, AND
+		// has a legal swap partner. The guard is defence in depth; this
+		// subtest pins that seeds are where the seeding put them, which is the
+		// property that actually matters to an operator.
+		for _, n := range []int{5, 6, 7, 12, 16} {
+			for _, nSeeds := range []int{2, 4, 6} {
+				if nSeeds > n {
+					continue
+				}
+				roster := make([]Player, n)
+				for i := range roster {
+					roster[i] = Player{Name: fmt.Sprintf("P%02d", i+1), Dojo: "OneClub"}
+				}
+				for s := 0; s < nSeeds; s++ {
+					roster[s].Seed = s + 1
+				}
+				reference := make([]Player, n)
+				copy(reference, roster)
+				for i := range reference {
+					reference[i].Dojo = fmt.Sprintf("Unique%02d", i+1)
+				}
+				got, want := StandardSeeding(roster), StandardSeeding(reference)
+				for slot := range want {
+					if want[slot].Seed > 0 {
+						assert.Equal(t, want[slot].Seed, got[slot].Seed,
+							"n=%d seeds=%d: slot %d must still hold seed %d", n, nSeeds, slot, want[slot].Seed)
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("two seeds from one dojo stay drawn against each other", func(t *testing.T) {
+		// The counterpart of the rule above, asserted so it reads as a
+		// decision rather than an oversight: when both competitors in a pair
+		// are seeds from one dojo, neither may be moved, so the pairing
+		// survives. That is a seeding outcome, since the operator set those
+		// ranks, not a fault in the draw.
+		roster := make([]Player, 6)
+		for i := range roster {
+			roster[i] = Player{Name: fmt.Sprintf("S%02d", i+1), Dojo: "SeedClub", Seed: i + 1}
+		}
+		out := StandardSeeding(roster)
+		assert.Positive(t, countR1Clashes(out),
+			"an all-seeded single-dojo field cannot be separated, and the pass must not pretend otherwise")
+		seen := map[int]bool{}
+		for _, p := range out {
+			if p.Seed > 0 {
+				assert.False(t, seen[p.Seed], "seed %d appears twice", p.Seed)
+				seen[p.Seed] = true
+			}
+		}
+		assert.Len(t, seen, 6, "every seed must still be in the draw exactly once")
+	})
+}

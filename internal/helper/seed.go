@@ -244,10 +244,11 @@ func StandardSeeding(players []Player) []Player {
 // pairs and touches only the ones that are actually wrong, so a roster with no
 // same-dojo first round is returned byte-identical.
 //
-// Seeded slots are never moved: their placement IS the seeding contract, and a
-// dojo is not a reason to break it. A collision that can only be fixed by
-// moving a seed is therefore left alone, as is one where no partner swap is
-// conflict-free -- the draw still happens, it is just not improvable here.
+// Seeded slots are never moved, on EITHER side of the pair: their placement is
+// the seeding contract, and a dojo is not a reason to break it. So a pairing
+// that could only be fixed by moving a seed is left alone, as is one where no
+// partner swap is conflict-free. The draw still happens; it is just not
+// improvable here.
 func separateFirstRoundDojos(result []Player, occupied map[int]bool) {
 	// A swap is only legal into a slot that is unseeded, present, and whose own
 	// pair does not become same-dojo as a result.
@@ -269,6 +270,23 @@ func separateFirstRoundDojos(result []Player, occupied map[int]bool) {
 		// the more likely the two club-mates also end up in opposite halves,
 		// so they meet as late as the draw allows rather than merely not in
 		// round one.
+		if occupied[i+1] {
+			// The competitor this pass would move is a SEED. Its slot comes
+			// from the rank the operator set, and a shared dojo is not a
+			// reason to override that, so the pairing stands.
+			//
+			// Honest about its status: this guard is defence in depth, not a
+			// fix for an observed case. Seeds land on even slots in a
+			// power-of-two draw, so the second member of a pair is normally
+			// unseeded; a displaced seed on a non-power-of-two roster CAN
+			// reach an odd slot (measured), but no roster was found where such
+			// a seed also shares a dojo with its even partner AND a legal swap
+			// partner exists, so removing this line reddens no test. It is
+			// here because "seeds never move" should be enforced by the code
+			// rather than hold by accident of where generateBracketOrder puts
+			// them.
+			continue
+		}
 		moved := false
 		for d := len(result) - 1; d >= 0 && !moved; d-- {
 			if d == i || d == i+1 || occupied[d] {

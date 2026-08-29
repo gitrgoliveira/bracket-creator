@@ -44,7 +44,7 @@ Before implementing features or making architectural decisions, read the project
 - **Shiaijo (Courts):** `--courts` defaults to 2. It controls both pool distribution and tree labeling.
 - **Dojo Conflicts:** The `Dojo` field in CSVs is used *only* for pool randomization to avoid early teammate matches; it's not used in playoffs-only mode.
 - **Workbook construction:** All sheets/styles are emitted by `internal/excel/template.go` and `internal/helper/excel_styles.go`. To change global appearance, edit these: there is no template binary.
-- **Duplicates:** Participant CSVs are checked for duplicate names; both CLI and Web UI return an error before generating output.
+- **Duplicates:** Competitor identity is (name, dojo). Two competitors sharing a name from different dojos are different people and are allowed; only same-name AND same-dojo is a duplicate. Participant CSVs are checked for duplicate rows and both CLI and Web UI return an error before generating output. Team names must be unique even across dojos, because a team name is its identity in results.
 
 ## Useful Commands
 - **Lint only:** `make go/lint`

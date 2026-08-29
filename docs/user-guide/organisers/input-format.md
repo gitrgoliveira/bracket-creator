@@ -11,7 +11,7 @@ Luke Rodriguez, Team Beta
 Michael Lewis, Team Gamma
 ```
 
-The first column is the participant name. The second column is the dojo/team affiliation used to avoid placing dojo-mates in the same pool.
+The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**: a row with no dojo is rejected, because a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. The dojo is what the draw uses to keep club-mates apart, in the pools and in the first round of a knockout.
 
 ## Zekken display name
 
@@ -29,7 +29,9 @@ For team tournaments (`--team-matches N`), each row still represents an individu
 
 ## Constraints
 
-- Names must be **unique**: duplicate entries are rejected before any bracket is generated.
+- A competitor is identified by **name and dojo together**. Two people who share a name are accepted as long as their dojos differ, which is common with widespread surnames; the same name at the same dojo is one person entered twice and is rejected before any bracket is generated.
+- The dojo must not be blank.
+- **Team names are the exception**: two teams may not share a name even at different dojos, because a team's name is what identifies it in results.
 - Names in a [seeds file](../commands/create-pools.md#seeding) must match the CSV exactly (case-sensitive).
 
 ## Seeds file

@@ -135,6 +135,14 @@ It is a rule about one competition's allocation, never about your venue: a hall 
 
 The count you assign is also not always the count the draw uses. A competition is never drawn onto more shiai-jo than it has pools, so a larger allocation steps down to the largest allowed count that fits, without an error and without a warning: seven pools assigned eight shiai-jo run on four. See [If you assign more shiai-jo than the competition has pools](run-tournament.md#if-you-assign-more-shiai-jo-than-the-competition-has-pools).
 
+## Club-mates in the first round
+
+The draw avoids opening a knockout with two competitors from the same dojo. After the places are worked out it checks each first-round match and, where the pairing is between two members of one dojo, exchanges one of them with a competitor elsewhere in the draw, choosing a partner as far away as the shape allows so the two meet as late as possible rather than merely not first.
+
+This matters most for a **Knockout only** competition, where there is no pool phase to separate club-mates beforehand and the draw follows the order your roster is in. Rosters are usually entered a club at a time, and without this the first round can be almost entirely club against club.
+
+Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would simply create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
+
 ## Byes
 
 Byes are decided **inside each block**, never across the draw as a whole.

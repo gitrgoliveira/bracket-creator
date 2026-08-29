@@ -39,10 +39,11 @@ Once a dojo has one member in every pool, no conflict-free pool exists for the r
 
 The overflow therefore spreads as evenly as the remaining space allows instead of piling into the first pool with room. With 24 entrants, 10 of them from one dojo, in six pools of 4, that dojo's members land 2, 2, 2, 2, 1 and 1 to a pool: no pool is all one dojo, and no pool holds more than one pairing from that dojo.
 
-Two limits are worth knowing at the desk:
+After the pools are filled the draw makes a second pass over them, exchanging competitors between pools wherever that breaks up a dojo pairing without creating another one. This is what lets it recover from a placement that only looks wrong once the last entrant is in: a club whose members happen to be entered last is no longer stranded in whichever pool still had room. Nobody changes pool unless the exchange strictly improves the spread, pool sizes never change, and a seeded competitor is never moved.
 
-- Once a dojo outnumbers the pools, some matches between its members are unavoidable. The draw minimises them; it cannot remove them.
-- The spread is only as good as the space left. If the last entrants to place are from one dojo and only one pool has room, they share that pool.
+One limit remains, and it is arithmetic rather than a shortcoming: once a dojo has more members than there are pools, some of its members must share a pool, so some matches between club-mates are unavoidable. The draw spreads them as thinly as the pool count allows.
+
+Setting seeds does not cost you any of this. Seeds take their places first, and the second pass runs afterwards, so a roster spreads its clubs just as well seeded as unseeded.
 
 ## Pools onto shiai-jo
 

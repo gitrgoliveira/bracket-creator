@@ -2326,3 +2326,90 @@ func TestPoolSeeding_SingleCourt_DojoSpread(t *testing.T) {
 			"BetaDojo overpopulated %s: %v", pool.PoolName, dojoCount)
 	}
 }
+
+// TestPoolSeeding_SeedsDoNotDegradeDojoSpread pins the pool-side counterpart of
+// the knockout's first-round dojo separation.
+//
+// Seeds occupy slots computed before the unseeded are placed, which shifts the
+// dojo-clustered fill and could leave two club-mates in one pool on a roster
+// that spreads perfectly without seeds. Measured before the repair pass: four
+// pools holding four 3-member clubs spread every club one-per-pool with no
+// seeds, and put two together the moment two seeds were set.
+func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
+	build := func(numPools, poolSize, nClubs, clubSize, nSeeds int) []Player {
+		n := numPools * poolSize
+		r := make([]Player, 0, n)
+		for c := 0; c < nClubs; c++ {
+			for i := 1; i <= clubSize; i++ {
+				r = append(r, Player{Name: fmt.Sprintf("C%d_%d", c, i), Dojo: fmt.Sprintf("Club%d", c)})
+			}
+		}
+		for i := len(r) + 1; i <= n; i++ {
+			r = append(r, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
+		}
+		for s := 0; s < nSeeds; s++ {
+			r[s].Seed = s + 1
+		}
+		return r
+	}
+	worstSameDojo := func(pools []Pool, nClubs int) int {
+		m := 0
+		for c := 0; c < nClubs; c++ {
+			dojo := fmt.Sprintf("Club%d", c)
+			for _, p := range pools {
+				k := 0
+				for _, pl := range p.Players {
+					if pl.Dojo == dojo {
+						k++
+					}
+				}
+				if k > m {
+					m = k
+				}
+			}
+		}
+		return m
+	}
+
+	tests := []struct {
+		name                                         string
+		numPools, poolSize, courts, nClubs, clubSize int
+		seeds                                        int
+	}{
+		// Both cases were measured suboptimal before the repair pass, and both
+		// spread perfectly with the same roster and no seeds.
+		{"four 3-member clubs, two seeds", 4, 3, 1, 4, 3, 2},
+		{"four 5-member clubs, four seeds", 7, 3, 2, 4, 5, 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			optimum := (tt.clubSize + tt.numPools - 1) / tt.numPools
+
+			unseeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nClubs, tt.clubSize, 0), tt.poolSize, false, tt.courts)
+			require.NoError(t, err)
+			require.Equal(t, optimum, worstSameDojo(unseeded, tt.nClubs),
+				"baseline: the same roster without seeds must already spread optimally")
+
+			seeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nClubs, tt.clubSize, tt.seeds), tt.poolSize, false, tt.courts)
+			require.NoError(t, err)
+			assert.Equal(t, optimum, worstSameDojo(seeded, tt.nClubs),
+				"setting seeds must not make the dojo spread worse than the same roster without them")
+
+			// Sizes and seed separation are invariants of the repair pass: it
+			// swaps competitors between pools, so it must never move a seed,
+			// change a pool's size, or lose anybody.
+			total := 0
+			for _, p := range seeded {
+				total += len(p.Players)
+				seeds := 0
+				for _, pl := range p.Players {
+					if pl.Seed > 0 {
+						seeds++
+					}
+				}
+				assert.LessOrEqual(t, seeds, 1, "%s holds more than one seed", p.PoolName)
+			}
+			assert.Equal(t, tt.numPools*tt.poolSize, total, "the repair pass must not lose or duplicate a competitor")
+		})
+	}
+}

@@ -475,6 +475,8 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 		dojoSets[poolN][player.Dojo] = true
 	}
 
+	rebalanceDojosAcrossPools(pools)
+
 	for i := 0; i < len(pools); i++ {
 		char := string(rune('A' + i%26))
 		if i > 25 {
@@ -741,6 +743,20 @@ func playerCoordKey(p Player) string {
 	return p.Name + "|" + p.DisplayName + "|" + p.Dojo
 }
 
+// ConvertPlayersToWinners maps a competitor's DISPLAYED name to the data-sheet
+// cell the tree formula concatenates.
+//
+// Known and deliberate: the returned map is keyed by name, so two competitors
+// who share a name (legal when their dojos differ) collapse to one entry. That
+// is safe HERE, and only here, because the cell being referenced holds the
+// player's NAME (column B, see dataColumnLayout.writePlayer) -- both namesakes
+// resolve to a cell containing the same string, so the rendered bracket is
+// identical either way. The lookup key would have to become an identity, and
+// the tree would have to carry that identity instead of a bare name, for a
+// difference nobody can see. If this map is ever pointed at a cell that
+// differs BETWEEN two namesakes -- the competitor number is the obvious
+// candidate, numberCell is already on playerCellCoord -- that reasoning
+// expires and the key must become helper.CompetitorKey.
 func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[string]playerCellCoord) map[string]MatchWinner {
 	matchWinners := make(map[string]MatchWinner, len(players))
 	for _, player := range players {
@@ -755,4 +771,85 @@ func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[strin
 		matchWinners[key] = MatchWinner{cellCoord: coord.cellCoord}
 	}
 	return matchWinners
+}
+
+// rebalanceDojosAcrossPools is assignPlayersToPools' repair pass: after the
+// greedy fill, it swaps UNSEEDED competitors between pools to break up
+// same-dojo pairings the fill could not avoid at the time it placed them.
+//
+// Why a repair pass and not a smarter fill: the fill is one pass in arrival
+// order, so it commits a placement before it can know what still has to be
+// placed. An earlier attempt to fix this by pre-arranging the roster (dealing
+// the free slots round-robin across start pools) made things WORSE -- it took
+// suboptimal spreads from 2 to 20 across the same 2048-roster sweep -- because
+// the arrangement fought the fill's own availability search. Looking at the
+// finished pools instead needs no prediction.
+//
+// Only strictly-improving swaps are taken: a member of an over-represented
+// dojo moves to a pool holding NONE of it, in exchange for a competitor whose
+// dojo the receiving pool does not already hold. So a swap can never create a
+// collision to fix one, and pool SIZES never change (it is an exchange, not a
+// move). Seeded competitors are never swapped: their placement is the seeding
+// contract, and a dojo is not a reason to break it.
+//
+// Iteration is by index throughout, and the dojo of the FIRST surplus member
+// found is the one acted on, so the result does not depend on map order.
+func rebalanceDojosAcrossPools(pools []Pool) {
+	countDojo := func(p Pool, dojo string) int {
+		n := 0
+		for _, pl := range p.Players {
+			if pl.Dojo == dojo {
+				n++
+			}
+		}
+		return n
+	}
+
+	// Bounded: every accepted swap strictly lowers the number of same-dojo
+	// pairings, which cannot go below zero, so the loop terminates. The cap is
+	// belt and braces against a future edit breaking that argument.
+	for pass := 0; pass < len(pools)*len(pools)+1; pass++ {
+		swapped := false
+		for i := range pools {
+			for ai := range pools[i].Players {
+				a := pools[i].Players[ai]
+				if a.Seed > 0 || a.Dojo == "" {
+					continue
+				}
+				if countDojo(pools[i], a.Dojo) < 2 {
+					continue // not over-represented here
+				}
+				for j := range pools {
+					if j == i || countDojo(pools[j], a.Dojo) != 0 {
+						continue
+					}
+					for bi := range pools[j].Players {
+						b := pools[j].Players[bi]
+						if b.Seed > 0 || b.Dojo == a.Dojo {
+							continue
+						}
+						// Bringing b into pool i must not create a new pairing.
+						if countDojo(pools[i], b.Dojo) != 0 {
+							continue
+						}
+						pools[i].Players[ai], pools[j].Players[bi] = b, a
+						swapped = true
+						break
+					}
+					if swapped {
+						break
+					}
+				}
+				if swapped {
+					break
+				}
+			}
+			if swapped {
+				break
+			}
+		}
+		if !swapped {
+			return
+		}
+	}
 }

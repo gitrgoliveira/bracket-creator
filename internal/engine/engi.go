@@ -211,18 +211,75 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 	}
 }
 
-// engiPlayerKey returns the stable key used to index playerStandings by
-// participant identity. Same-name participants from different dojos are
-// explicitly allowed (CheckDuplicateEntriesByNameDojo only rejects same-name
-// AND same-dojo), so keying by name alone silently merges distinct
-// competitors into one standings row. Prefers the participant UUID (id);
-// falls back to name for legacy data that predates SideAID/SideBID/player.ID
-// (empty for old CSVs, so behavior for that data is unchanged).
-func engiPlayerKey(id, name string) string {
+// standingsPlayerKey returns the id-based or name-based encoding used by
+// registerStandingsPlayer / lookupStandingsPlayer below. Same-name
+// participants from different dojos are explicitly allowed
+// (CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo), so
+// keying by name alone silently merges distinct competitors into one
+// standings row. NOT used by Swiss (SwissStandings / computeEngiSwissStandings):
+// Swiss matches persist no per-side UUIDs at all (buildSwissMatches never
+// sets SideAID/SideBID, and the SPA only echoes an id it already received),
+// so an id-preferring key there would build "id:<uuid>" roster entries that
+// no match lookup (always "name:...", since the match side id is always
+// empty) could ever find -- silently dropping every Swiss tally rather than
+// fixing the same-name case. See computeEngiSwissStandings's doc comment.
+func standingsPlayerKey(id, name string) string {
 	if id != "" {
 		return "id:" + id
 	}
 	return "name:" + name
+}
+
+// registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
+// into m under BOTH its name key AND (when player.ID is non-empty) its id
+// key, and returns the standing so the caller can keep populating it.
+//
+// Registering both, rather than only the id-preferred single key, is what
+// makes lookupStandingsPlayer resilient to a roster whose participants carry
+// real ids while some of the MATCHES that reference them don't (a
+// competition drawn before per-side ids existed on a given match shape, or a
+// TB/DH row generated before generateTiebreakerMatches /
+// generatePoolDaihyosenMatches started stamping SideAID/SideBID): the id key
+// simply goes unused for those matches and lookup falls through to the name
+// key, exactly as it always did before ids existed. A single symmetric key
+// (id-preferred on BOTH sides) does not degrade this way: if the roster
+// entry resolves via "id:<uuid>" but the match carries no id for that side,
+// the match's key is "name:<name>", which never equals the roster's key, and
+// EVERY match missing a side id -- not just the same-name case -- silently
+// stops contributing to standings. That regression was caught by
+// internal/export's hand-built fixtures (real participant ids, no
+// SideAID/SideBID on the match) before it could reach production data drawn
+// the same way (e.g. a mid-tournament upgrade whose TB/DH rows predate the
+// id-stamping fix).
+//
+// The name key is last-write-wins on a genuine collision (two roster entries
+// sharing a name with no id on either side to disambiguate): that is the
+// SAME degraded behavior standings always had before ids existed, not a new
+// gap -- it only matters when a match referencing one of them ALSO carries
+// no id, at which point there is no data left to disambiguate correctly.
+func registerStandingsPlayer(m map[string]*state.PlayerStanding, player domain.Player) *state.PlayerStanding {
+	st := &state.PlayerStanding{Player: player}
+	m[standingsPlayerKey("", player.Name)] = st
+	if player.ID != "" {
+		m[standingsPlayerKey(player.ID, "")] = st
+	}
+	return st
+}
+
+// lookupStandingsPlayer resolves a match side (id, name) to the
+// *state.PlayerStanding registered by registerStandingsPlayer. Prefers the
+// id key when id is non-empty AND that key was actually registered
+// (unambiguous even when two roster entries share a display name); falls
+// back to the name key otherwise -- when the match carries no id for this
+// side, or carries one that doesn't match any registered roster id (stale/
+// foreign data; degrading to name is preferable to resolving nothing).
+func lookupStandingsPlayer(m map[string]*state.PlayerStanding, id, name string) *state.PlayerStanding {
+	if id != "" {
+		if st, ok := m[standingsPlayerKey(id, "")]; ok {
+			return st
+		}
+	}
+	return m[standingsPlayerKey("", name)]
 }
 
 // engiScoreSummary renders the human-readable score cell for an engi
@@ -267,8 +324,14 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 		matches := poolResults[p.PoolName]
 
 		playerStandings := make(map[string]*state.PlayerStanding)
+		// order holds one *PlayerStanding per player, in roster order: the
+		// output slice below ranges over THIS, not over playerStandings'
+		// values, because registerStandingsPlayer indexes the SAME pointer
+		// under two keys (id and name) so a range over the map's values
+		// would visit -- and append -- each player twice.
+		order := make([]*state.PlayerStanding, 0, len(p.Players))
 		for _, player := range p.Players {
-			playerStandings[engiPlayerKey(player.ID, player.Name)] = &state.PlayerStanding{Player: player}
+			order = append(order, registerStandingsPlayer(playerStandings, player))
 		}
 
 		for _, m := range matches {
@@ -279,8 +342,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			sA := playerStandings[engiPlayerKey(m.SideAID, m.SideA)]
-			sB := playerStandings[engiPlayerKey(m.SideBID, m.SideB)]
+			sA := lookupStandingsPlayer(playerStandings, m.SideAID, m.SideA)
+			sB := lookupStandingsPlayer(playerStandings, m.SideBID, m.SideB)
 			if sA == nil || sB == nil {
 				continue
 			}
@@ -303,8 +366,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 			sB.Flags += m.FlagsB
 		}
 
-		sorted := make([]state.PlayerStanding, 0, len(playerStandings))
-		for _, s := range playerStandings {
+		sorted := make([]state.PlayerStanding, 0, len(order))
+		for _, s := range order {
 			s.ScoreSummary = engiScoreSummary(s)
 			sorted = append(sorted, *s)
 		}
@@ -342,10 +405,14 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 //
 // Identity is keyed by display NAME, exactly like the kendo SwissStandings it
 // twins: Swiss matches persist no per-side UUIDs (SideAID/SideBID/WinnerID are
-// empty in pool-matches.csv), and Swiss already treats names as unique
-// identities (swissFieldNamesFromMatches, helper.CheckDuplicateEntries). Keying
-// by engiPlayerKey would build "id:<uuid>" roster keys that never match the
-// name-only lookups the empty-ID matches produce, tallying nothing.
+// empty in pool-matches.csv), and the Swiss pairing pipeline (rematch
+// avoidance, win/bye tracking, rank ordering) already treats names as the
+// pairing identity end to end -- see the correction in swissFieldNamesFromMatches's
+// doc comment: the actual duplicate-name rule is name+dojo
+// (CheckDuplicateEntriesByNameDojo), not the whole-row CheckDuplicateEntries,
+// so this is a known, accepted gap for a same-name pair in Swiss, not a rule.
+// Keying by standingsPlayerKey would build "id:<uuid>" roster keys that never
+// match the name-only lookups the empty-ID matches produce, tallying nothing.
 func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
 	byName := make(map[string]*state.PlayerStanding, len(participants))
 	for _, p := range participants {

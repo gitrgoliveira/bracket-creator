@@ -64,8 +64,17 @@ func parseSwissMatchRound(id string) (int, bool) {
 // appeared in prior Swiss matches (players and bye recipients alike), i.e.
 // the frozen round-1 field. Used by GenerateSwissRound for rounds > 1 to keep
 // the field stable across rounds regardless of later check-in toggles
-// (mp-w7x; PR #199 review). Names are unique per competition
-// (helper.CheckDuplicateEntries), so a name key is an unambiguous identity.
+// (mp-w7x; PR #199 review). Keyed by name, not id: the whole Swiss pairing
+// pipeline (this function, priorPair/wins/hadBye in GenerateSwissRound,
+// buildRankByName, pairKey, and SwissStandings) treats display name as the
+// pairing identity end to end, because pool-matches.csv never persists a
+// per-side id for a Swiss match (buildSwissMatches sets only SideA/SideB).
+// This is a real, known gap for two participants who share a name: the
+// app's actual duplicate rule is name+dojo (helper.
+// CheckDuplicateEntriesByNameDojo), which explicitly permits such namesakes,
+// NOT the whole-row helper.CheckDuplicateEntries this comment used to (wrongly)
+// cite as the reason names are safe to use as identity here. Namesakes in a
+// Swiss field are not disambiguated by this pipeline today.
 func swissFieldNamesFromMatches(matches []state.MatchResult) map[string]bool {
 	field := make(map[string]bool)
 	for _, m := range matches {

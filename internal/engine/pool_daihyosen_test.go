@@ -93,6 +93,26 @@ func TestGeneratePoolDaihyosenMatches_TwoWayTie(t *testing.T) {
 	assert.Equal(t, "A", m.Court)
 }
 
+// TestGeneratePoolDaihyosenMatches_StampsSideIDs pins that generated DH rows
+// carry SideAID/SideBID from the tied teams' participant ids (mirrors
+// pools.go's regular-match generation and generateTiebreakerMatches). Without
+// this, applyTiebreakSort has no id to key on and two tied teams sharing a
+// display name across dojos (CheckDuplicateEntriesByNameDojo) would
+// cross-attribute each other's DH wins (bc-cse).
+func TestGeneratePoolDaihyosenMatches_StampsSideIDs(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-teamA", Name: "TeamA"}},
+		{Player: domain.Player{ID: "id-teamB", Name: "TeamB"}},
+	}
+	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", map[string]bool{})
+	require.Len(t, matches, 1)
+	m := matches[0]
+	assert.NotEmpty(t, m.SideAID)
+	assert.NotEmpty(t, m.SideBID)
+	assert.NotEqual(t, m.SideAID, m.SideBID)
+	assert.ElementsMatch(t, []string{m.SideAID, m.SideBID}, []string{"id-teamA", "id-teamB"})
+}
+
 // TestGeneratePoolDaihyosenMatches_ThreeWayTie verifies round-robin for 3 teams.
 func TestGeneratePoolDaihyosenMatches_ThreeWayTie(t *testing.T) {
 	group := []state.PlayerStanding{

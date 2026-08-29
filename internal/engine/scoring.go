@@ -1331,12 +1331,24 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 	for _, p := range pools {
 		matches := poolResults[p.PoolName]
 		playerStandings := make(map[string]*state.PlayerStanding)
+		// order holds one *PlayerStanding per player, in roster order: the
+		// output slice below ranges over THIS, not over playerStandings'
+		// values, because registerStandingsPlayer indexes the SAME pointer
+		// under two keys (id and name) so a range over the map's values
+		// would visit -- and append -- each player twice.
+		order := make([]*state.PlayerStanding, 0, len(p.Players))
 		for _, player := range p.Players {
 			// helper.Player is a type alias for domain.Player (NFR-007);
 			// the pool player flows directly into PlayerStanding.
-			playerStandings[player.Name] = &state.PlayerStanding{
-				Player: player,
-			}
+			// registerStandingsPlayer indexes by id AND name (not bare name
+			// alone): two competitors sharing a name from different dojos
+			// are explicitly allowed (CheckDuplicateEntriesByNameDojo), and
+			// a league is a single pool holding every competitor, so a
+			// bare-name key here silently collapses namesakes into one
+			// standings row. See registerStandingsPlayer's doc comment
+			// (engi.go) for why both keys are registered rather than one
+			// id-preferred key.
+			order = append(order, registerStandingsPlayer(playerStandings, player))
 		}
 
 		for _, m := range matches {
@@ -1347,20 +1359,28 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			sA := playerStandings[m.SideA]
-			sB := playerStandings[m.SideB]
+			sA := lookupStandingsPlayer(playerStandings, m.SideAID, m.SideA)
+			sB := lookupStandingsPlayer(playerStandings, m.SideBID, m.SideB)
 			if sA == nil || sB == nil {
 				continue
 			}
 
-			// Team W/L/D (or individual W/L/D)
-			if m.Winner == m.SideA {
+			// Team W/L/D (or individual W/L/D). Resolve the winning side by
+			// WinnerID when available (unambiguous even when both sides
+			// share a display name, e.g. a same-name-different-dojo pairing
+			// within one pool); fall back to the Winner name comparison for
+			// legacy data recorded before WinnerID was set. Mirrors
+			// computeEngiStandings' winnerIsA/winnerIsB resolution exactly.
+			winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
+			winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+			switch {
+			case winnerIsA:
 				sA.Wins++
 				sB.Losses++
-			} else if m.Winner == m.SideB {
+			case winnerIsB:
 				sB.Wins++
 				sA.Losses++
-			} else if state.IsDraw(m.Decision) || m.Winner == "" {
+			case state.IsDraw(m.Decision) || m.Winner == "":
 				sA.Draws++
 				sB.Draws++
 			}
@@ -1379,7 +1399,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		}
 
 		var sorted []state.PlayerStanding
-		for _, s := range playerStandings {
+		for _, s := range order {
 			if isTeam {
 				// Single packed ranking score over the full team tiebreak chain
 				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.

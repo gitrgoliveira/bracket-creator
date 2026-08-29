@@ -1120,3 +1120,78 @@ func TestMaybeAutoCompletePools_Engi_League_SelfHeal(t *testing.T) {
 			"spurious TB rows must be healed away by MaybeAutoCompletePools")
 	}
 }
+
+// TestGenerateTiebreakerMatches_StampsSideIDs pins that generated TB rows
+// carry SideAID/SideBID from the tied competitors' participant ids (mirrors
+// pools.go's regular-match generation). Without this, applyTiebreakSort has
+// no id to key on and two tied namesakes from different dojos
+// (CheckDuplicateEntriesByNameDojo) would cross-attribute each other's TB
+// wins (bc-cse).
+func TestGenerateTiebreakerMatches_StampsSideIDs(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-alice", Name: "Alice"}},
+		{Player: domain.Player{ID: "id-bob", Name: "Bob"}},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", map[string]bool{})
+	require.Len(t, matches, 1)
+	m := matches[0]
+	assert.NotEmpty(t, m.SideAID)
+	assert.NotEmpty(t, m.SideBID)
+	assert.NotEqual(t, m.SideAID, m.SideBID)
+	assert.ElementsMatch(t, []string{m.SideAID, m.SideBID}, []string{"id-alice", "id-bob"})
+}
+
+// TestApplyTiebreakSort_SameNameDifferentDojo pins the win-attribution fix:
+// two tied competitors sharing a display name across different dojos
+// (CheckDuplicateEntriesByNameDojo explicitly allows this) must have their
+// own supplementary-bout (TB) wins counted separately. Before the fix,
+// groupNames/groupWins were keyed by bare Player.Name, so a win by one
+// "Alice" bled into the other "Alice"'s tally via the shared name bucket.
+//
+// Fixture: three-way tied group Alice-A (Tokyo), Alice-B (Osaka), Carol.
+// Alice-A LOSES both her TB bouts (to Carol and, indirectly, is not involved
+// with Alice-B at all here); Alice-B and Carol each win one bout. The
+// correct (id-keyed) order therefore ranks Alice-B and Carol (1 win each)
+// above Alice-A (0 wins); the buggy (name-keyed) code merges Alice-A's and
+// Alice-B's tallies into a shared "Alice" bucket, incorrectly crediting
+// Alice-A with Alice-B's win and leaving the tied group unsorted (all three
+// read "1" from the shared bucket, so the stable sort makes no change and
+// Alice-A -- who actually lost every bout she played -- stays in first
+// place).
+func TestApplyTiebreakSort_SameNameDifferentDojo(t *testing.T) {
+	aliceA := domain.Player{ID: "id-alice-tokyo", Name: "Alice", Dojo: "Tokyo"}
+	aliceB := domain.Player{ID: "id-alice-osaka", Name: "Alice", Dojo: "Osaka"}
+	carol := domain.Player{ID: "id-carol", Name: "Carol", Dojo: "Kyoto"}
+
+	sorted := []state.PlayerStanding{
+		{Player: aliceA, Points: 100},
+		{Player: aliceB, Points: 100},
+		{Player: carol, Points: 100},
+	}
+	matches := []state.MatchResult{
+		// Alice-A vs Carol: Carol wins.
+		{
+			ID: "Pool A-TB-0", SideA: aliceA.Name, SideB: carol.Name,
+			SideAID: aliceA.ID, SideBID: carol.ID,
+			Winner: carol.Name, WinnerID: carol.ID,
+			Status: state.MatchStatusCompleted,
+		},
+		// Alice-B vs Carol: Alice-B wins.
+		{
+			ID: "Pool A-TB-1", SideA: aliceB.Name, SideB: carol.Name,
+			SideAID: aliceB.ID, SideBID: carol.ID,
+			Winner: aliceB.Name, WinnerID: aliceB.ID,
+			Status: state.MatchStatusCompleted,
+		},
+	}
+
+	applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
+
+	require.Len(t, sorted, 3)
+	assert.NotEqual(t, aliceA.ID, sorted[0].Player.ID,
+		"Alice-Tokyo lost every TB bout she played and must not rank first")
+	gotIDs := []string{sorted[0].Player.ID, sorted[1].Player.ID, sorted[2].Player.ID}
+	assert.Equal(t, "id-alice-tokyo", gotIDs[2], "the 0-win Alice must rank last")
+	assert.ElementsMatch(t, []string{"id-alice-osaka", "id-carol"}, gotIDs[:2],
+		"the two 1-win competitors must rank ahead of the 0-win one")
+}

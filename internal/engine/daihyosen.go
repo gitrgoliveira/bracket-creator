@@ -149,6 +149,10 @@ func IsPoolDaihyosenMatchID(matchID string) bool {
 // a tied group of teams in team-pool competitions. Mirrors
 // generateTiebreakerMatches but uses the "DH-N" ID prefix and is used when
 // teams are fully tied on all 8 ranking criteria after regular pool play.
+// Stamps SideAID/SideBID from the tied teams' participant ids (mirrors
+// pools.go's regular-match generation), so applyTiebreakSort can resolve the
+// winning side by id rather than by name when two tied teams share a display
+// name (allowed across dojos, CheckDuplicateEntriesByNameDojo).
 func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStanding, existingDHCount int, court string, existingPairs map[string]bool) []state.MatchResult {
 	var results []state.MatchResult
 	idx := existingDHCount
@@ -162,11 +166,13 @@ func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStand
 				continue
 			}
 			results = append(results, state.MatchResult{
-				ID:     fmt.Sprintf("%s-DH-%d", poolName, idx),
-				SideA:  a.Player.Name,
-				SideB:  b.Player.Name,
-				Status: state.MatchStatusScheduled,
-				Court:  court,
+				ID:      fmt.Sprintf("%s-DH-%d", poolName, idx),
+				SideA:   a.Player.Name,
+				SideB:   b.Player.Name,
+				SideAID: a.Player.ID,
+				SideBID: b.Player.ID,
+				Status:  state.MatchStatusScheduled,
+				Court:   court,
 			})
 			existingPairs[key] = true
 			idx++

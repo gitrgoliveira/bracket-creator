@@ -92,26 +92,95 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // callers (TB, DH) share one implementation. Win counts are scoped to bouts
 // between members of the same tied group, so an unrelated group's results never
 // bleed across; a group with no decided supplementary bouts is left untouched.
+//
+// Group membership and win attribution are keyed by standingsPlayerKey
+// (id-preferring, name fallback): two tied competitors can share a display
+// name across dojos (CheckDuplicateEntriesByNameDojo), and a bare-name key
+// would both misclassify group membership (a same-named, unrelated
+// competitor elsewhere in the pool falsely counted as "in this group") and
+// cross-attribute a supplementary win between the two namesakes.
+// generateTiebreakerMatches / generatePoolDaihyosenMatches stamp
+// SideAID/SideBID at generation so the id half is actually populated for
+// TB/DH rows going forward.
+//
+// The sort comparator below recomputes each element's key FRESH from
+// sorted[i+a]/sorted[i+b] on every call rather than caching a
+// position->key/count mapping once: sort.SliceStable physically swaps
+// elements as it sorts, so a fixed "this position had N wins" cache goes
+// stale the moment two elements it describes are swapped, and the comparator
+// silently starts comparing the wrong pair of counts (verified: an earlier
+// version of this function cached original-position keys and produced a
+// wrong final order on exactly the fixture in
+// TestApplyTiebreakSort_SameNameDifferentDojo). Reading sorted[i+a] directly
+// always reflects whoever CURRENTLY occupies that slot, so it can't go
+// stale.
+//
+// A match side is resolved to a group member's canonical key via
+// resolveGroupMatchKey: when the match carries an id for that side, the key
+// is symmetric (both a member's own key and a match's believed key for the
+// same id compute to the identical "id:<uuid>" string, so no lookup table is
+// needed for that path -- only membership in this specific tied group is
+// verified). When the match carries no id for that side (a pre-fix TB/DH
+// row, or any other legacy data), resolution falls back to a name lookup
+// built from the group's own members; a genuine same-name collision with NO
+// id on the match to disambiguate degrades to the same "last one registered
+// wins" behavior standings always had before ids existed -- there is no data
+// left to do better with -- but a correctly id-stamped match is never
+// misattributed merely because some OTHER row in the same pool lacks one.
 func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) {
 	for _, positions := range detectPoolTies(sorted) {
 		i := positions[0]
 		j := positions[len(positions)-1] + 1
-		groupNames := make(map[string]bool, j-i)
+
+		groupKeys := make(map[string]bool, j-i)
+		byName := make(map[string]string, j-i)
 		for k := i; k < j; k++ {
-			groupNames[sorted[k].Player.Name] = true
+			ck := standingsPlayerKey(sorted[k].Player.ID, sorted[k].Player.Name)
+			groupKeys[ck] = true
+			byName[standingsPlayerKey("", sorted[k].Player.Name)] = ck
 		}
+		resolveGroupMatchKey := func(id, name string) (string, bool) {
+			if id != "" {
+				if ck := standingsPlayerKey(id, ""); groupKeys[ck] {
+					return ck, true
+				}
+				// A non-empty id that isn't one of this group's members
+				// (foreign/stale data) falls through to the name lookup
+				// below rather than resolving to nothing.
+			}
+			ck, ok := byName[standingsPlayerKey("", name)]
+			return ck, ok
+		}
+
 		groupWins := map[string]int{}
 		for _, m := range matches {
 			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
 				continue
 			}
-			if groupNames[m.SideA] && groupNames[m.SideB] {
-				groupWins[m.Winner]++
+			keyA, aOK := resolveGroupMatchKey(m.SideAID, m.SideA)
+			keyB, bOK := resolveGroupMatchKey(m.SideBID, m.SideB)
+			if !aOK || !bOK || keyA == keyB {
+				continue
+			}
+			// Resolve the winning side by WinnerID when available
+			// (unambiguous even when both sides share a display name); fall
+			// back to the Winner name comparison for legacy/unstamped rows.
+			// Mirrors the win attribution in computeStandingsFrom /
+			// computeEngiStandings.
+			winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
+			winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+			switch {
+			case winnerIsA:
+				groupWins[keyA]++
+			case winnerIsB:
+				groupWins[keyB]++
 			}
 		}
 		if len(groupWins) > 0 {
 			sort.SliceStable(sorted[i:j], func(a, b int) bool {
-				return groupWins[sorted[i+a].Player.Name] > groupWins[sorted[i+b].Player.Name]
+				keyA := standingsPlayerKey(sorted[i+a].Player.ID, sorted[i+a].Player.Name)
+				keyB := standingsPlayerKey(sorted[i+b].Player.ID, sorted[i+b].Player.Name)
+				return groupWins[keyA] > groupWins[keyB]
 			})
 		}
 	}
@@ -186,6 +255,10 @@ func tiebreakerPairKey(a, b string) string {
 // for tiedGroup. existingTBCount is the current number of TB matches in
 // the pool (used to produce unique TB-N indices). court is the court
 // label assigned to the pool. Pairs already in existingPairs are skipped.
+// Stamps SideAID/SideBID from the tied competitors' participant ids (mirrors
+// pools.go's regular-match generation), so applyTiebreakSort can resolve the
+// winning side by id rather than by name when two tied competitors share a
+// display name (allowed across dojos, CheckDuplicateEntriesByNameDojo).
 func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding, existingTBCount int, court string, existingPairs map[string]bool) []state.MatchResult {
 	var results []state.MatchResult
 	idx := existingTBCount
@@ -199,11 +272,13 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 				continue
 			}
 			results = append(results, state.MatchResult{
-				ID:     fmt.Sprintf("%s-TB-%d", poolName, idx),
-				SideA:  a.Player.Name,
-				SideB:  b.Player.Name,
-				Status: state.MatchStatusScheduled,
-				Court:  court,
+				ID:      fmt.Sprintf("%s-TB-%d", poolName, idx),
+				SideA:   a.Player.Name,
+				SideB:   b.Player.Name,
+				SideAID: a.Player.ID,
+				SideBID: b.Player.ID,
+				Status:  state.MatchStatusScheduled,
+				Court:   court,
 			})
 			existingPairs[key] = true
 			idx++

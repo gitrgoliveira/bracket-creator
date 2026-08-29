@@ -230,15 +230,48 @@ func standingsPlayerKey(id, name string) string {
 	return "name:" + name
 }
 
-// CompetitorKey is the shared identity-key builder for competitor identity
-// (operator rule: (name, dojo), not name); see its doc comment in
-// internal/helper/identity.go for the full rationale. It was originally
-// engine-local (Swiss pairing only) and was moved to helper (bc-cse) so
-// internal/state -- which cannot import internal/engine without a cycle --
-// can key manual pool-rank overrides (state.Overrides.PoolRanks) with the
-// same scheme. Swiss (swiss.go) and computeEngiSwissStandings /
-// computeEngiStandings (this file, via standingsPlayerKey) both still call
-// helper.CompetitorKey directly.
+// resolveWinnerSide reports which side of a match won, preferring the winner's
+// participant id over the display name.
+//
+// The name comparison alone is not enough: "m.Winner == m.SideA" is true for
+// BOTH sides of a same-name pairing (legal when the dojos differ), so the
+// loser could be credited. When an id is recorded it decides; when it is not
+// -- a row written before ids existed -- the name comparison is all there is,
+// which is the behaviour those rows always had.
+//
+// Both results can be false: an unfinished match, a draw, or a winner naming
+// neither side. Callers treat that as "no win to award" rather than as an
+// error.
+func resolveWinnerSide(m state.MatchResult) (winnerIsA, winnerIsB bool) {
+	if m.WinnerID != "" {
+		return m.WinnerID == m.SideAID, m.WinnerID == m.SideBID
+	}
+	return m.Winner != "" && m.Winner == m.SideA, m.Winner != "" && m.Winner == m.SideB
+}
+
+// THE TWO KEY SCHEMES, and why they are not one.
+//
+// helper.CompetitorKey(id, name, dojo) falls back to a normalized name+dojo
+// composite. standingsPlayerKey(id, name) above falls back to the bare name.
+// standingsPlayerKey does NOT call CompetitorKey and is not a narrower alias
+// for it; they answer different questions and cannot be merged:
+//
+//   - CompetitorKey keys a ROSTER against another ROSTER, where both sides
+//     know the dojo. Swiss pairing and state.Overrides.PoolRanks use it. (It
+//     lives in helper, not here, because internal/state cannot import
+//     internal/engine without a cycle.)
+//   - standingsPlayerKey keys a roster against MATCH SIDES, and a
+//     state.MatchResult carries an id and a name per side but never a dojo.
+//     A dojo-aware roster key would therefore be unfindable by any match
+//     lookup: the roster entry would be filed under "nd:name|dojo" and the
+//     lookup could only ever ask for "name:name". Adding dojo here would not
+//     disambiguate anything, it would break every id-less lookup.
+//
+// That is why registerStandingsPlayer files each competitor under BOTH keys:
+// the id key disambiguates namesakes whenever the match carries ids, and the
+// name key keeps id-less (legacy) matches resolving as they always did. If
+// MatchResult ever grows a per-side dojo, this distinction disappears and the
+// two schemes should become one.
 
 // registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
 // into m under BOTH its name key AND (when player.ID is non-empty) its id
@@ -267,6 +300,24 @@ func standingsPlayerKey(id, name string) string {
 // SAME degraded behavior standings always had before ids existed, not a new
 // gap -- it only matters when a match referencing one of them ALSO carries
 // no id, at which point there is no data left to disambiguate correctly.
+// newStandingsIndex builds the standings lookup for a roster and returns it
+// alongside the same pointers in roster order.
+//
+// Both halves are needed and the second is easy to forget: the map indexes
+// each competitor under TWO keys (id and name, see registerStandingsPlayer),
+// so ranging over its values visits -- and would append -- every competitor
+// twice. Callers assemble their output from the returned slice, never from the
+// map. Returning them together is what stops each call site having to know
+// that, and having to say so in its own comment.
+func newStandingsIndex(players []domain.Player) (map[string]*state.PlayerStanding, []*state.PlayerStanding) {
+	byKey := make(map[string]*state.PlayerStanding, len(players))
+	order := make([]*state.PlayerStanding, 0, len(players))
+	for _, p := range players {
+		order = append(order, registerStandingsPlayer(byKey, p))
+	}
+	return byKey, order
+}
+
 func registerStandingsPlayer(m map[string]*state.PlayerStanding, player domain.Player) *state.PlayerStanding {
 	st := &state.PlayerStanding{Player: player}
 	m[standingsPlayerKey("", player.Name)] = st
@@ -333,16 +384,7 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 	for _, p := range pools {
 		matches := poolResults[p.PoolName]
 
-		playerStandings := make(map[string]*state.PlayerStanding)
-		// order holds one *PlayerStanding per player, in roster order: the
-		// output slice below ranges over THIS, not over playerStandings'
-		// values, because registerStandingsPlayer indexes the SAME pointer
-		// under two keys (id and name) so a range over the map's values
-		// would visit -- and append -- each player twice.
-		order := make([]*state.PlayerStanding, 0, len(p.Players))
-		for _, player := range p.Players {
-			order = append(order, registerStandingsPlayer(playerStandings, player))
-		}
+		playerStandings, order := newStandingsIndex(p.Players)
 
 		for _, m := range matches {
 			if m.Status != state.MatchStatusCompleted {
@@ -357,13 +399,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 			if sA == nil || sB == nil {
 				continue
 			}
-			// Win by flag majority. Engi has no draws (odd flag total) and does
-			// not record losses: ranking is Wins then accumulated own-side Flags.
-			// Resolve the winning side by WinnerID when available (unambiguous
-			// even when both sides share a display name); fall back to the
-			// Winner name for legacy data recorded before WinnerID was set.
-			winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
-			winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
 				sA.Wins++
@@ -427,14 +464,7 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
 	// order holds one *PlayerStanding per participant, in roster order: the
 	// assembly loop below ranges over THIS, not over byKey's values, because
-	// registerStandingsPlayer indexes the SAME pointer under two keys and a
-	// range over the map's values would visit -- and append -- each
-	// participant twice (mirrors SwissStandings / computeEngiStandings).
-	byKey := make(map[string]*state.PlayerStanding, len(participants))
-	order := make([]*state.PlayerStanding, 0, len(participants))
-	for _, p := range participants {
-		order = append(order, registerStandingsPlayer(byKey, p))
-	}
+	byKey, order := newStandingsIndex(participants)
 
 	headToHead := make(map[string]map[string]string) // winner key → opponent key → winner key
 	for _, m := range matches {
@@ -456,13 +486,8 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 		if sA == nil || sB == nil {
 			continue
 		}
-		// Engi has no draws (odd flag total) and records no losses: ranking is
-		// Wins then accumulated own-side Flags. Resolve the winning side by
-		// WinnerID when available (unambiguous even when both sides share a
-		// display name); fall back to the Winner name for legacy data recorded
-		// before WinnerID was set, mirroring computeEngiStandings / SwissStandings.
-		winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
-		winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+		// Winner by id where recorded, else by name; see resolveWinnerSide.
+		winnerIsA, winnerIsB := resolveWinnerSide(m)
 		keyA := standingsPlayerKey(sA.Player.ID, sA.Player.Name)
 		keyB := standingsPlayerKey(sB.Player.ID, sB.Player.Name)
 		switch {

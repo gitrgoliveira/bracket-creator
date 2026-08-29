@@ -70,14 +70,7 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	// genuine tie as decided; either answer changes who advances.
 	// generatePoolDaihyosenMatches stamps SideAID/SideBID/WinnerID, so the
 	// ids are there to key on and the hardening costs nothing.
-	groupKeys := make(map[string]bool, len(group))
-	byName := make(map[string]string, len(group))
-	for _, s := range group {
-		ck := standingsPlayerKey(s.Player.ID, s.Player.Name)
-		groupKeys[ck] = true
-		byName[standingsPlayerKey("", s.Player.Name)] = ck
-	}
-	resolve := newGroupKeyResolver(groupKeys, byName)
+	resolve := newGroupKeyResolver(group)
 
 	dhWins := make(map[string]int, len(group))
 	dhCompleted := 0

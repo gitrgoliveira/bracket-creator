@@ -132,14 +132,7 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 		i := positions[0]
 		j := positions[len(positions)-1] + 1
 
-		groupKeys := make(map[string]bool, j-i)
-		byName := make(map[string]string, j-i)
-		for k := i; k < j; k++ {
-			ck := standingsPlayerKey(sorted[k].Player.ID, sorted[k].Player.Name)
-			groupKeys[ck] = true
-			byName[standingsPlayerKey("", sorted[k].Player.Name)] = ck
-		}
-		resolveGroupMatchKey := newGroupKeyResolver(groupKeys, byName)
+		resolveGroupMatchKey := newGroupKeyResolver(sorted[i:j])
 
 		groupWins := map[string]int{}
 		for _, m := range matches {
@@ -151,13 +144,8 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 			if !aOK || !bOK || keyA == keyB {
 				continue
 			}
-			// Resolve the winning side by WinnerID when available
-			// (unambiguous even when both sides share a display name); fall
-			// back to the Winner name comparison for legacy/unstamped rows.
-			// Mirrors the win attribution in computeStandingsFrom /
-			// computeEngiStandings.
-			winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
-			winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
 				groupWins[keyA]++
@@ -448,7 +436,8 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	return injected, nil
 }
 
-// newGroupKeyResolver returns the (id, name) -> canonical member key resolution
+// newGroupKeyResolver indexes a tied group and returns the (id, name) ->
+// canonical member key resolution
 // shared by applyTiebreakSort and groupNeedsChusen (chusen.go). Both ask the
 // same question of the same kind of data: a supplementary bout names two sides,
 // and the caller needs to know which member of THIS tied group each side is.
@@ -462,7 +451,14 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 // the single entry byName holds, which is exactly the behaviour that predates
 // ids. A correctly stamped bout is never misattributed just because some other
 // row in the same pool lacks an id.
-func newGroupKeyResolver(groupKeys map[string]bool, byName map[string]string) func(id, name string) (string, bool) {
+func newGroupKeyResolver(members []state.PlayerStanding) func(id, name string) (string, bool) {
+	groupKeys := make(map[string]bool, len(members))
+	byName := make(map[string]string, len(members))
+	for _, s := range members {
+		ck := standingsPlayerKey(s.Player.ID, s.Player.Name)
+		groupKeys[ck] = true
+		byName[standingsPlayerKey("", s.Player.Name)] = ck
+	}
 	return func(id, name string) (string, bool) {
 		if id != "" {
 			if ck := standingsPlayerKey(id, ""); groupKeys[ck] {

@@ -750,24 +750,10 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 	}
 	isTeam := comp.TeamSize > 0
 
-	// Initialise one PlayerStanding per participant so the response
-	// includes the full roster (matches the existing pool-standings
-	// invariant, operators expect to see every player listed).
-	// registerStandingsPlayer indexes by id AND name (not bare name alone,
-	// bc-cse): two competitors sharing a name from different dojos are
-	// explicitly allowed (CheckDuplicateEntriesByNameDojo), and a bare-name
-	// key here silently collapses them into one standings row exactly as it
-	// did before this fix. order holds one *PlayerStanding per participant,
-	// in roster order: the assembly loop below ranges over THIS, not over
-	// byKey's values, because registerStandingsPlayer indexes the SAME
-	// pointer under two keys and a range over the map's values would visit
-	// -- and append -- each participant twice (mirrors computeStandingsFrom /
-	// computeEngiStandings, scoring.go / engi.go).
-	byKey := make(map[string]*state.PlayerStanding, len(participants))
-	order := make([]*state.PlayerStanding, 0, len(participants))
-	for _, p := range participants {
-		order = append(order, registerStandingsPlayer(byKey, p))
-	}
+	// Indexed by IDENTITY, not bare name: two participants sharing a name
+	// from different dojos are explicitly allowed, and a bare-name key here
+	// collapsed them into one standings row before this fix.
+	byKey, order := newStandingsIndex(participants)
 
 	// Tally W/L/D and ippons across every Swiss match. Skip non-Swiss
 	// rows (a stray pool-match in the file would otherwise contribute
@@ -815,12 +801,8 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 			sB.IpponsTaken += countScoringIppons(m.IpponsA)
 		}
 
-		// Resolve the winning side by WinnerID when available (unambiguous
-		// even when both sides share a display name); fall back to the
-		// Winner name comparison for legacy data recorded before WinnerID
-		// was set. Mirrors computeStandingsFrom / computeEngiStandings.
-		winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
-		winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+		// Winner by id where recorded, else by name; see resolveWinnerSide.
+		winnerIsA, winnerIsB := resolveWinnerSide(m)
 		keyA := standingsPlayerKey(sA.Player.ID, sA.Player.Name)
 		keyB := standingsPlayerKey(sB.Player.ID, sB.Player.Name)
 		switch {

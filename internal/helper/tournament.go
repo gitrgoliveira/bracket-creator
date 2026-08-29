@@ -528,6 +528,21 @@ func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targe
 	return -1
 }
 
+// countDojoInPool returns how many of pool's competitors are from dojo. Shared
+// by the fallback that chooses where an unplaceable competitor goes and by the
+// repair pass that swaps competitors afterwards, so the two can never disagree
+// about what "how many of this dojo are here" means -- if dojo comparison ever
+// needs normalizing, this is the one place it changes.
+func countDojoInPool(pool Pool, dojo string) int {
+	n := 0
+	for _, pl := range pool.Players {
+		if pl.Dojo == dojo {
+			n++
+		}
+	}
+	return n
+}
+
 // leastConflictedPool is assignPlayersToPools' first fallback, reached when
 // discoverPool finds no conflict-free pool for a player (a dojo conflict OR
 // a name conflict against every pool with room). Among the pools that still
@@ -546,12 +561,7 @@ func leastConflictedPool(pools []Pool, targetSizes []int, dojo string) int {
 		if len(pool.Players) >= targetSizes[i] {
 			continue
 		}
-		n := 0
-		for _, pl := range pool.Players {
-			if pl.Dojo == dojo {
-				n++
-			}
-		}
+		n := countDojoInPool(pool, dojo)
 		if best < 0 || n < bestDojo || (n == bestDojo && len(pool.Players) < bestSize) {
 			best, bestDojo, bestSize = i, n, len(pool.Players)
 		}
@@ -795,61 +805,47 @@ func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[strin
 // Iteration is by index throughout, and the dojo of the FIRST surplus member
 // found is the one acted on, so the result does not depend on map order.
 func rebalanceDojosAcrossPools(pools []Pool) {
-	countDojo := func(p Pool, dojo string) int {
-		n := 0
-		for _, pl := range p.Players {
-			if pl.Dojo == dojo {
-				n++
-			}
-		}
-		return n
-	}
-
 	// Bounded: every accepted swap strictly lowers the number of same-dojo
-	// pairings, which cannot go below zero, so the loop terminates. The cap is
+	// pairings, which cannot go below zero, so this terminates. The cap is
 	// belt and braces against a future edit breaking that argument.
 	for pass := 0; pass < len(pools)*len(pools)+1; pass++ {
-		swapped := false
-		for i := range pools {
-			for ai := range pools[i].Players {
-				a := pools[i].Players[ai]
-				if a.Seed > 0 || a.Dojo == "" {
-					continue
-				}
-				if countDojo(pools[i], a.Dojo) < 2 {
-					continue // not over-represented here
-				}
-				for j := range pools {
-					if j == i || countDojo(pools[j], a.Dojo) != 0 {
-						continue
-					}
-					for bi := range pools[j].Players {
-						b := pools[j].Players[bi]
-						if b.Seed > 0 || b.Dojo == a.Dojo {
-							continue
-						}
-						// Bringing b into pool i must not create a new pairing.
-						if countDojo(pools[i], b.Dojo) != 0 {
-							continue
-						}
-						pools[i].Players[ai], pools[j].Players[bi] = b, a
-						swapped = true
-						break
-					}
-					if swapped {
-						break
-					}
-				}
-				if swapped {
-					break
-				}
-			}
-			if swapped {
-				break
-			}
-		}
-		if !swapped {
+		if !applyOneDojoSwap(pools) {
 			return
 		}
 	}
+}
+
+// applyOneDojoSwap performs the first strictly-improving exchange it finds and
+// reports whether it made one. Split out of rebalanceDojosAcrossPools so the
+// search can say "done" with a plain return instead of threading a flag back
+// out through four levels of loop.
+func applyOneDojoSwap(pools []Pool) bool {
+	for i := range pools {
+		for ai := range pools[i].Players {
+			a := pools[i].Players[ai]
+			// Only a competitor whose dojo is over-represented in THIS pool is
+			// worth moving, and a seed is never moved.
+			if a.Seed > 0 || a.Dojo == "" || countDojoInPool(pools[i], a.Dojo) < 2 {
+				continue
+			}
+			for j := range pools {
+				// The receiving pool must hold none of a's dojo, or the swap
+				// just moves the pairing somewhere else.
+				if j == i || countDojoInPool(pools[j], a.Dojo) != 0 {
+					continue
+				}
+				for bi := range pools[j].Players {
+					b := pools[j].Players[bi]
+					// b comes back the other way, so pool i must not already
+					// hold b's dojo: a swap may never create a pairing.
+					if b.Seed > 0 || b.Dojo == a.Dojo || countDojoInPool(pools[i], b.Dojo) != 0 {
+						continue
+					}
+					pools[i].Players[ai], pools[j].Players[bi] = b, a
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

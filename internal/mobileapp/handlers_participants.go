@@ -496,6 +496,8 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					httpStatus = http.StatusConflict
 				case errors.Is(err, state.ErrReservedName):
 					httpStatus = http.StatusBadRequest
+				case errors.Is(err, state.ErrBlankDojo):
+					httpStatus = http.StatusBadRequest
 				}
 				httpMsg = err.Error()
 				return err
@@ -520,11 +522,6 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			c.JSON(httpStatus, gin.H{"error": msg})
 			return
 		}
-		if errors.Is(err, state.ErrBlankDojo) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
 		var warnings []string
 		if isDrawReady && oldName != "" {
 			// Cascade the name/dojo change through draw artifacts outside the

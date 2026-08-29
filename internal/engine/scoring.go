@@ -1330,26 +1330,13 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 	allStandings := make(map[string][]state.PlayerStanding)
 	for _, p := range pools {
 		matches := poolResults[p.PoolName]
-		playerStandings := make(map[string]*state.PlayerStanding)
-		// order holds one *PlayerStanding per player, in roster order: the
-		// output slice below ranges over THIS, not over playerStandings'
-		// values, because registerStandingsPlayer indexes the SAME pointer
-		// under two keys (id and name) so a range over the map's values
-		// would visit -- and append -- each player twice.
-		order := make([]*state.PlayerStanding, 0, len(p.Players))
-		for _, player := range p.Players {
-			// helper.Player is a type alias for domain.Player (NFR-007);
-			// the pool player flows directly into PlayerStanding.
-			// registerStandingsPlayer indexes by id AND name (not bare name
-			// alone): two competitors sharing a name from different dojos
-			// are explicitly allowed (CheckDuplicateEntriesByNameDojo), and
-			// a league is a single pool holding every competitor, so a
-			// bare-name key here silently collapses namesakes into one
-			// standings row. See registerStandingsPlayer's doc comment
-			// (engi.go) for why both keys are registered rather than one
-			// id-preferred key.
-			order = append(order, registerStandingsPlayer(playerStandings, player))
-		}
+		// Indexed by IDENTITY, not bare name: two competitors sharing a name
+		// from different dojos are explicitly allowed, and a league is a
+		// single pool holding every competitor, so a bare-name key here
+		// silently collapses namesakes into one standings row.
+		// (helper.Player is a type alias for domain.Player, NFR-007, so the
+		// pool player flows straight into PlayerStanding.)
+		playerStandings, order := newStandingsIndex(p.Players)
 
 		for _, m := range matches {
 			if m.Status != state.MatchStatusCompleted {
@@ -1365,14 +1352,8 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				continue
 			}
 
-			// Team W/L/D (or individual W/L/D). Resolve the winning side by
-			// WinnerID when available (unambiguous even when both sides
-			// share a display name, e.g. a same-name-different-dojo pairing
-			// within one pool); fall back to the Winner name comparison for
-			// legacy data recorded before WinnerID was set. Mirrors
-			// computeEngiStandings' winnerIsA/winnerIsB resolution exactly.
-			winnerIsA := (m.WinnerID != "" && m.WinnerID == m.SideAID) || (m.WinnerID == "" && m.Winner == m.SideA)
-			winnerIsB := (m.WinnerID != "" && m.WinnerID == m.SideBID) || (m.WinnerID == "" && m.Winner == m.SideB)
+			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
 				sA.Wins++

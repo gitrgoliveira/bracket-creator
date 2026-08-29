@@ -1506,3 +1506,41 @@ func TestParticipant500ErrorsAreSanitized(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateParticipant_BlankDojo400 pins the endpoint contract: a blank dojo
+// on the single-participant PUT answers 400, not 500.
+//
+// What it does NOT pin, stated so nobody reads more into it: the 400 comes
+// from this handler's own inline dojo check, which fires before the store is
+// touched, so the test still passes with the state-layer sentinel's case
+// removed from the transaction closure's switch (verified by removing it).
+// That case is defence in depth for a caller that reaches UpdateParticipant
+// without the inline check, and it is deliberately unpinned here because no
+// request can currently produce it. The reason it is there at all: the first
+// version of this classification sat OUTSIDE the closure, reading an `err`
+// the closure had shadowed and which was always nil by that point, while the
+// closure's switch carried no case for the sentinel -- so had the inline
+// check ever been removed, the failure would have surfaced as a 500.
+func TestUpdateParticipant_BlankDojo400(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	compID := "blank-dojo-put"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Blank Dojo PUT", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Wakaba"},
+	}))
+	stored, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+
+	body, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "   "})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+stored[0].ID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"a blank dojo on the single-participant PUT is the client's error, not a server fault")
+	assert.Contains(t, w.Body.String(), "dojo")
+}

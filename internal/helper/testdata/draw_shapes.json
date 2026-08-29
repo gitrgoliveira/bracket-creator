@@ -9,12 +9,30 @@
     "or pagination shows up here as a reviewable diff, and a change that",
     "was not intended is a regression. Do not hand-edit a value.",
     "",
-    "What each case captures, for one (pool count, qualifiers per pool,",
-    "shiaijo count) combination, from the live pipeline",
-    "BuildKnockoutDraw -\u003e TreeToLeafArray plus the TreePageLayout /",
-    "SubdivideRegions page geometry. Pools come from helper.CreatePools",
-    "over a synthetic roster with one dojo per player, sized so every case",
-    "mixes 4-player and 3-player pools (see drawGoldenRosterSize).",
+    "What each REGULAR (P\u003cn\u003e-W\u003cn\u003e-C\u003cn\u003e keyed) case captures, for one",
+    "(pool count, qualifiers per pool, shiaijo count) combination, from",
+    "the live pipeline BuildKnockoutDraw -\u003e TreeToLeafArray plus the",
+    "TreePageLayout / SubdivideRegions page geometry. Pools come from",
+    "helper.CreatePools over a synthetic roster with one dojo per player,",
+    "sized so every case mixes 4-player and 3-player pools (see",
+    "drawGoldenRosterSize).",
+    "",
+    "A second case family, keyed \"dojo/...\", exists for bc-dojo (the",
+    "pool-assignment fallback fix): a roster that deliberately",
+    "oversubscribes ONE dojo (more members than there are pools), run",
+    "through helper.BuildPoolPhase's full documented order --",
+    "PoolSeeding -\u003e CreatePools -\u003e ReorderPoolsForCourts -- because their",
+    "SUBJECT is pool COMPOSITION, i.e. the guarantee an operator actually",
+    "receives, not draw shape (unlike the regular sweep, where",
+    "ReorderPoolsForCourts is skipped because it is a pure permutation +",
+    "rename that cannot change a case's recorded shape). These cases add",
+    "three fields the regular sweep never populates (empty/zero there,",
+    "omitted by the JSON encoding so the 132 regular cases are",
+    "unaffected): dojoPerPoolCounts (the oversubscribed dojo's per-pool",
+    "member count, in pool order), maxSameDojoCount (the largest such",
+    "count in any one pool), and singleDojoPools (the names of any",
+    "multi-player pool whose members are ALL that one dojo -- there",
+    "should never be any, post-fix).",
     "",
     "IT USED TO PIN FOUR DEFECTS. They are recorded here because the file",
     "is read side by side with its predecessor:",
@@ -17897,6 +17915,441 @@
       ],
       "pageCourtMismatchCount": 0,
       "pageCourtMismatch": []
+    },
+    "dojo/bead-scenario": {
+      "rosterSize": 24,
+      "poolNames": [
+        "Pool A",
+        "Pool B",
+        "Pool C",
+        "Pool D",
+        "Pool E",
+        "Pool F"
+      ],
+      "poolSizes": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "drawCourts": 2,
+      "poolToCourt": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "numEntrants": 12,
+      "leaves": [
+        "Pool A-1st",
+        "Pool D-2nd",
+        "Pool B-1st",
+        "Pool E-2nd",
+        "Pool C-1st",
+        "Pool F-2nd",
+        "",
+        "",
+        "Pool D-1st",
+        "Pool A-2nd",
+        "Pool E-1st",
+        "Pool B-2nd",
+        "Pool F-1st",
+        "Pool C-2nd",
+        "",
+        ""
+      ],
+      "round1": [
+        "Pool A-1st vs Pool D-2nd",
+        "Pool B-1st vs Pool E-2nd",
+        "Pool C-1st vs Pool F-2nd",
+        "(bye) vs (bye)",
+        "Pool D-1st vs Pool A-2nd",
+        "Pool E-1st vs Pool B-2nd",
+        "Pool F-1st vs Pool C-2nd",
+        "(bye) vs (bye)"
+      ],
+      "byes": [],
+      "numPages": 2,
+      "numPagesRendered": 2,
+      "pages": [
+        {
+          "page": 1,
+          "courtLabel": "A",
+          "poolStart": 0,
+          "poolEnd": 3,
+          "claimedPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 6
+        },
+        {
+          "page": 2,
+          "courtLabel": "B",
+          "poolStart": 3,
+          "poolEnd": 6,
+          "claimedPools": [
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 6
+        }
+      ],
+      "pageCourtMismatchCount": 0,
+      "pageCourtMismatch": [],
+      "dojoPerPoolCounts": [
+        2,
+        2,
+        1,
+        2,
+        2,
+        1
+      ],
+      "maxSameDojoCount": 2
+    },
+    "dojo/deep-oversubscription": {
+      "rosterSize": 24,
+      "poolNames": [
+        "Pool A",
+        "Pool B",
+        "Pool C",
+        "Pool D",
+        "Pool E",
+        "Pool F"
+      ],
+      "poolSizes": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "drawCourts": 2,
+      "poolToCourt": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "numEntrants": 12,
+      "leaves": [
+        "Pool A-1st",
+        "Pool D-2nd",
+        "Pool B-1st",
+        "Pool E-2nd",
+        "Pool C-1st",
+        "Pool F-2nd",
+        "",
+        "",
+        "Pool D-1st",
+        "Pool A-2nd",
+        "Pool E-1st",
+        "Pool B-2nd",
+        "Pool F-1st",
+        "Pool C-2nd",
+        "",
+        ""
+      ],
+      "round1": [
+        "Pool A-1st vs Pool D-2nd",
+        "Pool B-1st vs Pool E-2nd",
+        "Pool C-1st vs Pool F-2nd",
+        "(bye) vs (bye)",
+        "Pool D-1st vs Pool A-2nd",
+        "Pool E-1st vs Pool B-2nd",
+        "Pool F-1st vs Pool C-2nd",
+        "(bye) vs (bye)"
+      ],
+      "byes": [],
+      "numPages": 2,
+      "numPagesRendered": 2,
+      "pages": [
+        {
+          "page": 1,
+          "courtLabel": "A",
+          "poolStart": 0,
+          "poolEnd": 3,
+          "claimedPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 6
+        },
+        {
+          "page": 2,
+          "courtLabel": "B",
+          "poolStart": 3,
+          "poolEnd": 6,
+          "claimedPools": [
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 6
+        }
+      ],
+      "pageCourtMismatchCount": 0,
+      "pageCourtMismatch": [],
+      "dojoPerPoolCounts": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "maxSameDojoCount": 2
+    },
+    "dojo/one-court": {
+      "rosterSize": 24,
+      "poolNames": [
+        "Pool A",
+        "Pool B",
+        "Pool C",
+        "Pool D",
+        "Pool E",
+        "Pool F"
+      ],
+      "poolSizes": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "drawCourts": 1,
+      "poolToCourt": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "numEntrants": 12,
+      "leaves": [
+        "Pool A-1st",
+        "Pool D-2nd",
+        "Pool B-1st",
+        "Pool E-2nd",
+        "Pool C-1st",
+        "Pool F-2nd",
+        "",
+        "",
+        "Pool D-1st",
+        "Pool A-2nd",
+        "Pool E-1st",
+        "Pool B-2nd",
+        "Pool F-1st",
+        "Pool C-2nd",
+        "",
+        ""
+      ],
+      "round1": [
+        "Pool A-1st vs Pool D-2nd",
+        "Pool B-1st vs Pool E-2nd",
+        "Pool C-1st vs Pool F-2nd",
+        "(bye) vs (bye)",
+        "Pool D-1st vs Pool A-2nd",
+        "Pool E-1st vs Pool B-2nd",
+        "Pool F-1st vs Pool C-2nd",
+        "(bye) vs (bye)"
+      ],
+      "byes": [],
+      "numPages": 1,
+      "numPagesRendered": 1,
+      "pages": [
+        {
+          "page": 1,
+          "courtLabel": "A",
+          "poolStart": 0,
+          "poolEnd": 6,
+          "claimedPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 12
+        }
+      ],
+      "pageCourtMismatchCount": 0,
+      "pageCourtMismatch": [],
+      "dojoPerPoolCounts": [
+        2,
+        2,
+        2,
+        2,
+        1,
+        1
+      ],
+      "maxSameDojoCount": 2
+    },
+    "dojo/oversubscribed-by-one": {
+      "rosterSize": 24,
+      "poolNames": [
+        "Pool A",
+        "Pool B",
+        "Pool C",
+        "Pool D",
+        "Pool E",
+        "Pool F"
+      ],
+      "poolSizes": [
+        4,
+        4,
+        4,
+        4,
+        4,
+        4
+      ],
+      "drawCourts": 2,
+      "poolToCourt": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "numEntrants": 12,
+      "leaves": [
+        "Pool A-1st",
+        "Pool D-2nd",
+        "Pool B-1st",
+        "Pool E-2nd",
+        "Pool C-1st",
+        "Pool F-2nd",
+        "",
+        "",
+        "Pool D-1st",
+        "Pool A-2nd",
+        "Pool E-1st",
+        "Pool B-2nd",
+        "Pool F-1st",
+        "Pool C-2nd",
+        "",
+        ""
+      ],
+      "round1": [
+        "Pool A-1st vs Pool D-2nd",
+        "Pool B-1st vs Pool E-2nd",
+        "Pool C-1st vs Pool F-2nd",
+        "(bye) vs (bye)",
+        "Pool D-1st vs Pool A-2nd",
+        "Pool E-1st vs Pool B-2nd",
+        "Pool F-1st vs Pool C-2nd",
+        "(bye) vs (bye)"
+      ],
+      "byes": [],
+      "numPages": 2,
+      "numPagesRendered": 2,
+      "pages": [
+        {
+          "page": 1,
+          "courtLabel": "A",
+          "poolStart": 0,
+          "poolEnd": 3,
+          "claimedPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 6
+        },
+        {
+          "page": 2,
+          "courtLabel": "B",
+          "poolStart": 3,
+          "poolEnd": 6,
+          "claimedPools": [
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "presentPools": [
+            "Pool A",
+            "Pool B",
+            "Pool C",
+            "Pool D",
+            "Pool E",
+            "Pool F"
+          ],
+          "leafCount": 6
+        }
+      ],
+      "pageCourtMismatchCount": 0,
+      "pageCourtMismatch": [],
+      "dojoPerPoolCounts": [
+        2,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "maxSameDojoCount": 2
     }
   }
 }

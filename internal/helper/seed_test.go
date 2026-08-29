@@ -1,7 +1,11 @@
 package helper
 
 import (
+	"encoding/csv"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -1681,7 +1685,9 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 	// Regression test: LC2026 6+ mixed category had 5 players from Tora Dojo
 	// London and 1 seeded player. The seeded player shifted unseeded filling
 	// by one slot, causing the 5th Tora player to find no conflict-free pool
-	// and fall back to forceSameDojo, placing two Tora players in the same pool.
+	// and reach the placement fallback (which, before the bc-dojo fix, took
+	// the first pool with room and would have placed two Tora players in the
+	// same pool).
 	players := []Player{
 		{Name: "Walter McCahon", Dojo: "Tora Dojo London"},
 		{Name: "Ricardo Oliveira", Dojo: "Tora Dojo London"},
@@ -1721,7 +1727,8 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 
 func TestPoolSeeding_LargeSameDojo(t *testing.T) {
 	// Regression test: same-dojo players spread throughout the CSV (not grouped
-	// at the front) trigger the forceSameDojo fallback and land in the same pool.
+	// at the front) reach the placement fallback, which before the bc-dojo fix
+	// took the first pool with room and would have landed two in the same pool.
 	// Each case uses dojoSize == numPools (worst case: every pool must absorb
 	// exactly one same-dojo player). Players are placed at evenly-spaced
 	// positions pos[i] = i*(total-1)/(D-1), which reproduces the adversarial
@@ -2041,6 +2048,212 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			assert.LessOrEqual(t, c, 1, "Big doubled in %s", pool.PoolName)
 		}
 	})
+}
+
+// buildOversubscribedDojoRoster builds a deterministic roster of `total`
+// players where `dojoSize` of them share dojoName, spread evenly through the
+// roster at pos[i] = i*(total-1)/(dojoSize-1) (the same adversarial spacing
+// used by TestPoolSeeding_LargeSameDojo above, which reproduces the LC2026
+// ordering for fixture realism). Unlike that test's dojoSize == numPools
+// case, HERE dojoSize > numPools, so the leastConflictedPool fallback is
+// unavoidable regardless of input order: after numPools conflict-free
+// placements every pool already holds one member of the oversubscribed dojo,
+// and PoolSeeding re-clusters by dojo before CreatePools ever sees the
+// roster's order anyway (grouped-at-front and this spread measure to the
+// identical per-pool counts). The spacing is kept for fixture realism, not
+// because it changes whether the fallback fires. The remaining players each
+// get a unique dojo.
+//
+// This is a thin naming wrapper over newOversubscribedDojoRoster, the
+// algorithm shared with drawGoldenDojoRoster (draw_shapes_golden_test.go).
+// Only the generated NAME strings differ between the two callers (this
+// one's assertions read player.Dojo only, so its names are disposable; the
+// golden's names are frozen into testdata/draw_shapes.json byte-for-byte) --
+// the placement math itself must never drift between two copies.
+func buildOversubscribedDojoRoster(total, dojoSize int, dojoName string) []Player {
+	return newOversubscribedDojoRoster(total, dojoSize, dojoName,
+		func(i int) string { return fmt.Sprintf("%s Player %d", dojoName, i) },
+		func(i int) (name, dojo string) { return fmt.Sprintf("Other%d", i), fmt.Sprintf("Dojo%d", i) },
+	)
+}
+
+// newOversubscribedDojoRoster is the shared placement algorithm behind
+// buildOversubscribedDojoRoster and drawGoldenDojoRoster. memberName formats
+// the i-th (1-based) oversubscribed-dojo player's name; filler formats the
+// i-th (1-based) filler player's name and unique dojo.
+//
+// Requires dojoSize >= 2: the position formula divides by dojoSize-1, so a
+// smaller value would otherwise divide by zero -- reject it here with a
+// clear message rather than let a future caller hit that panic silently.
+func newOversubscribedDojoRoster(total, dojoSize int, dojoName string, memberName func(i int) string, filler func(i int) (name, dojo string)) []Player {
+	if dojoSize < 2 {
+		panic(fmt.Sprintf("newOversubscribedDojoRoster: dojoSize must be >= 2 to oversubscribe %q, got %d", dojoName, dojoSize))
+	}
+
+	players := make([]Player, total)
+
+	dojoPositions := make(map[int]bool, dojoSize)
+	for i := 0; i < dojoSize; i++ {
+		dojoPositions[i*(total-1)/(dojoSize-1)] = true
+	}
+
+	dojoIdx, otherIdx := 0, 0
+	for i := 0; i < total; i++ {
+		if dojoPositions[i] {
+			dojoIdx++
+			players[i] = Player{Name: memberName(dojoIdx), Dojo: dojoName}
+		} else {
+			otherIdx++
+			name, dojo := filler(otherIdx)
+			players[i] = Player{Name: name, Dojo: dojo}
+		}
+	}
+	return players
+}
+
+// isSingleDojoPool reports whether pool p has MORE THAN ONE player and they
+// all share one dojo. Pools of 0 or 1 player are excluded: a same-dojo
+// conflict needs at least two players to exist, so a singleton pool
+// trivially satisfying "every player shares a dojo" is not what either
+// caller (below, and computeDojoOversubscriptionStats in
+// draw_shapes_golden_test.go) means to flag.
+func isSingleDojoPool(p Pool) bool {
+	if len(p.Players) <= 1 {
+		return false
+	}
+	dojo := p.Players[0].Dojo
+	for _, pl := range p.Players[1:] {
+		if pl.Dojo != dojo {
+			return false
+		}
+	}
+	return true
+}
+
+func TestPoolSeeding_DojoSpreadFallback(t *testing.T) {
+	// Regression test for bc-dojo: 24 entrants, 10 from one dojo (rest unique
+	// dojos), through BuildPoolPhase(players, 4, false, 2) -- poolSize 4,
+	// min-mode, 2 courts, which is what actually derives 6 pools of 4 and
+	// runs PoolSeeding -> CreatePools -> ReorderPoolsForCourts in the order
+	// production uses (BuildPoolPhase's own doc comment: hand-assembling
+	// this sequence is exactly the drift it exists to prevent). Before the
+	// fix, the fallback (first-pool-with-room) placed overflow into the
+	// FIRST pool with room, piling four of the ten Tora players into a
+	// single pool -- measured as an entirely single-dojo pool of 4.
+	players := buildOversubscribedDojoRoster(24, 10, "Tora Dojo")
+
+	pools, drawCourts, err := BuildPoolPhase(players, 4, false, 2)
+	require.NoError(t, err)
+	require.Len(t, pools, 6)
+	require.Equal(t, 2, drawCourts)
+
+	// Pool SIZES must be unaffected by the fallback fix: this is checked
+	// separately from composition so a future change that moves sizes is
+	// distinguishable from one that moves membership.
+	for i, pool := range pools {
+		assert.Len(t, pool.Players, 4, "pool %d (%s) size changed", i, pool.PoolName)
+	}
+
+	toraCounts := make([]int, len(pools))
+	for i, pool := range pools {
+		count := 0
+		for _, p := range pool.Players {
+			if p.Dojo == "Tora Dojo" {
+				count++
+			}
+		}
+		toraCounts[i] = count
+		assert.False(t, isSingleDojoPool(pool), "%s is entirely single-dojo", pool.PoolName)
+	}
+
+	// Assert the MULTISET of per-pool Tora counts, never the ordered
+	// per-pool sequence: the sequence is 2,2,1,2,2,1 for this scenario and is
+	// an artifact of the tie-break, not the contract.
+	sorted := append([]int(nil), toraCounts...)
+	sort.Ints(sorted)
+	assert.Equal(t, []int{1, 1, 2, 2, 2, 2}, sorted,
+		"Tora Dojo per-pool counts (sorted) should be the multiset {2,2,2,2,1,1}, got %v", toraCounts)
+
+	maxCount := 0
+	for _, c := range toraCounts {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+	assert.LessOrEqual(t, maxCount, 2, "Tora Dojo should never exceed 2 players in any pool, got per-pool counts %v", toraCounts)
+}
+
+// loadCSVPlayers reads a "Name,Zekken,Dojo,DanGrade" CSV file (the layout of
+// test-data/individual_men_up_to_2nd_2026.csv) directly, bypassing
+// helper.ReadCSVFile, which rejects the ".." needed to reach test-data/ from
+// this package's directory as an escaping relative path.
+func loadCSVPlayers(t *testing.T, path string) []Player {
+	t.Helper()
+
+	f, err := os.Open(path) // #nosec G304 -- test-only, fixed path under test-data/
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = -1
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+
+	players := make([]Player, 0, len(records))
+	for _, rec := range records {
+		require.GreaterOrEqual(t, len(rec), 3, "record %v missing dojo column", rec)
+		players = append(players, Player{
+			Name: strings.TrimSpace(rec[0]),
+			Dojo: strings.TrimSpace(rec[2]),
+		})
+	}
+	return players
+}
+
+func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
+	// Regression test for bc-dojo, using the real committed roster
+	// test-data/individual_men_up_to_2nd_2026.csv (50 players, 15 "Team Rho"),
+	// run through BuildPoolPhase(players, 5, false, 2) -- the one function
+	// documented to get the PoolSeeding -> CreatePools -> ReorderPoolsForCourts
+	// order and the derived pool/court counts right, exactly as the real
+	// draw does (BuildPoolPhase's own doc comment names hand-assembling this
+	// sequence as the exact drift it exists to prevent).
+	players := loadCSVPlayers(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
+	require.Len(t, players, 50)
+
+	rhoCount := 0
+	for _, p := range players {
+		if p.Dojo == "Team Rho" {
+			rhoCount++
+		}
+	}
+	require.Equal(t, 15, rhoCount, "fixture drifted: expected 15 Team Rho players")
+
+	pools, drawCourts, err := BuildPoolPhase(players, 5, false, 2)
+	require.NoError(t, err)
+	require.Len(t, pools, 10)
+	require.Equal(t, 2, drawCourts)
+
+	// Pool SIZES must be unaffected by the fallback fix: this is checked
+	// separately from composition. 50 players / 10 pools = 5 each.
+	for i, pool := range pools {
+		assert.Len(t, pool.Players, 5, "pool %d (%s) size changed", i, pool.PoolName)
+	}
+
+	// Acceptance is "no pool holds more than 2 of ANY one dojo", not only
+	// the oversubscribed one: with the fix the worst count anywhere on this
+	// roster is 2, so assert every dojo, which also guards the smaller
+	// multi-member dojos in the fixture.
+	for _, pool := range pools {
+		dojoCount := make(map[string]int)
+		for _, p := range pool.Players {
+			dojoCount[p.Dojo]++
+		}
+		for dojo, count := range dojoCount {
+			assert.LessOrEqual(t, count, 2,
+				"%s has %d players in %s, expected at most 2", dojo, count, pool.PoolName)
+		}
+	}
 }
 
 func TestApplySeeds_DuplicateSeedRanks(t *testing.T) {

@@ -119,8 +119,8 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 // forcePoolSize piles extra players into pool[0] rather than distributing evenly.
 //
 // All-unique dojos ensure discoverPool never hits a dojo-conflict that would
-// route players via forceSameDojo, keeping the pool-size distribution identical
-// to the pure targetSize/forcePoolSize path.
+// route players via leastConflictedPool, keeping the pool-size distribution
+// identical to the pure targetSize/forcePoolSize path.
 func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCount int, err error) {
 	if in.PoolSize <= 0 {
 		return 0, 0, fmt.Errorf("EstimateMatchCounts: PoolSize must be > 0 for mixed format, got %d", in.PoolSize)

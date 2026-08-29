@@ -444,7 +444,7 @@ func CreatePoolsForCount(players []Player, poolSize, totalPools int) ([]Pool, er
 // assignPlayersToPools is CreatePools' and CreatePoolsForCount's shared
 // assignment body: given the target size for each of len(targetSizes)
 // pools, distribute players into them avoiding dojo/name conflicts where
-// possible, falling back to forceSameDojo then forcePoolSize when a
+// possible, falling back to leastConflictedPool then forcePoolSize when a
 // conflict-free placement does not exist, and name the pools alphabetically
 // in the order they end up in. Extracted so the two callers cannot drift on
 // how a remainder is spread; only what pool COUNT and target sizes they hand
@@ -463,9 +463,9 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 
 	for i, player := range players {
 		poolN := discoverPool(pools, dojoSets, nameSets, player, targetSizes, i%totalPools)
-		// try and force same dojo
+		// no conflict-free pool available: pick the least-conflicted one
 		if poolN < 0 {
-			poolN = forceSameDojo(pools, targetSizes)
+			poolN = leastConflictedPool(pools, targetSizes, player.Dojo)
 		}
 
 		// try and force pool size
@@ -515,13 +515,35 @@ func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Pla
 	return -1
 }
 
-func forceSameDojo(pools []Pool, targetSizes []int) int {
+// leastConflictedPool is assignPlayersToPools' first fallback, reached when
+// discoverPool finds no conflict-free pool for a player (a dojo conflict OR
+// a name conflict against every pool with room). Among the pools that still
+// have room, it picks the one holding the FEWEST players already sharing the
+// incoming player's dojo, tie-broken by fewest players overall, then by
+// lowest index. The strict "<" comparisons (rather than "<=") keep the
+// lowest-index pool on a tie, which is what makes the output deterministic.
+//
+// It is deliberately name-conflict-blind: it only ranks by dojo count, so a
+// name collision alone does not influence which pool is chosen. Returns -1
+// if no pool has room.
+func leastConflictedPool(pools []Pool, targetSizes []int, dojo string) int {
+	best := -1
+	bestDojo, bestSize := 0, 0
 	for i, pool := range pools {
-		if len(pool.Players) < targetSizes[i] {
-			return i
+		if len(pool.Players) >= targetSizes[i] {
+			continue
+		}
+		n := 0
+		for _, pl := range pool.Players {
+			if pl.Dojo == dojo {
+				n++
+			}
+		}
+		if best < 0 || n < bestDojo || (n == bestDojo && len(pool.Players) < bestSize) {
+			best, bestDojo, bestSize = i, n, len(pool.Players)
 		}
 	}
-	return -1
+	return best
 }
 
 func forcePoolSize(pools []Pool, targetSizes []int) int {

@@ -271,8 +271,9 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 
 	// Cluster unseeded players by dojo (largest groups first) so that players
 	// from the same dojo occupy consecutive result slots. Consecutive slots map
-	// to distinct start-pool indices mod numPools, preventing forceSameDojo
-	// fallback from landing same-dojo players in the same pool.
+	// to distinct start-pool indices mod numPools, preventing the
+	// leastConflictedPool fallback from landing same-dojo players in the same
+	// pool.
 	dojoCount := make(map[string]int)
 	for _, p := range unseeded {
 		dojoCount[p.Dojo]++

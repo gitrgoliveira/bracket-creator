@@ -673,14 +673,14 @@ func TestDiscoverPool(t *testing.T) {
 	})
 }
 
-func TestForceSameDojo(t *testing.T) {
+func TestLeastConflictedPool(t *testing.T) {
 	t.Run("finds pool with space", func(t *testing.T) {
 		pools := []Pool{
 			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
 			{Players: []Player{{Name: "P3"}}},
 		}
 
-		poolIdx := forceSameDojo(pools, []int{2, 2})
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
 		if poolIdx != 1 {
 			t.Errorf("Expected pool 1, got %d", poolIdx)
 		}
@@ -692,11 +692,98 @@ func TestForceSameDojo(t *testing.T) {
 			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
 		}
 
-		poolIdx := forceSameDojo(pools, []int{2, 2})
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
 		}
 	})
+
+	tests := []struct {
+		name        string
+		pools       []Pool
+		targetSizes []int
+		dojo        string
+		want        int
+	}{
+		{
+			name: "picks pool with fewest members of the incoming dojo",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}, {Name: "P2", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P4", Dojo: "Other"}}},
+			},
+			targetSizes: []int{4, 4, 4},
+			dojo:        "Tora",
+			want:        2, // 0 Tora members, vs 2 and 1 in the other pools
+		},
+		{
+			name: "ties on dojo count broken by fewest players",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}, {Name: "P2", Dojo: "Other"}, {Name: "P3", Dojo: "Other2"}}},
+				{Players: []Player{{Name: "P4", Dojo: "Tora"}}},
+			},
+			targetSizes: []int{4, 4},
+			dojo:        "Tora",
+			// Both pools have exactly 1 Tora member; pool 1 has fewer players overall.
+			want: 1,
+		},
+		{
+			name: "dojo count wins even when the smaller pool has MORE of the dojo",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Other"}, {Name: "P2", Dojo: "Other2"}, {Name: "P3", Dojo: "Other3"}}},
+				{Players: []Player{{Name: "P4", Dojo: "Tora"}, {Name: "P5", Dojo: "Other4"}}},
+			},
+			targetSizes: []int{4, 4},
+			dojo:        "Tora",
+			// Pool 0 has 0 Tora members but 3 players; pool 1 has 1 Tora
+			// member but only 2 players (SMALLER overall). Dojo count must
+			// be checked before player count, so the winner is pool 0. A
+			// mutant that swaps the two keys (player count first) would
+			// pick pool 1 here, which is exactly what this case pins.
+			want: 0,
+		},
+		{
+			name: "ties on dojo count and player count broken by lowest index",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P2", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}}},
+			},
+			targetSizes: []int{4, 4, 4},
+			dojo:        "Tora",
+			want:        0,
+		},
+		{
+			name: "full pools are skipped even with fewer dojo members",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Other"}, {Name: "P2", Dojo: "Other2"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}}},
+			},
+			targetSizes: []int{2, 4},
+			dojo:        "Tora",
+			// Pool 0 has 0 Tora members but is full; pool 1 has room.
+			want: 1,
+		},
+		{
+			name: "returns -1 when nothing has room",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}, {Name: "P2", Dojo: "Other"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}, {Name: "P4", Dojo: "Other2"}}},
+			},
+			targetSizes: []int{2, 2},
+			dojo:        "Tora",
+			want:        -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := leastConflictedPool(tt.pools, tt.targetSizes, tt.dojo)
+			if got != tt.want {
+				t.Errorf("leastConflictedPool() = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestForcePoolSize(t *testing.T) {

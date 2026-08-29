@@ -17,6 +17,10 @@ func makePlayers(n int) []domain.Player {
 	for i := range n {
 		players[i] = domain.Player{
 			Name: fmt.Sprintf("Player%02d", i+1),
+			// Unique dojo per player: a blank dojo is refused by every write
+			// path, and unique dojos keep dojo-conflict avoidance from firing
+			// so these fixtures exercise the draw shape they were written for.
+			Dojo: fmt.Sprintf("Dojo%02d", i+1),
 		}
 	}
 	return players

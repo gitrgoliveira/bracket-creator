@@ -116,8 +116,8 @@ func TestGetPoolRanking_Basic(t *testing.T) {
 		{
 			PoolName: "Pool A",
 			Players: []helper.Player{
-				{Name: "Alice"},
-				{Name: "Bob"},
+				{Name: "Alice", Dojo: "Dojo Alice"},
+				{Name: "Bob", Dojo: "Dojo Bob"},
 			},
 		},
 	}))
@@ -173,10 +173,10 @@ func TestGetPoolRanking_OutOfRange(t *testing.T) {
 	}))
 
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted},
@@ -206,11 +206,11 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 	}))
 
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "TeamA"}, {Name: "TeamB"},
+		{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"},
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "TeamA"}, {Name: "TeamB"},
+			{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"},
 		}},
 	}))
 

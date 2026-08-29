@@ -224,7 +224,71 @@ func StandardSeeding(players []Player) []Player {
 			}
 		}
 	}
+	separateFirstRoundDojos(result, occupied)
 	return result
+}
+
+// separateFirstRoundDojos swaps UNSEEDED competitors so that, where the draw
+// allows it, no first-round match is between two members of the same dojo.
+//
+// Why it is needed: unseeded competitors fill the bracket in roster order, and
+// CreateBalancedTree pairs adjacent slots, so a roster entered club by club --
+// which is how operators paste one -- produces a first round of club-mate
+// against club-mate. Measured before this existed: 16 competitors from four
+// dojos of four produced EIGHT first-round matches, every one of them
+// intra-club.
+//
+// Why it is a repair pass rather than a smarter fill: reordering the unseeded
+// list up front would reorder EVERY draw, including the ones with no dojo
+// collision at all, changing published brackets for no benefit. This walks the
+// pairs and touches only the ones that are actually wrong, so a roster with no
+// same-dojo first round is returned byte-identical.
+//
+// Seeded slots are never moved: their placement IS the seeding contract, and a
+// dojo is not a reason to break it. A collision that can only be fixed by
+// moving a seed is therefore left alone, as is one where no partner swap is
+// conflict-free -- the draw still happens, it is just not improvable here.
+func separateFirstRoundDojos(result []Player, occupied map[int]bool) {
+	// A swap is only legal into a slot that is unseeded, present, and whose own
+	// pair does not become same-dojo as a result.
+	sameDojo := func(a, b Player) bool {
+		return a.Name != "" && b.Name != "" && a.Dojo == b.Dojo
+	}
+	partner := func(i int) int {
+		if i%2 == 0 {
+			return i + 1
+		}
+		return i - 1
+	}
+	for i := 0; i+1 < len(result); i += 2 {
+		if !sameDojo(result[i], result[i+1]) {
+			continue
+		}
+		// Try to move the SECOND member somewhere it does not clash. Scan from
+		// the far end of the bracket first: the further the swap partner sits,
+		// the more likely the two club-mates also end up in opposite halves,
+		// so they meet as late as the draw allows rather than merely not in
+		// round one.
+		moved := false
+		for d := len(result) - 1; d >= 0 && !moved; d-- {
+			if d == i || d == i+1 || occupied[d] {
+				continue
+			}
+			dp := partner(d)
+			if dp < 0 || dp >= len(result) {
+				continue
+			}
+			// After the swap: slot i+1 holds result[d], slot d holds result[i+1].
+			if sameDojo(result[i], result[d]) {
+				continue // would not fix this pair
+			}
+			if sameDojo(result[i+1], result[dp]) {
+				continue // would break the donor pair
+			}
+			result[i+1], result[d] = result[d], result[i+1]
+			moved = true
+		}
+	}
 }
 
 // PoolSeeding reorders players for pool distribution so that top seeds land

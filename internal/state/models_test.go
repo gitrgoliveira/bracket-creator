@@ -478,7 +478,7 @@ func TestQualifiersForPool(t *testing.T) {
 	poolOfSize := func(n int) helper.Pool {
 		p := helper.Pool{PoolName: "P1"}
 		for i := 0; i < n; i++ {
-			p.Players = append(p.Players, helper.Player{Name: "player"})
+			p.Players = append(p.Players, helper.Player{Name: "player", Dojo: "Dojo player"})
 		}
 		return p
 	}
@@ -695,7 +695,7 @@ func TestMatchResult_RoundRoundtrip(t *testing.T) {
 // never hit this (the engine refuses to start with an unset PoolSize).
 func TestQualifiersForPool_UnsetPoolSizeDegradesToUniform(t *testing.T) {
 	c := Competition{PoolWinners: 1, ExtraQualifiers: ExtraQualifiersLargerPools}
-	pool := helper.Pool{Players: []helper.Player{{Name: "a"}, {Name: "b"}, {Name: "c"}, {Name: "d"}}}
+	pool := helper.Pool{Players: []helper.Player{{Name: "a", Dojo: "Dojo a"}, {Name: "b", Dojo: "Dojo b"}, {Name: "c", Dojo: "Dojo c"}, {Name: "d", Dojo: "Dojo d"}}}
 	assert.Equal(t, 1, c.QualifiersForPool(pool),
 		"PoolSize=0 must not make a 4-player pool read as oversized")
 }

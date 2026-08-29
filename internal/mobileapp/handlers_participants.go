@@ -143,6 +143,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}
+				if errors.Is(err, state.ErrBlankDojo) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
 				if errors.Is(err, state.ErrCompetitionNotInSetup) {
 					// Reload to distinguish draw-ready from a fully-started competition
 					// under TOCTOU: status could have flipped between our check above
@@ -328,6 +332,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+			if errors.Is(err, state.ErrBlankDojo) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			internalError(c, err, "failed to save participants")
 			return
 		}
@@ -510,6 +518,10 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				msg = txErr.Error()
 			}
 			c.JSON(httpStatus, gin.H{"error": msg})
+			return
+		}
+		if errors.Is(err, state.ErrBlankDojo) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 

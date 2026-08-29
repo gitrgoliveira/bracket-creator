@@ -64,8 +64,8 @@ func scoringSetup2Players(t *testing.T, teamMatches int, engi bool) *excelize.Fi
 	pool := Pool{
 		PoolName: "Pool A",
 		Players: []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"},
+			{Name: "Bob", Dojo: "Dojo Bob"},
 		},
 	}
 	pool.Matches = []Match{{SideA: &pool.Players[0], SideB: &pool.Players[1]}}
@@ -102,9 +102,9 @@ func scoringSetup3PlayerRoundRobin(t *testing.T, engi bool) *excelize.File {
 	pool := Pool{
 		PoolName: "Pool A",
 		Players: []Player{
-			{Name: "Alice"},
-			{Name: "Bob"},
-			{Name: "Carol"},
+			{Name: "Alice", Dojo: "Dojo Alice"},
+			{Name: "Bob", Dojo: "Dojo Bob"},
+			{Name: "Carol", Dojo: "Dojo Carol"},
 		},
 	}
 	pool.Matches = []Match{

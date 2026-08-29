@@ -23,6 +23,24 @@ var ErrParticipantNotFound = errors.New("participant not found")
 // people at different clubs), so the message names both fields.
 var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
+// ErrBlankDojo is returned by every participant write path when an entry
+// carries no dojo. A competitor's identity is (name, dojo), so a blank dojo
+// is not a missing display detail: it makes the competitor unidentifiable to
+// every consumer that has no participant id to fall back on, and it collapses
+// two same-named competitors into one duplicate (they would key identically).
+//
+// Enforced HERE, at the lowest write layer, rather than only in the handlers,
+// for the same reason as the duplicate guard above: a guard that lives in the
+// handlers is bypassable by the next caller. The handlers keep their own
+// checks so the operator gets a per-field 400 naming the offending row.
+//
+// READ is deliberately NOT gated. A roster written before this rule (or hand
+// edited) still loads, so an operator can see it and repair the dojo through
+// the edit UI. The cost of that choice is real and worth stating: until the
+// blank dojo is fixed, ANY save touching that roster is refused, including a
+// check-in, because every write goes through this one floor.
+var ErrBlankDojo = errors.New("participant dojo must not be blank")
+
 // duplicateTeamNameError reports two teams sharing a name in a team
 // competition. It deliberately does NOT wrap ErrDuplicateName's text: that
 // sentinel says "same name and dojo", whereas this gate fires precisely when
@@ -1016,6 +1034,17 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// duplicate (normalizedName, normalizedDojo) pairs uniformly. Enforcing
 	// only in the handlers would leave the guard bypassable, the same reason
 	// the elevated-password gate is inline on the roster PUT path.
+	// Blank-dojo guard runs BEFORE the duplicate scan on purpose: with no
+	// dojo, two same-named competitors key identically, so a blank-dojo
+	// roster would otherwise be reported as a DUPLICATE, which names the
+	// wrong problem and sends the operator looking for a competitor who is
+	// not there.
+	for _, p := range players {
+		if strings.TrimSpace(p.Dojo) == "" {
+			return fmt.Errorf("%w: %q", ErrBlankDojo, p.Name)
+		}
+	}
+
 	entries := make([][2]string, len(players))
 	for i, p := range players {
 		entries[i] = [2]string{p.Name, p.Dojo}

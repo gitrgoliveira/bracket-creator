@@ -146,6 +146,10 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+			if errors.Is(err, state.ErrBlankDojo) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			if errors.Is(err, state.ErrCompetitionNotInSetup) {
 				c.JSON(http.StatusConflict, gin.H{"error": "registration is closed for this competition"})
 				return

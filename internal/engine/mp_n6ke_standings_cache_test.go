@@ -49,7 +49,7 @@ func TestMpN6keStandingsCacheInvalidatedOnSameTickPoolMatchSave(t *testing.T) {
 	}
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
 	}
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Kind: "individual",
@@ -58,7 +58,7 @@ func TestMpN6keStandingsCacheInvalidatedOnSameTickPoolMatchSave(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"},
 	}))
 
 	// First save: the bout is still scheduled, so both players sit at 0 wins.
@@ -126,10 +126,10 @@ func TestMpN6keLoserOfFlightRaceRejectsStaleSnapshot(t *testing.T) {
 		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"},
 	}))
 
 	// Warm the cache while the bout is unscored. This entry stands in for the
@@ -187,7 +187,7 @@ func TestMpN6keRecreatedCompetitionDoesNotServeDeletedStandings(t *testing.T) {
 		roster := make([]domain.Player, 0, len(players))
 		for _, n := range players {
 			pool.Players = append(pool.Players, helper.Player{Name: n})
-			roster = append(roster, domain.Player{Name: n})
+			roster = append(roster, domain.Player{Name: n, Dojo: "Dojo " + n})
 		}
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Recycled", Kind: "individual",

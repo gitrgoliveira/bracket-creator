@@ -81,8 +81,8 @@ func TestPoolNameFromMatchID(t *testing.T) {
 // produce one DH match.
 func TestGeneratePoolDaihyosenMatches_TwoWayTie(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "TeamA"}},
-		{Player: domain.Player{Name: "TeamB"}},
+		{Player: domain.Player{Name: "TeamA", Dojo: "Dojo TeamA"}},
+		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
 	}
 	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", map[string]bool{})
 	require.Len(t, matches, 1)
@@ -101,8 +101,8 @@ func TestGeneratePoolDaihyosenMatches_TwoWayTie(t *testing.T) {
 // cross-attribute each other's DH wins (bc-cse).
 func TestGeneratePoolDaihyosenMatches_StampsSideIDs(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{ID: "id-teamA", Name: "TeamA"}},
-		{Player: domain.Player{ID: "id-teamB", Name: "TeamB"}},
+		{Player: domain.Player{ID: "id-teamA", Name: "TeamA", Dojo: "Dojo TeamA"}},
+		{Player: domain.Player{ID: "id-teamB", Name: "TeamB", Dojo: "Dojo TeamB"}},
 	}
 	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", map[string]bool{})
 	require.Len(t, matches, 1)
@@ -116,9 +116,9 @@ func TestGeneratePoolDaihyosenMatches_StampsSideIDs(t *testing.T) {
 // TestGeneratePoolDaihyosenMatches_ThreeWayTie verifies round-robin for 3 teams.
 func TestGeneratePoolDaihyosenMatches_ThreeWayTie(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "TeamA"}},
-		{Player: domain.Player{Name: "TeamB"}},
-		{Player: domain.Player{Name: "TeamC"}},
+		{Player: domain.Player{Name: "TeamA", Dojo: "Dojo TeamA"}},
+		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
+		{Player: domain.Player{Name: "TeamC", Dojo: "Dojo TeamC"}},
 	}
 	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "B", map[string]bool{})
 	require.Len(t, matches, 3)
@@ -130,9 +130,9 @@ func TestGeneratePoolDaihyosenMatches_ThreeWayTie(t *testing.T) {
 // TestGeneratePoolDaihyosenMatches_SkipsExistingPairs ensures idempotency.
 func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "TeamA"}},
-		{Player: domain.Player{Name: "TeamB"}},
-		{Player: domain.Player{Name: "TeamC"}},
+		{Player: domain.Player{Name: "TeamA", Dojo: "Dojo TeamA"}},
+		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
+		{Player: domain.Player{Name: "TeamC", Dojo: "Dojo TeamC"}},
 	}
 	existing := map[string]bool{tiebreakerPairKey("TeamA", "TeamB"): true}
 	matches := generatePoolDaihyosenMatches("Pool X", group, 1, "A", existing)
@@ -166,7 +166,7 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"},
+			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
 		}},
 	}))
 
@@ -244,7 +244,7 @@ func setupTeamMixedPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, 
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"},
+			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
 		}},
 	}))
 
@@ -461,8 +461,8 @@ func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 func TestDHCycleExists_NoCycle(t *testing.T) {
 	standings := map[string][]state.PlayerStanding{
 		"Pool A": {
-			{Player: helper.Player{Name: "Alpha"}, Points: 0},
-			{Player: helper.Player{Name: "Beta"}, Points: 0},
+			{Player: helper.Player{Name: "Alpha", Dojo: "Dojo Alpha"}, Points: 0},
+			{Player: helper.Player{Name: "Beta", Dojo: "Dojo Beta"}, Points: 0},
 		},
 	}
 	matches := []state.MatchResult{
@@ -477,9 +477,9 @@ func TestDHCycleExists_NoCycle(t *testing.T) {
 func TestDHCycleExists_Cycle(t *testing.T) {
 	standings := map[string][]state.PlayerStanding{
 		"Pool A": {
-			{Player: helper.Player{Name: "Alpha"}, Points: 0},
-			{Player: helper.Player{Name: "Beta"}, Points: 0},
-			{Player: helper.Player{Name: "Gamma"}, Points: 0},
+			{Player: helper.Player{Name: "Alpha", Dojo: "Dojo Alpha"}, Points: 0},
+			{Player: helper.Player{Name: "Beta", Dojo: "Dojo Beta"}, Points: 0},
+			{Player: helper.Player{Name: "Gamma", Dojo: "Dojo Gamma"}, Points: 0},
 		},
 	}
 	matches := []state.MatchResult{
@@ -495,9 +495,9 @@ func TestDHCycleExists_Cycle(t *testing.T) {
 func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
 	standings := map[string][]state.PlayerStanding{
 		"Pool A": {
-			{Player: helper.Player{Name: "Alpha"}, Points: 0},
-			{Player: helper.Player{Name: "Beta"}, Points: 0},
-			{Player: helper.Player{Name: "Gamma"}, Points: 0},
+			{Player: helper.Player{Name: "Alpha", Dojo: "Dojo Alpha"}, Points: 0},
+			{Player: helper.Player{Name: "Beta", Dojo: "Dojo Beta"}, Points: 0},
+			{Player: helper.Player{Name: "Gamma", Dojo: "Dojo Gamma"}, Points: 0},
 		},
 	}
 	matches := []state.MatchResult{
@@ -703,7 +703,7 @@ func TestInjectPoolDaihyosenMatches_PreservesExistingScheduledAt(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha"}, {Name: "Beta"},
+			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"},
 		}},
 	}))
 

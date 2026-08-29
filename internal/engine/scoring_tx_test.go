@@ -531,8 +531,8 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 	compID := "guard-test"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	// Build competition.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -548,7 +548,7 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 	}))
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 
 	// Save the initial scheduled pool matches.
@@ -801,7 +801,7 @@ func TestPoolRescore_NonMixedComp_GuardIsNoOp(t *testing.T) {
 	createTestCompetition(t, store, compID, "league", 2)
 
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
@@ -881,8 +881,8 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	compID := "guard-corrupt"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Kind: "individual",
@@ -891,7 +891,7 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 	// Both pools already decided: A1 1st in Pool A, B1 1st in Pool B.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{

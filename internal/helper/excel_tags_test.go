@@ -15,7 +15,7 @@ func TestCreateTagsSheetQR(t *testing.T) {
 		{
 			PoolName: "Pool A",
 			Players: []Player{
-				{Name: "Alice", PoolPosition: 1, Number: "K1"},
+				{Name: "Alice", PoolPosition: 1, Number: "K1", Dojo: "Dojo Alice"},
 			},
 		},
 	}
@@ -41,9 +41,9 @@ func TestCreateTagsSheet(t *testing.T) {
 		{
 			PoolName: "Pool A",
 			Players: []Player{
-				{Name: "Player 1", PoolPosition: 1},
-				{Name: "Player 2", PoolPosition: 2},
-				{Name: "Player 3", PoolPosition: 3},
+				{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1"},
+				{Name: "Player 2", PoolPosition: 2, Dojo: "Dojo Player 2"},
+				{Name: "Player 3", PoolPosition: 3, Dojo: "Dojo Player 3"},
 			},
 		},
 	}

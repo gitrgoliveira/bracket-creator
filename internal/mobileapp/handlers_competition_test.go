@@ -92,7 +92,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// (rank within a pool is bounded by len(pool.Players)).
 		require.NoError(t, store.SavePools("rank-comp", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{
-				{Name: "Player 1"}, {Name: "Player 2"}, {Name: "Player 3"},
+				{Name: "Player 1", Dojo: "Dojo Player 1"}, {Name: "Player 2", Dojo: "Dojo Player 2"}, {Name: "Player 3", Dojo: "Dojo Player 3"},
 			}},
 		}))
 
@@ -163,7 +163,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// pool-size check).
 		require.NoError(t, store.SavePools("rank-bad-comp", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{
-				{Name: "Player 1"}, {Name: "Player 2"}, {Name: "Player 3"},
+				{Name: "Player 1", Dojo: "Dojo Player 1"}, {Name: "Player 2", Dojo: "Dojo Player 2"}, {Name: "Player 3", Dojo: "Dojo Player 3"},
 			}},
 		}))
 
@@ -199,7 +199,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		comp := state.Competition{ID: "rank-unknown-pool", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-unknown-pool", []helper.Pool{
-			{PoolName: "pool-a", Players: []helper.Player{{Name: "P1"}}},
+			{PoolName: "pool-a", Players: []helper.Player{{Name: "P1", Dojo: "Dojo P1"}}},
 		}))
 
 		reqBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
@@ -225,7 +225,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			c := state.Competition{ID: compID, Status: status}
 			require.NoError(t, store.SaveCompetition(&c))
 			require.NoError(t, store.SavePools(compID, []helper.Pool{
-				{PoolName: "pool-1", Players: []helper.Player{{Name: "P1"}}},
+				{PoolName: "pool-1", Players: []helper.Player{{Name: "P1", Dojo: "Dojo P1"}}},
 			}))
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/pools/pool-1/override-rank", bytes.NewBuffer(validBody))

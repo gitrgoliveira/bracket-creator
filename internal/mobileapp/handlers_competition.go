@@ -801,6 +801,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
+			if errors.Is(err, state.ErrBlankDojo) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			// Checked BEFORE the errSaveParticipants branch, which would bury it
 			// as a generic 500: a duplicate roster entry is the operator's to
 			// fix, and the message names the colliding entries. Without this the
@@ -1817,6 +1821,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					return
 				}
 				if errors.Is(err, state.ErrReservedName) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					return
+				}
+				if errors.Is(err, state.ErrBlankDojo) {
 					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 					return
 				}

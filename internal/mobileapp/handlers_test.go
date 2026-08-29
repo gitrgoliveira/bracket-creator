@@ -1659,7 +1659,7 @@ func TestCompetitionHandlers(t *testing.T) {
 	// POST /api/competitions/:id/start
 	comp = state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	store.SaveCompetition(&comp)
-	store.SaveParticipants("c1", []domain.Player{{Name: "P1"}, {Name: "P2"}})
+	store.SaveParticipants("c1", []domain.Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}})
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("POST", "/api/competitions/c1/start", nil)
 	r.ServeHTTP(w, req)
@@ -2186,7 +2186,7 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	// Format omitted → playoffs path; MaybeAutoCompletePools is a no-op.
 	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&comp))
-	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "P1"}, {Name: "P2"}}))
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}))
 
 	ch := hub.Subscribe()
 	defer hub.Unsubscribe(ch)

@@ -143,7 +143,7 @@ func setupIndividualLeagueThirdTie(t *testing.T, compID string, twoThird bool) (
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"},
+			{Name: "A", Dojo: "Dojo A"}, {Name: "B", Dojo: "Dojo B"}, {Name: "C", Dojo: "Dojo C"}, {Name: "D", Dojo: "Dojo D"},
 		}},
 	}))
 	winBy := func(id, a, b, winner string) state.MatchResult {

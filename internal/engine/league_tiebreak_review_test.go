@@ -21,7 +21,7 @@ func TestLeagueTiebreakCandidates_EmptyUntilRegularComplete(t *testing.T) {
 		TeamSize: 2, PoolSize: 3, RoundRobin: true, Courts: []string{"A"}, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"}}},
 	}))
 	// Three round-robin matches, only the FIRST completed (as a draw); the other
 	// two still scheduled.

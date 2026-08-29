@@ -673,8 +673,8 @@ func TestDiscoverPool(t *testing.T) {
 func TestLeastConflictedPool(t *testing.T) {
 	t.Run("finds pool with space", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
-			{Players: []Player{{Name: "P3"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}},
+			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}}},
 		}
 
 		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
@@ -685,8 +685,8 @@ func TestLeastConflictedPool(t *testing.T) {
 
 	t.Run("returns -1 when all pools full", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
-			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}},
+			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}, {Name: "P4", Dojo: "Dojo P4"}}},
 		}
 
 		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
@@ -786,8 +786,8 @@ func TestLeastConflictedPool(t *testing.T) {
 func TestForcePoolSize(t *testing.T) {
 	t.Run("finds pool with room for extra player", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
-			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}},
+			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}, {Name: "P4", Dojo: "Dojo P4"}}},
 		}
 
 		poolIdx := forcePoolSize(pools, []int{2, 2})
@@ -810,8 +810,8 @@ func TestForcePoolSize(t *testing.T) {
 
 	t.Run("returns first pool when all full", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}, {Name: "P3"}}},
-			{Players: []Player{{Name: "P4"}, {Name: "P5"}, {Name: "P6"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}, {Name: "P3", Dojo: "Dojo P3"}}},
+			{Players: []Player{{Name: "P4", Dojo: "Dojo P4"}, {Name: "P5", Dojo: "Dojo P5"}, {Name: "P6", Dojo: "Dojo P6"}}},
 		}
 
 		poolIdx := forcePoolSize(pools, []int{2, 2})
@@ -1211,8 +1211,8 @@ func TestCreatePoolRoundRobinMatchesEdgeCases(t *testing.T) {
 				{
 					PoolName: "Pool A",
 					Players: []Player{
-						{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
-						{Name: "P4"}, {Name: "P5"}, {Name: "P6"},
+						{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}, {Name: "P3", Dojo: "Dojo P3"},
+						{Name: "P4", Dojo: "Dojo P4"}, {Name: "P5", Dojo: "Dojo P5"}, {Name: "P6", Dojo: "Dojo P6"},
 					},
 				},
 			},
@@ -1240,7 +1240,7 @@ func TestCreatePoolRoundRobinMatchesEdgeCases(t *testing.T) {
 				{
 					PoolName: "Pool A",
 					Players: []Player{
-						{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"},
+						{Name: "A", Dojo: "Dojo A"}, {Name: "B", Dojo: "Dojo B"}, {Name: "C", Dojo: "Dojo C"}, {Name: "D", Dojo: "Dojo D"},
 					},
 				},
 			},

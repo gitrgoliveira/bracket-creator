@@ -547,19 +547,35 @@ func TestSaveParticipants_RejectsDuplicateNameDojo(t *testing.T) {
 	})
 	assert.NoError(t, err, "same name at different dojos must be allowed in a bulk save")
 
-	// Two same-named teams with empty dojo collide (real duplicate).
+	// Two same-named teams at the SAME dojo collide (real duplicate). This
+	// used to be written with empty dojos; a blank dojo is now refused
+	// outright (see the blank-dojo case below), so the duplicate rule is
+	// exercised with a real dojo instead.
 	err = store.SaveParticipants(compID, []domain.Player{
-		{Name: "Shudokan", Dojo: ""},
-		{Name: "shudokan", Dojo: ""},
+		{Name: "Shudokan", Dojo: "Shudokan HQ"},
+		{Name: "shudokan", Dojo: "Shudokan HQ"},
 	})
-	assert.ErrorIs(t, err, ErrDuplicateName, "identical team names with empty dojo must collide")
+	assert.ErrorIs(t, err, ErrDuplicateName, "identical team names at one dojo must collide")
 
 	// Squad variants (different names) are NOT perfect duplicates.
 	err = store.SaveParticipants(compID, []domain.Player{
-		{Name: "Shudokan A", Dojo: ""},
-		{Name: "Shudokan B", Dojo: ""},
+		{Name: "Shudokan A", Dojo: "Shudokan HQ"},
+		{Name: "Shudokan B", Dojo: "Shudokan HQ"},
 	})
 	assert.NoError(t, err, "A/B squad teams are distinct names and must be allowed")
+
+	// A blank dojo is refused outright: competitor identity is (name, dojo),
+	// so an entry with no dojo cannot be told apart from a namesake.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Shudokan C", Dojo: ""},
+	})
+	assert.ErrorIs(t, err, ErrBlankDojo, "a blank dojo must be refused at the write floor")
+
+	// Whitespace is not a dojo either.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "Shudokan D", Dojo: "   "},
+	})
+	assert.ErrorIs(t, err, ErrBlankDojo, "a whitespace-only dojo must be refused")
 }
 
 func TestSaveParticipants_RejectsReservedNames(t *testing.T) {
@@ -575,7 +591,7 @@ func TestSaveParticipants_RejectsReservedNames(t *testing.T) {
 	}{
 		{"Pool A-1st", "Wakaba"},
 		{"Pool Z-2nd", "Tora"},
-		{"Winner of r1-m0", ""},
+		{"Winner of r1-m0", "Kenshinkan"}, // dojo must be non-blank; the reserved-NAME rule is what is under test here
 		{"Winner of r3-m10", "Dojo"},
 	}
 	for _, tc := range cases {

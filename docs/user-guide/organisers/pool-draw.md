@@ -31,19 +31,25 @@ Before the pools are filled, the entry list is arranged:
 1. **Seeded competitors** come first, in rank order. They are placed in different pools and, as far as the shape allows, on different shiai-jo and at opposite ends of each shiai-jo's set of pools. Two seeds never share a pool; where a configuration cannot satisfy every constraint, the deepest one gives way and the draw warns you which. [Seeding](knockout-draw.md#seeding) describes how far apart the draw keeps them.
 2. **Everyone else** is grouped by dojo, largest dojo first. This grouping is what keeps members of the same dojo apart: they occupy consecutive positions in the arranged list, and consecutive positions start their placement at different pools.
 
-The pools then fill one competitor at a time. Each competitor starts at a different pool, in rotation, and takes the first pool with space that holds nobody from their dojo. The dojo is the only thing the draw keeps apart. Sharing a name is not a conflict: two competitors can share a name only when their dojos differ, because a second entry with both the same name and the same dojo is refused as a duplicate of the same person. Namesakes are two different people, they may fight in the same pool, and the sheet tells them apart by dojo and by competitor number.
+The pools then fill one competitor at a time, and each placement looks past the pools to the knockout that will be built from them. Before anyone is placed, the draw works out which part of the knockout tree each pool's qualifiers will feed. A competitor is then placed in the pool that keeps their dojo's members apart for as long as the competition allows: never in a pool that already holds one where a free pool exists, and among the free pools, the one whose qualifiers would meet the rest of their dojo latest in the knockout. Every placement is recorded per pool and per branch of the tree, so the next placement sees the whole picture.
+
+The dojo is the only thing the draw keeps apart. Sharing a name is not a conflict: two competitors can share a name only when their dojos differ, because a second entry with both the same name and the same dojo is refused as a duplicate of the same person. Namesakes are two different people, they may fight in the same pool, and the sheet tells them apart by dojo and by competitor number.
+
+Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps clubs apart longer, and only then. An exchange is taken only when it helps: no club's first meeting may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. On a roster where no club can be kept apart any better, the pools come out exactly as placed.
 
 ## When a dojo has more members than pools
 
-Once a dojo has one member in every pool, no conflict-free pool exists for the rest of its members. Each of those members is placed in the pool currently holding the **fewest members of that dojo** among the pools with space; on a tie, the pool with fewer players, and then the earliest pool.
+Once a dojo has one member in every pool, some of its members must share, and the draw spreads them as evenly as the pool count allows. With 24 entrants, 10 of them from one dojo, in six pools of 4, that dojo's members land 2, 2, 2, 2, 1 and 1 to a pool: no pool is all one dojo, no pool holds more than one pairing from that dojo, and no spread with fewer shared pools exists.
 
-The overflow therefore spreads as evenly as the remaining space allows instead of piling into the first pool with room. With 24 entrants, 10 of them from one dojo, in six pools of 4, that dojo's members land 2, 2, 2, 2, 1 and 1 to a pool: no pool is all one dojo, and no pool holds more than one pairing from that dojo.
+Two of its members meeting in a pool is arithmetic, not a shortcoming: a dojo with more members than pools cannot avoid it, and the draw's job is to make it as rare as the numbers allow.
 
-After the pools are filled the draw makes a second pass over them, exchanging competitors between pools wherever that breaks up a dojo pairing without creating another one. This is what lets it recover from a placement that only looks wrong once the last entrant is in: a club whose members happen to be entered last is no longer stranded in whichever pool still had room. Nobody changes pool unless the exchange strictly improves the spread, pool sizes never change, and a seeded competitor is never moved.
+Setting seeds does not cost you any of this. Seeds take their places first, exactly where the seeding rules put them, and their dojos are counted from the start, so the rest of their club is spread around them. A roster spreads its clubs just as well seeded as unseeded.
 
-One limit remains, and it is arithmetic rather than a shortcoming: once a dojo has more members than there are pools, some of its members must share a pool, so some matches between club-mates are unavoidable. The draw spreads them as thinly as the pool count allows.
+## Club-mates and the knockout
 
-Setting seeds does not cost you any of this. Seeds take their places first, and the second pass runs afterwards, so a roster spreads its clubs just as well seeded as unseeded.
+Keeping club-mates out of one pool is only half the job: two members of one dojo in different pools can still be drawn to meet in the very first knockout match if their pools feed neighbouring slots. Because every placement is made against the knockout tree, the draw pushes that first club-mate meeting as late as the bracket allows, and in particular keeps it out of the first round wherever any arrangement of the pools could.
+
+The limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a club's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands; and when several clubs compete for the same few well-separated pool pairs, not every club can have one, so the draw settles the contest in favour of as few early meetings as possible overall.
 
 ## Pools onto shiai-jo
 

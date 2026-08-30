@@ -234,12 +234,25 @@ func (o *poolOptions) createPools(entries []string) error {
 	// helper.BuildPoolPhase rather than a mutation of it (state.ValidateExtraQualifiers
 	// above already rejected the combination with "max" sizing, so isMax is
 	// never relevant on this branch).
+	//
+	// The standard/larger-pools branch calls
+	// helper.BuildPoolPhaseTreeAwareWithMode, not plain helper.BuildPoolPhase
+	// (bc-dojo Phase 4): this command has a REAL pool-winners count
+	// (o.poolWinners) and extra-qualifiers mode (o.extraQualifiers, "" or
+	// "larger-pools" here) to hand it, and BuildPoolPhase's own poolWinners
+	// is FIXED at its documented default (2) -- calling it here would score
+	// every candidate placement against the WRONG knockout tree whenever
+	// either real value differs from that default.
 	var pools []helper.Pool
 	var drawCourts int
 	if o.extraQualifiers == state.ExtraQualifiersFillBracket {
 		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, activePoolSize, o.courts)
 	} else {
-		pools, drawCourts, err = helper.BuildPoolPhase(players, activePoolSize, isMax, o.courts)
+		minPoolSize := 0
+		if !isMax {
+			minPoolSize = activePoolSize
+		}
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, o.poolWinners, o.extraQualifiers, minPoolSize)
 	}
 	if err != nil {
 		return err

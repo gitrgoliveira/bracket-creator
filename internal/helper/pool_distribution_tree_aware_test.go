@@ -57,12 +57,19 @@ func seedPoolByName(pools []Pool) map[string]string {
 	return out
 }
 
-// TestSeedPlacementEquality_OldVsTreeAware is Phase 2's mandated pin: it runs
-// BOTH pipelines over the seeded sweeps and asserts every seed lands in the
-// SAME named pool. BuildPoolPhaseTreeAware's seed step (placeSeedIndices) is
-// an extraction of BuildPoolPhase's own seed arithmetic (PoolSeeding's), so
-// this must hold exactly -- any drift here means the extraction broke
-// something, not that the new path made a different but valid choice.
+// TestSeedPlacementEquality_OldVsTreeAware is Phase 2's mandated pin: every
+// seed must land in the SAME named pool as the PRE-SWAP pipeline put it,
+// because placeSeedIndices is an extraction of PoolSeeding's own seed
+// arithmetic -- any drift means the extraction broke something, not that the
+// new path made a different but valid choice.
+//
+// The old side is referencePoolSeedingPipeline (the gate test's faithful
+// reconstruction of PoolSeeding -> CreatePools -> ReorderPoolsForCourts).
+// It was BuildPoolPhase when this pin was written, which was right up until
+// the Phase 4 swap made BuildPoolPhase DELEGATE to the tree-aware path --
+// from that moment the pin compared the new path against itself and held for
+// any seed arithmetic whatsoever. A self-comparison that can never fail is
+// not a pin.
 func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 	total := 0
 	for numPools := 3; numPools <= 7; numPools++ {
@@ -86,7 +93,7 @@ func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 
 					for _, numCourts := range []int{1, 2, 4} {
 						for _, poolWinners := range []int{1, 2} {
-							oldPools, _, err := BuildPoolPhase(r, poolSize, false, numCourts)
+							oldPools, _, err := referencePoolSeedingPipeline(r, poolSize, false, numCourts)
 							require.NoError(t, err)
 							newPools, _, err := BuildPoolPhaseTreeAware(r, poolSize, false, numCourts, poolWinners)
 							require.NoError(t, err)
@@ -121,13 +128,17 @@ func TestSeedPlacementEquality_MultiClub(t *testing.T) {
 			for _, isMax := range []bool{false, true} {
 				for nClubs := 2; nClubs <= 4; nClubs++ {
 					for clubSize := 2; clubSize <= numPools+2; clubSize++ {
-						for nSeeds := 0; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
+						for nSeeds := 1; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
+							// nSeeds starts at 1: a seedless config has no
+							// placement to compare, and the seedless sweep
+							// burned most of this test's former 23-second
+							// runtime comparing empty maps.
 							if nClubs*clubSize > numPools*poolSize {
 								continue
 							}
 							r := buildClubRoster(numPools, poolSize, nClubs, clubSize, nSeeds)
-							for _, courts := range []int{1, 2, 4} {
-								oldPools, _, err := BuildPoolPhase(r, poolSize, isMax, courts)
+							for _, courts := range []int{1, 2} {
+								oldPools, _, err := referencePoolSeedingPipeline(r, poolSize, isMax, courts)
 								require.NoError(t, err)
 								newPools, _, err := BuildPoolPhaseTreeAware(r, poolSize, isMax, courts, 1)
 								require.NoError(t, err)

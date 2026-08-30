@@ -52,7 +52,20 @@ func poolQualifierPaths(targetSizes []int, poolWinners, numCourts int) [][]int {
 	if len(targetSizes) == 0 || poolWinners <= 0 {
 		return nil
 	}
+	skeleton := buildQualifierSkeleton(targetSizes)
+	draw := BuildKnockoutDraw(skeleton, poolWinners, numCourts)
+	if draw == nil {
+		return nil
+	}
+	return qualifierSlotsFromLeaves(draw, skeleton, func(int) int { return poolWinners })
+}
 
+// buildQualifierSkeleton builds the placeholder []Pool poolQualifierPaths and
+// its two mode-specific siblings below all build a skeleton draw from: one
+// pool per target size, named exactly as assignPlayersToPools would name it
+// once cut, holding that many zero-value Players and nobody else. Shared so
+// the three skeleton builders cannot drift on naming or sizing.
+func buildQualifierSkeleton(targetSizes []int) []Pool {
 	skeleton := make([]Pool, len(targetSizes))
 	for i, size := range targetSizes {
 		if size < 0 {
@@ -63,12 +76,15 @@ func poolQualifierPaths(targetSizes []int, poolWinners, numCourts int) [][]int {
 			Players:  make([]Player, size),
 		}
 	}
+	return skeleton
+}
 
-	draw := BuildKnockoutDraw(skeleton, poolWinners, numCourts)
-	if draw == nil {
-		return nil
-	}
-
+// qualifierSlotsFromLeaves extracts, for pool i, the knockout leaf slot of
+// each qualifying rank in ranks(i) -- shared by poolQualifierPaths and its
+// two mode-specific siblings so all three read a built draw's leaves the
+// same way (skeleton pool name + GetOrdinal(rank), looked up in
+// TreeToLeafArray's slot map).
+func qualifierSlotsFromLeaves(draw *KnockoutDraw, skeleton []Pool, ranks func(poolIdx int) int) [][]int {
 	leaves := TreeToLeafArray(draw.Root)
 	slotOf := make(map[string]int, len(leaves))
 	for slot, label := range leaves {
@@ -76,12 +92,11 @@ func poolQualifierPaths(targetSizes []int, poolWinners, numCourts int) [][]int {
 			slotOf[label] = slot
 		}
 	}
-
-	out := make([][]int, len(targetSizes))
-	for i, size := range targetSizes {
-		winners := poolWinners
-		if winners > size {
-			winners = size
+	out := make([][]int, len(skeleton))
+	for i := range skeleton {
+		winners := ranks(i)
+		if winners > len(skeleton[i].Players) {
+			winners = len(skeleton[i].Players)
 		}
 		for rank := 1; rank <= winners; rank++ {
 			label := fmt.Sprintf("%s-%s", skeleton[i].PoolName, GetOrdinal(rank))
@@ -91,4 +106,97 @@ func poolQualifierPaths(targetSizes []int, poolWinners, numCourts int) [][]int {
 		}
 	}
 	return out
+}
+
+// poolQualifierPathsPerPool is poolQualifierPaths' larger-pools counterpart
+// (bc-dojo Phase 4, mode-aware pool distribution): builds the skeleton via
+// BuildKnockoutDrawPerPool instead of the uniform builder, so a pool larger
+// than the minimum sends its real EXTRA (crossed) qualifier in the skeleton
+// too. Without this, the region-aware distributor would score every
+// candidate placement against the STANDARD one-qualifier-per-pool tree even
+// for a competition running state.ExtraQualifiersLargerPools, which is not
+// the tree BuildKnockoutDrawPerPool actually builds for it.
+//
+// overrides is exactly what production's own extraQualifierOverrides
+// (internal/engine/playoff_skeleton.go) builds from a competition's real
+// pools -- pool index -> qualifier count, entries only for pools that differ
+// from defaultWinners -- derived here PRE-placement from target SIZES by
+// extraQualifierOverridesFromSizes instead, since the "is this pool
+// oversized" test (state.Competition.QualifiersForPool) only ever reads a
+// pool's participant COUNT, exactly what targetSizes already promises pool i
+// will end up holding.
+//
+// Returns nil when BuildKnockoutDrawPerPool refuses this shape (out of
+// larger-pools' scope, e.g. a court count with no same-half neighbour): the
+// caller (treeAwareQualifierSlots) degrades to scoring every candidate as
+// equally safe rather than guessing a placement no sheet corroborates --
+// production's own draw-build step (buildPoolFedDraw) still refuses the
+// SAME shape at the real knockout-build step regardless of how the pools
+// were formed, so the operator is told either way.
+func poolQualifierPathsPerPool(targetSizes []int, defaultWinners int, overrides map[int]int, numCourts int) [][]int {
+	if len(targetSizes) == 0 || defaultWinners <= 0 {
+		return nil
+	}
+	skeleton := buildQualifierSkeleton(targetSizes)
+	draw := BuildKnockoutDrawPerPool(skeleton, defaultWinners, overrides, numCourts)
+	if draw == nil {
+		return nil
+	}
+	return qualifierSlotsFromLeaves(draw, skeleton, func(i int) int {
+		return perPoolWinners(overrides, i, defaultWinners)
+	})
+}
+
+// poolQualifierPathsFillBracket is poolQualifierPaths' fill-bracket
+// counterpart (bc-dojo Phase 4): builds the skeleton via
+// SelectFillBracketDraftIndices + BuildKnockoutDrawFillBracket, reusing
+// production's OWN draft-selection pipeline rather than guessing which
+// pools draft a 2nd.
+//
+// Selection needs to know pool SIZES (a candidate needs >= 2 members to have
+// a 2nd place to draft) and which pools are SEEDED, by RANK (drafts are
+// taken from seeded pools in seed order, oversized pools as the fallback) --
+// both fixed pre-placement, once seed placement (placeSeedIndices) has run:
+// a seed's pool is a function of its own rank/court alone, never of who else
+// is unseeded. seedPoolIdx (seed RANK -> pool index, the same PRE-reorder
+// index space targetSizes is in) is folded into placeholder Players so
+// SelectFillBracketDrafts' own poolIsSeeded/poolSeedRank scan sees exactly
+// the real seeding, without a single real competitor being placed.
+//
+// Returns nil when selection or placement refuses this shape (out of
+// fill-bracket's scope for this roster/court count): production's own
+// draw-build step reaches the identical refusal independently
+// (buildPoolFedDraw), so the distributor degrading to "score every candidate
+// as equally safe" here costs nothing a caller was not already going to be
+// told about at draw time.
+func poolQualifierPathsFillBracket(targetSizes []int, minSize int, seedPoolIdx map[int]int, numCourts int) [][]int {
+	if len(targetSizes) == 0 {
+		return nil
+	}
+	skeleton := buildQualifierSkeleton(targetSizes)
+	for rank, idx := range seedPoolIdx {
+		if idx < 0 || idx >= len(skeleton) || len(skeleton[idx].Players) == 0 {
+			continue
+		}
+		skeleton[idx].Players[0].Seed = rank
+	}
+
+	draftIdx, err := SelectFillBracketDraftIndices(skeleton, minSize, numCourts)
+	if err != nil {
+		return nil
+	}
+	draw := BuildKnockoutDrawFillBracket(skeleton, draftIdx, numCourts)
+	if draw == nil {
+		return nil
+	}
+	drafted := make(map[int]bool, len(draftIdx))
+	for _, pi := range draftIdx {
+		drafted[pi] = true
+	}
+	return qualifierSlotsFromLeaves(draw, skeleton, func(i int) int {
+		if drafted[i] {
+			return 2
+		}
+		return 1
+	})
 }

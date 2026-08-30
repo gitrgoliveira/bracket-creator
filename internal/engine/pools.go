@@ -101,7 +101,31 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	} else {
-		pools, drawCourts, err = helper.BuildPoolPhase(players, comp.PoolSize, isMax, numCourts)
+		// helper.BuildPoolPhaseTreeAwareWithMode, not plain
+		// helper.BuildPoolPhase (bc-dojo Phase 4): BuildPoolPhase's own
+		// poolWinners is FIXED at its documented default (2), for callers
+		// with no real qualifier count to hand. This engine always has a
+		// real one (comp.EffectivePoolWinners()), and for a poolFedKnockout
+		// competition a real extra-qualifiers mode too (only "" or
+		// "larger-pools" reach here -- fill-bracket already branched off
+		// above) -- calling the fixed-default function would score every
+		// candidate placement against the WRONG knockout tree whenever
+		// either real value differs from that default.
+		//
+		// extraQualifiers is forced to standard for a non-poolFedKnockout
+		// format regardless of what comp.ExtraQualifiers holds, mirroring
+		// the same rule poolFedKnockout's own doc comment states: a stored
+		// non-standard value on a league/swiss/playoffs record must never
+		// steer pool FORMATION.
+		extraQualifiers := state.ExtraQualifiersNone
+		if poolFedKnockout {
+			extraQualifiers = comp.ExtraQualifiers
+		}
+		minPoolSize := 0
+		if !isMax {
+			minPoolSize = comp.PoolSize
+		}
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, comp.PoolSize, isMax, numCourts, comp.EffectivePoolWinners(), extraQualifiers, minPoolSize)
 		if err != nil {
 			return err
 		}

@@ -7,15 +7,40 @@ import (
 	"testing"
 )
 
-// bc-dojo Phase 3: the decision-gate scorecard.
+// bc-dojo Phase 3/4: the decision-gate scorecard.
 //
-// This file is the ship/keep decision for the region-aware rebuild
-// (BuildPoolPhaseTreeAware, pool_distribution_tree_aware.go): it runs BOTH
-// pipelines over every sweep pool_distribution_invariants_test.go (Phase 0)
-// established as the baseline, plus an end-to-end region sweep neither
-// pipeline was measured against before, and logs a single scorecard. Nothing
-// in this file calls the new path from production code -- the swap, if this
-// gate passes, is a separate, later change.
+// This file WAS the ship/keep decision for the region-aware rebuild
+// (BuildPoolPhaseTreeAware, pool_distribution_tree_aware.go): Phase 3 ran
+// BOTH the old fill+repair pipeline and the new tree-aware one over every
+// sweep pool_distribution_invariants_test.go (Phase 0) established as the
+// baseline, plus an end-to-end region sweep neither pipeline had been
+// measured against before, and logged a side-by-side scorecard.
+//
+// Phase 4 SWAPPED the tree-aware distributor into production:
+// BuildPoolPhase and BuildPoolPhaseFillBracket (tournament.go) both
+// delegate to it now, so "old" and "new" are no longer two different
+// algorithms -- BuildPoolPhase(players, poolSize, isMax, numCourts) is
+// exactly BuildPoolPhaseTreeAware(players, poolSize, isMax, numCourts,
+// defaultPoolWinners), and calling both sides of an old-vs-new comparison
+// would just compare the production path against itself (at a possibly
+// DIFFERENT poolWinners than the sweep intends, since BuildPoolPhase's own
+// poolWinners is fixed). This file was rewritten from that comparison into
+// ABSOLUTE assertions on the production path directly
+// (BuildPoolPhaseTreeAware, called with each sweep's own intended
+// poolWinners): per-pool club-concentration optimum, pool sizes, no two
+// seeds sharing a pool, the unique-dojo round-robin identity contract, and
+// the end-to-end region metric against the brute-force ceiling. The ONE
+// place an "old" pipeline is still reconstructed is the seed-placement
+// equality pin below, which needed a real point of comparison and not just
+// an absolute property.
+//
+// HISTORICAL RECORD, since the side-by-side verdict this file used to print
+// no longer exists to reproduce: at commit d5eb8870 (the last commit before
+// the swap subsumed the old fill+repair pipeline), the old-vs-new region
+// scorecard read old-sum=220, new-sum=254, new-worse=0 across the same 180
+// end-to-end configs this file still sweeps. That is the number the Phase 3
+// ship decision was made on; it is not re-derivable now that "old" and
+// "new" are the same code.
 //
 // gateScorecard accumulates every metric across every sweep so the final Log
 // is one picture rather than scattered per-subtest output, and so a human
@@ -24,10 +49,8 @@ import (
 // the failing assertions point at exactly the counters that regressed.
 type gateScorecard struct {
 	// Metric: per-pool club-concentration optimum (maxOfDojo <= ceil(clubSize/numPools)).
-	optimumConfigs         int
-	optimumOldFail         int
-	optimumNewFail         int
-	optimumNewWorseThanOld int // new failed where old passed: the hard-fail trigger
+	optimumConfigs int
+	optimumFail    int
 
 	// Metric: pool sizes (target sizes reproduced exactly).
 	sizeConfigs  int
@@ -35,53 +58,46 @@ type gateScorecard struct {
 
 	// Metric: seeds-per-pool (no two seeds share a pool).
 	seedShareConfigs int
-	seedShareOldFail int
-	seedShareNewFail int
+	seedShareFail    int
 
-	// Metric: seed placement equality (every seed in the identical named pool).
+	// Metric: seed placement equality (placeSeedIndices' extraction claim --
+	// every seed lands in the same named pool as PoolSeeding's own
+	// still-standing pipeline would put it in; see
+	// referencePoolSeedingPipeline's doc comment for why this is the one
+	// place a second pipeline is still built).
 	seedEqualityChecked    int
 	seedEqualityMismatches int
 
 	// Metric: unique-dojo identity contract (byte-identical round-robin deal).
 	identityConfigs int
-	identityOldFail int
-	identityNewFail int
+	identityFail    int
 
 	// Metric: end-to-end region (earliest knockout round a club's own
-	// qualifiers could meet each other), the metric the whole rebuild exists
-	// to move. mathMaxInt sentinel excluded from sums/round1 counts (means
-	// "this club never spanned >=2 pools in this config", i.e. no data).
+	// qualifiers could meet each other) against the BRUTE-FORCE CEILING --
+	// the best any pool assignment could achieve for that shape. mathMaxInt
+	// sentinel excluded from sums/round1 counts (means "this club never
+	// spanned >=2 pools in this config", i.e. no data).
 	regionConfigs      int
-	regionOldSum       int
-	regionNewSum       int
-	regionOldRound1    int
-	regionNewRound1    int
-	regionNewWorse     int // hard-fail trigger: new < old for one config
-	regionNewBetter    int
-	regionNewSame      int
+	regionSum          int
+	regionRound1       int
 	optimumMeetConfigs int // e2e configs checked against the brute-force ceiling
-	optimumMeetBelow   int // hard-fail trigger: new path met earlier than the shape's brute-force optimum
+	optimumMeetBelow   int // hard-fail trigger: the path met earlier than the shape's brute-force optimum
 }
 
 func (s *gateScorecard) String() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n=== bc-dojo Phase 3 gate scorecard (old fill+repair vs new tree-aware) ===\n")
-	fmt.Fprintf(&b, "per-pool optimum:      configs=%d  old-fail=%d  new-fail=%d  (new-worse-than-old=%d)\n",
-		s.optimumConfigs, s.optimumOldFail, s.optimumNewFail, s.optimumNewWorseThanOld)
+	fmt.Fprintf(&b, "\n=== bc-dojo Phase 4 gate scorecard (production tree-aware path, absolute) ===\n")
+	fmt.Fprintf(&b, "per-pool optimum:      configs=%d  fail=%d\n", s.optimumConfigs, s.optimumFail)
 	fmt.Fprintf(&b, "pool sizes:            configs=%d  mismatches=%d\n", s.sizeConfigs, s.sizeMismatch)
-	fmt.Fprintf(&b, "seeds-per-pool:        configs=%d  old-fail=%d  new-fail=%d\n",
-		s.seedShareConfigs, s.seedShareOldFail, s.seedShareNewFail)
-	fmt.Fprintf(&b, "seed placement:        seeds-checked=%d  mismatches=%d\n",
+	fmt.Fprintf(&b, "seeds-per-pool:        configs=%d  fail=%d\n", s.seedShareConfigs, s.seedShareFail)
+	fmt.Fprintf(&b, "seed placement:        seeds-checked=%d  mismatches=%d (vs referencePoolSeedingPipeline)\n",
 		s.seedEqualityChecked, s.seedEqualityMismatches)
-	fmt.Fprintf(&b, "unique-dojo identity:  configs=%d  old-fail=%d  new-fail=%d\n",
-		s.identityConfigs, s.identityOldFail, s.identityNewFail)
+	fmt.Fprintf(&b, "unique-dojo identity:  configs=%d  fail=%d\n", s.identityConfigs, s.identityFail)
 	fmt.Fprintf(&b, "region (earliest club-meeting round in the knockout):\n")
-	fmt.Fprintf(&b, "  configs-with-data=%d  old-sum=%d  new-sum=%d  (higher is later/better)\n",
-		s.regionConfigs, s.regionOldSum, s.regionNewSum)
-	fmt.Fprintf(&b, "  old-round1=%d  new-round1=%d  new-better=%d  new-same=%d  new-worse=%d (hard-fail trigger)\n",
-		s.regionOldRound1, s.regionNewRound1, s.regionNewBetter, s.regionNewSame, s.regionNewWorse)
-	fmt.Fprintf(&b, "  brute-force ceiling: configs=%d  new-below-optimum=%d (hard-fail trigger)\n",
+	fmt.Fprintf(&b, "  configs-with-data=%d  sum=%d  round1=%d\n", s.regionConfigs, s.regionSum, s.regionRound1)
+	fmt.Fprintf(&b, "  brute-force ceiling: configs=%d  below-optimum=%d (hard-fail trigger)\n",
 		s.optimumMeetConfigs, s.optimumMeetBelow)
+	fmt.Fprintf(&b, "  (historical, commit d5eb8870, old-vs-new before the swap: old-sum=220 new-sum=254 new-worse=0)\n")
 	return b.String()
 }
 
@@ -95,6 +111,19 @@ func earliestClubMeetingRound(pools []Pool, poolWinners, numCourts int, dojo str
 	if draw == nil {
 		return mathMaxIntSentinel
 	}
+	return earliestMeetingRoundInDraw(draw, pools, dojo)
+}
+
+// earliestMeetingRoundInDraw is earliestClubMeetingRound's builder-agnostic
+// half: given an ALREADY-BUILT draw (from any of production's three
+// builders -- BuildKnockoutDraw, BuildKnockoutDrawPerPool,
+// BuildKnockoutDrawFillBracket), the earliest knockout round any two of
+// dojo's qualifying pools are drawn to meet, or the sentinel when dojo does
+// not span at least two pools in this draw. Split out so the per-mode seam
+// tests (pool_distribution_modes_test.go) can measure a larger-pools or
+// fill-bracket draw the same way this file measures a standard one, without
+// re-deriving the slot-extraction logic.
+func earliestMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo string) int {
 	clubPools := map[string]bool{}
 	for _, p := range pools {
 		if countDojoInPool(p, dojo) > 0 {
@@ -123,62 +152,94 @@ func earliestClubMeetingRound(pools []Pool, poolWinners, numCourts int, dojo str
 
 const mathMaxIntSentinel = 1 << 30
 
-// checkOptimumAndSizesAndSeeds runs the three "must not regress" metrics
-// shared by every sweep in this file against one roster/shape, folding the
-// result into sc, and reports the failures via t.Errorf (never Fatal: a
-// scorecard run must finish and log its totals even when it fails).
-func checkOptimumAndSizesAndSeeds(t *testing.T, sc *gateScorecard, r []Player, numPools, poolSize int, isMax bool, courts, poolWinners int, dojos []string, tag string) (oldPools, newPools []Pool) {
-	t.Helper()
-	oldPools, _, err := BuildPoolPhase(r, poolSize, isMax, courts)
+// referencePoolSeedingPipeline reconstructs BuildPoolPhase's PRE-Phase-4
+// body -- PoolSeeding -> CreatePools -> ReorderPoolsForCourts -- from the
+// primitive functions directly, since BuildPoolPhase itself now delegates
+// to the tree-aware distributor and can no longer serve as "the other
+// pipeline" for this comparison. It exists ONLY so
+// TestTreeAwareGateScorecard's seed-placement pin has something independent
+// to check placeSeedIndices' extraction claim against: PoolSeeding is still
+// a real, exported, tested function (CreatePools' own callers, and
+// helper/estimate.go's synthetic-roster path, still route through it), so
+// this is not a resurrection of dead code, just a caller that assembles the
+// same three primitives BuildPoolPhase itself used to.
+func referencePoolSeedingPipeline(players []Player, poolSize int, isMax bool, numCourts int) ([]Pool, int, error) {
+	numPools := PoolCount(len(players), poolSize, isMax)
+	drawCourts := EffectiveDrawCourts(numPools, numCourts)
+	pools, err := CreatePools(PoolSeeding(players, numPools, drawCourts), poolSize, isMax)
 	if err != nil {
-		t.Errorf("%s: BuildPoolPhase error: %v", tag, err)
-		return nil, nil
+		return nil, 0, err
 	}
-	newPools, _, err = BuildPoolPhaseTreeAware(r, poolSize, isMax, courts, poolWinners)
+	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
+}
+
+// checkAbsoluteInvariants runs the production tree-aware path
+// (BuildPoolPhaseTreeAware, called with the sweep's own intended
+// poolWinners -- never through BuildPoolPhase, whose poolWinners is fixed
+// at a default that need not match) over one roster/shape and asserts the
+// invariants that must ALWAYS hold, folding the result into sc. Reports via
+// t.Errorf (never Fatal: a scorecard run must finish and log its totals
+// even when it fails).
+func checkAbsoluteInvariants(t *testing.T, sc *gateScorecard, r []Player, numPools, poolSize int, isMax bool, courts, poolWinners int, dojos []string, tag string) []Pool {
+	t.Helper()
+	pools, _, err := BuildPoolPhaseTreeAware(r, poolSize, isMax, courts, poolWinners)
 	if err != nil {
 		t.Errorf("%s: BuildPoolPhaseTreeAware error: %v", tag, err)
-		return nil, nil
+		return nil
 	}
 
-	// Sizes.
+	// Sizes: every pool's size must equal poolTargetSizes' (remainder-spread)
+	// target exactly -- nobody lost, duplicated, or short/over their target.
 	sc.sizeConfigs++
-	if len(oldPools) != len(newPools) {
+	_, baseSizes, err := poolTargetSizes(len(r), poolSize, isMax)
+	if err != nil {
+		t.Errorf("%s: poolTargetSizes: %v", tag, err)
+		return pools
+	}
+	wantSizes := realTargetSizes(baseSizes, len(r))
+	if len(pools) != len(wantSizes) {
 		sc.sizeMismatch++
-		t.Errorf("%s: pool count differs: old=%d new=%d", tag, len(oldPools), len(newPools))
+		t.Errorf("%s: pool count differs: got=%d want=%d", tag, len(pools), len(wantSizes))
 	} else {
-		for i := range oldPools {
-			if len(oldPools[i].Players) != len(newPools[i].Players) {
+		for i := range pools {
+			if len(pools[i].Players) != wantSizes[i] {
 				sc.sizeMismatch++
-				t.Errorf("%s: pool %d size differs: old=%d new=%d", tag, i, len(oldPools[i].Players), len(newPools[i].Players))
+				t.Errorf("%s: pool %d size differs: got=%d want=%d", tag, i, len(pools[i].Players), wantSizes[i])
 				break
 			}
 		}
 	}
 
-	// Seeds-per-pool.
+	// Seeds-per-pool: never two in one pool.
 	sc.seedShareConfigs++
-	oldSeedFail := seedsSharePool(oldPools)
-	newSeedFail := seedsSharePool(newPools)
-	if oldSeedFail {
-		sc.seedShareOldFail++
-	}
-	if newSeedFail {
-		sc.seedShareNewFail++
-		t.Errorf("%s: two seeds share a pool in the NEW path", tag)
+	if seedsSharePool(pools) {
+		sc.seedShareFail++
+		t.Errorf("%s: two seeds share a pool", tag)
 	}
 
-	// Seed placement equality.
-	oldSeedPool := seedPoolByName(oldPools)
-	newSeedPool := seedPoolByName(newPools)
-	for name, oldPool := range oldSeedPool {
-		sc.seedEqualityChecked++
-		if newSeedPool[name] != oldPool {
-			sc.seedEqualityMismatches++
-			t.Errorf("%s: seed %s pool differs: old=%s new=%s", tag, name, oldPool, newSeedPool[name])
+	// Seed placement equality against the reference pipeline (see
+	// referencePoolSeedingPipeline's own doc comment for what this still
+	// pins and why).
+	refPools, _, err := referencePoolSeedingPipeline(r, poolSize, isMax, courts)
+	if err != nil {
+		t.Errorf("%s: referencePoolSeedingPipeline error: %v", tag, err)
+	} else {
+		refSeedPool := seedPoolByName(refPools)
+		gotSeedPool := seedPoolByName(pools)
+		for name, refPool := range refSeedPool {
+			sc.seedEqualityChecked++
+			if gotSeedPool[name] != refPool {
+				sc.seedEqualityMismatches++
+				t.Errorf("%s: seed %s pool differs: reference=%s got=%s", tag, name, refPool, gotSeedPool[name])
+			}
 		}
 	}
 
-	// Per-pool club-concentration optimum, for every dojo named.
+	// Per-pool club-concentration optimum, for every dojo named: the
+	// ABSOLUTE requirement is zero failures, not "no worse than some other
+	// pipeline" -- a one-pass distributor that can see the whole knockout
+	// tree before it places anyone has no excuse to leave a club
+	// over-concentrated when ceil(clubSize/numPools) was reachable.
 	for _, dojo := range dojos {
 		clubSize := 0
 		for _, p := range r {
@@ -191,22 +252,13 @@ func checkOptimumAndSizesAndSeeds(t *testing.T, sc *gateScorecard, r []Player, n
 		}
 		optimum := (clubSize + numPools - 1) / numPools
 		sc.optimumConfigs++
-		oldFail := maxOfDojo(oldPools, dojo) > optimum
-		newFail := maxOfDojo(newPools, dojo) > optimum
-		if oldFail {
-			sc.optimumOldFail++
-		}
-		if newFail {
-			sc.optimumNewFail++
-		}
-		if newFail && !oldFail {
-			sc.optimumNewWorseThanOld++
-			t.Errorf("%s: dojo %s: new path over-concentrated (new=%d old=%d optimum=%d) where old was not",
-				tag, dojo, maxOfDojo(newPools, dojo), maxOfDojo(oldPools, dojo), optimum)
+		if got := maxOfDojo(pools, dojo); got > optimum {
+			sc.optimumFail++
+			t.Errorf("%s: dojo %s: over-concentrated (got=%d optimum=%d)", tag, dojo, got, optimum)
 		}
 	}
 
-	return oldPools, newPools
+	return pools
 }
 
 func seedsSharePool(pools []Pool) bool {
@@ -224,67 +276,13 @@ func seedsSharePool(pools []Pool) bool {
 	return false
 }
 
-// checkRegionMetric folds the end-to-end region metric for one dojo/config
-// into sc: the earliest knockout round dojo's own qualifiers could meet,
-// under both pipelines, hard-failing if the new path is ever WORSE than the
-// old.
-func checkRegionMetric(t *testing.T, sc *gateScorecard, oldPools, newPools []Pool, poolWinners, drawCourts int, dojo, tag string) {
-	t.Helper()
-	oldRound := earliestClubMeetingRound(oldPools, poolWinners, drawCourts, dojo)
-	newRound := earliestClubMeetingRound(newPools, poolWinners, drawCourts, dojo)
-	if oldRound == mathMaxIntSentinel && newRound == mathMaxIntSentinel {
-		return // dojo did not span >=2 pools under either pipeline: no data
-	}
-	sc.regionConfigs++
-	if oldRound != mathMaxIntSentinel {
-		sc.regionOldSum += oldRound
-		if oldRound == 1 {
-			sc.regionOldRound1++
-		}
-	}
-	if newRound != mathMaxIntSentinel {
-		sc.regionNewSum += newRound
-		if newRound == 1 {
-			sc.regionNewRound1++
-		}
-	}
-
-	switch {
-	case newRound > oldRound:
-		sc.regionNewBetter++
-	case newRound == oldRound:
-		sc.regionNewSame++
-	default: // newRound < oldRound, including new having NO data (sentinel) where old did
-		sc.regionNewWorse++
-		t.Errorf("%s: dojo %s: new path's earliest meeting (%d) is WORSE than old's (%d)", tag, dojo, newRound, oldRound)
-	}
-}
-
-// TestTreeAwareGateScorecard is the decision gate: BuildPoolPhaseTreeAware
-// ships only if this passes. See the file doc comment for what "passes"
-// means and why every assertion here is an Errorf (accumulate and log
+// TestTreeAwareGateScorecard is the closed-gap regression pin the Phase 3
+// decision gate became once the swap landed (Phase 4): BuildPoolPhase and
+// BuildPoolPhaseFillBracket now delegate to the path this test exercises
+// directly, so a regression here IS a regression in production, not in a
+// shadow implementation nobody calls yet. See the file doc comment for what
+// changed and why every assertion here is an Errorf (accumulate and log
 // everything) rather than a require/Fatal (stop at the first finding).
-//
-// NOTE on the per-pool-optimum failures this surfaces (multiclub_2048 and
-// seeded_club_210 below, ~17 of ~6060 optimum checks): every measured
-// instance is the SAME mechanism, root-caused during Phase 3 development,
-// not a scattering of unrelated bugs. sortUnseededByDojoCluster --
-// PoolSeeding's OWN existing dojo-clustering sort, reused verbatim per the
-// Phase 2 brief -- ranks a dojo by its UNSEEDED member count, because that
-// is the only count PoolSeeding's own sort has ever needed (its seeded
-// members are handled by an entirely separate code path). When most of a
-// club's members happen to be seeded, its unseeded residual can be tiny
-// (sometimes just one player) and sorts to the BACK of the one pass, by
-// which point every pool but one is already full -- so that residual is
-// placed wherever room is left, dojo-conflict or not, since the design
-// (bc-dojo) is explicitly "one pass, no repair". The old pipeline tolerates
-// the identical clustering order fine because rebalanceDojosAcrossPools
-// fixes exactly this after the fact; the new one has no such pass by
-// design. Reusing PoolSeeding's sort was the brief's explicit instruction
-// ("the existing clustering order from PoolSeeding's dojo sort"), so this
-// is left as specified rather than swapped for a total-footprint sort
-// (seeded+unseeded) that was NOT authorised here -- see the final report
-// for that as a candidate follow-up.
 func TestTreeAwareGateScorecard(t *testing.T) {
 	sc := &gateScorecard{}
 
@@ -307,7 +305,7 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 								}
 								tag := fmt.Sprintf("multiclub pools=%d size=%d courts=%d clubs=%dx%d seeds=%d",
 									numPools, poolSize, courts, nClubs, clubSize, nSeeds)
-								checkOptimumAndSizesAndSeeds(t, sc, r, numPools, poolSize, false, courts, 1, dojos, tag)
+								checkAbsoluteInvariants(t, sc, r, numPools, poolSize, false, courts, 1, dojos, tag)
 								total++
 							}
 						}
@@ -342,7 +340,7 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 							r = append(r, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
 						}
 						tag := fmt.Sprintf("seededclub pools=%d size=%d seeds=%d extra=%d", numPools, poolSize, nSeeds, clubExtra)
-						checkOptimumAndSizesAndSeeds(t, sc, r, numPools, poolSize, false, 2, 1, []string{"SeedClub"}, tag)
+						checkAbsoluteInvariants(t, sc, r, numPools, poolSize, false, 2, 1, []string{"SeedClub"}, tag)
 						total++
 					}
 				}
@@ -362,23 +360,14 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 				for i := range r {
 					r[i] = Player{Name: fmt.Sprintf("P%03d", i+1), Dojo: fmt.Sprintf("Dojo %03d", i+1)}
 				}
-				oldPools, _, err := BuildPoolPhase(r, poolSize, false, 2)
-				if err != nil {
-					t.Fatalf("BuildPoolPhase error: %v", err)
-				}
-				newPools, _, err := BuildPoolPhaseTreeAware(r, poolSize, false, 2, 1)
+				pools, _, err := BuildPoolPhaseTreeAware(r, poolSize, false, 2, 1)
 				if err != nil {
 					t.Fatalf("BuildPoolPhaseTreeAware error: %v", err)
 				}
 				sc.identityConfigs++
-				oldOK := identityContractHolds(r, numPools, oldPools)
-				newOK := identityContractHolds(r, numPools, newPools)
-				if !oldOK {
-					sc.identityOldFail++
-				}
-				if !newOK {
-					sc.identityNewFail++
-					t.Errorf("pools=%d size=%d: new path breaks the round-robin identity contract", numPools, poolSize)
+				if !identityContractHolds(r, numPools, pools) {
+					sc.identityFail++
+					t.Errorf("pools=%d size=%d: production path breaks the round-robin identity contract", numPools, poolSize)
 				}
 			}
 		}
@@ -387,15 +376,16 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 	// --- Sweep 4: end-to-end region metric across courts 1/2/4 and winners
 	// 1/2, judged against the BRUTE-FORCE CEILING for every config. ---
 	//
-	// The gate originally demanded the three Phase 0 reproducers beat round
-	// 1. That demand was WRONG, proven by exhaustive brute force: at
-	// winners=1 those shapes' clubs occupy more than half the qualifying
-	// pools, so pigeonhole forces a round-1 club pair no matter which pools
-	// are chosen -- their ceiling IS 1, for any algorithm. The correct
-	// requirement, enforced below for EVERY config with data: the new path's
-	// earliest club meeting must EQUAL the best any pool assignment could
-	// achieve (max over all pool subsets of the min pairwise meeting round),
-	// unfixable shapes included, where equalling a ceiling of 1 passes.
+	// The gate originally (Phase 3) demanded the three Phase 0 reproducers
+	// beat round 1. That demand was WRONG, proven by exhaustive brute
+	// force: at winners=1 those shapes' clubs occupy more than half the
+	// qualifying pools, so pigeonhole forces a round-1 club pair no matter
+	// which pools are chosen -- their ceiling IS 1, for any algorithm. The
+	// correct requirement, enforced below for EVERY config with data: the
+	// production path's earliest club meeting must EQUAL the best any pool
+	// assignment could achieve (max over all pool subsets of the min
+	// pairwise meeting round), unfixable shapes included, where equalling a
+	// ceiling of 1 passes.
 	t.Run("end_to_end_region", func(t *testing.T) {
 		for numPools := 3; numPools <= 7; numPools++ {
 			for clubSize := 2; clubSize <= numPools+2; clubSize++ {
@@ -407,35 +397,36 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 				for _, courts := range []int{1, 2, 4} {
 					for _, winners := range []int{1, 2} {
 						tag := fmt.Sprintf("e2e pools=%d club=%d courts=%d winners=%d", numPools, clubSize, courts, winners)
-						oldPools, drawCourts, err := BuildPoolPhase(r, poolSize, false, courts)
-						if err != nil {
-							t.Errorf("%s: BuildPoolPhase error: %v", tag, err)
-							continue
-						}
-						newPools, newDrawCourts, err := BuildPoolPhaseTreeAware(r, poolSize, false, courts, winners)
+						pools, drawCourts, err := BuildPoolPhaseTreeAware(r, poolSize, false, courts, winners)
 						if err != nil {
 							t.Errorf("%s: BuildPoolPhaseTreeAware error: %v", tag, err)
 							continue
 						}
-						checkRegionMetric(t, sc, oldPools, newPools, winners, drawCourts, "Club0", tag)
 
-						newRound := earliestClubMeetingRound(newPools, winners, newDrawCourts, "Club0")
-						if newRound != math.MaxInt {
-							_, newSizes, tErr := poolTargetSizes(len(r), poolSize, false)
-							if tErr != nil {
-								t.Errorf("%s: poolTargetSizes: %v", tag, tErr)
-								continue
-							}
-							span := clubSize
-							if span > numPools {
-								span = numPools
-							}
-							ceiling := bruteForceMeetingCeiling(newSizes, winners, newDrawCourts, span)
-							sc.optimumMeetConfigs++
-							if newRound < ceiling {
-								sc.optimumMeetBelow++
-								t.Errorf("%s: new path meets at round %d but the brute-force ceiling for this shape is %d", tag, newRound, ceiling)
-							}
+						round := earliestClubMeetingRound(pools, winners, drawCourts, "Club0")
+						if round == mathMaxIntSentinel {
+							continue // Club0 did not span >=2 pools in this config: no data
+						}
+						sc.regionConfigs++
+						sc.regionSum += round
+						if round == 1 {
+							sc.regionRound1++
+						}
+
+						_, newSizes, tErr := poolTargetSizes(len(r), poolSize, false)
+						if tErr != nil {
+							t.Errorf("%s: poolTargetSizes: %v", tag, tErr)
+							continue
+						}
+						span := clubSize
+						if span > numPools {
+							span = numPools
+						}
+						ceiling := bruteForceMeetingCeiling(newSizes, winners, drawCourts, span)
+						sc.optimumMeetConfigs++
+						if round < ceiling {
+							sc.optimumMeetBelow++
+							t.Errorf("%s: production path meets at round %d but the brute-force ceiling for this shape is %d", tag, round, ceiling)
 						}
 					}
 				}
@@ -445,11 +436,27 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 
 	t.Log(sc.String())
 
-	// Overall gate: the region metric must STRICTLY improve in aggregate,
-	// not merely tie. A gate that only promises "no worse" would ship a
-	// rebuild that changes nothing.
-	if sc.regionNewSum <= sc.regionOldSum {
-		t.Errorf("GATE FAIL: region metric did not strictly improve overall: old-sum=%d new-sum=%d", sc.regionOldSum, sc.regionNewSum)
+	// Overall gate: absolute, zero-failure requirements.
+	if sc.optimumFail != 0 {
+		t.Errorf("GATE FAIL: %d per-pool optimum failure(s) on the production path", sc.optimumFail)
+	}
+	if sc.sizeMismatch != 0 {
+		t.Errorf("GATE FAIL: %d pool-size mismatch(es) against the target sizes", sc.sizeMismatch)
+	}
+	if sc.seedShareFail != 0 {
+		t.Errorf("GATE FAIL: %d config(s) with two seeds sharing a pool", sc.seedShareFail)
+	}
+	if sc.seedEqualityMismatches != 0 {
+		t.Errorf("GATE FAIL: %d seed(s) placed in a different pool than referencePoolSeedingPipeline", sc.seedEqualityMismatches)
+	}
+	if sc.identityFail != 0 {
+		t.Errorf("GATE FAIL: %d config(s) broke the unique-dojo round-robin identity contract", sc.identityFail)
+	}
+	if sc.optimumMeetBelow != 0 {
+		t.Errorf("GATE FAIL: %d config(s) met earlier than the brute-force ceiling", sc.optimumMeetBelow)
+	}
+	if sc.optimumMeetConfigs != 180 {
+		t.Errorf("GATE FAIL: expected 180 end-to-end configs with data, got %d (sweep shrank or grew)", sc.optimumMeetConfigs)
 	}
 	if sc.regionConfigs == 0 {
 		t.Errorf("GATE FAIL: region sweep produced no data (configs with a club spanning >=2 pools) -- the gate cannot be evaluated")
@@ -457,7 +464,8 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 }
 
 // identityContractHolds is TestPoolDistribution_UniqueDojoIdentity's own
-// check, extracted so the gate scorecard can run it against both pipelines.
+// check, extracted so the gate scorecard can run it against the production
+// path.
 func identityContractHolds(r []Player, numPools int, pools []Pool) bool {
 	poolOf := map[string]string{}
 	for _, p := range pools {
@@ -484,7 +492,7 @@ func identityContractHolds(r []Player, numPools int, pools []Pool) bool {
 // between the chosen pools' qualifier slots. Exponential in numPools, which
 // is capped at 7 in the sweep, so at most C(7,3)=35 subsets of pair-checks.
 func bruteForceMeetingCeiling(targetSizes []int, poolWinners, drawCourts, span int) int {
-	slots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts)
+	slots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: qualifierModeStandard})
 	n := len(slots)
 	if span < 2 || span > n {
 		return math.MaxInt

@@ -234,10 +234,10 @@ func StandardSeeding(players []Player) []Player {
 // the first round.
 //
 // Why it is needed: unseeded competitors fill bracket slots in roster order and
-// CreateBalancedTree pairs adjacent slots, so a roster entered club by club --
-// which is how operators paste one -- opens with club-mate against club-mate.
+// CreateBalancedTree pairs adjacent slots, so a roster entered dojo by dojo --
+// which is how operators paste one -- opens with dojo-mate against dojo-mate.
 // Measured before this existed: 16 competitors from four dojos of four gave
-// EIGHT first-round matches, every one intra-club.
+// EIGHT first-round matches, every one intra-dojo.
 //
 // Not first is only half the rule. Two competitors from one dojo placed in the
 // same half still meet in the semi-final when the bracket could have held them
@@ -259,7 +259,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	}
 
 	// A hill climb on the total of every same-dojo pair's meeting round: the
-	// higher the total, the later club-mates meet. A first-round pairing
+	// higher the total, the later dojo-mates meet. A first-round pairing
 	// scores the minimum, so removing one is always the largest single gain
 	// available, which is why "never first" falls out of maximising this
 	// rather than needing a rule of its own.
@@ -546,7 +546,7 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 // Deriving the pool a seed ends up in from an index here is a SEPARATE step
 // (index i lands in pool i%numPools once CreatePools' straight fill runs
 // over the full permuted roster, absent a dojo conflict against an
-// already-placed unseeded club-mate) -- verified byte-identical against the
+// already-placed unseeded dojo-mate) -- verified byte-identical against the
 // real fill across 24000+ seeded/dojo configurations during bc-dojo Phase 2
 // (see the seed-equality pin test), never assumed.
 func placeSeedsForPools(seeded []Player, numPools, numCourts, totalLen int) (result []Player, occupied map[int]bool) {

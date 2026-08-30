@@ -11,7 +11,7 @@ Luke Rodriguez, Team Beta
 Michael Lewis, Team Gamma
 ```
 
-The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**: a row with no dojo is rejected, because a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. The dojo is what the draw uses to keep club-mates apart, in the pools and in the first round of a knockout.
+The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**: a row with no dojo is rejected, because a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. The dojo is what the draw uses to keep dojo-mates apart, in the pools and in the first round of a knockout.
 
 ## Zekken display name
 

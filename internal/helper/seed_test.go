@@ -1695,7 +1695,7 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 		{Name: "Chris Bowden", Dojo: "Ichi Byoshi"},
 		{Name: "Ruairidh Pooler", Dojo: "Scotland"},
 		{Name: "Royth von Hahn", Dojo: "Kendo Dojo Koln"},
-		{Name: "Mykolas Maciulevicius", Dojo: "Iron Wolf Kendo Club"},
+		{Name: "Mykolas Maciulevicius", Dojo: "Iron Wolf Kendo Dojo"},
 		{Name: "Jonathan Fitzgerald", Dojo: "Peristeri Kenyukai"},
 		{Name: "Dominik Christ", Dojo: "Tora Dojo London"},
 		{Name: "Denis Arsenin", Dojo: "Latvian Kendo Federation"},
@@ -2332,17 +2332,17 @@ func TestPoolSeeding_SingleCourt_DojoSpread(t *testing.T) {
 // the knockout's first-round dojo separation.
 //
 // Seeds occupy slots computed before the unseeded are placed, which shifts the
-// dojo-clustered fill and could leave two club-mates in one pool on a roster
+// dojo-clustered fill and could leave two dojo-mates in one pool on a roster
 // that spreads perfectly without seeds. Measured before the repair pass: four
-// pools holding four 3-member clubs spread every club one-per-pool with no
+// pools holding four 3-member dojos spread every dojo one-per-pool with no
 // seeds, and put two together the moment two seeds were set.
 func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
-	build := func(numPools, poolSize, nClubs, clubSize, nSeeds int) []Player {
+	build := func(numPools, poolSize, nDojos, dojoGroupSize, nSeeds int) []Player {
 		n := numPools * poolSize
 		r := make([]Player, 0, n)
-		for c := 0; c < nClubs; c++ {
-			for i := 1; i <= clubSize; i++ {
-				r = append(r, Player{Name: fmt.Sprintf("C%d_%d", c, i), Dojo: fmt.Sprintf("Club%d", c)})
+		for c := 0; c < nDojos; c++ {
+			for i := 1; i <= dojoGroupSize; i++ {
+				r = append(r, Player{Name: fmt.Sprintf("C%d_%d", c, i), Dojo: fmt.Sprintf("Dojo%d", c)})
 			}
 		}
 		for i := len(r) + 1; i <= n; i++ {
@@ -2353,10 +2353,10 @@ func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
 		}
 		return r
 	}
-	worstSameDojo := func(pools []Pool, nClubs int) int {
+	worstSameDojo := func(pools []Pool, nDojos int) int {
 		m := 0
-		for c := 0; c < nClubs; c++ {
-			dojo := fmt.Sprintf("Club%d", c)
+		for c := 0; c < nDojos; c++ {
+			dojo := fmt.Sprintf("Dojo%d", c)
 			for _, p := range pools {
 				k := 0
 				for _, pl := range p.Players {
@@ -2373,27 +2373,27 @@ func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                                         string
-		numPools, poolSize, courts, nClubs, clubSize int
-		seeds                                        int
+		name                                              string
+		numPools, poolSize, courts, nDojos, dojoGroupSize int
+		seeds                                             int
 	}{
 		// Both cases were measured suboptimal before the repair pass, and both
 		// spread perfectly with the same roster and no seeds.
-		{"four 3-member clubs, two seeds", 4, 3, 1, 4, 3, 2},
-		{"four 5-member clubs, four seeds", 7, 3, 2, 4, 5, 4},
+		{"four 3-member dojos, two seeds", 4, 3, 1, 4, 3, 2},
+		{"four 5-member dojos, four seeds", 7, 3, 2, 4, 5, 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			optimum := (tt.clubSize + tt.numPools - 1) / tt.numPools
+			optimum := (tt.dojoGroupSize + tt.numPools - 1) / tt.numPools
 
-			unseeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nClubs, tt.clubSize, 0), tt.poolSize, false, tt.courts)
+			unseeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nDojos, tt.dojoGroupSize, 0), tt.poolSize, false, tt.courts)
 			require.NoError(t, err)
-			require.Equal(t, optimum, worstSameDojo(unseeded, tt.nClubs),
+			require.Equal(t, optimum, worstSameDojo(unseeded, tt.nDojos),
 				"baseline: the same roster without seeds must already spread optimally")
 
-			seeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nClubs, tt.clubSize, tt.seeds), tt.poolSize, false, tt.courts)
+			seeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nDojos, tt.dojoGroupSize, tt.seeds), tt.poolSize, false, tt.courts)
 			require.NoError(t, err)
-			assert.Equal(t, optimum, worstSameDojo(seeded, tt.nClubs),
+			assert.Equal(t, optimum, worstSameDojo(seeded, tt.nDojos),
 				"setting seeds must not make the dojo spread worse than the same roster without them")
 
 			// Sizes and seed separation are invariants of the repair pass: it
@@ -2416,14 +2416,14 @@ func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
 }
 
 // TestStandardSeeding_DelaysDojoMeetings pins the knockout counterpart of the
-// pool draw's dojo avoidance: club-mates must not meet in the first round, and
+// pool draw's dojo avoidance: dojo-mates must not meet in the first round, and
 // beyond that must meet as LATE as the bracket allows.
 //
-// Operators paste a roster club by club, unseeded competitors fill bracket
+// Operators paste a roster dojo by dojo, unseeded competitors fill bracket
 // slots in roster order, and CreateBalancedTree pairs adjacent slots, so
 // before delayDojoMeetings existed a roster of four dojos of four produced a
-// first round in which EVERY match was club-mate against club-mate. Pushing
-// them out of round one is only half of it: two club-mates left in the same
+// first round in which EVERY match was dojo-mate against dojo-mate. Pushing
+// them out of round one is only half of it: two dojo-mates left in the same
 // half still meet in the semi-final when the draw could have held them apart
 // until the final.
 func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
@@ -2437,41 +2437,41 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 		}
 		return n
 	}
-	clubGrouped := func(nClubs, clubSize int) []Player {
+	dojoGrouped := func(nDojos, dojoGroupSize int) []Player {
 		var roster []Player
-		for c := 0; c < nClubs; c++ {
-			for i := 1; i <= clubSize; i++ {
+		for c := 0; c < nDojos; c++ {
+			for i := 1; i <= dojoGroupSize; i++ {
 				roster = append(roster, Player{
 					Name: fmt.Sprintf("C%d_%d", c, i),
-					Dojo: fmt.Sprintf("Club%d", c),
+					Dojo: fmt.Sprintf("Dojo%d", c),
 				})
 			}
 		}
 		return roster
 	}
 
-	t.Run("club-grouped roster gets no same-dojo first round", func(t *testing.T) {
-		assert.Equal(t, 0, countR1Clashes(StandardSeeding(clubGrouped(4, 4))),
+	t.Run("dojo-grouped roster gets no same-dojo first round", func(t *testing.T) {
+		assert.Equal(t, 0, countR1Clashes(StandardSeeding(dojoGrouped(4, 4))),
 			"no first-round match may be between two members of one dojo when the draw allows otherwise")
 	})
 
-	t.Run("club-mates meet as late as the bracket allows", func(t *testing.T) {
+	t.Run("dojo-mates meet as late as the bracket allows", func(t *testing.T) {
 		// The bracket halves at every round, so N competitors can be kept
-		// apart until round N-ceil(log2(clubSize))+1 and no later: a club of
+		// apart until round N-ceil(log2(dojoGroupSize))+1 and no later: a dojo of
 		// two can be split across the halves and meet only in the final, a
-		// club of four across the quarters and meet in the semi-final.
+		// dojo of four across the quarters and meet in the semi-final.
 		// Anything earlier than that bound is a draw that gave up too soon.
-		for _, tc := range []struct{ n, nClubs, clubSize int }{
+		for _, tc := range []struct{ n, nDojos, dojoGroupSize int }{
 			{8, 2, 2}, {16, 2, 2}, {16, 3, 2}, {16, 2, 4}, {32, 4, 4},
 		} {
-			roster := clubGrouped(tc.nClubs, tc.clubSize)
+			roster := dojoGrouped(tc.nDojos, tc.dojoGroupSize)
 			for i := len(roster) + 1; i <= tc.n; i++ {
 				roster = append(roster, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
 			}
 			out := StandardSeeding(roster)
 
 			rounds := bits.Len(uint(tc.n)) - 1
-			best := rounds - (bits.Len(uint(tc.clubSize - 1))) + 1
+			best := rounds - (bits.Len(uint(tc.dojoGroupSize - 1))) + 1
 			slots := map[string][]int{}
 			for slot, p := range out {
 				if p.Name != "" {
@@ -2491,8 +2491,8 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 					}
 				}
 				assert.GreaterOrEqual(t, earliest, best,
-					"n=%d clubs=%dx%d: %s meets in round %d, but the bracket allows round %d",
-					tc.n, tc.nClubs, tc.clubSize, dojo, earliest, best)
+					"n=%d dojos=%dx%d: %s meets in round %d, but the bracket allows round %d",
+					tc.n, tc.nDojos, tc.dojoGroupSize, dojo, earliest, best)
 			}
 		}
 	})
@@ -2536,7 +2536,7 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 				}
 				roster := make([]Player, n)
 				for i := range roster {
-					roster[i] = Player{Name: fmt.Sprintf("P%02d", i+1), Dojo: "OneClub"}
+					roster[i] = Player{Name: fmt.Sprintf("P%02d", i+1), Dojo: "OneDojo"}
 				}
 				for s := 0; s < nSeeds; s++ {
 					roster[s].Seed = s + 1
@@ -2565,7 +2565,7 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 		// ranks, not a fault in the draw.
 		roster := make([]Player, 6)
 		for i := range roster {
-			roster[i] = Player{Name: fmt.Sprintf("S%02d", i+1), Dojo: "SeedClub", Seed: i + 1}
+			roster[i] = Player{Name: fmt.Sprintf("S%02d", i+1), Dojo: "SeedDojo", Seed: i + 1}
 		}
 		out := StandardSeeding(roster)
 		assert.Positive(t, countR1Clashes(out),

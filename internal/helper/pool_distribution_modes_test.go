@@ -48,14 +48,14 @@ func buildLargerPoolsOverrides(pools []Pool, minSize, poolWinners int) map[int]i
 	return overrides
 }
 
-// TestQualifierModeSeam_LargerPools sweeps a handful of oversubscribed-club
+// TestQualifierModeSeam_LargerPools sweeps a handful of oversubscribed-dojo
 // shapes at poolWinners=1 (state.ValidateExtraQualifiers' own gate for this
 // mode) and asserts:
 //  1. BuildPoolPhaseTreeAwareWithMode(..., "larger-pools", minSize) produces
 //     pools BuildKnockoutDrawPerPool (production's real larger-pools
 //     builder) can build a draw from.
 //  2. Scoring against the REAL larger-pools tree (mode-aware) never places
-//     a club's own qualifiers to meet EARLIER than mode-blind (standard
+//     a dojo's own qualifiers to meet EARLIER than mode-blind (standard
 //     scoring) placement would, for the identical pool count/sizes fed to
 //     the identical real draw -- and at least one swept config shows a
 //     STRICT improvement, proving the seam changes the outcome rather than
@@ -74,8 +74,8 @@ func TestQualifierModeSeam_LargerPools(t *testing.T) {
 				// the oversized pool larger-pools' extra qualifier exists
 				// for.
 				n := numPools*minSize + 1
-				r := buildClubRoster(numPools, minSize, 1, 2, 0)
-				// buildClubRoster sizes its roster at numPools*poolSize
+				r := buildMultiDojoRoster(numPools, minSize, 1, 2, 0)
+				// buildMultiDojoRoster sizes its roster at numPools*poolSize
 				// exactly; pad by one extra unique-dojo filler to reach n.
 				r = append(r, Player{Name: "Filler", Dojo: "FillerDojo"})
 				require.Len(t, r, n)
@@ -104,10 +104,10 @@ func TestQualifierModeSeam_LargerPools(t *testing.T) {
 				blindDraw := BuildKnockoutDrawPerPool(blindPools, poolWinners, overrides, drawCourts)
 				require.NotNil(t, blindDraw, "%s: BuildKnockoutDrawPerPool refused the mode-blind pools", tag)
 
-				awareRound := earliestMeetingRoundInDraw(awareDraw, awarePools, "Club0")
-				blindRound := earliestMeetingRoundInDraw(blindDraw, blindPools, "Club0")
+				awareRound := earliestMeetingRoundInDraw(awareDraw, awarePools, "Dojo0")
+				blindRound := earliestMeetingRoundInDraw(blindDraw, blindPools, "Dojo0")
 				if awareRound == mathMaxIntSentinel {
-					continue // Club0 did not span >=2 pools in this shape: no data
+					continue // Dojo0 did not span >=2 pools in this shape: no data
 				}
 				configs++
 				assert.GreaterOrEqualf(t, awareRound, blindRound,
@@ -119,7 +119,7 @@ func TestQualifierModeSeam_LargerPools(t *testing.T) {
 		}
 	}
 
-	require.Greater(t, configs, 0, "sweep produced no data (no config had Club0 spanning >=2 pools)")
+	require.Greater(t, configs, 0, "sweep produced no data (no config had Dojo0 spanning >=2 pools)")
 	assert.Greater(t, strictImprovement, 0, "mode-aware larger-pools scoring never strictly improved over mode-blind scoring across the sweep; the seam may be wired to nothing")
 }
 
@@ -127,7 +127,7 @@ func TestQualifierModeSeam_LargerPools(t *testing.T) {
 // for fill-bracket mode: BuildPoolPhaseFillBracketTreeAware's pools must
 // feed SelectFillBracketDraftIndices + BuildKnockoutDrawFillBracket
 // (production's real fill-bracket pipeline) successfully, and mode-aware
-// scoring must never place a club to meet earlier than mode-blind scoring
+// scoring must never place a dojo to meet earlier than mode-blind scoring
 // does under the IDENTICAL real fill-bracket draw (same pool count/sizes,
 // hence the same draftPoolIdx -- draft selection reads only sizes and which
 // pools are seeded, both invariant between the two runs).
@@ -143,17 +143,17 @@ func TestQualifierModeSeam_FillBracket(t *testing.T) {
 			// A single UNRELATED seed (rank 1) gives fill-bracket's own
 			// seeded-pools-first draft selection something to draft from
 			// (mirrors TestBuildPoolPhaseFillBracket_45's own shape) --
-			// Club0 itself is entirely UNSEEDED, deliberately: a seed's
+			// Dojo0 itself is entirely UNSEEDED, deliberately: a seed's
 			// pool is fixed by placeSeedIndices regardless of qualifier
 			// mode (mode only ever influences the UNSEEDED one-pass
-			// placement), so a club made of seeds would land identically
+			// placement), so a dojo made of seeds would land identically
 			// under mode-aware and mode-blind scoring and could never show
 			// the improvement this test exists to catch.
 			r := make([]Player, 0, n)
 			r = append(r, Player{Name: "Seed1", Dojo: "SeedDojo", Seed: 1})
 			r = append(r,
-				Player{Name: "C0_1", Dojo: "Club0"},
-				Player{Name: "C0_2", Dojo: "Club0"},
+				Player{Name: "C0_1", Dojo: "Dojo0"},
+				Player{Name: "C0_2", Dojo: "Dojo0"},
 			)
 			for i := len(r) + 1; i <= n; i++ {
 				r = append(r, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
@@ -194,8 +194,8 @@ func TestQualifierModeSeam_FillBracket(t *testing.T) {
 			blindDraw := BuildKnockoutDrawFillBracket(blindPools, draftIdx, drawCourts)
 			require.NotNil(t, blindDraw, "%s: BuildKnockoutDrawFillBracket refused the mode-blind pools", tag)
 
-			awareRound := earliestMeetingRoundInDraw(awareDraw, awarePools, "Club0")
-			blindRound := earliestMeetingRoundInDraw(blindDraw, blindPools, "Club0")
+			awareRound := earliestMeetingRoundInDraw(awareDraw, awarePools, "Dojo0")
+			blindRound := earliestMeetingRoundInDraw(blindDraw, blindPools, "Dojo0")
 			if awareRound == mathMaxIntSentinel {
 				continue
 			}
@@ -208,6 +208,6 @@ func TestQualifierModeSeam_FillBracket(t *testing.T) {
 		}
 	}
 
-	require.Greater(t, configs, 0, "sweep produced no data (no config had Club0 spanning >=2 pools)")
+	require.Greater(t, configs, 0, "sweep produced no data (no config had Dojo0 spanning >=2 pools)")
 	assert.Greater(t, strictImprovement, 0, "mode-aware fill-bracket scoring never strictly improved over mode-blind scoring across the sweep; the seam may be wired to nothing")
 }

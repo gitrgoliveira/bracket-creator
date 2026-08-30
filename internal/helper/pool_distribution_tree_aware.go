@@ -52,7 +52,7 @@ import (
 //     PoolSeeding's own unseeded-only dojo sort), by pickTreeAwarePool:
 //     among the pools that still have room, the one that pushes this
 //     player's earliest possible knockout meeting with an already-placed
-//     club-mate the LATEST, ties broken by leastConflictedPool's existing
+//     dojo-mate the LATEST, ties broken by leastConflictedPool's existing
 //     rule. There is no repair pass: the old pipeline needed one (a
 //     post-fill dojo-swap pass, since deleted) to fix what a blind,
 //     order-dependent fill could not see coming, and that problem does not
@@ -240,14 +240,14 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// dojo's size counts EVERY member on the roster, seeded ones included,
 	// not just its unseeded residue. This deliberately diverges from
 	// sortUnseededByDojoCluster (the old pipeline's order, kept verbatim
-	// there): under the unseeded-only count, a club whose members are mostly
+	// there): under the unseeded-only count, a dojo whose members are mostly
 	// SEEDED sorts its lone unseeded straggler to the back of the pass, by
 	// which point only conflicted pools have room -- and with no repair pass
 	// behind it, the placement stands. Measured before this ordering: 17 of
 	// 6060 gate configs regressed the per-pool optimum through exactly that
-	// starvation (e.g. pools=4, clubs=4x3, seeds=2: the lone unseeded C0_3
-	// deferred behind nine strangers and forced into a club-mate's pool).
-	// Counting seeded members restores the club's true urgency; the old
+	// starvation (e.g. pools=4, dojos=4x3, seeds=2: the lone unseeded C0_3
+	// deferred behind nine strangers and forced into a dojo-mate's pool).
+	// Counting seeded members restores the dojo's true urgency; the old
 	// pipeline (before its own repair pass was deleted alongside this swap)
 	// never needed this because that repair pass fixed the same mistake
 	// after the fact.
@@ -266,36 +266,36 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	}
 
 	// Step 4: strictly-improving meeting repairs. The one pass above is
-	// greedy per player, and on a MULTI-club roster the clubs placed early
-	// can box a later club into pools whose qualifiers meet in round 1 even
-	// though a mutual exchange would suit both clubs -- measured on the real
+	// greedy per player, and on a MULTI-dojo roster the dojos placed early
+	// can box a later dojo into pools whose qualifiers meet in round 1 even
+	// though a mutual exchange would suit both dojos -- measured on the real
 	// example rosters before this step existed: Team Epsilon (mock_data_small)
 	// went from meeting in round 2 to round 1, and Team Xi
 	// (mock_data_large_zekken) from round 5 to round 1, both while the
-	// roster's OTHER clubs improved. A per-player chooser cannot see those
+	// roster's OTHER dojos improved. A per-player chooser cannot see those
 	// trades because each player is final the moment it is placed; only the
 	// finished pools can. The operator's rule is absolute -- a first match
-	// against a club-mate must not happen where any assignment avoids it --
+	// against a dojo-mate must not happen where any assignment avoids it --
 	// so the finished pools get a repair loop: unseeded-for-unseeded
 	// exchanges, accepted only when they strictly improve
-	// (fewer clubs meeting in round 1, then a later meeting-sum), never
-	// worsen ANY club's earliest meeting, never move a seed and never break
-	// a club's per-pool optimum. Single-club rosters are already at their
+	// (fewer dojos meeting in round 1, then a later meeting-sum), never
+	// worsen ANY dojo's earliest meeting, never move a seed and never break
+	// a dojo's per-pool optimum. Single-dojo rosters are already at their
 	// brute-force ceiling (the Phase 3 gate pins 180/180), so this loop is a
 	// no-op there, which is what keeps the gate numbers, the goldens and the
 	// unique-dojo identity contract exactly where they were.
-	improveClubMeetings(pools, targetSizes, qualifierSlots, players)
+	improveDojoMeetings(pools, targetSizes, qualifierSlots, players)
 
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
 }
 
-// clubEarliestMeeting returns the earliest knockout round two of dojo's pools
+// earliestDojoMeeting returns the earliest knockout round two of dojo's pools
 // are drawn to meet, or math.MaxInt when dojo occupies fewer than two pools.
 // pairRound is the precomputed pool-pair meeting matrix (poolPairRounds):
 // the repair loop evaluates hundreds of thousands of candidate exchanges,
 // and recomputing each pool pair's slot pairing per candidate multiplied the
 // whole test suite's runtime by three before the matrix existed.
-func clubEarliestMeeting(pools []Pool, pairRound [][]int, dojo string) int {
+func earliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string) int {
 	earliest := math.MaxInt
 	for i := range pools {
 		if countDojoInPool(pools[i], dojo) == 0 || i >= len(pairRound) {
@@ -330,17 +330,17 @@ func poolPairRounds(qualifierSlots [][]int) [][]int {
 	return m
 }
 
-// improveClubMeetings is the multi-club repair loop described at its call
+// improveDojoMeetings is the multi-dojo repair loop described at its call
 // site. Objective, lexicographic and strictly decreasing on every accepted
-// exchange (so the loop terminates): first the number of multi-pool clubs
+// exchange (so the loop terminates): first the number of multi-pool dojos
 // whose earliest meeting is round 1, then the negated sum of finite meeting
-// rounds. An exchange moves one unseeded player of a round-1 club out of one
+// rounds. An exchange moves one unseeded player of a round-1 dojo out of one
 // of its pools in return for an unseeded player of a different dojo, and is
 // legal only when afterwards (a) neither exchanged dojo's earliest meeting
-// got EARLIER, (b) neither pool holds more of either dojo than the club's
+// got EARLIER, (b) neither pool holds more of either dojo than the dojo's
 // per-pool optimum ceil(total/numPools) allows, so the spread invariants the
 // gate pins survive by construction.
-func improveClubMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int, roster []Player) {
+func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int, roster []Player) {
 	pairRound := poolPairRounds(qualifierSlots)
 	footprint := make(map[string]int, len(roster))
 	for _, p := range roster {
@@ -359,7 +359,7 @@ func improveClubMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 					continue
 				}
 				seen[pl.Dojo] = true
-				if m := clubEarliestMeeting(pools, pairRound, pl.Dojo); m != math.MaxInt {
+				if m := earliestDojoMeeting(pools, pairRound, pl.Dojo); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
 					}
@@ -391,8 +391,8 @@ func improveClubMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 				if a.Seed > 0 {
 					continue
 				}
-				if m := clubEarliestMeeting(pools, pairRound, a.Dojo); m > 1 {
-					continue // only members of a round-1 club are worth moving
+				if m := earliestDojoMeeting(pools, pairRound, a.Dojo); m > 1 {
+					continue // only members of a round-1 dojo are worth moving
 				}
 				for j := 0; j < numPools && !improved; j++ {
 					if j == i {
@@ -412,14 +412,14 @@ func improveClubMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 						}
 						// Only the two exchanged dojos' meetings can move,
 						// so the objective is updated by their delta rather
-						// than recomputed over every club (which made the
+						// than recomputed over every dojo (which made the
 						// 2048-config sweep ~6x slower for no extra
 						// information).
-						beforeA := clubEarliestMeeting(pools, pairRound, a.Dojo)
-						beforeB := clubEarliestMeeting(pools, pairRound, b.Dojo)
+						beforeA := earliestDojoMeeting(pools, pairRound, a.Dojo)
+						beforeB := earliestDojoMeeting(pools, pairRound, b.Dojo)
 						pools[i].Players[ai], pools[j].Players[bi] = b, a
-						afterA := clubEarliestMeeting(pools, pairRound, a.Dojo)
-						afterB := clubEarliestMeeting(pools, pairRound, b.Dojo)
+						afterA := earliestDojoMeeting(pools, pairRound, a.Dojo)
+						afterB := earliestDojoMeeting(pools, pairRound, b.Dojo)
 						newR1, newNS := curR1, curNS
 						for _, d := range [2][2]int{{beforeA, afterA}, {beforeB, afterB}} {
 							bef, aft := d[0], d[1]
@@ -448,15 +448,15 @@ func improveClubMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 		if !improved {
 			// Pairwise exchanges can stall in a local optimum that a
 			// three-way rotation escapes: measured on mock_data_small (five
-			// 2-member clubs over three pools), the pairwise fixpoint left
-			// two clubs meeting in round 1 that the old pipeline's
+			// 2-member dojos over three pools), the pairwise fixpoint left
+			// two dojos meeting in round 1 that the old pipeline's
 			// accidental placement kept at round 2, proving a better
 			// assignment existed. Try rotations a->Q, b->R, c->P among
 			// unseeded players of three distinct dojos, same guards, same
 			// strictly-improving objective; on success resume the pairwise
-			// loop. Only attempted at a stall with round-1 clubs remaining,
+			// loop. Only attempted at a stall with round-1 dojos remaining,
 			// so the common case never pays for it.
-			if !rotateForClubMeetings(pools, pairRound, optimum, curR1, curNS, better) {
+			if !rotateForDojoMeetings(pools, pairRound, optimum, curR1, curNS, better) {
 				break
 			}
 		}
@@ -490,7 +490,7 @@ func improveClubMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 // Calling poolQualifierPaths directly on PRE-reorder targetSizes silently
 // scores every candidate against the WRONG topology whenever ReorderPoolsForCourts
 // would actually move anything (its own activation condition, numPools >
-// numCourts): measured in testing (bc-dojo Phase 2/3) to relabel a same-club
+// numCourts): measured in testing (bc-dojo Phase 2/3) to relabel a same-dojo
 // pairing that the real draw puts in round 2 as a round-1 pairing instead,
 // because pool position 2 pre-reorder can land adjacent to position 0
 // post-reorder while looking two slots apart before the permutation.
@@ -736,12 +736,12 @@ func sortUnseededByTotalDojoFootprint(unseeded, roster []Player) {
 	})
 }
 
-// rotateForClubMeetings attempts one strictly-improving three-way rotation of
+// rotateForDojoMeetings attempts one strictly-improving three-way rotation of
 // unseeded players (a: P->Q, b: Q->R, c: R->P), guarded exactly as the
-// pairwise exchanges are: no involved club's earliest meeting may get
+// pairwise exchanges are: no involved dojo's earliest meeting may get
 // earlier, every involved dojo stays within its per-pool optimum, seeds are
 // never touched. Returns whether a rotation was applied.
-func rotateForClubMeetings(pools []Pool, pairRound [][]int, optimum func(string) int, curR1, curNS int, better func(int, int, int, int) bool) bool {
+func rotateForDojoMeetings(pools []Pool, pairRound [][]int, optimum func(string) int, curR1, curNS int, better func(int, int, int, int) bool) bool {
 	numPools := len(pools)
 	for i := 0; i < numPools; i++ {
 		for ai := range pools[i].Players {
@@ -749,7 +749,7 @@ func rotateForClubMeetings(pools []Pool, pairRound [][]int, optimum func(string)
 			if a.Seed > 0 {
 				continue
 			}
-			if m := clubEarliestMeeting(pools, pairRound, a.Dojo); m > 1 {
+			if m := earliestDojoMeeting(pools, pairRound, a.Dojo); m > 1 {
 				continue
 			}
 			for j := 0; j < numPools; j++ {
@@ -776,13 +776,13 @@ func rotateForClubMeetings(pools []Pool, pairRound [][]int, optimum func(string)
 								countDojoInPool(pools[i], c.Dojo)+1 > optimum(c.Dojo) {
 								continue
 							}
-							befA := clubEarliestMeeting(pools, pairRound, a.Dojo)
-							befB := clubEarliestMeeting(pools, pairRound, b.Dojo)
-							befC := clubEarliestMeeting(pools, pairRound, c.Dojo)
+							befA := earliestDojoMeeting(pools, pairRound, a.Dojo)
+							befB := earliestDojoMeeting(pools, pairRound, b.Dojo)
+							befC := earliestDojoMeeting(pools, pairRound, c.Dojo)
 							pools[i].Players[ai], pools[j].Players[bi], pools[k].Players[ci] = c, a, b
-							aftA := clubEarliestMeeting(pools, pairRound, a.Dojo)
-							aftB := clubEarliestMeeting(pools, pairRound, b.Dojo)
-							aftC := clubEarliestMeeting(pools, pairRound, c.Dojo)
+							aftA := earliestDojoMeeting(pools, pairRound, a.Dojo)
+							aftB := earliestDojoMeeting(pools, pairRound, b.Dojo)
+							aftC := earliestDojoMeeting(pools, pairRound, c.Dojo)
 							newR1, newNS := curR1, curNS
 							for _, d := range [3][2]int{{befA, aftA}, {befB, aftB}, {befC, aftC}} {
 								bef, aft := d[0], d[1]

@@ -27,7 +27,7 @@ import "fmt"
 // never has, so a seeded pool's exact leaf slot can shift by one bye
 // compared with this skeleton's all-unseeded one. That only ever perturbs
 // the fine position INSIDE a block, never which block/region a qualifier is
-// routed to, and it is an accepted approximation for the club-spread
+// routed to, and it is an accepted approximation for the dojo-spread
 // heuristic this feeds (the distributor's own seed placement is untouched
 // and byte-identical to today's pipeline; this seam is only ever consulted
 // for UNSEEDED players). See the Phase 3 scorecard for whether that

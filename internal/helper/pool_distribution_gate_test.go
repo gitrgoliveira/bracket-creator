@@ -27,7 +27,7 @@ import (
 // poolWinners is fixed). This file was rewritten from that comparison into
 // ABSOLUTE assertions on the production path directly
 // (BuildPoolPhaseTreeAware, called with each sweep's own intended
-// poolWinners): per-pool club-concentration optimum, pool sizes, no two
+// poolWinners): per-pool dojo-concentration optimum, pool sizes, no two
 // seeds sharing a pool, the unique-dojo round-robin identity contract, and
 // the end-to-end region metric against the brute-force ceiling. The ONE
 // place an "old" pipeline is still reconstructed is the seed-placement
@@ -48,7 +48,7 @@ import (
 // failed: t.Logf runs regardless (Errorf does not stop the function), and
 // the failing assertions point at exactly the counters that regressed.
 type gateScorecard struct {
-	// Metric: per-pool club-concentration optimum (maxOfDojo <= ceil(clubSize/numPools)).
+	// Metric: per-pool dojo-concentration optimum (maxOfDojo <= ceil(dojoGroupSize/numPools)).
 	optimumConfigs int
 	optimumFail    int
 
@@ -72,10 +72,10 @@ type gateScorecard struct {
 	identityConfigs int
 	identityFail    int
 
-	// Metric: end-to-end region (earliest knockout round a club's own
+	// Metric: end-to-end region (earliest knockout round a dojo's own
 	// qualifiers could meet each other) against the BRUTE-FORCE CEILING --
 	// the best any pool assignment could achieve for that shape. mathMaxInt
-	// sentinel excluded from sums/round1 counts (means "this club never
+	// sentinel excluded from sums/round1 counts (means "this dojo never
 	// spanned >=2 pools in this config", i.e. no data).
 	regionConfigs      int
 	regionSum          int
@@ -93,7 +93,7 @@ func (s *gateScorecard) String() string {
 	fmt.Fprintf(&b, "seed placement:        seeds-checked=%d  mismatches=%d (vs referencePoolSeedingPipeline)\n",
 		s.seedEqualityChecked, s.seedEqualityMismatches)
 	fmt.Fprintf(&b, "unique-dojo identity:  configs=%d  fail=%d\n", s.identityConfigs, s.identityFail)
-	fmt.Fprintf(&b, "region (earliest club-meeting round in the knockout):\n")
+	fmt.Fprintf(&b, "region (earliest dojo-meeting round in the knockout):\n")
 	fmt.Fprintf(&b, "  configs-with-data=%d  sum=%d  round1=%d\n", s.regionConfigs, s.regionSum, s.regionRound1)
 	fmt.Fprintf(&b, "  brute-force ceiling: configs=%d  below-optimum=%d (hard-fail trigger)\n",
 		s.optimumMeetConfigs, s.optimumMeetBelow)
@@ -101,12 +101,12 @@ func (s *gateScorecard) String() string {
 	return b.String()
 }
 
-// earliestClubMeetingRound is the known-gap test's own metric
+// earliestDojoMeetingRound is the known-gap test's own metric
 // (pool_distribution_invariants_test.go), generalised into a function: the
 // earliest knockout round any two of dojo's qualifying pools could be drawn
 // to meet, or math.MaxInt when dojo does not span at least two pools in this
 // draw (nothing to measure).
-func earliestClubMeetingRound(pools []Pool, poolWinners, numCourts int, dojo string) int {
+func earliestDojoMeetingRound(pools []Pool, poolWinners, numCourts int, dojo string) int {
 	draw := BuildKnockoutDraw(pools, poolWinners, numCourts)
 	if draw == nil {
 		return mathMaxIntSentinel
@@ -114,7 +114,7 @@ func earliestClubMeetingRound(pools []Pool, poolWinners, numCourts int, dojo str
 	return earliestMeetingRoundInDraw(draw, pools, dojo)
 }
 
-// earliestMeetingRoundInDraw is earliestClubMeetingRound's builder-agnostic
+// earliestMeetingRoundInDraw is earliestDojoMeetingRound's builder-agnostic
 // half: given an ALREADY-BUILT draw (from any of production's three
 // builders -- BuildKnockoutDraw, BuildKnockoutDrawPerPool,
 // BuildKnockoutDrawFillBracket), the earliest knockout round any two of
@@ -124,15 +124,15 @@ func earliestClubMeetingRound(pools []Pool, poolWinners, numCourts int, dojo str
 // fill-bracket draw the same way this file measures a standard one, without
 // re-deriving the slot-extraction logic.
 func earliestMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo string) int {
-	clubPools := map[string]bool{}
+	dojoPools := map[string]bool{}
 	for _, p := range pools {
 		if countDojoInPool(p, dojo) > 0 {
-			clubPools[p.PoolName] = true
+			dojoPools[p.PoolName] = true
 		}
 	}
 	var slots []int
 	for slot, v := range TreeToLeafArray(draw.Root) {
-		if i := strings.LastIndex(v, "-"); i > 0 && clubPools[v[:i]] {
+		if i := strings.LastIndex(v, "-"); i > 0 && dojoPools[v[:i]] {
 			slots = append(slots, slot)
 		}
 	}
@@ -235,22 +235,22 @@ func checkAbsoluteInvariants(t *testing.T, sc *gateScorecard, r []Player, numPoo
 		}
 	}
 
-	// Per-pool club-concentration optimum, for every dojo named: the
+	// Per-pool dojo-concentration optimum, for every dojo named: the
 	// ABSOLUTE requirement is zero failures, not "no worse than some other
 	// pipeline" -- a one-pass distributor that can see the whole knockout
-	// tree before it places anyone has no excuse to leave a club
-	// over-concentrated when ceil(clubSize/numPools) was reachable.
+	// tree before it places anyone has no excuse to leave a dojo
+	// over-concentrated when ceil(dojoGroupSize/numPools) was reachable.
 	for _, dojo := range dojos {
-		clubSize := 0
+		dojoGroupSize := 0
 		for _, p := range r {
 			if p.Dojo == dojo {
-				clubSize++
+				dojoGroupSize++
 			}
 		}
-		if clubSize == 0 {
+		if dojoGroupSize == 0 {
 			continue
 		}
-		optimum := (clubSize + numPools - 1) / numPools
+		optimum := (dojoGroupSize + numPools - 1) / numPools
 		sc.optimumConfigs++
 		if got := maxOfDojo(pools, dojo); got > optimum {
 			sc.optimumFail++
@@ -286,25 +286,25 @@ func seedsSharePool(pools []Pool) bool {
 func TestTreeAwareGateScorecard(t *testing.T) {
 	sc := &gateScorecard{}
 
-	// --- Sweep 1: the 2048-config multi-club sweep (Phase 0's own). ---
-	t.Run("multiclub_2048", func(t *testing.T) {
+	// --- Sweep 1: the 2048-config multi-dojo sweep (Phase 0's own). ---
+	t.Run("multidojo_2048", func(t *testing.T) {
 		total := 0
 		for numPools := 3; numPools <= 7; numPools++ {
 			for poolSize := 3; poolSize <= 5; poolSize++ {
 				for courts := 1; courts <= 2; courts++ {
-					for nClubs := 2; nClubs <= 4; nClubs++ {
-						for clubSize := 2; clubSize <= numPools+2; clubSize++ {
+					for nDojos := 2; nDojos <= 4; nDojos++ {
+						for dojoGroupSize := 2; dojoGroupSize <= numPools+2; dojoGroupSize++ {
 							for nSeeds := 0; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
-								if nClubs*clubSize > numPools*poolSize {
+								if nDojos*dojoGroupSize > numPools*poolSize {
 									continue
 								}
-								r := buildClubRoster(numPools, poolSize, nClubs, clubSize, nSeeds)
-								dojos := make([]string, nClubs)
-								for c := 0; c < nClubs; c++ {
-									dojos[c] = fmt.Sprintf("Club%d", c)
+								r := buildMultiDojoRoster(numPools, poolSize, nDojos, dojoGroupSize, nSeeds)
+								dojos := make([]string, nDojos)
+								for c := 0; c < nDojos; c++ {
+									dojos[c] = fmt.Sprintf("Dojo%d", c)
 								}
-								tag := fmt.Sprintf("multiclub pools=%d size=%d courts=%d clubs=%dx%d seeds=%d",
-									numPools, poolSize, courts, nClubs, clubSize, nSeeds)
+								tag := fmt.Sprintf("multidojo pools=%d size=%d courts=%d dojos=%dx%d seeds=%d",
+									numPools, poolSize, courts, nDojos, dojoGroupSize, nSeeds)
 								checkAbsoluteInvariants(t, sc, r, numPools, poolSize, false, courts, 1, dojos, tag)
 								total++
 							}
@@ -318,29 +318,29 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 		}
 	})
 
-	// --- Sweep 2: the 210-config seeded-club sweep (Phase 0's own). ---
-	t.Run("seeded_club_210", func(t *testing.T) {
+	// --- Sweep 2: the 210-config seeded-dojo sweep (Phase 0's own). ---
+	t.Run("seeded_dojo_210", func(t *testing.T) {
 		total := 0
 		for numPools := 3; numPools <= 7; numPools++ {
 			for poolSize := 3; poolSize <= 5; poolSize++ {
 				for nSeeds := 2; nSeeds <= 4 && nSeeds <= numPools; nSeeds++ {
-					for clubExtra := 0; clubExtra <= 4; clubExtra++ {
+					for dojoExtra := 0; dojoExtra <= 4; dojoExtra++ {
 						n := numPools * poolSize
-						if nSeeds+clubExtra > n {
+						if nSeeds+dojoExtra > n {
 							continue
 						}
 						r := make([]Player, 0, n)
 						for s := 1; s <= nSeeds; s++ {
-							r = append(r, Player{Name: fmt.Sprintf("Seed%d", s), Dojo: "SeedClub", Seed: s})
+							r = append(r, Player{Name: fmt.Sprintf("Seed%d", s), Dojo: "SeedDojo", Seed: s})
 						}
-						for i := 1; i <= clubExtra; i++ {
-							r = append(r, Player{Name: fmt.Sprintf("Mate%d", i), Dojo: "SeedClub"})
+						for i := 1; i <= dojoExtra; i++ {
+							r = append(r, Player{Name: fmt.Sprintf("Mate%d", i), Dojo: "SeedDojo"})
 						}
 						for i := len(r) + 1; i <= n; i++ {
 							r = append(r, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
 						}
-						tag := fmt.Sprintf("seededclub pools=%d size=%d seeds=%d extra=%d", numPools, poolSize, nSeeds, clubExtra)
-						checkAbsoluteInvariants(t, sc, r, numPools, poolSize, false, 2, 1, []string{"SeedClub"}, tag)
+						tag := fmt.Sprintf("seededdojo pools=%d size=%d seeds=%d extra=%d", numPools, poolSize, nSeeds, dojoExtra)
+						checkAbsoluteInvariants(t, sc, r, numPools, poolSize, false, 2, 1, []string{"SeedDojo"}, tag)
 						total++
 					}
 				}
@@ -378,34 +378,34 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 	//
 	// The gate originally (Phase 3) demanded the three Phase 0 reproducers
 	// beat round 1. That demand was WRONG, proven by exhaustive brute
-	// force: at winners=1 those shapes' clubs occupy more than half the
-	// qualifying pools, so pigeonhole forces a round-1 club pair no matter
+	// force: at winners=1 those shapes' dojos occupy more than half the
+	// qualifying pools, so pigeonhole forces a round-1 dojo pair no matter
 	// which pools are chosen -- their ceiling IS 1, for any algorithm. The
 	// correct requirement, enforced below for EVERY config with data: the
-	// production path's earliest club meeting must EQUAL the best any pool
+	// production path's earliest dojo meeting must EQUAL the best any pool
 	// assignment could achieve (max over all pool subsets of the min
 	// pairwise meeting round), unfixable shapes included, where equalling a
 	// ceiling of 1 passes.
 	t.Run("end_to_end_region", func(t *testing.T) {
 		for numPools := 3; numPools <= 7; numPools++ {
-			for clubSize := 2; clubSize <= numPools+2; clubSize++ {
+			for dojoGroupSize := 2; dojoGroupSize <= numPools+2; dojoGroupSize++ {
 				poolSize := 4
-				if clubSize > numPools*poolSize {
+				if dojoGroupSize > numPools*poolSize {
 					continue
 				}
-				r := buildClubRoster(numPools, poolSize, 1, clubSize, 0)
+				r := buildMultiDojoRoster(numPools, poolSize, 1, dojoGroupSize, 0)
 				for _, courts := range []int{1, 2, 4} {
 					for _, winners := range []int{1, 2} {
-						tag := fmt.Sprintf("e2e pools=%d club=%d courts=%d winners=%d", numPools, clubSize, courts, winners)
+						tag := fmt.Sprintf("e2e pools=%d dojo=%d courts=%d winners=%d", numPools, dojoGroupSize, courts, winners)
 						pools, drawCourts, err := BuildPoolPhaseTreeAware(r, poolSize, false, courts, winners)
 						if err != nil {
 							t.Errorf("%s: BuildPoolPhaseTreeAware error: %v", tag, err)
 							continue
 						}
 
-						round := earliestClubMeetingRound(pools, winners, drawCourts, "Club0")
+						round := earliestDojoMeetingRound(pools, winners, drawCourts, "Dojo0")
 						if round == mathMaxIntSentinel {
-							continue // Club0 did not span >=2 pools in this config: no data
+							continue // Dojo0 did not span >=2 pools in this config: no data
 						}
 						sc.regionConfigs++
 						sc.regionSum += round
@@ -418,7 +418,7 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 							t.Errorf("%s: poolTargetSizes: %v", tag, tErr)
 							continue
 						}
-						span := clubSize
+						span := dojoGroupSize
 						if span > numPools {
 							span = numPools
 						}
@@ -459,7 +459,7 @@ func TestTreeAwareGateScorecard(t *testing.T) {
 		t.Errorf("GATE FAIL: expected 180 end-to-end configs with data, got %d (sweep shrank or grew)", sc.optimumMeetConfigs)
 	}
 	if sc.regionConfigs == 0 {
-		t.Errorf("GATE FAIL: region sweep produced no data (configs with a club spanning >=2 pools) -- the gate cannot be evaluated")
+		t.Errorf("GATE FAIL: region sweep produced no data (configs with a dojo spanning >=2 pools) -- the gate cannot be evaluated")
 	}
 }
 
@@ -487,7 +487,7 @@ func identityContractHolds(r []Player, numPools int, pools []Pool) bool {
 }
 
 // bruteForceMeetingCeiling returns the best earliest-meeting round ANY pool
-// assignment could achieve for a club spanning `span` pools: the maximum,
+// assignment could achieve for a dojo spanning `span` pools: the maximum,
 // over every subset of `span` pools, of the minimum pairwise meeting round
 // between the chosen pools' qualifier slots. Exponential in numPools, which
 // is capped at 7 in the sweep, so at most C(7,3)=35 subsets of pair-checks.

@@ -35,7 +35,7 @@ The pools then fill one competitor at a time, and each placement looks past the 
 
 The dojo is the only thing the draw keeps apart. Sharing a name is not a conflict: two competitors can share a name only when their dojos differ, because a second entry with both the same name and the same dojo is refused as a duplicate of the same person. Namesakes are two different people, they may fight in the same pool, and the sheet tells them apart by dojo and by competitor number.
 
-Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps clubs apart longer, and only then. An exchange is taken only when it helps: no club's first meeting may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. On a roster where no club can be kept apart any better, the pools come out exactly as placed.
+Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps: no dojo's first meeting may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
 
 ## When a dojo has more members than pools
 
@@ -43,13 +43,13 @@ Once a dojo has one member in every pool, some of its members must share, and th
 
 Two of its members meeting in a pool is arithmetic, not a shortcoming: a dojo with more members than pools cannot avoid it, and the draw's job is to make it as rare as the numbers allow.
 
-Setting seeds does not cost you any of this. Seeds take their places first, exactly where the seeding rules put them, and their dojos are counted from the start, so the rest of their club is spread around them. A roster spreads its clubs just as well seeded as unseeded.
+Setting seeds does not cost you any of this. Seeds take their places first, exactly where the seeding rules put them, and their dojos are counted from the start, so the rest of their dojo is spread around them. A roster spreads its dojos just as well seeded as unseeded.
 
-## Club-mates and the knockout
+## Dojo-mates and the knockout
 
-Keeping club-mates out of one pool is only half the job: two members of one dojo in different pools can still be drawn to meet in the very first knockout match if their pools feed neighbouring slots. Because every placement is made against the knockout tree, the draw pushes that first club-mate meeting as late as the bracket allows, and in particular keeps it out of the first round wherever any arrangement of the pools could.
+Keeping dojo-mates out of one pool is only half the job: two members of one dojo in different pools can still be drawn to meet in the very first knockout match if their pools feed neighbouring slots. Because every placement is made against the knockout tree, the draw pushes that first dojo-mate meeting as late as the bracket allows, and in particular keeps it out of the first round wherever any arrangement of the pools could.
 
-The limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a club's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands; and when several clubs compete for the same few well-separated pool pairs, not every club can have one, so the draw settles the contest in favour of as few early meetings as possible overall.
+The limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a dojo's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands; and when several dojos compete for the same few well-separated pool pairs, not every dojo can have one, so the draw settles the contest in favour of as few early meetings as possible overall.
 
 ## Pools onto shiai-jo
 

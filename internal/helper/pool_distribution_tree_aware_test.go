@@ -75,17 +75,17 @@ func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 	for numPools := 3; numPools <= 7; numPools++ {
 		for poolSize := 3; poolSize <= 5; poolSize++ {
 			for nSeeds := 2; nSeeds <= 4 && nSeeds <= numPools; nSeeds++ {
-				for clubExtra := 0; clubExtra <= 4; clubExtra++ {
+				for dojoExtra := 0; dojoExtra <= 4; dojoExtra++ {
 					n := numPools * poolSize
-					if nSeeds+clubExtra > n {
+					if nSeeds+dojoExtra > n {
 						continue
 					}
 					r := make([]Player, 0, n)
 					for s := 1; s <= nSeeds; s++ {
-						r = append(r, Player{Name: fmt.Sprintf("Seed%d", s), Dojo: "SeedClub", Seed: s})
+						r = append(r, Player{Name: fmt.Sprintf("Seed%d", s), Dojo: "SeedDojo", Seed: s})
 					}
-					for i := 1; i <= clubExtra; i++ {
-						r = append(r, Player{Name: fmt.Sprintf("Mate%d", i), Dojo: "SeedClub"})
+					for i := 1; i <= dojoExtra; i++ {
+						r = append(r, Player{Name: fmt.Sprintf("Mate%d", i), Dojo: "SeedDojo"})
 					}
 					for i := len(r) + 1; i <= n; i++ {
 						r = append(r, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
@@ -103,11 +103,11 @@ func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 							newSeedPool := seedPoolByName(newPools)
 							require.Equal(t, len(oldSeedPool), len(newSeedPool),
 								"pools=%d size=%d seeds=%d extra=%d courts=%d winners=%d: seed count differs",
-								numPools, poolSize, nSeeds, clubExtra, numCourts, poolWinners)
+								numPools, poolSize, nSeeds, dojoExtra, numCourts, poolWinners)
 							for name, oldPool := range oldSeedPool {
 								assert.Equalf(t, oldPool, newSeedPool[name],
 									"pools=%d size=%d seeds=%d extra=%d courts=%d winners=%d: seed %s landed in %s (old) vs %s (new)",
-									numPools, poolSize, nSeeds, clubExtra, numCourts, poolWinners, name, oldPool, newSeedPool[name])
+									numPools, poolSize, nSeeds, dojoExtra, numCourts, poolWinners, name, oldPool, newSeedPool[name])
 							}
 						}
 					}
@@ -118,25 +118,25 @@ func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 	require.GreaterOrEqual(t, total, 200, "sweep shrank below the measured 210-config space (x courts x winners)")
 }
 
-// TestSeedPlacementEquality_MultiClub broadens the pin with the Phase-0
-// multi-club roster generator (several clubs at once, isMax variants, seeds
+// TestSeedPlacementEquality_MultiDojo broadens the pin with the Phase-0
+// multi-dojo roster generator (several dojos at once, isMax variants, seeds
 // beyond maxSeedRanks=4).
-func TestSeedPlacementEquality_MultiClub(t *testing.T) {
+func TestSeedPlacementEquality_MultiDojo(t *testing.T) {
 	total := 0
 	for numPools := 3; numPools <= 7; numPools++ {
 		for poolSize := 3; poolSize <= 5; poolSize++ {
 			for _, isMax := range []bool{false, true} {
-				for nClubs := 2; nClubs <= 4; nClubs++ {
-					for clubSize := 2; clubSize <= numPools+2; clubSize++ {
+				for nDojos := 2; nDojos <= 4; nDojos++ {
+					for dojoGroupSize := 2; dojoGroupSize <= numPools+2; dojoGroupSize++ {
 						for nSeeds := 1; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
 							// nSeeds starts at 1: a seedless config has no
 							// placement to compare, and the seedless sweep
 							// burned most of this test's former 23-second
 							// runtime comparing empty maps.
-							if nClubs*clubSize > numPools*poolSize {
+							if nDojos*dojoGroupSize > numPools*poolSize {
 								continue
 							}
-							r := buildClubRoster(numPools, poolSize, nClubs, clubSize, nSeeds)
+							r := buildMultiDojoRoster(numPools, poolSize, nDojos, dojoGroupSize, nSeeds)
 							for _, courts := range []int{1, 2} {
 								oldPools, _, err := referencePoolSeedingPipeline(r, poolSize, isMax, courts)
 								require.NoError(t, err)
@@ -148,8 +148,8 @@ func TestSeedPlacementEquality_MultiClub(t *testing.T) {
 								newSeedPool := seedPoolByName(newPools)
 								for name, oldPool := range oldSeedPool {
 									assert.Equalf(t, oldPool, newSeedPool[name],
-										"pools=%d size=%d isMax=%v clubs=%dx%d seeds=%d courts=%d: seed %s mismatch",
-										numPools, poolSize, isMax, nClubs, clubSize, nSeeds, courts, name)
+										"pools=%d size=%d isMax=%v dojos=%dx%d seeds=%d courts=%d: seed %s mismatch",
+										numPools, poolSize, isMax, nDojos, dojoGroupSize, nSeeds, courts, name)
 								}
 							}
 						}
@@ -208,7 +208,7 @@ func TestBuildPoolPhaseTreeAware_SizesMatchOldPath(t *testing.T) {
 func TestBuildPoolPhaseTreeAware_NoTwoSeedsShareAPool(t *testing.T) {
 	for numPools := 3; numPools <= 7; numPools++ {
 		for nSeeds := 2; nSeeds <= 4 && nSeeds <= numPools; nSeeds++ {
-			r := buildClubRoster(numPools, 4, 1, nSeeds, nSeeds)
+			r := buildMultiDojoRoster(numPools, 4, 1, nSeeds, nSeeds)
 			pools, _, err := BuildPoolPhaseTreeAware(r, 4, false, 2, 1)
 			require.NoError(t, err)
 			for _, p := range pools {

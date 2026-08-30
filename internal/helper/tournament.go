@@ -292,7 +292,7 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 //     the seed spread, the deinterleave AND the caller's pool-to-shiaijo
 //     allocation, and all three must agree.
 //  3. PoolSeeding runs BEFORE CreatePools: it reorders the roster so that
-//     CreatePools' straight fill lands seeds and club-mates where they belong.
+//     CreatePools' straight fill lands seeds and dojo-mates where they belong.
 //     It runs whether or not anyone is seeded, because it also clusters by dojo.
 //  4. ReorderPoolsForCourts runs AFTER CreatePools and before anything reads
 //     pool order or pool names.

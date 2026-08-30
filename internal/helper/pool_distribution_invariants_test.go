@@ -62,9 +62,16 @@ func maxOfDojo(pools []Pool, dojo string) int {
 	return m
 }
 
-// TestPoolDistribution_Invariants sweeps 2048 multi-dojo rosters (the sweep
-// that measured the fill+repair pipeline at 2048/2048 optimal) and asserts
-// everything the rebuild must not lose:
+// TestPoolDistribution_Invariants sweeps multi-dojo rosters (originally
+// 2048, the sweep that measured the fill+repair pipeline at 2048/2048
+// optimal; extended per operator ruling, bc-dojo-least-conflicted-pool, to
+// dojoGroupSize up to 2*numPools -- the OLD cap of numPools+2 was too
+// narrow to reach an OVERSUBSCRIBED dojo, i.e. one occupying more than a
+// pool's worth of the roster on its own, which is exactly the shape
+// (footprint == numPools * optimum, zero slack anywhere) that escaped this
+// sweep and was only caught by draw_shapes_golden_test.go's
+// "dojo/deep-oversubscription" case) and asserts everything the rebuild
+// must not lose:
 //   - every dojo's worst per-pool concentration is ceil(dojoGroupSize/numPools),
 //     the arithmetic optimum;
 //   - pool sizes always equal the target sizes (nobody lost or duplicated);
@@ -75,7 +82,7 @@ func TestPoolDistribution_Invariants(t *testing.T) {
 		for poolSize := 3; poolSize <= 5; poolSize++ {
 			for courts := 1; courts <= 2; courts++ {
 				for nDojos := 2; nDojos <= 4; nDojos++ {
-					for dojoGroupSize := 2; dojoGroupSize <= numPools+2; dojoGroupSize++ {
+					for dojoGroupSize := 2; dojoGroupSize <= 2*numPools; dojoGroupSize++ {
 						for nSeeds := 0; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
 							if nDojos*dojoGroupSize > numPools*poolSize {
 								continue
@@ -113,6 +120,7 @@ func TestPoolDistribution_Invariants(t *testing.T) {
 		}
 	}
 	require.GreaterOrEqual(t, total, 2000, "sweep shrank; the baseline is meaningless if it no longer covers the measured space")
+	t.Logf("TestPoolDistribution_Invariants: swept %d configs (extended dojoGroupSize range)", total)
 }
 
 // TestPoolDistribution_SeededDojoSweep is the 210-config sweep with every
@@ -295,31 +303,50 @@ func dojoMeetingVsCeiling(t *testing.T, numPools, dojoGroupSize int) (earliest, 
 
 // TestPoolDistribution_RealRosters_MultiDojo pins the multi-dojo behaviour of
 // the tree-aware distributor on the two committed rosters, measured through
-// the REAL knockout draw (earliestDojoMeetingRound builds it and reads the
-// tree) -- an earlier version of this pin scored post-reorder pools against
-// the pre-reorder slot map and produced numbers wrong enough to briefly
-// convict the repair loop of regressions it did not have. Measure through
-// the draw or not at all.
+// the REAL knockout draw (earliestDojoWinnerMeetingRound/earliestDojoMeetingRound,
+// pool_distribution_gate_test.go, build it and read the tree) -- an earlier
+// version of this pin scored post-reorder pools against the pre-reorder
+// slot map and produced numbers wrong enough to briefly convict the repair
+// loop of regressions it did not have. Measure through the draw or not at
+// all.
 //
-// The large roster is the headline: the pre-swap pipeline sent TEN dojos
-// into a round-1 dojo-mate meeting; the one-pass chooser alone cut that to
-// one (Team Xi, dropped from round 5 to round 1 -- the case that justified
-// improveDojoMeetings); with the repair loop, ZERO dojos open the knockout
-// against a dojo-mate and Xi recovers to round 4. Disabling the repair loop
-// reddens both assertions (verified).
+// The large roster is the headline, HISTORICAL RECORD (Phase 4's own
+// all-qualifier-scored fill+repair pipeline, superseded by
+// bc-dojo-least-conflicted-pool's descent+winner-path-exchange, still the
+// most legible telling of why a repair pass mattered at all): the pre-swap
+// pipeline sent TEN dojos into a round-1 dojo-mate meeting; a one-pass
+// chooser alone cut that to one (Team Xi, dropped from round 5 to round 1);
+// with a repair loop, ZERO dojos opened the knockout against a dojo-mate
+// and Xi recovered to round 4 (all-qualifier metric; round 6 on the
+// winner-path metric below, under the CURRENT production pipeline).
 //
-// The small roster is a floor, not a win: pool capacities 4/3/3 over three
-// pools force dojos onto the round-1 pool pair whatever the assignment, and
-// old and new both land at three such dojos (sum 7 both). The pin only
-// guards the count against growing.
+// METRIC, operator ruling (bc-dojo-least-conflicted-pool): the asserted
+// count below is the WINNER-PATH metric (earliestDojoWinnerMeetingRound --
+// a dojo's earliest meeting counting only pools' WINNER/rank-1 leaves,
+// never a runner-up/crossed-in qualifier). "A second-place qualifier
+// colliding with a same-dojo competitor through CROSSING is accepted
+// chance -- that's life -- not a defect": do NOT "fix" a roster where the
+// winner-path count is the asserted floor/ceiling but the ALL-QUALIFIER
+// count (logged below, informational, never asserted) is higher -- that
+// gap IS the accepted residue, on both rosters. Measured under the
+// PRODUCTION pipeline (BuildPoolPhaseTreeAware: the dojo-tree descent,
+// assignUnseededByDojoTree, followed by the winner-path pairwise exchange,
+// improveDojoMeetings -- see pool_distribution_tree_aware.go's own
+// top-of-file doc comment for the two-stage design and
+// pool_distribution_dojo_tree_test.go for the descent stage's own
+// dedicated, isolated tests): the small roster's three
+// round-1-by-all-qualifiers dojos (Team Beta, Team Gamma, Team Delta) are
+// ALL crossing-borne under this ruling -- zero of them meet in round 1 by
+// winner path -- and the large roster is winner-path zero either way, so
+// both rosters' winner-path floor is 0.
 func TestPoolDistribution_RealRosters_MultiDojo(t *testing.T) {
 	cases := []struct {
 		file            string
 		poolMin, courts int
 		maxRoundOne     int
-		pins            map[string]int // dojo -> minimum earliest meeting round
+		pins            map[string]int // dojo -> minimum WINNER-PATH earliest meeting round
 	}{
-		{"../../test-data/mock_data_small.csv", 3, 1, 3, nil},
+		{"../../test-data/mock_data_small.csv", 3, 1, 0, nil},
 		{"../../test-data/mock_data_large_zekken.csv", 3, 2, 0,
 			map[string]int{"Team Xi": 2}},
 	}
@@ -329,7 +356,7 @@ func TestPoolDistribution_RealRosters_MultiDojo(t *testing.T) {
 			pools, _, err := BuildPoolPhaseTreeAware(ps, c.poolMin, false, c.courts, 2)
 			require.NoError(t, err)
 
-			roundOne := 0
+			winnerRoundOne, allQualRoundOne := 0, 0
 			seen := map[string]bool{}
 			for _, p := range pools {
 				for _, pl := range p.Players {
@@ -337,18 +364,25 @@ func TestPoolDistribution_RealRosters_MultiDojo(t *testing.T) {
 						continue
 					}
 					seen[pl.Dojo] = true
+					if m := earliestDojoWinnerMeetingRound(pools, 2, c.courts, pl.Dojo); m < math.MaxInt/2 && m <= 1 {
+						winnerRoundOne++
+						t.Logf("WINNER-PATH round-1 dojo: %q", pl.Dojo)
+					}
 					if m := earliestDojoMeetingRound(pools, 2, c.courts, pl.Dojo); m < math.MaxInt/2 && m <= 1 {
-						roundOne++
-						t.Logf("round-1 dojo: %q", pl.Dojo)
+						allQualRoundOne++
 					}
 				}
 			}
-			assert.LessOrEqualf(t, roundOne, c.maxRoundOne,
-				"more dojos open the knockout against a dojo-mate than the design allows on this roster")
+			assert.LessOrEqualf(t, winnerRoundOne, c.maxRoundOne,
+				"more dojos open the knockout against a dojo-mate BY WINNER PATH than the design allows on this roster")
+			t.Logf("all-qualifier round-1 count (informational, includes operator-accepted crossing collisions): %d", allQualRoundOne)
+
 			for dojo, minRound := range c.pins {
-				got := earliestDojoMeetingRound(pools, 2, c.courts, dojo)
+				got := earliestDojoWinnerMeetingRound(pools, 2, c.courts, dojo)
 				assert.GreaterOrEqualf(t, got, minRound,
-					"%s must not open the knockout against a dojo-mate", dojo)
+					"%s must not open the knockout against a dojo-mate BY WINNER PATH", dojo)
+				t.Logf("%s: winner-path round=%d (all-qualifier round=%d, informational)",
+					dojo, got, earliestDojoMeetingRound(pools, 2, c.courts, dojo))
 			}
 		})
 	}
@@ -377,4 +411,22 @@ func loadDistributionRoster(t *testing.T, path string) []Player {
 		ps = append(ps, Player{Name: strings.TrimSpace(rec[0]), Dojo: dojo})
 	}
 	return ps
+}
+
+// TestPoolDistribution_RealRoster_TeamThetaFloor pins the one known long-tail
+// loss the descent rebuild ships with, so it can neither decay further nor be
+// rediscovered as a surprise. On mock_data_large_zekken at max-mode (the
+// pools-example-large-max-size shape), Team Theta's earliest winner-path
+// meeting is round 4; the pre-descent pipeline reached round 5. One dojo, one
+// round, far above round 1, against 98 of 100 dojo comparisons on the changed
+// workbooks improving or holding -- accepted, and isolated: a 1436-config
+// synthetic max-mode sweep (3-15 pools) found zero other regressions. If this
+// assertion fails LOW, the tail got worse and needs a look; if Theta ever
+// reaches 5 again, tighten the pin.
+func TestPoolDistribution_RealRoster_TeamThetaFloor(t *testing.T) {
+	ps := loadDistributionRoster(t, "../../test-data/mock_data_large_zekken.csv")
+	pools, dc, err := BuildPoolPhaseTreeAware(ps, 3, true, 2, 2)
+	require.NoError(t, err)
+	got := earliestDojoWinnerMeetingRound(pools, 2, dc, "Team Theta")
+	assert.GreaterOrEqual(t, got, 4, "Team Theta's known one-round loss must not deepen")
 }

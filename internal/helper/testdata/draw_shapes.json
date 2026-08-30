@@ -18021,11 +18021,11 @@
       "pageCourtMismatch": [],
       "dojoPerPoolCounts": [
         2,
+        1,
         2,
         1,
         2,
-        2,
-        1
+        2
       ],
       "maxSameDojoCount": 2
     },
@@ -18231,10 +18231,10 @@
       "dojoPerPoolCounts": [
         2,
         2,
-        2,
-        2,
         1,
-        1
+        1,
+        2,
+        2
       ],
       "maxSameDojoCount": 2
     },
@@ -18342,12 +18342,12 @@
       "pageCourtMismatchCount": 0,
       "pageCourtMismatch": [],
       "dojoPerPoolCounts": [
-        2,
         1,
         1,
         1,
         1,
-        1
+        1,
+        2
       ],
       "maxSameDojoCount": 2
     }

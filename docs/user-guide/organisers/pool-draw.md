@@ -49,7 +49,7 @@ Setting seeds does not cost you any of this. Seeds take their places first, exac
 
 Keeping dojo-mates out of one pool is only half the job: two members of one dojo in different pools can still be drawn to meet in the very first knockout match if their pools feed neighbouring slots. Because every placement is made against the knockout tree, the draw pushes that first dojo-mate meeting as late as the bracket allows, and in particular keeps it out of the first round wherever any arrangement of the pools could.
 
-The limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a dojo's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands; and when several dojos compete for the same few well-separated pool pairs, not every dojo can have one, so the draw settles the contest in favour of as few early meetings as possible overall.
+With two qualifiers per pool the second place crosses to a partner region, and a crossed second meeting a dojo-mate there is chance the draw cannot rule out. It still makes a best effort: where two pools serve a competitor equally well, the draw prefers the one whose crossing lands its qualifiers furthest from the rest of the dojo. Beyond that, the limits are the sheet's own arithmetic, and they are worth knowing at the desk. When a dojo's members qualify from pools that must feed neighbouring slots, because the pool counts leave no alternative, the early meeting stands; and when several dojos compete for the same few well-separated pool pairs, not every dojo can have one, so the draw settles the contest in favour of as few early meetings as possible overall.
 
 ## Pools onto shiai-jo
 

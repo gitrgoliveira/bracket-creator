@@ -239,11 +239,23 @@ func standingsPlayerKey(id, name string) string {
 // -- a row written before ids existed -- the name comparison is all there is,
 // which is the behaviour those rows always had.
 //
+// The id comparison is only meaningful when at least one side id is actually
+// on the row: comparing WinnerID against two empty strings is not "no match",
+// it is a vacuous comparison that can never succeed regardless of who won.
+// That shape is exactly what a pre-bc-cse client wrote for every Swiss/TB/DH
+// result: winnerId resolved against the roster, but sideAId/sideBId never
+// stamped. Gating on "WinnerID != """ alone (the old condition) took that
+// vacuous branch and silently credited nobody; gating on side-id presence
+// instead falls through to the name comparison for exactly those rows, which
+// resolves correctly whenever the names are unique (unresolvable only for the
+// genuine namesake-vs-namesake case, which has no data left to decide it
+// either way).
+//
 // Both results can be false: an unfinished match, a draw, or a winner naming
 // neither side. Callers treat that as "no win to award" rather than as an
 // error.
 func resolveWinnerSide(m state.MatchResult) (winnerIsA, winnerIsB bool) {
-	if m.WinnerID != "" {
+	if m.WinnerID != "" && (m.SideAID != "" || m.SideBID != "") {
 		return m.WinnerID == m.SideAID, m.WinnerID == m.SideBID
 	}
 	return m.Winner != "" && m.Winner == m.SideA, m.Winner != "" && m.Winner == m.SideB

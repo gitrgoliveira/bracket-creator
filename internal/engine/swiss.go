@@ -73,11 +73,14 @@ func parseSwissMatchRound(id string) (int, bool) {
 // persisted Swiss row carried only a name. Once every match this engine
 // generates carries an id for a roster member who has one (effectively
 // always -- see CompetitorKey), the byID branch of resolveSwissRosterKey is
-// what actually resolves it; byName is the legacy fallback and reproduces
-// the OLD bare-name behaviour exactly (first roster entry sharing the name),
-// so an already-persisted same-name row is neither fixed nor further broken
-// by this change -- there is no id on that row to do better with, and
-// retroactively re-keying already-persisted rounds is out of scope.
+// what actually resolves it; byName is the legacy fallback for a name-only
+// row. The true OLD behaviour, before identity keys existed at all, was a
+// single MERGED standings/pairing entry for every namesake -- not a
+// deterministic pick of one of them -- so byName cannot "reproduce" it;
+// resolveSwissRosterKey's last-registered pick (see its doc comment) is a
+// new, arbitrary-but-consistent tie-break on data that no longer carries
+// enough information to decide correctly. Retroactively re-keying
+// already-persisted rounds is out of scope.
 func buildSwissRosterIndex(roster []domain.Player) (byID map[string]string, byName map[string][]string) {
 	byID = make(map[string]string, len(roster))
 	byName = make(map[string][]string, len(roster))
@@ -91,10 +94,24 @@ func buildSwissRosterIndex(roster []domain.Player) (byID map[string]string, byNa
 	return byID, byName
 }
 
-// resolveSwissRosterKey resolves a Swiss match side (id, name) to a roster
-// identity key from buildSwissRosterIndex. See that function's doc comment
-// for why the id branch is authoritative and the name branch is a
+// resolveSwissRosterKey resolves a Swiss match side (id, name) to a SINGLE
+// roster identity key from buildSwissRosterIndex. See that function's doc
+// comment for why the id branch is authoritative and the name branch is a
 // legacy-only fallback.
+//
+// A win, a bye, or a prior-pairing record can only be attributed to ONE
+// competitor, so the id-less fallback must make a single, deterministic
+// pick among same-name roster entries. It picks the LAST-registered one
+// (ks[len(ks)-1], not ks[0]) to align with every other consumer of an
+// id-less legacy row: registerStandingsPlayer's name key is last-write-wins
+// by construction (a later map assignment overwrites an earlier one), and
+// tiebreaker.go's newGroupKeyResolver builds its name index the same way.
+// Before this alignment, a single id-less row resolved to the FIRST
+// namesake here but the LAST namesake in standings/tiebreak, so
+// GenerateSwissRound and SwissStandings deterministically disagreed about
+// who a legacy row's win belonged to. Picking "first" instead of "last"
+// would have been equally arbitrary; what matters is that every consumer
+// picks the SAME one.
 func resolveSwissRosterKey(byID map[string]string, byName map[string][]string, id, name string) (string, bool) {
 	if id != "" {
 		if k, ok := byID[id]; ok {
@@ -102,7 +119,7 @@ func resolveSwissRosterKey(byID map[string]string, byName map[string][]string, i
 		}
 	}
 	if ks := byName[name]; len(ks) > 0 {
-		return ks[0], true
+		return ks[len(ks)-1], true
 	}
 	return "", false
 }
@@ -120,22 +137,38 @@ func resolveSwissRosterKey(byID map[string]string, byName map[string][]string, i
 // CheckDuplicateEntriesByNameDojo), which explicitly permits such namesakes.
 // Keying by identity (id-preferred, see resolveSwissRosterKey) keeps the two
 // distinct.
+//
+// An id-less side is deliberately NOT resolved via resolveSwissRosterKey's
+// single-pick policy here: that policy exists because a win/bye/pairing must
+// land on exactly one competitor, but field membership asks a different
+// question -- "was this name part of the round-1 draw" -- where admitting
+// only one namesake would wrongly evict the other from every later round
+// (they never earn a fresh id-less row of their own to reclaim a slot, since
+// a frozen field member no longer appears as an active participant to pair).
+// So an id-less side admits EVERY roster key sharing its name; a row that
+// does carry an id still resolves to that one competitor exactly.
 func swissFieldKeysFromMatches(matches []state.MatchResult, byID map[string]string, byName map[string][]string) map[string]bool {
 	field := make(map[string]bool)
+	admit := func(id, name string) {
+		if name == "" {
+			return
+		}
+		if id != "" {
+			if k, ok := byID[id]; ok {
+				field[k] = true
+				return
+			}
+		}
+		for _, k := range byName[name] {
+			field[k] = true
+		}
+	}
 	for _, m := range matches {
 		if _, ok := parseSwissMatchRound(m.ID); !ok {
 			continue
 		}
-		if m.SideA != "" {
-			if k, ok := resolveSwissRosterKey(byID, byName, m.SideAID, m.SideA); ok {
-				field[k] = true
-			}
-		}
-		if m.SideB != "" {
-			if k, ok := resolveSwissRosterKey(byID, byName, m.SideBID, m.SideB); ok {
-				field[k] = true
-			}
-		}
+		admit(m.SideAID, m.SideA)
+		admit(m.SideBID, m.SideB)
 	}
 	return field
 }

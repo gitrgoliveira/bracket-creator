@@ -1165,3 +1165,80 @@ func TestSwissPairing_SameNameDifferentDojo_ByeIndependence(t *testing.T) {
 		"Tokyo Tanaka -- who has never personally had a bye -- must receive round 2's bye, "+
 			"not be skipped because Osaka Tanaka (same display name, different dojo) already had one")
 }
+
+// TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth pins the frozen-
+// field side of the fix: round-1 rows written with NO per-side ids at all
+// (the pre-bc-cse wire shape) still name BOTH "Tanaka Kenji" namesakes, one
+// per match. swissFieldKeysFromMatches must admit every roster key sharing
+// an id-less side's name, not just resolveSwissRosterKey's single
+// last-registered pick -- picking only one would silently evict the other
+// namesake from every round after the first, since a frozen-out participant
+// never gets a fresh row of their own to reclaim a field slot.
+func TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "swiss-field-namesake"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:                       compID,
+		Name:                     "Swiss Field Namesake",
+		Kind:                     "individual",
+		Format:                   state.CompFormatSwiss,
+		SwissRounds:              2,
+		Courts:                   []string{"A"},
+		StartTime:                "09:00",
+		Status:                   state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180,
+	}))
+	players := snPlayers() // Tokyo Tanaka, Osaka Tanaka, Suzuki, Watanabe
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// Both Tanaka namesakes actually played round 1 (one against Suzuki, one
+	// against Watanabe), but the rows carry no per-side ids at all, so the
+	// row alone cannot say which Tanaka played which match.
+	round1 := []state.MatchResult{
+		{ID: "Swiss-R1-0", SideA: "Tanaka Kenji", SideB: "Suzuki Hiro",
+			Winner: "Suzuki Hiro", Status: state.MatchStatusCompleted},
+		{ID: "Swiss-R1-1", SideA: "Tanaka Kenji", SideB: "Watanabe Ryo",
+			Winner: "Watanabe Ryo", Status: state.MatchStatusCompleted},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, round1))
+
+	r2, err := eng.GenerateSwissRound(compID, 2)
+	require.NoError(t, err)
+
+	seen := make(map[string]bool)
+	for _, m := range r2 {
+		seen[m.SideAID] = true
+		if m.SideBID != "" {
+			seen[m.SideBID] = true
+		}
+	}
+	assert.True(t, seen[snIDOsaka], "Osaka Tanaka must remain in the frozen field for round 2")
+	assert.True(t, seen[snIDTokyo], "Tokyo Tanaka must remain in the frozen field for round 2")
+}
+
+// TestResolveSwissRosterKey_MatchesStandingsLastWritePolicy_IDlessNamesake
+// pins the tie-break alignment: GenerateSwissRound's pairing-side resolver
+// (resolveSwissRosterKey) and the standings-side resolver
+// (registerStandingsPlayer/lookupStandingsPlayer, shared by SwissStandings,
+// computeStandingsFrom and applyTiebreakSort's newGroupKeyResolver) must
+// attribute the SAME id-less legacy row to the SAME namesake. Before this
+// fix, resolveSwissRosterKey picked the FIRST roster entry sharing a name
+// while the standings index -- a plain map assignment, last write wins --
+// resolved to the LAST, so a single persisted row was credited to opposite
+// people depending which surface read it.
+func TestResolveSwissRosterKey_MatchesStandingsLastWritePolicy_IDlessNamesake(t *testing.T) {
+	players := snPlayers() // Tokyo Tanaka, Osaka Tanaka (same name), Suzuki, Watanabe
+	rosterByID, rosterByName := buildSwissRosterIndex(players)
+
+	pairingKey, ok := resolveSwissRosterKey(rosterByID, rosterByName, "", "Tanaka Kenji")
+	require.True(t, ok)
+
+	byKey, _ := newStandingsIndex(players)
+	standingsPlayer := lookupStandingsPlayer(byKey, "", "Tanaka Kenji")
+	require.NotNil(t, standingsPlayer)
+	standingsKey := helper.CompetitorKey(standingsPlayer.Player.ID, standingsPlayer.Player.Name, standingsPlayer.Player.Dojo)
+
+	assert.Equal(t, standingsKey, pairingKey,
+		"the pairing-side and standings-side resolvers must attribute an id-less namesake row to the SAME roster entry")
+}

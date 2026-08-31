@@ -280,6 +280,22 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// growth within a generation plus a bounded number of same-dojo pairs
 	// is what keeps a generation itself finite; the outer iteration cap
 	// below is unchanged and remains the belt-and-braces bound.
+	//
+	// Performance note (bc-dojo-least-conflicted-pool wave 2): this
+	// continuation is what the outer loop's own worst-pair rescan (O(N^2),
+	// unchanged by dojoSumMeetRounds' P1 speedup) now pays for on every
+	// stuck-and-excluded iteration, not just on an accepted one. Measured
+	// at 256 entrants, 16 dojos of 16: ~2051 total outer iterations, of
+	// which only ~130 are accepted swaps -- the other ~1921 exist solely
+	// to discover and exclude an unfixable pair one at a time. Each of
+	// those iterations still pays the full O(N^2) rescan plus an O(N)
+	// (post-P1) candidate confirmation, and the total iteration count
+	// itself scales close to O(N^2) on a heavily-clustered roster, so the
+	// climb's wall time is closer to O(N^4) than the O(N) candidates *
+	// O(N) per-candidate = O(N^2)-per-iteration figure alone would
+	// suggest. P1 cut the per-candidate cost ~100x as intended; it did not
+	// reduce the iteration count, which this continuation controls and
+	// which is now the larger remaining term at this roster size.
 	type pairKey struct{ i, j int }
 	excluded := map[pairKey]bool{}
 
@@ -359,36 +375,52 @@ func dojoMeetRound(i, j int) int {
 	return bits.Len(uint(d))
 }
 
-// dojoSumMeetRounds totals the meeting round of every same-dojo pair. Only
-// slots x and y can change when those two are swapped, so callers score a
-// candidate swap with dojoSwapGain instead of recomputing this over the whole
-// draw.
-func dojoSumMeetRounds(result []Player, only ...int) int {
-	touched := func(i int) bool {
-		if len(only) == 0 {
-			return true
+// dojoSumMeetRounds totals the meeting round of every same-dojo pair that
+// includes slot x or slot y (each such pair counted exactly once, including
+// the {x, y} pair itself when both are members of the same dojo). Only
+// slots x and y can change when those two are swapped, so dojoSwapGain --
+// its sole caller, always with x != y -- never needs the sum over every
+// OTHER pair in the draw: those are unaffected by the swap and would cancel
+// out of the before/after delta anyway. Walking only the pairs that touch
+// {x, y} turns this from an O(N^2) whole-draw scan into O(N) per call, an
+// ~N/2x cut on THIS function alone (measured ~100x at N=256, matching the
+// dominant per-candidate cost dojoSwapGain was paying). This does not by
+// itself bound delayDojoMeetings' overall wall time: the surrounding hill
+// climb's own worst-pair rescan and its wave-1 stuck-pair continuation
+// (both unchanged here, see delayDojoMeetings' doc comment) can still drive
+// the total iteration count up for a heavily-clustered roster, and at that
+// point THEIR O(N^2)-per-iteration cost, not this function's, is what
+// dominates. Measured at 256 entrants, 16 dojos of 16: this cut wall time
+// from ~27.7s to ~7.9s, well short of the ~100x per-call improvement,
+// because the iteration count itself (driven by wave-1's continuation, not
+// this function) scales close to O(N^2) on that shape.
+func dojoSumMeetRounds(result []Player, x, y int) int {
+	pairScore := func(i, j int) int {
+		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+			return 0
 		}
-		for _, o := range only {
-			if i == o {
-				return true
-			}
+		if result[i].Dojo != result[j].Dojo {
+			return 0
 		}
-		return false
+		return dojoMeetRound(i, j)
 	}
 	sum := 0
-	for i := range result {
-		for j := i + 1; j < len(result); j++ {
-			if !touched(i) && !touched(j) {
-				continue
-			}
-			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
-				continue
-			}
-			if result[i].Dojo != result[j].Dojo {
-				continue
-			}
-			sum += dojoMeetRound(i, j)
+	for j := range result {
+		if j == x {
+			continue
 		}
+		sum += pairScore(x, j)
+	}
+	if y == x {
+		return sum
+	}
+	// The {x, y} pair itself was already scored above (j == y in the loop
+	// over x); skip both here so it is never counted twice.
+	for j := range result {
+		if j == y || j == x {
+			continue
+		}
+		sum += pairScore(y, j)
 	}
 	return sum
 }

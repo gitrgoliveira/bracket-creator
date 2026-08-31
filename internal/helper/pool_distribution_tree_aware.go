@@ -384,21 +384,49 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 // and recomputing each pool pair's slot pairing per candidate multiplied the
 // whole test suite's runtime by three before the matrix existed.
 func earliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string) int {
-	earliest := math.MaxInt
+	// Collect dojo's occupied-pool indices ONCE (O(P*poolSize)) instead of
+	// rediscovering pool j's membership inside the pair loop for every i
+	// (the old code called countDojoInPool(pools[j], ...) up to once per
+	// (i, j) pair, i.e. O(P^2*poolSize)). The pair loop below then only
+	// ever visits the k <= P pools that actually hold the dojo, via direct
+	// pairRound lookups (k^2), which is where the real savings are: k is
+	// typically small even when P (pool count) is large.
+	occupied := make([]int, 0, len(pools))
 	for i := range pools {
-		if countDojoInPool(pools[i], dojo) == 0 || i >= len(pairRound) {
+		if i >= len(pairRound) {
 			continue
 		}
-		for j := i + 1; j < len(pools); j++ {
-			if countDojoInPool(pools[j], dojo) == 0 || j >= len(pairRound) {
-				continue
-			}
+		if countDojoInPool(pools[i], dojo) > 0 {
+			occupied = append(occupied, i)
+		}
+	}
+	earliest := math.MaxInt
+	for oi := 0; oi < len(occupied); oi++ {
+		for oj := oi + 1; oj < len(occupied); oj++ {
+			i, j := occupied[oi], occupied[oj]
 			if r := pairRound[i][j]; r < earliest {
 				earliest = r
 			}
 		}
 	}
 	return earliest
+}
+
+// cachedDojoMeeting is earliestDojoMeeting memoized by dojo name in cache.
+// Callers (improveDojoMeetings) hold cache valid only across a span of calls
+// during which pools' CONTENTS are known not to change -- see the call
+// site's own comment for why that span is exactly "one pass" there. Getting
+// that invariant wrong would silently serve a stale round for a dojo whose
+// pool membership already moved, so this stays a private helper rather than
+// something a new caller could reach for without re-deriving the same
+// guarantee.
+func cachedDojoMeeting(pools []Pool, pairRound [][]int, dojo string, cache map[string]int) int {
+	if v, ok := cache[dojo]; ok {
+		return v
+	}
+	v := earliestDojoMeeting(pools, pairRound, dojo)
+	cache[dojo] = v
+	return v
 }
 
 // poolPairRounds precomputes earliestPairing for every pool pair.
@@ -573,6 +601,12 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 		return aqa < aqb
 	}
 
+	// Per-pass memoization for earliestDojoMeeting, keyed by dojo name --
+	// see the cache-clearing comment inside the pass loop for why a single
+	// map reused (and cleared) across passes is safe here.
+	winnerMeetCache := make(map[string]int, len(roster))
+	allQualMeetCache := make(map[string]int, len(roster))
+
 	// Bounded belt-and-braces cap; the lexicographic strict improvement is
 	// the real termination argument. Runs to a FULL fixpoint of the
 	// lexicographic objective -- excess first, then round-1 count, then
@@ -590,6 +624,18 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// MaxSameDojoCount 2.
 	for pass := 0; pass < len(roster)*numPools+1; pass++ {
 		curExc, curR1, curNS, curAQ := objective()
+		// winnerMeetCache/allQualMeetCache memoize earliestDojoMeeting by
+		// dojo name for the duration of THIS pass: pools are only ever
+		// mutated by an ACCEPTED swap below, which immediately breaks every
+		// loop in this pass via the "&& !improved" guards, so every "before"
+		// read in between reflects the exact same pool contents this pass
+		// started with. Cleared at the top of every pass (an accepted swap
+		// always starts a new one), which is equivalent to clearing on
+		// accept -- nothing in THIS pass reads the cache again once a swap
+		// is accepted. "After" values are never cached: they are the
+		// post-swap state of one specific candidate and are never reused.
+		clear(winnerMeetCache)
+		clear(allQualMeetCache)
 		improved := false
 		for i := 0; i < numPools && !improved; i++ {
 			for ai := 0; ai < len(pools[i].Players) && !improved; ai++ {
@@ -597,7 +643,16 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 				if a.Seed > 0 {
 					continue
 				}
-				hasMeetingSignal := earliestDojoMeeting(pools, pairRound, a.Dojo) != math.MaxInt
+				// beforeA/beforeAQA depend only on a.Dojo and the pass-start
+				// pool contents (see the cache comment above), so they are
+				// loop-invariant across the entire (j, bi) scan below --
+				// hoisted here instead of being recomputed per candidate b,
+				// and reused directly for hasMeetingSignal rather than
+				// calling earliestDojoMeeting a second time for the same
+				// answer.
+				beforeA := cachedDojoMeeting(pools, pairRound, a.Dojo, winnerMeetCache)
+				beforeAQA := cachedDojoMeeting(pools, allQualPairRound, a.Dojo, allQualMeetCache)
+				hasMeetingSignal := beforeA != math.MaxInt
 				hasExcessSignal := excessOf(a.Dojo, countDojoInPool(pools[i], a.Dojo)) > 0
 				if !hasMeetingSignal && !hasExcessSignal {
 					continue // nothing an exchange could ever improve for this dojo, from THIS pool
@@ -643,11 +698,14 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 						// best-effort crossing tier must never backfire by
 						// accepting a swap that makes an all-qualifier
 						// meeting earlier even while tiers (a)-(c) look
-						// neutral or better.
-						beforeA := earliestDojoMeeting(pools, pairRound, a.Dojo)
-						beforeB := earliestDojoMeeting(pools, pairRound, b.Dojo)
-						beforeAQA := earliestDojoMeeting(pools, allQualPairRound, a.Dojo)
-						beforeAQB := earliestDojoMeeting(pools, allQualPairRound, b.Dojo)
+						// neutral or better. beforeA/beforeAQA are the
+						// ai-level hoisted values (a.Dojo and the pool
+						// contents are both unchanged since then); beforeB/
+						// beforeAQB come from the pass-scoped cache, since
+						// b.Dojo recurs across many (i, ai, j, bi)
+						// candidates within one pass.
+						beforeB := cachedDojoMeeting(pools, pairRound, b.Dojo, winnerMeetCache)
+						beforeAQB := cachedDojoMeeting(pools, allQualPairRound, b.Dojo, allQualMeetCache)
 						pools[i].Players[ai], pools[j].Players[bi] = b, a
 						afterA := earliestDojoMeeting(pools, pairRound, a.Dojo)
 						afterB := earliestDojoMeeting(pools, pairRound, b.Dojo)

@@ -2653,3 +2653,150 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 		}
 	})
 }
+
+// referenceDojoSumMeetRoundsTouching is a full O(N^2) scan over EVERY pair in
+// the draw, kept only for TestDojoSumMeetRounds_MatchesFullScan: it is the
+// pre-P1 semantics of dojoSumMeetRounds(result, x, y) restated independently
+// -- sum dojoMeetRound(i, j) for every same-dojo pair where i or j is x or y,
+// counting the {x, y} pair itself exactly once -- rather than derived from
+// the two-loop-over-x-and-y shape the real function now uses. A bug that
+// double-counts or drops the {x, y} pair, or that mis-scopes "touching",
+// would still pass a test built from the same two-loop shape; this does not
+// share that shape.
+func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
+	sum := 0
+	for i := range result {
+		for j := i + 1; j < len(result); j++ {
+			if i != x && i != y && j != x && j != y {
+				continue
+			}
+			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+				continue
+			}
+			if result[i].Dojo != result[j].Dojo {
+				continue
+			}
+			sum += dojoMeetRound(i, j)
+		}
+	}
+	return sum
+}
+
+// referenceFullDrawDojoSum is a full whole-draw meeting-round total,
+// independent of both dojoSumMeetRounds and dojoSwapGain, used by
+// TestDojoSwapGain_MatchesFullDrawDelta as the "recompute from scratch"
+// oracle for a swap's gain.
+func referenceFullDrawDojoSum(result []Player) int {
+	sum := 0
+	for i := range result {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+				continue
+			}
+			if result[i].Dojo != result[j].Dojo {
+				continue
+			}
+			sum += dojoMeetRound(i, j)
+		}
+	}
+	return sum
+}
+
+// dojoSumTestRosters is shared by TestDojoSumMeetRounds_MatchesFullScan and
+// TestDojoSwapGain_MatchesFullDrawDelta: a spread of deterministic shapes
+// covering a namesake-free (all-unique-dojo) roster, a clustered-dojo roster
+// (a few dojos, several members each, pasted dojo-by-dojo as an operator
+// would), a multi-dojo roster with dojos interleaved rather than clustered,
+// and a roster with some blank Name slots (byes) and a blank Dojo entry, both
+// of which the meeting-round scan must skip.
+func dojoSumTestRosters() map[string][]Player {
+	namesakeFree := make([]Player, 12)
+	for i := range namesakeFree {
+		namesakeFree[i] = Player{Name: fmt.Sprintf("U%02d", i+1), Dojo: fmt.Sprintf("Dojo%02d", i+1)}
+	}
+
+	clustered := make([]Player, 0, 16)
+	for c := 0; c < 4; c++ {
+		for i := 0; i < 4; i++ {
+			clustered = append(clustered, Player{
+				Name: fmt.Sprintf("C%d_%d", c, i),
+				Dojo: fmt.Sprintf("Dojo%d", c),
+			})
+		}
+	}
+
+	interleaved := make([]Player, 16)
+	dojos := []string{"Alpha", "Beta", "Gamma", "Delta"}
+	for i := range interleaved {
+		interleaved[i] = Player{Name: fmt.Sprintf("I%02d", i+1), Dojo: dojos[i%len(dojos)]}
+	}
+
+	withByesAndBlankDojo := []Player{
+		{Name: "A1", Dojo: "DojoA"},
+		{Name: "", Dojo: ""}, // bye slot: blank name AND blank dojo
+		{Name: "A2", Dojo: "DojoA"},
+		{Name: "NoDojo", Dojo: ""}, // named but dojo-less: excluded from every pair
+		{Name: "B1", Dojo: "DojoB"},
+		{Name: "B2", Dojo: "DojoB"},
+		{Name: "A3", Dojo: "DojoA"},
+		{Name: "", Dojo: ""},
+	}
+
+	return map[string][]Player{
+		"namesake-free":            namesakeFree,
+		"clustered-dojo":           clustered,
+		"multi-dojo-interleaved":   interleaved,
+		"byes-and-blank-dojo-rows": withByesAndBlankDojo,
+	}
+}
+
+// TestDojoSumMeetRounds_MatchesFullScan pins the P1 rewrite of
+// dojoSumMeetRounds (walk only the pairs touching x or y, in O(N), rather
+// than the old variadic-filtered O(N^2) whole-draw scan) against
+// referenceDojoSumMeetRoundsTouching, over every (x, y) pair in each roster
+// shape.
+func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
+	for name, roster := range dojoSumTestRosters() {
+		t.Run(name, func(t *testing.T) {
+			for x := range roster {
+				for y := range roster {
+					if x == y {
+						continue
+					}
+					want := referenceDojoSumMeetRoundsTouching(roster, x, y)
+					got := dojoSumMeetRounds(roster, x, y)
+					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
+				}
+			}
+		})
+	}
+}
+
+// TestDojoSwapGain_MatchesFullDrawDelta pins dojoSwapGain -- built on top of
+// the P1-rewritten dojoSumMeetRounds -- against an entirely independent
+// oracle: the before/after delta of a full whole-draw recompute
+// (referenceFullDrawDojoSum), for every (x, y) swap in each roster shape.
+// This is what actually matters to delayDojoMeetings' hill climb: the
+// SCOPED sum must still produce the same swap-gain delta the old whole-draw
+// sum would have.
+func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
+	for name, roster := range dojoSumTestRosters() {
+		t.Run(name, func(t *testing.T) {
+			for x := range roster {
+				for y := range roster {
+					if x == y {
+						continue
+					}
+					before := referenceFullDrawDojoSum(roster)
+					roster[x], roster[y] = roster[y], roster[x]
+					after := referenceFullDrawDojoSum(roster)
+					roster[x], roster[y] = roster[y], roster[x]
+					want := after - before
+
+					got := dojoSwapGain(roster, x, y)
+					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
+				}
+			}
+		})
+	}
+}

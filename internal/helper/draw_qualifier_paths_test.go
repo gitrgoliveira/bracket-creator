@@ -106,6 +106,58 @@ func TestPoolQualifierPaths_EmptyCases(t *testing.T) {
 	assert.Nil(t, poolQualifierPaths([]int{4, 4}, -1, 2))
 }
 
+// TestMinSeedRankPerPool_Deterministic pins minSeedRankPerPool's contract
+// (bc-dojo-least-conflicted-pool FIX 2): when two seed ranks share a pool --
+// legal for gapped survivor ranks after no-shows, or more seed ranks than
+// pools wrapping via idx%numPools upstream -- the pool's recorded rank must
+// be the MINIMUM of the two, not whichever the map happened to iterate last.
+//
+// Go deliberately randomizes map iteration order per range statement, so a
+// single call proves nothing either way: a buggy plain-overwrite
+// implementation would still return the right answer on roughly half of any
+// given run. This calls the real function many times against the exact same
+// map object and requires EVERY call to agree with the minimum, which is
+// what a genuinely order-independent (commutative) reduction guarantees and
+// a last-write-wins range-assign cannot.
+func TestMinSeedRankPerPool_Deterministic(t *testing.T) {
+	seedPoolIdx := map[int]int{
+		5: 0, // pool 0 also claimed by rank 2 below; 2 must win
+		2: 0,
+		3: 1, // pool 1: only one rank, unambiguous
+	}
+	want := map[int]int{0: 2, 1: 3}
+
+	for i := 0; i < 200; i++ {
+		got := minSeedRankPerPool(seedPoolIdx)
+		require.Equalf(t, want, got, "iteration %d: pool 0 must resolve to its MINIMUM surviving rank (2), not whatever a range-assign visited last", i)
+	}
+}
+
+// TestPoolQualifierPathsFillBracket_SharedSeedPoolUsesMinRank is the
+// integration-level companion to TestMinSeedRankPerPool_Deterministic: it
+// drives poolQualifierPathsFillBracket itself (not just the extracted
+// helper), on a shape where the pool holding two colliding seed ranks (0)
+// competes for a single draft slot against a pool with an unambiguous rank
+// (1) -- found by sweeping shapes and confirming this one's draft outcome
+// actually flips between "pool 0 drafts" and "pool 1 drafts" depending on
+// whether pool 0 resolves to its min rank (2, beats pool 1's rank 3) or the
+// stray non-min rank (5, loses to rank 3) -- and requires the SAME pool (0)
+// to win the draft on every call.
+func TestPoolQualifierPathsFillBracket_SharedSeedPoolUsesMinRank(t *testing.T) {
+	targetSizes := []int{2, 2, 2}
+	const minSize = 2
+	const numCourts = 2
+	seedPoolIdx := map[int]int{5: 0, 2: 0, 3: 1}
+
+	first := poolQualifierPathsFillBracket(targetSizes, minSize, seedPoolIdx, numCourts)
+	require.NotNil(t, first, "sweep setup: this shape must be in fill-bracket's scope")
+	require.Len(t, first[0], 2, "sweep setup: pool 0 (the ambiguous one, min rank 2) must be the one drafted, i.e. pool 0 sends 2 qualifiers")
+	for i := 0; i < 100; i++ {
+		got := poolQualifierPathsFillBracket(targetSizes, minSize, seedPoolIdx, numCourts)
+		require.Equalf(t, first, got, "iteration %d: identical input must produce identical qualifier paths (pool 0 must keep winning the draft on rank 2, never lose it to a stray rank 5)", i)
+	}
+}
+
 // TestPoolQualifierPaths_RedOnShiftedSlots is a RED-verification harness: it
 // asserts the exact slot numbers for a fixed, small, hand-checked shape (4
 // pools of 4, 1 winner, 2 courts), so a future change that shifts the

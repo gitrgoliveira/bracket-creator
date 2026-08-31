@@ -147,6 +147,38 @@ func poolQualifierPathsPerPool(targetSizes []int, defaultWinners int, overrides 
 	})
 }
 
+// minSeedRankPerPool reduces seedPoolIdx (seed RANK -> pool index, as
+// computed by placeSeedIndices) to POOL index -> that pool's BEST (lowest,
+// i.e. minimum) surviving seed rank (bc-dojo-least-conflicted-pool FIX 2).
+//
+// Two seed ranks can legally share one pool -- gapped survivor ranks after
+// no-shows, or more seed ranks than pools wrapping via idx%numPools in
+// placeSeedIndices -- and poolQualifierPathsFillBracket only has ONE
+// placeholder Players[0] slot per pool to record a seed rank onto. A plain
+// `for rank, idx := range seedPoolIdx { skeleton[idx].Players[0].Seed =
+// rank }` range-assign is then map-iteration-order dependent: whichever
+// rank Go's map happens to visit LAST for that idx wins, which is
+// nondeterministic run-to-run on identical input. That changes
+// SelectFillBracketDrafts' seed-ordered draft set (it drafts seeded pools
+// in seed order via poolSeedRank) and, through it, the whole unseeded pool
+// distribution.
+//
+// Production's real draw-time draft always resolves a pool holding several
+// surviving seeds to its BEST (lowest) rank -- poolSeedRank's own contract,
+// reused unchanged elsewhere in this package -- so computing the minimum
+// here first is both deterministic (a min-reduction is commutative: the
+// result does not depend on which order the map is walked in) and
+// consistent with what the real draw does.
+func minSeedRankPerPool(seedPoolIdx map[int]int) map[int]int {
+	out := make(map[int]int, len(seedPoolIdx))
+	for rank, idx := range seedPoolIdx {
+		if cur, ok := out[idx]; !ok || rank < cur {
+			out[idx] = rank
+		}
+	}
+	return out
+}
+
 // poolQualifierPathsFillBracket is poolQualifierPaths' fill-bracket
 // counterpart (bc-dojo Phase 4): builds the skeleton via
 // SelectFillBracketDraftIndices + BuildKnockoutDrawFillBracket, reusing
@@ -174,7 +206,13 @@ func poolQualifierPathsFillBracket(targetSizes []int, minSize int, seedPoolIdx m
 		return nil
 	}
 	skeleton := buildQualifierSkeleton(targetSizes)
-	for rank, idx := range seedPoolIdx {
+	// Record the MINIMUM seed rank per pool (bc-dojo-least-conflicted-pool
+	// FIX 2), via minSeedRankPerPool -- see that function's own doc comment
+	// for why a plain `skeleton[idx].Players[0].Seed = rank` range-assign is
+	// wrong here. Only fill-bracket is affected: the standard skeleton
+	// carries no seeds, and larger-pools' overrides map is consumed by
+	// keyed lookup, never by a range-assign into a shared slot.
+	for idx, rank := range minSeedRankPerPool(seedPoolIdx) {
 		if idx < 0 || idx >= len(skeleton) || len(skeleton[idx].Players) == 0 {
 			continue
 		}

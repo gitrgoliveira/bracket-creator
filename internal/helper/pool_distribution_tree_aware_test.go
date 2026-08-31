@@ -223,3 +223,61 @@ func TestBuildPoolPhaseTreeAware_NoTwoSeedsShareAPool(t *testing.T) {
 		}
 	}
 }
+
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo pins FIX 1
+// (bc-dojo-least-conflicted-pool): a roster containing a blank-dojo player
+// must be refused outright by the shared pre-flight
+// (buildPoolPhaseTreeAwareCore), reached by all three tree-aware entry
+// points, rather than silently corrupting the descent's capacity accounting
+// (recordDojoOccupancy is guarded on `p.Dojo != ""`, so a blank-dojo player
+// consumes a real pool seat without the tree ever seeing it) or
+// improveDojoMeetings' spread/meeting objective (which would otherwise count
+// Dojo=="" as a phantom dojo). The error must name the offending player and
+// no pools may be returned.
+func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "NoDojo", Dojo: ""},
+		{Name: "Carol", Dojo: "DojoC"},
+		{Name: "Dave", Dojo: "DojoA"},
+		{Name: "Erin", Dojo: "DojoB"},
+		{Name: "Frank", Dojo: "DojoC"},
+		{Name: "Grace", Dojo: "DojoA"},
+	}
+
+	pools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(players, 4, false, 1, 2, "", 0)
+	require.Error(t, err, "a blank-dojo roster must be refused, not silently drawn")
+	assert.ErrorIs(t, err, ErrBlankDojo)
+	assert.Contains(t, err.Error(), "NoDojo", "the error must name the offending player so the operator knows which row to repair")
+	assert.Nil(t, pools)
+	assert.Zero(t, drawCourts)
+
+	// Every tree-aware entry point funnels through the same pre-flight.
+	pools2, _, err2 := BuildPoolPhaseTreeAware(players, 4, false, 1, 2)
+	require.Error(t, err2)
+	assert.ErrorIs(t, err2, ErrBlankDojo)
+	assert.Nil(t, pools2)
+
+	pools3, _, err3 := BuildPoolPhaseFillBracketTreeAware(players, 4, 1)
+	require.Error(t, err3)
+	assert.ErrorIs(t, err3, ErrBlankDojo)
+	assert.Nil(t, pools3)
+}
+
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames checks
+// that every offending player is named, not just the first found, so an
+// operator with several bad rows can fix them all from one error rather
+// than re-running the draw once per row.
+func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "NoDojoOne", Dojo: ""},
+		{Name: "NoDojoTwo", Dojo: ""},
+		{Name: "Carol", Dojo: "DojoC"},
+	}
+	_, _, err := BuildPoolPhaseTreeAwareWithMode(players, 2, false, 1, 2, "", 0)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "NoDojoOne")
+	assert.Contains(t, err.Error(), "NoDojoTwo")
+}

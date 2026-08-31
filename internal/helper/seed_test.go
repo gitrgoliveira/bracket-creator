@@ -2579,4 +2579,77 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 		}
 		assert.Len(t, seen, 6, "every seed must still be in the draw exactly once")
 	})
+
+	// TestStandardSeeding_DelayDojoMeetings_SkipsImmovableWorstPair pins FIX 3
+	// (bc-dojo-least-conflicted-pool): the worst-pair hill climb must not
+	// abandon the WHOLE repair the moment the single globally-worst same-dojo
+	// pair turns out to be immovable.
+	//
+	// Construction (n=8): generateBracketOrder(8) = [1,8,4,5,2,7,3,6], so
+	// seed ranks 4 and 5 land at slots 2 and 3 -- adjacent, meeting in round
+	// 1, and both SEEDED, hence permanently immovable (a dojo is not a
+	// reason to break the seeding contract). Separately, six unseeded
+	// players fill the remaining slots (0,1,4,5,6,7) in roster order; the
+	// last two of them (DojoX) land at slots 6 and 7, ALSO meeting in round
+	// 1, but both unseeded and hence fixable (e.g. swapping either of them
+	// with slot 0's occupant pushes DojoX's meeting to round 3, at the cost
+	// of moving DojoB's own pair from round 3 to round 2 -- a net
+	// improvement the hill climb should take).
+	//
+	// Before the fix, the worst-pair scan always found the seeded DojoA
+	// pair first (it is tied for worst at round 1, and the scan order
+	// visits slots 2-3 before 6-7), found no movable member to relocate,
+	// and returned immediately -- leaving DojoX's fixable round-1 meeting
+	// untouched. RED-verified: reverting to the original early-return
+	// reproduces exactly that (see the fix's own commit for the verification
+	// transcript).
+	t.Run("an immovable worst pair does not strand a separate fixable pair", func(t *testing.T) {
+		players := []Player{
+			{Name: "S4", Dojo: "DojoA", Seed: 4},
+			{Name: "S5", Dojo: "DojoA", Seed: 5},
+			{Name: "C1", Dojo: "DojoC"},
+			{Name: "B1", Dojo: "DojoB"},
+			{Name: "D1", Dojo: "DojoD"},
+			{Name: "B2", Dojo: "DojoB"},
+			{Name: "X1", Dojo: "DojoX"},
+			{Name: "X2", Dojo: "DojoX"},
+		}
+
+		out := StandardSeeding(players)
+		require.Len(t, out, 8)
+
+		slotOf := map[string]int{}
+		for i, p := range out {
+			if p.Name != "" {
+				slotOf[p.Name] = i
+			}
+		}
+
+		// Sanity: the construction actually produces the immovable
+		// round-1 seeded pairing this test is about. If this fails, the
+		// fixture no longer exercises the scenario and needs revisiting,
+		// not the production code.
+		require.Contains(t, slotOf, "S4")
+		require.Contains(t, slotOf, "S5")
+		require.Equal(t, 1, dojoMeetRound(slotOf["S4"], slotOf["S5"]),
+			"sanity: the seeded DojoA pair must be the immovable round-1 pairing this test is about")
+
+		// The actual assertion: no MOVABLE same-dojo pair (neither member
+		// seeded) may meet in round 1. The immovable seeded pair at
+		// slots 2-3 is expected and allowed to remain.
+		for i := range out {
+			for j := i + 1; j < len(out); j++ {
+				a, b := out[i], out[j]
+				if a.Name == "" || b.Name == "" || a.Dojo == "" || a.Dojo != b.Dojo {
+					continue
+				}
+				if dojoMeetRound(i, j) != 1 {
+					continue
+				}
+				assert.Truef(t, a.Seed > 0 && b.Seed > 0,
+					"movable same-dojo pair %s/%s (dojo %s) meets in round 1 at slots %d/%d: a fixable round-1 collision must not be stranded by an unrelated immovable one",
+					a.Name, b.Name, a.Dojo, i, j)
+			}
+		}
+	})
 }

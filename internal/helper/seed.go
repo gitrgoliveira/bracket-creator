@@ -258,6 +258,31 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
 
+	// excluded holds same-dojo pairs (slot indices i<j) the current scan
+	// generation has already picked as "worst" and found unfixable --
+	// either both slots are seeded (occupied, permanently immovable, e.g.
+	// two seed ranks from one dojo landing adjacent by the seeding
+	// contract) or no available relocation currently improves the total.
+	// Without this, the worst-pair scan below always re-selects the SAME
+	// globally-worst pair, and an immovable one stops the whole climb dead
+	// (bc-dojo-least-conflicted-pool FIX 3: an 8-player draw with seed
+	// ranks 4 and 5 sharing a dojo lands them adjacent and immovable, while
+	// an entirely separate, fixable unseeded same-dojo pair at round 1
+	// elsewhere in the same draw was left untouched because the scan never
+	// got past the immovable pair). Excluding a stuck pair lets the scan
+	// fall through to the next-worst REMAINING pair instead.
+	//
+	// The set only grows within one generation (between accepted swaps):
+	// a swap changes dojoSwapGain for every other pair too (a pair excluded
+	// a moment ago may now have a fixable relocation, or may no longer even
+	// be the worst), so it is reset to empty whenever a swap IS accepted,
+	// giving the next generation a clean look at everything. Monotonic
+	// growth within a generation plus a bounded number of same-dojo pairs
+	// is what keeps a generation itself finite; the outer iteration cap
+	// below is unchanged and remains the belt-and-braces bound.
+	type pairKey struct{ i, j int }
+	excluded := map[pairKey]bool{}
+
 	// A hill climb on the total of every same-dojo pair's meeting round: the
 	// higher the total, the later dojo-mates meet. A first-round pairing
 	// scores the minimum, so removing one is always the largest single gain
@@ -273,13 +298,16 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 				if result[i].Dojo != result[j].Dojo {
 					continue
 				}
+				if excluded[pairKey{i, j}] {
+					continue
+				}
 				if r := dojoMeetRound(i, j); r < worstRound {
 					worstA, worstB, worstRound = i, j, r
 				}
 			}
 		}
 		if worstA < 0 {
-			return // no dojo shares two slots: nothing to delay
+			return // no selectable dojo pair remains: nothing left to delay
 		}
 
 		// Try relocating either member of the worst pair. Accept the swap that
@@ -300,9 +328,17 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 			}
 		}
 		if bestGain <= 0 {
-			return // nothing left that improves matters
+			// This worst pair is stuck: exclude it so the next iteration
+			// retries against the next-worst REMAINING pair, rather than
+			// abandoning every other dojo's meeting untouched (see the
+			// excluded map's own doc comment above).
+			excluded[pairKey{worstA, worstB}] = true
+			continue
 		}
 		result[bestX], result[bestY] = result[bestY], result[bestX]
+		// The landscape changed for every pair, stuck or not: give the next
+		// generation a fresh look.
+		excluded = map[pairKey]bool{}
 	}
 }
 

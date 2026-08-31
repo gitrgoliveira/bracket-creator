@@ -1,9 +1,11 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
+	"strings"
 )
 
 // The region-aware pool distributor (bc-dojo). Built BESIDE the old
@@ -243,6 +245,48 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 	return buildPoolPhaseTreeAwareCore(players, numPools, base, numCourts, 1, qualifierMode{ExtraQualifiers: qualifierModeFillBracket, MinPoolSize: minSize})
 }
 
+// ErrBlankDojo is the sentinel identifying a draw refused because the
+// roster contains at least one player with an empty Dojo
+// (bc-dojo-least-conflicted-pool FIX 1). Match it with errors.Is; the
+// returned error's message additionally names every offending player so the
+// operator knows exactly which row to repair.
+//
+// Every downstream signal in this file is defined only for non-blank
+// dojos: recordDojoOccupancy is guarded on `p.Dojo != ""` (so a blank-dojo
+// player consumes a real pool seat via the leastConflictedPool bypass
+// without ever updating the tree's capacity accounting -- the descent's
+// ONLY fullness signal -- which lets a later descent overfill a pool past
+// its target size) and improveDojoMeetings' footprint/spread/meeting
+// objective would otherwise count Dojo=="" as a phantom dojo that drives
+// and vetoes real swaps. Per the operator's absolute "dojo must never be
+// empty" rule (NO FALLBACKS), a blank-dojo roster is refused outright
+// rather than tolerated by a new blank-skipping accounting path.
+//
+// Participant LOADING stays blank-tolerant on purpose (state.LoadParticipants
+// and its CSV parser accept a blank dojo, so a legacy or hand-edited roster
+// can still be loaded and the offending row repaired in the UI/CSV) -- only
+// the DRAW itself refuses, at this one shared pre-flight.
+var ErrBlankDojo = errors.New("cannot draw pools: every competitor must have a dojo")
+
+// validateNoBlankDojo is the one pre-flight check shared by
+// BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
+// BuildPoolPhaseFillBracketTreeAware (all three funnel through
+// buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
+// attempt regardless of which entry point the caller used). Returns nil
+// when every player has a non-blank Dojo.
+func validateNoBlankDojo(players []Player) error {
+	var names []string
+	for _, p := range players {
+		if p.Dojo == "" {
+			names = append(names, p.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrBlankDojo, strings.Join(names, ", "))
+}
+
 // buildPoolPhaseTreeAwareCore is BuildPoolPhaseTreeAware's and
 // BuildPoolPhaseFillBracketTreeAware's shared body (bc-dojo Phase 4): given
 // the pool COUNT and BASE target sizes already resolved by the caller's own
@@ -252,6 +296,14 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // exercised before this was added), distributes the unseeded in one pass
 // against the mode's own knockout skeleton, and reorders for courts.
 func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes []int, numCourts int, poolWinners int, mode qualifierMode) ([]Pool, int, error) {
+	// FIX 1 (bc-dojo-least-conflicted-pool): refuse a blank-dojo roster up
+	// front, before any seed/pool arithmetic runs, rather than let one
+	// silently corrupt the tree-aware capacity accounting below. See
+	// ErrBlankDojo's own doc comment for the two mechanisms this closes.
+	if err := validateNoBlankDojo(players); err != nil {
+		return nil, 0, err
+	}
+
 	drawCourts := EffectiveDrawCourts(numPools, numCourts)
 
 	pools := make([]Pool, numPools)

@@ -163,7 +163,7 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCou
 	// --- Playoff bracket ---
 	poolWinners := in.PoolWinners
 	if poolWinners <= 0 {
-		poolWinners = 2 // mirrors ResolveQualifiedPools' default in engine/knockout.go
+		poolWinners = defaultPoolWinners // same default ResolveQualifiedPools (engine/knockout.go) falls back to
 	}
 	numFinalists := len(realPools) * poolWinners
 	totalPlayoffMatches := bracketMatchCount(numFinalists)

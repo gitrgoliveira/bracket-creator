@@ -101,25 +101,32 @@ import (
 //     into that pool's occupancy immediately, which is what "recording
 //     their dojo" means operationally: the unseeded pass below sees seeded
 //     occupants exactly as it sees earlier unseeded ones.
-//  3. Every unseeded player is then placed in ONE PASS, largest dojo first
-//     by TOTAL roster footprint (sortUnseededByTotalDojoFootprint -- see its
-//     own doc comment for why this counts seeded members too, unlike
-//     PoolSeeding's own unseeded-only dojo sort), by pickTreeAwarePool:
-//     among the pools that still have room, the one that pushes this
-//     player's earliest possible knockout meeting with an already-placed
-//     dojo-mate the LATEST, ties broken by leastConflictedPool's existing
-//     rule. There is no repair pass: the old pipeline needed one (a
-//     post-fill dojo-swap pass, since deleted) to fix what a blind,
-//     order-dependent fill could not see coming, and that problem does not
-//     arise when the fill can see the whole tree before it places anyone.
-//  4. ReorderPoolsForCourts runs last, exactly as BuildPoolPhase's does.
+//  3. Every unseeded player is then placed in ONE PASS, IN ROSTER ORDER (no
+//     re-sort -- the roster arrives pre-shuffled by design, sorting here
+//     would fight that), by assignUnseededByDojoTree descending a tree of
+//     halves/quarters/.../pools built over each pool's WINNER (rank-1)
+//     qualifier leaf: at each node, fewer of this dojo per real pool wins,
+//     ties broken by room then by leastConflictedPool's existing rule. See
+//     assignUnseededByDojoTree's own doc comment for the placement
+//     mechanism.
+//  4. improveDojoMeetings then runs a PAIRWISE-ONLY exchange pass over the
+//     result, scored on the winner-path metric alone: the descent commits
+//     each player the moment it places them and cannot see a later dojo's
+//     needs, so on a multi-dojo roster an early dojo can still box a later
+//     one into pools whose winners meet in round 1. The exchange pass
+//     closes exactly that residual (accepted only when it strictly
+//     improves, never worsens any dojo's earliest winner-path meeting);
+//     it is a no-op on an all-unique-dojo roster and on a single-dojo
+//     roster already at the brute-force ceiling. See improveDojoMeetings'
+//     own doc comment.
+//  5. ReorderPoolsForCourts runs last, exactly as BuildPoolPhase's does.
 //
 // numCourts is used ONLY in step 1 (to derive drawCourts, the modulus seed
-// placement and ReorderPoolsForCourts both need) and step 4 (the actual
-// court assignment). Steps 2 and 3 -- the whole of WHO goes WHERE -- never
-// read a court index: the knockout tree's region/crossing structure is the
-// same shape whatever the shiaijo count (poolQualifierPaths, Phase 1), so
-// distribution is computed once and courts are laid onto the result
+// placement and ReorderPoolsForCourts both need) and step 5 (the actual
+// court assignment). Steps 2 through 4 -- the whole of WHO goes WHERE --
+// never read a court index: the knockout tree's region/crossing structure
+// is the same shape whatever the shiaijo count (poolQualifierPaths, Phase
+// 1), so distribution is computed once and courts are laid onto the result
 // afterwards, never the other way round.
 //
 // poolWinners is the one addition to BuildPoolPhase's own parameter list:
@@ -148,8 +155,9 @@ func BuildPoolPhaseTreeAware(players []Player, poolSize int, isMax bool, numCour
 // defaultPoolWinners is the pool-winners count BuildPoolPhase falls back to
 // when it has no real competition to read one from: the documented default
 // both state.Competition.EffectivePoolWinners() and
-// engine.ResolveQualifiedPools use (helper/estimate.go mirrors it too, for
-// the same reason).
+// engine.ResolveQualifiedPools use. helper/estimate.go's EstimateMatchCounts
+// falls back to this same const for the same reason (a synthetic estimate
+// has no real competition either).
 const defaultPoolWinners = 2
 
 // qualifierMode selects which of production's three knockout-draw skeleton
@@ -200,16 +208,25 @@ const (
 // cmd/create-pools.go), as opposed to BuildPoolPhaseTreeAware's and
 // BuildPoolPhase's own fixed defaultPoolWinners/standard-mode behaviour.
 //
-// minPoolSize is state.Competition.PoolSize (the minimum-mode pool size)
-// when extraQualifiers is larger-pools or fill-bracket, ignored for
-// standard mode. isMax must be false whenever extraQualifiers is
-// non-standard (state.ValidateExtraQualifiers enforces this on every real
-// caller before formation runs); this function does not re-validate it,
-// matching poolTargetSizes' own trust-the-caller contract.
-func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool, numCourts int, poolWinners int, extraQualifiers string, minPoolSize int) ([]Pool, int, error) {
+// The minimum-mode pool size qualifierMode.MinPoolSize needs (state.
+// Competition.PoolSize when extraQualifiers is larger-pools or
+// fill-bracket, ignored for standard mode) is fully derivable from this
+// function's own poolSize/isMax parameters -- it is poolSize under
+// minimum-mode sizing (isMax false) and 0 (irrelevant) under max-mode
+// sizing, exactly poolTargetSizes' own isMax contract -- so it is computed
+// here rather than taken as a caller-supplied parameter every caller would
+// otherwise have to hand-derive identically. isMax must be false whenever
+// extraQualifiers is non-standard (state.ValidateExtraQualifiers enforces
+// this on every real caller before formation runs); this function does not
+// re-validate it, matching poolTargetSizes' own trust-the-caller contract.
+func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool, numCourts int, poolWinners int, extraQualifiers string) ([]Pool, int, error) {
 	numPools, targetSizes, err := poolTargetSizes(len(players), poolSize, isMax)
 	if err != nil {
 		return nil, 0, err
+	}
+	minPoolSize := 0
+	if !isMax {
+		minPoolSize = poolSize
 	}
 	return buildPoolPhaseTreeAwareCore(players, numPools, targetSizes, numCourts, poolWinners, qualifierMode{ExtraQualifiers: extraQualifiers, MinPoolSize: minPoolSize})
 }
@@ -874,33 +891,31 @@ func extraQualifierOverridesFromSizes(sizes []int, minPoolSize, poolWinners int)
 	return overrides
 }
 
-// reorderPositions mirrors ReorderPoolsForCourts' own grouping arithmetic
-// (helper.go) on bare indices instead of Pool structs: post[preIdx] is the
-// position pre-reorder index preIdx lands at once ReorderPoolsForCourts
-// actually runs, including its own no-op condition (numCourts <= 1 ||
-// numPools <= numCourts), which must match EXACTLY or a caller would permute
-// when the real function would not. Pinned equal to it by
-// TestReorderPositionsMatchesReorderPoolsForCourts so the two can never
-// drift silently.
+// reorderPositions reports the same pre-to-post-reorder permutation
+// ReorderPoolsForCourts (helper.go) produces, but as a bare index mapping
+// instead of a []Pool: post[preIdx] is the position pre-reorder index
+// preIdx lands at once ReorderPoolsForCourts actually runs, including its
+// own no-op condition (numCourts <= 1 || numPools <= numCourts).
+//
+// Rather than re-deriving ReorderPoolsForCourts' own i%numCourts grouping
+// arithmetic by hand -- a second copy that could silently drift from the
+// real function -- this SIMULATES the real thing (the same pattern
+// realTargetSizes uses for its own remainder spread): it builds numPools
+// placeholder pools, each holding one uniquely-identifiable marker player
+// (the player's Seed field carries its pre-reorder index; PoolName can't be
+// the marker, since ReorderPoolsForCourts overwrites it as part of
+// reordering), runs the REAL ReorderPoolsForCourts over them, and reads the
+// permutation back off where each marker ended up. This can never drift
+// from ReorderPoolsForCourts because it IS ReorderPoolsForCourts.
 func reorderPositions(numPools, numCourts int) []int {
+	markers := make([]Pool, numPools)
+	for i := range markers {
+		markers[i] = Pool{Players: []Player{{Seed: i}}}
+	}
+	reordered := ReorderPoolsForCourts(markers, numCourts)
 	post := make([]int, numPools)
-	if numCourts <= 1 || numPools <= numCourts {
-		for i := range post {
-			post[i] = i
-		}
-		return post
-	}
-	groups := make([][]int, numCourts)
-	for i := 0; i < numPools; i++ {
-		c := i % numCourts
-		groups[c] = append(groups[c], i)
-	}
-	pos := 0
-	for _, g := range groups {
-		for _, i := range g {
-			post[i] = pos
-			pos++
-		}
+	for postIdx, p := range reordered {
+		post[p.Players[0].Seed] = postIdx
 	}
 	return post
 }
@@ -1355,12 +1370,12 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 
 // poolUnderDojoCap is leastConflictedPool restricted to pools that hold
 // FEWER than dojoCap of dojo already: every pool at or over the cap is
-// masked as already full (its target size set to its current length, the
-// same masking trick pickTreeAwarePool uses above), so leastConflictedPool's
-// own room check and tie-break (fewest of dojo, fewest players, lowest
-// index) narrows the search to the capped candidates while still returning
-// a true original index. Returns -1 when no pool is both under cap and has
-// room, matching leastConflictedPool's own sentinel.
+// masked as already full (its target size set to its current length), so
+// leastConflictedPool's own room check and tie-break (fewest of dojo,
+// fewest players, lowest index) narrows the search to the capped
+// candidates while still returning a true original index. Returns -1 when
+// no pool is both under cap and has room, matching leastConflictedPool's
+// own sentinel.
 func poolUnderDojoCap(pools []Pool, targetSizes []int, dojo string, dojoCap int) int {
 	masked := append([]int(nil), targetSizes...)
 	for i := range pools {

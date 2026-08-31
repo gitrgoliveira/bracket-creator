@@ -487,10 +487,11 @@ func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
 // indices mod numPools, preventing the leastConflictedPool fallback from
 // landing same-dojo players in the same pool.
 //
-// Extracted out of PoolSeeding so BuildPoolPhaseTreeAware (bc-dojo Phase 2)
-// can process the unseeded roster in the SAME clustering order its one-pass
-// distribution loop is specified to use, without a second copy of this sort
-// that could drift from PoolSeeding's own.
+// PoolSeeding-private: PoolSeeding is its only caller. The tree-aware path
+// (assignUnseededByDojoTree, pool_distribution_tree_aware.go) deliberately
+// does NOT re-sort the unseeded roster -- it processes players in the
+// caller's own (pre-shuffled) order, since re-sorting there would fight
+// that upstream decision rather than help it.
 func sortUnseededByDojoCluster(unseeded []Player) {
 	dojoCount := make(map[string]int)
 	for _, p := range unseeded {
@@ -603,13 +604,14 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 	return indices
 }
 
-// placeSeedsForPools is PoolSeeding's seed-placement half, extracted so
-// BuildPoolPhaseTreeAware (bc-dojo Phase 2) can put seeds in EXACTLY the
-// pools today's pipeline puts them in, without re-deriving --or drifting
-// from-- seedPoolRank/seedCourtOrder's arithmetic a second time. It returns
-// PoolSeeding's own `result`/`occupied` pair: a dense slice of length
-// totalLen with each seeded player at its target index and every other index
-// left zero, and the set of indices a seed claims.
+// placeSeedsForPools is PoolSeeding's seed-placement half. PoolSeeding-private:
+// PoolSeeding is its only caller. It wraps placeSeedIndices (this file),
+// which IS shared with BuildPoolPhaseTreeAware so the two pipelines can
+// never drift on the seedPoolRank/seedCourtOrder arithmetic; this function
+// just converts that shared index list into PoolSeeding's own
+// `result`/`occupied` pair: a dense slice of length totalLen with each
+// seeded player at its target index and every other index left zero, and
+// the set of indices a seed claims.
 //
 // Deriving the pool a seed ends up in from an index here is a SEPARATE step
 // (index i lands in pool i%numPools once CreatePools' straight fill runs

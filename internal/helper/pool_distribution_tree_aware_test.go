@@ -9,34 +9,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestReorderPositionsMatchesReorderPoolsForCourts pins reorderPositions
-// against the real ReorderPoolsForCourts: build numPools distinguishable
-// synthetic pools (each holding one uniquely-named player, since
-// ReorderPoolsForCourts overwrites PoolName itself as part of reordering and
-// so cannot be used as the identity marker here), reorder them for real, and
-// check that pool i's content ended up at reorderPositions(...)[i]. This is
-// the seam a bug slipped through during Phase 2 development (see
-// treeAwareQualifierSlots' doc comment) -- pre-reorder and post-reorder pool
-// order are different index spaces, and this test is what would have caught
-// scoring against the wrong one.
-func TestReorderPositionsMatchesReorderPoolsForCourts(t *testing.T) {
+// TestReorderPositionsIsAValidPermutation sanity-checks reorderPositions'
+// output shape.
+//
+// reorderPositions used to hand-derive ReorderPoolsForCourts' own
+// i%numCourts grouping arithmetic a second time, and this test compared
+// that hand copy's output against the real ReorderPoolsForCourts run over
+// marker pools -- a genuine pin, back when the two were independent
+// implementations. reorderPositions itself now BUILDS those same marker
+// pools and calls the real ReorderPoolsForCourts internally (see its own
+// doc comment), so a test that re-does the identical marker-pool dance and
+// compares the two outputs would be comparing reorderPositions against
+// itself: it can never fail, however reorderPositions is written, and pins
+// nothing (this repo has already learned that lesson once on this branch).
+// What is still worth asserting here is that reorderPositions' contract
+// holds regardless of implementation: for every numPools/numCourts, `post`
+// must be a bijection over [0, numPools) -- every pre-reorder index maps to
+// exactly one in-range post-reorder position, and no two collide.
+func TestReorderPositionsIsAValidPermutation(t *testing.T) {
 	for numPools := 1; numPools <= 10; numPools++ {
 		for numCourts := 1; numCourts <= 8; numCourts++ {
 			t.Run(fmt.Sprintf("pools=%d courts=%d", numPools, numCourts), func(t *testing.T) {
-				pools := make([]Pool, numPools)
-				for i := range pools {
-					pools[i] = Pool{Players: []Player{{Name: fmt.Sprintf("marker-%d", i)}}}
-				}
-				reordered := ReorderPoolsForCourts(pools, numCourts)
 				post := reorderPositions(numPools, numCourts)
 				require.Len(t, post, numPools)
-				require.Len(t, reordered, numPools)
+				seen := make([]bool, numPools)
 				for preIdx, postIdx := range post {
 					require.GreaterOrEqualf(t, postIdx, 0, "pool %d", preIdx)
 					require.Lessf(t, postIdx, numPools, "pool %d", preIdx)
-					require.Len(t, reordered[postIdx].Players, 1)
-					assert.Equalf(t, fmt.Sprintf("marker-%d", preIdx), reordered[postIdx].Players[0].Name,
-						"pre-reorder pool %d: expected it at post-reorder position %d", preIdx, postIdx)
+					require.Falsef(t, seen[postIdx], "post-reorder position %d claimed by more than one pre-reorder index", postIdx)
+					seen[postIdx] = true
 				}
 			})
 		}
@@ -247,7 +248,7 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo(t *testing.T) {
 		{Name: "Grace", Dojo: "DojoA"},
 	}
 
-	pools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(players, 4, false, 1, 2, "", 0)
+	pools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(players, 4, false, 1, 2, "")
 	require.Error(t, err, "a blank-dojo roster must be refused, not silently drawn")
 	assert.ErrorIs(t, err, ErrBlankDojo)
 	assert.Contains(t, err.Error(), "NoDojo", "the error must name the offending player so the operator knows which row to repair")
@@ -277,7 +278,7 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames(t *testi
 		{Name: "NoDojoTwo", Dojo: ""},
 		{Name: "Carol", Dojo: "DojoC"},
 	}
-	_, _, err := BuildPoolPhaseTreeAwareWithMode(players, 2, false, 1, 2, "", 0)
+	_, _, err := BuildPoolPhaseTreeAwareWithMode(players, 2, false, 1, 2, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "NoDojoOne")
 	assert.Contains(t, err.Error(), "NoDojoTwo")

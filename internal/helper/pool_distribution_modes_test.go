@@ -51,9 +51,9 @@ func buildLargerPoolsOverrides(pools []Pool, minSize, poolWinners int) map[int]i
 // TestQualifierModeSeam_LargerPools sweeps a handful of oversubscribed-dojo
 // shapes at poolWinners=1 (state.ValidateExtraQualifiers' own gate for this
 // mode) and asserts:
-//  1. BuildPoolPhaseTreeAwareWithMode(..., "larger-pools", minSize) produces
-//     pools BuildKnockoutDrawPerPool (production's real larger-pools
-//     builder) can build a draw from.
+//  1. BuildPoolPhaseTreeAwareWithMode(..., "larger-pools") produces pools
+//     BuildKnockoutDrawPerPool (production's real larger-pools builder) can
+//     build a draw from.
 //  2. Scoring against the REAL larger-pools tree (mode-aware) never places
 //     a dojo's own qualifiers to meet EARLIER than mode-blind (standard
 //     scoring) placement would, for the identical pool count/sizes fed to
@@ -82,7 +82,7 @@ func TestQualifierModeSeam_LargerPools(t *testing.T) {
 
 				tag := fmt.Sprintf("larger-pools pools=%d minSize=%d courts=%d", numPools, minSize, courts)
 
-				awarePools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(r, minSize, false, courts, poolWinners, qualifierModeLargerPools, minSize)
+				awarePools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(r, minSize, false, courts, poolWinners, qualifierModeLargerPools)
 				require.NoError(t, err, tag)
 
 				numPoolsGot, baseSizes, err := poolTargetSizes(n, minSize, false)

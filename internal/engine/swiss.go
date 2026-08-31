@@ -596,7 +596,7 @@ func (e *Engine) subsequentRoundPairings(
 
 	// Pair within win-groups. When pairing fails inside a group
 	// (rematch wall), pull a candidate from the next group up/down.
-	pairs := pairWithinWinGroups(ordered, wins, priorPair, rankByKey)
+	pairs := pairWithinWinGroups(ordered, wins, priorPair)
 	return pairs, bye, nil
 }
 
@@ -636,7 +636,7 @@ func lowestWinBucketNames(ordered []string, wins map[string]int) []string {
 // ordered/wins/priorPair carry competitor identity keys (CompetitorKey),
 // not display names (bc-cse), so rematch avoidance (priorPair) correctly
 // distinguishes two same-name-different-dojo competitors.
-func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[string]bool, rankByKey map[string]int) [][2]string {
+func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[string]bool) [][2]string {
 	pairs := [][2]string{}
 
 	// remaining holds the still-unpaired names in priority order.
@@ -666,7 +666,6 @@ func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[st
 		remaining = append(remaining[:partnerIdx], remaining[partnerIdx+1:]...)
 		remaining = remaining[1:]
 	}
-	_ = rankByKey // reserved for richer tie-break logic; kept in the signature for future evolution
 	return pairs
 }
 

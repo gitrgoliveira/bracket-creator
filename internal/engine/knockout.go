@@ -185,6 +185,19 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // and whether the bracket now has zero pool-origin placeholders left (every pool
 // seeded). No-op (0, false, nil) for non-mixed competitions, standalone playoffs
 // brackets carry no pool placeholders.
+//
+// Boundary, by current design (bc-cse): the resolver above writes a
+// competitor's display NAME into the bracket slot (`resolver[key] =
+// ps[rank-1].Player.Name`), not an id -- BracketMatch persists no side ids
+// at all (state/bracket.go's MatchSidesByID doc), so there is nowhere on a
+// bracket match to put one even if this function resolved one. If two
+// same-name-different-dojo competitors both qualify (legal identity,
+// CLAUDE.md's "Competitor identity" rule), the bracket cannot tell their
+// slots apart from that point on, and downstream eligibility resolution
+// (lookupPlayerID, eligibility.go) degrades to a first-name-match lookup for
+// the same reason. This is the documented seam where bc-cse's identity work
+// stops, not an oversight this function owes a fix for: closing it needs
+// BracketMatch to grow persisted side ids, a separate, larger change.
 func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {

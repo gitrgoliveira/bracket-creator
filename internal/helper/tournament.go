@@ -309,10 +309,15 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 // DELEGATES to the region-aware distributor (BuildPoolPhaseTreeAware,
 // pool_distribution_tree_aware.go), which enforces the same four
 // constraints above -- the same numPools/drawCourts derivation, seeds
-// placed before the unseeded, ReorderPoolsForCourts last -- inside ONE
-// forward pass that can see the whole knockout tree before it places
-// anyone, so it needs no repair pass at all (see that function's own doc
-// comment for the algorithm).
+// placed before the unseeded, ReorderPoolsForCourts last -- inside a
+// forward pass (assignUnseededByDojoTree) that can see the whole knockout
+// tree before it places anyone, followed by a narrow pairwise-exchange
+// pass (improveDojoMeetings) that closes the one residual the forward pass
+// alone cannot see. That exchange pass is a different animal from the
+// deleted post-fill repair: it is scored on the winner-path metric alone,
+// touches only unseeded-for-unseeded swaps, and is a no-op on the
+// unique-dojo and single-dojo cases the old repair also left untouched
+// (see BuildPoolPhaseTreeAware's own doc comment for the full pipeline).
 //
 // poolWinners is fixed at defaultPoolWinners (2, the documented
 // EffectivePoolWinners()/ResolveQualifiedPools default) and the mode at
@@ -900,12 +905,3 @@ func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[strin
 	}
 	return matchWinners
 }
-
-// assignPlayersToPools' post-fill dojo-swap repair pass (a same-dojo-pair
-// exchange search, run once after the greedy fill) was deleted by the
-// bc-dojo Phase 4 swap: the region-aware distributor (BuildPoolPhaseTreeAware,
-// pool_distribution_tree_aware.go) sees the whole knockout tree before it
-// places anyone, so it gets dojo placement right in its one forward pass
-// and never needed a second pass to repair it. See assignPlayersToPools'
-// own doc comment for what still calls this function and why removing the
-// repair pass changed none of their output.

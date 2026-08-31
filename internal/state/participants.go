@@ -20,7 +20,7 @@ var ErrParticipantNotFound = errors.New("participant not found")
 // with another participant in the same roster (excluding the participant being
 // edited, for the update path). The comparison is on the normalized
 // (name, dojo) key; the SAME name at a DIFFERENT dojo is allowed (two real
-// people at different clubs), so the message names both fields.
+// people at different dojos), so the message names both fields.
 var ErrDuplicateName = errors.New("a participant with the same name and dojo already exists")
 
 // ErrBlankDojo is returned by every participant write path when an entry
@@ -413,6 +413,19 @@ func (s *Store) saveParticipantsTakingLock(compID string, players []domain.Playe
 // the import path rolls the whole competition back when the participant save
 // fails. Fresh operator input still goes through SaveParticipants and is still
 // refused; only a restore of already-owned data is exempt.
+//
+// The blank-dojo floor (ErrBlankDojo, saveParticipantsNoLock) is deliberately
+// NOT exempted the same way: it runs unconditionally regardless of rule.skip,
+// so an archive containing a blank-dojo row is refused here exactly as a
+// fresh save would refuse it, and the error names the offending row. This
+// is a chosen asymmetry, not an oversight -- the team-name rule postdates
+// existing archives (a backup can be older than the rule and still be
+// legitimate data), but a blank dojo has never been valid competitor
+// identity at any point this store has existed, restored or not. The
+// operator's remedy is also different in kind: a team-name collision has no
+// fix the operator can apply (the archive just predates the rule), whereas a
+// blank dojo is a repairable data error -- fix the row in the CSV inside the
+// archive bundle and re-import.
 func (s *Store) SaveParticipantsRestored(compID string, players []domain.Player) error {
 	return s.saveParticipantsTakingLock(compID, players, false)
 }
@@ -648,7 +661,7 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 	// for check-in-only transforms that don't rename; which is harmless
 	// because the participant being edited is skipped (i == foundIdx) and a
 	// no-op edit can't collide with itself. Using both fields allows same-named
-	// competitors from different clubs while rejecting diacritic/casing variants.
+	// competitors from different dojos while rejecting diacritic/casing variants.
 	newNormName := helper.NormalizeParticipantName(players[foundIdx].Name)
 	newNormDojo := helper.NormalizeParticipantName(players[foundIdx].Dojo)
 	for i := range players {
@@ -862,7 +875,7 @@ func (s *Store) AddParticipant(compID string, p domain.Player, withZekkenName bo
 
 	// Duplicate-name guard: reject when (normalizedName, normalizedDojo)
 	// matches an existing entry. Using both name and dojo means that two
-	// real people at different clubs with the same name are allowed, while
+	// real people at different dojos with the same name are allowed, while
 	// diacritic / casing variants ("Müller/Wakaba" vs "muller/wakaba") are
 	// correctly rejected.
 	for _, existing := range players {

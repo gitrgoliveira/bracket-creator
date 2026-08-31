@@ -272,12 +272,7 @@ func drawGoldenDojoRoster(total, dojoSize int, dojoName string) []Player {
 func computeDojoOversubscriptionStats(pools []Pool, dojo string) (counts []int, maxCount int, singleDojoPools []string) {
 	counts = make([]int, len(pools))
 	for i, p := range pools {
-		n := 0
-		for _, pl := range p.Players {
-			if pl.Dojo == dojo {
-				n++
-			}
-		}
+		n := countDojoInPool(p, dojo)
 		counts[i] = n
 		if n > maxCount {
 			maxCount = n

@@ -248,11 +248,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	if o.extraQualifiers == state.ExtraQualifiersFillBracket {
 		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, activePoolSize, o.courts)
 	} else {
-		minPoolSize := 0
-		if !isMax {
-			minPoolSize = activePoolSize
-		}
-		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, o.poolWinners, o.extraQualifiers, minPoolSize)
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, o.poolWinners, o.extraQualifiers)
 	}
 	if err != nil {
 		return err

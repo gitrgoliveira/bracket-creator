@@ -285,6 +285,24 @@ func resolveWinnerSide(m state.MatchResult) (winnerIsA, winnerIsB bool) {
 // MatchResult ever grows a per-side dojo, this distinction disappears and the
 // two schemes should become one.
 
+// newStandingsIndex builds the standings lookup for a roster and returns it
+// alongside the same pointers in roster order.
+//
+// Both halves are needed and the second is easy to forget: the map indexes
+// each competitor under TWO keys (id and name, see registerStandingsPlayer),
+// so ranging over its values visits -- and would append -- every competitor
+// twice. Callers assemble their output from the returned slice, never from the
+// map. Returning them together is what stops each call site having to know
+// that, and having to say so in its own comment.
+func newStandingsIndex(players []domain.Player) (map[string]*state.PlayerStanding, []*state.PlayerStanding) {
+	byKey := make(map[string]*state.PlayerStanding, len(players))
+	order := make([]*state.PlayerStanding, 0, len(players))
+	for _, p := range players {
+		order = append(order, registerStandingsPlayer(byKey, p))
+	}
+	return byKey, order
+}
+
 // registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
 // into m under BOTH its name key AND (when player.ID is non-empty) its id
 // key, and returns the standing so the caller can keep populating it.
@@ -312,24 +330,6 @@ func resolveWinnerSide(m state.MatchResult) (winnerIsA, winnerIsB bool) {
 // SAME degraded behavior standings always had before ids existed, not a new
 // gap -- it only matters when a match referencing one of them ALSO carries
 // no id, at which point there is no data left to disambiguate correctly.
-// newStandingsIndex builds the standings lookup for a roster and returns it
-// alongside the same pointers in roster order.
-//
-// Both halves are needed and the second is easy to forget: the map indexes
-// each competitor under TWO keys (id and name, see registerStandingsPlayer),
-// so ranging over its values visits -- and would append -- every competitor
-// twice. Callers assemble their output from the returned slice, never from the
-// map. Returning them together is what stops each call site having to know
-// that, and having to say so in its own comment.
-func newStandingsIndex(players []domain.Player) (map[string]*state.PlayerStanding, []*state.PlayerStanding) {
-	byKey := make(map[string]*state.PlayerStanding, len(players))
-	order := make([]*state.PlayerStanding, 0, len(players))
-	for _, p := range players {
-		order = append(order, registerStandingsPlayer(byKey, p))
-	}
-	return byKey, order
-}
-
 func registerStandingsPlayer(m map[string]*state.PlayerStanding, player domain.Player) *state.PlayerStanding {
 	st := &state.PlayerStanding{Player: player}
 	m[standingsPlayerKey("", player.Name)] = st
@@ -476,6 +476,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
 	// order holds one *PlayerStanding per participant, in roster order: the
 	// assembly loop below ranges over THIS, not over byKey's values, because
+	// byKey double-registers each competitor (see newStandingsIndex's own
+	// "Both halves are needed" paragraph).
 	byKey, order := newStandingsIndex(participants)
 
 	headToHead := make(map[string]map[string]string) // winner key → opponent key → winner key

@@ -121,11 +121,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		if poolFedKnockout {
 			extraQualifiers = comp.ExtraQualifiers
 		}
-		minPoolSize := 0
-		if !isMax {
-			minPoolSize = comp.PoolSize
-		}
-		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, comp.PoolSize, isMax, numCourts, comp.EffectivePoolWinners(), extraQualifiers, minPoolSize)
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, comp.PoolSize, isMax, numCourts, comp.EffectivePoolWinners(), extraQualifiers)
 		if err != nil {
 			// Wrapped as a *ValidationError (-> HTTP 400 at the
 			// generate-draw handler), matching the fill-bracket branch

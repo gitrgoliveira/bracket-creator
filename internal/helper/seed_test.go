@@ -2523,12 +2523,14 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 		// ODD slot and so the only way it could be the side this pass moves.
 		//
 		// What this does NOT pin, stated so nobody reads more into it:
-		// removing the occupied[i+1] guard from separateFirstRoundDojos
-		// leaves this subtest green (verified). No roster was found where a
-		// seed sits on an odd slot, shares a dojo with its even partner, AND
-		// has a legal swap partner. The guard is defence in depth; this
-		// subtest pins that seeds are where the seeding put them, which is the
-		// property that actually matters to an operator.
+		// removing the seed-protecting occupied guard from this pass (then
+		// named separateFirstRoundDojos; today delayDojoMeetings' movable()
+		// check) left this subtest green, verified against that earlier form.
+		// No roster was found where a seed sits on an odd slot, shares a dojo
+		// with its even partner, AND has a legal swap partner. The guard is
+		// defence in depth; this subtest pins that seeds are where the
+		// seeding put them, which is the property that actually matters to
+		// an operator.
 		for _, n := range []int{5, 6, 7, 12, 16} {
 			for _, nSeeds := range []int{2, 4, 6} {
 				if nSeeds > n {

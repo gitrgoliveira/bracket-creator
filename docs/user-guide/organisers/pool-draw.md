@@ -34,6 +34,16 @@ The dojo is the only thing the draw keeps apart. Sharing a name is not a conflic
 
 Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps: no dojo's first meeting may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
 
+### Watch a draw being made
+
+The walk-through below applies the rules on this page to two example rosters. Step through it one competitor at a time, or press Play and watch the pools fill. At each fork it shows how many of that competitor's dojo already sit on either side of the bracket, and which way that sends them.
+
+<div data-pool-draw-animation>
+  <p>This walk-through needs JavaScript. Everything it demonstrates is described in the text above and below it.</p>
+</div>
+
+Both rosters, and the pools the draw produces from them, come from the application itself rather than from a hand-written example.
+
 ## When a dojo has more members than pools
 
 Once a dojo has one member in every pool, some of its members must share, and the draw spreads them as evenly as the pool count allows. With 24 entrants, 10 of them from one dojo, in six pools of 4, that dojo's members land 2, 2, 2, 2, 1 and 1 to a pool: no pool is all one dojo, no pool holds more than one pairing from that dojo, and no spread with fewer shared pools exists.

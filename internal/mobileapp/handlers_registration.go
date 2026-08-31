@@ -138,16 +138,17 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 
 		addedPlayer, err := store.AddParticipant(id, player, comp.EffectiveWithZekkenName())
 		if err != nil {
+			// ErrDuplicateName gets a friendlier public-facing message here
+			// (this is the unauthenticated self-registration endpoint), so it
+			// is checked BEFORE respondRosterWriteError -- that shared
+			// classifier (errors.go) always answers with err.Error()
+			// verbatim, which would leak the raw "same name and dojo" wording
+			// to a walk-up competitor instead of this endpoint's guidance.
 			if errors.Is(err, state.ErrDuplicateName) {
 				c.JSON(http.StatusConflict, gin.H{"error": "A participant with this name is already registered. If this is you, no action needed. If not, try including your dojo name."})
 				return
 			}
-			if errors.Is(err, state.ErrReservedName) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.Is(err, state.ErrBlankDojo) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if respondRosterWriteError(c, err) {
 				return
 			}
 			if errors.Is(err, state.ErrCompetitionNotInSetup) {

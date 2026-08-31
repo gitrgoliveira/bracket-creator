@@ -135,16 +135,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 			addedPlayer, err := store.AddParticipant(id, player, comp.EffectiveWithZekkenName())
 			if err != nil {
-				if errors.Is(err, state.ErrDuplicateName) {
-					c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-					return
-				}
-				if errors.Is(err, state.ErrReservedName) {
-					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-					return
-				}
-				if errors.Is(err, state.ErrBlankDojo) {
-					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				if respondRosterWriteError(c, err) {
 					return
 				}
 				if errors.Is(err, state.ErrCompetitionNotInSetup) {
@@ -322,18 +313,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		if err := store.SaveParticipants(id, players); err != nil {
 			// Defense-in-depth: saveParticipantsNoLock also enforces the
-			// Tier-1 (name, dojo) guard, so map that to 409 rather than 500
-			// in case the pre-check above ever diverges from the write layer.
-			if errors.Is(err, state.ErrDuplicateName) {
-				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.Is(err, state.ErrReservedName) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.Is(err, state.ErrBlankDojo) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			// Tier-1 (name, dojo) guard and the blank-dojo/reserved-name
+			// floors, so map those to their 4xx rather than 500 in case the
+			// pre-check above ever diverges from the write layer.
+			// respondRosterWriteError (errors.go) is the one shared
+			// classifier for these sentinels.
+			if respondRosterWriteError(c, err) {
 				return
 			}
 			internalError(c, err, "failed to save participants")
@@ -489,15 +474,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return nil
 			})
 			if err != nil {
-				switch {
-				case errors.Is(err, state.ErrParticipantNotFound):
-					httpStatus = http.StatusNotFound
-				case errors.Is(err, state.ErrDuplicateName):
-					httpStatus = http.StatusConflict
-				case errors.Is(err, state.ErrReservedName):
-					httpStatus = http.StatusBadRequest
-				case errors.Is(err, state.ErrBlankDojo):
-					httpStatus = http.StatusBadRequest
+				// classifyRosterWriteError (errors.go) is the one shared
+				// classifier for these sentinels; httpStatus keeps its zero-
+				// value default (StatusInternalServerError, set above) for
+				// anything it doesn't recognize.
+				if status, ok := classifyRosterWriteError(err); ok {
+					httpStatus = status
 				}
 				httpMsg = err.Error()
 				return err
@@ -691,8 +673,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 
 		if err != nil {
-			if errors.Is(err, state.ErrParticipantNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			// Every write funnels through saveParticipantsNoLock's floor
+			// guards, so a check-in can be refused by ErrBlankDojo (a
+			// DIFFERENT, unrelated roster row with a blank dojo blocks EVERY
+			// write while it's unfixed -- see ErrBlankDojo's doc), not just
+			// ErrParticipantNotFound. respondRosterWriteError (errors.go) is
+			// the one shared classifier for these sentinels.
+			if respondRosterWriteError(c, err) {
 				return
 			}
 			internalError(c, err)
@@ -736,6 +723,15 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		result, err := store.BulkCheckIn(id, req.ParticipantIDs)
 		if err != nil {
+			// BulkCheckIn is the highest-frequency roster writer and, like
+			// every other write, goes through saveParticipantsNoLock's floor
+			// guards: an unrelated blank-dojo row already on disk refuses
+			// this write too (ErrBlankDojo), not just an infra failure.
+			// respondRosterWriteError (errors.go) is the one shared
+			// classifier for these sentinels.
+			if respondRosterWriteError(c, err) {
+				return
+			}
 			internalError(c, err)
 			return
 		}
@@ -766,8 +762,11 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		})
 
 		if err != nil {
-			if errors.Is(err, state.ErrParticipantNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			// See the checkin (PUT) handler above: this write is subject to
+			// the same saveParticipantsNoLock floor guards, so
+			// respondRosterWriteError (errors.go) classifies ErrBlankDojo
+			// too, not just ErrParticipantNotFound.
+			if respondRosterWriteError(c, err) {
 				return
 			}
 			internalError(c, err)

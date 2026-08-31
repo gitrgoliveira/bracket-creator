@@ -302,7 +302,7 @@ func TestGenerateTiebreakerMatches_TwoWay(t *testing.T) {
 		{Player: domain.Player{Name: "Alice", Dojo: "Dojo Alice"}},
 		{Player: domain.Player{Name: "Bob", Dojo: "Dojo Bob"}},
 	}
-	matches := generateTiebreakerMatches("Pool A", group, 0, "A", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.Equal(t, "Pool A-TB-0", m.ID)
@@ -318,7 +318,7 @@ func TestGenerateTiebreakerMatches_ThreeWay(t *testing.T) {
 		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
 		{Player: domain.Player{Name: "C", Dojo: "Dojo C"}},
 	}
-	matches := generateTiebreakerMatches("Pool X", group, 0, "B", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool X", group, 0, "B", nil)
 	// 3-way round-robin = 3 matches
 	require.Len(t, matches, 3)
 	assert.Equal(t, "Pool X-TB-0", matches[0].ID)
@@ -331,7 +331,7 @@ func TestGenerateTiebreakerMatches_ExistingCountOffset(t *testing.T) {
 		{Player: domain.Player{Name: "A", Dojo: "Dojo A"}},
 		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
 	}
-	matches := generateTiebreakerMatches("Pool X", group, 5, "A", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool X", group, 5, "A", nil)
 	require.Len(t, matches, 1)
 	assert.Equal(t, "Pool X-TB-5", matches[0].ID)
 }
@@ -342,10 +342,84 @@ func TestGenerateTiebreakerMatches_SkipsExistingPairs(t *testing.T) {
 		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
 		{Player: domain.Player{Name: "C", Dojo: "Dojo C"}},
 	}
-	existingPairs := map[string]bool{tiebreakerPairKey("A", "B"): true}
-	matches := generateTiebreakerMatches("Pool X", group, 1, "A", existingPairs)
+	existingRows := []state.MatchResult{{SideA: "A", SideB: "B"}}
+	matches := generateTiebreakerMatches("Pool X", group, 1, "A", existingRows)
 	// Only A-C and B-C should be generated
 	require.Len(t, matches, 2)
+}
+
+// TestGenerateTiebreakerMatches_NamesakePairGenerated is the regression guard
+// for the finding that a tied NAMESAKE pair (same display name, different
+// dojo -- legal per CheckDuplicateEntriesByNameDojo) never got its own TB
+// bout generated: the old `a.Player.Name >= b.Player.Name` skip is false in
+// BOTH loop orientations when the two names are equal, so `continue` fired
+// every time and zero matches were ever produced for the pair. Before the
+// fix (index-based enumeration replacing the name comparison) this asserts
+// Len 1 against an actual Len 0.
+func TestGenerateTiebreakerMatches_NamesakePairGenerated(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-alice-tokyo", Name: "Alice", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-alice-osaka", Name: "Alice", Dojo: "Osaka"}},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 1, "the tied namesake pair must still get its own TB bout")
+	m := matches[0]
+	assert.Equal(t, "Pool A-TB-0", m.ID)
+	assert.ElementsMatch(t, []string{m.SideAID, m.SideBID}, []string{"id-alice-tokyo", "id-alice-osaka"})
+}
+
+// TestGenerateTiebreakerMatches_ThreeWayWithNamesake covers the second half
+// of the same finding: a 3-way tied group {X@dojoA, X@dojoB, Y} must generate
+// all THREE round-robin bouts. Before the fix, bare-name dedup collapsed
+// X@dojoA-vs-Y and X@dojoB-vs-Y into "the same pair" (both keyed "X|Y"), so
+// only 2 of the 3 bouts were produced (and the X-vs-X bout was dropped
+// entirely by the name-order skip, same as the two-way case above).
+func TestGenerateTiebreakerMatches_ThreeWayWithNamesake(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-x-tokyo", Name: "X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-x-osaka", Name: "X", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-y", Name: "Y", Dojo: "Kyoto"}},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 3, "all three round-robin pairs of a 3-way group with one namesake pair must be generated")
+
+	gotPairs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		gotPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
+	}
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-x-osaka")], "X@Tokyo vs X@Osaka must be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-y")], "X@Tokyo vs Y must be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-osaka", "id-y")], "X@Osaka vs Y must be generated (distinct from X@Tokyo vs Y)")
+}
+
+// TestGenerateTiebreakerMatches_PrefillDedupsNamesakeInvolvingPair is the
+// regression guard requested alongside the two tests above: a genuinely
+// already-existing TB row for ONE of the two namesake-involving pairs must
+// still be skipped on re-injection, while the OTHER pair (which merely
+// shares a bare-name collision with the first under the old key scheme)
+// must still be generated. This is the scenario the old bare-name dedup got
+// backwards: it would either drop both (name collision) or, depending on
+// enumeration order, generate neither correctly.
+func TestGenerateTiebreakerMatches_PrefillDedupsNamesakeInvolvingPair(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-x-tokyo", Name: "X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-x-osaka", Name: "X", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-y", Name: "Y", Dojo: "Kyoto"}},
+	}
+	// X@Tokyo vs Y already exists on disk (e.g. from a prior injection).
+	existingRows := []state.MatchResult{
+		{ID: "Pool A-TB-0", SideA: "X", SideB: "Y", SideAID: "id-x-tokyo", SideBID: "id-y", Status: state.MatchStatusScheduled},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 1, "A", existingRows)
+	require.Len(t, matches, 2, "X-vs-X and X@Osaka-vs-Y are new; X@Tokyo-vs-Y already exists")
+
+	gotPairs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		gotPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
+	}
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-x-osaka")], "X@Tokyo vs X@Osaka must still be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-osaka", "id-y")], "X@Osaka vs Y is a DIFFERENT pair from the pre-existing X@Tokyo vs Y and must still be generated")
+	assert.False(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-y")], "the pre-existing X@Tokyo vs Y row must not be regenerated")
 }
 
 func TestInjectTiebreakerMatches_NoTie(t *testing.T) {
@@ -1132,7 +1206,7 @@ func TestGenerateTiebreakerMatches_StampsSideIDs(t *testing.T) {
 		{Player: domain.Player{ID: "id-alice", Name: "Alice", Dojo: "Dojo Alice"}},
 		{Player: domain.Player{ID: "id-bob", Name: "Bob", Dojo: "Dojo Bob"}},
 	}
-	matches := generateTiebreakerMatches("Pool A", group, 0, "A", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.NotEmpty(t, m.SideAID)

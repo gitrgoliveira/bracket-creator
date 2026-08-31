@@ -215,14 +215,19 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 		return nil, validationErrorf("a tie-break group needs at least two teams (competition %s)", compID)
 	}
 
-	// Determine the court from existing matches.
+	// Determine the court from existing matches. existingRows are handed to
+	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
+	// here): it resolves each row's sides against tiedGroup itself via
+	// newGroupKeyResolver, the same identity-keyed contract
+	// InjectPoolDaihyosenMatches uses, so a namesake-involving existing bout
+	// cannot suppress a distinct pair on this operator-triggered path either.
 	allMatches, err := e.store.LoadPoolMatches(compID)
 	if err != nil {
 		return nil, err
 	}
 	court := ""
 	existingCount := 0
-	existingPairs := map[string]bool{}
+	var existingRows []state.MatchResult
 	for _, m := range allMatches {
 		pn, ok := poolNameFromMatchID(m.ID)
 		if !ok {
@@ -233,11 +238,11 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 		}
 		if IsPoolDaihyosenMatchID(m.ID) && pn == poolName {
 			existingCount++
-			existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+			existingRows = append(existingRows, m)
 		}
 	}
 
-	injected := generatePoolDaihyosenMatches(poolName, tiedGroup, existingCount, court, existingPairs)
+	injected := generatePoolDaihyosenMatches(poolName, tiedGroup, existingCount, court, existingRows)
 	if len(injected) == 0 {
 		return nil, nil
 	}

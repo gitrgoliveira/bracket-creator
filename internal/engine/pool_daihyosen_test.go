@@ -84,7 +84,7 @@ func TestGeneratePoolDaihyosenMatches_TwoWayTie(t *testing.T) {
 		{Player: domain.Player{Name: "TeamA", Dojo: "Dojo TeamA"}},
 		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
 	}
-	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", map[string]bool{})
+	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", nil)
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.Equal(t, "Pool X-DH-0", m.ID)
@@ -104,7 +104,7 @@ func TestGeneratePoolDaihyosenMatches_StampsSideIDs(t *testing.T) {
 		{Player: domain.Player{ID: "id-teamA", Name: "TeamA", Dojo: "Dojo TeamA"}},
 		{Player: domain.Player{ID: "id-teamB", Name: "TeamB", Dojo: "Dojo TeamB"}},
 	}
-	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", map[string]bool{})
+	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "A", nil)
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.NotEmpty(t, m.SideAID)
@@ -120,7 +120,7 @@ func TestGeneratePoolDaihyosenMatches_ThreeWayTie(t *testing.T) {
 		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
 		{Player: domain.Player{Name: "TeamC", Dojo: "Dojo TeamC"}},
 	}
-	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "B", map[string]bool{})
+	matches := generatePoolDaihyosenMatches("Pool X", group, 0, "B", nil)
 	require.Len(t, matches, 3)
 	assert.Equal(t, "Pool X-DH-0", matches[0].ID)
 	assert.Equal(t, "Pool X-DH-1", matches[1].ID)
@@ -134,9 +134,89 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
 		{Player: domain.Player{Name: "TeamC", Dojo: "Dojo TeamC"}},
 	}
-	existing := map[string]bool{tiebreakerPairKey("TeamA", "TeamB"): true}
-	matches := generatePoolDaihyosenMatches("Pool X", group, 1, "A", existing)
+	existingRows := []state.MatchResult{{SideA: "TeamA", SideB: "TeamB"}}
+	matches := generatePoolDaihyosenMatches("Pool X", group, 1, "A", existingRows)
 	require.Len(t, matches, 2, "TeamA-TeamB already exists; only other 2 pairs generated")
+}
+
+// TestGeneratePoolDaihyosenMatches_NamesakeTeamsGenerated is the regression
+// guard for the finding that a tied group of two SAME-NAME teams (the
+// unique-team-name rule has documented enforcement holes,
+// checkNewTeamNameCollisions) never got their own DH bout generated: the old
+// `a.Player.Name >= b.Player.Name` skip is false in BOTH loop orientations
+// when the two names are equal, so `continue` fired every time and zero
+// matches were ever produced. Mirrors
+// TestGenerateTiebreakerMatches_NamesakePairGenerated.
+func TestGeneratePoolDaihyosenMatches_NamesakeTeamsGenerated(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-team-x-tokyo", Name: "Team X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-team-x-osaka", Name: "Team X", Dojo: "Osaka"}},
+	}
+	matches := generatePoolDaihyosenMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 1, "the tied namesake team pair must still get its own DH bout")
+	m := matches[0]
+	assert.Equal(t, "Pool A-DH-0", m.ID)
+	assert.ElementsMatch(t, []string{m.SideAID, m.SideBID}, []string{"id-team-x-tokyo", "id-team-x-osaka"})
+}
+
+// TestGeneratePoolDaihyosenMatches_ThreeWayWithNamesakeTeams covers the
+// second half of the same finding: a 3-way tied group {X@dojoA, X@dojoB, Y}
+// must generate all THREE round-robin bouts. Mirrors
+// TestGenerateTiebreakerMatches_ThreeWayWithNamesake.
+func TestGeneratePoolDaihyosenMatches_ThreeWayWithNamesakeTeams(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-x-tokyo", Name: "Team X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-x-osaka", Name: "Team X", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-y", Name: "Team Y", Dojo: "Kyoto"}},
+	}
+	matches := generatePoolDaihyosenMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 3, "all three round-robin pairs of a 3-way group with one namesake pair must be generated")
+
+	gotPairs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		gotPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
+	}
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-x-osaka")], "Team X@Tokyo vs Team X@Osaka must be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-y")], "Team X@Tokyo vs Team Y must be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-osaka", "id-y")], "Team X@Osaka vs Team Y must be generated (distinct from Team X@Tokyo vs Team Y)")
+}
+
+// TestGeneratePoolDaihyosenMatches_PrefillDedupsNamesakeInvolvingPair closes
+// the class the FIX2 doc comment used to describe as an "accepted, narrower
+// gap": generatePoolDaihyosenMatches now shares generateTiebreakerMatches'
+// existingRows contract (identity-keyed dedup via newGroupKeyResolver)
+// instead of a bare-name existingPairs map, so this scenario is fixed for
+// EVERY caller of the shared function -- both InjectPoolDaihyosenMatches
+// (auto-injection) and GenerateLeagueTiebreakMatches (league_tiebreak.go,
+// the operator-triggered team-league path), which now build the identical
+// existingRows shape. Mirrors
+// TestGenerateTiebreakerMatches_PrefillDedupsNamesakeInvolvingPair exactly.
+//
+// A genuinely already-existing DH row for ONE of the two namesake-involving
+// pairs (Team X@Tokyo vs Team Y) must still be skipped on re-injection,
+// while the OTHER pair (Team X@Osaka vs Team Y -- a DIFFERENT pair that
+// merely shares a bare-name collision with the first under the old key
+// scheme) must still be generated.
+func TestGeneratePoolDaihyosenMatches_PrefillDedupsNamesakeInvolvingPair(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-x-tokyo", Name: "Team X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-x-osaka", Name: "Team X", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-y", Name: "Team Y", Dojo: "Kyoto"}},
+	}
+	// Team X@Tokyo vs Team Y already exists on disk (e.g. from a prior injection).
+	existingRows := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team X", SideB: "Team Y", SideAID: "id-x-tokyo", SideBID: "id-y", Status: state.MatchStatusScheduled},
+	}
+	matches := generatePoolDaihyosenMatches("Pool A", group, 1, "A", existingRows)
+	require.Len(t, matches, 2, "Team X-vs-Team X and Team X@Osaka-vs-Team Y are new; Team X@Tokyo-vs-Team Y already exists")
+
+	gotPairs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		gotPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
+	}
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-x-osaka")], "Team X@Tokyo vs Team X@Osaka must still be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-osaka", "id-y")], "Team X@Osaka vs Team Y is a DIFFERENT pair from the pre-existing Team X@Tokyo vs Team Y and must still be generated")
+	assert.False(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-y")], "the pre-existing Team X@Tokyo vs Team Y row must not be regenerated")
 }
 
 // setupTeamPoolComp creates a team-pool competition with three teams in Pool A,

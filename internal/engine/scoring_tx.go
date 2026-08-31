@@ -50,6 +50,20 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// topNFinisher pairs a top-N finisher's IDENTITY key (standingsPlayerKey:
+// id-preferring, name fallback) with their bare display name. The mp-e2k1
+// displaced-qualifier guard below needs both: membership in the pre/post
+// top-N sets must be decided by identity (two competitors sharing a display
+// name from different dojos are explicitly legal, CheckDuplicateEntriesByNameDojo,
+// so a bare-name set would not notice a re-score swapping WHICH namesake
+// holds a qualifying rank), while hasStartedKnockoutMatchTx's bracket lookup
+// only has names to match against (BracketMatch carries no per-side id), so
+// the reported Finisher must still be a name.
+type topNFinisher struct {
+	key  string
+	name string
+}
+
 // RecordMatchResultWithIneligibilityTx is the tx-aware twin of
 // RecordMatchResultWithIneligibility. The K3/CHK047 partial-write
 // rollback path replays the prior result via the same tx so the
@@ -112,9 +126,9 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// non-engi competitions, so compIsEngi is always false here and is not
 	// tracked as a variable.
 	var (
-		poolRescoredName string   // pool this match belongs to (empty = not a pool match)
-		oldTopN          []string // qualifying finisher names BEFORE the write
-		poolWinners      int      // EffectivePoolWinners, captured so the post-write block needn't reload the comp
+		poolRescoredName string         // pool this match belongs to (empty = not a pool match)
+		oldTopN          []topNFinisher // qualifying finishers BEFORE the write, keyed by identity
+		poolWinners      int            // EffectivePoolWinners, captured so the post-write block needn't reload the comp
 	)
 	if prior != nil {
 		// mp-e2k1: reuse the comp already loaded (and error-checked) at the
@@ -139,7 +153,8 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 				}
 				ps := preStandings[pn]
 				for i := 0; i < poolWinners && i < len(ps); i++ {
-					oldTopN = append(oldTopN, ps[i].Player.Name)
+					p := ps[i].Player
+					oldTopN = append(oldTopN, topNFinisher{key: standingsPlayerKey(p.ID, p.Name), name: p.Name})
 				}
 			}
 		}
@@ -169,17 +184,34 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			return nil, fmt.Errorf("mp-e2k1: post-write standings for %s pool %q: %w", compID, poolRescoredName, sErr)
 		}
 		ps := postStandings[poolRescoredName]
-		// Build new top-N set and find displaced names. poolWinners was
-		// captured pre-write, the competition record can't change within
-		// this tx, so no reload is needed.
+		// Build the new top-N set and find displaced finishers, keyed by
+		// IDENTITY (standingsPlayerKey: id-preferring, name fallback) rather
+		// than bare name. Two competitors sharing a display name from
+		// different dojos are explicitly legal (CheckDuplicateEntriesByNameDojo),
+		// so a re-score that swaps WHICH namesake holds a qualifying rank
+		// changes the identity at that rank without changing the bare name
+		// occupying it; a name-keyed newSet would see the same string still
+		// present and silently miss the swap (mp-e2k1's guard exists
+		// precisely to catch a qualifying finisher changing under a started
+		// knockout match). poolWinners was captured pre-write, the
+		// competition record can't change within this tx, so no reload is
+		// needed.
 		newSet := make(map[string]struct{}, poolWinners)
 		for i := 0; i < poolWinners && i < len(ps); i++ {
-			newSet[ps[i].Player.Name] = struct{}{}
+			p := ps[i].Player
+			newSet[standingsPlayerKey(p.ID, p.Name)] = struct{}{}
 		}
+		// displaced carries bare NAMES (not keys): hasStartedKnockoutMatchTx
+		// below matches bracket sides by name only (BracketMatch carries no
+		// per-side id), so a namesake swap deliberately produces an
+		// over-broad name-based lookup that can match EITHER dojo's
+		// occupant of that bracket slot. That is intentional: the guard
+		// fails CLOSED on a namesake collision rather than silently letting
+		// an identity swap through.
 		var displaced []string
-		for _, name := range oldTopN {
-			if _, stillIn := newSet[name]; !stillIn {
-				displaced = append(displaced, name)
+		for _, f := range oldTopN {
+			if _, stillIn := newSet[f.key]; !stillIn {
+				displaced = append(displaced, f.name)
 			}
 		}
 		if len(displaced) > 0 {

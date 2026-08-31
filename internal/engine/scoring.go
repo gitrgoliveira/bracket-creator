@@ -1575,36 +1575,56 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
 	topN := min(effectiveTopN(comp), len(sorted))
 
-	// Build per-competitor regular match counts and completion status.
-	// A competitor is "done" when every regular match they appear in is Completed.
+	// Build per-competitor regular match counts and completion status,
+	// keyed by IDENTITY rather than bare Player.Name: two league competitors
+	// can share a display name across dojos (CheckDuplicateEntriesByNameDojo
+	// only rejects same-name AND same-dojo), and a bare-name key here would
+	// merge their completion counters into one shared bucket -- one
+	// namesake's still-in-progress fights then either delay or falsely
+	// trigger the OTHER namesake's emerging-tie mark. newStandingsIndex /
+	// lookupStandingsPlayer are the same identity machinery
+	// computeStandingsFrom itself used to build `sorted` in the first place
+	// (a fresh index built here, over the same roster, resolves each match
+	// side to the correct *state.PlayerStanding pointer exactly as that
+	// original build did), reused rather than re-deriving a second ad hoc
+	// key scheme.
 	type compStatus struct {
 		total     int
 		completed int
 	}
-	status := make(map[string]*compStatus, len(sorted))
-	for _, s := range sorted {
-		status[s.Player.Name] = &compStatus{}
+	players := make([]domain.Player, len(sorted))
+	for i, s := range sorted {
+		players[i] = s.Player
+	}
+	byKey, order := newStandingsIndex(players)
+	statusFor := make(map[*state.PlayerStanding]*compStatus, len(order))
+	for _, st := range order {
+		statusFor[st] = &compStatus{}
 	}
 	for _, m := range regularMatches {
-		if _, okA := status[m.SideA]; okA {
-			status[m.SideA].total++
+		if sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA); sA != nil {
+			cs := statusFor[sA]
+			cs.total++
 			if m.Status == state.MatchStatusCompleted {
-				status[m.SideA].completed++
+				cs.completed++
 			}
 		}
-		if _, okB := status[m.SideB]; okB {
-			status[m.SideB].total++
+		if sB := lookupStandingsPlayer(byKey, m.SideBID, m.SideB); sB != nil {
+			cs := statusFor[sB]
+			cs.total++
 			if m.Status == state.MatchStatusCompleted {
-				status[m.SideB].completed++
+				cs.completed++
 			}
 		}
 	}
 
 	// Check if ANY top-N competitor has completed all their own fights.
+	// order[i] is the standings entry for players[i], i.e. sorted[i]'s
+	// player, since newStandingsIndex ranges players in the same order it
+	// received them and appends each registered entry to order in lockstep.
 	triggerFired := false
 	for i := range topN {
-		name := sorted[i].Player.Name
-		cs := status[name]
+		cs := statusFor[order[i]]
 		if cs != nil && cs.total > 0 && cs.completed == cs.total {
 			triggerFired = true
 			break

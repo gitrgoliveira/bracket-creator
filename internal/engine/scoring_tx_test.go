@@ -793,6 +793,138 @@ func TestPoolRescore_FinisherFlip_KnockoutRunning_Rejected(t *testing.T) {
 	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored, "running knockout leaf must also block a finisher flip")
 }
 
+// TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected is the
+// regression guard for the finding that oldTopN/newSet/displaced in
+// RecordMatchResultWithIneligibilityTx were keyed by bare Player.Name: a
+// re-score that swaps WHICH of two same-named, different-dojo competitors
+// (CheckDuplicateEntriesByNameDojo explicitly allows this) holds a
+// qualifying rank changed the IDENTITY at that rank without changing the
+// bare name occupying it, so the name-keyed `displaced` computation stayed
+// empty and hasStartedKnockoutMatchTx was never even consulted -- a silent
+// identity swap under a started bracket slot.
+//
+// Fixture: Pool A has three competitors -- P1 (always wins, rank 1) and two
+// "Alice"s from different dojos. AliceX beats AliceY initially (AliceX ranks
+// 2nd, qualifying with poolWinners=2; AliceY ranks 3rd, non-qualifying). A
+// knockout match is hand-crafted as already RUNNING for the qualifying
+// "Alice" (there is no way to tell from the bracket's bare-name side which
+// dojo actually qualified, which is itself the point: the guard's downstream
+// bracket lookup is name-only and deliberately over-broad). Re-scoring the
+// AliceX-vs-AliceY pool match to flip the winner promotes AliceY to 2nd and
+// drops AliceX out of the top-N: same bare name at rank 2, different
+// competitor. The identity-keyed guard must detect this as a displacement and
+// reject the re-score; the pre-fix bare-name-keyed version saw "Alice" still
+// present at rank 2 and let it through.
+func TestPoolRescore_NamesakeFinisherSwap_KnockoutStarted_Rejected(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "namesake-guard-test"
+
+	p1 := domain.Player{ID: "id-p1", Name: "P1", Dojo: "Dojo P1"}
+	aliceX := domain.Player{ID: "id-alice-x", Name: "Alice", Dojo: "Dojo X"}
+	aliceY := domain.Player{ID: "id-alice-y", Name: "Alice", Dojo: "Dojo Y"}
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        compID,
+		Kind:        "individual",
+		Format:      state.CompFormatMixed,
+		Status:      state.CompStatusPools,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		PoolWinners: 2,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{p1, aliceX, aliceY}},
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{p1, aliceX, aliceY}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "P1", SideB: "Alice", SideAID: p1.ID, SideBID: aliceX.ID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-1", SideA: "P1", SideB: "Alice", SideAID: p1.ID, SideBID: aliceY.ID, Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", SideA: "Alice", SideB: "Alice", SideAID: aliceX.ID, SideBID: aliceY.ID, Status: state.MatchStatusScheduled},
+	}))
+
+	scoreNamesakeMatchTx(t, eng, store, compID, "Pool A-0", "P1", "Alice", p1.ID, aliceX.ID, p1.ID)
+	scoreNamesakeMatchTx(t, eng, store, compID, "Pool A-1", "P1", "Alice", p1.ID, aliceY.ID, p1.ID)
+	scoreNamesakeMatchTx(t, eng, store, compID, "Pool A-2", "Alice", "Alice", aliceX.ID, aliceY.ID, aliceX.ID)
+
+	// Sanity: AliceX (rank 2) qualifies with poolWinners=2, AliceY (rank 3) does not.
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	require.Len(t, standings["Pool A"], 3)
+	require.Equal(t, aliceX.ID, standings["Pool A"][1].Player.ID, "AliceX must be rank 2 before the re-score")
+
+	// Hand-craft a started knockout match for the qualifying "Alice" (bracket
+	// sides are bare names only; there is no dojo to tell the two apart).
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "r1-m0", SideA: "Alice", SideB: "P1", Status: state.MatchStatusRunning}},
+		},
+	}))
+
+	// Re-score Pool A-2, flipping the winner: AliceY now beats AliceX.
+	var rescore error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, rescore = eng.RecordMatchResultWithIneligibilityTx(tx, compID, "Pool A-2", &state.MatchResult{
+			SideA:    "Alice",
+			SideB:    "Alice",
+			SideAID:  aliceX.ID,
+			SideBID:  aliceY.ID,
+			Winner:   "Alice",
+			WinnerID: aliceY.ID,
+			IpponsB:  []string{"M"},
+			Status:   state.MatchStatusCompleted,
+		})
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.Error(t, rescore, "swapping which namesake holds the qualifying rank must be rejected while the knockout leaf is started")
+	assert.ErrorIs(t, rescore, ErrDownstreamKnockoutScored)
+	var dkErr *DownstreamKnockoutScoredError
+	require.ErrorAs(t, rescore, &dkErr)
+	assert.Equal(t, "Pool A", dkErr.Pool)
+
+	// Verify the pool match was rolled back: AliceX must still be the recorded winner.
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var poolA2 *state.MatchResult
+	for i := range matches {
+		if matches[i].ID == "Pool A-2" {
+			poolA2 = &matches[i]
+			break
+		}
+	}
+	require.NotNil(t, poolA2)
+	assert.Equal(t, aliceX.ID, poolA2.WinnerID, "pool match result must have been rolled back to AliceX as winner")
+}
+
+// scoreNamesakeMatchTx is a test helper mirroring scorePoolMatchTx but for
+// fixtures where SideA/SideB can be the SAME display name (namesakes from
+// different dojos): it stamps SideAID/SideBID/WinnerID explicitly rather than
+// inferring the winner from the (ambiguous) bare Winner name alone.
+func scoreNamesakeMatchTx(t *testing.T, eng *Engine, store *state.Store, compID, matchID, sideA, sideB, sideAID, sideBID, winnerID string) {
+	t.Helper()
+	result := &state.MatchResult{
+		SideA:    sideA,
+		SideB:    sideB,
+		SideAID:  sideAID,
+		SideBID:  sideBID,
+		Winner:   sideA,
+		WinnerID: winnerID,
+		IpponsA:  []string{"M"},
+		Status:   state.MatchStatusCompleted,
+	}
+	if winnerID == sideBID {
+		result.Winner = sideB
+		result.IpponsA = nil
+		result.IpponsB = []string{"M"}
+	}
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result)
+		return err
+	})
+	require.NoError(t, txErr)
+}
+
 // TestPoolRescore_NonMixedComp_GuardIsNoOp verifies the guard is skipped
 // entirely for standalone (non-mixed) competitions.
 func TestPoolRescore_NonMixedComp_GuardIsNoOp(t *testing.T) {

@@ -30,7 +30,7 @@ For team tournaments (`--team-matches N`), each row still represents an individu
 ## Constraints
 
 - A competitor is identified by **name and dojo together**. Two people who share a name are accepted as long as their dojos differ, which is common with widespread surnames; the same name at the same dojo is one person entered twice and is rejected before any bracket is generated.
-- The dojo must not be blank. A roster stored before this rule existed, or edited by hand, still loads so it can be repaired, but until the blank dojo is fixed the app refuses every change to that roster (check-ins included) and refuses to generate a draw from it; each refusal names the participant to fix. Importing a saved tournament is refused the same way: correct the dojo in the archive's participant file and import again.
+- The dojo must not be blank. A roster stored before this rule existed, or edited by hand, still loads so it can be repaired. Until the blank dojo is fixed, the app refuses every change to that roster (check-ins included) and refuses to generate a draw from it, and each refusal names the participant to fix. Importing a saved tournament is refused the same way: correct the dojo in the archive's participant file and import again.
 - **Team names are the exception**: two teams may not share a name even at different dojos, because a team's name is what identifies it in results.
 - Names in a [seeds file](../commands/create-pools.md#seeding) must match the CSV exactly (case-sensitive).
 

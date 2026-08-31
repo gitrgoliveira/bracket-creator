@@ -2,7 +2,7 @@
 
 In a competition with a pool phase, the knockout bracket is not redrawn once the pools finish. It is built when you generate the draw: every qualifying place has a slot waiting for it before a single pool match is played, and the preview shows you which pool feeds which slot.
 
-This page explains how those slots are worked out, so you can check a draw before you publish it and answer questions about it at the desk. For the phase before this one, how the pools themselves are drawn, see [The pool draw](pool-draw.md).
+This page explains how those slots are worked out, so you can verify a bracket before publishing it. For the phase before this one, how the pools themselves are drawn, see [The pool draw](pool-draw.md).
 
 It describes the **Pools + Knockout** format, pools followed by a knockout. A **Knockout only** competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
 
@@ -141,7 +141,7 @@ The draw avoids opening a knockout with two competitors from the same dojo. Afte
 
 This matters most for a **Knockout only** competition, where there is no pool phase to separate dojo-mates beforehand and the draw follows the order your roster is in. Rosters are usually entered a dojo at a time, and without this the first round can be almost entirely dojo against dojo.
 
-Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would simply create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
+Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
 
 ## Byes
 

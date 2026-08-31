@@ -136,7 +136,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
   const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
-  // Per-group input values: keys are "${poolName}::${teamName}" -> string.
+  // Per-member input values: keys are "${groupKey}::${idx}" -> string, where
+  // groupKey is "${poolName}::${minPosition}" and idx is the member's index
+  // in that group (never the display name, which two members can share).
   const [chusenInputs, setChusenInputs] = useStateA({});
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
   // (a pool can hold more than one unresolved tied group).
@@ -303,9 +305,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // the operator's edit if present, else the displayed default
         // (minPosition + index). Both validation and submit read this so
         // accepting the shown defaults (already a valid permutation) records
-        // without forcing a manual edit.
+        // without forcing a manual edit. Keyed on groupKey (pool + minPosition),
+        // not bare poolName: a pool can hold more than one unresolved tied
+        // group (see the groupKey comment above), and PoolWinners has no
+        // upper bound, so e.g. a cycle at 1st/2nd and another at 3rd/4th in
+        // the SAME pool both start their members at idx 0 -- a poolName-only
+        // key collapses them onto one shared input and one shared clear.
         const effRank = (idx) => {
-          const raw = chusenInputs[`${poolName}::${idx}`];
+          const raw = chusenInputs[`${groupKey}::${idx}`];
           return parseInt(raw !== undefined ? raw : String(minPosition + idx), 10);
         };
 
@@ -337,10 +344,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             // Optimistically hide THIS group only (a pool can hold several) - the
             // effect re-fetches on the next update to reconcile.
             setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
-            // Clear inputs for this group.
+            // Clear inputs for this group only (groupKey, not bare poolName --
+            // see the effRank comment: a sibling tied group in the same pool
+            // shares idx 0..N and must not have its inputs wiped here too).
             setChusenInputs(prev => {
               const next = { ...prev };
-              for (let i = 0; i < members.length; i++) delete next[`${poolName}::${i}`];
+              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${i}`];
               return next;
             });
           } catch (e) {
@@ -371,7 +380,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               Assign positions {minPosition} to {minPosition + members.length - 1} (one per team):
             </div>
             {members.map((member, idx) => {
-              const inputKey = `${poolName}::${idx}`;
+              // groupKey, not bare poolName: see the effRank comment above --
+              // a pool can hold more than one unresolved tied group, and
+              // without minPosition in the key two groups in the same pool
+              // collide on the same idx.
+              const inputKey = `${groupKey}::${idx}`;
               const defaultVal = minPosition + idx;
               // Stable DOM id so the label is programmatically tied to its input.
               const inputId = `chusen-${groupKey}-${idx}`.replace(/[^a-zA-Z0-9_-]+/g, "-");

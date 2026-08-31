@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"sort"
+	"strings"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -197,18 +200,38 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 		nameSet[n] = true
 	}
 
-	// Locate the pool and build the group.
+	// Locate the pool and build the group. matchCount tracks how many
+	// standings entries matched each requested name, so a mismatch between
+	// len(tiedGroup) and len(nameSet) below can be diagnosed precisely
+	// rather than reported as one generic "not found": a requested name
+	// matching ZERO entries is genuinely missing, but a name matching TWO OR
+	// MORE (a namesake collision -- team names must be unique by rule, but
+	// checkNewTeamNameCollisions has documented enforcement holes) WAS
+	// found, just ambiguously. Reporting "not found" for that case sends the
+	// operator hunting for a team that was actually on the sheet, twice.
 	var poolName string
 	var tiedGroup []state.PlayerStanding
+	matchCount := make(map[string]int, len(nameSet))
 	for pn, ps := range standings {
 		poolName = pn
 		for _, s := range ps {
 			if nameSet[s.Player.Name] {
 				tiedGroup = append(tiedGroup, s)
+				matchCount[s.Player.Name]++
 			}
 		}
 	}
 	if len(tiedGroup) != len(nameSet) {
+		var ambiguous []string
+		for n := range nameSet {
+			if matchCount[n] > 1 {
+				ambiguous = append(ambiguous, n)
+			}
+		}
+		if len(ambiguous) > 0 {
+			sort.Strings(ambiguous)
+			return nil, validationErrorf("team name(s) %s match more than one standings entry (a namesake across dojos); name-based tie-break selection cannot disambiguate them for competition %s", strings.Join(ambiguous, ", "), compID)
+		}
 		return nil, validationErrorf("one or more requested teams not found in standings for competition %s", compID)
 	}
 	if len(tiedGroup) < 2 {

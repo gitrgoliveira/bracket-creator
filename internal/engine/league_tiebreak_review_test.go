@@ -71,3 +71,44 @@ func TestGenerateLeagueTiebreakMatches_RejectsBadNames(t *testing.T) {
 		assert.Len(t, injected, 3, "3-team round-robin → 3 tie-break bouts")
 	})
 }
+
+// TestGenerateLeagueTiebreakMatches_AmbiguousNameDiagnosis is the regression
+// guard for the finding that a requested name matching TWO standings entries
+// (a namesake collision -- team names must be unique by rule, but
+// checkNewTeamNameCollisions has documented enforcement holes) was
+// misdiagnosed as "not found": len(tiedGroup) != len(nameSet) is also true
+// when a name matches MORE than once, not just zero times, and the old
+// unconditional message sent the operator hunting for a team that was
+// actually on the sheet, twice. The fix must name the ambiguous team and
+// must NOT claim it was "not found".
+func TestGenerateLeagueTiebreakMatches_AmbiguousNameDiagnosis(t *testing.T) {
+	compID := "lt-ambiguous-name"
+	eng, store, _ := setupTestEngine(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Ambiguous Name Test",
+		Format:   state.CompFormatLeague,
+		Status:   state.CompStatusPools,
+		Courts:   []string{"A"},
+		Kind:     "team",
+		TeamSize: 2,
+	}))
+	// Two DIFFERENT teams share the display name "Team X" (different dojos,
+	// the documented enforcement-hole shape); "Team Y" is unambiguous.
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Team X", Dojo: "Dojo A"}, {Name: "Team X", Dojo: "Dojo B"}, {Name: "Team Y", Dojo: "Dojo C"},
+		}},
+	}))
+	// No pool matches needed: CalculatePoolStandings returns one entry per
+	// pool player even with zero matches played, and GenerateLeagueTiebreakMatches
+	// does not re-validate consequentiality (the handler is the gate).
+
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Team X", "Team Y"})
+	require.Error(t, err, "an ambiguous team name must be rejected")
+	assert.NotContains(t, err.Error(), "not found",
+		"a name that matched twice was FOUND, just ambiguously -- must not be reported as missing")
+	assert.Contains(t, err.Error(), "Team X",
+		"the error must name the ambiguous team so the operator isn't left guessing")
+}

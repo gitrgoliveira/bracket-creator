@@ -220,3 +220,93 @@ describe('AdminPools chusen banner: unique-name group regression guard', () => {
     expect(api.overridePoolRank).not.toHaveBeenCalled();
   });
 });
+
+describe('AdminPools chusen banner: two tied groups in the same pool stay independent', () => {
+  // A pool can hold more than one unresolved tied group at once (e.g. a
+  // cycle at 1st/2nd AND a separate cycle at 3rd/4th -- PoolWinners has no
+  // upper bound), and every group's members start at idx 0. The fix keys
+  // chusenInputs / effRank / the post-submit clear on groupKey
+  // ("${poolName}::${minPosition}"), not bare poolName: a poolName-only key
+  // makes two same-pool groups share idx 0's (and idx 1's, ...) entry, so
+  // typing in one leaks into the other and submitting one wipes the other's
+  // still-open edits.
+  const groupOne = {
+    poolName: 'Pool A',
+    teamNames: ['Alpha', 'Beta'],
+    teams: [
+      { id: 'team-a', name: 'Alpha', dojo: 'Dojo A' },
+      { id: 'team-b', name: 'Beta', dojo: 'Dojo B' },
+    ],
+    minPosition: 1,
+  };
+  const groupTwo = {
+    poolName: 'Pool A',
+    teamNames: ['Gamma', 'Delta'],
+    teams: [
+      { id: 'team-g', name: 'Gamma', dojo: 'Dojo G' },
+      { id: 'team-d', name: 'Delta', dojo: 'Dojo D' },
+    ],
+    minPosition: 3,
+  };
+
+  it("typing in group 1's inputs does not change group 2's effective values", async () => {
+    const api = makeApi([groupOne, groupTwo]);
+    await mountAdminPools({ api });
+
+    await screen.findByText('Chusen (drawing lots) required');
+    const inputs = screen.getAllByRole('spinbutton');
+    expect(inputs.length).toBe(4);
+    // DOM order follows candidate order: group 1's two rows, then group 2's.
+    const [g1a, g1b, g2a, g2b] = inputs;
+    expect(g2a.value).toBe('3');
+    expect(g2b.value).toBe('4');
+    expect(g1a.id).not.toBe(g2a.id);
+    expect(g1b.id).not.toBe(g2b.id);
+
+    fireEvent.change(g1a, { target: { value: '99' } });
+    fireEvent.change(g1b, { target: { value: '98' } });
+
+    // A poolName-only key (dropping minPosition) makes group 1's idx-0/1
+    // rows share group 2's idx-0/1 chusenInputs entries, so this edit would
+    // leak straight into group 2's still-untouched rows.
+    expect(g2a.value).toBe('3');
+    expect(g2b.value).toBe('4');
+  });
+
+  it("submitting group 1 sends only its own members and does not wipe group 2's in-progress edits", async () => {
+    const api = makeApi([groupOne, groupTwo]);
+    await mountAdminPools({ api });
+
+    await screen.findByText('Chusen (drawing lots) required');
+    const inputs = screen.getAllByRole('spinbutton');
+    const [g1a, g1b, g2a, g2b] = inputs;
+
+    // Group 1: swap its own valid permutation (1,2) -> (2,1) and submit it.
+    fireEvent.change(g1a, { target: { value: '2' } });
+    fireEvent.change(g1b, { target: { value: '1' } });
+    // Group 2: swap its own valid permutation (3,4) -> (4,3), left UNSAVED.
+    fireEvent.change(g2a, { target: { value: '4' } });
+    fireEvent.change(g2b, { target: { value: '3' } });
+
+    const recordButtons = screen.getAllByRole('button', { name: /Record chusen result/ });
+    expect(recordButtons.length).toBe(2);
+    await act(async () => { fireEvent.click(recordButtons[0]); }); // group 1's button
+
+    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
+    const calls = api.overridePoolRank.mock.calls;
+    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a', 'Dojo A']);
+    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b', 'Dojo B']);
+    // Group 2 must never appear in the write: it was not submitted.
+    expect(calls.some((c) => c[2] === 'Gamma' || c[2] === 'Delta')).toBe(false);
+
+    // Group 1's row is now gone (optimistically removed on success); only
+    // group 2's row remains. Its inputs must still show the operator's
+    // unsaved (4, 3) edit, not a reset to (3, 4): a poolName-only clear key
+    // deletes exactly the entries group 2 also reads (idx 0 and 1, same
+    // group size), discarding an edit the operator never saved or undid.
+    const remaining = screen.getAllByRole('spinbutton');
+    expect(remaining.length).toBe(2);
+    expect(remaining[0].value).toBe('4');
+    expect(remaining[1].value).toBe('3');
+  });
+});

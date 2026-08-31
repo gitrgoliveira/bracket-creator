@@ -250,7 +250,7 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo(t *testing.T) {
 
 	pools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(players, 4, false, 1, 2, "")
 	require.Error(t, err, "a blank-dojo roster must be refused, not silently drawn")
-	assert.ErrorIs(t, err, ErrBlankDojo)
+	assert.ErrorIs(t, err, ErrBlankDojoInDraw)
 	assert.Contains(t, err.Error(), "NoDojo", "the error must name the offending player so the operator knows which row to repair")
 	assert.Nil(t, pools)
 	assert.Zero(t, drawCourts)
@@ -258,12 +258,12 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo(t *testing.T) {
 	// Every tree-aware entry point funnels through the same pre-flight.
 	pools2, _, err2 := BuildPoolPhaseTreeAware(players, 4, false, 1, 2)
 	require.Error(t, err2)
-	assert.ErrorIs(t, err2, ErrBlankDojo)
+	assert.ErrorIs(t, err2, ErrBlankDojoInDraw)
 	assert.Nil(t, pools2)
 
 	pools3, _, err3 := BuildPoolPhaseFillBracketTreeAware(players, 4, 1)
 	require.Error(t, err3)
-	assert.ErrorIs(t, err3, ErrBlankDojo)
+	assert.ErrorIs(t, err3, ErrBlankDojoInDraw)
 	assert.Nil(t, pools3)
 }
 
@@ -282,6 +282,24 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames(t *testi
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "NoDojoOne")
 	assert.Contains(t, err.Error(), "NoDojoTwo")
+}
+
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo pins
+// validateNoBlankDojo's TrimSpace alignment with state.ErrBlankDojo's own
+// write-floor check (saveParticipantsNoLock): a Dojo of "   " is exactly as
+// blank as "" and must be refused at the draw too, not just at the
+// participant-write floor, so a future in-memory producer that skips that
+// floor cannot slip whitespace past this guard.
+func TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "WhitespaceDojo", Dojo: "   "},
+		{Name: "Carol", Dojo: "DojoC"},
+	}
+	_, _, err := BuildPoolPhaseTreeAwareWithMode(players, 1, false, 1, 2, "")
+	require.Error(t, err, "a whitespace-only dojo must be refused, not silently drawn")
+	assert.ErrorIs(t, err, ErrBlankDojoInDraw)
+	assert.Contains(t, err.Error(), "WhitespaceDojo", "the error must name the offending player")
 }
 
 // referenceEarliestDojoMeeting is the pre-P3 nested-scan algorithm, kept

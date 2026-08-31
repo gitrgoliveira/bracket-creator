@@ -282,22 +282,73 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// below is unchanged and remains the belt-and-braces bound.
 	//
 	// Performance note (bc-dojo-least-conflicted-pool wave 2): this
-	// continuation is what the outer loop's own worst-pair rescan (O(N^2),
-	// unchanged by dojoSumMeetRounds' P1 speedup) now pays for on every
-	// stuck-and-excluded iteration, not just on an accepted one. Measured
-	// at 256 entrants, 16 dojos of 16: ~2051 total outer iterations, of
-	// which only ~130 are accepted swaps -- the other ~1921 exist solely
-	// to discover and exclude an unfixable pair one at a time. Each of
-	// those iterations still pays the full O(N^2) rescan plus an O(N)
-	// (post-P1) candidate confirmation, and the total iteration count
-	// itself scales close to O(N^2) on a heavily-clustered roster, so the
-	// climb's wall time is closer to O(N^4) than the O(N) candidates *
-	// O(N) per-candidate = O(N^2)-per-iteration figure alone would
-	// suggest. P1 cut the per-candidate cost ~100x as intended; it did not
-	// reduce the iteration count, which this continuation controls and
-	// which is now the larger remaining term at this roster size.
+	// continuation means the outer loop below can run many more iterations
+	// than accepted swaps -- a handful of dojos each contributing one worst
+	// pair per generation, discovered and excluded one at a time -- and
+	// every one of those iterations re-pays the worst-pair rescan (O(N^2),
+	// unaffected by dojoSumMeetRounds' P1 speedup). CORRECTION to an
+	// earlier version of this note, which blamed that rescan as the
+	// dominant cost: instrumented directly (sum of time spent in the
+	// rescan vs. the candidate-relocation scan, over the whole climb), the
+	// rescan is only 6-22% of the pre-memo total at 256 entrants across
+	// four measured shapes -- the O(N) candidates * O(N) dojoSwapGain =
+	// O(N^2) candidate-CONFIRMATION scan below (run once per outer
+	// iteration for worstA and worstB alike, even when neither slot's
+	// landscape changed since the last time it was checked) was the
+	// dominant term, at 78-94%. That confirmation is exactly what the
+	// slotBest memo below now caches per slot for the life of a
+	// generation; see its own doc comment for why that is safe. Re-measured
+	// end-to-end (delayDojoMeetings alone, unmemoized reference vs. the
+	// real memoized function, this machine, 256 entrants):
+	//   16 dojos of 16:                7.88s -> 1.44s (5.5x)
+	//   32 dojos of 8:                 3.81s -> 1.06s (3.6x)
+	//   2 dojos of 96 + 64 singletons: 20.9s -> 6.29s (3.3x)
+	//   2 dojos of 128 (no singletons): 35.8s -> 12.4s (2.9x)
+	// The lopsided (few oversized dojos) shapes remain the most expensive
+	// in absolute terms -- the same few slots recur as worstA/worstB across
+	// the most stuck-and-excluded iterations of a generation, which is
+	// both why they were the slowest before the memo and why the memo
+	// buys proportionally less there (a larger share of their remaining
+	// cost is the worst-pair rescan itself, unmemoized, at 22% vs. 6-7%
+	// for the evenly-clustered shapes).
 	type pairKey struct{ i, j int }
 	excluded := map[pairKey]bool{}
+
+	// slotBest memoizes bestRelocation's result (the best (gain, y) found
+	// scanning every candidate partner for one slot) for the life of a
+	// GENERATION -- cleared in the exact same place and for the exact same
+	// reason as excluded: dojoSwapGain(result, x, .) is a pure function of
+	// x and the current `result`, and `result` (and `occupied`, and hence
+	// movable()) do not change between accepted swaps, so a slot recomputed
+	// against the identical draw twice in one generation is guaranteed to
+	// get the identical answer. This matters because worstA/worstB recur:
+	// once a same-dojo pair is excluded as stuck, the NEXT-worst pair often
+	// shares one of its two slots (the other dojo-mate of an already-seen
+	// slot, or the same immovable seed reappearing against a new partner),
+	// so without this memo the O(N) confirmation scan for that slot would
+	// be repeated once per stuck iteration it recurs in, whereas the
+	// answer -- the same `result`, so the same swap-gain landscape -- never
+	// changed underneath it.
+	type slotCandidate struct{ gain, y int }
+	slotBest := map[int]slotCandidate{}
+	bestRelocation := func(x int) (gain, y int) {
+		if c, ok := slotBest[x]; ok {
+			return c.gain, c.y
+		}
+		gain, y = 0, -1
+		if movable(x) {
+			for cand := range result {
+				if cand == x || !movable(cand) || result[cand].Dojo == result[x].Dojo {
+					continue
+				}
+				if g := dojoSwapGain(result, x, cand); g > gain {
+					gain, y = g, cand
+				}
+			}
+		}
+		slotBest[x] = slotCandidate{gain, y}
+		return gain, y
+	}
 
 	// A hill climb on the total of every same-dojo pair's meeting round: the
 	// higher the total, the later dojo-mates meet. A first-round pairing
@@ -326,21 +377,20 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 			return // no selectable dojo pair remains: nothing left to delay
 		}
 
-		// Try relocating either member of the worst pair. Accept the swap that
-		// improves the overall total by the most; ties keep the earlier
-		// candidate so the result does not depend on scan order.
+		// Try relocating either member of the worst pair. Accept the swap
+		// that improves the overall total by the most; ties keep the
+		// earlier candidate so the result does not depend on scan order.
+		// bestRelocation(worstA) is evaluated (and, on a cache hit,
+		// answered) strictly before bestRelocation(worstB), and only a
+		// STRICT '>' replaces the running best, so a worstB tying worstA's
+		// gain never displaces it -- exactly the order and tie-break the
+		// unmemoized double loop produced, since the memo only changes
+		// whether a given slot's own scan is recomputed or looked up, never
+		// what it returns or the order these two calls happen in.
 		bestGain, bestX, bestY := 0, -1, -1
 		for _, x := range []int{worstA, worstB} {
-			if !movable(x) {
-				continue
-			}
-			for y := range result {
-				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
-					continue
-				}
-				if gain := dojoSwapGain(result, x, y); gain > bestGain {
-					bestGain, bestX, bestY = gain, x, y
-				}
+			if gain, y := bestRelocation(x); gain > bestGain {
+				bestGain, bestX, bestY = gain, x, y
 			}
 		}
 		if bestGain <= 0 {
@@ -353,8 +403,11 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 		}
 		result[bestX], result[bestY] = result[bestY], result[bestX]
 		// The landscape changed for every pair, stuck or not: give the next
-		// generation a fresh look.
+		// generation a fresh look. slotBest is cleared in lockstep with
+		// excluded (see slotBest's own doc comment) -- both are scoped to
+		// exactly one generation and reset together whenever a swap lands.
 		excluded = map[pairKey]bool{}
+		slotBest = map[int]slotCandidate{}
 	}
 }
 
@@ -383,17 +436,17 @@ func dojoMeetRound(i, j int) int {
 // OTHER pair in the draw: those are unaffected by the swap and would cancel
 // out of the before/after delta anyway. Walking only the pairs that touch
 // {x, y} turns this from an O(N^2) whole-draw scan into O(N) per call, an
-// ~N/2x cut on THIS function alone (measured ~100x at N=256, matching the
-// dominant per-candidate cost dojoSwapGain was paying). This does not by
-// itself bound delayDojoMeetings' overall wall time: the surrounding hill
-// climb's own worst-pair rescan and its wave-1 stuck-pair continuation
-// (both unchanged here, see delayDojoMeetings' doc comment) can still drive
-// the total iteration count up for a heavily-clustered roster, and at that
-// point THEIR O(N^2)-per-iteration cost, not this function's, is what
-// dominates. Measured at 256 entrants, 16 dojos of 16: this cut wall time
-// from ~27.7s to ~7.9s, well short of the ~100x per-call improvement,
-// because the iteration count itself (driven by wave-1's continuation, not
-// this function) scales close to O(N^2) on that shape.
+// ~100x cut on THIS function alone at N=256 (measured), which is what made
+// the O(N) candidates * O(N) dojoSwapGain = O(N^2) candidate-confirmation
+// scan in delayDojoMeetings affordable per call. That confirmation scan
+// remained delayDojoMeetings' own dominant cost afterwards (it recurs once
+// per outer iteration, and wave-1's stuck-pair continuation can run many
+// iterations per accepted swap) until the wave-2 slotBest memo cached it
+// per slot for the life of a generation. See delayDojoMeetings' own
+// "Performance note" for the current measured cost breakdown and
+// end-to-end numbers -- kept in that ONE place rather than restated here,
+// since a previous version of this note tried to restate it and drifted
+// into misattributing the dominant cost to the wrong sub-loop.
 func dojoSumMeetRounds(result []Player, x, y int) int {
 	pairScore := func(i, j int) int {
 		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {

@@ -379,6 +379,21 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // data) would satisfy `names[m.SideA] && names[m.SideB]` under the old test
 // even though it is not a bout between two DIFFERENT group members at all.
 // The keyA != keyB guard rejects that self-pairing explicitly.
+//
+// That same guard also has a second, legitimate false negative: two id-less
+// GROUP MEMBERS who genuinely share a display name (again the namesake
+// collision the unique-team-name rule doesn't fully close) both resolve to
+// the SAME fallback key, because newGroupKeyResolver's name index is
+// last-write-wins and cannot tell two id-less same-name members apart from
+// the name alone. A REAL DH row played between those two competitors then
+// also reads keyA == keyB and is rejected as if it were the corrupted
+// self-pair above, even though it is a genuine tie-breaker. This fails
+// CLOSED, which is the safe direction for this guard: the group is reported
+// as still lacking a tie-breaker, so MaybeAutoCompletePools keeps returning
+// AwaitingLeagueTiebreak / AutoCompleteNoChange instead of advancing on a
+// result this function cannot actually verify belongs to two distinct
+// competitors, and the operator sees the group still needs action rather
+// than the competition silently completing on an unverifiable DH.
 func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	resolve := newGroupKeyResolver(group)
 	for _, m := range allMatches {

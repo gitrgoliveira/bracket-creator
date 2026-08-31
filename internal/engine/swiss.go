@@ -145,8 +145,32 @@ func resolveSwissRosterKey(byID map[string]string, byName map[string][]string, i
 // only one namesake would wrongly evict the other from every later round
 // (they never earn a fresh id-less row of their own to reclaim a slot, since
 // a frozen field member no longer appears as an active participant to pair).
-// So an id-less side admits EVERY roster key sharing its name; a row that
-// does carry an id still resolves to that one competitor exactly.
+// So an id-less side admits EVERY roster key sharing its name. A row that
+// DOES carry an id resolves to that one competitor exactly only on a byID
+// HIT; on a MISS (e.g. a replaced participant's id, now stale because it no
+// longer appears in the current roster's byID index) admit falls through to
+// the same byName loop below and, exactly like an id-less row, admits every
+// namesake sharing that name -- correct for that case too, since a stale id
+// gives no more information than no id at all about which specific
+// competitor's slot was replaced.
+//
+// This deliberately creates an asymmetry with resolveSwissRosterKey for an
+// id-less (or stale-id) row: THIS function admits BOTH namesakes to the
+// frozen field, but GenerateSwissRound's win/bye/prior-pairing counters
+// (wins, hadBye, priorPair below, built via resolveSwissRosterKey) can only
+// attribute that row's outcome to ONE of them -- the last-registered key.
+// The other namesake therefore stays in the field with a clean slate (zero
+// wins, no recorded bye, no recorded prior opponent) and can be re-paired in
+// a later round against someone she has, in reality, already faced. This is
+// correct given the data, not a bug to reconcile: an id-less row carries no
+// way to tell the two namesakes apart, so crediting a win/bye/pairing to a
+// second, arbitrarily-chosen key would be no more accurate than crediting
+// the first, while field MEMBERSHIP must stay conservative because wrongly
+// evicting a namesake here is unrecoverable (she never earns a fresh row of
+// her own to reclaim a slot). Do not "fix" one half without the other:
+// making resolveSwissRosterKey multi-admit too would break wins/byes (one
+// row cannot credit two competitors), and making this function single-pick
+// would start silently evicting namesakes from later rounds.
 func swissFieldKeysFromMatches(matches []state.MatchResult, byID map[string]string, byName map[string][]string) map[string]bool {
 	field := make(map[string]bool)
 	admit := func(id, name string) {
@@ -596,7 +620,7 @@ func (e *Engine) subsequentRoundPairings(
 
 	// Pair within win-groups. When pairing fails inside a group
 	// (rematch wall), pull a candidate from the next group up/down.
-	pairs := pairWithinWinGroups(ordered, wins, priorPair)
+	pairs := pairWithinWinGroups(ordered, priorPair)
 	return pairs, bye, nil
 }
 
@@ -633,10 +657,10 @@ func lowestWinBucketNames(ordered []string, wins map[string]int) []string {
 // matcher could replace this, the test suite (T175) covers the
 // happy-path correctness.
 //
-// ordered/wins/priorPair carry competitor identity keys (CompetitorKey),
+// ordered/priorPair carry competitor identity keys (CompetitorKey),
 // not display names (bc-cse), so rematch avoidance (priorPair) correctly
 // distinguishes two same-name-different-dojo competitors.
-func pairWithinWinGroups(ordered []string, wins map[string]int, priorPair map[string]bool) [][2]string {
+func pairWithinWinGroups(ordered []string, priorPair map[string]bool) [][2]string {
 	pairs := [][2]string{}
 
 	// remaining holds the still-unpaired names in priority order.

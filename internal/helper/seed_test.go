@@ -2800,3 +2800,158 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 		})
 	}
 }
+
+// referenceDelayDojoMeetingsUnmemoized is delayDojoMeetings' body as it
+// existed immediately before the bc-dojo-least-conflicted-pool wave-2
+// slotBest memo: the candidate-relocation scan for worstA/worstB is
+// recomputed fresh on every outer iteration, with no per-slot cache. Kept
+// ONLY as TestDelayDojoMeetings_MatchesUnmemoizedReference's oracle -- the
+// worst-pair selection, tie-break order, exclusion/generation bookkeeping
+// and accept condition are copied unchanged, so any drift from the real
+// (memoized) function can only be attributed to the memo itself.
+func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool) {
+	movable := func(i int) bool {
+		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
+	}
+
+	type pairKey struct{ i, j int }
+	excluded := map[pairKey]bool{}
+
+	for iter := 0; iter < len(result)*len(result); iter++ {
+		worstA, worstB, worstRound := -1, -1, 1<<30
+		for i := range result {
+			for j := i + 1; j < len(result); j++ {
+				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+					continue
+				}
+				if result[i].Dojo != result[j].Dojo {
+					continue
+				}
+				if excluded[pairKey{i, j}] {
+					continue
+				}
+				if r := dojoMeetRound(i, j); r < worstRound {
+					worstA, worstB, worstRound = i, j, r
+				}
+			}
+		}
+		if worstA < 0 {
+			return
+		}
+
+		bestGain, bestX, bestY := 0, -1, -1
+		for _, x := range []int{worstA, worstB} {
+			if !movable(x) {
+				continue
+			}
+			for y := range result {
+				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
+					continue
+				}
+				if gain := dojoSwapGain(result, x, y); gain > bestGain {
+					bestGain, bestX, bestY = gain, x, y
+				}
+			}
+		}
+		if bestGain <= 0 {
+			excluded[pairKey{worstA, worstB}] = true
+			continue
+		}
+		result[bestX], result[bestY] = result[bestY], result[bestX]
+		excluded = map[pairKey]bool{}
+	}
+}
+
+// TestDelayDojoMeetings_MatchesUnmemoizedReference pins the wave-2 slotBest
+// generation memo against referenceDelayDojoMeetingsUnmemoized (the
+// pre-memo body) across clustered, lopsided (a couple of oversized dojos
+// plus many singleton dojos -- the shape most likely to make one slot recur
+// as worstA/worstB across several stuck-and-excluded iterations of the same
+// generation, which is exactly what the memo is for), and seeded/occupied
+// shapes.
+func TestDelayDojoMeetings_MatchesUnmemoizedReference(t *testing.T) {
+	dojoGrouped := func(nDojos, groupSize int) []Player {
+		var out []Player
+		for c := 0; c < nDojos; c++ {
+			for i := 0; i < groupSize; i++ {
+				out = append(out, Player{Name: fmt.Sprintf("C%02d_%03d", c, i), Dojo: fmt.Sprintf("Dojo%02d", c)})
+			}
+		}
+		return out
+	}
+	lopsided := func(bigDojos, bigGroupSize, singletons int) []Player {
+		var out []Player
+		for c := 0; c < bigDojos; c++ {
+			for i := 0; i < bigGroupSize; i++ {
+				out = append(out, Player{Name: fmt.Sprintf("Big%d_%03d", c, i), Dojo: fmt.Sprintf("BigDojo%d", c)})
+			}
+		}
+		for i := 0; i < singletons; i++ {
+			out = append(out, Player{Name: fmt.Sprintf("Solo%03d", i), Dojo: fmt.Sprintf("SoloDojo%03d", i)})
+		}
+		return out
+	}
+
+	// Sized to stay well under a second in total: this test's job is
+	// output-identity, which the memo logic makes N-independent (a slot's
+	// cached answer is exactly what a fresh scan would return, whatever N
+	// is) -- the dramatic wall-clock deltas are measured separately
+	// (dojoSumMeetRounds' and delayDojoMeetings' own doc comments) on
+	// 256-entrant rosters, which would make this correctness pin itself
+	// the slowest thing in the package if reused here.
+	cases := map[string][]Player{
+		"clustered 8 dojos of 8":                       dojoGrouped(8, 8),
+		"clustered 16 dojos of 4":                      dojoGrouped(16, 4),
+		"lopsided: 2 large dojos + many singletons":    lopsided(2, 10, 20),
+		"lopsided: 1 large dojo + many singletons":     lopsided(1, 12, 16),
+		"lopsided: 3 large dojos + few singletons":     lopsided(3, 8, 6),
+		"small mixed clustered + one unique straggler": append(dojoGrouped(3, 3), Player{Name: "Extra", Dojo: "UniqueDojo"}),
+	}
+
+	for name, roster := range cases {
+		t.Run(name, func(t *testing.T) {
+			memoized := make([]Player, len(roster))
+			copy(memoized, roster)
+			reference := make([]Player, len(roster))
+			copy(reference, roster)
+			occupied := map[int]bool{}
+
+			delayDojoMeetings(memoized, occupied)
+			referenceDelayDojoMeetingsUnmemoized(reference, occupied)
+
+			require.Len(t, memoized, len(reference))
+			for i := range memoized {
+				assert.Equalf(t, reference[i].Name, memoized[i].Name,
+					"slot %d: memoized=%q reference=%q", i, memoized[i].Name, reference[i].Name)
+			}
+		})
+	}
+
+	// A seeded/occupied variant: two seed slots share a dojo and land
+	// adjacent (immovable, mirrors the excluded map's own FIX-3 scenario),
+	// alongside an entirely separate fixable same-dojo pair elsewhere, so
+	// the memo is exercised alongside the occupied-slot immovability path
+	// too, not just the plain unseeded case above.
+	t.Run("seeded pair immovable, separate fixable pair elsewhere", func(t *testing.T) {
+		roster := dojoGrouped(6, 6) // 36 players, 6 dojos of 6
+		roster[2].Seed = 4
+		roster[3].Seed = 5
+		roster[2].Dojo = "SeededDojo"
+		roster[3].Dojo = "SeededDojo"
+		occupied := map[int]bool{2: true, 3: true}
+
+		memoized := make([]Player, len(roster))
+		copy(memoized, roster)
+		reference := make([]Player, len(roster))
+		copy(reference, roster)
+
+		delayDojoMeetings(memoized, occupied)
+		referenceDelayDojoMeetingsUnmemoized(reference, occupied)
+
+		require.Len(t, memoized, len(reference))
+		for i := range memoized {
+			assert.Equalf(t, reference[i].Name, memoized[i].Name,
+				"slot %d: memoized=%q reference=%q", i, memoized[i].Name, reference[i].Name)
+		}
+	})
+}

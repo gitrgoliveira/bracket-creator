@@ -262,11 +262,17 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 	return buildPoolPhaseTreeAwareCore(players, numPools, base, numCourts, 1, qualifierMode{ExtraQualifiers: qualifierModeFillBracket, MinPoolSize: minSize})
 }
 
-// ErrBlankDojo is the sentinel identifying a draw refused because the
+// ErrBlankDojoInDraw is the sentinel identifying a draw refused because the
 // roster contains at least one player with an empty Dojo
 // (bc-dojo-least-conflicted-pool FIX 1). Match it with errors.Is; the
 // returned error's message additionally names every offending player so the
 // operator knows exactly which row to repair.
+//
+// DISTINCT from state.ErrBlankDojo (internal/state/participants.go), the
+// participant-WRITE floor: different packages, different sentinel values,
+// on purpose -- errors.Is(drawErr, state.ErrBlankDojo) would silently never
+// match this one despite the shared concept, which is exactly why this one
+// carries the "InDraw" suffix rather than the same bare name.
 //
 // Every downstream signal in this file is defined only for non-blank
 // dojos: recordDojoOccupancy is guarded on `p.Dojo != ""` (so a blank-dojo
@@ -283,25 +289,28 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // and its CSV parser accept a blank dojo, so a legacy or hand-edited roster
 // can still be loaded and the offending row repaired in the UI/CSV) -- only
 // the DRAW itself refuses, at this one shared pre-flight.
-var ErrBlankDojo = errors.New("cannot draw pools: every competitor must have a dojo")
+var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must have a dojo")
 
 // validateNoBlankDojo is the one pre-flight check shared by
 // BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
 // BuildPoolPhaseFillBracketTreeAware (all three funnel through
 // buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
 // attempt regardless of which entry point the caller used). Returns nil
-// when every player has a non-blank Dojo.
+// when every player has a non-blank Dojo. Trims before comparing (matching
+// state.ErrBlankDojo's own write-floor check, saveParticipantsNoLock) so a
+// future in-memory producer that hands this a whitespace-only Dojo without
+// going through that floor first cannot slip "   " past this guard too.
 func validateNoBlankDojo(players []Player) error {
 	var names []string
 	for _, p := range players {
-		if p.Dojo == "" {
+		if strings.TrimSpace(p.Dojo) == "" {
 			names = append(names, p.Name)
 		}
 	}
 	if len(names) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w: %s", ErrBlankDojo, strings.Join(names, ", "))
+	return fmt.Errorf("%w: %s", ErrBlankDojoInDraw, strings.Join(names, ", "))
 }
 
 // buildPoolPhaseTreeAwareCore is BuildPoolPhaseTreeAware's and
@@ -316,7 +325,7 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// FIX 1 (bc-dojo-least-conflicted-pool): refuse a blank-dojo roster up
 	// front, before any seed/pool arithmetic runs, rather than let one
 	// silently corrupt the tree-aware capacity accounting below. See
-	// ErrBlankDojo's own doc comment for the two mechanisms this closes.
+	// ErrBlankDojoInDraw's own doc comment for the two mechanisms this closes.
 	if err := validateNoBlankDojo(players); err != nil {
 		return nil, 0, err
 	}

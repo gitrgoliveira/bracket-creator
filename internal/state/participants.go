@@ -39,6 +39,9 @@ var ErrDuplicateName = errors.New("a participant with the same name and dojo alr
 // the edit UI. The cost of that choice is real and worth stating: until the
 // blank dojo is fixed, ANY save touching that roster is refused, including a
 // check-in, because every write goes through this one floor.
+//
+// DISTINCT from helper.ErrBlankDojoInDraw, the draw-time refusal of a loaded
+// blank-dojo roster: errors.Is against the wrong one silently never matches.
 var ErrBlankDojo = errors.New("participant dojo must not be blank")
 
 // duplicateTeamNameError reports two teams sharing a name in a team

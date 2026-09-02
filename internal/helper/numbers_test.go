@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -169,4 +170,45 @@ func TestDefaultNumberPrefix(t *testing.T) {
 			assert.LessOrEqualf(t, len(got), MaxNumberPrefixLen, "derived prefix %q must never exceed the length cap", got)
 		})
 	}
+}
+
+// TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics pins F8 (bc-pnum
+// review): the numeric-suffix fallback loop is bounded at 999 (three digits,
+// matching MaxNumberPrefixLen). Before the bound, a taken set covering EVERY
+// candidate up to the cap (~1000 entries: "KO2".."KO9", "K10".."K99",
+// "100".."999") ran the loop past suffix 999 into a four-digit suffix, where
+// MaxNumberPrefixLen-len(digits) goes negative and the trim
+// (stem[:negative]) panics. Reaching this needs ~1000 same-initial
+// competitions on one tournament day, a scenario this repo's own tests
+// cannot honestly construct any other way, but the function must degrade to
+// "return its best guess" rather than crash the request.
+func TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics(t *testing.T) {
+	taken := []string{"K", "KO"}
+	// 1-digit suffix (2-9): leaves 2 chars for the stem, so the full "KO"
+	// stem fits untrimmed.
+	for n := 2; n <= 9; n++ {
+		taken = append(taken, fmt.Sprintf("KO%d", n))
+	}
+	// 2-digit suffix (10-99): leaves 1 char, so the stem trims to "K".
+	for n := 10; n <= 99; n++ {
+		taken = append(taken, fmt.Sprintf("K%d", n))
+	}
+	// 3-digit suffix (100-999): leaves 0 chars, so the stem trims to "",
+	// leaving the bare digits as the candidate.
+	for n := 100; n <= 999; n++ {
+		taken = append(taken, fmt.Sprintf("%d", n))
+	}
+
+	var got string
+	assert.NotPanicsf(t, func() {
+		got = DefaultNumberPrefix("Kendo Open", taken)
+	}, "every candidate up to the length cap is taken; the derivation must degrade gracefully, not panic")
+
+	// Every candidate through the bound (999) is taken, so the function
+	// returns the LAST one it tried rather than looping forever or growing
+	// past the length cap. checkUniqueCompFields is what actually rejects
+	// this collision at save time, with its own "already used by
+	// competition ..." error naming the real conflict.
+	assert.Equal(t, "999", got)
+	assert.LessOrEqual(t, len(got), MaxNumberPrefixLen)
 }

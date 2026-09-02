@@ -88,18 +88,36 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	}
 
 	// Every initial-based candidate collides, so fall to a numeric suffix on
-	// the shortest stem that still leaves room for the digits.
+	// the shortest stem that still leaves room for the digits. Bounded at 999
+	// (three digits): MaxNumberPrefixLen is 3, so a four-digit suffix ("1000")
+	// would demand a negative trim (MaxNumberPrefixLen-len(digits) < 0) and
+	// panic on the slice below. Reaching this bound needs ~1000 competitions
+	// sharing the same derived initials on one tournament day -- this repo's
+	// tests cannot construct that scenario honestly, but bounding the loop
+	// rather than looping forever (or panicking) is cheap insurance.
 	stem := initials
-	for suffix := 2; ; suffix++ {
+	lastCandidate := stem
+	for suffix := 2; suffix <= 999; suffix++ {
 		digits := fmt.Sprintf("%d", suffix)
 		trimmed := stem
 		if len(trimmed)+len(digits) > MaxNumberPrefixLen {
 			trimmed = trimmed[:MaxNumberPrefixLen-len(digits)]
 		}
-		if candidate := trimmed + digits; !used[candidate] {
+		candidate := trimmed + digits
+		lastCandidate = candidate
+		if !used[candidate] {
 			return candidate
 		}
 	}
+	// Exhausted every candidate up to the length cap: every one of them is
+	// already taken. Return the last one tried rather than inventing a value
+	// beyond MaxNumberPrefixLen -- the caller (checkUniqueCompFields, on both
+	// the create and the settings-save path) re-validates uniqueness against
+	// the SAME taken set and rejects the collision with its own "prefix
+	// already used by competition ..." error, which names the actual
+	// conflict. That is the right place for this to surface: this function's
+	// contract is a best-effort SUGGESTION, not a uniqueness guarantee.
+	return lastCandidate
 }
 
 // nameInitials reduces a name to the uppercased ASCII initials of its words,

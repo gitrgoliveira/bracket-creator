@@ -1,0 +1,16 @@
+# CodeQL scope for this repository.
+#
+# paths-ignore keeps the JavaScript analysis on SOURCE only:
+#
+#   web-mobile/dist    esbuild's output of web-mobile/js, produced by the build
+#                      and embedded in the binary. Scanning it alongside the
+#                      source reports every finding twice and points the second
+#                      copy at a generated file nobody can edit.
+#   web-mobile/vendor  third-party libraries shipped verbatim; upgrading them is
+#                      how they get fixed here, not patching them in place.
+#   node_modules       dependency trees, gated separately by `make js/sec`
+#                      (npm audit via audit-ci).
+paths-ignore:
+  - web-mobile/dist
+  - web-mobile/vendor
+  - "**/node_modules"

@@ -6,6 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Edit only inside the correct worktree branch, never the main repo directory.** This repo uses a git worktree per PR. Before any file edit, verify the current working directory (`pwd`) and branch (`git branch --show-current`). Edits landing in the wrong worktree (or the `main` checkout) force costly patch-and-revert recovery.
 
+## Worktrees
+
+Always confirm the working directory with `git rev-parse --show-toplevel` before any git operation. Never use `cd` inside a Bash command to reach a repo — pass explicit paths or run from the worktree root. All PR work happens in that PR's worktree, never the main checkout.
+
+## Workflow Rules
+
+### Planning vs. Implementation
+
+When asked to *plan*, *verify*, or *record a plan on a bead*: do NOT write code. Produce the plan, write it to the bead, and stop. Never `git stash`, `git checkout`, or otherwise discard uncommitted work without explicit approval — capture a diff first if work must be set aside.
+
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
@@ -276,6 +286,10 @@ Engine side: `state.IsTransactional(h)` lets a caller whose correctness depends 
   Packages below 85% must be brought up before merging. New packages must include test files covering their public API. Tracked in bead mp-3abe.
   **Intentionally untested:** `internal/domain/internal/glossarygen` is a `go generate` code-generator (emits `glossary_data.js`); it has no exported API and is excluded from the gate. `internal/helper/bracket`, `internal/helper/csv`, and `internal/helper/seeding` are empty stub packages (no exported symbols yet) and are likewise excluded.
 
+### Verification Claims
+
+Never state that something is fixed, rendered, counted, or passing based on grep or DOM selectors alone. Confirm with the authoritative source: run the test, take a screenshot, or read the file. If evidence is unavailable, say so explicitly rather than asserting.
+
 ## Merge & Rebase
 
 When rebasing or resolving conflicts, watch for these recurring breakages:
@@ -293,6 +307,10 @@ When rebasing or resolving conflicts, watch for these recurring breakages:
 ## Debugging Principles
 
 - **Never fabricate explanations for tool/infrastructure failures.** If you don't know the root cause of a CI failure, say so and investigate. Do not invent "known bugs", version-specific regressions, or other rationalizations to justify a workaround (e.g. a fabricated "known bug in Codecov v6.0.x" masking a transient GPG keyserver failure). Read the actual logs first.
+
+## Shell Discipline
+
+Do not use `pkill`, broad `kill`, or force-push. Long-running processes get their own background handle and are terminated by PID. Chain commands with `;` not `&&` when a non-zero exit from cleanup would abort the rest.
 
 
 # Validation

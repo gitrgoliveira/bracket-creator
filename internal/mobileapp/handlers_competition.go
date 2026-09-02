@@ -439,22 +439,67 @@ func assignDefaultNumberPrefix(store *state.Store, comp *state.Competition, excl
 	return nil
 }
 
+// numberPrefixAction distinguishes the two ensureNumberPrefix callers, since
+// POST .../start and POST .../generate-draw accept different starting
+// statuses (see engine.StartCompetition / engine.GenerateDraw's own status
+// switches in engine/competition.go, which ensureNumberPrefix must mirror
+// rather than race ahead of).
+type numberPrefixAction int
+
+const (
+	// numberPrefixActionStart mirrors engine.StartCompetition's accepted
+	// statuses: state.CompStatusSetup (and legacy "") take the one-click
+	// draw-then-run path, state.CompStatusDrawReady just flips status over
+	// an already-generated draw. Both are pre-flight for a start.
+	numberPrefixActionStart numberPrefixAction = iota
+	// numberPrefixActionGenerateDraw mirrors engine.GenerateDraw's accepted
+	// statuses: only state.CompStatusSetup (and legacy ""). draw-ready and
+	// anything past it are rejected by the engine on its own terms.
+	numberPrefixActionGenerateDraw
+)
+
 // ensureNumberPrefix is the R7 guard for POST .../start and
 // POST .../generate-draw: either can be reached by a legacy competition that
 // predates this rule and still carries an empty NumberPrefix on disk (G7), and
 // G2 requires the app never draw one without a prefix. It loads the
-// competition, assigns the default only when the field is empty, and saves
-// only when that assignment actually changed something -- three existing
-// primitives (LoadCompetition, assignDefaultNumberPrefix, SaveCompetition), no
-// new write path.
+// competition, assigns the default only when the field is empty, saves only
+// when that assignment actually changed something, and renumbers pools.csv --
+// existing primitives (LoadCompetition, assignDefaultNumberPrefix,
+// SaveCompetition, engine.RenumberCompetitors), no new write path.
+//
+// (i) It only acts when the competition's status is one the requested action
+// would itself accept (see numberPrefixAction). Any other status is left
+// untouched, and the caller's own eng.StartCompetition/eng.GenerateDraw call,
+// immediately after, rejects it on the engine's own terms (e.g. "competition
+// already started"). Without this, a competition in a status the action
+// cannot use anyway would still have this function mint and PERSIST a new
+// prefix -- an app-side write with no corresponding engine action, and
+// outside G2's contract (G2 assigns a prefix ONLY at a boundary that
+// persists or DRAWS; a doomed pre-flight check is neither).
+// (ii) A missing competition is not an error here: it returns nil, and the
+// caller's own eng.StartCompetition/eng.GenerateDraw call, immediately after,
+// reports the 404 on its own terms (the engine maps not-found to 404).
+// (iii) After assigning and saving, it calls eng.RenumberCompetitors so a
+// draw-ready legacy competition (drawn before this rule existed, so its
+// pools.csv carries no Number column) gets numbered as part of start:
+// engine.StartCompetition's draw-ready branch (transitionDrawToRunning) only
+// flips status, it never re-runs the draw pipeline, so nothing else would
+// ever number that file. For the setup/not-yet-drawn case this call is a
+// cheap no-op (RenumberCompetitors returns immediately when there is no
+// pools.csv to rewrite): the draw pipeline eng.StartCompetition/
+// eng.GenerateDraw is about to run numbers fresh from the just-assigned
+// prefix on its own.
 //
 // Takes the same rename lock checkUniqueCompFields and the POST/PUT handlers
 // use, for the same reason: SaveCompetition here must not race a concurrent
 // rename of this or another competition (see store.go "Lock ordering note" on
-// WithCompetitionRenameLock). A missing competition is not an error here; the
-// caller's own eng.StartCompetition/eng.GenerateDraw call, immediately after,
-// reports that 404 on its own terms.
-func ensureNumberPrefix(store *state.Store, id string) error {
+// WithCompetitionRenameLock). Calling eng.RenumberCompetitors (which takes
+// its own per-competition lock via WithTransaction) from inside that closure
+// is safe by the same reasoning SaveCompetition already relies on here:
+// compRenameMu is a separate mutex from any per-competition lock, and nothing
+// that holds a per-competition lock ever acquires compRenameMu, so there is
+// no AB-BA cycle (store.go's "Lock ordering note").
+func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, action numberPrefixAction) error {
 	return store.WithCompetitionRenameLock(func() error {
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
@@ -463,14 +508,29 @@ func ensureNumberPrefix(store *state.Store, id string) error {
 		if comp == nil {
 			return nil
 		}
+		var statusAllows bool
+		switch action {
+		case numberPrefixActionStart:
+			statusAllows = comp.Status == state.CompStatusSetup || comp.Status == "" || comp.Status == state.CompStatusDrawReady
+		case numberPrefixActionGenerateDraw:
+			statusAllows = comp.Status == state.CompStatusSetup || comp.Status == ""
+		}
+		if !statusAllows {
+			return nil
+		}
 		before := comp.NumberPrefix
 		if err := assignDefaultNumberPrefix(store, comp, id); err != nil {
 			return err
 		}
-		if comp.NumberPrefix == before {
-			return nil
+		if comp.NumberPrefix != before {
+			if err := store.SaveCompetition(comp); err != nil {
+				return err
+			}
 		}
-		return store.SaveCompetition(comp)
+		if _, err := eng.RenumberCompetitors(id); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 
@@ -904,8 +964,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return nil
 			}
 			var infraErr error
-			if infraErr := assignDefaultNumberPrefix(store, &comp, ""); infraErr != nil {
-				return infraErr
+			if dErr := assignDefaultNumberPrefix(store, &comp, ""); dErr != nil {
+				return dErr
 			}
 			infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, "")
 			if infraErr != nil {
@@ -1365,6 +1425,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// them is that same refusal, not a validation error.
 		var formatOrKindStartedFlag bool
 		var changed bool
+		// numberPrefixMoved records whether THIS PUT actually changed the
+		// stored NumberPrefix (computed inside the transform below, where
+		// `current` is the on-disk record, immediately before it is
+		// overwritten with the post-inheritance request value). It drives the
+		// RenumberCompetitors error policy after the transform commits: a
+		// renumber failure following a prefix THIS write moved is damage this
+		// write caused (500, the operator must retry); a renumber failure
+		// with the prefix unchanged is inherited damage from something else
+		// (logged, 200, healed by the next save). Stays false for a
+		// roster-only PUT, whose transform branch returns before ever
+		// touching NumberPrefix.
+		var numberPrefixMoved bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
 			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
@@ -1616,6 +1688,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
 				var infraErr error
+				// A blank/omitted numberPrefix on a settings PUT means "keep the
+				// stored value", exactly like TeamMatchType and ExtraQualifiers
+				// above -- never "this competition has no prefix". Inherit BEFORE
+				// assignDefaultNumberPrefix runs, so that helper only ever derives
+				// a value for a competition that truly has none stored (G7's
+				// legacy shape). Without this, any settings save that simply
+				// omits the field would invent a NEW prefix for a competition
+				// that already had one, renumbering every competitor and
+				// invalidating printed tags for no reason the operator asked for.
+				if comp.NumberPrefix == "" {
+					comp.NumberPrefix = current.NumberPrefix
+				}
 				if dErr := assignDefaultNumberPrefix(store, &comp, id); dErr != nil {
 					return nil, dErr
 				}
@@ -1731,6 +1815,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.RoundRobin = comp.RoundRobin
 				current.WithZekkenName = comp.WithZekkenName
 				current.TeamSize = comp.TeamSize
+				// Captured against the STILL-STORED value, one statement before
+				// it is overwritten: this is the one place that can tell whether
+				// THIS write is what moved the prefix (see numberPrefixMoved's
+				// declaration above).
+				numberPrefixMoved = comp.NumberPrefix != current.NumberPrefix
 				current.NumberPrefix = comp.NumberPrefix
 				// started is computed here, ahead of the Format/Kind gate that
 				// needs it, rather than down by the Naginata/Engi guards below
@@ -1910,31 +1999,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
-		// Runs after EVERY successful settings save, not only when the prefix
-		// moved (G4): RenumberCompetitors is idempotent (it writes pools.csv
-		// only when a number actually differs), so a save that didn't touch
-		// the prefix costs one no-op read-compare here, and a save that DID
-		// move it is what makes the change take effect. Unconditional also
-		// makes every later save a retry of a renumber that failed on a prior
-		// save, and heals a legacy pools.csv whose Number column was never
-		// populated (G7) with no extra code.
-		//
-		// It runs AFTER the settings transaction rather than inside it:
-		// UpdateCompetitionChanged already holds the per-competition lock and
-		// the locked pool helpers are unexported, so the rewrite takes its own
-		// lock through the engine (which is the layer that owns numbering).
-		// Between the two there is a brief window where config.md carries the
-		// new prefix and pools.csv still holds the old numbers; the broadcast
-		// below is emitted after both, so no surface is told to repaint until
-		// they agree.
-		//
-		// A failure here is reported rather than swallowed: the operator asked
-		// for a save and pools.csv did not end up consistent with it, and the
-		// two files now disagree until the save is retried.
-		if rErr := eng.RenumberCompetitors(id); rErr != nil {
-			internalError(c, rErr)
-			return
-		}
 		// Participants/seeds save (separate file), runs whenever the
 		// PUT body PRESENT (non-nil) Players field, including an
 		// explicit empty `players: []` payload to CLEAR the roster.
@@ -2007,7 +2071,58 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			participantsChanged = true
 		}
-		if changed || participantsChanged {
+		// Runs after EVERY successful settings save, not only when the prefix
+		// moved (G4): RenumberCompetitors is idempotent (it writes pools.csv
+		// only when a number actually differs), so a save that didn't touch
+		// the prefix costs one no-op read-compare here, and a save that DID
+		// move it is what makes the change take effect. Unconditional also
+		// makes every later save a retry of a renumber that failed on a prior
+		// save, and heals a legacy pools.csv whose Number column was never
+		// populated (G7) with no extra code.
+		//
+		// It runs AFTER the settings transaction (and after the participants
+		// save above) rather than inside the transform: UpdateCompetitionChanged
+		// already holds the per-competition lock and the locked pool helpers
+		// are unexported, so the rewrite takes its own lock through the engine
+		// (which is the layer that owns numbering). It runs after participants
+		// so that whatever the PUT actually asked to persist (settings, or a
+		// roster) lands regardless of what this derived, secondary rewrite
+		// does. Between the settings save and this there is a brief window
+		// where config.md carries the new prefix and pools.csv still holds the
+		// old numbers; the broadcast below is emitted after both, so no
+		// surface is told to repaint until they agree.
+		//
+		// A failure here is reported by whether THIS PUT is the one that moved
+		// the prefix (numberPrefixMoved, computed above where `current` was
+		// known): if it did, the operator's save is only half landed --
+		// config.md carries the new prefix but pools.csv does not reflect it
+		// -- and that is worth a 500 naming the situation so they know to
+		// retry rather than assume the change took. If it did not, the
+		// failure is INHERITED damage (an already-broken pools.csv, or a
+		// prefix change from an earlier save that never healed) that this
+		// unrelated save just happened to notice; reporting it as though this
+		// save broke something would block an operator editing e.g. the
+		// competition date from a competition whose pools.csv was already
+		// corrupt. It is logged instead, and the very next save retries
+		// (RenumberCompetitors is idempotent and unconditional, G4).
+		renumbered, rErr := eng.RenumberCompetitors(id)
+		if rErr != nil {
+			if numberPrefixMoved {
+				// internalError is deliberately NOT used here: it special-cases a
+				// corrupt pools.csv into a generic "corrupt_file" body, which would
+				// drop this specific "settings were saved" message the operator
+				// needs to know the retry is what fixes it, not that the save itself
+				// was refused.
+				log.Printf("mobileapp: PUT /api/competitions/%s: settings saved but renumber failed after a prefix change: %v", id, rErr)
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": "settings were saved but competitors could not be renumbered; save again once pools.csv is repaired",
+				})
+				return
+			}
+			log.Printf("mobileapp: competition %s: renumber failed on an unrelated settings save (prefix unchanged, retried on next save): %v", id, rErr)
+			renumbered = false
+		}
+		if changed || participantsChanged || renumbered {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		// Re-load to return the actual on-disk state (with non-settings
@@ -2159,7 +2274,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		if err := ensureNumberPrefix(store, id); err != nil {
+		if err := ensureNumberPrefix(store, eng, id, numberPrefixActionStart); err != nil {
 			internalError(c, err)
 			return
 		}
@@ -2208,7 +2323,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		if err := ensureNumberPrefix(store, id); err != nil {
+		if err := ensureNumberPrefix(store, eng, id, numberPrefixActionGenerateDraw); err != nil {
 			internalError(c, err)
 			return
 		}

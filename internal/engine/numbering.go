@@ -25,15 +25,26 @@ import (
 //
 // pools.csv column 7 is the only persisted home of Player.Number (BracketMatch
 // has no such field and participants.csv does not persist it), so rewriting the
-// pools file renumbers every surface. A competition with no pools file is
-// playoffs-only, where numbers are never persisted and are re-derived from
-// participant order on read; there is nothing on disk to rewrite, so this
-// returns without an error.
+// pools file renumbers every surface. "No pools file" is not the same thing as
+// "playoffs-only": a playoffs competition never has one at all (its numbers
+// are re-derived from participant order on read, see
+// mobileapp.mergePoolNumbersIntoPlayers), but a mixed/league/Swiss
+// competition that simply hasn't been drawn YET has none either, for the
+// mundane reason that SavePools has never run -- transitionDrawToRunning
+// routes all three formats to the same state.CompStatusPools, so they share
+// this same file once a draw exists. Either way there is nothing on disk to
+// rewrite, so this returns without an error.
 //
 // The load and the save share one WithTransaction, so a concurrent score write
 // cannot interleave between reading the pools and writing them back.
-func (e *Engine) RenumberCompetitors(compID string) error {
-	return e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+//
+// Returns whether pools.csv was actually rewritten, so a caller that only
+// broadcasts a change notification when something changed (the settings PUT
+// handler) does not have to re-derive that from its own before/after
+// comparison -- this function already computed it to decide whether to save.
+func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
+	var changed bool
+	err := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
 		comp, err := tx.LoadCompetition(compID)
 		if err != nil {
 			return fmt.Errorf("renumber %s: load competition: %w", compID, err)
@@ -59,7 +70,6 @@ func (e *Engine) RenumberCompetitors(compID string) error {
 
 		helper.NumberPools(pools, comp.NumberPrefix)
 
-		changed := false
 		i := 0
 		for _, pool := range pools {
 			for _, p := range pool.Players {
@@ -78,4 +88,5 @@ func (e *Engine) RenumberCompetitors(compID string) error {
 		}
 		return nil
 	})
+	return changed, err
 }

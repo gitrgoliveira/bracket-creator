@@ -33,7 +33,9 @@ func TestRenumberCompetitors_RewritesUnderNewPrefix(t *testing.T) {
 		}},
 	}))
 
-	require.NoError(t, eng.RenumberCompetitors(compID))
+	changed, err := eng.RenumberCompetitors(compID)
+	require.NoError(t, err)
+	assert.True(t, changed, "a rewrite that actually renumbers must report changed=true")
 
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
@@ -102,7 +104,9 @@ func TestRenumberCompetitors_Idempotent_SecondCallDoesNotRewriteTheFile(t *testi
 
 	// The numbers already match the stored prefix, so this call has nothing
 	// to change and must never attempt to write pools.csv.
-	require.NoError(t, eng.RenumberCompetitors(compID), "a no-op renumber must never attempt to write pools.csv")
+	changed, err := eng.RenumberCompetitors(compID)
+	require.NoError(t, err, "a no-op renumber must never attempt to write pools.csv")
+	assert.False(t, changed, "a no-op renumber must report changed=false")
 
 	require.NoError(t, os.Chmod(compDir, 0o700))
 	after, err := os.ReadFile(poolsPath)
@@ -136,7 +140,9 @@ func TestRenumberCompetitors_HealsAPreviouslyUnhealedFile(t *testing.T) {
 		}},
 	}))
 
-	require.NoError(t, eng.RenumberCompetitors(compID))
+	changed, err := eng.RenumberCompetitors(compID)
+	require.NoError(t, err)
+	assert.True(t, changed, "healing a stale/blank Number column must report changed=true")
 
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
@@ -157,9 +163,11 @@ func TestRenumberCompetitors_NoPools_IsANoOp(t *testing.T) {
 		Status: "setup", NumberPrefix: "K",
 	}))
 
-	require.NoError(t, eng.RenumberCompetitors(compID))
+	changed, err := eng.RenumberCompetitors(compID)
+	require.NoError(t, err)
+	assert.False(t, changed, "a competition with no pools.csv has nothing to change")
 
-	_, err := os.Stat(dir + "/competitions/" + compID + "/pools.csv")
+	_, err = os.Stat(dir + "/competitions/" + compID + "/pools.csv")
 	assert.True(t, os.IsNotExist(err), "no pools.csv should be created for a competition with none")
 }
 
@@ -169,8 +177,9 @@ func TestRenumberCompetitors_NoPools_IsANoOp(t *testing.T) {
 func TestRenumberCompetitors_NotFound(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
 
-	err := eng.RenumberCompetitors("does-not-exist")
+	changed, err := eng.RenumberCompetitors("does-not-exist")
 	require.Error(t, err)
+	assert.False(t, changed, "a not-found error must report changed=false, not a partial success")
 	var nfe *NotFoundError
 	assert.ErrorAs(t, err, &nfe, "unknown compID must return NotFoundError")
 }

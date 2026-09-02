@@ -2014,6 +2014,88 @@ func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testi
 		assert.NotEmpty(t, stored.NumberPrefix, "a legacy empty prefix must be assigned before the draw runs")
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
+
+	// F3(iii): engine.StartCompetition's draw-ready branch
+	// (transitionDrawToRunning) only flips status, it never re-runs the draw
+	// pipeline, so a legacy pools.csv left over from a draw generated before
+	// this rule existed (empty prefix, empty Number column) would otherwise
+	// never get numbered. ensureNumberPrefix's own eng.RenumberCompetitors
+	// call is what heals it as part of start.
+	t.Run("POST /start on a draw-ready legacy competition numbers the existing pools.csv", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		cid := "legacy-draw-ready-start"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Legacy Draw Ready Start", Format: state.CompFormatMixed, Kind: "individual",
+			Courts: []string{"A"}, PoolSize: 3, PoolWinners: 2, Status: state.CompStatusDrawReady,
+			// NumberPrefix intentionally left empty: this is the legacy shape.
+		}))
+		require.NoError(t, store.SavePools(cid, []helper.Pool{
+			{PoolName: "Pool A", Players: []helper.Player{
+				{ID: "p1", Name: "Alice", Dojo: "Dojo Alice"},
+				{ID: "p2", Name: "Bob", Dojo: "Dojo Bob"},
+			}},
+		}))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/start", nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.NotEmpty(t, stored.NumberPrefix, "a legacy empty prefix must be assigned")
+
+		pools, err := store.LoadPools(cid)
+		require.NoError(t, err)
+		require.Len(t, pools, 1)
+		require.Len(t, pools[0].Players, 2)
+		for _, pl := range pools[0].Players {
+			assert.NotEmptyf(t, pl.Number, "competitor %q must be numbered by start, not left blank", pl.Name)
+			assert.Truef(t, strings.HasPrefix(pl.Number, stored.NumberPrefix),
+				"number %q should start with the assigned prefix %q", pl.Number, stored.NumberPrefix)
+		}
+	})
+
+	// F3(i): a competition whose status the requested action cannot use
+	// anyway (already running/in-progress) must be left untouched by
+	// ensureNumberPrefix -- both its NumberPrefix and its config.md file --
+	// and the rejection must come from the engine's own status switch
+	// (StartCompetition's default case: "competition %s already started",
+	// mapped to 400 by the handler), not from this pre-flight guard minting
+	// and persisting a prefix for an action that was always going to fail.
+	t.Run("POST /start on a running competition with an empty prefix is rejected and config.md is untouched", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		cid := "running-empty-prefix"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Running Empty Prefix", Format: state.CompFormatMixed, Kind: "individual",
+			Courts: []string{"A"}, PoolSize: 3, PoolWinners: 2, Status: state.CompStatusPools,
+			// NumberPrefix intentionally left empty: this is the legacy shape,
+			// and the competition is already in progress (status "pools"),
+			// which engine.StartCompetition's default case refuses.
+		}))
+		configPath := tempDir + "/competitions/" + cid + "/config.md"
+		before, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/start", nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusBadRequest, w.Code,
+			"an already-started competition must be rejected with the engine's usual status code: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "already started")
+
+		after, err := os.ReadFile(configPath)
+		require.NoError(t, err)
+		assert.Equal(t, before, after, "config.md must be untouched: ensureNumberPrefix must not persist a prefix for a status the action can't use")
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Empty(t, stored.NumberPrefix, "the empty prefix must not have been assigned")
+	})
 }
 
 // TestGETNumberPrefixDefault exercises the R9 preview endpoint (item 8): it
@@ -2060,6 +2142,97 @@ func TestGETNumberPrefixDefault(t *testing.T) {
 		// initial to escalate to, so it falls straight to a numeric suffix.
 		assert.Equal(t, "K2", getPrefix(t, ""))
 	})
+}
+
+// TestPOSTCompetition_NoNumberPrefixStoresDerivedPrefix pins F5(a) (bc-pnum
+// review): POST /competitions with numberPrefix omitted must store a DERIVED
+// prefix, not an empty one. Goes red if the assignDefaultNumberPrefix call in
+// the POST handler is removed -- unlike "NumberPrefix Trimmed On Create"
+// above (which sends an explicit, padded prefix and checks trimming), this
+// sends no numberPrefix key at all.
+func TestPOSTCompetition_NoNumberPrefixStoresDerivedPrefix(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	body, _ := json.Marshal(map[string]any{
+		"id":   "no-prefix-post",
+		"name": "Novice Cup",
+		// numberPrefix deliberately omitted.
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusCreated, w.Code, "response: %s", w.Body.String())
+
+	stored, err := store.LoadCompetition("no-prefix-post")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "N", stored.NumberPrefix, "an omitted numberPrefix on create must be derived from the name, never left empty")
+}
+
+// TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV pins F5(b)
+// (bc-pnum review): a settings PUT on a legacy competition (empty prefix on
+// disk, empty Number column in pools.csv) that changes only an UNRELATED
+// field must still assign the derived prefix and heal pools.csv. Goes red if
+// the RenumberCompetitors call becomes conditional on the prefix having
+// moved -- here the request doesn't send numberPrefix at all, so F1's
+// inherit step sees an empty stored value to inherit, assignDefaultNumberPrefix
+// then derives one because the competition truly has none, and G4's
+// unconditional-renumber-after-every-save is what actually rewrites the
+// blank Number column.
+func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "legacy-unrelated-field"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Legacy Unrelated Field", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusDrawReady,
+		// NumberPrefix intentionally left empty: this is the legacy shape.
+	}))
+	require.NoError(t, store.SavePools(cid, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			// Number intentionally left empty: legacy pools.csv drawn before
+			// this rule existed (G7).
+			{Name: "Player 1", Dojo: "Dojo Player 1"},
+			{Name: "Player 2", Dojo: "Dojo Player 2"},
+		}},
+	}))
+
+	body, _ := json.Marshal(map[string]any{
+		"id":             cid,
+		"name":           "Legacy Unrelated Field",
+		"format":         state.CompFormatMixed,
+		"kind":           "individual",
+		"courts":         []string{"A"},
+		"poolSize":       4,
+		"poolWinners":    2,
+		"roundRobin":     false,
+		"mirror":         false,
+		"checkInEnabled": true, // the only field this PUT actually changes
+		// numberPrefix deliberately omitted.
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.NotEmpty(t, stored.NumberPrefix, "a legacy empty prefix must be assigned even though this PUT only touched checkInEnabled")
+	assert.True(t, stored.CheckInEnabled, "the field the PUT actually asked to change must still land")
+
+	pools, err := store.LoadPools(cid)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 2)
+	for _, pl := range pools[0].Players {
+		assert.NotEmptyf(t, pl.Number, "competitor %q must be numbered: pools.csv must be healed by this save, not left blank", pl.Name)
+		assert.Truef(t, strings.HasPrefix(pl.Number, stored.NumberPrefix),
+			"number %q should start with the assigned prefix %q", pl.Number, stored.NumberPrefix)
+	}
 }
 
 // TestCreateCompetitionEngiTeamExclusion pins Copilot #326: engi (individual
@@ -3113,6 +3286,173 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			"cosmetic Name change must persist through the draw-ready gate")
 		// Status must remain draw-ready, a rename does not discard the draw.
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+}
+
+// TestPUTCompetition_OmittedNumberPrefixInheritsStored pins the review's F1
+// (HIGH): a PUT whose numberPrefix is blank/omitted must INHERIT the stored
+// prefix, exactly like TeamMatchType and ExtraQualifiers already do, rather
+// than assignDefaultNumberPrefix minting a brand new one for a competition
+// that already has one. Without inheriting BEFORE assignDefaultNumberPrefix
+// runs, any settings save that simply omits the field (any client that
+// doesn't echo it back) would silently invent a new prefix, renumbering
+// every competitor and invalidating printed tags for no reason the operator
+// asked for.
+func TestPUTCompetition_OmittedNumberPrefixInheritsStored(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+
+	const cid = "inherit-prefix"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Inherit Prefix", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusDrawReady,
+		NumberPrefix: "Z",
+	}))
+	require.NoError(t, store.SavePools(cid, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Player 1", Dojo: "Dojo Player 1", Number: "Z1"},
+			{Name: "Player 2", Dojo: "Dojo Player 2", Number: "Z2"},
+		}},
+	}))
+
+	body, _ := json.Marshal(map[string]any{
+		"id":          cid,
+		"name":        "Inherit Prefix",
+		"format":      state.CompFormatMixed,
+		"kind":        "individual",
+		"courts":      []string{"A"},
+		"poolSize":    4,
+		"poolWinners": 2,
+		"roundRobin":  false,
+		"mirror":      false,
+		// numberPrefix deliberately OMITTED: the exact shape a client that
+		// has never heard of the field, or simply doesn't echo it back, sends.
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.Equal(t, "Z", stored.NumberPrefix, "an omitted numberPrefix must inherit the STORED prefix, not derive a new one")
+
+	pools, err := store.LoadPools(cid)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 2)
+	assert.Equal(t, "Z1", pools[0].Players[0].Number, "pools.csv must be unchanged: the prefix never moved")
+	assert.Equal(t, "Z2", pools[0].Players[1].Number)
+}
+
+// TestPUTCompetition_RenumberFailurePolicy pins the review's F2 (MEDIUM): a
+// RenumberCompetitors failure is reported differently depending on whether
+// THIS PUT is the one that moved the prefix. A pools.csv broken by something
+// else entirely (corrupted on disk, or a prefix change from an earlier save
+// that never healed) must not block an operator editing an unrelated field --
+// it is inherited damage, logged and retried by the next save. A PUT that
+// itself moves the prefix and then fails to renumber is different: the
+// operator's save only half-landed, and that is worth a 500 naming what
+// happened. The "bare quote" CSV corruption mirrors
+// state.TestLoadPools_MalformedCSV.
+func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
+	writeCorruptPools := func(t *testing.T, dir, cid string) {
+		t.Helper()
+		require.NoError(t, os.WriteFile(
+			filepath.Join(dir, "competitions", cid, "pools.csv"),
+			[]byte("a,b\na,\"bad\nquote"), 0o600))
+	}
+
+	t.Run("prefix unchanged: rename over a broken pools.csv still returns 200 and lands", func(t *testing.T) {
+		r, store, _, _, dir := setupTestRouter(t)
+
+		const cid = "renumber-fail-rename"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Renumber Fail Rename", Format: state.CompFormatMixed, Kind: "individual",
+			Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusDrawReady,
+			NumberPrefix: "K",
+		}))
+		writeCorruptPools(t, dir, cid)
+
+		body, _ := json.Marshal(map[string]any{
+			"id": cid, "name": "Renumber Fail Rename Renamed", "format": state.CompFormatMixed,
+			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
+			"roundRobin": false, "mirror": false, "numberPrefix": "K", // unchanged
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equalf(t, http.StatusOK, w.Code,
+			"a renumber failure over an UNCHANGED prefix is inherited damage, not this write's fault: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, "Renumber Fail Rename Renamed", stored.Name, "the rename must still land")
+	})
+
+	t.Run("prefix moved: 500 naming that settings were saved but renumbering failed", func(t *testing.T) {
+		r, store, _, _, dir := setupTestRouter(t)
+
+		const cid = "renumber-fail-prefix"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Renumber Fail Prefix", Format: state.CompFormatMixed, Kind: "individual",
+			Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusDrawReady,
+			NumberPrefix: "K",
+		}))
+		writeCorruptPools(t, dir, cid)
+
+		body, _ := json.Marshal(map[string]any{
+			"id": cid, "name": "Renumber Fail Prefix", "format": state.CompFormatMixed,
+			"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
+			"roundRobin": false, "mirror": false, "numberPrefix": "X", // moved
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equalf(t, http.StatusInternalServerError, w.Code,
+			"a renumber failure over a MOVED prefix is this write's own fault: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "settings were saved",
+			"the 500 body must say the settings landed even though renumbering failed")
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.Equal(t, "X", stored.NumberPrefix, "config.md must still carry the new prefix: the settings save itself succeeded")
+	})
+
+	t.Run("roster-only PUT over a broken pools.csv still returns 200 and saves participants", func(t *testing.T) {
+		r, store, _, _, dir := setupTestRouter(t)
+
+		const cid = "renumber-fail-roster"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Renumber Fail Roster", Format: state.CompFormatMixed, Kind: "individual",
+			Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
+			NumberPrefix: "K",
+		}))
+		writeCorruptPools(t, dir, cid)
+
+		body, _ := json.Marshal(state.Competition{
+			ID:   cid,
+			Name: "Renumber Fail Roster",
+			Players: []domain.Player{
+				{ID: "p1-uuid", Name: "Alice", Dojo: "Dojo Alice"},
+				{ID: "p2-uuid", Name: "Bob", Dojo: "Dojo Bob"},
+			},
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equalf(t, http.StatusOK, w.Code,
+			"a roster-only PUT never moves numberPrefix, so a renumber failure over a broken pools.csv is inherited damage: %s", w.Body.String())
+
+		players, err := store.LoadParticipants(cid, false)
+		require.NoError(t, err)
+		assert.Len(t, players, 2, "participants.csv must have landed despite the broken pools.csv")
 	})
 }
 

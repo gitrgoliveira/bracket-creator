@@ -399,6 +399,13 @@ func poolTargetSizes(numPlayers, poolSize int, isMax bool) (totalPools int, targ
 	if poolSize <= 0 {
 		return 0, nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
 	}
+	// The upper guard, for the same reason at the other end (see MaxPoolSize).
+	// Both modes keep every target size at or under poolSize, and min mode's
+	// remainder can then add one seat to a pool (realTargetSizes), so refusing
+	// poolSize at MaxPoolSize is what keeps a DRAWN pool inside it.
+	if poolSize >= MaxPoolSize {
+		return 0, nil, fmt.Errorf("cannot create pools: pool size must be less than %d, got %d", MaxPoolSize, poolSize)
+	}
 	totalPools = PoolCount(numPlayers, poolSize, isMax)
 
 	if totalPools == 0 && numPlayers > 0 {
@@ -444,11 +451,11 @@ func poolTargetSizes(numPlayers, poolSize int, isMax bool) (totalPools int, targ
 // package: CreatePoolsForCount's own precondition bounds it directly, and
 // poolTargetSizes' uniform row bounds it to < poolSize, which callers here
 // only ever combine with a pool count derived so poolSize <= numPools) is
-// spread by SIMULATING assignPlayersToPools' own forcePoolSize fallback on
-// placeholder pools -- reusing the exact function CreatePools/
-// CreatePoolsForCount call for this, rather than re-deriving its
+// spread by SIMULATING assignPlayersToPools' own forcePoolSize fallback over
+// pool COUNTS -- forcePoolSizeFromCounts, the very walk CreatePools/
+// CreatePoolsForCount reach through forcePoolSize, rather than re-deriving its
 // outer-to-inner order a second time. This is safe to precompute, before any
-// real player exists, because forcePoolSize never reads a player's identity,
+// real player exists, because that walk never reads a player's identity,
 // only pool LENGTHS against targetSizes, and every pool is providably at
 // its base size before assignPlayersToPools' normal fill (discoverPool /
 // leastConflictedPool) ever lets forcePoolSize fire at all: those two only
@@ -465,20 +472,12 @@ func realTargetSizes(base []int, numPlayers int) []int {
 		return base
 	}
 
-	sim := make([]Pool, len(base))
-	for i := range sim {
-		sim[i].Players = make([]Player, base[i])
-	}
+	counts := make([]int, len(base))
+	copy(counts, base)
 	for r := 0; r < remainder; r++ {
-		idx := forcePoolSize(sim, base)
-		sim[idx].Players = append(sim[idx].Players, Player{})
+		counts[forcePoolSizeFromCounts(counts, base)]++
 	}
-
-	out := make([]int, len(base))
-	for i := range out {
-		out[i] = len(sim[i].Players)
-	}
-	return out
+	return counts
 }
 
 func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
@@ -692,16 +691,33 @@ func leastConflictedPool(pools []Pool, targetSizes []int, dojo string) int {
 	return best
 }
 
+// forcePoolSize picks the pool an overflow player lands in, walking the pools
+// outer to inner and taking the first with room for one over its target. It
+// reads pool LENGTHS and nothing else, which is what lets realTargetSizes
+// precompute the same landing order before any player exists.
 func forcePoolSize(pools []Pool, targetSizes []int) int {
+	counts := make([]int, len(pools))
+	for i := range pools {
+		counts[i] = len(pools[i].Players)
+	}
+	return forcePoolSizeFromCounts(counts, targetSizes)
+}
 
-	for i, j := 0, len(pools)-1; i <= j; i, j = i+1, j-1 {
-		if len(pools[i].Players) < targetSizes[i]+1 {
+// forcePoolSizeFromCounts is that rule expressed over the pool sizes alone, so
+// a caller holding only counts does not have to fabricate players to ask it.
+// realTargetSizes used to do exactly that: it built a placeholder Pool per pool
+// and filled it with one zero-value Player per seat, purely so it could call
+// forcePoolSize and then read the lengths straight back out. That allocation
+// scaled with the entry count for no reason, and read to CodeQL as an
+// allocation sized by request-derived input (go/uncontrolled-allocation-size).
+// One walk, two entry points, so the two cannot drift.
+func forcePoolSizeFromCounts(counts, targetSizes []int) int {
+	for i, j := 0, len(counts)-1; i <= j; i, j = i+1, j-1 {
+		if counts[i] < targetSizes[i]+1 {
 			return i
 		}
-		if i != j {
-			if len(pools[j].Players) < targetSizes[j]+1 {
-				return j
-			}
+		if i != j && counts[j] < targetSizes[j]+1 {
+			return j
 		}
 	}
 	return 0

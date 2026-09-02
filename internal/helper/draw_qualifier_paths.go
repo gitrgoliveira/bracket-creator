@@ -65,11 +65,28 @@ func poolQualifierPaths(targetSizes []int, poolWinners, numCourts int) [][]int {
 // pool per target size, named exactly as assignPlayersToPools would name it
 // once cut, holding that many zero-value Players and nobody else. Shared so
 // the three skeleton builders cannot drift on naming or sizing.
+//
+// Returns nil when any pool would exceed MaxPoolSize, which every caller
+// already treats as "this shape is not supported" (their own documented nil
+// return). poolTargetSizes refuses such a pool first, with an error naming the
+// size, so this is the bound at the allocation rather than the one the
+// operator ever sees.
 func buildQualifierSkeleton(targetSizes []int) []Pool {
 	skeleton := make([]Pool, len(targetSizes))
 	for i, size := range targetSizes {
 		if size < 0 {
 			size = 0
+		}
+		// The skeleton holds one placeholder seat per pool seat, because the
+		// draw builder reads pool LENGTHS (poolLoad, playersPerBlock) and the
+		// fill-bracket mode writes a seed onto the first of them, so the
+		// allocation cannot be replaced by a count. Bound it here, where it
+		// happens: poolTargetSizes has already refused a pool this size and
+		// told the operator why, so reaching this is a caller that skipped
+		// that arithmetic, and refusing the SHAPE is what this function's
+		// callers already expect a nil for.
+		if size > MaxPoolSize {
+			return nil
 		}
 		skeleton[i] = Pool{
 			PoolName: poolPositionName(i),

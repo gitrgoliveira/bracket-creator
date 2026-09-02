@@ -212,3 +212,73 @@ func docDrawSwaps(preset docDrawPreset, before, after []Pool) []docDrawSwap {
 	}
 	return swaps
 }
+
+// The pool draw allocates a placeholder seat per pool seat while it works out
+// which knockout slot each pool feeds, so a pool size has to be bounded by
+// something stated rather than by whatever number reached the arithmetic
+// (CodeQL go/uncontrolled-allocation-size). MaxPoolSize is that bound; these
+// pin both ends of it, since a ceiling nothing tests is a ceiling a later
+// change deletes.
+func TestPoolSizeCeiling(t *testing.T) {
+	t.Run("poolTargetSizes refuses a pool at the ceiling and says so", func(t *testing.T) {
+		_, _, err := poolTargetSizes(MaxPoolSize*4, MaxPoolSize, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "pool size must be less than")
+
+		// One under it still draws, so the guard bounds without narrowing.
+		_, sizes, err := poolTargetSizes(MaxPoolSize*2, MaxPoolSize-1, true)
+		require.NoError(t, err)
+		require.NotEmpty(t, sizes)
+		for i, size := range sizes {
+			assert.LessOrEqual(t, size, MaxPoolSize, "pool %d", i)
+		}
+	})
+
+	t.Run("the skeleton refuses an oversized pool at the allocation", func(t *testing.T) {
+		// Reachable only by a caller that skipped poolTargetSizes, which is
+		// exactly why the bound is asserted here too.
+		assert.Nil(t, buildQualifierSkeleton([]int{4, MaxPoolSize + 1}),
+			"a pool over the ceiling must refuse the shape, not allocate it")
+		assert.Nil(t, poolQualifierPaths([]int{4, MaxPoolSize + 1}, 1, 1))
+
+		ok := buildQualifierSkeleton([]int{4, MaxPoolSize})
+		require.Len(t, ok, 2)
+		assert.Len(t, ok[1].Players, MaxPoolSize)
+	})
+
+	t.Run("a real tournament is nowhere near the ceiling", func(t *testing.T) {
+		_, sizes, err := poolTargetSizes(512, 4, true)
+		require.NoError(t, err)
+		for _, size := range sizes {
+			assert.LessOrEqual(t, size, 4)
+		}
+	})
+}
+
+// realTargetSizes spreads a min-mode remainder across the pools, taking the
+// two outermost first and working inward (0, last, 1, last-1, ...), and now
+// does it over counts rather than by fabricating a player per seat. Its only other coverage is indirect (the goldens and the gate
+// scorecard), so the spread itself is pinned here: a walk that drifts would
+// otherwise surface as an unexplained golden diff.
+func TestRealTargetSizesSpreadsTheRemainderFromTheEndsInward(t *testing.T) {
+	for _, tc := range []struct {
+		base       []int
+		numPlayers int
+		want       []int
+	}{
+		{[]int{3, 3, 3}, 9, []int{3, 3, 3}},  // nothing left over
+		{[]int{3, 3, 3}, 10, []int{4, 3, 3}}, // one over: the outermost pool
+		{[]int{3, 3, 3}, 11, []int{4, 3, 4}}, // two: then the other end
+		{[]int{4, 4, 4, 4}, 18, []int{5, 4, 4, 5}},
+		{[]int{4, 4, 4, 4, 4}, 23, []int{5, 5, 4, 4, 5}}, // 0, then 4, then 1: ends first, inward
+		{[]int{5}, 7, []int{7}},                          // a lone pool takes them all
+	} {
+		got := realTargetSizes(append([]int(nil), tc.base...), tc.numPlayers)
+		assert.Equal(t, tc.want, got, "base %v with %d players", tc.base, tc.numPlayers)
+		sum := 0
+		for _, n := range got {
+			sum += n
+		}
+		assert.Equal(t, tc.numPlayers, sum, "every player must get a seat")
+	}
+}

@@ -282,7 +282,11 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 			fmt.Printf("export: warning: apply seeds for playoffs skeleton: %v\n", aerr)
 		}
 	}
-	helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+	// No AssignPlayerNumbers call here (bc-pnum review, F11): players is
+	// local to this function (freshly loaded above, never returned or shared
+	// with a caller), and only p.Name is read into the returned names slice
+	// below. Setting Number on it would be pure waste -- traced end to end,
+	// nothing downstream of this function's return value can ever see it.
 	seeded := helper.StandardSeeding(players)
 	names := make([]string, len(seeded))
 	for i, p := range seeded {

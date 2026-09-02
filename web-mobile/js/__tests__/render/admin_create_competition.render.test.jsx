@@ -317,6 +317,72 @@ describe('AdminCreateCompetition server-error surfacing (bc-draw R9 gap 2)', () 
   });
 });
 
+// bc-pnum F5(c): the create form pre-fills the number-prefix field from the
+// server's own derivation (GET number-prefix-default) as the operator types
+// the name, but must never clobber a value the operator typed themselves.
+// numberPrefixTouchedRef is the latch: once the field's onChange fires, the
+// pre-fill effect returns immediately on every later re-run (a name/kind
+// change included), so it never fetches again at all, let alone applies a
+// result -- stronger than "fetches but discards the answer".
+describe('AdminCreateCompetition number-prefix pre-fill latch (bc-pnum F5c)', () => {
+  const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');
+  const nameField = (container) => {
+    const label = Array.from(container.querySelectorAll('.field__label')).find((l) => l.textContent.trim() === 'Display name');
+    return label.parentElement.querySelector('input');
+  };
+
+  it('pre-fills the server-derived prefix on mount', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'I' });
+    try {
+      const { container } = await mountForm();
+      await waitFor(() => expect(prefixInput(container).value).toBe('I'));
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+
+  it('a typed prefix survives a later name change', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    // Returns a DIFFERENT value once the name becomes "Spring Open", so a
+    // clobber would be observable: if the latch didn't hold, the field would
+    // flip from the operator's "Z" to the server's "S".
+    const getNumberPrefixDefault = vi.fn((name) => Promise.resolve({
+      numberPrefix: name === 'Spring Open' ? 'S' : 'I',
+    }));
+    window.API.getNumberPrefixDefault = getNumberPrefixDefault;
+    try {
+      const { container } = await mountForm();
+      await waitFor(() => expect(prefixInput(container).value).toBe('I'));
+
+      await act(async () => {
+        fireEvent.change(prefixInput(container), { target: { value: 'Z' } });
+      });
+      expect(prefixInput(container).value).toBe('Z');
+
+      const callsBeforeRename = getNumberPrefixDefault.mock.calls.length;
+      await act(async () => {
+        fireEvent.change(nameField(container), { target: { value: 'Spring Open' } });
+      });
+      // Real timers: wait past the 250ms debounce window so a would-be fetch
+      // has had every chance to fire before asserting it didn't. A bare
+      // synchronous assertion right after the change would pass even if the
+      // latch were broken, simply because the debounce hadn't elapsed yet.
+      await act(async () => {
+        await new Promise((resolve) => { setTimeout(resolve, 400); });
+      });
+
+      // The latch suppresses the fetch entirely once touched (the effect
+      // returns before ever creating the debounce timer), not merely its
+      // result: no new call, for any name, since the operator typed "Z".
+      expect(getNumberPrefixDefault.mock.calls.length).toBe(callsBeforeRename);
+      expect(prefixInput(container).value).toBe('Z');
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+});
+
 // bc-draw R9 UAT gap 3, operator-facing half. The chosen mechanism is to
 // REFUSE a tournament court reduction while a live competition still holds a
 // removed shiaijo, so the refusal has to actually land: it names which

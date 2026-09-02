@@ -873,14 +873,24 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   useEffectA(() => {
     if (numberPrefixTouchedRef.current) return;
     const controller = new AbortController();
-    window.API.getNumberPrefixDefault(deriveCompetitionName(name, kind), "", password, controller.signal)
-      .then((res) => {
-        if (!controller.signal.aborted && !numberPrefixTouchedRef.current) {
-          setNumberPrefix(res && res.numberPrefix || "");
-        }
-      })
-      .catch(() => {});
-    return () => { controller.abort(); };
+    // Debounced (~250ms): this effect's deps include `name`, which changes on
+    // every keystroke, so an undebounced version fired one fetch per
+    // character typed. 250ms is long enough to coalesce a normal typing
+    // burst into one request, short enough that the pre-fill still lands
+    // right after the operator pauses. The timer (not yet fetched) and the
+    // controller (fetch in flight) are both cancelled on cleanup, so a fast
+    // typist or an unmount never leaves a stray request racing to call
+    // setNumberPrefix after the component has moved on.
+    const timer = setTimeout(() => {
+      window.API.getNumberPrefixDefault(deriveCompetitionName(name, kind), "", password, controller.signal)
+        .then((res) => {
+          if (!controller.signal.aborted && !numberPrefixTouchedRef.current) {
+            setNumberPrefix(res && res.numberPrefix || "");
+          }
+        })
+        .catch(() => {});
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [name, kind, password]);
 
   const toggleCourt = (cc) => {

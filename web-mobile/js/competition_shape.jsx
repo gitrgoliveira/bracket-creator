@@ -466,7 +466,15 @@ export const HINT_NAGINATA = "Adds the Sune (S) ippon button to the score editor
 export const LABEL_CHECK_IN = "Check-in tracking";
 export const HINT_CHECK_IN = "Show check-in column and counter. Disable for competitions that don't need attendance tracking.";
 export const LABEL_NUMBER_PREFIX = "Player number prefix";
-export const HINT_NUMBER_PREFIX = "Single letter prefix for participant numbers (A1, B1…). Keeps numbers unique across competitions.";
+// bc-pnum F12: one hint shared by the create form and the settings form, so
+// it has to describe what a BLANK field does in both places, which differ:
+// on create there is nothing stored yet to keep, so blank derives a prefix
+// from the competition's name; in settings a prefix is usually already
+// stored, so blank keeps it rather than deriving a new one (see
+// assignDefaultNumberPrefix / the inherit-before-derive step in the PUT
+// handler). Also states the 3-character cap the TextField's maxLength
+// enforces, which the old copy didn't mention at all.
+export const HINT_NUMBER_PREFIX = "Up to 3 letters for competitor numbers (e.g. K produces K1, K2…). Leave blank: on create, one is derived from the competition's name; in settings, the current prefix is kept.";
 // HINT_KIND_ONLY_INDIVIDUAL: settings shows this in place of the zekken /
 // engi hint when the competition is a team one, standing in for the hint
 // rather than sitting beside it (see zekkenApplies above for why settings

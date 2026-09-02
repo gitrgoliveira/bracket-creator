@@ -66,6 +66,10 @@ Because the seeds are spread before the pools fill, the top seeds' pools sit on 
 
 ## Competitor numbers
 
-When the competition has a number prefix set, generating the draw gives every competitor a number, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
+Every competition has a number prefix. You can set your own in competition setup, or leave it blank: the app then derives one from the competition's name, for example "Kendo Open" becomes K, or KO if K is already used by another competition that day. The setup and settings pages show you the derived prefix before you save, so you see it before it takes effect.
 
-Because the numbers follow the finished draw, they are only fixed once you generate it. Until then the participants panel shows a provisional number, which changes if the roster or the draw changes. A competition with no number prefix set is drawn the same way but assigns no numbers, and competitors are identified by name and dojo alone.
+Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
+
+Because the numbers follow the finished draw, they are only fixed once you generate it. Until then the participants panel shows a provisional number, which changes if the roster or the draw changes.
+
+You can change the number prefix at any time, including after the draw is generated or the competition has started. Saving the new prefix renumbers every competitor immediately; it does not change who is in which pool or who plays whom. If you have already printed tags, reprint them after changing the prefix, because the numbers on the old tags no longer match.

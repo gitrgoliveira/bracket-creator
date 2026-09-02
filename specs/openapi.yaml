@@ -942,6 +942,13 @@ paths:
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
+
+        `numberPrefix` is never left empty: when omitted or blank, the server
+        derives one from `name` (initials, disambiguated against every other
+        competition's prefix, e.g. `"K"`, then `"KO"`, then `"KO2"`), the same
+        derivation `GET /api/competitions/number-prefix-default` previews.
+        Every competitor's number is `numberPrefix` + a sequence counter
+        running through the drawn pools in order (e.g. `K1`, `K2`, ...).
       security:
         - TournamentPassword: []
       requestBody:
@@ -959,6 +966,53 @@ paths:
                 $ref: '#/components/schemas/Competition'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /api/competitions/number-prefix-default:
+    get:
+      tags: [competitions]
+      summary: Preview the default number prefix for a competition name
+      description: |
+        Returns the number prefix a save with the field left blank would
+        actually assign (the same derivation `POST /api/competitions` and a
+        settings `PUT` apply server-side): initials of `name`'s words,
+        disambiguated against every OTHER competition's stored
+        `numberPrefix` (case-insensitive), falling back to `"K"` when `name`
+        yields no ASCII letters. `"Kendo Open"` derives `"K"`; if `"K"` is
+        already taken, `"KO"`; if that collides too, a numeric suffix
+        (`"KO2"`, `"KO3"`, ...). Always within the 3-character prefix cap.
+
+        Read-only and side-effect free: it previews a value, it does not
+        assign or store one. The create form calls it as the operator types
+        the name, with `exclude` omitted (the competition doesn't exist yet,
+        so nothing to exclude from the taken set). The settings form calls it
+        for a legacy competition whose stored `numberPrefix` is still empty,
+        passing its own `id` as `exclude` so its own (empty) prefix can't
+        collide with itself.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Competition name to derive from. Empty is valid; resolves via the fallback.
+        - name: exclude
+          in: query
+          schema:
+            type: string
+          description: Competition id whose own stored prefix is excluded from the taken set.
+      responses:
+        '200':
+          description: The prefix a save would assign.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  numberPrefix:
+                    type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}:
     parameters:
@@ -1008,14 +1062,27 @@ paths:
         leagueTwoThirdPlaces can only be changed before the competition
         starts`, respectively). Every other field in the list above
         (including `poolMatchDurationSeconds` / `playoffMatchDurationSeconds`,
-        `checkInEnabled`, and `swissRounds`) is editable regardless of
-        status through this endpoint; `poolSize`, `poolWinners`,
+        `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
+        regardless of status through this endpoint; `poolSize`, `poolWinners`,
         `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
-        `roundRobin`, `teamSize`, `numberPrefix`, `withZekkenName` and
+        `roundRobin`, `teamSize`, `withZekkenName` and
         `mirror` are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
         `draw-ready`, but are not blocked once the competition has moved
         past it.
+
+        `numberPrefix` is deliberately outside the output-affecting set: it
+        only labels competitors, not what the draw generated, so changing it
+        in ANY status (including `draw-ready`, `running` and `completed`)
+        returns 200. A successful settings save always re-derives every
+        competitor's number from the (possibly unchanged) `numberPrefix` and
+        rewrites `pools.csv` in place whenever a number actually differs; a
+        save that leaves the prefix untouched is a no-op rewrite. An empty
+        `numberPrefix` in the request is never stored as empty: the server
+        assigns a derived default (see `GET
+        /api/competitions/number-prefix-default`) the first time any
+        settings save or draw reaches a competition that doesn't have one yet
+        (including a legacy record created before this rule existed).
 
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
@@ -1122,9 +1189,12 @@ paths:
 
             * Output-affecting settings (format, courts, pool
               size/winners/mode, extra qualifiers, pool format, round-robin,
-              mirror, team size, kind, team match type, number prefix, zekken
+              mirror, team size, kind, team match type, zekken
               display) were changed while the competition is in `draw-ready`
-              state; discard the draw first.
+              state; discard the draw first. `numberPrefix` is NOT one of
+              these: it can be changed in any status, including `draw-ready`
+              and after the competition has started, see the settings-update
+              description above.
             * `format` or `kind` was changed after the competition STARTED
               (status past `setup`). Both repoint generation and scoring while
               results already exist, so neither can change after the fact.
@@ -3945,6 +4015,16 @@ components:
           type: boolean
         numberPrefix:
           type: string
+          description: |
+            Letter prefix for competitor numbers (e.g. `"K"` produces `K1`,
+            `K2`, ...). Never empty on a competition the app has saved or
+            drawn: `POST /api/competitions`, a settings `PUT`, import, `POST
+            .../start` and `POST .../generate-draw` all assign a derived
+            default when it is absent, before persisting or drawing. A
+            legacy record written before this rule existed may still load
+            with it blank; its next save or draw assigns one. Can be changed
+            in any status, including after a draw exists; see the `PUT`
+            endpoint's description.
         hasParticipantIDs:
           type: boolean
         teamMatchType:

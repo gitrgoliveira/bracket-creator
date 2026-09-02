@@ -84,10 +84,21 @@ export function teamMatchTypeHint(isKachinuki) {
 
 // swissRoundLabel: "Swiss-R3" (the synthetic engine pool name, see
 // engine/swiss.go swissPoolName) → "Round 3"; any other shape (a real pool
-// name, "", null) is returned unchanged. This is the SINGLE owner of the
-// Swiss round label: viewer_utils.jsx's leagueAwareLabel, display_helpers.jsx's
-// phaseLabel, and admin_shiaijo.jsx's queue-group/context labels all call
-// through here rather than restating the "Swiss-R<N>" parse (mp-dej2).
+// name, "", null) is returned unchanged.
+//
+// SINGLE owner of the "Swiss-R<N>" parse: nothing else may restate it (mp-dej2).
+// Two layers call in, and a new render site should use the layer above rather
+// than this function directly:
+//   • viewer_utils.jsx  leagueAwareLabel / poolLabel — the pool-phase label for
+//     the viewer AND admin match rows. This is the one to reach for.
+//   • display_helpers.jsx  phaseLabel — the TV board and lobby, which read off
+//     the raw payload and so must derive the name from the match id.
+// admin_shiaijo.jsx's queue grouping is the one site that calls this directly,
+// because its own fallback ("Pool") differs from leagueAwareLabel's.
+//
+// A render site that reaches past both layers for a raw m.poolName prints the
+// synthetic id: that is what admin_scoring_shared.jsx's withdrawal panel did
+// until it was moved onto poolLabel. If you add one, use poolLabel.
 export function swissRoundLabel(poolName) {
     const m = /^Swiss-R(\d+)$/.exec(poolName || "");
     return m ? `Round ${m[1]}` : (poolName || "");

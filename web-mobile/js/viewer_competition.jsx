@@ -17,6 +17,12 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
+// bracketRoundsContain: is this match id drawn INSIDE BracketTree? The bronze
+// (3rd-place) playoff is a sibling of bracket.rounds and is rendered below the
+// tree, so it is not, and the tree holds no ref by which to scroll to it.
+const bracketRoundsContain = (bracket, id) =>
+  !!id && !!bracket && Array.isArray(bracket.rounds)
+  && bracket.rounds.some((round) => (round || []).some((m) => m && m.id === id));
 // DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
 // (…-DH-N), daihyosen-specific, so a pool name containing "-DH-" can't
 // false-positive a regular match. Routing a bout to the individual (rep-bout)
@@ -43,6 +49,14 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // with a synthetic "Swiss-R1" pool name but never writes pools.csv) now
   // contributes its matches here exactly as it already did to
   // home/watchlist/schedule/find-my-matches, which call compMatches directly.
+  //
+  // The collapse is NOT Swiss-only in what it adds. compMatches also emits the
+  // bronze (3rd-place) playoff, a sibling of bracket.rounds that the loop this
+  // replaced never walked, so that bout now reaches Up next / Recent results
+  // here as it always has on every other surface. That is the fix working, not
+  // a side effect: the page was dropping a real bout. It does have one
+  // consequence -- the bronze can now be currentMatch, and it renders outside
+  // BracketTree -- which the bracket auto-scroll effect below handles.
   const allMatches = useMemo(
     () => compMatches({ ...c, pools, poolMatches, bracket }),
     // isEngi (not c.engi) because that is the binding this component closes
@@ -234,10 +248,25 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
 
   // Depends on currentMatch?.id, not the object: re-scroll only when the target
   // match actually changes, not on every currentMatch identity churn.
+  //
+  // Gated on the tree actually containing the match (mp-dej2): allMatches now
+  // comes from the shared compMatches, which surfaces the bronze playoff as a
+  // first-class bracket match where the hand-rolled loop it replaced dropped it
+  // entirely. That is the correct list behaviour -- the bronze is a real bout
+  // and every other surface already showed it -- but it means currentMatch can
+  // now be a match the tree cannot centre. useAutoScrollToMatch bails silently
+  // on a missing ref, so an ungated target would quietly leave the tab wherever
+  // it was instead of centring on something. Skip rather than retarget: there
+  // is no "nearest" tree match to fall back to, and the bronze is rendered in
+  // full just below the tree, so it is not hidden from the operator.
   React.useEffect(() => {
-    if (effectiveTab === "bracket" && currentMatch) {
+    if (effectiveTab === "bracket" && currentMatch && bracketRoundsContain(derivedBracket, currentMatch.id)) {
       setBracketScrollTarget(currentMatch.id + "::" + Date.now());
     }
+    // Deps deliberately unchanged: the containment test reads derivedBracket
+    // from the closure rather than taking it (or a derived Set) as a dep. A
+    // fresh object in this dep list re-fires the effect on every render, and
+    // the effect setStates, so it would spin.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [effectiveTab, currentMatch?.id]);
 

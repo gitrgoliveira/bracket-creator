@@ -180,6 +180,69 @@ describe('ViewerCompetition Overview shows Swiss round matches (mp-dej2)', () =>
     expect(collectText(tree)).not.toContain('Nothing scheduled');
   });
 
+  // mp-dej2 follow-up: collapsing onto compMatches also pulled in the bronze
+  // (3rd-place) playoff, which the hand-rolled loop never walked. Two halves,
+  // and they pull in opposite directions, so both are pinned here:
+  //   1. the bronze SHOULD reach the lists (it is a real bout, and every other
+  //      surface already showed it), and
+  //   2. it must NOT become the bracket auto-scroll target, because it renders
+  //      outside BracketTree and useAutoScrollToMatch bails on a missing ref,
+  //      which would silently stop the tab centring on anything.
+  describe('bronze (3rd-place) playoff', () => {
+    const bronzeDetail = () => ({
+      id: 'c2',
+      name: 'Naginata KO',
+      kind: 'individual',
+      teamSize: 0,
+      format: 'playoffs',
+      status: 'playoffs',
+      startTime: '09:00',
+      courts: ['A'],
+      config: { players: [] },
+      pools: [],
+      poolMatches: [],
+      bracket: {
+        rounds: [[
+          { id: 'r1-m1', sideA: 'Alice', sideB: 'Bob', status: 'scheduled', court: 'A', scheduledAt: '10:00' },
+        ]],
+        // Scheduled EARLIER than the final, so it sorts first and becomes
+        // currentMatch: the reachable case, not a hypothetical one.
+        thirdPlaceMatch: { id: 'bronze-1', sideA: 'Carol', sideB: 'Dave', status: 'scheduled', court: 'A', scheduledAt: '09:30' },
+      },
+      standings: {},
+    });
+
+    it('lists the bronze bout alongside the bracket matches', () => {
+      const detail = normalizeCompetitionDetail(bronzeDetail());
+      const props = overviewProps(detail);
+      const ids = props.upcomingMatches.map((m) => m.id);
+      expect(ids).toContain('bronze-1');
+      expect(ids).toContain('r1-m1');
+    });
+
+    it('does not point the bracket auto-scroll at the bronze, which renders outside the tree', () => {
+      const detail = normalizeCompetitionDetail(bronzeDetail());
+      // Mount on the Bracket tab, where the auto-scroll effect runs.
+      const tree = runtime.mount(ViewerCompetition, {
+        tournament: { competitions: [detail], mode: 'public' },
+        competition: detail,
+        pools: detail.pools,
+        poolMatches: detail.poolMatches,
+        standings: detail.standings,
+        bracket: detail.bracket,
+        onBack: () => {},
+        tweaks: {},
+        activeTab: 'bracket',
+      });
+      const bt = findInTree(tree, (n) => n.type === global.window.BracketTree);
+      expect(bt, 'expected the Bracket tab to render BracketTree').not.toBeNull();
+      // The bronze is currentMatch here (09:30 beats the final's 10:00), so an
+      // ungated effect would have stamped "bronze-1::<ts>" as the target.
+      const target = bt.props.autoScrollMatchId;
+      expect(String(target || '')).not.toContain('bronze-1');
+    });
+  });
+
   it('shows "Round 1", never the raw "Swiss-R1" id, as the row phase label', () => {
     // The reactive test runtime does not invoke VSchedItem's own function
     // body (same caveat as viewer_competition_bye_results.jsx / _round_labels):

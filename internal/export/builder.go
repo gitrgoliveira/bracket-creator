@@ -90,6 +90,19 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: load bracket: %w", err)
 	}
 
+	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6), matching
+	// the blank-template export (Engine.ExportCompetitionXlsx): a corrupt
+	// tournament.md now aborts this export instead of CompetitionCourts
+	// silently degrading to the competition's own court list -- which prints
+	// the WRONG shiaijo names on every sheet for exactly the legacy records
+	// that need the venue's. A MISSING tournament.md is not an error --
+	// LoadTournament returns (nil, nil) for that (state/tournament.go) -- so a
+	// competition with no tournament record yet still exports.
+	tourn, err := store.LoadTournament()
+	if err != nil {
+		return nil, fmt.Errorf("export: load tournament: %w", err)
+	}
+
 	// Index match results by ID for O(1) lookup.
 	matchResultByID := make(map[string]state.MatchResult, len(matchResults))
 	for _, mr := range matchResults {
@@ -120,7 +133,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// The shiaijo BY NAME, mirroring the blank-template export: a competition
 	// allocated C and D must not have its sheets titled A and B. The count is
 	// read off the same list rather than derived a second time.
-	courts := engine.CompetitionCourts(store, comp)
+	courts := engine.CompetitionCourts(comp, tourn)
 	numCourts := len(courts)
 	// Where each pool is actually being fought, so the archived workbook bands a
 	// pool under the shiaijo it was scored on.

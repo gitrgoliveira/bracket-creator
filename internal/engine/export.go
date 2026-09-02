@@ -42,10 +42,22 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		courtOfPool = PoolCourtByName(poolMatches)
 	}
 
+	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6): both the
+	// shiaijo list below and the Tags sheet's publicURL near the end of this
+	// function read from this single load, so the two can never disagree and a
+	// corrupt tournament.md aborts the export instead of silently printing
+	// positional court labels on one sheet. A MISSING tournament.md is not an
+	// error -- LoadTournament returns (nil, nil) for that (state/tournament.go)
+	// -- so a competition with no tournament record yet still exports.
+	tourn, err := e.store.LoadTournament()
+	if err != nil {
+		return nil, err
+	}
+
 	// The shiaijo BY NAME, for every sheet that prints one. The count is read
 	// off the same list rather than derived a second time, so the two can never
 	// disagree; CompetitionCourts owns the inheritance and the single-court fallback.
-	courts := CompetitionCourts(e.store, comp)
+	courts := CompetitionCourts(comp, tourn)
 	numCourts := len(courts)
 
 	f, err := excel.NewFileFromScratch()
@@ -86,32 +98,29 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	//    silently dropping those entrants' half of the draw. It was not a
 	//    large-draw edge case: TreePageLayout raises the page count to
 	//    NextPow2(numCourts), so every competition on 2 or more courts hit it.
-	// Load the stored bracket ONLY for the paths that actually consume it:
-	// naginata (its bronze gate) and a pure playoffs competition (its elimination
-	// leaves — mp-ndfu). Still skipped for league/swiss/mixed, whose export has
-	// zero dependency on bracket.json, so a corrupted file can never abort an
-	// export that never needed it. Bronze gates on the stored bracket's
-	// ThirdPlaceMatch exactly as the results workbook does (builder.go), so the
-	// two exports of one competition agree.
-	hasBronze := false
-	var bracket *state.Bracket
-	if comp.Naginata || isPurePlayoffs(comp, pools) {
-		bracket, err = e.store.LoadBracket(id)
-		if err != nil {
-			return nil, err
-		}
-		hasBronze = bracket != nil && bracket.ThirdPlaceMatch != nil
-	} else if b, courtErr := e.store.LoadBracket(id); courtErr == nil {
-		// Not structurally required for this format, but it carries the LIVE
-		// court of every bout, which is the only correct source for the
-		// elimination sheet's bands (the operator reassigns matches between
-		// shiaijo as the day runs). Best-effort on purpose: the strict load
-		// above stays limited to the formats that cannot render without a
-		// bracket, so a corrupt bracket.json still cannot abort an export that
-		// only wanted court labels. Falling through with a nil bracket simply
-		// bands by the draw's regions, which is what this did before.
-		bracket = b
+	// Load the stored bracket ONCE, unconditionally, strictly (mp-yuy8 criterion
+	// 4). It used to load only for naginata/pure-playoffs and otherwise fall
+	// through best-effort on a load error, silently continuing with a nil
+	// bracket -- but the bracket carries the LIVE court of every bout (the
+	// operator reassigns matches between shiaijo as the day runs), which is the
+	// only correct source for the elimination sheet's bands; a nil bracket bands
+	// by the draw's regions instead, i.e. prints score sheets under the wrong
+	// court rather than failing. A MISSING bracket.json is not an error --
+	// parseBracketFile returns an empty non-nil bracket for a not-yet-drawn
+	// competition (state/bracket.go) -- so league/swiss/mixed competitions that
+	// never had a bracket are unaffected; only a corrupt/unreadable file fails.
+	bracket, err := e.store.LoadBracket(id)
+	if err != nil {
+		return nil, err
 	}
+	// hasBronze keeps its EXISTING narrow gate (naginata or pure playoffs) even
+	// though the load above is now unconditional: the bracket builder only ever
+	// populates ThirdPlaceMatch when comp.Naginata is true
+	// (buildBracketFromDraw, internal/engine/bracket.go), which this gate's
+	// first disjunct already covers regardless of format, so widening the LOAD
+	// does not widen what fires the bronze-only Elimination sheet fallback
+	// below. Not a decision to revisit here -- see mp-yuy8 criterion 5.
+	hasBronze := (comp.Naginata || isPurePlayoffs(comp, pools)) && bracket != nil && bracket.ThirdPlaceMatch != nil
 
 	// Elimination leaves for the knockout phase, shared with the results workbook
 	// (EliminationDraw) so both exports of one competition render the identical
@@ -166,12 +175,13 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
 
 	// 6. Tags sheet, pass publicURL so numbered tags get an embedded QR code.
-	// LoadTournament errors are silently ignored: a missing publicURL simply
-	// omits QR codes without aborting the export. CreateTagsSheet errors
-	// (e.g. Excel write failures) still propagate.
+	// tourn (loaded once, strictly, above) may legitimately be nil for a
+	// competition with no tournament record yet, which simply omits QR codes
+	// without aborting the export. CreateTagsSheet errors (e.g. Excel write
+	// failures) still propagate.
 	var publicURL string
-	if t, tErr := e.store.LoadTournament(); tErr == nil && t != nil {
-		publicURL = t.PublicURL
+	if tourn != nil {
+		publicURL = tourn.PublicURL
 	}
 	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
 		return nil, err

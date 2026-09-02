@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -396,6 +397,53 @@ func TestBuildResultsWorkbook_NoPools(t *testing.T) {
 	data, err := BuildResultsWorkbook(store, eng, compID)
 	require.NoError(t, err)
 	require.NotEmpty(t, data)
+}
+
+// TestBuildResultsWorkbook_MissingTournament_Succeeds guards against
+// over-strictness for mp-yuy8 criterion 6: a competition folder with no
+// tournament.md at all (the bootstrap window before POST /tournament) must
+// still build a results workbook. LoadTournament treats "does not exist" as
+// (nil, nil), never an error (internal/state/tournament.go).
+func TestBuildResultsWorkbook_MissingTournament_Succeeds(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	require.NoFileExists(t, filepath.Join(dir, "tournament.md"))
+
+	require.NoError(t, store.SavePools(compID, makePools()))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+}
+
+// TestBuildResultsWorkbook_CorruptTournament_Fails pins mp-yuy8 criterion 6: a
+// corrupt (unreadable) tournament.md now aborts BuildResultsWorkbook rather
+// than engine.CompetitionCourts silently degrading to the competition's own
+// court list. A malformed YAML front matter does NOT make LoadTournament
+// error (it falls back to a default Tournament{} -- see
+// internal/state/tournament.go's parseFrontMatter branch), so "corrupt" here
+// is reproduced the same way as the engine-side test
+// (TestExportCompetitionXlsx_CorruptTournament_Fails): tournament.md
+// replaced by a directory, forcing a real os.ReadFile error.
+func TestBuildResultsWorkbook_CorruptTournament_Fails(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Cup", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePools(compID, makePools()))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	tournPath := filepath.Join(dir, "tournament.md")
+	require.NoError(t, os.RemoveAll(tournPath))
+	require.NoError(t, os.Mkdir(tournPath, 0o755))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.Error(t, err, "a corrupt tournament.md must abort the export rather than silently printing positional court labels")
+	assert.Nil(t, data)
 }
 
 func TestBuildResultsWorkbook_CompetitionNotFound(t *testing.T) {

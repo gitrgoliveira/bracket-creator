@@ -30,7 +30,7 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"}, {Name: "Delta"},
+			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"}, {Name: "Delta", Dojo: "Dojo Delta"},
 		}},
 	}))
 

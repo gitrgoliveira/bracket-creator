@@ -68,6 +68,22 @@ const (
 // and TestShiaijoRuleJSMirrorsMatchTheGoMessage).
 const MaxCourts = 16
 
+// MaxPoolSize is a defensive ceiling on a DRAWN pool's size, in the same class
+// as MaxCourts. A pool is a round robin, so its match count grows as n(n-1)/2:
+// a pool of 1000 would be 499,500 fights in one group, which no venue can run
+// and no operator can mean. The largest real pool is a league group in the
+// dozens, so nothing legitimate is refused.
+//
+// It exists because the draw allocates one placeholder seat per pool seat when
+// it builds the qualifier skeleton (buildQualifierSkeleton,
+// draw_qualifier_paths.go), and that allocation should be bounded by a stated
+// limit rather than by whatever number reached poolTargetSizes
+// (go/uncontrolled-allocation-size). Enforced at poolTargetSizes, the
+// arithmetic every pool path goes through, which can answer the operator with
+// an error; asserted again at the allocation itself, three call frames away,
+// where the bound has to be visible to be a bound.
+const MaxPoolSize = 1000
+
 // courtLabelAlphabet names the shiaijo, in order: one letter per supported
 // court, so CourtLabel cannot produce a name for a court the rest of the system
 // would refuse. Sized TO MaxCourts rather than the other way round -- the cap is

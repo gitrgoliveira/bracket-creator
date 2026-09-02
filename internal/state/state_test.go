@@ -516,9 +516,9 @@ func TestStore_PoolsCSV_PreservesOrder(t *testing.T) {
 	require.NoError(t, err)
 
 	pools := []helper.Pool{
-		{PoolName: "Pool Z", Players: []helper.Player{{Name: "First"}}},
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Second"}}},
-		{PoolName: "Pool M", Players: []helper.Player{{Name: "Third"}}},
+		{PoolName: "Pool Z", Players: []helper.Player{{Name: "First", Dojo: "Dojo First"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Second", Dojo: "Dojo Second"}}},
+		{PoolName: "Pool M", Players: []helper.Player{{Name: "Third", Dojo: "Dojo Third"}}},
 	}
 
 	compID := "order"

@@ -82,7 +82,7 @@ func TestByeGoesToTheHighestPrecedenceOccupantSweep(t *testing.T) {
 				// them, not just at the four that fully determine D6's halves
 				// and quarters. At zero seeds criterion 1 never fires and the
 				// order falls through to pool size and pool order, which is
-				// exactly the path an unseeded club event takes.
+				// exactly the path an unseeded dojo-level event takes.
 				for _, numSeeds := range seedCounts {
 					if !rosterHolds(numPools, numSeeds) {
 						continue

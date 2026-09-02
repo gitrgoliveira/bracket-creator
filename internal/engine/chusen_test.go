@@ -1,11 +1,13 @@
 package engine
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -214,4 +216,41 @@ func TestChusenCandidates_PartialTieWithoutCycleNeedsChusen(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cands, 1, "Beta and Gamma tie on daihyosen wins with no cycle present -> still needs chusen")
 	assert.Len(t, cands[0].Teams, 4)
+}
+
+// TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity pins the identity keying in
+// groupNeedsChusen at unit level. Two TEAMS sharing a display name is not a
+// state normal operation produces (team names are unique by rule; see the
+// comment in groupNeedsChusen), so the group is hand-built rather than driven
+// through a draw: the point is that the function reads the daihyosen result
+// per competitor, not per name, if such a roster ever reaches it.
+//
+// Fixture: three tied teams, two of them named "Tora" from different dojos.
+// The daihyosen round-robin is complete with a strict 2/1/0 win order, so the
+// group is DECIDED and needs no chusen. Keyed by bare name, both Toras read
+// the same win count, the order looks tied, and a chusen is offered that the
+// operator does not need.
+func TestGroupNeedsChusen_SameNameTeamsKeyOnIdentity(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-a", Name: "Tora", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-b", Name: "Tora", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-c", Name: "Kuma", Dojo: "Kyoto"}},
+	}
+	dh := func(idx int, aID, aName, bID, bName, wID, wName string) state.MatchResult {
+		return state.MatchResult{
+			ID:    fmt.Sprintf("Pool A-DH-%d", idx),
+			SideA: aName, SideAID: aID,
+			SideB: bName, SideBID: bID,
+			Winner: wName, WinnerID: wID,
+			Status: state.MatchStatusCompleted,
+		}
+	}
+	matches := []state.MatchResult{
+		dh(0, "id-a", "Tora", "id-b", "Tora", "id-a", "Tora"), // Tokyo beats Osaka
+		dh(1, "id-a", "Tora", "id-c", "Kuma", "id-a", "Tora"), // Tokyo beats Kuma
+		dh(2, "id-b", "Tora", "id-c", "Kuma", "id-b", "Tora"), // Osaka beats Kuma
+	}
+	// Strict 2/1/0 order: Tokyo 2, Osaka 1, Kuma 0.
+	assert.False(t, groupNeedsChusen(group, matches, nil),
+		"a decided daihyosen order must not need a chusen just because two teams share a name")
 }

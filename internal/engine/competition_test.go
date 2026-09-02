@@ -870,3 +870,57 @@ func TestReplaceParticipantInDraw_NoopWhenUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, poolsBefore, poolsAfter, "pools must be unchanged on no-op")
 }
+
+// --- leagueGroupHasDH: identity-keyed membership (symmetry with groupNeedsChusen) ---
+
+// TestLeagueGroupHasDH_TwoDistinctMembers is the baseline: a real DH bout
+// between two DIFFERENT group members is recognized regardless of whether an
+// id is present (name-fallback resolution still applies for legacy rows with
+// no SideAID/SideBID).
+func TestLeagueGroupHasDH_TwoDistinctMembers(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-a", Name: "Team A", Dojo: "Dojo A"}},
+		{Player: domain.Player{ID: "id-b", Name: "Team B", Dojo: "Dojo B"}},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", SideAID: "id-a", SideBID: "id-b", Status: state.MatchStatusCompleted, Winner: "Team A"},
+	}
+	assert.True(t, leagueGroupHasDH(group, matches))
+}
+
+// TestLeagueGroupHasDH_SelfPairSameNameRejected is the regression guard for
+// the finding that leagueGroupHasDH's bare-name membership test collapses two
+// SAME-NAME group members (a namesake collision -- the unique-team-name rule
+// has documented enforcement holes, checkNewTeamNameCollisions) into one map
+// entry. A DH row whose two sides BOTH resolve to the SAME group member
+// (corrupted/self-referential data, e.g. SideAID == SideBID) is not a bout
+// between two distinct group members and must not count as "the group has a
+// tie-breaker". Under the old code, `names["Team X"]` collapses both
+// namesakes into one key present on the map, so
+// `names[m.SideA] && names[m.SideB]` reads true for a self-pairing row even
+// though it never actually paired the two DIFFERENT namesakes against each
+// other.
+func TestLeagueGroupHasDH_SelfPairSameNameRejected(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-tokyo", Name: "Team X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-osaka", Name: "Team X", Dojo: "Osaka"}},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team X", SideB: "Team X", SideAID: "id-tokyo", SideBID: "id-tokyo", Status: state.MatchStatusCompleted, Winner: "Team X", WinnerID: "id-tokyo"},
+	}
+	assert.False(t, leagueGroupHasDH(group, matches), "a DH row whose two sides resolve to the SAME group member is not a tie-breaker between the group's two distinct members")
+}
+
+// TestLeagueGroupHasDH_NamesakePairRecognized proves the fix does not merely
+// reject the self-pair: a GENUINE DH bout between the two DIFFERENT namesake
+// members (distinct ids) must still be recognized.
+func TestLeagueGroupHasDH_NamesakePairRecognized(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-tokyo", Name: "Team X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-osaka", Name: "Team X", Dojo: "Osaka"}},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team X", SideB: "Team X", SideAID: "id-tokyo", SideBID: "id-osaka", Status: state.MatchStatusCompleted, Winner: "Team X", WinnerID: "id-osaka"},
+	}
+	assert.True(t, leagueGroupHasDH(group, matches), "a genuine DH bout between the two distinct namesake members must be recognized")
+}

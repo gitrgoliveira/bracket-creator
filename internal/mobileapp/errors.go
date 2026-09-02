@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"errors"
 	"log"
 	"net/http"
 
@@ -51,4 +52,62 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 		msg = publicMsg[0]
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+}
+
+// classifyRosterWriteError maps one of the participant-roster write sentinel
+// errors -- returned by Store.AddParticipant, Store.SaveParticipants,
+// Store.UpdateParticipant, Store.BulkCheckIn, and every other write that
+// funnels through saveParticipantsNoLock -- to the HTTP status this package
+// answers with for it. ok is false when err does not match any of them,
+// leaving the caller free to check its own site-specific sentinels (e.g.
+// state.ErrCompetitionNotInSetup) before falling back to internalError.
+//
+// This is the ONE place these four map to a status; every participant-write
+// call site should classify through here (directly, or via
+// respondRosterWriteError) rather than hand-copying its own
+// errors.Is(...)-then-c.JSON chain. Before this existed, ErrBlankDojo's own
+// doc comment promised "a per-field 400 naming the offending row" but six
+// call sites hand-copied that mapping while three check-in paths (PUT/DELETE
+// .../checkin, POST .../checkin-bulk) never checked it at all and fell
+// through to a generic 500 -- exactly the class of drift a single shared
+// classifier prevents.
+func classifyRosterWriteError(err error) (status int, ok bool) {
+	switch {
+	case errors.Is(err, state.ErrParticipantNotFound):
+		return http.StatusNotFound, true
+	case errors.Is(err, state.ErrDuplicateName):
+		return http.StatusConflict, true
+	case errors.Is(err, state.ErrReservedName):
+		return http.StatusBadRequest, true
+	case errors.Is(err, state.ErrBlankDojo):
+		return http.StatusBadRequest, true
+	default:
+		return 0, false
+	}
+}
+
+// respondRosterWriteError classifies err via classifyRosterWriteError and, if
+// it matches, writes {"error": err.Error()} at the classified status and
+// reports true; the caller must return immediately when this returns true.
+// It reports false, writing nothing to c, for any other error, so a call
+// site can chain its own site-specific handling (a sentinel this classifier
+// doesn't know, then internalError) after it.
+//
+// err.Error() is used verbatim for every matched case -- in particular NOT
+// errors.Unwrap(err).Error() for ErrDuplicateName: the duplicate-team-name
+// wrap is fmt.Errorf("%w: %w", ...), whose multi-error type implements
+// Unwrap() []error, so errors.Unwrap returns nil and a caller dereferencing
+// it panics. err.Error() already contains the full, colliding-entry-naming
+// message. A call site that needs a DIFFERENT, friendlier message for one
+// specific sentinel (self-registration overrides ErrDuplicateName's) must
+// check that sentinel itself BEFORE calling respondRosterWriteError, since
+// neither this function nor classifyRosterWriteError lets a caller override
+// a matched message.
+func respondRosterWriteError(c *gin.Context, err error) bool {
+	status, ok := classifyRosterWriteError(err)
+	if !ok {
+		return false
+	}
+	c.JSON(status, gin.H{"error": err.Error()})
+	return true
 }

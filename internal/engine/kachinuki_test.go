@@ -2928,8 +2928,8 @@ func saveMixedKachinukiCompForReopenTest(t *testing.T) (*Engine, *state.Store, s
 	compID := "kachinuki-reopen-guard"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:            compID,
@@ -2945,7 +2945,7 @@ func saveMixedKachinukiCompForReopenTest(t *testing.T) (*Engine, *state.Store, s
 	}))
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},

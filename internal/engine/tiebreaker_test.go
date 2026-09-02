@@ -276,9 +276,9 @@ func TestStandingPoints_CriteriaPriority(t *testing.T) {
 // defensive skipping of out-of-range indices.
 func TestStandingsAt(t *testing.T) {
 	s := []state.PlayerStanding{
-		{Player: domain.Player{Name: "A"}},
-		{Player: domain.Player{Name: "B"}},
-		{Player: domain.Player{Name: "C"}},
+		{Player: domain.Player{Name: "A", Dojo: "Dojo A"}},
+		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
+		{Player: domain.Player{Name: "C", Dojo: "Dojo C"}},
 	}
 	t.Run("preserves position order", func(t *testing.T) {
 		got := standingsAt(s, []int{2, 0})
@@ -299,10 +299,10 @@ func TestStandingsAt(t *testing.T) {
 
 func TestGenerateTiebreakerMatches_TwoWay(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "Alice"}},
-		{Player: domain.Player{Name: "Bob"}},
+		{Player: domain.Player{Name: "Alice", Dojo: "Dojo Alice"}},
+		{Player: domain.Player{Name: "Bob", Dojo: "Dojo Bob"}},
 	}
-	matches := generateTiebreakerMatches("Pool A", group, 0, "A", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
 	require.Len(t, matches, 1)
 	m := matches[0]
 	assert.Equal(t, "Pool A-TB-0", m.ID)
@@ -314,11 +314,11 @@ func TestGenerateTiebreakerMatches_TwoWay(t *testing.T) {
 
 func TestGenerateTiebreakerMatches_ThreeWay(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "A"}},
-		{Player: domain.Player{Name: "B"}},
-		{Player: domain.Player{Name: "C"}},
+		{Player: domain.Player{Name: "A", Dojo: "Dojo A"}},
+		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
+		{Player: domain.Player{Name: "C", Dojo: "Dojo C"}},
 	}
-	matches := generateTiebreakerMatches("Pool X", group, 0, "B", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool X", group, 0, "B", nil)
 	// 3-way round-robin = 3 matches
 	require.Len(t, matches, 3)
 	assert.Equal(t, "Pool X-TB-0", matches[0].ID)
@@ -328,24 +328,98 @@ func TestGenerateTiebreakerMatches_ThreeWay(t *testing.T) {
 
 func TestGenerateTiebreakerMatches_ExistingCountOffset(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "A"}},
-		{Player: domain.Player{Name: "B"}},
+		{Player: domain.Player{Name: "A", Dojo: "Dojo A"}},
+		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
 	}
-	matches := generateTiebreakerMatches("Pool X", group, 5, "A", map[string]bool{})
+	matches := generateTiebreakerMatches("Pool X", group, 5, "A", nil)
 	require.Len(t, matches, 1)
 	assert.Equal(t, "Pool X-TB-5", matches[0].ID)
 }
 
 func TestGenerateTiebreakerMatches_SkipsExistingPairs(t *testing.T) {
 	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "A"}},
-		{Player: domain.Player{Name: "B"}},
-		{Player: domain.Player{Name: "C"}},
+		{Player: domain.Player{Name: "A", Dojo: "Dojo A"}},
+		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
+		{Player: domain.Player{Name: "C", Dojo: "Dojo C"}},
 	}
-	existingPairs := map[string]bool{tiebreakerPairKey("A", "B"): true}
-	matches := generateTiebreakerMatches("Pool X", group, 1, "A", existingPairs)
+	existingRows := []state.MatchResult{{SideA: "A", SideB: "B"}}
+	matches := generateTiebreakerMatches("Pool X", group, 1, "A", existingRows)
 	// Only A-C and B-C should be generated
 	require.Len(t, matches, 2)
+}
+
+// TestGenerateTiebreakerMatches_NamesakePairGenerated is the regression guard
+// for the finding that a tied NAMESAKE pair (same display name, different
+// dojo -- legal per CheckDuplicateEntriesByNameDojo) never got its own TB
+// bout generated: the old `a.Player.Name >= b.Player.Name` skip is false in
+// BOTH loop orientations when the two names are equal, so `continue` fired
+// every time and zero matches were ever produced for the pair. Before the
+// fix (index-based enumeration replacing the name comparison) this asserts
+// Len 1 against an actual Len 0.
+func TestGenerateTiebreakerMatches_NamesakePairGenerated(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-alice-tokyo", Name: "Alice", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-alice-osaka", Name: "Alice", Dojo: "Osaka"}},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 1, "the tied namesake pair must still get its own TB bout")
+	m := matches[0]
+	assert.Equal(t, "Pool A-TB-0", m.ID)
+	assert.ElementsMatch(t, []string{m.SideAID, m.SideBID}, []string{"id-alice-tokyo", "id-alice-osaka"})
+}
+
+// TestGenerateTiebreakerMatches_ThreeWayWithNamesake covers the second half
+// of the same finding: a 3-way tied group {X@dojoA, X@dojoB, Y} must generate
+// all THREE round-robin bouts. Before the fix, bare-name dedup collapsed
+// X@dojoA-vs-Y and X@dojoB-vs-Y into "the same pair" (both keyed "X|Y"), so
+// only 2 of the 3 bouts were produced (and the X-vs-X bout was dropped
+// entirely by the name-order skip, same as the two-way case above).
+func TestGenerateTiebreakerMatches_ThreeWayWithNamesake(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-x-tokyo", Name: "X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-x-osaka", Name: "X", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-y", Name: "Y", Dojo: "Kyoto"}},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 3, "all three round-robin pairs of a 3-way group with one namesake pair must be generated")
+
+	gotPairs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		gotPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
+	}
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-x-osaka")], "X@Tokyo vs X@Osaka must be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-y")], "X@Tokyo vs Y must be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-osaka", "id-y")], "X@Osaka vs Y must be generated (distinct from X@Tokyo vs Y)")
+}
+
+// TestGenerateTiebreakerMatches_PrefillDedupsNamesakeInvolvingPair is the
+// regression guard requested alongside the two tests above: a genuinely
+// already-existing TB row for ONE of the two namesake-involving pairs must
+// still be skipped on re-injection, while the OTHER pair (which merely
+// shares a bare-name collision with the first under the old key scheme)
+// must still be generated. This is the scenario the old bare-name dedup got
+// backwards: it would either drop both (name collision) or, depending on
+// enumeration order, generate neither correctly.
+func TestGenerateTiebreakerMatches_PrefillDedupsNamesakeInvolvingPair(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-x-tokyo", Name: "X", Dojo: "Tokyo"}},
+		{Player: domain.Player{ID: "id-x-osaka", Name: "X", Dojo: "Osaka"}},
+		{Player: domain.Player{ID: "id-y", Name: "Y", Dojo: "Kyoto"}},
+	}
+	// X@Tokyo vs Y already exists on disk (e.g. from a prior injection).
+	existingRows := []state.MatchResult{
+		{ID: "Pool A-TB-0", SideA: "X", SideB: "Y", SideAID: "id-x-tokyo", SideBID: "id-y", Status: state.MatchStatusScheduled},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 1, "A", existingRows)
+	require.Len(t, matches, 2, "X-vs-X and X@Osaka-vs-Y are new; X@Tokyo-vs-Y already exists")
+
+	gotPairs := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		gotPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
+	}
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-x-osaka")], "X@Tokyo vs X@Osaka must still be generated")
+	assert.True(t, gotPairs[tiebreakerPairKey("id-x-osaka", "id-y")], "X@Osaka vs Y is a DIFFERENT pair from the pre-existing X@Tokyo vs Y and must still be generated")
+	assert.False(t, gotPairs[tiebreakerPairKey("id-x-tokyo", "id-y")], "the pre-existing X@Tokyo vs Y row must not be regenerated")
 }
 
 func TestInjectTiebreakerMatches_NoTie(t *testing.T) {
@@ -361,7 +435,7 @@ func TestInjectTiebreakerMatches_NoTie(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
 		}},
 	}))
 	// Alice wins both, Bob beats Charlie, distinct standings, no tie
@@ -389,7 +463,7 @@ func TestInjectTiebreakerMatches_TwoWayTie(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
 		}},
 	}))
 	// Alice wins both, Bob and Charlie both lose once, both 0 ippons: tie
@@ -424,7 +498,7 @@ func TestInjectTiebreakerMatches_Idempotent(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}},
 	}))
 	// A draw → both have identical stats → tie
@@ -465,7 +539,7 @@ func TestMaybeAutoCompletePools_TiesDetected(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}},
 	}))
 	// Draw → tie
@@ -507,7 +581,7 @@ func TestMaybeAutoCompletePools_TiebreakersIncomplete(t *testing.T) {
 		Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
 	}))
 	// Regular match complete, TB match still scheduled
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -536,7 +610,7 @@ func TestMaybeAutoCompletePools_TiebreakersComplete(t *testing.T) {
 		Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
 	}))
 	// Regular match complete + TB match complete
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -567,7 +641,7 @@ func TestComputeStandings_TBExcludedFromStats(t *testing.T) {
 		Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
 	}))
 	// Regular draw + TB win for Alice
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -609,7 +683,7 @@ func TestInjectTiebreakerMatches_PreservesExistingScheduledAt(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}},
 	}))
 
@@ -660,7 +734,7 @@ func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
 		}},
 	}))
 	// Alice wins all → distinct standings (no tie)
@@ -706,8 +780,8 @@ func TestComputeStandings_MultiGroupTBSortIsolation(t *testing.T) {
 	// 5-player pool: Alpha first, then {Beta,Gamma} tied, then {Delta,Epsilon} tied.
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha"}, {Name: "Beta"}, {Name: "Gamma"},
-			{Name: "Delta"}, {Name: "Epsilon"},
+			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
+			{Name: "Delta", Dojo: "Dojo Delta"}, {Name: "Epsilon", Dojo: "Dojo Epsilon"},
 		}},
 	}))
 	// Alpha beats everyone. Beta and Gamma both beat Delta and Epsilon and
@@ -761,7 +835,7 @@ func TestComputeStandings_TBSecondarySort(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
 		}},
 	}))
 	// Alice wins all regular matches; Bob and Charlie draw → tie
@@ -808,7 +882,7 @@ func setupIndividualPoolTB(t *testing.T, compID string, poolWinners int) (*Engin
 		Status: state.CompStatusPools, Courts: []string{"A"}, PoolWinners: poolWinners,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
-		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dave"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Carol", Dojo: "Dojo Carol"}, {Name: "Dave", Dojo: "Dojo Dave"},
 	}}}))
 	require.NoError(t, store.SavePoolMatches(compID, fourPlayerOneTiedPairTB()))
 	return eng, store
@@ -903,10 +977,10 @@ func TestInjectTiebreakerMatches_Engi_DecisiveResult(t *testing.T) {
 			setupEngiComp(t, store, compID, state.CompFormatMixed)
 			require.NoError(t, store.SavePools(compID, []helper.Pool{
 				{PoolName: "Pool A", Players: []helper.Player{
-					{Name: "Alice"}, {Name: "Bob"},
+					{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 				}},
 				{PoolName: "Pool B", Players: []helper.Player{
-					{Name: "Carol"}, {Name: "Dave"},
+					{Name: "Carol", Dojo: "Dojo Carol"}, {Name: "Dave", Dojo: "Dojo Dave"},
 				}},
 			}))
 			require.NoError(t, store.SavePoolMatches(compID, tc.matches))
@@ -936,7 +1010,7 @@ func TestInjectTiebreakerMatches_Engi_FullCycleTie(t *testing.T) {
 	setupEngiComp(t, store, compID, state.CompFormatLeague)
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"}, {Name: "Charlie"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
 		}},
 	}))
 	// Cycle: Alice beats Bob (3-2), Bob beats Charlie (3-2), Charlie beats Alice (3-2).
@@ -976,7 +1050,7 @@ func TestInjectTiebreakerMatches_Engi_SelfHeal(t *testing.T) {
 	setupEngiComp(t, store, compID, state.CompFormatLeague)
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}},
 	}))
 
@@ -1051,7 +1125,7 @@ func TestMaybeAutoCompletePools_Engi_NoTiebreakInjection(t *testing.T) {
 	setupEngiComp(t, store, compID, state.CompFormatLeague)
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}},
 	}))
 	// One decisive flag-scored match. Points=0 for all engi standings, so
@@ -1091,7 +1165,7 @@ func TestMaybeAutoCompletePools_Engi_League_SelfHeal(t *testing.T) {
 	setupEngiComp(t, store, compID, state.CompFormatLeague)
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}},
 	}))
 	// One decisive completed flag match plus the spurious winnerless
@@ -1119,4 +1193,79 @@ func TestMaybeAutoCompletePools_Engi_League_SelfHeal(t *testing.T) {
 		assert.False(t, IsTiebreakerMatchID(m.ID),
 			"spurious TB rows must be healed away by MaybeAutoCompletePools")
 	}
+}
+
+// TestGenerateTiebreakerMatches_StampsSideIDs pins that generated TB rows
+// carry SideAID/SideBID from the tied competitors' participant ids (mirrors
+// pools.go's regular-match generation). Without this, applyTiebreakSort has
+// no id to key on and two tied namesakes from different dojos
+// (CheckDuplicateEntriesByNameDojo) would cross-attribute each other's TB
+// wins (bc-cse).
+func TestGenerateTiebreakerMatches_StampsSideIDs(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "id-alice", Name: "Alice", Dojo: "Dojo Alice"}},
+		{Player: domain.Player{ID: "id-bob", Name: "Bob", Dojo: "Dojo Bob"}},
+	}
+	matches := generateTiebreakerMatches("Pool A", group, 0, "A", nil)
+	require.Len(t, matches, 1)
+	m := matches[0]
+	assert.NotEmpty(t, m.SideAID)
+	assert.NotEmpty(t, m.SideBID)
+	assert.NotEqual(t, m.SideAID, m.SideBID)
+	assert.ElementsMatch(t, []string{m.SideAID, m.SideBID}, []string{"id-alice", "id-bob"})
+}
+
+// TestApplyTiebreakSort_SameNameDifferentDojo pins the win-attribution fix:
+// two tied competitors sharing a display name across different dojos
+// (CheckDuplicateEntriesByNameDojo explicitly allows this) must have their
+// own supplementary-bout (TB) wins counted separately. Before the fix,
+// groupNames/groupWins were keyed by bare Player.Name, so a win by one
+// "Alice" bled into the other "Alice"'s tally via the shared name bucket.
+//
+// Fixture: three-way tied group Alice-A (Tokyo), Alice-B (Osaka), Carol.
+// Alice-A LOSES both her TB bouts (to Carol and, indirectly, is not involved
+// with Alice-B at all here); Alice-B and Carol each win one bout. The
+// correct (id-keyed) order therefore ranks Alice-B and Carol (1 win each)
+// above Alice-A (0 wins); the buggy (name-keyed) code merges Alice-A's and
+// Alice-B's tallies into a shared "Alice" bucket, incorrectly crediting
+// Alice-A with Alice-B's win and leaving the tied group unsorted (all three
+// read "1" from the shared bucket, so the stable sort makes no change and
+// Alice-A -- who actually lost every bout she played -- stays in first
+// place).
+func TestApplyTiebreakSort_SameNameDifferentDojo(t *testing.T) {
+	aliceA := domain.Player{ID: "id-alice-tokyo", Name: "Alice", Dojo: "Tokyo"}
+	aliceB := domain.Player{ID: "id-alice-osaka", Name: "Alice", Dojo: "Osaka"}
+	carol := domain.Player{ID: "id-carol", Name: "Carol", Dojo: "Kyoto"}
+
+	sorted := []state.PlayerStanding{
+		{Player: aliceA, Points: 100},
+		{Player: aliceB, Points: 100},
+		{Player: carol, Points: 100},
+	}
+	matches := []state.MatchResult{
+		// Alice-A vs Carol: Carol wins.
+		{
+			ID: "Pool A-TB-0", SideA: aliceA.Name, SideB: carol.Name,
+			SideAID: aliceA.ID, SideBID: carol.ID,
+			Winner: carol.Name, WinnerID: carol.ID,
+			Status: state.MatchStatusCompleted,
+		},
+		// Alice-B vs Carol: Alice-B wins.
+		{
+			ID: "Pool A-TB-1", SideA: aliceB.Name, SideB: carol.Name,
+			SideAID: aliceB.ID, SideBID: carol.ID,
+			Winner: aliceB.Name, WinnerID: aliceB.ID,
+			Status: state.MatchStatusCompleted,
+		},
+	}
+
+	applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
+
+	require.Len(t, sorted, 3)
+	assert.NotEqual(t, aliceA.ID, sorted[0].Player.ID,
+		"Alice-Tokyo lost every TB bout she played and must not rank first")
+	gotIDs := []string{sorted[0].Player.ID, sorted[1].Player.ID, sorted[2].Player.ID}
+	assert.Equal(t, "id-alice-tokyo", gotIDs[2], "the 0-win Alice must rank last")
+	assert.ElementsMatch(t, []string{"id-alice-osaka", "id-carol"}, gotIDs[:2],
+		"the two 1-win competitors must rank ahead of the 0-win one")
 }

@@ -157,6 +157,53 @@ func TestMarkTiedStandings_League(t *testing.T) {
 	}
 }
 
+// TestMarkTiedStandings_League_NamesakeCountersNotMerged is the regression
+// guard for the finding that markTiedStandingsLeague's per-competitor
+// completion counter was keyed by bare Player.Name: two league competitors
+// sharing a display name across dojos (CheckDuplicateEntriesByNameDojo)
+// shared ONE merged {total, completed} bucket, so one namesake's
+// still-in-progress fights inflated the OTHER namesake's counter and withheld
+// the emerging-tie mark even after she had genuinely finished every fight of
+// her own.
+//
+// Fixture: a 3-competitor individual league, Alice@Tokyo, Alice@Osaka (tied
+// with each other at the top, rank 1-2, within the default top-3 band), and
+// Bob. Alice@Tokyo has completed both her own fixtures (vs Bob, vs
+// Alice@Osaka); Alice@Osaka has one fixture still scheduled (vs Bob); Bob
+// also has one fixture still scheduled. Under the bare-name-keyed bug, the
+// shared "Alice" bucket sees the Alice@Osaka-vs-Bob match as unresolved
+// alongside the two SideA/SideB name hits from the completed Alice-vs-Alice
+// match, so it never reads "fully done", and Bob's own bucket is genuinely
+// not done either: the trigger never fires and NEITHER row is marked, even
+// though Alice@Tokyo (a top-N competitor) finished every fight that is
+// actually hers.
+func TestMarkTiedStandings_League_NamesakeCountersNotMerged(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatLeague}
+
+	aliceTokyo := domain.Player{ID: "id-alice-tokyo", Name: "Alice", Dojo: "Tokyo"}
+	aliceOsaka := domain.Player{ID: "id-alice-osaka", Name: "Alice", Dojo: "Osaka"}
+	bob := domain.Player{ID: "id-bob", Name: "Bob", Dojo: "Dojo Bob"}
+
+	sorted := []state.PlayerStanding{
+		{Player: aliceTokyo, Points: 100},
+		{Player: aliceOsaka, Points: 100},
+		{Player: bob, Points: 50},
+	}
+	matches := []state.MatchResult{
+		// Alice@Tokyo's own fixtures: both complete.
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceTokyo.ID, SideBID: bob.ID, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "Alice", SideB: "Alice", SideAID: aliceTokyo.ID, SideBID: aliceOsaka.ID, Status: state.MatchStatusCompleted},
+		// Alice@Osaka still has one fixture pending (vs Bob); so does Bob.
+		{ID: "Pool A-2", SideA: "Alice", SideB: "Bob", SideAID: aliceOsaka.ID, SideBID: bob.ID, Status: state.MatchStatusScheduled},
+	}
+
+	markTiedStandings(comp, sorted, matches)
+
+	assert.True(t, sorted[0].Tied, "Alice@Tokyo finished every fight of her own and is in the tied top-N band")
+	assert.True(t, sorted[1].Tied, "the whole tied group (both Alices) must be marked once the trigger fires")
+	assert.False(t, sorted[2].Tied, "Bob is untied and must not be marked")
+}
+
 // TestMarkTiedStandings_TwoThirdPlacesExemption verifies the two-joint-3rd
 // exemption: a tie sitting entirely at positions >= 3 is not marked when
 // LeagueTwoThirdPlaces is enabled (both teams share bronze, no decider needed).

@@ -42,9 +42,10 @@ Before implementing features or making architectural decisions, read the project
 - **Case Sensitivity:** Seeding names must match the participant list *exactly*.
 - **Team Matches:** `team-matches=0` is the default for individual tournaments.
 - **Shiaijo (Courts):** `--courts` defaults to 2. It controls both pool distribution and tree labeling.
-- **Dojo Conflicts:** The `Dojo` field in CSVs is used *only* for pool randomization to avoid early teammate matches; it's not used in playoffs-only mode.
+- **The docs walk-through is pinned to the draw:** `docs/assets/javascripts/pool-draw-animation.js` replays the pool descent in JS and carries its example rosters' drawn pools as a fixture in the same file, which `TestPoolDrawDocWalkthroughMatchesTheDraw` re-runs through the real distributor. Change the draw and that test goes red pointing at a docs file; update the fixture and re-check the JS in a browser.
+- **Dojo Conflicts:** The `Dojo` field drives the draw's separation everywhere: pool distribution descends the knockout tree by recorded per-branch dojo counts so dojo-mates meet as late as possible, and playoffs-only draws separate dojo-mates too (first round guaranteed where avoidable, later rounds best-effort; acceptance is sum-driven by operator ruling — a swap may pull an already-deep dojo one round earlier to push the earliest meetings later, and no per-dojo never-earlier veto is to be added there).
 - **Workbook construction:** All sheets/styles are emitted by `internal/excel/template.go` and `internal/helper/excel_styles.go`. To change global appearance, edit these: there is no template binary.
-- **Duplicates:** Participant CSVs are checked for duplicate names; both CLI and Web UI return an error before generating output.
+- **Duplicates:** Competitor identity is (name, dojo). Two competitors sharing a name from different dojos are different people and are allowed; only same-name AND same-dojo is a duplicate. Participant CSVs are checked for duplicate rows and both CLI and Web UI return an error before generating output. Team names must be unique even across dojos, because a team name is its identity in results. A blank dojo has two floors with two distinct sentinels: `state.ErrBlankDojo` refuses every roster save (loading stays tolerant so the roster can be repaired) and `helper.ErrBlankDojoInDraw` refuses the tree-aware draw over a loaded legacy roster; they are different errors in different packages, and neither refusal is a bug to relax.
 
 ## Useful Commands
 - **Lint only:** `make go/lint`

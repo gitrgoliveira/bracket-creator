@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -78,6 +78,19 @@ go/sec: go/generate ## Run security scans (gosec)
 	@echo "Running security scans..."
 	gosec ./cmd/... ./internal/... ./tests/... .
 
+go/sec-tests: go/generate ## Run gosec over test files too (audit, not a gate)
+	@# gosec skips _test.go by default and golangci-lint excludes gosec from
+	@# tests as well, so test code is scanned by nothing. That is the right
+	@# DEFAULT: test scaffolding trips ~500 findings, essentially all of them
+	@# unhandled errors, temp-file permissions and small int-to-rune
+	@# conversions, and gating on it would mean suppressing every one and
+	@# burying real signal. It is the wrong thing to never look at, though, so
+	@# the scan lives here and can be run on demand. Audited 2026-09-02: no
+	@# finding outside a _test.go file, and every HIGH was scaffolding (two
+	@# were table cases asserting that a URL carrying credentials is REJECTED).
+	@echo "Auditing test files with gosec (not part of the gate)..."
+	gosec -tests ./cmd/... ./internal/... ./tests/... .
+
 go/vuln: ## Run vulnerability check (govulncheck)
 	@echo "Running vulnerability check..."
 	govulncheck ./...
@@ -111,6 +124,11 @@ js/deps: web-mobile/node_modules/.package-lock.json ## Install this worktree's J
 js/lint: js/deps ## Run Javascript linters
 	@echo "Running Javascript linters..."
 	@cd web-mobile && npm run lint
+	@# docs/assets/javascripts sits outside web-mobile, so the line above never
+	@# saw it and the docs widgets were linted by nothing at all. oxlint refuses
+	@# a path containing "..", so it is run from the repo root against
+	@# web-mobile's installed binary rather than by cd-ing and reaching back.
+	@npx --prefix web-mobile oxlint --deny-warnings docs/assets/javascripts/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci + npm audit)
 	@echo "Running Javascript security scans..."

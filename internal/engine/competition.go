@@ -360,19 +360,49 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 }
 
 // leagueGroupHasDH reports whether a daihyosen tie-breaker match already exists
-// between two members of the given tied group, i.e. the operator has run a
-// tie-breaker for it. Used by MaybeAutoCompletePools to decide, per consequential
-// group, whether the operator still needs to act. At that call site every DH
-// match is guaranteed complete (an incomplete DH bails earlier), so "a DH match
-// exists" means "the operator has actioned this group"; whether that tie-breaker
-// actually resolved the order is then verified by dhCycleExists.
+// BETWEEN TWO DISTINCT members of the given tied group, i.e. the operator has
+// run a tie-breaker for it. Used by MaybeAutoCompletePools to decide, per
+// consequential group, whether the operator still needs to act. At that call
+// site every DH match is guaranteed complete (an incomplete DH bails earlier),
+// so "a DH match exists" means "the operator has actioned this group"; whether
+// that tie-breaker actually resolved the order is then verified by
+// dhCycleExists.
+//
+// Membership is resolved via newGroupKeyResolver (id-preferring, name
+// fallback), mirroring groupNeedsChusen's identical conversion (chusen.go) --
+// the two functions ask the same question of the same kind of data. A bare
+// display-name membership test collapses two SAME-NAME group members (the
+// unique-team-name rule has documented enforcement holes,
+// checkNewTeamNameCollisions) into one map entry, so a row that actually
+// pairs ONE of those members against THEMSELVES (SideA and SideB both
+// resolving to the identical group member -- corrupted/self-referential
+// data) would satisfy `names[m.SideA] && names[m.SideB]` under the old test
+// even though it is not a bout between two DIFFERENT group members at all.
+// The keyA != keyB guard rejects that self-pairing explicitly.
+//
+// That same guard also has a second, legitimate false negative: two id-less
+// GROUP MEMBERS who genuinely share a display name (again the namesake
+// collision the unique-team-name rule doesn't fully close) both resolve to
+// the SAME fallback key, because newGroupKeyResolver's name index is
+// last-write-wins and cannot tell two id-less same-name members apart from
+// the name alone. A REAL DH row played between those two competitors then
+// also reads keyA == keyB and is rejected as if it were the corrupted
+// self-pair above, even though it is a genuine tie-breaker. This fails
+// CLOSED, which is the safe direction for this guard: the group is reported
+// as still lacking a tie-breaker, so MaybeAutoCompletePools keeps returning
+// AwaitingLeagueTiebreak / AutoCompleteNoChange instead of advancing on a
+// result this function cannot actually verify belongs to two distinct
+// competitors, and the operator sees the group still needs action rather
+// than the competition silently completing on an unverifiable DH.
 func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
-	names := make(map[string]bool, len(group))
-	for _, s := range group {
-		names[s.Player.Name] = true
-	}
+	resolve := newGroupKeyResolver(group)
 	for _, m := range allMatches {
-		if IsPoolDaihyosenMatchID(m.ID) && names[m.SideA] && names[m.SideB] {
+		if !IsPoolDaihyosenMatchID(m.ID) {
+			continue
+		}
+		keyA, okA := resolve(m.SideAID, m.SideA)
+		keyB, okB := resolve(m.SideBID, m.SideB)
+		if okA && okB && keyA != keyB {
 			return true
 		}
 	}

@@ -3,7 +3,7 @@ BIN_NAME := bracket-creator
 GH_REPOSITORY ?= gitrgoliveira/bracket-creator
 IMAGE_NAME := ghcr.io/$(GH_REPOSITORY)
 BIN_PATH := ./bin
-GO_VERSION := 1.26.6
+GO_VERSION := 1.27.1
 GO_SOURCES := $(shell find . -name "*.go" -type f)
 EMBEDDED_ASSETS := $(shell find ./web ./web-mobile -type f 2>/dev/null)
 
@@ -45,9 +45,15 @@ local/deps: hooks/install js/deps ## Install project dependencies
 	# because GOPATH/bin already held an older cached binary (see the note above
 	# go/lint). Keep this version in lockstep with the pin in
 	# .github/workflows/validate.yaml so a local green run predicts CI.
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
-	go install github.com/securego/gosec/v2/cmd/gosec@v2.25.0
-	go install golang.org/x/vuln/cmd/govulncheck@latest
+	# GOTOOLCHAIN=go$(GO_VERSION): these analysers embed the go/types of the Go
+	# that BUILT them, and golangci-lint refuses to run when that is older than
+	# go.mod's go directive ("the Go language version (go1.26) used to build
+	# golangci-lint is lower than the targeted Go version"). `go install pkg@ver`
+	# runs outside this module, so it would otherwise use whatever `go` is on
+	# PATH rather than the toolchain go.mod asks for.
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
+	GOTOOLCHAIN=go$(GO_VERSION) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+	GOTOOLCHAIN=go$(GO_VERSION) go install golang.org/x/vuln/cmd/govulncheck@latest
 	python3 -m pip install -r docs/requirements.txt
 
 hooks/install: ## Wire scripts/hooks/ as the git hooks dir for this clone

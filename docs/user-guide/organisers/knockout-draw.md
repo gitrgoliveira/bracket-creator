@@ -2,7 +2,7 @@
 
 In a competition with a pool phase, the knockout bracket is not redrawn once the pools finish. It is built when you generate the draw: every qualifying place has a slot waiting for it before a single pool match is played, and the preview shows you which pool feeds which slot.
 
-This page explains how those slots are worked out, so you can check a draw before you publish it and answer questions about it at the desk.
+This page explains how those slots are worked out, so you can verify a bracket before publishing it. For the phase before this one, how the pools themselves are drawn, see [The pool draw](pool-draw.md).
 
 It describes the **Pools + Knockout** format, pools followed by a knockout. A **Knockout only** competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
 
@@ -134,6 +134,14 @@ The rule applies to the formats that build a knockout bracket, which are mixed a
 It is a rule about one competition's allocation, never about your venue: a hall with three shiai-jo is perfectly normal and runs its competitions on 1 or 2 of them. See [Assigning shiai-jo](run-tournament.md#assigning-shiai-jo) for how that works in practice, and for what happens to a competition that was saved with a count the rule does not allow.
 
 The count you assign is also not always the count the draw uses. A competition is never drawn onto more shiai-jo than it has pools, so a larger allocation steps down to the largest allowed count that fits, without an error and without a warning: seven pools assigned eight shiai-jo run on four. See [If you assign more shiai-jo than the competition has pools](run-tournament.md#if-you-assign-more-shiai-jo-than-the-competition-has-pools).
+
+## Dojo-mates in the first round
+
+The draw avoids opening a knockout with two competitors from the same dojo. After the places are worked out it checks each first-round match and, where the pairing is between two members of one dojo, exchanges one of them with a competitor elsewhere in the draw, choosing a partner as far away as the shape allows so the two meet as late as possible rather than merely not first.
+
+This matters most for a **Knockout only** competition, where there is no pool phase to separate dojo-mates beforehand and the draw follows the order your roster is in. Rosters are usually entered a dojo at a time, and without this the first round can be almost entirely dojo against dojo.
+
+Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
 
 ## Byes
 

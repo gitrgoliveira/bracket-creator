@@ -1,7 +1,12 @@
 package helper
 
 import (
+	"encoding/csv"
 	"fmt"
+	"math/bits"
+	"os"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -1681,14 +1686,16 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 	// Regression test: LC2026 6+ mixed category had 5 players from Tora Dojo
 	// London and 1 seeded player. The seeded player shifted unseeded filling
 	// by one slot, causing the 5th Tora player to find no conflict-free pool
-	// and fall back to forceSameDojo, placing two Tora players in the same pool.
+	// and reach the placement fallback (which, before the bc-dojo fix, took
+	// the first pool with room and would have placed two Tora players in the
+	// same pool).
 	players := []Player{
 		{Name: "Walter McCahon", Dojo: "Tora Dojo London"},
 		{Name: "Ricardo Oliveira", Dojo: "Tora Dojo London"},
 		{Name: "Chris Bowden", Dojo: "Ichi Byoshi"},
 		{Name: "Ruairidh Pooler", Dojo: "Scotland"},
 		{Name: "Royth von Hahn", Dojo: "Kendo Dojo Koln"},
-		{Name: "Mykolas Maciulevicius", Dojo: "Iron Wolf Kendo Club"},
+		{Name: "Mykolas Maciulevicius", Dojo: "Iron Wolf Kendo Dojo"},
 		{Name: "Jonathan Fitzgerald", Dojo: "Peristeri Kenyukai"},
 		{Name: "Dominik Christ", Dojo: "Tora Dojo London"},
 		{Name: "Denis Arsenin", Dojo: "Latvian Kendo Federation"},
@@ -1721,7 +1728,8 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 
 func TestPoolSeeding_LargeSameDojo(t *testing.T) {
 	// Regression test: same-dojo players spread throughout the CSV (not grouped
-	// at the front) trigger the forceSameDojo fallback and land in the same pool.
+	// at the front) reach the placement fallback, which before the bc-dojo fix
+	// took the first pool with room and would have landed two in the same pool.
 	// Each case uses dojoSize == numPools (worst case: every pool must absorb
 	// exactly one same-dojo player). Players are placed at evenly-spaced
 	// positions pos[i] = i*(total-1)/(D-1), which reproduces the adversarial
@@ -2043,6 +2051,212 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 	})
 }
 
+// buildOversubscribedDojoRoster builds a deterministic roster of `total`
+// players where `dojoSize` of them share dojoName, spread evenly through the
+// roster at pos[i] = i*(total-1)/(dojoSize-1) (the same adversarial spacing
+// used by TestPoolSeeding_LargeSameDojo above, which reproduces the LC2026
+// ordering for fixture realism). Unlike that test's dojoSize == numPools
+// case, HERE dojoSize > numPools, so the leastConflictedPool fallback is
+// unavoidable regardless of input order: after numPools conflict-free
+// placements every pool already holds one member of the oversubscribed dojo,
+// and PoolSeeding re-clusters by dojo before CreatePools ever sees the
+// roster's order anyway (grouped-at-front and this spread measure to the
+// identical per-pool counts). The spacing is kept for fixture realism, not
+// because it changes whether the fallback fires. The remaining players each
+// get a unique dojo.
+//
+// This is a thin naming wrapper over newOversubscribedDojoRoster, the
+// algorithm shared with drawGoldenDojoRoster (draw_shapes_golden_test.go).
+// Only the generated NAME strings differ between the two callers (this
+// one's assertions read player.Dojo only, so its names are disposable; the
+// golden's names are frozen into testdata/draw_shapes.json byte-for-byte) --
+// the placement math itself must never drift between two copies.
+func buildOversubscribedDojoRoster(total, dojoSize int, dojoName string) []Player {
+	return newOversubscribedDojoRoster(total, dojoSize, dojoName,
+		func(i int) string { return fmt.Sprintf("%s Player %d", dojoName, i) },
+		func(i int) (name, dojo string) { return fmt.Sprintf("Other%d", i), fmt.Sprintf("Dojo%d", i) },
+	)
+}
+
+// newOversubscribedDojoRoster is the shared placement algorithm behind
+// buildOversubscribedDojoRoster and drawGoldenDojoRoster. memberName formats
+// the i-th (1-based) oversubscribed-dojo player's name; filler formats the
+// i-th (1-based) filler player's name and unique dojo.
+//
+// Requires dojoSize >= 2: the position formula divides by dojoSize-1, so a
+// smaller value would otherwise divide by zero -- reject it here with a
+// clear message rather than let a future caller hit that panic silently.
+func newOversubscribedDojoRoster(total, dojoSize int, dojoName string, memberName func(i int) string, filler func(i int) (name, dojo string)) []Player {
+	if dojoSize < 2 {
+		panic(fmt.Sprintf("newOversubscribedDojoRoster: dojoSize must be >= 2 to oversubscribe %q, got %d", dojoName, dojoSize))
+	}
+
+	players := make([]Player, total)
+
+	dojoPositions := make(map[int]bool, dojoSize)
+	for i := 0; i < dojoSize; i++ {
+		dojoPositions[i*(total-1)/(dojoSize-1)] = true
+	}
+
+	dojoIdx, otherIdx := 0, 0
+	for i := 0; i < total; i++ {
+		if dojoPositions[i] {
+			dojoIdx++
+			players[i] = Player{Name: memberName(dojoIdx), Dojo: dojoName}
+		} else {
+			otherIdx++
+			name, dojo := filler(otherIdx)
+			players[i] = Player{Name: name, Dojo: dojo}
+		}
+	}
+	return players
+}
+
+// isSingleDojoPool reports whether pool p has MORE THAN ONE player and they
+// all share one dojo. Pools of 0 or 1 player are excluded: a same-dojo
+// conflict needs at least two players to exist, so a singleton pool
+// trivially satisfying "every player shares a dojo" is not what either
+// caller (below, and computeDojoOversubscriptionStats in
+// draw_shapes_golden_test.go) means to flag.
+func isSingleDojoPool(p Pool) bool {
+	if len(p.Players) <= 1 {
+		return false
+	}
+	dojo := p.Players[0].Dojo
+	for _, pl := range p.Players[1:] {
+		if pl.Dojo != dojo {
+			return false
+		}
+	}
+	return true
+}
+
+func TestPoolSeeding_DojoSpreadFallback(t *testing.T) {
+	// Regression test for bc-dojo: 24 entrants, 10 from one dojo (rest unique
+	// dojos), through BuildPoolPhase(players, 4, false, 2) -- poolSize 4,
+	// min-mode, 2 courts, which is what actually derives 6 pools of 4 and
+	// runs PoolSeeding -> CreatePools -> ReorderPoolsForCourts in the order
+	// production uses (BuildPoolPhase's own doc comment: hand-assembling
+	// this sequence is exactly the drift it exists to prevent). Before the
+	// fix, the fallback (first-pool-with-room) placed overflow into the
+	// FIRST pool with room, piling four of the ten Tora players into a
+	// single pool -- measured as an entirely single-dojo pool of 4.
+	players := buildOversubscribedDojoRoster(24, 10, "Tora Dojo")
+
+	pools, drawCourts, err := BuildPoolPhase(players, 4, false, 2)
+	require.NoError(t, err)
+	require.Len(t, pools, 6)
+	require.Equal(t, 2, drawCourts)
+
+	// Pool SIZES must be unaffected by the fallback fix: this is checked
+	// separately from composition so a future change that moves sizes is
+	// distinguishable from one that moves membership.
+	for i, pool := range pools {
+		assert.Len(t, pool.Players, 4, "pool %d (%s) size changed", i, pool.PoolName)
+	}
+
+	toraCounts := make([]int, len(pools))
+	for i, pool := range pools {
+		count := 0
+		for _, p := range pool.Players {
+			if p.Dojo == "Tora Dojo" {
+				count++
+			}
+		}
+		toraCounts[i] = count
+		assert.False(t, isSingleDojoPool(pool), "%s is entirely single-dojo", pool.PoolName)
+	}
+
+	// Assert the MULTISET of per-pool Tora counts, never the ordered
+	// per-pool sequence: the sequence is 2,2,1,2,2,1 for this scenario and is
+	// an artifact of the tie-break, not the contract.
+	sorted := append([]int(nil), toraCounts...)
+	sort.Ints(sorted)
+	assert.Equal(t, []int{1, 1, 2, 2, 2, 2}, sorted,
+		"Tora Dojo per-pool counts (sorted) should be the multiset {2,2,2,2,1,1}, got %v", toraCounts)
+
+	maxCount := 0
+	for _, c := range toraCounts {
+		if c > maxCount {
+			maxCount = c
+		}
+	}
+	assert.LessOrEqual(t, maxCount, 2, "Tora Dojo should never exceed 2 players in any pool, got per-pool counts %v", toraCounts)
+}
+
+// loadCSVPlayers reads a "Name,Zekken,Dojo,DanGrade" CSV file (the layout of
+// test-data/individual_men_up_to_2nd_2026.csv) directly, bypassing
+// helper.ReadCSVFile, which rejects the ".." needed to reach test-data/ from
+// this package's directory as an escaping relative path.
+func loadCSVPlayers(t *testing.T, path string) []Player {
+	t.Helper()
+
+	f, err := os.Open(path) // #nosec G304 -- test-only, fixed path under test-data/
+	require.NoError(t, err)
+	defer func() { _ = f.Close() }()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = -1
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+
+	players := make([]Player, 0, len(records))
+	for _, rec := range records {
+		require.GreaterOrEqual(t, len(rec), 3, "record %v missing dojo column", rec)
+		players = append(players, Player{
+			Name: strings.TrimSpace(rec[0]),
+			Dojo: strings.TrimSpace(rec[2]),
+		})
+	}
+	return players
+}
+
+func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
+	// Regression test for bc-dojo, using the real committed roster
+	// test-data/individual_men_up_to_2nd_2026.csv (50 players, 15 "Team Rho"),
+	// run through BuildPoolPhase(players, 5, false, 2) -- the one function
+	// documented to get the PoolSeeding -> CreatePools -> ReorderPoolsForCourts
+	// order and the derived pool/court counts right, exactly as the real
+	// draw does (BuildPoolPhase's own doc comment names hand-assembling this
+	// sequence as the exact drift it exists to prevent).
+	players := loadCSVPlayers(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
+	require.Len(t, players, 50)
+
+	rhoCount := 0
+	for _, p := range players {
+		if p.Dojo == "Team Rho" {
+			rhoCount++
+		}
+	}
+	require.Equal(t, 15, rhoCount, "fixture drifted: expected 15 Team Rho players")
+
+	pools, drawCourts, err := BuildPoolPhase(players, 5, false, 2)
+	require.NoError(t, err)
+	require.Len(t, pools, 10)
+	require.Equal(t, 2, drawCourts)
+
+	// Pool SIZES must be unaffected by the fallback fix: this is checked
+	// separately from composition. 50 players / 10 pools = 5 each.
+	for i, pool := range pools {
+		assert.Len(t, pool.Players, 5, "pool %d (%s) size changed", i, pool.PoolName)
+	}
+
+	// Acceptance is "no pool holds more than 2 of ANY one dojo", not only
+	// the oversubscribed one: with the fix the worst count anywhere on this
+	// roster is 2, so assert every dojo, which also guards the smaller
+	// multi-member dojos in the fixture.
+	for _, pool := range pools {
+		dojoCount := make(map[string]int)
+		for _, p := range pool.Players {
+			dojoCount[p.Dojo]++
+		}
+		for dojo, count := range dojoCount {
+			assert.LessOrEqual(t, count, 2,
+				"%s has %d players in %s, expected at most 2", dojo, count, pool.PoolName)
+		}
+	}
+}
+
 func TestApplySeeds_DuplicateSeedRanks(t *testing.T) {
 	t.Run("rejects two assignments with the same rank", func(t *testing.T) {
 		players := []Player{
@@ -2112,4 +2326,634 @@ func TestPoolSeeding_SingleCourt_DojoSpread(t *testing.T) {
 		assert.LessOrEqual(t, dojoCount["BetaDojo"], 1,
 			"BetaDojo overpopulated %s: %v", pool.PoolName, dojoCount)
 	}
+}
+
+// TestPoolSeeding_SeedsDoNotDegradeDojoSpread pins the pool-side counterpart of
+// the knockout's first-round dojo separation.
+//
+// Seeds occupy slots computed before the unseeded are placed, which shifts the
+// dojo-clustered fill and could leave two dojo-mates in one pool on a roster
+// that spreads perfectly without seeds. Measured before the repair pass: four
+// pools holding four 3-member dojos spread every dojo one-per-pool with no
+// seeds, and put two together the moment two seeds were set.
+func TestPoolSeeding_SeedsDoNotDegradeDojoSpread(t *testing.T) {
+	build := func(numPools, poolSize, nDojos, dojoGroupSize, nSeeds int) []Player {
+		n := numPools * poolSize
+		r := make([]Player, 0, n)
+		for c := 0; c < nDojos; c++ {
+			for i := 1; i <= dojoGroupSize; i++ {
+				r = append(r, Player{Name: fmt.Sprintf("C%d_%d", c, i), Dojo: fmt.Sprintf("Dojo%d", c)})
+			}
+		}
+		for i := len(r) + 1; i <= n; i++ {
+			r = append(r, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
+		}
+		for s := 0; s < nSeeds; s++ {
+			r[s].Seed = s + 1
+		}
+		return r
+	}
+	worstSameDojo := func(pools []Pool, nDojos int) int {
+		m := 0
+		for c := 0; c < nDojos; c++ {
+			dojo := fmt.Sprintf("Dojo%d", c)
+			for _, p := range pools {
+				k := 0
+				for _, pl := range p.Players {
+					if pl.Dojo == dojo {
+						k++
+					}
+				}
+				if k > m {
+					m = k
+				}
+			}
+		}
+		return m
+	}
+
+	tests := []struct {
+		name                                              string
+		numPools, poolSize, courts, nDojos, dojoGroupSize int
+		seeds                                             int
+	}{
+		// Both cases were measured suboptimal before the repair pass, and both
+		// spread perfectly with the same roster and no seeds.
+		{"four 3-member dojos, two seeds", 4, 3, 1, 4, 3, 2},
+		{"four 5-member dojos, four seeds", 7, 3, 2, 4, 5, 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			optimum := (tt.dojoGroupSize + tt.numPools - 1) / tt.numPools
+
+			unseeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nDojos, tt.dojoGroupSize, 0), tt.poolSize, false, tt.courts)
+			require.NoError(t, err)
+			require.Equal(t, optimum, worstSameDojo(unseeded, tt.nDojos),
+				"baseline: the same roster without seeds must already spread optimally")
+
+			seeded, _, err := BuildPoolPhase(build(tt.numPools, tt.poolSize, tt.nDojos, tt.dojoGroupSize, tt.seeds), tt.poolSize, false, tt.courts)
+			require.NoError(t, err)
+			assert.Equal(t, optimum, worstSameDojo(seeded, tt.nDojos),
+				"setting seeds must not make the dojo spread worse than the same roster without them")
+
+			// Sizes and seed separation are invariants of the repair pass: it
+			// swaps competitors between pools, so it must never move a seed,
+			// change a pool's size, or lose anybody.
+			total := 0
+			for _, p := range seeded {
+				total += len(p.Players)
+				seeds := 0
+				for _, pl := range p.Players {
+					if pl.Seed > 0 {
+						seeds++
+					}
+				}
+				assert.LessOrEqual(t, seeds, 1, "%s holds more than one seed", p.PoolName)
+			}
+			assert.Equal(t, tt.numPools*tt.poolSize, total, "the repair pass must not lose or duplicate a competitor")
+		})
+	}
+}
+
+// TestStandardSeeding_DelaysDojoMeetings pins the knockout counterpart of the
+// pool draw's dojo avoidance: dojo-mates must not meet in the first round, and
+// beyond that must meet as LATE as the bracket allows.
+//
+// Operators paste a roster dojo by dojo, unseeded competitors fill bracket
+// slots in roster order, and CreateBalancedTree pairs adjacent slots, so
+// before delayDojoMeetings existed a roster of four dojos of four produced a
+// first round in which EVERY match was dojo-mate against dojo-mate. Pushing
+// them out of round one is only half of it: two dojo-mates left in the same
+// half still meet in the semi-final when the draw could have held them apart
+// until the final.
+func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
+	countR1Clashes := func(out []Player) int {
+		n := 0
+		for i := 0; i+1 < len(out); i += 2 {
+			a, b := out[i], out[i+1]
+			if a.Name != "" && b.Name != "" && a.Dojo == b.Dojo {
+				n++
+			}
+		}
+		return n
+	}
+	dojoGrouped := func(nDojos, dojoGroupSize int) []Player {
+		var roster []Player
+		for c := 0; c < nDojos; c++ {
+			for i := 1; i <= dojoGroupSize; i++ {
+				roster = append(roster, Player{
+					Name: fmt.Sprintf("C%d_%d", c, i),
+					Dojo: fmt.Sprintf("Dojo%d", c),
+				})
+			}
+		}
+		return roster
+	}
+
+	t.Run("dojo-grouped roster gets no same-dojo first round", func(t *testing.T) {
+		assert.Equal(t, 0, countR1Clashes(StandardSeeding(dojoGrouped(4, 4))),
+			"no first-round match may be between two members of one dojo when the draw allows otherwise")
+	})
+
+	t.Run("dojo-mates meet as late as the bracket allows", func(t *testing.T) {
+		// The bracket halves at every round, so N competitors can be kept
+		// apart until round N-ceil(log2(dojoGroupSize))+1 and no later: a dojo of
+		// two can be split across the halves and meet only in the final, a
+		// dojo of four across the quarters and meet in the semi-final.
+		// Anything earlier than that bound is a draw that gave up too soon.
+		for _, tc := range []struct{ n, nDojos, dojoGroupSize int }{
+			{8, 2, 2}, {16, 2, 2}, {16, 3, 2}, {16, 2, 4}, {32, 4, 4},
+		} {
+			roster := dojoGrouped(tc.nDojos, tc.dojoGroupSize)
+			for i := len(roster) + 1; i <= tc.n; i++ {
+				roster = append(roster, Player{Name: fmt.Sprintf("O%d", i), Dojo: fmt.Sprintf("D%02d", i)})
+			}
+			out := StandardSeeding(roster)
+
+			rounds := bits.Len(uint(tc.n)) - 1
+			best := rounds - (bits.Len(uint(tc.dojoGroupSize - 1))) + 1
+			slots := map[string][]int{}
+			for slot, p := range out {
+				if p.Name != "" {
+					slots[p.Dojo] = append(slots[p.Dojo], slot)
+				}
+			}
+			for dojo, ss := range slots {
+				if len(ss) < 2 {
+					continue
+				}
+				earliest := 1 << 30
+				for a := range ss {
+					for b := a + 1; b < len(ss); b++ {
+						if r := dojoMeetRound(ss[a], ss[b]); r < earliest {
+							earliest = r
+						}
+					}
+				}
+				assert.GreaterOrEqual(t, earliest, best,
+					"n=%d dojos=%dx%d: %s meets in round %d, but the bracket allows round %d",
+					tc.n, tc.nDojos, tc.dojoGroupSize, dojo, earliest, best)
+			}
+		}
+	})
+
+	t.Run("a roster with no dojo collision is returned untouched", func(t *testing.T) {
+		// The pass must be a no-op when there is nothing to repair, which is
+		// what keeps existing published draws and the goldens byte-identical.
+		roster := make([]Player, 16)
+		for i := range roster {
+			roster[i] = Player{Name: fmt.Sprintf("P%03d", i+1), Dojo: fmt.Sprintf("Dojo %03d", i+1)}
+		}
+		out := StandardSeeding(roster)
+		for i := range out {
+			assert.Equal(t, roster[i].Name, out[i].Name, "slot %d moved on a roster with no dojo collision", i)
+		}
+	})
+
+	t.Run("seeds are never moved, on either side of a pair", func(t *testing.T) {
+		// Compared against a REFERENCE draw, not against the output itself: an
+		// earlier version of this assertion compared out[slot].Name with
+		// itself, which holds for any input and pinned nothing. The reference
+		// is the same roster with every dojo made unique, so the pass is a
+		// no-op on it and its seed slots are the untouched seeding.
+		//
+		// The sizes are deliberate: a competitor count that is NOT a power of
+		// two, with more seeds than the top bracket positions, forces
+		// displaced-seed placement, which is the only way a seed reaches an
+		// ODD slot and so the only way it could be the side this pass moves.
+		//
+		// What this does NOT pin, stated so nobody reads more into it:
+		// removing the seed-protecting occupied guard from this pass (then
+		// named separateFirstRoundDojos; today delayDojoMeetings' movable()
+		// check) left this subtest green, verified against that earlier form.
+		// No roster was found where a seed sits on an odd slot, shares a dojo
+		// with its even partner, AND has a legal swap partner. The guard is
+		// defence in depth; this subtest pins that seeds are where the
+		// seeding put them, which is the property that actually matters to
+		// an operator.
+		for _, n := range []int{5, 6, 7, 12, 16} {
+			for _, nSeeds := range []int{2, 4, 6} {
+				if nSeeds > n {
+					continue
+				}
+				roster := make([]Player, n)
+				for i := range roster {
+					roster[i] = Player{Name: fmt.Sprintf("P%02d", i+1), Dojo: "OneDojo"}
+				}
+				for s := 0; s < nSeeds; s++ {
+					roster[s].Seed = s + 1
+				}
+				reference := make([]Player, n)
+				copy(reference, roster)
+				for i := range reference {
+					reference[i].Dojo = fmt.Sprintf("Unique%02d", i+1)
+				}
+				got, want := StandardSeeding(roster), StandardSeeding(reference)
+				for slot := range want {
+					if want[slot].Seed > 0 {
+						assert.Equal(t, want[slot].Seed, got[slot].Seed,
+							"n=%d seeds=%d: slot %d must still hold seed %d", n, nSeeds, slot, want[slot].Seed)
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("two seeds from one dojo stay drawn against each other", func(t *testing.T) {
+		// The counterpart of the rule above, asserted so it reads as a
+		// decision rather than an oversight: when both competitors in a pair
+		// are seeds from one dojo, neither may be moved, so the pairing
+		// survives. That is a seeding outcome, since the operator set those
+		// ranks, not a fault in the draw.
+		roster := make([]Player, 6)
+		for i := range roster {
+			roster[i] = Player{Name: fmt.Sprintf("S%02d", i+1), Dojo: "SeedDojo", Seed: i + 1}
+		}
+		out := StandardSeeding(roster)
+		assert.Positive(t, countR1Clashes(out),
+			"an all-seeded single-dojo field cannot be separated, and the pass must not pretend otherwise")
+		seen := map[int]bool{}
+		for _, p := range out {
+			if p.Seed > 0 {
+				assert.False(t, seen[p.Seed], "seed %d appears twice", p.Seed)
+				seen[p.Seed] = true
+			}
+		}
+		assert.Len(t, seen, 6, "every seed must still be in the draw exactly once")
+	})
+
+	// TestStandardSeeding_DelayDojoMeetings_SkipsImmovableWorstPair pins FIX 3
+	// (bc-dojo-least-conflicted-pool): the worst-pair hill climb must not
+	// abandon the WHOLE repair the moment the single globally-worst same-dojo
+	// pair turns out to be immovable.
+	//
+	// Construction (n=8): generateBracketOrder(8) = [1,8,4,5,2,7,3,6], so
+	// seed ranks 4 and 5 land at slots 2 and 3 -- adjacent, meeting in round
+	// 1, and both SEEDED, hence permanently immovable (a dojo is not a
+	// reason to break the seeding contract). Separately, six unseeded
+	// players fill the remaining slots (0,1,4,5,6,7) in roster order; the
+	// last two of them (DojoX) land at slots 6 and 7, ALSO meeting in round
+	// 1, but both unseeded and hence fixable (e.g. swapping either of them
+	// with slot 0's occupant pushes DojoX's meeting to round 3, at the cost
+	// of moving DojoB's own pair from round 3 to round 2 -- a net
+	// improvement the hill climb should take).
+	//
+	// Before the fix, the worst-pair scan always found the seeded DojoA
+	// pair first (it is tied for worst at round 1, and the scan order
+	// visits slots 2-3 before 6-7), found no movable member to relocate,
+	// and returned immediately -- leaving DojoX's fixable round-1 meeting
+	// untouched. RED-verified: reverting to the original early-return
+	// reproduces exactly that (see the fix's own commit for the verification
+	// transcript).
+	t.Run("an immovable worst pair does not strand a separate fixable pair", func(t *testing.T) {
+		players := []Player{
+			{Name: "S4", Dojo: "DojoA", Seed: 4},
+			{Name: "S5", Dojo: "DojoA", Seed: 5},
+			{Name: "C1", Dojo: "DojoC"},
+			{Name: "B1", Dojo: "DojoB"},
+			{Name: "D1", Dojo: "DojoD"},
+			{Name: "B2", Dojo: "DojoB"},
+			{Name: "X1", Dojo: "DojoX"},
+			{Name: "X2", Dojo: "DojoX"},
+		}
+
+		out := StandardSeeding(players)
+		require.Len(t, out, 8)
+
+		slotOf := map[string]int{}
+		for i, p := range out {
+			if p.Name != "" {
+				slotOf[p.Name] = i
+			}
+		}
+
+		// Sanity: the construction actually produces the immovable
+		// round-1 seeded pairing this test is about. If this fails, the
+		// fixture no longer exercises the scenario and needs revisiting,
+		// not the production code.
+		require.Contains(t, slotOf, "S4")
+		require.Contains(t, slotOf, "S5")
+		require.Equal(t, 1, dojoMeetRound(slotOf["S4"], slotOf["S5"]),
+			"sanity: the seeded DojoA pair must be the immovable round-1 pairing this test is about")
+
+		// The actual assertion: no MOVABLE same-dojo pair (neither member
+		// seeded) may meet in round 1. The immovable seeded pair at
+		// slots 2-3 is expected and allowed to remain.
+		for i := range out {
+			for j := i + 1; j < len(out); j++ {
+				a, b := out[i], out[j]
+				if a.Name == "" || b.Name == "" || a.Dojo == "" || a.Dojo != b.Dojo {
+					continue
+				}
+				if dojoMeetRound(i, j) != 1 {
+					continue
+				}
+				assert.Truef(t, a.Seed > 0 && b.Seed > 0,
+					"movable same-dojo pair %s/%s (dojo %s) meets in round 1 at slots %d/%d: a fixable round-1 collision must not be stranded by an unrelated immovable one",
+					a.Name, b.Name, a.Dojo, i, j)
+			}
+		}
+	})
+}
+
+// referenceDojoSumMeetRoundsTouching is a full O(N^2) scan over EVERY pair in
+// the draw, kept only for TestDojoSumMeetRounds_MatchesFullScan: it is the
+// pre-P1 semantics of dojoSumMeetRounds(result, x, y) restated independently
+// -- sum dojoMeetRound(i, j) for every same-dojo pair where i or j is x or y,
+// counting the {x, y} pair itself exactly once -- rather than derived from
+// the two-loop-over-x-and-y shape the real function now uses. A bug that
+// double-counts or drops the {x, y} pair, or that mis-scopes "touching",
+// would still pass a test built from the same two-loop shape; this does not
+// share that shape.
+func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
+	sum := 0
+	for i := range result {
+		for j := i + 1; j < len(result); j++ {
+			if i != x && i != y && j != x && j != y {
+				continue
+			}
+			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+				continue
+			}
+			if result[i].Dojo != result[j].Dojo {
+				continue
+			}
+			sum += dojoMeetRound(i, j)
+		}
+	}
+	return sum
+}
+
+// referenceFullDrawDojoSum is a full whole-draw meeting-round total,
+// independent of both dojoSumMeetRounds and dojoSwapGain, used by
+// TestDojoSwapGain_MatchesFullDrawDelta as the "recompute from scratch"
+// oracle for a swap's gain.
+func referenceFullDrawDojoSum(result []Player) int {
+	sum := 0
+	for i := range result {
+		for j := i + 1; j < len(result); j++ {
+			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+				continue
+			}
+			if result[i].Dojo != result[j].Dojo {
+				continue
+			}
+			sum += dojoMeetRound(i, j)
+		}
+	}
+	return sum
+}
+
+// dojoSumTestRosters is shared by TestDojoSumMeetRounds_MatchesFullScan and
+// TestDojoSwapGain_MatchesFullDrawDelta: a spread of deterministic shapes
+// covering a namesake-free (all-unique-dojo) roster, a clustered-dojo roster
+// (a few dojos, several members each, pasted dojo-by-dojo as an operator
+// would), a multi-dojo roster with dojos interleaved rather than clustered,
+// and a roster with some blank Name slots (byes) and a blank Dojo entry, both
+// of which the meeting-round scan must skip.
+func dojoSumTestRosters() map[string][]Player {
+	namesakeFree := make([]Player, 12)
+	for i := range namesakeFree {
+		namesakeFree[i] = Player{Name: fmt.Sprintf("U%02d", i+1), Dojo: fmt.Sprintf("Dojo%02d", i+1)}
+	}
+
+	clustered := make([]Player, 0, 16)
+	for c := 0; c < 4; c++ {
+		for i := 0; i < 4; i++ {
+			clustered = append(clustered, Player{
+				Name: fmt.Sprintf("C%d_%d", c, i),
+				Dojo: fmt.Sprintf("Dojo%d", c),
+			})
+		}
+	}
+
+	interleaved := make([]Player, 16)
+	dojos := []string{"Alpha", "Beta", "Gamma", "Delta"}
+	for i := range interleaved {
+		interleaved[i] = Player{Name: fmt.Sprintf("I%02d", i+1), Dojo: dojos[i%len(dojos)]}
+	}
+
+	withByesAndBlankDojo := []Player{
+		{Name: "A1", Dojo: "DojoA"},
+		{Name: "", Dojo: ""}, // bye slot: blank name AND blank dojo
+		{Name: "A2", Dojo: "DojoA"},
+		{Name: "NoDojo", Dojo: ""}, // named but dojo-less: excluded from every pair
+		{Name: "B1", Dojo: "DojoB"},
+		{Name: "B2", Dojo: "DojoB"},
+		{Name: "A3", Dojo: "DojoA"},
+		{Name: "", Dojo: ""},
+	}
+
+	return map[string][]Player{
+		"namesake-free":            namesakeFree,
+		"clustered-dojo":           clustered,
+		"multi-dojo-interleaved":   interleaved,
+		"byes-and-blank-dojo-rows": withByesAndBlankDojo,
+	}
+}
+
+// TestDojoSumMeetRounds_MatchesFullScan pins the P1 rewrite of
+// dojoSumMeetRounds (walk only the pairs touching x or y, in O(N), rather
+// than the old variadic-filtered O(N^2) whole-draw scan) against
+// referenceDojoSumMeetRoundsTouching, over every (x, y) pair in each roster
+// shape.
+func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
+	for name, roster := range dojoSumTestRosters() {
+		t.Run(name, func(t *testing.T) {
+			for x := range roster {
+				for y := range roster {
+					if x == y {
+						continue
+					}
+					want := referenceDojoSumMeetRoundsTouching(roster, x, y)
+					got := dojoSumMeetRounds(roster, x, y)
+					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
+				}
+			}
+		})
+	}
+}
+
+// TestDojoSwapGain_MatchesFullDrawDelta pins dojoSwapGain -- built on top of
+// the P1-rewritten dojoSumMeetRounds -- against an entirely independent
+// oracle: the before/after delta of a full whole-draw recompute
+// (referenceFullDrawDojoSum), for every (x, y) swap in each roster shape.
+// This is what actually matters to delayDojoMeetings' hill climb: the
+// SCOPED sum must still produce the same swap-gain delta the old whole-draw
+// sum would have.
+func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
+	for name, roster := range dojoSumTestRosters() {
+		t.Run(name, func(t *testing.T) {
+			for x := range roster {
+				for y := range roster {
+					if x == y {
+						continue
+					}
+					before := referenceFullDrawDojoSum(roster)
+					roster[x], roster[y] = roster[y], roster[x]
+					after := referenceFullDrawDojoSum(roster)
+					roster[x], roster[y] = roster[y], roster[x]
+					want := after - before
+
+					got := dojoSwapGain(roster, x, y)
+					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
+				}
+			}
+		})
+	}
+}
+
+// referenceDelayDojoMeetingsUnmemoized is delayDojoMeetings' body as it
+// existed immediately before the bc-dojo-least-conflicted-pool wave-2
+// slotBest memo: the candidate-relocation scan for worstA/worstB is
+// recomputed fresh on every outer iteration, with no per-slot cache. Kept
+// ONLY as TestDelayDojoMeetings_MatchesUnmemoizedReference's oracle -- the
+// worst-pair selection, tie-break order, exclusion/generation bookkeeping
+// and accept condition are copied unchanged, so any drift from the real
+// (memoized) function can only be attributed to the memo itself.
+func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool) {
+	movable := func(i int) bool {
+		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
+	}
+
+	type pairKey struct{ i, j int }
+	excluded := map[pairKey]bool{}
+
+	for iter := 0; iter < len(result)*len(result); iter++ {
+		worstA, worstB, worstRound := -1, -1, 1<<30
+		for i := range result {
+			for j := i + 1; j < len(result); j++ {
+				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
+					continue
+				}
+				if result[i].Dojo != result[j].Dojo {
+					continue
+				}
+				if excluded[pairKey{i, j}] {
+					continue
+				}
+				if r := dojoMeetRound(i, j); r < worstRound {
+					worstA, worstB, worstRound = i, j, r
+				}
+			}
+		}
+		if worstA < 0 {
+			return
+		}
+
+		bestGain, bestX, bestY := 0, -1, -1
+		for _, x := range []int{worstA, worstB} {
+			if !movable(x) {
+				continue
+			}
+			for y := range result {
+				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
+					continue
+				}
+				if gain := dojoSwapGain(result, x, y); gain > bestGain {
+					bestGain, bestX, bestY = gain, x, y
+				}
+			}
+		}
+		if bestGain <= 0 {
+			excluded[pairKey{worstA, worstB}] = true
+			continue
+		}
+		result[bestX], result[bestY] = result[bestY], result[bestX]
+		excluded = map[pairKey]bool{}
+	}
+}
+
+// TestDelayDojoMeetings_MatchesUnmemoizedReference pins the wave-2 slotBest
+// generation memo against referenceDelayDojoMeetingsUnmemoized (the
+// pre-memo body) across clustered, lopsided (a couple of oversized dojos
+// plus many singleton dojos -- the shape most likely to make one slot recur
+// as worstA/worstB across several stuck-and-excluded iterations of the same
+// generation, which is exactly what the memo is for), and seeded/occupied
+// shapes.
+func TestDelayDojoMeetings_MatchesUnmemoizedReference(t *testing.T) {
+	dojoGrouped := func(nDojos, groupSize int) []Player {
+		var out []Player
+		for c := 0; c < nDojos; c++ {
+			for i := 0; i < groupSize; i++ {
+				out = append(out, Player{Name: fmt.Sprintf("C%02d_%03d", c, i), Dojo: fmt.Sprintf("Dojo%02d", c)})
+			}
+		}
+		return out
+	}
+	lopsided := func(bigDojos, bigGroupSize, singletons int) []Player {
+		var out []Player
+		for c := 0; c < bigDojos; c++ {
+			for i := 0; i < bigGroupSize; i++ {
+				out = append(out, Player{Name: fmt.Sprintf("Big%d_%03d", c, i), Dojo: fmt.Sprintf("BigDojo%d", c)})
+			}
+		}
+		for i := 0; i < singletons; i++ {
+			out = append(out, Player{Name: fmt.Sprintf("Solo%03d", i), Dojo: fmt.Sprintf("SoloDojo%03d", i)})
+		}
+		return out
+	}
+
+	// Sized to stay well under a second in total: this test's job is
+	// output-identity, which the memo logic makes N-independent (a slot's
+	// cached answer is exactly what a fresh scan would return, whatever N
+	// is) -- the dramatic wall-clock deltas are measured separately
+	// (dojoSumMeetRounds' and delayDojoMeetings' own doc comments) on
+	// 256-entrant rosters, which would make this correctness pin itself
+	// the slowest thing in the package if reused here.
+	cases := map[string][]Player{
+		"clustered 8 dojos of 8":                       dojoGrouped(8, 8),
+		"clustered 16 dojos of 4":                      dojoGrouped(16, 4),
+		"lopsided: 2 large dojos + many singletons":    lopsided(2, 10, 20),
+		"lopsided: 1 large dojo + many singletons":     lopsided(1, 12, 16),
+		"lopsided: 3 large dojos + few singletons":     lopsided(3, 8, 6),
+		"small mixed clustered + one unique straggler": append(dojoGrouped(3, 3), Player{Name: "Extra", Dojo: "UniqueDojo"}),
+	}
+
+	for name, roster := range cases {
+		t.Run(name, func(t *testing.T) {
+			memoized := make([]Player, len(roster))
+			copy(memoized, roster)
+			reference := make([]Player, len(roster))
+			copy(reference, roster)
+			occupied := map[int]bool{}
+
+			delayDojoMeetings(memoized, occupied)
+			referenceDelayDojoMeetingsUnmemoized(reference, occupied)
+
+			require.Len(t, memoized, len(reference))
+			for i := range memoized {
+				assert.Equalf(t, reference[i].Name, memoized[i].Name,
+					"slot %d: memoized=%q reference=%q", i, memoized[i].Name, reference[i].Name)
+			}
+		})
+	}
+
+	// A seeded/occupied variant: two seed slots share a dojo and land
+	// adjacent (immovable, mirrors the excluded map's own FIX-3 scenario),
+	// alongside an entirely separate fixable same-dojo pair elsewhere, so
+	// the memo is exercised alongside the occupied-slot immovability path
+	// too, not just the plain unseeded case above.
+	t.Run("seeded pair immovable, separate fixable pair elsewhere", func(t *testing.T) {
+		roster := dojoGrouped(6, 6) // 36 players, 6 dojos of 6
+		roster[2].Seed = 4
+		roster[3].Seed = 5
+		roster[2].Dojo = "SeededDojo"
+		roster[3].Dojo = "SeededDojo"
+		occupied := map[int]bool{2: true, 3: true}
+
+		memoized := make([]Player, len(roster))
+		copy(memoized, roster)
+		reference := make([]Player, len(roster))
+		copy(reference, roster)
+
+		delayDojoMeetings(memoized, occupied)
+		referenceDelayDojoMeetingsUnmemoized(reference, occupied)
+
+		require.Len(t, memoized, len(reference))
+		for i := range memoized {
+			assert.Equalf(t, reference[i].Name, memoized[i].Name,
+				"slot %d: memoized=%q reference=%q", i, memoized[i].Name, reference[i].Name)
+		}
+	})
 }

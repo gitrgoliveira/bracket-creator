@@ -1330,14 +1330,13 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 	allStandings := make(map[string][]state.PlayerStanding)
 	for _, p := range pools {
 		matches := poolResults[p.PoolName]
-		playerStandings := make(map[string]*state.PlayerStanding)
-		for _, player := range p.Players {
-			// helper.Player is a type alias for domain.Player (NFR-007);
-			// the pool player flows directly into PlayerStanding.
-			playerStandings[player.Name] = &state.PlayerStanding{
-				Player: player,
-			}
-		}
+		// Indexed by IDENTITY, not bare name: two competitors sharing a name
+		// from different dojos are explicitly allowed, and a league is a
+		// single pool holding every competitor, so a bare-name key here
+		// silently collapses namesakes into one standings row.
+		// (helper.Player is a type alias for domain.Player, NFR-007, so the
+		// pool player flows straight into PlayerStanding.)
+		playerStandings, order := newStandingsIndex(p.Players)
 
 		for _, m := range matches {
 			if m.Status != state.MatchStatusCompleted {
@@ -1347,20 +1346,22 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			sA := playerStandings[m.SideA]
-			sB := playerStandings[m.SideB]
+			sA := lookupStandingsPlayer(playerStandings, m.SideAID, m.SideA)
+			sB := lookupStandingsPlayer(playerStandings, m.SideBID, m.SideB)
 			if sA == nil || sB == nil {
 				continue
 			}
 
-			// Team W/L/D (or individual W/L/D)
-			if m.Winner == m.SideA {
+			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			winnerIsA, winnerIsB := resolveWinnerSide(m)
+			switch {
+			case winnerIsA:
 				sA.Wins++
 				sB.Losses++
-			} else if m.Winner == m.SideB {
+			case winnerIsB:
 				sB.Wins++
 				sA.Losses++
-			} else if state.IsDraw(m.Decision) || m.Winner == "" {
+			case state.IsDraw(m.Decision) || m.Winner == "":
 				sA.Draws++
 				sB.Draws++
 			}
@@ -1379,7 +1380,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		}
 
 		var sorted []state.PlayerStanding
-		for _, s := range playerStandings {
+		for _, s := range order {
 			if isTeam {
 				// Single packed ranking score over the full team tiebreak chain
 				// (W, L, T, IV, IL, IT, PW, PL). See teamStandingPoints.
@@ -1430,13 +1431,20 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// regardless of how the operator chose to resolve it.
 		markTiedStandings(comp, sorted, poolResults[p.PoolName])
 
-		// Apply manual rank overrides
+		// Apply manual rank overrides. Overrides are keyed by competitor
+		// IDENTITY (helper.CompetitorKey: id-preferred, name+dojo fallback),
+		// not bare name (bc-cse) -- lookupPoolRankOverride also honours a
+		// legacy bare-name key for an overrides.json written before this fix,
+		// see its doc comment for the read-only compatibility decision.
 		overrides, _ := e.store.LoadOverrides(compId)
-		if overrides != nil && overrides.PoolRanks[p.PoolName] != nil {
-			poolOverrides := overrides.PoolRanks[p.PoolName]
+		var poolOverrides map[string]int
+		if overrides != nil {
+			poolOverrides = overrides.PoolRanks[p.PoolName]
+		}
+		if len(poolOverrides) > 0 {
 			sort.Slice(sorted, func(i, j int) bool {
-				rankI, okI := poolOverrides[sorted[i].Player.Name]
-				rankJ, okJ := poolOverrides[sorted[j].Player.Name]
+				rankI, okI := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo)
+				rankJ, okJ := lookupPoolRankOverride(poolOverrides, sorted[j].Player.ID, sorted[j].Player.Name, sorted[j].Player.Dojo)
 				if okI && okJ {
 					return rankI < rankJ
 				}
@@ -1450,11 +1458,11 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			})
 		}
 
-		poolHasOverrides := overrides != nil && overrides.PoolRanks[p.PoolName] != nil
+		poolHasOverrides := len(poolOverrides) > 0
 		for i := range sorted {
 			sorted[i].Rank = i + 1
 			if poolHasOverrides {
-				if _, ok := overrides.PoolRanks[p.PoolName][sorted[i].Player.Name]; ok {
+				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo); ok {
 					sorted[i].IsOverridden = true
 				}
 			}
@@ -1567,36 +1575,56 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
 	topN := min(effectiveTopN(comp), len(sorted))
 
-	// Build per-competitor regular match counts and completion status.
-	// A competitor is "done" when every regular match they appear in is Completed.
+	// Build per-competitor regular match counts and completion status,
+	// keyed by IDENTITY rather than bare Player.Name: two league competitors
+	// can share a display name across dojos (CheckDuplicateEntriesByNameDojo
+	// only rejects same-name AND same-dojo), and a bare-name key here would
+	// merge their completion counters into one shared bucket -- one
+	// namesake's still-in-progress fights then either delay or falsely
+	// trigger the OTHER namesake's emerging-tie mark. newStandingsIndex /
+	// lookupStandingsPlayer are the same identity machinery
+	// computeStandingsFrom itself used to build `sorted` in the first place
+	// (a fresh index built here, over the same roster, resolves each match
+	// side to the correct *state.PlayerStanding pointer exactly as that
+	// original build did), reused rather than re-deriving a second ad hoc
+	// key scheme.
 	type compStatus struct {
 		total     int
 		completed int
 	}
-	status := make(map[string]*compStatus, len(sorted))
-	for _, s := range sorted {
-		status[s.Player.Name] = &compStatus{}
+	players := make([]domain.Player, len(sorted))
+	for i, s := range sorted {
+		players[i] = s.Player
+	}
+	byKey, order := newStandingsIndex(players)
+	statusFor := make(map[*state.PlayerStanding]*compStatus, len(order))
+	for _, st := range order {
+		statusFor[st] = &compStatus{}
 	}
 	for _, m := range regularMatches {
-		if _, okA := status[m.SideA]; okA {
-			status[m.SideA].total++
+		if sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA); sA != nil {
+			cs := statusFor[sA]
+			cs.total++
 			if m.Status == state.MatchStatusCompleted {
-				status[m.SideA].completed++
+				cs.completed++
 			}
 		}
-		if _, okB := status[m.SideB]; okB {
-			status[m.SideB].total++
+		if sB := lookupStandingsPlayer(byKey, m.SideBID, m.SideB); sB != nil {
+			cs := statusFor[sB]
+			cs.total++
 			if m.Status == state.MatchStatusCompleted {
-				status[m.SideB].completed++
+				cs.completed++
 			}
 		}
 	}
 
 	// Check if ANY top-N competitor has completed all their own fights.
+	// order[i] is the standings entry for players[i], i.e. sorted[i]'s
+	// player, since newStandingsIndex ranges players in the same order it
+	// received them and appends each registered entry to order in lockstep.
 	triggerFired := false
 	for i := range topN {
-		name := sorted[i].Player.Name
-		cs := status[name]
+		cs := statusFor[order[i]]
 		if cs != nil && cs.total > 0 && cs.completed == cs.total {
 			triggerFired = true
 			break

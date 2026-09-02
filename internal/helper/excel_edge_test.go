@@ -579,8 +579,8 @@ func TestPrintTeamEliminationMatches_CellRefLikeLeafNames(t *testing.T) {
 func TestBandOrderIsOneRuleForBothSheets(t *testing.T) {
 	courts := []string{"A", "B", "C", "D"}
 	pools := []Pool{
-		{PoolName: "Pool A", Players: []Player{{Name: "a"}}},
-		{PoolName: "Pool B", Players: []Player{{Name: "b"}}},
+		{PoolName: "Pool A", Players: []Player{{Name: "a", Dojo: "Dojo a"}}},
+		{PoolName: "Pool B", Players: []Player{{Name: "b", Dojo: "Dojo b"}}},
 	}
 	// Both pools moved off the shiaijo the clamp allocated them, onto shiaijo
 	// the competition owns but the clamp dropped, in reverse order.

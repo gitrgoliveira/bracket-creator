@@ -7,6 +7,7 @@ repo_url: https://github.com/gitrgoliveira/bracket-creator
 
 extra_css:
   - assets/stylesheets/extra.css
+  - assets/stylesheets/pool-draw-animation.css
 
 # Mermaid: load the library explicitly plus an init that re-runs on Material's
 # instant-navigation page swaps (see assets/javascripts/mermaid-init.js).
@@ -15,6 +16,10 @@ extra_javascript:
   # version here to upgrade (check https://www.npmjs.com/package/mermaid).
   - https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.min.js
   - assets/javascripts/mermaid-init.js
+  # The pool draw walk-through on user-guide/organisers/pool-draw.md. Mounts
+  # itself on any [data-pool-draw-animation] element, so loading it site-wide
+  # costs nothing on the pages that do not carry one.
+  - assets/javascripts/pool-draw-animation.js
 
 markdown_extensions:
   # attr_list + md_in_html power the home-page grid cards (the `markdown`
@@ -105,6 +110,7 @@ nav:
           - Run a tournament on the day: user-guide/organisers/run-tournament.md
           - Operating modes and access control: user-guide/organisers/operating-modes.md
           - Tournament formats: user-guide/organisers/formats.md
+          - The pool draw: user-guide/organisers/pool-draw.md
           - The knockout draw: user-guide/organisers/knockout-draw.md
           - Team tournaments: user-guide/organisers/team-tournaments.md
           - Naginata competitions: user-guide/organisers/naginata.md

@@ -92,26 +92,72 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // callers (TB, DH) share one implementation. Win counts are scoped to bouts
 // between members of the same tied group, so an unrelated group's results never
 // bleed across; a group with no decided supplementary bouts is left untouched.
+//
+// Group membership and win attribution are keyed by standingsPlayerKey
+// (id-preferring, name fallback): two tied competitors can share a display
+// name across dojos (CheckDuplicateEntriesByNameDojo), and a bare-name key
+// would both misclassify group membership (a same-named, unrelated
+// competitor elsewhere in the pool falsely counted as "in this group") and
+// cross-attribute a supplementary win between the two namesakes.
+// generateTiebreakerMatches / generatePoolDaihyosenMatches stamp
+// SideAID/SideBID at generation so the id half is actually populated for
+// TB/DH rows going forward.
+//
+// The sort comparator below recomputes each element's key FRESH from
+// sorted[i+a]/sorted[i+b] on every call rather than caching a
+// position->key/count mapping once: sort.SliceStable physically swaps
+// elements as it sorts, so a fixed "this position had N wins" cache goes
+// stale the moment two elements it describes are swapped, and the comparator
+// silently starts comparing the wrong pair of counts (verified: an earlier
+// version of this function cached original-position keys and produced a
+// wrong final order on exactly the fixture in
+// TestApplyTiebreakSort_SameNameDifferentDojo). Reading sorted[i+a] directly
+// always reflects whoever CURRENTLY occupies that slot, so it can't go
+// stale.
+//
+// A match side is resolved to a group member's canonical key via
+// resolveGroupMatchKey: when the match carries an id for that side, the key
+// is symmetric (both a member's own key and a match's believed key for the
+// same id compute to the identical "id:<uuid>" string, so no lookup table is
+// needed for that path -- only membership in this specific tied group is
+// verified). When the match carries no id for that side (a pre-fix TB/DH
+// row, or any other legacy data), resolution falls back to a name lookup
+// built from the group's own members; a genuine same-name collision with NO
+// id on the match to disambiguate degrades to the same "last one registered
+// wins" behavior standings always had before ids existed -- there is no data
+// left to do better with -- but a correctly id-stamped match is never
+// misattributed merely because some OTHER row in the same pool lacks one.
 func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) {
 	for _, positions := range detectPoolTies(sorted) {
 		i := positions[0]
 		j := positions[len(positions)-1] + 1
-		groupNames := make(map[string]bool, j-i)
-		for k := i; k < j; k++ {
-			groupNames[sorted[k].Player.Name] = true
-		}
+
+		resolveGroupMatchKey := newGroupKeyResolver(sorted[i:j])
+
 		groupWins := map[string]int{}
 		for _, m := range matches {
 			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
 				continue
 			}
-			if groupNames[m.SideA] && groupNames[m.SideB] {
-				groupWins[m.Winner]++
+			keyA, aOK := resolveGroupMatchKey(m.SideAID, m.SideA)
+			keyB, bOK := resolveGroupMatchKey(m.SideBID, m.SideB)
+			if !aOK || !bOK || keyA == keyB {
+				continue
+			}
+			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			winnerIsA, winnerIsB := resolveWinnerSide(m)
+			switch {
+			case winnerIsA:
+				groupWins[keyA]++
+			case winnerIsB:
+				groupWins[keyB]++
 			}
 		}
 		if len(groupWins) > 0 {
 			sort.SliceStable(sorted[i:j], func(a, b int) bool {
-				return groupWins[sorted[i+a].Player.Name] > groupWins[sorted[i+b].Player.Name]
+				keyA := standingsPlayerKey(sorted[i+a].Player.ID, sorted[i+a].Player.Name)
+				keyB := standingsPlayerKey(sorted[i+b].Player.ID, sorted[i+b].Player.Name)
+				return groupWins[keyA] > groupWins[keyB]
 			})
 		}
 	}
@@ -185,27 +231,66 @@ func tiebreakerPairKey(a, b string) string {
 // generateTiebreakerMatches creates the round-robin MatchResult entries
 // for tiedGroup. existingTBCount is the current number of TB matches in
 // the pool (used to produce unique TB-N indices). court is the court
-// label assigned to the pool. Pairs already in existingPairs are skipped.
-func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding, existingTBCount int, court string, existingPairs map[string]bool) []state.MatchResult {
+// label assigned to the pool. existingRows are the TB rows already on disk
+// for this pool (from a prior injection); a pair already represented among
+// them is skipped, which is what makes repeated injection idempotent.
+//
+// Pairs are enumerated by INDEX over tiedGroup (i < j), never by comparing
+// display names. The prior `a.Player.Name >= b.Player.Name` skip assumed
+// names were a strict order over DISTINCT competitors, which is false: two
+// tied competitors are explicitly allowed to share a display name across
+// dojos (CheckDuplicateEntriesByNameDojo). For a tied NAMESAKE pair, that
+// comparison is false in BOTH loop orientations (neither name is ever
+// strictly greater), so `continue` fired every time and the pair's own bout
+// was never generated at all -- the pool then reported "complete" with no TB
+// bout ever played for the pair that most needed one. In a 3+-way group
+// containing one namesake pair, the same name-based test also drops a
+// SEPARATE bout: dedup keyed on bare names sees "X vs Y" for BOTH X@dojoA-vs-Y
+// and X@dojoB-vs-Y and treats the second as a duplicate of the first. Index
+// enumeration sidesteps both failure modes: every unordered pair of distinct
+// group members is visited exactly once, regardless of what any of them are
+// named.
+//
+// Dedup against existingRows resolves each row's sides to a group member's
+// canonical identity key via newGroupKeyResolver (id-preferring, name
+// fallback -- the same resolver applyTiebreakSort uses), so the two
+// namesake-involving pairs above are tracked as the distinct pairs they are,
+// never merged under one bare-name bucket.
+//
+// Stamps SideAID/SideBID from the tied competitors' participant ids (mirrors
+// pools.go's regular-match generation), so applyTiebreakSort can resolve the
+// winning side by id rather than by name when two tied competitors share a
+// display name (allowed across dojos, CheckDuplicateEntriesByNameDojo).
+func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding, existingTBCount int, court string, existingRows []state.MatchResult) []state.MatchResult {
+	resolve := newGroupKeyResolver(tiedGroup)
+	existingPairs := make(map[string]bool, len(existingRows))
+	for _, m := range existingRows {
+		keyA, okA := resolve(m.SideAID, m.SideA)
+		keyB, okB := resolve(m.SideBID, m.SideB)
+		if okA && okB {
+			existingPairs[tiebreakerPairKey(keyA, keyB)] = true
+		}
+	}
+
 	var results []state.MatchResult
 	idx := existingTBCount
-	for _, a := range tiedGroup {
-		for _, b := range tiedGroup {
-			if a.Player.Name >= b.Player.Name {
-				continue // only generate each pair once (a < b alphabetically)
-			}
-			key := tiebreakerPairKey(a.Player.Name, b.Player.Name)
-			if existingPairs[key] {
+	for i := 0; i < len(tiedGroup); i++ {
+		for j := i + 1; j < len(tiedGroup); j++ {
+			a, b := tiedGroup[i], tiedGroup[j]
+			keyA := standingsPlayerKey(a.Player.ID, a.Player.Name)
+			keyB := standingsPlayerKey(b.Player.ID, b.Player.Name)
+			if existingPairs[tiebreakerPairKey(keyA, keyB)] {
 				continue
 			}
 			results = append(results, state.MatchResult{
-				ID:     fmt.Sprintf("%s-TB-%d", poolName, idx),
-				SideA:  a.Player.Name,
-				SideB:  b.Player.Name,
-				Status: state.MatchStatusScheduled,
-				Court:  court,
+				ID:      fmt.Sprintf("%s-TB-%d", poolName, idx),
+				SideA:   a.Player.Name,
+				SideB:   b.Player.Name,
+				SideAID: a.Player.ID,
+				SideBID: b.Player.ID,
+				Status:  state.MatchStatusScheduled,
+				Court:   court,
 			})
-			existingPairs[key] = true
 			idx++
 		}
 	}
@@ -286,9 +371,14 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	}
 
 	// Scan existing TB matches per pool for idempotency and ID sequencing.
+	// existingRows are handed to generateTiebreakerMatches raw (not reduced to
+	// a bare-name dedup map here) so it can resolve each row's sides against
+	// the SPECIFIC tied group being processed via newGroupKeyResolver -- see
+	// that function's doc comment for why a bare-name reduction at this scan
+	// stage would collapse distinct namesake-involving pairs.
 	type poolTBInfo struct {
-		existingPairs map[string]bool
-		count         int
+		existingRows []state.MatchResult
+		count        int
 	}
 	poolTB := map[string]*poolTBInfo{}
 	poolCourt := map[string]string{}
@@ -313,10 +403,10 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		}
 		if IsTiebreakerMatchID(m.ID) {
 			if poolTB[pn] == nil {
-				poolTB[pn] = &poolTBInfo{existingPairs: map[string]bool{}}
+				poolTB[pn] = &poolTBInfo{}
 			}
 			poolTB[pn].count++
-			poolTB[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+			poolTB[pn].existingRows = append(poolTB[pn].existingRows, m)
 		} else if m.Status != state.MatchStatusCompleted {
 			regularIncomplete[pn] = true
 		}
@@ -330,10 +420,10 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 		}
 		info := poolTB[poolName]
 		existingCount := 0
-		existingPairs := map[string]bool{}
+		var existingRows []state.MatchResult
 		if info != nil {
 			existingCount = info.count
-			existingPairs = info.existingPairs
+			existingRows = info.existingRows
 		}
 
 		for _, positions := range detectPoolTies(poolStandings) {
@@ -341,7 +431,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 			if !tieNeedsIndividualBreak(comp, positions, group, poolWinners) {
 				continue
 			}
-			newMatches := generateTiebreakerMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
+			newMatches := generateTiebreakerMatches(poolName, group, existingCount, poolCourt[poolName], existingRows)
 			existingCount += len(newMatches)
 			injected = append(injected, newMatches...)
 		}
@@ -382,4 +472,38 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	e.standingsFlight.Delete(compID)
 
 	return injected, nil
+}
+
+// newGroupKeyResolver indexes a tied group and returns the (id, name) ->
+// canonical member key resolution
+// shared by applyTiebreakSort and groupNeedsChusen (chusen.go). Both ask the
+// same question of the same kind of data: a supplementary bout names two sides,
+// and the caller needs to know which member of THIS tied group each side is.
+//
+// An id is preferred because two members can share a display name across dojos
+// (competitor identity is name+dojo, never name alone). A non-empty id that is
+// not one of this group's members -- foreign or stale data -- falls through to
+// the name lookup rather than resolving to nothing. When the bout carries no id
+// for that side (a row written before TB/DH generation stamped them), the name
+// lookup is all there is, and a genuine same-name collision there degrades to
+// the single entry byName holds, which is exactly the behaviour that predates
+// ids. A correctly stamped bout is never misattributed just because some other
+// row in the same pool lacks an id.
+func newGroupKeyResolver(members []state.PlayerStanding) func(id, name string) (string, bool) {
+	groupKeys := make(map[string]bool, len(members))
+	byName := make(map[string]string, len(members))
+	for _, s := range members {
+		ck := standingsPlayerKey(s.Player.ID, s.Player.Name)
+		groupKeys[ck] = true
+		byName[standingsPlayerKey("", s.Player.Name)] = ck
+	}
+	return func(id, name string) (string, bool) {
+		if id != "" {
+			if ck := standingsPlayerKey(id, ""); groupKeys[ck] {
+				return ck, true
+			}
+		}
+		ck, ok := byName[standingsPlayerKey("", name)]
+		return ck, ok
+	}
 }

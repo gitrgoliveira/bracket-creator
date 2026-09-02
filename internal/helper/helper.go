@@ -385,13 +385,14 @@ func ReorderPoolsForCourts(pools []Pool, numCourts int) []Pool {
 		result = append(result, group...)
 	}
 
-	// Re-assign pool names in the new order
+	// Re-assign pool names in the new order, through poolPositionName
+	// (tournament.go) -- the one owner of the "Pool A".."Pool Z", "Pool
+	// AA", ... naming scheme -- rather than a second inline copy that could
+	// drift from it. This runs LAST in every pool-formation pipeline, so an
+	// inline copy here would silently override whatever poolPositionName
+	// itself says the naming scheme is.
 	for i := range result {
-		char := string(rune('A' + i%26))
-		if i > 25 {
-			char = char + char
-		}
-		result[i].PoolName = fmt.Sprintf("Pool %s", char)
+		result[i].PoolName = poolPositionName(i)
 	}
 
 	return result

@@ -35,7 +35,7 @@ func seedStoreWithGappedFile(t *testing.T) (*state.Store, string) {
 		ID: "c1", Name: "C1", Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2,
 	}))
 	require.NoError(t, s.SaveParticipants("c1", []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dave"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Carol", Dojo: "Dojo Carol"}, {Name: "Dave", Dojo: "Dojo Dave"},
 	}))
 	// A gapped file in the pre-Dojo header SaveSeeds used to write (readers
 	// locate columns by header name, so both layouts load alike): only rank 4

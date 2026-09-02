@@ -12,15 +12,12 @@ import (
 // buildSetsFromPools reconstructs the per-pool dojo/name conflict sets from
 // pools that already have players assigned, so that direct calls to discoverPool
 // in tests start from the correct initial state.
-func buildSetsFromPools(pools []Pool) (dojoSets, nameSets []map[string]bool) {
+func buildSetsFromPools(pools []Pool) (dojoSets []map[string]bool) {
 	dojoSets = make([]map[string]bool, len(pools))
-	nameSets = make([]map[string]bool, len(pools))
 	for i, pool := range pools {
 		dojoSets[i] = make(map[string]bool, len(pool.Players))
-		nameSets[i] = make(map[string]bool, len(pool.Players))
 		for _, p := range pool.Players {
 			dojoSets[i][p.Dojo] = true
-			nameSets[i][p.Name] = true
 		}
 	}
 	return
@@ -633,9 +630,9 @@ func TestDiscoverPool(t *testing.T) {
 	}
 
 	t.Run("finds empty pool", func(t *testing.T) {
-		dojoSets, nameSets := buildSetsFromPools(pools)
+		dojoSets := buildSetsFromPools(pools)
 		player := Player{Name: "P2", Dojo: "Dojo B"}
-		poolIdx := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0)
 
 		if poolIdx != 0 {
 			t.Errorf("Expected pool 0, got %d", poolIdx)
@@ -643,9 +640,9 @@ func TestDiscoverPool(t *testing.T) {
 	})
 
 	t.Run("avoids same dojo", func(t *testing.T) {
-		dojoSets, nameSets := buildSetsFromPools(pools)
+		dojoSets := buildSetsFromPools(pools)
 		player := Player{Name: "P3", Dojo: "Dojo A"}
-		poolIdx := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0)
 
 		// Should find pool 1 since pool 0 has same dojo
 		if poolIdx != 1 {
@@ -663,9 +660,9 @@ func TestDiscoverPool(t *testing.T) {
 				},
 			},
 		}
-		dojoSets, nameSets := buildSetsFromPools(fullPools)
+		dojoSets := buildSetsFromPools(fullPools)
 		player := Player{Name: "P3", Dojo: "D3"}
-		poolIdx := discoverPool(fullPools, dojoSets, nameSets, player, []int{2}, 0)
+		poolIdx := discoverPool(fullPools, dojoSets, player, []int{2}, 0)
 
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
@@ -673,14 +670,14 @@ func TestDiscoverPool(t *testing.T) {
 	})
 }
 
-func TestForceSameDojo(t *testing.T) {
+func TestLeastConflictedPool(t *testing.T) {
 	t.Run("finds pool with space", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
-			{Players: []Player{{Name: "P3"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}},
+			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}}},
 		}
 
-		poolIdx := forceSameDojo(pools, []int{2, 2})
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
 		if poolIdx != 1 {
 			t.Errorf("Expected pool 1, got %d", poolIdx)
 		}
@@ -688,22 +685,109 @@ func TestForceSameDojo(t *testing.T) {
 
 	t.Run("returns -1 when all pools full", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
-			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}},
+			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}, {Name: "P4", Dojo: "Dojo P4"}}},
 		}
 
-		poolIdx := forceSameDojo(pools, []int{2, 2})
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
 		}
 	})
+
+	tests := []struct {
+		name        string
+		pools       []Pool
+		targetSizes []int
+		dojo        string
+		want        int
+	}{
+		{
+			name: "picks pool with fewest members of the incoming dojo",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}, {Name: "P2", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P4", Dojo: "Other"}}},
+			},
+			targetSizes: []int{4, 4, 4},
+			dojo:        "Tora",
+			want:        2, // 0 Tora members, vs 2 and 1 in the other pools
+		},
+		{
+			name: "ties on dojo count broken by fewest players",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}, {Name: "P2", Dojo: "Other"}, {Name: "P3", Dojo: "Other2"}}},
+				{Players: []Player{{Name: "P4", Dojo: "Tora"}}},
+			},
+			targetSizes: []int{4, 4},
+			dojo:        "Tora",
+			// Both pools have exactly 1 Tora member; pool 1 has fewer players overall.
+			want: 1,
+		},
+		{
+			name: "dojo count wins even when the smaller pool has MORE of the dojo",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Other"}, {Name: "P2", Dojo: "Other2"}, {Name: "P3", Dojo: "Other3"}}},
+				{Players: []Player{{Name: "P4", Dojo: "Tora"}, {Name: "P5", Dojo: "Other4"}}},
+			},
+			targetSizes: []int{4, 4},
+			dojo:        "Tora",
+			// Pool 0 has 0 Tora members but 3 players; pool 1 has 1 Tora
+			// member but only 2 players (SMALLER overall). Dojo count must
+			// be checked before player count, so the winner is pool 0. A
+			// mutant that swaps the two keys (player count first) would
+			// pick pool 1 here, which is exactly what this case pins.
+			want: 0,
+		},
+		{
+			name: "ties on dojo count and player count broken by lowest index",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P2", Dojo: "Tora"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}}},
+			},
+			targetSizes: []int{4, 4, 4},
+			dojo:        "Tora",
+			want:        0,
+		},
+		{
+			name: "full pools are skipped even with fewer dojo members",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Other"}, {Name: "P2", Dojo: "Other2"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}}},
+			},
+			targetSizes: []int{2, 4},
+			dojo:        "Tora",
+			// Pool 0 has 0 Tora members but is full; pool 1 has room.
+			want: 1,
+		},
+		{
+			name: "returns -1 when nothing has room",
+			pools: []Pool{
+				{Players: []Player{{Name: "P1", Dojo: "Tora"}, {Name: "P2", Dojo: "Other"}}},
+				{Players: []Player{{Name: "P3", Dojo: "Tora"}, {Name: "P4", Dojo: "Other2"}}},
+			},
+			targetSizes: []int{2, 2},
+			dojo:        "Tora",
+			want:        -1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := leastConflictedPool(tt.pools, tt.targetSizes, tt.dojo)
+			if got != tt.want {
+				t.Errorf("leastConflictedPool() = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestForcePoolSize(t *testing.T) {
 	t.Run("finds pool with room for extra player", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}}},
-			{Players: []Player{{Name: "P3"}, {Name: "P4"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}},
+			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}, {Name: "P4", Dojo: "Dojo P4"}}},
 		}
 
 		poolIdx := forcePoolSize(pools, []int{2, 2})
@@ -726,8 +810,8 @@ func TestForcePoolSize(t *testing.T) {
 
 	t.Run("returns first pool when all full", func(t *testing.T) {
 		pools := []Pool{
-			{Players: []Player{{Name: "P1"}, {Name: "P2"}, {Name: "P3"}}},
-			{Players: []Player{{Name: "P4"}, {Name: "P5"}, {Name: "P6"}}},
+			{Players: []Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}, {Name: "P3", Dojo: "Dojo P3"}}},
+			{Players: []Player{{Name: "P4", Dojo: "Dojo P4"}, {Name: "P5", Dojo: "Dojo P5"}, {Name: "P6", Dojo: "Dojo P6"}}},
 		}
 
 		poolIdx := forcePoolSize(pools, []int{2, 2})
@@ -1127,8 +1211,8 @@ func TestCreatePoolRoundRobinMatchesEdgeCases(t *testing.T) {
 				{
 					PoolName: "Pool A",
 					Players: []Player{
-						{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
-						{Name: "P4"}, {Name: "P5"}, {Name: "P6"},
+						{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}, {Name: "P3", Dojo: "Dojo P3"},
+						{Name: "P4", Dojo: "Dojo P4"}, {Name: "P5", Dojo: "Dojo P5"}, {Name: "P6", Dojo: "Dojo P6"},
 					},
 				},
 			},
@@ -1156,7 +1240,7 @@ func TestCreatePoolRoundRobinMatchesEdgeCases(t *testing.T) {
 				{
 					PoolName: "Pool A",
 					Players: []Player{
-						{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"},
+						{Name: "A", Dojo: "Dojo A"}, {Name: "B", Dojo: "Dojo B"}, {Name: "C", Dojo: "Dojo C"}, {Name: "D", Dojo: "Dojo D"},
 					},
 				},
 			},
@@ -1619,16 +1703,16 @@ func TestCreatePools_MaxMode_LargeBalancing(t *testing.T) {
 func TestDiscoverPool_StartIndexRoundRobin(t *testing.T) {
 	// Three empty pools. Starting at index 1 should return 1 first.
 	pools := []Pool{{}, {}, {}}
-	dojoSets, nameSets := buildSetsFromPools(pools)
+	dojoSets := buildSetsFromPools(pools)
 	player := Player{Name: "P", Dojo: "D"}
 
-	if got := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2, 2}, 1); got != 1 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 1); got != 1 {
 		t.Errorf("expected start-index 1, got %d", got)
 	}
-	if got := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2, 2}, 2); got != 2 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 2); got != 2 {
 		t.Errorf("expected start-index 2, got %d", got)
 	}
-	if got := discoverPool(pools, dojoSets, nameSets, player, []int{2, 2, 2}, 0); got != 0 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 0); got != 0 {
 		t.Errorf("expected start-index 0, got %d", got)
 	}
 }

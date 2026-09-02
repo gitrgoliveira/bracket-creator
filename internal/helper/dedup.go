@@ -116,8 +116,11 @@ func CheckDuplicateEntriesByNameDojo(entries [][2]string) []string {
 				out = append(out, seen[k])
 			}
 		} else {
-			// Label: "name / dojo", or just "name" for empty-dojo entries
-			// (common for teams) so the message has no dangling " / ".
+			// Label: "name / dojo", or just "name" when the dojo is empty so
+			// the message has no dangling " / ". A blank dojo is refused by
+			// every write path (state.ErrBlankDojo) and the team roster
+			// format is "Team name, Dojo", so the bare-name label is for
+			// data that predates that rule, not a normal entry.
 			// Trim for display to match the normalization semantics, a
 			// whitespace-only dojo keys as empty, so it must render as empty too.
 			label := strings.TrimSpace(e[0])

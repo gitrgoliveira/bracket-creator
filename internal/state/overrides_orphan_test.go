@@ -34,14 +34,14 @@ func TestSaveOverridesDoesNotResurrectDeletedCompetition(t *testing.T) {
 
 	const compID = "deleted-comp"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Deleted Comp"}))
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "A1", 1))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "", "A1", "", 1))
 
 	require.NoError(t, store.DeleteCompetition(compID))
 	compDir := filepath.Join(dir, "competitions", compID)
 	require.NoDirExists(t, compDir, "premise: the delete removed the directory")
 
 	// The save must fail rather than rebuild the directory around its write.
-	err = store.SaveRankOverride(compID, "Pool A", "A1", 2)
+	err = store.SaveRankOverride(compID, "Pool A", "", "A1", "", 2)
 	assert.Error(t, err, "saving overrides for a deleted competition must fail, not recreate it")
 	assert.NoDirExists(t, compDir,
 		"an override save must never resurrect a deleted competition's directory")
@@ -70,7 +70,7 @@ func TestSaveOverridesConcurrentWithDeleteLeavesNoOrphan(t *testing.T) {
 			defer wg.Done()
 			// Error is expected whenever the delete won; what must never
 			// happen is a surviving directory without its config.
-			_ = store.SaveRankOverride(compID, "Pool A", "A1", 1)
+			_ = store.SaveRankOverride(compID, "Pool A", "", "A1", "", 1)
 		}()
 		wg.Wait()
 

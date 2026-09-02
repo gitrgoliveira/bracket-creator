@@ -2402,14 +2402,23 @@ const API = {
         }
         return res.json();
     },
-    async overridePoolRank(compID, poolID, playerName, rank, password) {
+    // playerId and playerDojo are OPTIONAL (bc-cse): two pool members can
+    // legally share a display name from different dojos (operator identity
+    // rule), so playerName alone cannot always tell them apart. When known,
+    // pass the competitor's id (preferred) and/or dojo so the server resolves
+    // the override unambiguously; omit them and only playerName is sent,
+    // exactly as before, for a caller that doesn't have that information.
+    async overridePoolRank(compID, poolID, playerName, rank, password, playerId, playerDojo) {
+        const body = { playerName, rank };
+        if (playerId) body.playerId = playerId;
+        if (playerDojo) body.playerDojo = playerDojo;
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Tournament-Password': password
             },
-            body: JSON.stringify({ playerName, rank })
+            body: JSON.stringify(body)
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

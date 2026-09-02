@@ -292,7 +292,7 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 //     the seed spread, the deinterleave AND the caller's pool-to-shiaijo
 //     allocation, and all three must agree.
 //  3. PoolSeeding runs BEFORE CreatePools: it reorders the roster so that
-//     CreatePools' straight fill lands seeds and club-mates where they belong.
+//     CreatePools' straight fill lands seeds and dojo-mates where they belong.
 //     It runs whether or not anyone is seeded, because it also clusters by dojo.
 //  4. ReorderPoolsForCourts runs AFTER CreatePools and before anything reads
 //     pool order or pool names.
@@ -300,15 +300,37 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 // Callers still own what happens either side: validating the roster before, and
 // naming, numbering, persisting and allocating pools to shiaijo after. Use the
 // returned court count for that allocation rather than re-deriving it.
+//
+// Until bc-dojo Phase 4 this function's own body ran
+// PoolSeeding -> CreatePools -> ReorderPoolsForCourts: a fill that commits a
+// placement before it can see what still has to be placed, then a
+// post-fill dojo-swap repair pass (since deleted) that swapped unseeded
+// competitors afterwards to break up what the fill could not avoid. It now
+// DELEGATES to the region-aware distributor (BuildPoolPhaseTreeAware,
+// pool_distribution_tree_aware.go), which enforces the same four
+// constraints above -- the same numPools/drawCourts derivation, seeds
+// placed before the unseeded, ReorderPoolsForCourts last -- inside a
+// forward pass (assignUnseededByDojoTree) that can see the whole knockout
+// tree before it places anyone, followed by a narrow pairwise-exchange
+// pass (improveDojoMeetings) that closes the one residual the forward pass
+// alone cannot see. That exchange pass is a different animal from the
+// deleted post-fill repair: it is scored on the winner-path metric alone,
+// touches only unseeded-for-unseeded swaps, and is a no-op on the
+// unique-dojo and single-dojo cases the old repair also left untouched
+// (see BuildPoolPhaseTreeAware's own doc comment for the full pipeline).
+//
+// poolWinners is fixed at defaultPoolWinners (2, the documented
+// EffectivePoolWinners()/ResolveQualifiedPools default) and the mode at
+// standard: this function's own signature has no poolWinners or
+// extra-qualifiers parameter and never has, so every existing caller/test
+// that has no real qualifier count to hand keeps exactly the shape it
+// always got. A caller that DOES know its competition's real pool-winners
+// count and extra-qualifiers mode -- internal/engine/pools.go,
+// cmd/create-pools.go -- must call BuildPoolPhaseTreeAwareWithMode instead,
+// or the distributor scores candidate placements against the WRONG knockout tree
+// whenever the real values differ from the default.
 func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) ([]Pool, int, error) {
-	numPools := PoolCount(len(players), poolSize, isMax)
-	drawCourts := EffectiveDrawCourts(numPools, numCourts)
-
-	pools, err := CreatePools(PoolSeeding(players, numPools, drawCourts), poolSize, isMax)
-	if err != nil {
-		return nil, 0, err
-	}
-	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
+	return BuildPoolPhaseTreeAware(players, poolSize, isMax, numCourts, defaultPoolWinners)
 }
 
 // BuildPoolPhaseFillBracket is BuildPoolPhase's fill-bracket counterpart
@@ -332,52 +354,68 @@ func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) (
 // players per pool" mode (state.ValidateExtraQualifiers gates it to
 // minimum-players-per-pool sizing), so unlike BuildPoolPhase there is no
 // isMax parameter here at all.
+//
+// Until bc-dojo Phase 4 this function's own body ran
+// PoolSeeding -> CreatePoolsForCount -> ReorderPoolsForCourts, the same
+// fill-then-repair shape BuildPoolPhase's pre-Phase-4 body had. It now
+// delegates to BuildPoolPhaseFillBracketTreeAware
+// (pool_distribution_tree_aware.go): the same region-aware one-pass
+// distributor BuildPoolPhase itself now uses, cutting via this function's
+// own FillBracketPoolCount formation objective and CreatePoolsForCount's
+// min-size-plus-outer-to-inner-remainder target sizes (realTargetSizes,
+// reused rather than re-derived), and scoring every unseeded placement
+// against the tree fill-bracket mode actually builds
+// (BuildKnockoutDrawFillBracket) rather than the standard uniform one.
 func BuildPoolPhaseFillBracket(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
-	// The roster's seed RANKS feed formation's supply rule (rule 4 in
-	// FillBracketPoolCount's doc comment): drafted 2nds come from seeded
-	// pools first, and only a rank at most the pool count is guaranteed its
-	// own pool (a higher rank wraps into an already-seeded one, so a gapped
-	// survivor set must not be counted as one seeded pool per player -- see
-	// the rule-4 comment for the failure that taught this). partitionSeeded
-	// is the same split the seeding pass itself uses, so what formation
-	// counts is what placement will see.
-	seeded, _ := partitionSeeded(players)
-	seedRanks := make([]int, len(seeded))
-	for i, p := range seeded {
-		seedRanks[i] = p.Seed
-	}
-	numPools, _, err := FillBracketPoolCount(len(players), minSize, seedRanks)
-	if err != nil {
-		return nil, 0, err
-	}
-	drawCourts := EffectiveDrawCourts(numPools, numCourts)
-
-	pools, err := CreatePoolsForCount(PoolSeeding(players, numPools, drawCourts), minSize, numPools)
-	if err != nil {
-		return nil, 0, err
-	}
-	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
+	return BuildPoolPhaseFillBracketTreeAware(players, minSize, numCourts)
 }
 
-func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+// poolTargetSizes is CreatePools' pool-COUNT-and-SIZE arithmetic, extracted
+// so a second caller can derive the exact same shape CreatePools would
+// without re-deriving -- or drifting from -- it (bc-dojo Phase 2:
+// BuildPoolPhaseTreeAware needs the shape before it can place anyone, and
+// "reuse, do not copy" is the constraint this exists to satisfy).
+// CreatePools itself now calls this rather than carrying its own copy of the
+// arithmetic; the error text and the max-mode remainder spread are both
+// unchanged.
+//
+// For "max" sizing the returned targetSizes already sum to numPlayers
+// exactly (the base row IS the final shape). For "min" (non-max) sizing they
+// do NOT: every pool gets the uniform poolSize row here, and whatever is
+// left over (numPlayers - totalPools*poolSize, always < poolSize) is spread
+// later, dynamically, by assignPlayersToPools' own forcePoolSize fallback --
+// interleaved with player placement in the real pipeline, so it is not
+// reflected in this function's return at all. A caller that needs the FINAL
+// min-mode sizes before any player is placed (bc-dojo Phase 4:
+// BuildPoolPhaseTreeAware's one-pass distribution enforces target size as a
+// hard per-pool cap, so it cannot discover the remainder the way the old
+// fill-then-repair pipeline does) must run this through realTargetSizes.
+func poolTargetSizes(numPlayers, poolSize int, isMax bool) (totalPools int, targetSizes []int, err error) {
 	// Guard before the division below: poolSize is the divisor in both the
 	// "max" and fixed-size branches, so a zero/negative value panics with an
 	// integer divide-by-zero. Reject it here, the lowest shared point, so
 	// every caller (engine draw, schedule estimator, CLI) is panic-proof
 	// regardless of how PoolSize reached it. (mp-ebgz)
 	if poolSize <= 0 {
-		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
+		return 0, nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
 	}
-	totalPools := PoolCount(len(players), poolSize, isMax)
+	// The upper guard, for the same reason at the other end (see MaxPoolSize).
+	// Both modes keep every target size at or under poolSize, and min mode's
+	// remainder can then add one seat to a pool (realTargetSizes), so refusing
+	// poolSize at MaxPoolSize is what keeps a DRAWN pool inside it.
+	if poolSize >= MaxPoolSize {
+		return 0, nil, fmt.Errorf("cannot create pools: pool size must be less than %d, got %d", MaxPoolSize, poolSize)
+	}
+	totalPools = PoolCount(numPlayers, poolSize, isMax)
 
-	if totalPools == 0 && len(players) > 0 {
-		return nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", len(players), poolSize)
+	if totalPools == 0 && numPlayers > 0 {
+		return 0, nil, fmt.Errorf("cannot create pools: player count (%d) is less than pool size (%d)", numPlayers, poolSize)
 	}
 
-	targetSizes := make([]int, totalPools)
+	targetSizes = make([]int, totalPools)
 	if isMax && totalPools > 0 {
-		base := len(players) / totalPools
-		rem := len(players) % totalPools
+		base := numPlayers / totalPools
+		rem := numPlayers % totalPools
 		for i := 0; i < totalPools; i++ {
 			if i < rem {
 				targetSizes[i] = base + 1
@@ -390,8 +428,81 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 			targetSizes[i] = poolSize
 		}
 	}
+	return totalPools, targetSizes, nil
+}
 
+// realTargetSizes closes poolTargetSizes' own documented gap for min-mode
+// sizing (bc-dojo Phase 4, found while wiring BuildPoolPhaseTreeAware into
+// production: every gate/invariant sweep before this happened to build a
+// roster whose size was an exact multiple of poolSize, so the gap never
+// fired -- BuildPoolPhaseTreeAware(17 players, poolSize=4, isMax=false, ...)
+// returned "cannot place player: no pool has room" instead of the 5/4/4/4
+// split the old pipeline produces, because its one-pass placement enforces
+// poolTargetSizes' base row as a hard per-pool cap with no repair pass
+// behind it to catch the shortfall).
+//
+// base is poolTargetSizes' own return (or an equivalent uniform-minSize row,
+// for a caller like the fill-bracket phase that derives its pool count some
+// other way); numPlayers is the real roster size. When sum(base) already
+// equals numPlayers (max-mode, or a min-mode roster with no remainder) this
+// is a no-op.
+//
+// Otherwise the shortfall (always < len(base) for every caller in this
+// package: CreatePoolsForCount's own precondition bounds it directly, and
+// poolTargetSizes' uniform row bounds it to < poolSize, which callers here
+// only ever combine with a pool count derived so poolSize <= numPools) is
+// spread by SIMULATING assignPlayersToPools' own forcePoolSize fallback over
+// pool COUNTS -- forcePoolSizeFromCounts, the very walk CreatePools/
+// CreatePoolsForCount reach through forcePoolSize, rather than re-deriving its
+// outer-to-inner order a second time. This is safe to precompute, before any
+// real player exists, because that walk never reads a player's identity,
+// only pool LENGTHS against targetSizes, and every pool is providably at
+// its base size before assignPlayersToPools' normal fill (discoverPool /
+// leastConflictedPool) ever lets forcePoolSize fire at all: those two only
+// return -1, handing off to forcePoolSize, once EVERY pool has already
+// reached its own target -- so the remainder's landing pools depend only on
+// the shortfall COUNT, never on which players filled the base rows first.
+func realTargetSizes(base []int, numPlayers int) []int {
+	sum := 0
+	for _, s := range base {
+		sum += s
+	}
+	remainder := numPlayers - sum
+	if remainder <= 0 {
+		return base
+	}
+
+	counts := make([]int, len(base))
+	copy(counts, base)
+	for r := 0; r < remainder; r++ {
+		counts[forcePoolSizeFromCounts(counts, base)]++
+	}
+	return counts
+}
+
+func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
+	_, targetSizes, err := poolTargetSizes(len(players), poolSize, isMax)
+	if err != nil {
+		return nil, err
+	}
 	return assignPlayersToPools(players, targetSizes), nil
+}
+
+// poolPositionName is the "Pool A".."Pool Z", then "Pool AA", "Pool BB", ...
+// naming assignPlayersToPools gives the pool at position i (0-based),
+// exposed as its own function so a caller that needs to name a pool by
+// position WITHOUT going through assignPlayersToPools -- Phase 1's
+// poolQualifierPaths seam builds placeholder pools before any player
+// exists -- uses the identical scheme rather than a second copy that could
+// drift from it. assignPlayersToPools is under a hard "do not modify"
+// constraint for bc-dojo, so its own naming loop is left as it is rather
+// than rewritten to call this; the two are pinned equal by test.
+func poolPositionName(i int) string {
+	char := string(rune('A' + i%26))
+	if i > 25 {
+		char = char + char
+	}
+	return fmt.Sprintf("Pool %s", char)
 }
 
 // CreatePoolsForCount is CreatePools with the pool COUNT supplied directly
@@ -444,28 +555,39 @@ func CreatePoolsForCount(players []Player, poolSize, totalPools int) ([]Pool, er
 // assignPlayersToPools is CreatePools' and CreatePoolsForCount's shared
 // assignment body: given the target size for each of len(targetSizes)
 // pools, distribute players into them avoiding dojo/name conflicts where
-// possible, falling back to forceSameDojo then forcePoolSize when a
+// possible, falling back to leastConflictedPool then forcePoolSize when a
 // conflict-free placement does not exist, and name the pools alphabetically
 // in the order they end up in. Extracted so the two callers cannot drift on
 // how a remainder is spread; only what pool COUNT and target sizes they hand
 // in differs.
+//
+// This used to end with a dojo-rebalancing repair pass (since deleted):
+// swapping unseeded competitors afterwards to break up same-dojo pairings
+// the greedy fill could not avoid at the time it placed them. The
+// region-aware rebuild (bc-dojo Phase 4)
+// subsumed it: BuildPoolPhase and BuildPoolPhaseFillBracket no longer route
+// through this function at all (both now delegate to the tree-aware
+// distributor, whose single forward pass gets dojo placement right without
+// needing a second pass to fix it), and this function's only remaining
+// production caller (the schedule estimator's synthetic roster,
+// internal/helper/estimate.go) and its own direct test callers all use
+// UNIQUE-dojo rosters, where the repair pass was already provably a no-op
+// (nothing to rebalance). Removing it changes none of their output.
 func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	totalPools := len(targetSizes)
 	pools := make([]Pool, totalPools)
 
-	// Per-pool sets for O(1) dojo-conflict and duplicate-name detection.
+	// Per-pool sets for O(1) dojo-conflict detection.
 	dojoSets := make([]map[string]bool, totalPools)
-	nameSets := make([]map[string]bool, totalPools)
 	for i := range dojoSets {
 		dojoSets[i] = make(map[string]bool)
-		nameSets[i] = make(map[string]bool)
 	}
 
 	for i, player := range players {
-		poolN := discoverPool(pools, dojoSets, nameSets, player, targetSizes, i%totalPools)
-		// try and force same dojo
+		poolN := discoverPool(pools, dojoSets, player, targetSizes, i%totalPools)
+		// no conflict-free pool available: pick the least-conflicted one
 		if poolN < 0 {
-			poolN = forceSameDojo(pools, targetSizes)
+			poolN = leastConflictedPool(pools, targetSizes, player.Dojo)
 		}
 
 		// try and force pool size
@@ -475,7 +597,6 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
 		dojoSets[poolN][player.Dojo] = true
-		nameSets[poolN][player.Name] = true
 	}
 
 	for i := 0; i < len(pools); i++ {
@@ -489,7 +610,21 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	return pools
 }
 
-func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {
+// discoverPool returns the first pool, scanning from startIndex, that has room
+// and holds nobody from the player's dojo, or -1 when no such pool exists (the
+// caller then falls back to leastConflictedPool).
+//
+// Sharing a NAME is deliberately not a conflict. Two competitors can only share
+// a name when their dojos differ, because a second entry with the same name AND
+// dojo is refused as a duplicate of the same person, so namesakes are distinct
+// people who may fight in one pool; they are told apart on the sheet by dojo and
+// by competitor number. This function used to reject a same-name pool as well,
+// which was measured to change nothing: across 414 pool shapes built from
+// rosters of same-name pairs, dropping the name test moved no competitor,
+// because PoolSeeding's dojo clustering and the rotating start already separate
+// them. It is dropped rather than kept as a no-op so the draw has one stated
+// separation rule instead of a second, silent one.
+func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {
 	totalPools := len(pools)
 	if totalPools == 0 {
 		return -1
@@ -503,8 +638,8 @@ func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Pla
 			continue
 		}
 
-		// O(1): reject if dojo or name already present in this pool
-		if dojoSets[curr][player.Dojo] || nameSets[curr][player.Name] {
+		// O(1): reject if this dojo is already present in the pool
+		if dojoSets[curr][player.Dojo] {
 			continue
 		}
 
@@ -515,25 +650,74 @@ func discoverPool(pools []Pool, dojoSets, nameSets []map[string]bool, player Pla
 	return -1
 }
 
-func forceSameDojo(pools []Pool, targetSizes []int) int {
-	for i, pool := range pools {
-		if len(pool.Players) < targetSizes[i] {
-			return i
+// countDojoInPool returns how many of pool's competitors are from dojo. Shared
+// by the fallback that chooses where an unplaceable competitor goes and by the
+// repair pass that swaps competitors afterwards, so the two can never disagree
+// about what "how many of this dojo are here" means -- if dojo comparison ever
+// needs normalizing, this is the one place it changes.
+func countDojoInPool(pool Pool, dojo string) int {
+	n := 0
+	for _, pl := range pool.Players {
+		if pl.Dojo == dojo {
+			n++
 		}
 	}
-	return -1
+	return n
 }
 
-func forcePoolSize(pools []Pool, targetSizes []int) int {
+// leastConflictedPool is assignPlayersToPools' first fallback, reached when
+// discoverPool finds no conflict-free pool for a player (a dojo conflict OR
+// a name conflict against every pool with room). Among the pools that still
+// have room, it picks the one holding the FEWEST players already sharing the
+// incoming player's dojo, tie-broken by fewest players overall, then by
+// lowest index. The strict "<" comparisons (rather than "<=") keep the
+// lowest-index pool on a tie, which is what makes the output deterministic.
+//
+// It is deliberately name-conflict-blind: it only ranks by dojo count, so a
+// name collision alone does not influence which pool is chosen. Returns -1
+// if no pool has room.
+func leastConflictedPool(pools []Pool, targetSizes []int, dojo string) int {
+	best := -1
+	bestDojo, bestSize := 0, 0
+	for i, pool := range pools {
+		if len(pool.Players) >= targetSizes[i] {
+			continue
+		}
+		n := countDojoInPool(pool, dojo)
+		if best < 0 || n < bestDojo || (n == bestDojo && len(pool.Players) < bestSize) {
+			best, bestDojo, bestSize = i, n, len(pool.Players)
+		}
+	}
+	return best
+}
 
-	for i, j := 0, len(pools)-1; i <= j; i, j = i+1, j-1 {
-		if len(pools[i].Players) < targetSizes[i]+1 {
+// forcePoolSize picks the pool an overflow player lands in, walking the pools
+// outer to inner and taking the first with room for one over its target. It
+// reads pool LENGTHS and nothing else, which is what lets realTargetSizes
+// precompute the same landing order before any player exists.
+func forcePoolSize(pools []Pool, targetSizes []int) int {
+	counts := make([]int, len(pools))
+	for i := range pools {
+		counts[i] = len(pools[i].Players)
+	}
+	return forcePoolSizeFromCounts(counts, targetSizes)
+}
+
+// forcePoolSizeFromCounts is that rule expressed over the pool sizes alone, so
+// a caller holding only counts does not have to fabricate players to ask it.
+// realTargetSizes used to do exactly that: it built a placeholder Pool per pool
+// and filled it with one zero-value Player per seat, purely so it could call
+// forcePoolSize and then read the lengths straight back out. That allocation
+// scaled with the entry count for no reason, and read to CodeQL as an
+// allocation sized by request-derived input (go/uncontrolled-allocation-size).
+// One walk, two entry points, so the two cannot drift.
+func forcePoolSizeFromCounts(counts, targetSizes []int) int {
+	for i, j := 0, len(counts)-1; i <= j; i, j = i+1, j-1 {
+		if counts[i] < targetSizes[i]+1 {
 			return i
 		}
-		if i != j {
-			if len(pools[j].Players) < targetSizes[j]+1 {
-				return j
-			}
+		if i != j && counts[j] < targetSizes[j]+1 {
+			return j
 		}
 	}
 	return 0
@@ -708,6 +892,20 @@ func playerCoordKey(p Player) string {
 	return p.Name + "|" + p.DisplayName + "|" + p.Dojo
 }
 
+// ConvertPlayersToWinners maps a competitor's DISPLAYED name to the data-sheet
+// cell the tree formula concatenates.
+//
+// Known and deliberate: the returned map is keyed by name, so two competitors
+// who share a name (legal when their dojos differ) collapse to one entry. That
+// is safe HERE, and only here, because the cell being referenced holds the
+// player's NAME (column B, see dataColumnLayout.writePlayer) -- both namesakes
+// resolve to a cell containing the same string, so the rendered bracket is
+// identical either way. The lookup key would have to become an identity, and
+// the tree would have to carry that identity instead of a bare name, for a
+// difference nobody can see. If this map is ever pointed at a cell that
+// differs BETWEEN two namesakes -- the competitor number is the obvious
+// candidate, numberCell is already on playerCellCoord -- that reasoning
+// expires and the key must become helper.CompetitorKey.
 func ConvertPlayersToWinners(players []Player, sanitized bool, pCoords map[string]playerCellCoord) map[string]MatchWinner {
 	matchWinners := make(map[string]MatchWinner, len(players))
 	for _, player := range players {

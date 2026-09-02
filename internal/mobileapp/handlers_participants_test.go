@@ -1506,3 +1506,135 @@ func TestParticipant500ErrorsAreSanitized(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateParticipant_BlankDojo400 pins the endpoint contract: a blank dojo
+// on the single-participant PUT answers 400, not 500.
+//
+// What it does NOT pin, stated so nobody reads more into it: the 400 comes
+// from this handler's own inline dojo check, which fires before the store is
+// touched, so the test still passes with the state-layer sentinel's case
+// removed from the transaction closure's switch (verified by removing it).
+// That case is defence in depth for a caller that reaches UpdateParticipant
+// without the inline check, and it is deliberately unpinned here because no
+// request can currently produce it. The reason it is there at all: the first
+// version of this classification sat OUTSIDE the closure, reading an `err`
+// the closure had shadowed and which was always nil by that point, while the
+// closure's switch carried no case for the sentinel -- so had the inline
+// check ever been removed, the failure would have surfaced as a 500.
+func TestUpdateParticipant_BlankDojo400(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	compID := "blank-dojo-put"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Blank Dojo PUT", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Wakaba"},
+	}))
+	stored, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+
+	body, _ := json.Marshal(map[string]interface{}{"name": "Alice", "dojo": "   "})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+stored[0].ID, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"a blank dojo on the single-participant PUT is the client's error, not a server fault")
+	assert.Contains(t, w.Body.String(), "dojo")
+}
+
+// writeLegacyRosterCSV writes a genuine legacy (UUID-less) participants.csv
+// straight to disk, bypassing every store write path. This is deliberate:
+// SaveParticipants/AddParticipant all enforce the ErrBlankDojo floor
+// (saveParticipantsNoLock), so a blank-dojo row can never be produced by
+// calling them -- the only way to get one onto disk (as a hand-edited or
+// pre-fix file would) is to write the CSV bytes directly. LoadParticipants'
+// non-zekken parse branch (helper.CreatePlayersFromRecords) does not validate
+// dojo on read, only on write, so this file loads cleanly; the very next
+// write attempt against this roster is what must be refused.
+func writeLegacyRosterCSV(t *testing.T, tempDir, compID, csv string) {
+	t.Helper()
+	dir := filepath.Join(tempDir, "competitions", compID)
+	require.NoError(t, os.MkdirAll(dir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "participants.csv"), []byte(csv), 0600))
+}
+
+// TestCheckIn_BlankDojoElsewhereInRoster_Returns400 pins the FIX 3 contract:
+// every participant write funnels through saveParticipantsNoLock's blank-dojo
+// floor (ErrBlankDojo's own doc: "until the blank dojo is fixed, ANY save
+// touching that roster is refused, including a check-in"), so a pre-existing
+// blank-dojo row belonging to a DIFFERENT participant must turn a check-in of
+// an otherwise-fine participant into a 400 naming the offending row, not an
+// opaque 500. Covers all three check-in paths: PUT checkin, DELETE checkin,
+// and POST checkin-bulk.
+func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
+	t.Run("PUT checkin", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		compID := "checkin-blank-dojo-put"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "Checkin Blank Dojo PUT", Status: state.CompStatusSetup,
+		}))
+		// Alice is a perfectly fine row; Charlie carries a blank dojo. Both
+		// on the SAME roster, so checking Alice in still has to rewrite the
+		// whole file -- and the floor guard fires on Charlie's row, not
+		// Alice's.
+		writeLegacyRosterCSV(t, tempDir, compID, "Alice,DojoA\nCharlie,\n")
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/Alice|DojoA/checkin", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"a pre-existing blank-dojo row elsewhere in the roster must 400, not 500")
+		assert.Contains(t, w.Body.String(), "Charlie",
+			"the error must name the offending participant, not just say 'internal error'")
+
+		// The refused write must leave the file untouched: Alice must still
+		// read back as NOT checked in.
+		players, err := store.LoadParticipants(compID, false)
+		require.NoError(t, err)
+		for _, p := range players {
+			if p.Name == "Alice" {
+				assert.False(t, p.CheckedIn, "a refused write must not have landed")
+			}
+		}
+	})
+
+	t.Run("DELETE checkin", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		compID := "checkin-blank-dojo-delete"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "Checkin Blank Dojo DELETE", Status: state.CompStatusSetup,
+		}))
+		writeLegacyRosterCSV(t, tempDir, compID, "Alice,DojoA,checked_in\nCharlie,\n")
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/api/competitions/"+compID+"/participants/Alice|DojoA/checkin", nil)
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"a pre-existing blank-dojo row elsewhere in the roster must 400, not 500")
+		assert.Contains(t, w.Body.String(), "Charlie")
+	})
+
+	t.Run("POST checkin-bulk", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		compID := "checkin-blank-dojo-bulk"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: compID, Name: "Checkin Blank Dojo Bulk", Status: state.CompStatusSetup,
+		}))
+		writeLegacyRosterCSV(t, tempDir, compID, "Alice,DojoA\nBob,DojoB\nCharlie,\n")
+
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{"Alice|DojoA", "Bob|DojoB"}})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"BulkCheckIn hits the same floor guard and must not fall through to a generic 500")
+		assert.Contains(t, w.Body.String(), "Charlie")
+	})
+}

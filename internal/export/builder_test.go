@@ -584,8 +584,8 @@ func TestStandingMap(t *testing.T) {
 	t.Parallel()
 	// Legacy state without UUIDs: keyed by name.
 	standings := []state.PlayerStanding{
-		{Player: domain.Player{Name: "Alice"}, Rank: 1},
-		{Player: domain.Player{Name: "Bob"}, Rank: 2},
+		{Player: domain.Player{Name: "Alice", Dojo: "Dojo Alice"}, Rank: 1},
+		{Player: domain.Player{Name: "Bob", Dojo: "Dojo Bob"}, Rank: 2},
 	}
 	m := standingMap(standings)
 	assert.Len(t, m, 2)
@@ -607,8 +607,8 @@ func TestStandingMap_SameNameKeyedByID(t *testing.T) {
 	assert.Equal(t, 1, m["id-1"].Rank)
 	assert.Equal(t, 4, m["id-2"].Rank)
 	// standingKey prefers ID, falls back to name.
-	assert.Equal(t, "id-1", standingKey(helper.Player{ID: "id-1", Name: "Sam"}))
-	assert.Equal(t, "Legacy", standingKey(helper.Player{Name: "Legacy"}))
+	assert.Equal(t, "id-1", standingKey(helper.Player{ID: "id-1", Name: "Sam", Dojo: "Dojo Sam"}))
+	assert.Equal(t, "Legacy", standingKey(helper.Player{Name: "Legacy", Dojo: "Dojo Legacy"}))
 }
 
 // TestAttachPoolMatches_SkipsUnresolvableSide is the regression test for the nil
@@ -649,7 +649,7 @@ func TestAttachPoolMatches_MiddleSkipPreservesOrdinals(t *testing.T) {
 	pools := []helper.Pool{{
 		PoolName: "Pool A",
 		Players: []helper.Player{
-			{ID: "id-1", Name: "Ann"}, {ID: "id-2", Name: "Bea"}, {ID: "id-3", Name: "Cid"},
+			{ID: "id-1", Name: "Ann", Dojo: "Dojo Ann"}, {ID: "id-2", Name: "Bea", Dojo: "Dojo Bea"}, {ID: "id-3", Name: "Cid", Dojo: "Dojo Cid"},
 		},
 	}}
 	results := []state.MatchResult{

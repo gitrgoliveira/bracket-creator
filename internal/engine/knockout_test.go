@@ -62,12 +62,12 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 	compID := "incremental"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 
 	// Pool A round-robin done (A1 > A2); Pool B still scheduled.
@@ -119,12 +119,12 @@ func TestResolveQualifiedPools_ReSeedAfterRescore(t *testing.T) {
 	compID := "reseed"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 
 	// Record the placeholder slot positions BEFORE any resolution so we can assert
@@ -186,12 +186,12 @@ func TestResolveQualifiedPools_LonePoolNoMatches(t *testing.T) {
 	compID := "lone-pool"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}}}, // lone qualifier, no matches
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}}}, // lone qualifier, no matches
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"},
 	}))
 	// Only Pool A has a match; Pool B has none (size 1).
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
@@ -222,12 +222,12 @@ func TestResolveQualifiedPools_DegeneratePoolClampsBye(t *testing.T) {
 	// Pool A has 2 players (normal), Pool B has 1 player (degenerate when
 	// poolWinners=2: can only supply a 1st-place finisher, not a 2nd).
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
@@ -290,13 +290,13 @@ func TestResolveQualifiedPools_CrossSeedOrder(t *testing.T) {
 	compID := "crossseed"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "A3", Dojo: "Dojo A3"}, {Name: "A4", Dojo: "Dojo A4"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}, {Name: "B3", Dojo: "Dojo B3"}, {Name: "B4", Dojo: "Dojo B4"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "A3"}, {Name: "A4"},
-		{Name: "B1"}, {Name: "B2"}, {Name: "B3"}, {Name: "B4"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "A3", Dojo: "Dojo A3"}, {Name: "A4", Dojo: "Dojo A4"},
+		{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}, {Name: "B3", Dojo: "Dojo B3"}, {Name: "B4", Dojo: "Dojo B4"},
 	}))
 
 	win := func(id, a, b, w string) state.MatchResult {
@@ -333,13 +333,13 @@ func TestResolveQualifiedPools_ByeWinnerField(t *testing.T) {
 	compID := "bye"
 
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
-		{PoolName: "Pool C", Players: []helper.Player{{Name: "C1"}, {Name: "C2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
+		{PoolName: "Pool C", Players: []helper.Player{{Name: "C1", Dojo: "Dojo C1"}, {Name: "C2", Dojo: "Dojo C2"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"}, {Name: "C1"}, {Name: "C2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}, {Name: "C1", Dojo: "Dojo C1"}, {Name: "C2", Dojo: "Dojo C2"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
@@ -460,12 +460,12 @@ func TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mixed-running"
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
@@ -486,12 +486,12 @@ func TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mixed-flip"
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1"}, {Name: "A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1"}, {Name: "B2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1"}, {Name: "A2"}, {Name: "B1"}, {Name: "B2"},
+		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
@@ -541,7 +541,7 @@ func TestGeneratePools_MixedRequiresTwoPools(t *testing.T) {
 		PoolSize: 10, PoolSizeMode: "max", PoolWinners: 2,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dan"}, {Name: "Eve"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Carol", Dojo: "Dojo Carol"}, {Name: "Dan", Dojo: "Dojo Dan"}, {Name: "Eve", Dojo: "Dojo Eve"},
 	}))
 	err := eng.GenerateDraw(compID)
 	require.Error(t, err)
@@ -567,7 +567,7 @@ func TestGeneratePools_MixedRejectsUnderfilledPool(t *testing.T) {
 	}))
 	// 5 participants @ PoolSize=2 (max) → at least one pool of size 1.
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"}, {Name: "Carol"}, {Name: "Dan"}, {Name: "Eve"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Carol", Dojo: "Dojo Carol"}, {Name: "Dan", Dojo: "Dojo Dan"}, {Name: "Eve", Dojo: "Dojo Eve"},
 	}))
 	err := eng.GenerateDraw(compID)
 	require.Error(t, err)
@@ -594,9 +594,9 @@ func unbalancedPools(n int) ([]helper.Pool, []domain.Player, []state.MatchResult
 		name := "Pool " + letter
 		pools = append(pools, helper.Pool{
 			PoolName: name,
-			Players:  []helper.Player{{Name: first}, {Name: second}},
+			Players:  []helper.Player{{Name: first, Dojo: "Dojo " + first}, {Name: second, Dojo: "Dojo " + second}},
 		})
-		participants = append(participants, domain.Player{Name: first}, domain.Player{Name: second})
+		participants = append(participants, domain.Player{Name: first, Dojo: "Dojo " + first}, domain.Player{Name: second, Dojo: "Dojo " + second})
 		results = append(results, state.MatchResult{
 			ID: name + "-0", SideA: first, SideB: second, Winner: first,
 			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,

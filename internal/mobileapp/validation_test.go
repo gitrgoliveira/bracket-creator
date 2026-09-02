@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
@@ -1838,4 +1839,18 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "daihyosen representative bout")
 	})
+}
+
+// TestMaxLenCompetitionNumberPrefixMatchesHelper pins F12 (bc-pnum review):
+// helper.DefaultNumberPrefix's own length cap (helper.MaxNumberPrefixLen)
+// must never propose a value MaxLenCompetitionNumberPrefix (this package's
+// length validator, validateMaxLen("numberPrefix", ...)) would then reject --
+// helper cannot import mobileapp to share one constant, so the two are
+// documented as matching (assignDefaultNumberPrefix's doc comment,
+// helper.MaxNumberPrefixLen's doc comment) rather than defined once. A
+// constant-equality assertion is what keeps a future edit to either one from
+// silently drifting the pair apart.
+func TestMaxLenCompetitionNumberPrefixMatchesHelper(t *testing.T) {
+	assert.Equal(t, helper.MaxNumberPrefixLen, MaxLenCompetitionNumberPrefix,
+		"helper.MaxNumberPrefixLen and mobileapp.MaxLenCompetitionNumberPrefix must stay in lockstep: a derived prefix must never exceed the length this package's own validator enforces")
 }

@@ -12,8 +12,11 @@ package helper
 // the two endpoints who get one each.
 //
 // Pre-condition: pools[i].Players must be sorted in the order the
-// pairings should follow (typically seed/rank order, the caller in
-// engine/pools.go applies PoolSeeding before passing them in).
+// pairings should follow (typically seed/rank order for the seeded
+// members). engine/pools.go's caller gets that ordering from
+// BuildPoolPhaseTreeAwareWithMode's own placement pipeline (seeds placed
+// first by rank, pool_distribution_tree_aware.go) -- PoolSeeding itself has
+// no production callers.
 func CreatePartialPoolMatches(pools []Pool) {
 	for i := range pools {
 		p := &pools[i]

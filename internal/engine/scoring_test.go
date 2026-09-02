@@ -145,7 +145,7 @@ func TestScoreSummary_Individual(t *testing.T) {
 	compID := "ind-summary"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Ind", TeamSize: 0}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "Alice"}, {Name: "Bob"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
@@ -181,7 +181,7 @@ func TestScoreSummary_Team(t *testing.T) {
 	compID := "team-summary"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Team", TeamSize: 3}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
@@ -224,7 +224,7 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{
@@ -283,7 +283,7 @@ func TestTeamStandings_PlaceholderIpponsDontInflatePoints(t *testing.T) {
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{

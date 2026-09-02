@@ -34,10 +34,10 @@ func TestPoolStandings_TiedPlayersDeterministicOrder(t *testing.T) {
 		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
 	}))
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Zeta"}, {Name: "Alpha"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Zeta", Dojo: "Dojo Zeta"}, {Name: "Alpha", Dojo: "Dojo Alpha"}}},
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Zeta"}, {Name: "Alpha"},
+		{Name: "Zeta", Dojo: "Dojo Zeta"}, {Name: "Alpha", Dojo: "Dojo Alpha"},
 	}))
 	// A draw with no ippons: both finish W:0 L:0 D:1, P:0-0, so they tie on every
 	// criterion and no bout separates them.

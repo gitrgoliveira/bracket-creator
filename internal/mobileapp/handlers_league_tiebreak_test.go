@@ -943,7 +943,7 @@ func TestLeagueTiebreakPost_DuplicateNames(t *testing.T) {
 	}
 	// Add a third team so {A,A,B} (len 3) would have matched a 3-team group
 	// under the old raw-len comparison.
-	candidates[0].Teams = append(candidates[0].Teams, state.PlayerStanding{Player: domain.Player{Name: "Team C"}})
+	candidates[0].Teams = append(candidates[0].Teams, state.PlayerStanding{Player: domain.Player{Name: "Team C", Dojo: "Dojo Team C"}})
 	candidates[0].MaxPosition = 3
 	eng := &stubLeagueTiebreakEngine{candidates: candidates}
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}

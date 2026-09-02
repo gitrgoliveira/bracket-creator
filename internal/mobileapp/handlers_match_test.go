@@ -822,7 +822,7 @@ func TestQuickScoreHandler(t *testing.T) {
 		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
 	})
 	store.SavePools("c1", []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
 	})
 
 	t.Run("team A wins", func(t *testing.T) {
@@ -1259,7 +1259,7 @@ func TestScoreHandlers_RejectSideMismatch(t *testing.T) {
 
 	store.SaveCompetition(&state.Competition{ID: "c1", Courts: []string{"A"}})
 	store.SavePools("c1", []helper.Pool{
-		{PoolName: "PoolE", Players: []helper.Player{{Name: "Benjamin Evans"}, {Name: "Sebastian Allen"}}},
+		{PoolName: "PoolE", Players: []helper.Player{{Name: "Benjamin Evans", Dojo: "Dojo Benjamin Evans"}, {Name: "Sebastian Allen", Dojo: "Dojo Sebastian Allen"}}},
 	})
 	store.SavePoolMatches("c1", []state.MatchResult{
 		{ID: "PoolE-0", SideA: "Benjamin Evans", SideB: "Sebastian Allen", Status: state.MatchStatusScheduled},
@@ -1640,7 +1640,7 @@ func TestScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveParticipants("pools1", []domain.Player{
-		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
+		{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}, {Name: "P3", Dojo: "Dojo P3"},
 	}))
 	require.NoError(t, store.SavePoolMatches("pools1", []state.MatchResult{
 		{ID: "PoolA-1", SideA: "P1", SideB: "P2"},
@@ -1724,7 +1724,7 @@ func TestBulkScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		ID: "bulk1", Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants("bulk1", []domain.Player{
-		{Name: "P1"}, {Name: "P2"}, {Name: "P3"},
+		{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}, {Name: "P3", Dojo: "Dojo P3"},
 	}))
 	require.NoError(t, store.SavePoolMatches("bulk1", []state.MatchResult{
 		{ID: "PoolA-1", SideA: "P1", SideB: "P2"},
@@ -1775,7 +1775,7 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 		ID: "qs1", Format: state.CompFormatLeague, Status: state.CompStatusPools, TeamSize: 3,
 	}))
 	require.NoError(t, store.SavePools("qs1", []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA"}, {Name: "TeamB"}, {Name: "TeamC"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}, {Name: "TeamC", Dojo: "Dojo TeamC"}}},
 	}))
 	require.NoError(t, store.SavePoolMatches("qs1", []state.MatchResult{
 		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
@@ -1850,7 +1850,7 @@ func TestPostScoreKikenAutoFillsRegulation(t *testing.T) {
 		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
@@ -1891,7 +1891,7 @@ func TestPostScoreKikenInEncho(t *testing.T) {
 		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
@@ -1931,7 +1931,7 @@ func TestPostScoreKikenInvalidScoreline(t *testing.T) {
 		ID: compID, Format: state.CompFormatMixed, Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
@@ -2217,7 +2217,7 @@ func setupSelfRunScoreRouter(t *testing.T, mainPw string) (*gin.Engine, *state.S
 		Status: state.CompStatusPools,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "Alice"}, {Name: "Bob"},
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},
@@ -2609,7 +2609,7 @@ func TestSelfRunScoreHandler(t *testing.T) {
 			Status: state.CompStatusPools,
 		}))
 		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-			{Name: "Alice"}, {Name: "Bob"},
+			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
 		}))
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
 			{ID: "PoolA-1", SideA: "Alice", SideB: "Bob"},

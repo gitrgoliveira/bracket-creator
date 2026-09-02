@@ -142,6 +142,18 @@ type drawShapeCase struct {
 	// (draw_court_mapping_test.go). Dropping it changed no bytes in the golden,
 	// because pageCourtMismatch is empty in every case.
 	PageCourtMismatch []drawPageMismatch `json:"pageCourtMismatch"`
+
+	// DojoPerPoolCounts / MaxSameDojoCount / SingleDojoPools capture pool
+	// COMPOSITION rather than draw shape, and are populated ONLY for the
+	// "dojo/..." cases (bc-dojo: the pool-assignment fallback fix). Those
+	// cases thread a roster that deliberately oversubscribes one dojo through
+	// the SAME CreatePools -> BuildKnockoutDraw pipeline as every other case.
+	// The regular unique-dojo sweep never populates these (every player has a
+	// distinct dojo, so there is nothing to oversubscribe), and omitempty
+	// keeps that existing 132-case block byte-identical.
+	DojoPerPoolCounts []int    `json:"dojoPerPoolCounts,omitempty"`
+	MaxSameDojoCount  int      `json:"maxSameDojoCount,omitempty"`
+	SingleDojoPools   []string `json:"singleDojoPools,omitempty"`
 }
 
 type drawShapePage struct {
@@ -220,6 +232,114 @@ func drawShapeKey(numPools, poolWinners, courts int) string {
 	return fmt.Sprintf("P%02d-W%d-C%d", numPools, poolWinners, courts)
 }
 
+// drawGoldenDojoName is the dojo name used by every "dojo/..." golden case
+// (bc-dojo). It never collides with drawGoldenRoster's per-player "Dojo NNN"
+// names, so a case built from drawGoldenDojoRoster can never accidentally
+// pick up an unrelated player as a same-dojo match.
+const drawGoldenDojoName = "Oversubscribed Dojo"
+
+// drawGoldenDojoPoolWinners is the qualifiers-per-pool value used by every
+// "dojo/..." case. These cases exist to characterize POOL COMPOSITION under
+// an oversubscribed dojo (bc-dojo), not to sweep the knockout draw, so a
+// single fixed value is enough to keep the case a valid drawShapeCase.
+const drawGoldenDojoPoolWinners = 2
+
+// drawGoldenDojoRoster builds a deterministic roster of `total` players where
+// `dojoSize` of them share dojoName, spread evenly through the roster at
+// pos[i] = i*(total-1)/(dojoSize-1) (reproducing the LC2026 adversarial
+// ordering for fixture realism). Every dojo/... case has dojoSize >
+// numPools, so CreatePools' leastConflictedPool fallback is unavoidable
+// regardless of input order here: grouping the oversubscribed dojo at the
+// front measures to the identical per-pool counts as this spread.
+//
+// This is a thin naming wrapper over newOversubscribedDojoRoster
+// (seed_test.go), the algorithm shared with buildOversubscribedDojoRoster.
+// The zero-padded "P%03d" names below are pinned byte-for-byte into
+// testdata/draw_shapes.json -- do not change the format without regenerating
+// (and reviewing) the golden.
+func drawGoldenDojoRoster(total, dojoSize int, dojoName string) []Player {
+	return newOversubscribedDojoRoster(total, dojoSize, dojoName,
+		func(i int) string { return fmt.Sprintf("%s P%03d", dojoName, i) },
+		func(i int) (name, dojo string) { return fmt.Sprintf("P%03d", i), fmt.Sprintf("Dojo %03d", i) },
+	)
+}
+
+// computeDojoOversubscriptionStats returns, for the given dojo, the per-pool
+// member count in pool order, the maximum such count in any one pool, and
+// the names of any multi-player pools whose members are ALL from dojo (via
+// the shared isSingleDojoPool, seed_test.go). Used only by the "dojo/..."
+// golden cases.
+func computeDojoOversubscriptionStats(pools []Pool, dojo string) (counts []int, maxCount int, singleDojoPools []string) {
+	counts = make([]int, len(pools))
+	for i, p := range pools {
+		n := countDojoInPool(p, dojo)
+		counts[i] = n
+		if n > maxCount {
+			maxCount = n
+		}
+		if isSingleDojoPool(p) {
+			singleDojoPools = append(singleDojoPools, p.PoolName)
+		}
+	}
+	return counts, maxCount, singleDojoPools
+}
+
+// dojoOversubscriptionCase describes one bc-dojo scenario: a roster where one
+// dojo has more members than there are pools, threaded through the same
+// CreatePools -> BuildKnockoutDraw pipeline as the regular sweep.
+type dojoOversubscriptionCase struct {
+	key      string
+	total    int
+	dojoSize int
+	poolSize int
+	courts   int
+}
+
+// drawSweepDojoCases covers the bead scenario plus variants: a bare +1
+// oversubscription (barely over one-per-pool), a deep 2x-pools
+// oversubscription, and a 1-court case (courts do not affect pool
+// composition, but the golden should show that explicitly rather than assume
+// it).
+var drawSweepDojoCases = []dojoOversubscriptionCase{
+	{key: "dojo/bead-scenario", total: 24, dojoSize: 10, poolSize: 4, courts: 2},
+	{key: "dojo/oversubscribed-by-one", total: 24, dojoSize: 7, poolSize: 4, courts: 2},
+	{key: "dojo/deep-oversubscription", total: 24, dojoSize: 12, poolSize: 4, courts: 2},
+	{key: "dojo/one-court", total: 24, dojoSize: 10, poolSize: 4, courts: 1},
+}
+
+// buildDrawShapeDojoCase runs one dojoOversubscriptionCase through
+// PoolSeeding -> CreatePools -> ReorderPoolsForCourts -- the real pool-phase
+// order BuildPoolPhase documents (PoolSeeding clusters by dojo BEFORE
+// CreatePools fills pools; ReorderPoolsForCourts runs after) -- and then the
+// shared buildDrawShapeCaseFromPools pipeline, before recording the dojo
+// composition stats onto the result. Unlike the regular sweep's synthetic
+// roster (unique dojo per player, so PoolSeeding's clustering is a no-op),
+// these cases deliberately oversubscribe one dojo, so skipping PoolSeeding
+// here would characterize CreatePools' fallback in isolation rather than the
+// guarantee the real draw actually gives an operator.
+func buildDrawShapeDojoCase(sc dojoOversubscriptionCase) drawShapeCase {
+	roster := drawGoldenDojoRoster(sc.total, sc.dojoSize, drawGoldenDojoName)
+
+	// BuildPoolPhase, not a hand-assembled PoolSeeding/CreatePools/
+	// ReorderPoolsForCourts sequence: it is the one function documented to
+	// get the order and the derived numPools/drawCourts right (its own doc
+	// comment names this exact drift as a repeat bug), so calling it here is
+	// what makes this case a faithful stand-in for BuildPoolPhase's real
+	// callers rather than a second hand-rolled copy that could silently
+	// diverge from it.
+	pools, drawCourts, err := BuildPoolPhase(roster, sc.poolSize, false, sc.courts)
+	if err != nil {
+		return drawShapeCase{Error: "BuildPoolPhase: " + err.Error()}
+	}
+
+	c := buildDrawShapeCaseFromPools(pools, len(roster), drawGoldenDojoPoolWinners, drawCourts)
+	if c.Error != "" {
+		return c
+	}
+	c.DojoPerPoolCounts, c.MaxSameDojoCount, c.SingleDojoPools = computeDojoOversubscriptionStats(pools, drawGoldenDojoName)
+	return c
+}
+
 // sortedUniquePoolNames extracts the pool name of every non-empty leaf value,
 // de-duplicated and sorted, so page contents never depend on traversal order.
 func sortedUniquePoolNames(leaves []string) []string {
@@ -240,19 +360,52 @@ func sortedUniquePoolNames(leaves []string) []string {
 	return out
 }
 
-// buildDrawShapeCase runs the real production pipeline for one combination.
-// Everything it records comes from exported helper functions, so the golden
-// tracks the shipped code rather than a re-implementation of it.
+// buildDrawShapeCase builds its pools directly from CreatePools -- no
+// PoolSeeding, no ReorderPoolsForCourts -- and hands them to
+// buildDrawShapeCaseFromPools. Production (cmd/create-pools.go,
+// internal/engine/pools.go) always builds pools via BuildPoolPhase, which
+// DOES run ReorderPoolsForCourts before anything drawn from the pools is
+// read. That is not a gap here: ReorderPoolsForCourts is a pure permutation
+// + rename (see its doc comment / helper.go) that never touches
+// pool.Players, so it cannot change anything this file characterizes --
+// leaves, byes, pagination -- only which pool NAME and INDEX a given
+// composition ends up under. CreatePools' own output is therefore a
+// faithful stand-in for what BuildKnockoutDraw draws in production, modulo
+// labelling. (The "dojo/..." cases below are different: their SUBJECT is
+// pool composition itself, so they run the full BuildPoolPhase-documented
+// order instead -- see buildDrawShapeDojoCase.) Everything this records
+// comes from exported helper functions, so the golden tracks the shipped
+// code rather than a re-implementation of it.
 func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
-	pools, err := CreatePools(drawGoldenRoster(numPools), drawGoldenPoolSize, true)
+	roster := drawGoldenRoster(numPools)
+	pools, err := CreatePools(roster, drawGoldenPoolSize, true)
 	if err != nil {
 		return drawShapeCase{Error: "CreatePools: " + err.Error()}
 	}
 	if len(pools) != numPools {
 		return drawShapeCase{Error: fmt.Sprintf("CreatePools produced %d pools, want %d", len(pools), numPools)}
 	}
+	return buildDrawShapeCaseFromPools(pools, len(roster), poolWinners, courts)
+}
 
-	c := drawShapeCase{RosterSize: drawGoldenRosterSize(numPools)}
+// buildDrawShapeCaseFromPools runs the knockout-draw half of the pipeline
+// (BuildKnockoutDraw -> TreeToLeafArray plus the page geometry) over
+// caller-supplied pools, in whatever order the caller already has them in.
+// Extracted from buildDrawShapeCase so the "dojo/..." oversubscription cases
+// (bc-dojo) can share it over a different roster -- and a REORDERED pool
+// set, see buildDrawShapeDojoCase -- without duplicating the draw-shape
+// computation.
+//
+// rosterSize is the caller's TRUE input count (the roster length BEFORE
+// CreatePools ran), not re-derived by summing pool.Players here: recording
+// the input count preserves the original cross-check a player-dropping
+// regression relied on -- if CreatePools silently dropped a player, the
+// recorded rosterSize would disagree with the sum of PoolSizes in the same
+// case, a reviewable diff. Re-deriving it as sum(len(p.Players)) would make
+// that class of bug invisible to this file by construction.
+func buildDrawShapeCaseFromPools(pools []Pool, rosterSize, poolWinners, courts int) drawShapeCase {
+	numPools := len(pools)
+	c := drawShapeCase{RosterSize: rosterSize}
 	for _, p := range pools {
 		c.PoolNames = append(c.PoolNames, p.PoolName)
 		c.PoolSizes = append(c.PoolSizes, len(p.Players))
@@ -271,9 +424,12 @@ func buildDrawShapeCase(numPools, poolWinners, courts int) drawShapeCase {
 	c.NumEntrants = numPools * poolWinners
 	c.DrawCourts = draw.NumCourts()
 
-	// NOTE: the engine does NOT call ReorderPoolsForCourts (bc-draw Phase 2a),
-	// so the golden does not either. AssignPoolsToCourts therefore sees the
-	// raw pool order, which is what makes the court blocks contiguous. It is
+	// AssignPoolsToCourts assumes CONTIGUOUS per-court pool blocks. The
+	// regular sweep hands it CreatePools' own sequential output directly
+	// (see buildDrawShapeCase's doc comment for why that is still a
+	// faithful stand-in for production); the dojo cases hand it pools
+	// already passed through ReorderPoolsForCourts, whose whole job is
+	// making an arbitrary pool order contiguous per court. Either way it is
 	// read back with the draw's OWN court count, which is what the draw
 	// allocated against.
 	assignments, err := AssignPoolsToCourts(numPools, c.DrawCourts)
@@ -378,12 +534,30 @@ func buildDrawShapesGolden() drawShapesGolden {
 			"or pagination shows up here as a reviewable diff, and a change that",
 			"was not intended is a regression. Do not hand-edit a value.",
 			"",
-			"What each case captures, for one (pool count, qualifiers per pool,",
-			"shiaijo count) combination, from the live pipeline",
-			"BuildKnockoutDraw -> TreeToLeafArray plus the TreePageLayout /",
-			"SubdivideRegions page geometry. Pools come from helper.CreatePools",
-			"over a synthetic roster with one dojo per player, sized so every case",
-			"mixes 4-player and 3-player pools (see drawGoldenRosterSize).",
+			"What each REGULAR (P<n>-W<n>-C<n> keyed) case captures, for one",
+			"(pool count, qualifiers per pool, shiaijo count) combination, from",
+			"the live pipeline BuildKnockoutDraw -> TreeToLeafArray plus the",
+			"TreePageLayout / SubdivideRegions page geometry. Pools come from",
+			"helper.CreatePools over a synthetic roster with one dojo per player,",
+			"sized so every case mixes 4-player and 3-player pools (see",
+			"drawGoldenRosterSize).",
+			"",
+			"A second case family, keyed \"dojo/...\", exists for bc-dojo (the",
+			"pool-assignment fallback fix): a roster that deliberately",
+			"oversubscribes ONE dojo (more members than there are pools), run",
+			"through helper.BuildPoolPhase's full documented order --",
+			"PoolSeeding -> CreatePools -> ReorderPoolsForCourts -- because their",
+			"SUBJECT is pool COMPOSITION, i.e. the guarantee an operator actually",
+			"receives, not draw shape (unlike the regular sweep, where",
+			"ReorderPoolsForCourts is skipped because it is a pure permutation +",
+			"rename that cannot change a case's recorded shape). These cases add",
+			"three fields the regular sweep never populates (empty/zero there,",
+			"omitted by the JSON encoding so the 132 regular cases are",
+			"unaffected): dojoPerPoolCounts (the oversubscribed dojo's per-pool",
+			"member count, in pool order), maxSameDojoCount (the largest such",
+			"count in any one pool), and singleDojoPools (the names of any",
+			"multi-player pool whose members are ALL that one dojo -- there",
+			"should never be any, post-fix).",
 			"",
 			"IT USED TO PIN FOUR DEFECTS. They are recorded here because the file",
 			"is read side by side with its predecessor:",
@@ -436,6 +610,9 @@ func buildDrawShapesGolden() drawShapesGolden {
 				g.Cases[drawShapeKey(numPools, poolWinners, courts)] = buildDrawShapeCase(numPools, poolWinners, courts)
 			}
 		}
+	}
+	for _, sc := range drawSweepDojoCases {
+		g.Cases[sc.key] = buildDrawShapeDojoCase(sc)
 	}
 	return g
 }

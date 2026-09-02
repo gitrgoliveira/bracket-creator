@@ -22,9 +22,9 @@ import (
 func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 	t.Run("no-op when numberPrefix is empty", func(t *testing.T) {
 		comp := &state.Competition{
-			Players: []domain.Player{{ID: "p1", Name: "Tanaka"}},
+			Players: []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
-		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1"}}}}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
 		mergePoolNumbersIntoPlayers(comp, pools)
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
@@ -33,7 +33,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka"}},
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)
 		assert.Equal(t, "", comp.Players[0].Number)
@@ -44,9 +44,9 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			NumberPrefix: "D",
 			Format:       state.CompFormatPlayoffs,
 			Players: []domain.Player{
-				{ID: "p1", Name: "Rossi Marco"},
-				{ID: "p2", Name: "Dubois Claire"},
-				{ID: "p3", Name: "Santos Ana"},
+				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
+				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
+				{ID: "p3", Name: "Santos Ana", Dojo: "Dojo Santos Ana"},
 			},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)
@@ -59,7 +59,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
 			Format:       state.CompFormatPlayoffs,
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING"}},
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
@@ -69,18 +69,18 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Players: []domain.Player{
-				{ID: "p1", Name: "Tanaka"},
-				{ID: "p2", Name: "Suzuki"},
-				{ID: "p3", Name: "Yamada"},
+				{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"},
+				{ID: "p2", Name: "Suzuki", Dojo: "Dojo Suzuki"},
+				{ID: "p3", Name: "Yamada", Dojo: "Dojo Yamada"},
 			},
 		}
 		pools := []helper.Pool{
 			{PoolName: "Pool A", Players: []domain.Player{
-				{ID: "p1", Name: "Tanaka", Number: "K1"},
-				{ID: "p3", Name: "Yamada", Number: "K2"},
+				{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"},
+				{ID: "p3", Name: "Yamada", Number: "K2", Dojo: "Dojo Yamada"},
 			}},
 			{PoolName: "Pool B", Players: []domain.Player{
-				{ID: "p2", Name: "Suzuki", Number: "K3"},
+				{ID: "p2", Name: "Suzuki", Number: "K3", Dojo: "Dojo Suzuki"},
 			}},
 		}
 		mergePoolNumbersIntoPlayers(comp, pools)
@@ -93,13 +93,13 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Players: []domain.Player{
-				{Name: "Tanaka"}, // no ID
-				{Name: "Suzuki"},
+				{Name: "Tanaka", Dojo: "Dojo Tanaka"}, // no ID
+				{Name: "Suzuki", Dojo: "Dojo Suzuki"},
 			},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{
-			{Name: "Tanaka", Number: "K1"},
-			{Name: "Suzuki", Number: "K2"},
+			{Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"},
+			{Name: "Suzuki", Number: "K2", Dojo: "Dojo Suzuki"},
 		}}}
 		mergePoolNumbersIntoPlayers(comp, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
@@ -109,9 +109,9 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 	t.Run("preserves existing non-empty Number (idempotent)", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING"}},
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
-		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1"}}}}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
 		mergePoolNumbersIntoPlayers(comp, pools)
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
 	})
@@ -119,9 +119,9 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 	t.Run("skips pool players with empty Number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka"}},
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
-		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: ""}}}}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "", Dojo: "Dojo Tanaka"}}}}
 		mergePoolNumbersIntoPlayers(comp, pools)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})

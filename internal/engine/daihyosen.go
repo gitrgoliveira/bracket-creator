@@ -147,28 +147,61 @@ func IsPoolDaihyosenMatchID(matchID string) bool {
 
 // generatePoolDaihyosenMatches creates round-robin MatchResult entries for
 // a tied group of teams in team-pool competitions. Mirrors
-// generateTiebreakerMatches but uses the "DH-N" ID prefix and is used when
-// teams are fully tied on all 8 ranking criteria after regular pool play.
-func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStanding, existingDHCount int, court string, existingPairs map[string]bool) []state.MatchResult {
+// generateTiebreakerMatches (including its existingRows dedup contract) but
+// uses the "DH-N" ID prefix and is used when teams are fully tied on all 8
+// ranking criteria after regular pool play. Stamps SideAID/SideBID from the
+// tied teams' participant ids (mirrors pools.go's regular-match generation),
+// so applyTiebreakSort can resolve the winning side by id rather than by
+// name when two tied teams share a display name (allowed across dojos,
+// CheckDuplicateEntriesByNameDojo).
+//
+// Pairs are enumerated by INDEX over tiedGroup (i < j), never by comparing
+// team names: two tied teams can share a display name (the unique-team-name
+// rule has documented enforcement holes, see checkNewTeamNameCollisions),
+// and the prior `a.Player.Name >= b.Player.Name` skip was false in BOTH loop
+// orientations for a namesake pair, so that pair's own bout was never
+// generated at all (the group 0-3 comment in generateTiebreakerMatches
+// describes the identical failure in detail).
+//
+// existingRows are the DH rows already on disk for this pool; dedup resolves
+// each row's sides to a group member's canonical identity key via
+// newGroupKeyResolver (id-preferring, name fallback), exactly as
+// generateTiebreakerMatches does, so two namesake-involving pairs (e.g.
+// X@dojoA-vs-Y and X@dojoB-vs-Y) are tracked as the distinct pairs they are
+// rather than colliding on a shared bare-name bucket. Both callers --
+// InjectPoolDaihyosenMatches below (auto-injection) and
+// GenerateLeagueTiebreakMatches (league_tiebreak.go, the operator-triggered
+// team-league path) -- share this one contract.
+func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStanding, existingDHCount int, court string, existingRows []state.MatchResult) []state.MatchResult {
+	resolve := newGroupKeyResolver(tiedGroup)
+	existingPairs := make(map[string]bool, len(existingRows))
+	for _, m := range existingRows {
+		keyA, okA := resolve(m.SideAID, m.SideA)
+		keyB, okB := resolve(m.SideBID, m.SideB)
+		if okA && okB {
+			existingPairs[tiebreakerPairKey(keyA, keyB)] = true
+		}
+	}
+
 	var results []state.MatchResult
 	idx := existingDHCount
-	for _, a := range tiedGroup {
-		for _, b := range tiedGroup {
-			if a.Player.Name >= b.Player.Name {
-				continue // only generate each pair once (a < b alphabetically)
-			}
-			key := tiebreakerPairKey(a.Player.Name, b.Player.Name)
-			if existingPairs[key] {
+	for i := 0; i < len(tiedGroup); i++ {
+		for j := i + 1; j < len(tiedGroup); j++ {
+			a, b := tiedGroup[i], tiedGroup[j]
+			keyA := standingsPlayerKey(a.Player.ID, a.Player.Name)
+			keyB := standingsPlayerKey(b.Player.ID, b.Player.Name)
+			if existingPairs[tiebreakerPairKey(keyA, keyB)] {
 				continue
 			}
 			results = append(results, state.MatchResult{
-				ID:     fmt.Sprintf("%s-DH-%d", poolName, idx),
-				SideA:  a.Player.Name,
-				SideB:  b.Player.Name,
-				Status: state.MatchStatusScheduled,
-				Court:  court,
+				ID:      fmt.Sprintf("%s-DH-%d", poolName, idx),
+				SideA:   a.Player.Name,
+				SideB:   b.Player.Name,
+				SideAID: a.Player.ID,
+				SideBID: b.Player.ID,
+				Status:  state.MatchStatusScheduled,
+				Court:   court,
 			})
-			existingPairs[key] = true
 			idx++
 		}
 	}
@@ -213,10 +246,15 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	// Scan existing DH matches per pool for idempotency and ID sequencing.
 	// poolNameFromMatchID strips the trailing suffix deterministically so
 	// overlapping pool names (e.g. "Pool A" vs "Pool A-East") are handled
-	// correctly without ambiguous prefix scanning.
+	// correctly without ambiguous prefix scanning. existingRows are handed to
+	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
+	// here) so it can resolve each row's sides against the SPECIFIC tied
+	// group being processed via newGroupKeyResolver -- see that function's
+	// doc comment for why a bare-name reduction at this scan stage would
+	// collapse distinct namesake-involving pairs.
 	type poolDHInfo struct {
-		existingPairs map[string]bool
-		count         int
+		existingRows []state.MatchResult
+		count        int
 	}
 	poolDH := map[string]*poolDHInfo{}
 	poolCourt := map[string]string{}
@@ -241,10 +279,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		}
 		if IsPoolDaihyosenMatchID(m.ID) {
 			if poolDH[pn] == nil {
-				poolDH[pn] = &poolDHInfo{existingPairs: map[string]bool{}}
+				poolDH[pn] = &poolDHInfo{}
 			}
 			poolDH[pn].count++
-			poolDH[pn].existingPairs[tiebreakerPairKey(m.SideA, m.SideB)] = true
+			poolDH[pn].existingRows = append(poolDH[pn].existingRows, m)
 		} else if m.Status != state.MatchStatusCompleted {
 			regularIncomplete[pn] = true
 		}
@@ -258,10 +296,10 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 		}
 		info := poolDH[poolName]
 		existingCount := 0
-		existingPairs := map[string]bool{}
+		var existingRows []state.MatchResult
 		if info != nil {
 			existingCount = info.count
-			existingPairs = info.existingPairs
+			existingRows = info.existingRows
 		}
 
 		for _, positions := range detectPoolTies(poolStandings) {
@@ -271,7 +309,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 				continue
 			}
 			group := standingsAt(poolStandings, positions)
-			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingPairs)
+			newMatches := generatePoolDaihyosenMatches(poolName, group, existingCount, poolCourt[poolName], existingRows)
 			existingCount += len(newMatches)
 			injected = append(injected, newMatches...)
 		}

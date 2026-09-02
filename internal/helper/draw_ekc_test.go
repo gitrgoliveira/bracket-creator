@@ -448,3 +448,69 @@ func holdsLabel(xs []string, want string) bool {
 	}
 	return false
 }
+
+// TestSeedsLandInD6HalvesAndQuartersTreeAware re-runs the D6/D7 seed
+// contract through the PRODUCTION distributor. The original test above runs
+// the pre-swap chain (PoolSeeding -> CreatePools -> ReorderPoolsForCourts),
+// which survives for the estimator and as the seed-placement reference; once
+// the tree-aware swap landed, only THIS variant pins the sheet-derived
+// contract on the code a tournament actually runs. Same assertions, same
+// worked shapes; a drift between the two variants means the tree-aware seed
+// step no longer reproduces PoolSeeding's arithmetic, which the
+// seed-placement equality pins will name more precisely.
+func TestSeedsLandInD6HalvesAndQuartersTreeAware(t *testing.T) {
+	for _, courts := range []int{1, 2, 4} {
+		for _, numPools := range []int{4, 8} {
+			t.Run(fmt.Sprintf("%d_pools_%d_courts", numPools, courts), func(t *testing.T) {
+				players := make([]Player, numPools*4)
+				for i := range players {
+					players[i] = Player{Name: fmt.Sprintf("p%03d", i), Dojo: fmt.Sprintf("dojo%03d", i)}
+				}
+				for s := 1; s <= 4; s++ {
+					players[s-1].Seed = s
+				}
+
+				pools, drawCourts, err := BuildPoolPhaseTreeAware(players, 4, false, courts, 2)
+				require.NoError(t, err)
+				draw := BuildKnockoutDraw(pools, 2, drawCourts)
+				require.NotNil(t, draw)
+
+				seededPool := map[int]string{}
+				for _, p := range pools {
+					for _, pl := range p.Players {
+						if pl.Seed > 0 {
+							require.Empty(t, seededPool[pl.Seed], "seed %d appears twice", pl.Seed)
+							seededPool[pl.Seed] = p.PoolName
+						}
+					}
+				}
+				require.Len(t, seededPool, 4, "all four seeds must be in a pool")
+				assert.Len(t, map[string]bool{
+					seededPool[1]: true, seededPool[2]: true,
+					seededPool[3]: true, seededPool[4]: true,
+				}, 4, "seeded pools must be distinct (D7 constraint 4, never droppable)")
+
+				leaves := TreeToLeafArray(draw.Root)
+				half, quarter := map[int]int{}, map[int]int{}
+				for seed, poolName := range seededPool {
+					idx := -1
+					for i, l := range leaves {
+						if l == poolName+"-1st" {
+							idx = i
+						}
+					}
+					require.GreaterOrEqual(t, idx, 0, "seed %d's pool winner must be in the draw", seed)
+					half[seed] = idx / (len(leaves) / 2)
+					quarter[seed] = idx / (len(leaves) / 4)
+				}
+				assert.Equal(t, half[1], half[3], "seeds 1 and 3 must share a half (D7 constraint 1)")
+				assert.Equal(t, half[2], half[4], "seeds 2 and 4 must share a half (D7 constraint 1)")
+				assert.NotEqual(t, half[1], half[2], "seeds 1 and 2 must be in opposite halves")
+				assert.Len(t, map[int]bool{
+					quarter[1]: true, quarter[2]: true,
+					quarter[3]: true, quarter[4]: true,
+				}, 4, "each of the four seeds must own a quarter (D7 constraint 2)")
+			})
+		}
+	}
+}

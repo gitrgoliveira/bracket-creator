@@ -262,7 +262,7 @@ func TestAddPoolsToTreeTable(t *testing.T) {
 					{
 						PoolName: "Pool A",
 						Players: []Player{
-							{Name: "Player 1", PoolPosition: 1},
+							{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1"},
 						},
 					},
 				}
@@ -813,8 +813,8 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		{
 			PoolName: "Pool A",
 			Players: []Player{
-				{Name: "Player1", PoolPosition: 1},
-				{Name: "Player2", PoolPosition: 2},
+				{Name: "Player1", PoolPosition: 1, Dojo: "Dojo Player1"},
+				{Name: "Player2", PoolPosition: 2, Dojo: "Dojo Player2"},
 			},
 		},
 	}
@@ -847,20 +847,20 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 
 	pools := []Pool{
 		{PoolName: "Pool A", Players: []Player{
-			{Name: "P1", PoolPosition: 1},
-			{Name: "P2", PoolPosition: 2},
+			{Name: "P1", PoolPosition: 1, Dojo: "Dojo P1"},
+			{Name: "P2", PoolPosition: 2, Dojo: "Dojo P2"},
 		}},
 		{PoolName: "Pool B", Players: []Player{
-			{Name: "P3", PoolPosition: 1},
-			{Name: "P4", PoolPosition: 2},
+			{Name: "P3", PoolPosition: 1, Dojo: "Dojo P3"},
+			{Name: "P4", PoolPosition: 2, Dojo: "Dojo P4"},
 		}},
 		{PoolName: "Pool C", Players: []Player{
-			{Name: "P5", PoolPosition: 1},
-			{Name: "P6", PoolPosition: 2},
+			{Name: "P5", PoolPosition: 1, Dojo: "Dojo P5"},
+			{Name: "P6", PoolPosition: 2, Dojo: "Dojo P6"},
 		}},
 		{PoolName: "Pool D", Players: []Player{
-			{Name: "P7", PoolPosition: 1},
-			{Name: "P8", PoolPosition: 2},
+			{Name: "P7", PoolPosition: 1, Dojo: "Dojo P7"},
+			{Name: "P8", PoolPosition: 2, Dojo: "Dojo P8"},
 		}},
 	}
 	allPlayers := make([]Player, 0, 8)

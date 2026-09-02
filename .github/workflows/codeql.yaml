@@ -11,7 +11,32 @@ on:
 
 jobs:
   codeql:
+    # The job ID stays `codeql`. Code scanning derives an analysis key from the
+    # workflow path plus this ID (GITHUB_JOB), never from the display name, so
+    # renaming below is free while renaming the ID would start a fresh
+    # configuration and cost a round of "configuration not found" diffs.
+    name: CodeQL ${{ matrix.label }}
     runs-on: ubuntu-latest
+
+    strategy:
+      # One language must not cancel the other's analysis.
+      fail-fast: false
+      matrix:
+        # Go is the backend. javascript-typescript covers the web-mobile SPA,
+        # the legacy web UI and the docs widgets: this repository analysed Go
+        # alone until now, so none of that frontend code had ever been scanned.
+        #
+        # The two legs already run in parallel; splitting them into separate
+        # jobs would buy no wall-clock and would duplicate the pinned action
+        # references. They share one analysis key, being one job, and do not
+        # overwrite each other because the per-language `category` below keeps
+        # the uploads distinct. `label` exists only so the checks read
+        # "CodeQL Go" instead of "codeql (go)".
+        include:
+          - language: go
+            label: Go
+          - language: javascript-typescript
+            label: JavaScript
 
     steps:
       - name: Checkout
@@ -20,10 +45,16 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4.37.7
         with:
-          languages: go
+          languages: ${{ matrix.language }}
+          config-file: ./.github/codeql/codeql-config.yaml
 
+      # A no-op for javascript-typescript, which needs no build to extract.
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4.37.7
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4.37.7
+        with:
+          # Explicit per language: without it the two runs upload their results
+          # under the same key and the second overwrites the first.
+          category: "/language:${{ matrix.language }}"

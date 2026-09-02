@@ -125,10 +125,12 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		}
 		defer func() { _ = os.RemoveAll(tempDir) }()
 
-		sources, err = eng.ExportTournamentWorkbooks(tempDir)
+		var skipped []engine.SkippedCompetition
+		sources, skipped, err = eng.ExportTournamentWorkbooks(tempDir)
 		if err != nil {
 			return fmt.Errorf("export tournament workbooks: %w", err)
 		}
+		reportSkippedCompetitions(cmd, skipped)
 		sourcesLabel = o.tournamentData
 	}
 
@@ -237,6 +239,19 @@ func collectWorkbooks(dir string, teamFiles []string) ([]pdf.SourceWorkbook, err
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Path < sources[j].Path })
 	return sources, nil
+}
+
+// reportSkippedCompetitions warns the operator, one line per competition,
+// about every Swiss competition ExportTournamentWorkbooks left out of the
+// booklet (Swiss export is not yet implemented -- bc-swex). Printed to
+// stderr, since it is a warning about an incomplete result rather than the
+// command's normal output. A silent omission would leave the operator
+// believing the printed booklet covers every competition when it does not.
+func reportSkippedCompetitions(cmd *cobra.Command, skipped []engine.SkippedCompetition) {
+	for _, s := range skipped {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: skipped competition %q (%s): %s\n", s.Name, s.ID, s.Reason)
+	}
 }
 
 func reportOutputs(cmd *cobra.Command, out map[string]string) {

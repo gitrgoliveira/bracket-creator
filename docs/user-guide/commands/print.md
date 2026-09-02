@@ -17,6 +17,15 @@ Provide **exactly one**:
 | `--input <dir>` | A directory of pre-existing bracket `.xlsx` files (for example, output from [`create-pools`](create-pools.md) or [`create-playoffs`](create-playoffs.md)). |
 | `--tournament-data <dir>` | A [tournament app](../organisers/run-tournament.md) data directory; the workbooks are generated on the fly from competition state. |
 
+!!! note "Swiss competitions are not included"
+
+    A Swiss competition has no pools and no fixed bracket, so there is nothing
+    to lay out on a printed sheet yet. With `--tournament-data`, Swiss
+    competitions are left out of the booklet and each one is named in a warning
+    on the console. Every other competition still prints as usual. To follow a
+    Swiss competition on the day, use the live standings view in the tournament
+    app.
+
 ## Types
 
 `--type` selects which sheets to render (required):

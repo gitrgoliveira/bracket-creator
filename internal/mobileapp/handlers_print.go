@@ -82,8 +82,13 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		}
 		defer func() { _ = os.RemoveAll(workDir) }()
 
-		// Export all competitions to XLSX workbooks.
-		sources, err := eng.ExportTournamentWorkbooks(workDir)
+		// Export all competitions to XLSX workbooks. Swiss competitions are
+		// skipped rather than aborting the whole booklet (Swiss export is not
+		// yet implemented -- bc-swex); skipped is reported to the operator
+		// below via both a response header and a text entry inside the ZIP,
+		// since a streamed application/zip response has no JSON body to carry
+		// a warning in.
+		sources, skipped, err := eng.ExportTournamentWorkbooks(workDir)
 		if err != nil {
 			internalError(c, err, "export workbooks")
 			return
@@ -122,9 +127,24 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		// response. No intermediate ZIP file is written to disk.
 		c.Header("Content-Type", "application/zip")
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="tournament-pdfs-%s.zip"`, printType))
+		if len(skipped) > 0 {
+			// Header form for any programmatic caller that inspects the
+			// response before unzipping. The ZIP entry written below is what
+			// an operator actually sees when they open the archive, so it
+			// carries the same information again in a form that survives
+			// download/re-upload/attach, where headers do not.
+			c.Header("X-Skipped-Competitions", skippedCompetitionsHeaderValue(skipped))
+		}
 		c.Status(http.StatusOK)
 
 		zw := zip.NewWriter(c.Writer)
+		if len(skipped) > 0 {
+			if err := writeSkippedCompetitionsEntry(zw, skipped); err != nil {
+				_ = c.Error(err)
+				_ = zw.Close()
+				return
+			}
+		}
 		for _, pdfPath := range ordered {
 			if err := streamPDFIntoZip(zw, pdfPath); err != nil {
 				// The 200 status + headers are already committed, so we cannot
@@ -159,6 +179,42 @@ func streamPDFIntoZip(zw *zip.Writer, pdfPath string) error {
 	}
 	if _, err := io.Copy(entry, f); err != nil {
 		return fmt.Errorf("write zip entry for %s: %w", pdfPath, err)
+	}
+	return nil
+}
+
+// skippedCompetitionsHeaderValue renders the skipped-competition list as a
+// single HTTP header value (semicolon-separated; header values cannot carry
+// newlines).
+func skippedCompetitionsHeaderValue(skipped []engine.SkippedCompetition) string {
+	parts := make([]string, 0, len(skipped))
+	for _, s := range skipped {
+		parts = append(parts, fmt.Sprintf("%s (%s): %s", s.Name, s.ID, s.Reason))
+	}
+	return strings.Join(parts, "; ")
+}
+
+// writeSkippedCompetitionsEntry adds a SKIPPED-COMPETITIONS.txt entry to the
+// ZIP naming every competition ExportTournamentWorkbooks left out of the
+// booklet and why. This is the entry an operator actually reads: the ZIP is
+// the only payload a streamed application/zip response carries, so a header
+// alone would be invisible to anyone who just downloads and opens the file.
+func writeSkippedCompetitionsEntry(zw *zip.Writer, skipped []engine.SkippedCompetition) error {
+	var body strings.Builder
+	body.WriteString("The following competitions were NOT included in this export:\n\n")
+	for _, s := range skipped {
+		fmt.Fprintf(&body, "- %s (%s): %s\n", s.Name, s.ID, s.Reason)
+	}
+	body.WriteString("\nSwiss-format competitions have no static bracket (results are per-round " +
+		"pairings plus a running standings table), so there is nothing to render into a printable " +
+		"workbook yet. Use the live Swiss standings/round view for these competitions instead.\n")
+
+	entry, err := zw.Create("SKIPPED-COMPETITIONS.txt")
+	if err != nil {
+		return fmt.Errorf("create zip entry for SKIPPED-COMPETITIONS.txt: %w", err)
+	}
+	if _, err := io.WriteString(entry, body.String()); err != nil {
+		return fmt.Errorf("write zip entry for SKIPPED-COMPETITIONS.txt: %w", err)
 	}
 	return nil
 }

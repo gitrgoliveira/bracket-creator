@@ -85,3 +85,19 @@ func (e *DownstreamKnockoutScoredError) Error() string {
 func (e *DownstreamKnockoutScoredError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutScored
 }
+
+// ErrSwissExportUnsupported is returned by Engine.ExportCompetitionXlsx (and
+// therefore by ExportTournamentWorkbooks), and is aliased by
+// internal/export.ErrSwissExportUnsupported for BuildResultsWorkbook. Swiss
+// has no pools and no static bracket -- results are per-round pairings plus a
+// running standings table -- so NEITHER the blank-template bracket export nor
+// the results-workbook export has anything to render; the message below is
+// shared by both and deliberately does not call either path a "bracket
+// export". Handlers should return HTTP 422 with the sentinel's message,
+// which points operators at the one place Swiss results ARE available today
+// (the live standings view) rather than just naming what does not work.
+// Lives here (engine), not in internal/export, because internal/export
+// imports internal/engine and the reverse would be an import cycle. A
+// dedicated Swiss export sheet is tracked as follow-up work (bc-swex); do not
+// attempt to implement it here.
+var ErrSwissExportUnsupported = errors.New("not yet implemented: Swiss competitions have no static bracket to export; use the live standings view instead")

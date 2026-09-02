@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -202,4 +203,86 @@ func TestPrintHandler_SofficeAbsent(t *testing.T) {
 			assert.Contains(t, w.Body.String(), "$LIBREOFFICE_PATH")
 		})
 	}
+}
+
+// TestPrintHandler_SwissSkippedAndWarned covers a mixed batch: a Swiss
+// competition alongside a renderable one. The Swiss competition has no
+// static bracket to print (Engine.ExportCompetitionXlsx's
+// ErrSwissExportUnsupported), so ExportTournamentWorkbooks skips it rather
+// than aborting the whole booklet -- but the operator must be TOLD, since a
+// silent omission would leave them believing the ZIP covers every
+// competition. Uses type=registration (fastest group: a single "data" sheet
+// per workbook, no bracket/pool rendering needed) to keep the real soffice
+// round-trip quick.
+func TestPrintHandler_SwissSkippedAndWarned(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soffice-dependent test in short mode")
+	}
+	if !sofficeAvailable() {
+		t.Skip("soffice not available in this environment")
+	}
+
+	r, store, _, _ := setupPrintTestRouter(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "renderable-comp",
+		Name:   "Renderable Comp",
+		Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-comp",
+		Name:        "Swiss Comp",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      state.CompStatusSetup,
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/print/registration", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"the renderable competition alone must still produce a booklet; got %d: %s", w.Code, w.Body.String())
+
+	// (a) response header names the skipped competition.
+	skippedHeader := w.Header().Get("X-Skipped-Competitions")
+	assert.Contains(t, skippedHeader, "Swiss Comp")
+	assert.Contains(t, skippedHeader, "swiss-comp")
+
+	// (b) the ZIP itself carries a plain-text entry -- the one an operator
+	// actually sees when they open the archive, since a streamed
+	// application/zip response has no JSON body to carry a warning in.
+	body := w.Body.Bytes()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	require.NoError(t, err, "response must be a valid ZIP archive")
+
+	var skippedEntry *zip.File
+	for _, f := range zr.File {
+		if f.Name == "SKIPPED-COMPETITIONS.txt" {
+			skippedEntry = f
+			break
+		}
+	}
+	require.NotNil(t, skippedEntry, "ZIP must contain SKIPPED-COMPETITIONS.txt when a Swiss competition was skipped")
+
+	rc, err := skippedEntry.Open()
+	require.NoError(t, err)
+	defer rc.Close()
+	content, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "Swiss Comp")
+	assert.Contains(t, string(content), "swiss-comp")
+	assert.Contains(t, string(content), "not yet implemented")
+
+	// The renderable competition's own PDF must still be present alongside
+	// the warning entry -- the skip must not have swallowed the whole batch.
+	var hasPDF bool
+	for _, f := range zr.File {
+		if strings.HasSuffix(f.Name, ".pdf") {
+			hasPDF = true
+			break
+		}
+	}
+	assert.True(t, hasPDF, "the renderable competition's PDF must still be produced")
 }

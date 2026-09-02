@@ -17,10 +17,19 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// ErrSwissExportUnsupported is returned by BuildResultsWorkbook for Swiss-format
-// competitions, which have no static bracket to render. Callers should surface a
-// clear message and point operators at the live Swiss standings instead.
-var ErrSwissExportUnsupported = errors.New("results export is not supported for Swiss competitions; use the live standings view")
+// ErrSwissExportUnsupported is returned by BuildResultsWorkbook for
+// Swiss-format competitions, which have no pool results or static bracket to
+// archive as literal values.
+//
+// This is a plain alias of engine.ErrSwissExportUnsupported -- see that
+// sentinel's doc comment for the message text and the full rationale, so
+// this comment can't drift out of sync with what the error actually says.
+// The sentinel must live in internal/engine, since internal/export imports
+// internal/engine and the reverse direction would be an import cycle; the
+// alias is what keeps errors.Is matching whichever export path -- this
+// results-workbook builder or Engine.ExportCompetitionXlsx -- produced the
+// error.
+var ErrSwissExportUnsupported = engine.ErrSwissExportUnsupported
 
 // ErrCompetitionNotFound is returned by BuildResultsWorkbook when the competition
 // ID does not exist, so the handler can map it to HTTP 404 (matching every other

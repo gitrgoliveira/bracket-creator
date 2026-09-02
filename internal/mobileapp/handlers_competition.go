@@ -2236,6 +2236,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
+			// Swiss has no static bracket to export; surface a clear 422 rather
+			// than a generic 500, mirroring RegisterExportResultsHandlers'
+			// handling of the same sentinel for the results-workbook path.
+			if errors.Is(err, engine.ErrSwissExportUnsupported) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+				return
+			}
 			internalError(c, err)
 			return
 		}

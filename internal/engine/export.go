@@ -18,6 +18,17 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, notFoundErrorf("competition %s not found", id)
 	}
 
+	// Swiss has no pools and no static bracket (results are per-round pairings
+	// and a running standings table), so there is nothing to render into the
+	// pool/tree layout this function produces. Block it explicitly, before any
+	// rendering work, rather than emitting a workbook whose sheets are
+	// structurally present but hold no participant data. Matches the guard in
+	// internal/export.BuildResultsWorkbook. A dedicated Swiss sheet is tracked
+	// as follow-up work (bc-swex).
+	if comp.Format == state.CompFormatSwiss {
+		return nil, ErrSwissExportUnsupported
+	}
+
 	pools, err := e.store.LoadPools(id)
 	if err != nil {
 		return nil, err

@@ -25,7 +25,7 @@ func TestGETCompetitionScheduleClashes(t *testing.T) {
 
 	save := func(id, name, date, start string, courts []string) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: id, Name: name, Format: state.CompFormatPlayoffs, Kind: "individual",
+			ID: id, Name: name, Format: state.CompFormatKnockout, Kind: "individual",
 			Date: date, StartTime: start, Courts: courts, Status: state.CompStatusSetup,
 		}))
 	}

@@ -357,17 +357,17 @@ func TestExportCompetitionXlsx_LeagueHasNoTreeSheet(t *testing.T) {
 	assert.Empty(t, treeSheets(f), "a league has no knockout, so it must export no bracket page")
 }
 
-// TestExportCompetitionXlsx_PurePlayoffsRendersBracket pins mp-ndfu: a pure
-// playoffs competition has NO pools, so the pool-fed draw returns nothing and
+// TestExportCompetitionXlsx_PureKnockoutRendersBracket pins mp-ndfu: a pure
+// knockout competition has NO pools, so the pool-fed draw returns nothing and
 // the blank-template export used to skip the entire knockout block -- shipping a
 // workbook (and PDF booklet) with no tree pages and an empty Elimination Matches
 // sheet. The fix derives the elimination leaves from the stored bracket
-// (PlayoffLeavesFromBracket), exactly as the results workbook does, so the two
+// (KnockoutLeavesFromBracket), exactly as the results workbook does, so the two
 // exports of the same draw agree.
-func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
+func TestExportCompetitionXlsx_PureKnockoutRendersBracket(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "pure-playoffs-bracket"
-	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+	compID := "pure-knockout-bracket"
+	createTestCompetition(t, store, compID, "knockout", 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 	})
 	names := make([]string, 8)
@@ -382,9 +382,9 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	// (1) The bracket page(s) must be rendered, not skipped, and carry content --
 	// not left as a blank sheet. (leafLabelsOnSheet is not usable here: its regex
 	// matches the pool CONCATENATE("Pool A-1st ", ...) placeholder form, but a
-	// pure-playoffs leaf renders a participant name via a different formula.)
+	// pure-knockout leaf renders a participant name via a different formula.)
 	pages := treeSheets(f)
-	require.NotEmpty(t, pages, "a pure playoffs competition must render its bracket page(s)")
+	require.NotEmpty(t, pages, "a pure knockout competition must render its bracket page(s)")
 	nonEmpty := 0
 	rows, err := f.GetRows(pages[0])
 	require.NoError(t, err)
@@ -403,7 +403,7 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	elim, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 	assert.Equal(t, 7, countEliminationMatchBlocks(elim),
-		"an 8-entrant playoffs knockout must render 7 elimination match blocks")
+		"an 8-entrant knockout knockout must render 7 elimination match blocks")
 }
 
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:

@@ -25,18 +25,18 @@ import (
 // numberPrefix is empty or either slice is empty. Match by id first
 // (HasParticipantIDs case), fall back to name.
 //
-// For playoffs-only competitions (format == "playoffs") the engine assigns
+// For knockout-only competitions (format == "knockout") the engine assigns
 // numbers in-memory but has no pools.csv to persist them. In that case assign
-// numbers sequentially (1-N in participant order), matching generatePlayoffs.
+// numbers sequentially (1-N in participant order), matching generateKnockout.
 func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
 	if numberPrefix == "" || len(players) == 0 {
 		return
 	}
 	if len(pools) == 0 {
-		if format != state.CompFormatPlayoffs {
+		if format != state.CompFormatKnockout {
 			return
 		}
-		// Playoffs-only: numbers were assigned in memory by generatePlayoffs
+		// Knockout-only: numbers were assigned in memory by generateKnockout
 		// but never written to disk. Re-derive them from participant order.
 		for i := range players {
 			if players[i].Number == "" {

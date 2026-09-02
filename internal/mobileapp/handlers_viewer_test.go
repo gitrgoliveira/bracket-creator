@@ -29,7 +29,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
-	t.Run("no-op when pools is empty and format is not playoffs", func(t *testing.T) {
+	t.Run("no-op when pools is empty and format is not knockout", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
@@ -39,10 +39,10 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 
-	t.Run("assigns sequential numbers for playoffs-only with no pools", func(t *testing.T) {
+	t.Run("assigns sequential numbers for knockout-only with no pools", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Players: []domain.Player{
 				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
 				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
@@ -55,10 +55,10 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "D3", comp.Players[2].Number)
 	})
 
-	t.Run("playoffs-only: preserves existing non-empty Number", func(t *testing.T) {
+	t.Run("knockout-only: preserves existing non-empty Number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)

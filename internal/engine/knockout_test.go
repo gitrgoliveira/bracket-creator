@@ -266,13 +266,13 @@ func TestResolveQualifiedPools_DegeneratePoolClampsBye(t *testing.T) {
 }
 
 // TestResolveQualifiedPools_NonMixedNoOp verifies the resolver is a no-op for
-// competitions that have no pool placeholders (standalone playoffs / league).
+// competitions that have no pool placeholders (standalone knockout / league).
 func TestResolveQualifiedPools_NonMixedNoOp(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	for _, format := range []string{state.CompFormatPlayoffs, state.CompFormatLeague} {
+	for _, format := range []string{state.CompFormatKnockout, state.CompFormatLeague} {
 		compID := "noop-" + format
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: compID, Name: compID, Format: format, Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+			ID: compID, Name: compID, Format: format, Status: state.CompStatusKnockout, Courts: []string{"A"},
 		}))
 		n, all, err := eng.ResolveQualifiedPools(compID)
 		require.NoError(t, err)
@@ -419,14 +419,14 @@ func TestScoreKnockout_PerMatchGate(t *testing.T) {
 }
 
 // TestKnockoutOnly_ScoreableFromDraw verifies that a standalone (knockout-only)
-// playoffs competition is scoreable from draw time, its round-1 leaves are real
+// knockout competition is scoreable from draw time, its round-1 leaves are real
 // players, so the per-match gate lets them through with no pool resolution.
 func TestKnockoutOnly_ScoreableFromDraw(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "ko-only"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatPlayoffs,
-		Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+		ID: compID, Name: compID, Kind: "individual", Format: state.CompFormatKnockout,
+		Status: state.CompStatusKnockout, Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
 		Rounds: [][]state.BracketMatch{
@@ -455,7 +455,7 @@ func TestKnockoutOnly_ScoreableFromDraw(t *testing.T) {
 // --- MaybeAutoCompletePools mixed/league branches --------------------------
 
 // TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled: a mixed comp with
-// an unfinished pool match must not flip to playoffs.
+// an unfinished pool match must not flip to knockout.
 func TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mixed-running"
@@ -481,7 +481,7 @@ func TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled(t *testing.T) {
 }
 
 // TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone: once the last pool is
-// seeded, the comp moves pools → playoffs.
+// seeded, the comp moves pools → knockout.
 func TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mixed-flip"
@@ -503,7 +503,7 @@ func TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone(t *testing.T) {
 	assert.Equal(t, AutoCompleteKnockoutStarted, outcome)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+	assert.Equal(t, state.CompStatusKnockout, comp.Status)
 }
 
 // TestMaybeAutoCompletePools_LeagueCompletes: league still auto-completes.

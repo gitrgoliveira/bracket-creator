@@ -260,7 +260,7 @@ func TestPrintSofficeNotFound(t *testing.T) {
 // if none is found. The cmd package is one directory below the repo root.
 func findExampleXLSXForCmd(t *testing.T) string {
 	t.Helper()
-	candidate := filepath.Join("..", "playoffs-example-medium.xlsx")
+	candidate := filepath.Join("..", "knockout-example-medium.xlsx")
 	if _, err := os.Stat(candidate); err != nil {
 		t.Skipf("example workbook not found at %s: %v", candidate, err)
 	}

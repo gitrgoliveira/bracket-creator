@@ -259,9 +259,15 @@ func TestCreateHandler_NoEngi_PWHeaderPresent(t *testing.T) {
 	require.True(t, hasPW, "non-engi Pool Matches must have a PW column")
 }
 
-// naginataPlayoffForm builds the POST /create body for a naginata playoffs
-// competition.
-func naginataPlayoffForm(playerList string) url.Values {
+// naginataKnockoutForm builds the POST /create body for a naginata knockout
+// competition. tournamentType is deliberately still the pre-rename literal
+// "playoffs": web/index.html (a later commit in this terminology
+// consolidation, bc-terminology) still posts that value, and this form
+// mirrors what the live page sends today, not the eventual one. The handler
+// accepts "knockout" too (see createTournamentHandler); once web/ is
+// converted this form should switch to "knockout" and the dual-accept
+// removed from the handler.
+func naginataKnockoutForm(playerList string) url.Values {
 	return url.Values{
 		"tournamentType": {"playoffs"},
 		"playerList":     {playerList},
@@ -272,18 +278,18 @@ func naginataPlayoffForm(playerList string) url.Values {
 	}
 }
 
-// TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock asserts that POST /create
+// TestCreateHandler_NaginataKnockout_ThirdPlaceBlock asserts that POST /create
 // with naginata=on and at least 4 players (so a semifinal round exists) produces
 // a "3rd Place" block on the Elimination Matches sheet.
-func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock(t *testing.T) {
+func TestCreateHandler_NaginataKnockout_ThirdPlaceBlock(t *testing.T) {
 	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
-	f := postCreate(t, naginataPlayoffForm(roster))
+	f := postCreate(t, naginataKnockoutForm(roster))
 
 	rows, err := f.GetRows("Elimination Matches")
 	require.NoError(t, err)
 
 	require.GreaterOrEqual(t, bctest.FindCellRow(rows, helper.ThirdPlaceLabel), 0,
-		"naginata playoffs with 4 players must have a '3rd Place' block on Elimination Matches")
+		"naginata knockout with 4 players must have a '3rd Place' block on Elimination Matches")
 }
 
 // TestCreateHandler_NoNaginata_NoThirdPlaceBlock is the regression guard:
@@ -303,18 +309,18 @@ func TestCreateHandler_NoNaginata_NoThirdPlaceBlock(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, -1, bctest.FindCellRow(rows, helper.ThirdPlaceLabel),
-		"non-naginata playoffs must not have a '3rd Place' block")
+		"non-naginata knockout must not have a '3rd Place' block")
 }
 
-// TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas verifies
+// TestCreateHandler_NaginataKnockout_ThirdPlaceBlock_EntrantFormulas verifies
 // that the blank template's bronze entrant cells (the hand-scoring surface) carry
 // CONCATENATE formulas that reference the losers of the two semifinals. The
 // operator writes ippon letters in the semifinal winner cells; the bronze name
 // cells then self-populate via "M <n> <winner text>" so the referees can see
 // who is competing without manual re-entry.
-func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testing.T) {
+func TestCreateHandler_NaginataKnockout_ThirdPlaceBlock_EntrantFormulas(t *testing.T) {
 	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
-	f := postCreate(t, naginataPlayoffForm(roster))
+	f := postCreate(t, naginataKnockoutForm(roster))
 
 	rows, err := f.GetRows("Elimination Matches")
 	require.NoError(t, err)
@@ -333,7 +339,7 @@ func TestCreateHandler_NaginataPlayoffs_ThirdPlaceBlock_EntrantFormulas(t *testi
 
 	// Both cells together must reference both semifinal match numbers ("M 1" and
 	// "M 2" for a 4-player bracket) via CONCATENATE formulas. With mirror=true
-	// (hardcoded for the playoffs web handler) the two formulas swap sides, so we
+	// (hardcoded for the knockout web handler) the two formulas swap sides, so we
 	// assert the pair rather than a specific cell.
 	combined := leftFormula + " " + rightFormula
 	assert.Contains(t, combined, "CONCATENATE", "bronze entrant cells must carry CONCATENATE formulas referencing semifinal losers")
@@ -352,13 +358,13 @@ func findResultsRow(rows [][]string) int {
 	return -1
 }
 
-// TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace verifies that the
-// POST /create response for a naginata playoffs bracket has a _xlnm.Print_Area
+// TestCreateHandler_NaginataKnockout_PrintAreaCoversThirdPlace verifies that the
+// POST /create response for a naginata knockout bracket has a _xlnm.Print_Area
 // defined name on the Elimination Matches sheet that covers the "3rd Place" block.
-// This exercises the create-playoffs code path (tournamentType=playoffs, naginata=on).
-func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) {
+// This exercises the create-knockout code path (tournamentType=playoffs, naginata=on).
+func TestCreateHandler_NaginataKnockout_PrintAreaCoversThirdPlace(t *testing.T) {
 	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
-	f := postCreate(t, naginataPlayoffForm(roster))
+	f := postCreate(t, naginataKnockoutForm(roster))
 
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
@@ -381,9 +387,11 @@ func TestCreateHandler_NaginataPlayoffs_PrintAreaCoversThirdPlace(t *testing.T) 
 		printAreaLastRow, thirdPlaceExcelRow)
 }
 
-// engiPlayoffForm builds the POST /create body for an engi knockout-only
+// engiKnockoutForm builds the POST /create body for an engi knockout-only
 // competition: combined pair names, engi=on, naginata=on (bronze block).
-func engiPlayoffForm(playerList string) url.Values {
+// tournamentType is deliberately still "playoffs"; see naginataKnockoutForm's
+// doc comment.
+func engiKnockoutForm(playerList string) url.Values {
 	return url.Values{
 		"tournamentType": {"playoffs"},
 		"playerList":     {playerList},
@@ -395,13 +403,13 @@ func engiPlayoffForm(playerList string) url.Values {
 	}
 }
 
-// TestCreateHandler_EngiPlayoffs_FlagsCaptions asserts that POST /create with
+// TestCreateHandler_EngiKnockout_FlagsCaptions asserts that POST /create with
 // tournamentType=playoffs&engi=on routes the elimination blocks through the
 // engi rendering path: the match headers carry the "Fl" flag-count captions
-// (kendo playoffs have no such captions).
-func TestCreateHandler_EngiPlayoffs_FlagsCaptions(t *testing.T) {
+// (kendo knockout matches have no such captions).
+func TestCreateHandler_EngiKnockout_FlagsCaptions(t *testing.T) {
 	const roster = "Aoi - Haru, DojoA\nBo - Cho, DojoB\nDai - Ebi, DojoC\nFu - Go, DojoD"
-	f := postCreate(t, engiPlayoffForm(roster))
+	f := postCreate(t, engiKnockoutForm(roster))
 
 	rows, err := f.GetRows("Elimination Matches")
 	require.NoError(t, err)
@@ -415,5 +423,5 @@ func TestCreateHandler_EngiPlayoffs_FlagsCaptions(t *testing.T) {
 		}
 	}
 	assert.Greater(t, found, 0,
-		"engi playoffs elimination blocks must carry 'Fl' flag captions")
+		"engi knockout elimination blocks must carry 'Fl' flag captions")
 }

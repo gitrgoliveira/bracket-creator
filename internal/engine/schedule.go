@@ -307,7 +307,7 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 
 // EstimateForCounts returns a ScheduleEstimate for a pre-draw competition
 // (no generated matches yet) given the expected number of pool matches and
-// playoff matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
+// knockout matches. It reuses the slot-model primitives (perMatchElapsedMinutes,
 // skipCeremonyBlocks) so per-match and in-day break (OpeningBlock/LunchBlock)
 // math match the post-draw path, but the aggregate intentionally diverges in
 // two documented ways (the buffer and phase-sequencing notes below), so it is
@@ -345,9 +345,9 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 // surfaced only as CeremonyMinutes.
 //
 // Phase sequencing (intentional, and a SECOND divergence from the post-draw
-// path): each court runs its pool matches and THEN its playoff matches on the
-// same advancing cursor, pools-then-playoffs, which is the realistic order
-// (playoff seeding needs pool results). The post-draw slot assigners
+// path): each court runs its pool matches and THEN its knockout matches on the
+// same advancing cursor, pools-then-knockout, which is the realistic order
+// (knockout seeding needs pool results). The post-draw slot assigners
 // (assignPoolMatchSlots / assignBracketMatchSlots) are invoked as two separate
 // calls that EACH re-anchor to dayStart+OpeningBlock, so they OVERLAP the two
 // phases in clock time. A post-draw estimate must therefore SEQUENCE the two
@@ -362,15 +362,15 @@ func EstimateSchedule(in EstimateInput) ScheduleEstimate {
 //
 // Returns a zero ScheduleEstimate only when comp is nil; an empty courts list
 // defaults to a single court (matching the assigners and EstimateSchedule).
-func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tournament *state.Tournament) ScheduleEstimate {
+func EstimateForCounts(poolCount, knockoutCount int, comp *state.Competition, tournament *state.Tournament) ScheduleEstimate {
 	if comp == nil {
 		return ScheduleEstimate{}
 	}
 	if poolCount < 0 {
 		poolCount = 0
 	}
-	if playoffCount < 0 {
-		playoffCount = 0
+	if knockoutCount < 0 {
+		knockoutCount = 0
 	}
 
 	courts := comp.Courts
@@ -472,7 +472,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 			perMatch func(schedScenario) int
 		}{
 			{poolCount, func(sc schedScenario) int { return sc.poolPerMatch }},
-			{playoffCount, func(sc schedScenario) int { return sc.playoffPerMatch }},
+			{knockoutCount, func(sc schedScenario) int { return sc.knockoutPerMatch }},
 		} {
 			base := spec.count / numCourts
 			rem := spec.count % numCourts
@@ -548,8 +548,8 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	// TeamSize). Computed after the kachinuki early-return above, which prices
 	// its own three scenarios and never reads these.
 	perCourts, maxes := walk([]schedScenario{{
-		perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/),
-		perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/),
+		perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/),
+		perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/),
 	}})
 	total := int(math.Round(maxes[0])) + ceremonyMin
 	return ScheduleEstimate{
@@ -561,7 +561,7 @@ func EstimateForCounts(poolCount, playoffCount int, comp *state.Competition, tou
 	}
 }
 
-// schedScenario is one per-match timing (pool + playoff minutes) that
+// schedScenario is one per-match timing (pool + knockout minutes) that
 // EstimateForCounts's walk prices. Kachinuki passes three (best/avg/worst);
 // every other format passes one.
-type schedScenario struct{ poolPerMatch, playoffPerMatch int }
+type schedScenario struct{ poolPerMatch, knockoutPerMatch int }

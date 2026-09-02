@@ -835,10 +835,10 @@ func TestCompetitionPOST_RetiredDurationFieldIgnored(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	comp := map[string]any{
-		"name":                 "Retired Fields",
-		"matchDuration":        15,
-		"poolMatchDuration":    15,
-		"playoffMatchDuration": 15,
+		"name":                  "Retired Fields",
+		"matchDuration":         15,
+		"poolMatchDuration":     15,
+		"knockoutMatchDuration": 15,
 	}
 	b, _ := json.Marshal(comp)
 	w := httptest.NewRecorder()

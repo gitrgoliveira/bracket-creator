@@ -182,7 +182,7 @@ func validateCompetitionDateInTournament(comp *state.Competition, tourn *state.T
 // band, so there is nothing to grandfather. The bounds live in the state package
 // precisely so that normalization and this validator cannot drift apart.
 func validateCompetitionDurations(comp *state.Competition) error {
-	for _, secs := range []int{comp.PoolMatchDurationSeconds, comp.PlayoffMatchDurationSeconds} {
+	for _, secs := range []int{comp.PoolMatchDurationSeconds, comp.KnockoutMatchDurationSeconds} {
 		if secs == 0 {
 			continue
 		}
@@ -195,7 +195,7 @@ func validateCompetitionDurations(comp *state.Competition) error {
 
 func validateCompetitionFormat(format, poolFormat string) (int, error) {
 	switch format {
-	case "", state.CompFormatPlayoffs,
+	case "", state.CompFormatKnockout,
 		state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
 		// ok
 	default:
@@ -212,7 +212,7 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 
 // normalizePoolConfig silently zeroes PoolSize and PoolWinners for formats
 // that have no pool phase. League has a single implicit pool containing all
-// participants (engine overrides PoolSize at start time); playoffs is a direct
+// participants (engine overrides PoolSize at start time); knockout is a direct
 // elimination bracket with no pools at all. Keeping these fields set for those
 // formats is misleading and inconsistent, so we discard them on ingest rather
 // than rejecting the request (the engine already ignores them at runtime, and
@@ -222,7 +222,7 @@ func validateCompetitionFormat(format, poolFormat string) (int, error) {
 // consistent regardless of how the client sends the competition.
 func normalizePoolConfig(comp *state.Competition) {
 	switch comp.Format {
-	case state.CompFormatLeague, state.CompFormatPlayoffs:
+	case state.CompFormatLeague, state.CompFormatKnockout:
 		comp.PoolSize = 0
 		comp.PoolWinners = 0
 	}
@@ -231,7 +231,7 @@ func normalizePoolConfig(comp *state.Competition) {
 
 // validateMixedPoolSize rejects a competition that lands on mixed format
 // with no usable pool size. normalizePoolConfig above only zeroes PoolSize
-// for league/playoffs; nothing on the way TO mixed requires one, so
+// for league/knockout; nothing on the way TO mixed requires one, so
 // without this a competition could persist a combination the draw can
 // never build, and the only failure would surface much later at draw
 // time (engine/pools.go: "pool size must be at least 1"), far from the
@@ -274,7 +274,7 @@ func validateMixedPoolSize(comp *state.Competition) error {
 //
 // Scoped to "mixed" at the POST call site and unscoped at the import one,
 // which is a real difference and a deliberately unchanged one: POST runs
-// normalizePoolConfig first, so a league/playoffs competition has already
+// normalizePoolConfig first, so a league/knockout competition has already
 // had PoolSize zeroed by the time the default is considered and must stay
 // that way. Import does not normalize, so it has always stored this number
 // on every format; that is inert (nothing reads PoolSize for a bare
@@ -304,7 +304,7 @@ type competitionUpdateRequest struct {
 
 // normalizeExtraQualifiers zeroes ExtraQualifiers (bc-qual LP-5a) for the
 // formats it cannot mean anything for: league has no knockout stage,
-// playoffs has no pool stage, and swiss pairs each round by standings --
+// knockout has no pool stage, and swiss pairs each round by standings --
 // internal/engine's own gate (poolFedKnockout in pools.go) is mixed-only,
 // so it never reaches any of them. Zeroing keeps stored config.md
 // consistent with what the engine actually uses, and means
@@ -324,7 +324,7 @@ type competitionUpdateRequest struct {
 // format instead of each carrying its own switch.
 func normalizeExtraQualifiers(comp *state.Competition) {
 	switch comp.Format {
-	case state.CompFormatLeague, state.CompFormatPlayoffs, state.CompFormatSwiss:
+	case state.CompFormatLeague, state.CompFormatKnockout, state.CompFormatSwiss:
 		comp.ExtraQualifiers = state.ExtraQualifiersNone
 	}
 }
@@ -665,7 +665,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		// Zero out pool-config fields that have no meaning for the chosen
-		// format (league / playoffs). The engine already ignores them at
+		// format (league / knockout). The engine already ignores them at
 		// start time; this keeps the persisted config consistent with what
 		// the engine actually uses. See normalizePoolConfig for full rationale.
 		normalizePoolConfig(&comp)
@@ -678,7 +678,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// existing tests in this package send -- start returning 400, while
 		// the identical competition arriving through the import door landed
 		// fine. Runs after normalizePoolConfig above, so it can only ever
-		// fire for "mixed": league and playoffs have had PoolSize zeroed by
+		// fire for "mixed": league and knockout have had PoolSize zeroed by
 		// then and must keep it.
 		if comp.Format == state.CompFormatMixed && comp.PoolSize == 0 {
 			comp.PoolSize = defaultPoolSize
@@ -732,7 +732,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Knockout qualifiers (bc-qual LP-5a): "" is always valid;
 		// larger-pools/fill-bracket additionally require minimum-players-
 		// per-pool sizing and poolWinners == 1. normalizePoolConfig above
-		// already zeroed ExtraQualifiers for league/playoffs, so this only
+		// already zeroed ExtraQualifiers for league/knockout, so this only
 		// ever rejects a genuinely invalid combination for "mixed" (or a
 		// hand-crafted request for another format). EffectivePoolWinners()
 		// resolves an unset/<=0 PoolWinners to the same default of 2 the
@@ -1624,7 +1624,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// comp.Format read live in engine/scoring_tx.go's mixed-pool
 				// rescoring gate, and comp.Kind read throughout
 				// internal/engine's scheduling/scoring/PDF paths): a
-				// competition already in pools / playoffs / completed cannot
+				// competition already in pools / knockout / completed cannot
 				// safely change either after the fact. Surfaced as a 409
 				// (matching teamMatchTypeStartedFlag below), not the 400
 				// validationErr path Naginata/Engi use just below: format and
@@ -1682,7 +1682,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// was migrated to seconds when it was loaded, and its legacy
 				// fields are already zero.
 				current.PoolMatchDurationSeconds = comp.PoolMatchDurationSeconds
-				current.PlayoffMatchDurationSeconds = comp.PlayoffMatchDurationSeconds
+				current.KnockoutMatchDurationSeconds = comp.KnockoutMatchDurationSeconds
 				// FR-050a: the swiss round budget is admin-editable at ANY
 				// status, deliberately and with no `started` guard. This
 				// comment used to claim the field went "read-only via the
@@ -1946,7 +1946,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// operator can recover from a broken competition.
 		if comp, err := store.LoadCompetition(id); err == nil && comp != nil {
 			switch comp.Status {
-			case state.CompStatusPools, state.CompStatusPlayoffs:
+			case state.CompStatusPools, state.CompStatusKnockout:
 				c.JSON(http.StatusConflict, gin.H{"error": "competition is in progress; mark it invalid before deleting"})
 				return
 			}
@@ -1981,7 +1981,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				notFoundFlag = true
 				return nil, nil
 			}
-			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
+			if current.Status != state.CompStatusPools && current.Status != state.CompStatusKnockout {
 				statusErr = fmt.Errorf("only in-progress competitions can be invalidated (current status: %q)", current.Status)
 				return nil, nil
 			}
@@ -2159,7 +2159,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 
 		// Full-bracket-completion gate + atomic status transition, all under ONE
 		// per-comp write lock via WithTransaction. A bracket-format competition
-		// (playoffs, or a mixed comp's knockout) must have EVERY must-play match
+		// (knockout, or a mixed comp's knockout) must have EVERY must-play match
 		// completed -- all rounds plus the naginata bronze (ThirdPlaceMatch, a
 		// sibling of Rounds) -- before it can be sealed, else the Awards podium
 		// would show an unplayed final/bronze. The JS "Complete competition"
@@ -2190,7 +2190,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				notFoundFlag = true
 				return nil
 			}
-			if current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs {
+			if current.Status != state.CompStatusPools && current.Status != state.CompStatusKnockout {
 				statusErr = fmt.Errorf("competition cannot be completed from status %q", current.Status)
 				return nil
 			}
@@ -2223,7 +2223,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, txErr)
 			return
 		}
-		// Reaching here means the status transitioned (pools/playoffs -> complete),
+		// Reaching here means the status transitioned (pools/knockout -> complete),
 		// always a real content change, so broadcast unconditionally.
 		hub.Broadcast(EventTournamentUpdated, nil)
 		c.JSON(http.StatusOK, compOut)

@@ -147,7 +147,13 @@ func (s *Store) LoadParticipantsOpt(compID string, withZekkenName bool, opts Loa
 func (s *Store) loadParticipants(compID string, withZekkenName bool, opts LoadParticipantsOpts) ([]domain.Player, error) {
 	// Before the read lock: legacy shapes convert on first read, under the
 	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
-	s.EnsureLegacyUpgraded(compID)
+	// In ordinary operation the startup sweep (SweepLegacyUpgrades) already
+	// converted every competition before this could ever run; a non-nil
+	// error here means this competition escaped that sweep, and the read is
+	// refused rather than silently serving a mis-classified competition.
+	if err := s.EnsureLegacyUpgraded(compID); err != nil {
+		return nil, err
+	}
 	mu := s.getCompLock(compID)
 	mu.RLock()
 	defer mu.RUnlock()

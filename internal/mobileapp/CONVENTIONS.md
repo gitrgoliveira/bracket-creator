@@ -32,7 +32,7 @@ These are the load + transform + save primitives. **Use them instead of `Load…
 | `Store.UpdateTournamentChanged(desired, transform)` | `s.mu` + `s.tournamentMu` | Mutating `tournament.md` based on its current state (e.g. password preserve-on-empty). |
 | `Store.UpdatePoolMatchByID(compID, matchID, mutate)` | per-competition write lock | Mutating a single pool match's score / status. |
 | `Store.UpdateBracket(compID, mutate)` | per-competition write lock | Mutating any bracket match's score / propagating winners. |
-| `Store.WithCompetitionRenameLock(fn)` | `s.compRenameMu` | Wrapping a "uniqueness-check + save" sequence (POST /competitions, PUT /competitions/:id rename, POST /playoffs). |
+| `Store.WithCompetitionRenameLock(fn)` | `s.compRenameMu` | Wrapping a "uniqueness-check + save" sequence (POST /competitions, PUT /competitions/:id rename, POST /knockout). |
 
 If you need a sequence the existing primitives don't cover, add a new one rather than reaching past the lock: the `Store` is the only place that knows the lock layout.
 

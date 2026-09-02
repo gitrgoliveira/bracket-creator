@@ -10,7 +10,7 @@
   ],
   "cases": [
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 4,
       "discriminating": false,
       "rounds": [
@@ -54,7 +54,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 5,
       "discriminating": false,
       "rounds": [
@@ -129,7 +129,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 8,
       "discriminating": false,
       "rounds": [
@@ -219,7 +219,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 9,
       "discriminating": false,
       "rounds": [
@@ -364,7 +364,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 11,
       "discriminating": false,
       "rounds": [
@@ -519,7 +519,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 13,
       "discriminating": false,
       "rounds": [
@@ -684,7 +684,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 16,
       "discriminating": false,
       "rounds": [
@@ -864,7 +864,7 @@
       ]
     },
     {
-      "name": "playoffs on 1 shiaijo",
+      "name": "knockout on 1 shiaijo",
       "entrants": 19,
       "discriminating": false,
       "rounds": [

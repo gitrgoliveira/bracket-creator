@@ -3,7 +3,7 @@ package helper
 import "fmt"
 
 // EstimateMatchCountsInput carries the scalar fields from a competition
-// configuration that are needed to derive pre-draw pool and playoff match
+// configuration that are needed to derive pre-draw pool and knockout match
 // counts. Only scalar types are used (no *state.Competition) because the
 // state package imports helper, adding the reverse import would create a
 // cycle. Callers in the engine layer should populate this struct from the
@@ -11,14 +11,14 @@ import "fmt"
 //
 // Required field matrix by Format:
 //
-//	"playoffs", PlayerCount only (no pool fields needed).
+//	"knockout", PlayerCount only (no pool fields needed).
 //	"mixed", PlayerCount, PoolSize (>0), PoolSizeMode, PoolWinners,
 //	               RoundRobin, PoolFormat.
 //	"league", PlayerCount only (single pool, always full round-robin).
 //	"swiss", PlayerCount, SwissRounds.
 type EstimateMatchCountsInput struct {
-	// Format is state.Competition.Format: "playoffs", "mixed", "league",
-	// "swiss". Empty string is treated as "playoffs" for backward
+	// Format is state.Competition.Format: "knockout", "mixed", "league",
+	// "swiss". Empty string is treated as "knockout" for backward
 	// compatibility with legacy configs. Any other value returns an error.
 	Format string
 
@@ -38,7 +38,7 @@ type EstimateMatchCountsInput struct {
 }
 
 // EstimateMatchCounts returns the expected number of pool matches and
-// playoff bracket matches for a competition given its configuration and
+// knockout bracket matches for a competition given its configuration and
 // participant count. The estimates are purely derived from the same
 // formulas used by the real draw pipeline:
 //
@@ -69,15 +69,15 @@ type EstimateMatchCountsInput struct {
 //     early return takes precedence and returns nil, callers should not
 //     rely on a format error for zero-player inputs).
 //   - PoolSize == 0 for the mixed format (would divide by zero).
-func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCount int, err error) {
+func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCount int, err error) {
 	if in.PlayerCount <= 0 {
 		return 0, 0, nil
 	}
 
 	switch in.Format {
-	case "playoffs", "":
+	case "knockout", "":
 		// No pool phase. Bracket over all players.
-		// Empty format is treated as playoffs for backward compatibility with
+		// Empty format is treated as knockout for backward compatibility with
 		// legacy competition configs that predate the Format field.
 		return 0, bracketMatchCount(in.PlayerCount), nil
 
@@ -85,7 +85,7 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 		return estimateMixed(in)
 
 	case "league":
-		// Single pool of all players, always full round-robin, no playoffs.
+		// Single pool of all players, always full round-robin, no knockout.
 		return in.PlayerCount * (in.PlayerCount - 1) / 2, 0, nil
 
 	case "swiss":
@@ -121,7 +121,7 @@ func EstimateMatchCounts(in EstimateMatchCountsInput) (poolMatchCount, playoffMa
 // All-unique dojos ensure discoverPool never hits a dojo-conflict that would
 // route players via leastConflictedPool, keeping the pool-size distribution
 // identical to the pure targetSize/forcePoolSize path.
-func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCount int, err error) {
+func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, knockoutMatchCount int, err error) {
 	if in.PoolSize <= 0 {
 		return 0, 0, fmt.Errorf("EstimateMatchCounts: PoolSize must be > 0 for mixed format, got %d", in.PoolSize)
 	}
@@ -160,15 +160,15 @@ func estimateMixed(in EstimateMatchCountsInput) (poolMatchCount, playoffMatchCou
 		totalPoolMatches += poolMatchesPerPool(len(p.Players), in.RoundRobin, in.PoolFormat)
 	}
 
-	// --- Playoff bracket ---
+	// --- Knockout bracket ---
 	poolWinners := in.PoolWinners
 	if poolWinners <= 0 {
 		poolWinners = defaultPoolWinners // same default ResolveQualifiedPools (engine/knockout.go) falls back to
 	}
 	numFinalists := len(realPools) * poolWinners
-	totalPlayoffMatches := bracketMatchCount(numFinalists)
+	totalKnockoutMatches := bracketMatchCount(numFinalists)
 
-	return totalPoolMatches, totalPlayoffMatches, nil
+	return totalPoolMatches, totalKnockoutMatches, nil
 }
 
 // poolMatchesPerPool returns the number of matches generated for a single
@@ -228,7 +228,7 @@ func poolMatchesPerPool(size int, roundRobin bool, poolFormat string) int {
 // advanced for auto-resolved (Completed) matches, so they must NOT be counted
 // for duration estimation.
 //
-// This is exactly players-1 (for players >= 2). The playoffs draw uses
+// This is exactly players-1 (for players >= 2). The knockout draw uses
 // StandardSeeding + CreateBalancedTree + TreeToLeafArray (mp-5ng7), which
 // embeds the tree's structural byes into a pow2 leaf array. Byes are clustered
 // where the tree is asymmetric, so some first-round slots are "" vs "" (double

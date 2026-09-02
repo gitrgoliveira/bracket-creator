@@ -147,7 +147,7 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 func (s *Store) SaveBracket(compID string, b *Bracket) error {
 	// Defense-in-depth: validate compID before acquiring the lock and
 	// writing via compPath. StartCompetition can reach this path via
-	// generatePlayoffs(comp.ID, ...), a corrupted or out-of-band edit
+	// generateKnockout(comp.ID, ...), a corrupted or out-of-band edit
 	// to config.md with a traversal-shaped ID could otherwise make
 	// bracket.json land outside the competition directory. Sibling
 	// LoadBracket and UpdateBracket already validate; align with them.

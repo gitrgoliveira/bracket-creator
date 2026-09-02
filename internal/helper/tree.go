@@ -242,11 +242,11 @@ func SemifinalMatchNumbers(rounds [][]*Node) (semiA, semiB int) {
 	return semiA, semiB
 }
 
-// NeedsBronzeBlock reports whether a naginata playoffs bracket should carry a
+// NeedsBronzeBlock reports whether a naginata knockout bracket should carry a
 // bronze (3rd-place) block: naginata only, and only when a real semifinal round
 // exists (a 2-player bracket is a single round with no semifinal, so no bronze).
 // This is the single source of truth for the rule expressed at every render/build
-// site (cmd create-pools/playoffs, internal/engine/bracket.go).
+// site (cmd create-pools/knockout, internal/engine/bracket.go).
 func NeedsBronzeBlock(naginata bool, numRounds int) bool {
 	return naginata && numRounds >= 2
 }

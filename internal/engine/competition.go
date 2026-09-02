@@ -41,7 +41,7 @@ const (
 	AutoCompleteTiebreakInjected AutoCompleteOutcome = 2
 	// AutoCompleteKnockoutStarted means the LAST pool of a mixed competition was
 	// just seeded into the knockout bracket: every pool is now resolved, so the
-	// competition moved CompStatusPools → CompStatusPlayoffs (only knockout
+	// competition moved CompStatusPools → CompStatusKnockout (only knockout
 	// matches remain). Callers should broadcast EventCompetitionStarted and
 	// EventScheduleUpdated.
 	AutoCompleteKnockoutStarted AutoCompleteOutcome = 3
@@ -80,8 +80,8 @@ const (
 //     the league completes with shared ranks.
 //   - Mixed format → delegates to advanceMixedPools, which seeds each COMPLETED
 //     pool's finishers into the in-place knockout bracket incrementally (no
-//     separate playoffs competition, no manual "start knockout" step), and flips
-//     the competition to CompStatusPlayoffs once the LAST pool has been seeded.
+//     separate knockout competition, no manual "start knockout" step), and flips
+//     the competition to CompStatusKnockout once the LAST pool has been seeded.
 //     Knockout matches become scoreable per-match as their feeder pools finish,
 //     there is no wait for the whole pool phase.
 //
@@ -245,7 +245,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 	// that group still has equal DH win counts and standings remain unresolved.
 	// Per the rules a still-level 3-4 way group goes to a further round of
 	// supplementary ippon-shobu and ultimately chusen / drawing lots
-	// (running_a_kendo_tournament.md:181); rather than seed the playoff from an
+	// (running_a_kendo_tournament.md:181); rather than seed the knockout from an
 	// arbitrary order we block auto-completion until a decisive result exists.
 	// Any pre-existing pool-rank overrides are still honoured by dhCycleExists.
 	if isTeamComp && hasCompleteDH {
@@ -307,7 +307,7 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 //     (ResolveQualifiedPools), newly-playable knockout matches were already
 //     scheduled at draw time, so they become live immediately.
 //  3. When the final pool has been seeded (no pool placeholders remain), flip
-//     CompStatusPools → CompStatusPlayoffs (informational, knockout matches are
+//     CompStatusPools → CompStatusKnockout (informational, knockout matches are
 //     already playable per-match during "pools").
 //
 // Outcomes: AutoCompleteKnockoutStarted (last pool seeded, status flipped),
@@ -336,13 +336,13 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 		return AutoCompleteNoChange, err
 	}
 
-	// 3. Flip pools → playoffs once every pool is seeded.
+	// 3. Flip pools → knockout once every pool is seeded.
 	if allResolved {
 		changed, cerr := e.store.UpdateCompetitionChanged(compID, func(c *state.Competition) (*state.Competition, error) {
 			if c == nil || c.Format != state.CompFormatMixed || c.Status != state.CompStatusPools {
 				return nil, nil
 			}
-			c.Status = state.CompStatusPlayoffs
+			c.Status = state.CompStatusKnockout
 			return c, nil
 		})
 		if cerr != nil {
@@ -532,7 +532,7 @@ func (e *Engine) DiscardDraw(id string) error {
 }
 
 // transitionDrawToRunning atomically moves a draw-ready competition to
-// the appropriate running status (Pools or Playoffs) based on its format.
+// the appropriate running status (Pools or Knockout) based on its format.
 func (e *Engine) transitionDrawToRunning(id string) error {
 	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
@@ -545,7 +545,7 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 		case state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
 			current.Status = state.CompStatusPools
 		default:
-			current.Status = state.CompStatusPlayoffs
+			current.Status = state.CompStatusKnockout
 		}
 		return current, nil
 	})
@@ -853,8 +853,13 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// convert between here and the re-check, which would then read our own
 	// one-time rewrite as a concurrent operator write. The upgrade ordering
 	// is folded into the store method itself so this call site cannot get
-	// it wrong by omission.
-	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
+	// it wrong by omission. It also runs the (louder, error-returning)
+	// format/status upgrade; propagate rather than fingerprint a competition
+	// that may still be in its unconverted legacy shape.
+	loadedParticipantsMtime, loadedSeedsMtime, err := e.store.ParticipantsFingerprint(id)
+	if err != nil {
+		return err
+	}
 
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo
@@ -980,10 +985,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 		comp.SwissCurrentRound = 1
 		comp.Status = state.CompStatusDrawReady
 	default:
-		// A standalone playoffs competition (the only remaining playoffs case
-		// after the derived-playoffs path was removed in mp-turx) uses standalone
+		// A standalone knockout competition (the only remaining knockout case
+		// after the derived-knockout path was removed in mp-turx) uses standalone
 		// seeding, there is no pool-preview topology to mirror.
-		if err := e.generatePlayoffs(comp, players, seeds); err != nil {
+		if err := e.generateKnockout(comp, players, seeds); err != nil {
 			return err
 		}
 		comp.Status = state.CompStatusDrawReady
@@ -992,7 +997,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// Atomic commit of the modified competition. The transform
 	// re-validates Status under the per-comp lock, if a concurrent
 	// StartCompetition won the race and already moved Status to
-	// Pools/Playoffs, we abort here with a validation error rather
+	// Pools/Knockout, we abort here with a validation error rather
 	// than clobbering their result with ours.
 	//
 	// The transform ALSO re-validates the generation-relevant fields
@@ -1000,10 +1005,10 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// RoundRobin, Kind, WithZekkenName, Courts, the exact set
 	// listed in the validation block below). If a concurrent settings
 	// save changed any of those between our outer Load (the basis
-	// for the pools/playoffs files we just generated) and this atomic
+	// for the pools/knockout files we just generated) and this atomic
 	// commit, the generated artifacts no longer match the new config,
-	// e.g. a Format change from "mixed" to "playoffs" would leave
-	// pools.csv on disk while Status committed to "playoffs". Better
+	// e.g. a Format change from "mixed" to "knockout" would leave
+	// pools.csv on disk while Status committed to "knockout". Better
 	// to abort with a 409-style conflict than to commit inconsistent
 	// state. Note: TeamSize and PoolWinners are deliberately NOT in
 	// this set, see the inline comment on the validation block for
@@ -1025,7 +1030,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// Generation-relevant fields must match the SNAPSHOT we
 		// generated from (loaded* values captured before the pipeline
 		// mutated anything). The list is EXACTLY what
-		// generatePools / generatePlayoffs read:
+		// generatePools / generateKnockout read:
 		//   - Format (decides which generator)
 		//   - PoolSize, PoolSizeMode, RoundRobin (pools structure)
 		//   - NumberPrefix (player numbering in both generators)

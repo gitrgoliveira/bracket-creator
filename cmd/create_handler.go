@@ -61,7 +61,11 @@ func createTournamentHandler(c *gin.Context) {
 	}
 
 	tournamentType := c.PostForm("tournamentType")
-	if tournamentType != "pools" && tournamentType != "playoffs" {
+	// "playoffs" is accepted here ONLY because web/index.html (a later commit
+	// in this terminology consolidation, bc-terminology) still posts that
+	// literal value. Once web/ is converted to post "knockout", remove the
+	// "playoffs" arm here and in the switch below.
+	if tournamentType != "pools" && tournamentType != "knockout" && tournamentType != "playoffs" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid tournament type",
 		})
@@ -192,8 +196,10 @@ func createTournamentHandler(c *gin.Context) {
 			return
 		}
 
-	case "playoffs":
-		o := &playoffOptions{
+	case "knockout", "playoffs":
+		// The "playoffs" case is temporary; see the comment on the validation
+		// guard above.
+		o := &knockoutOptions{
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
 			naginata:        naginata,
@@ -208,19 +214,19 @@ func createTournamentHandler(c *gin.Context) {
 
 		o.outputWriter = inMemoryWriter
 
-		err := o.createPlayoffs(entries)
+		err := o.createKnockout(entries)
 		if err != nil {
-			// As with pools, playoff generation failures are typically
+			// As with pools, knockout generation failures are typically
 			// request-caused (invalid roster, seed validation), report 400.
-			log.Printf("failed to create playoffs: %s", err.Error())
+			log.Printf("failed to create knockout: %s", err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("Failed to create playoffs: %s", err.Error()),
+				"error": fmt.Sprintf("Failed to create knockout: %s", err.Error()),
 			})
 			return
 		}
 	}
-	// No default: tournamentType is validated to be "pools" or "playoffs" by
-	// the guard near the top of this handler.
+	// No default: tournamentType is validated to be "pools", "knockout" or
+	// (temporarily) "playoffs" by the guard near the top of this handler.
 
 	// Ensure data is written to the buffer
 	if err := inMemoryWriter.Flush(); err != nil {

@@ -80,12 +80,12 @@ func TestQuarantineCorruptBracket_RefusesAReadableBracket(t *testing.T) {
 // For a direct-elimination competition the bracket file IS the draw. Rebuilding
 // it from today's roster would not restore the tournament, it would invent a
 // different one that disagrees with the sheet already printed and on the wall.
-func TestQuarantineCorruptBracket_RefusesPlayoffsRatherThanInventingADraw(t *testing.T) {
+func TestQuarantineCorruptBracket_RefusesKnockoutRatherThanInventingADraw(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
-	path := quarantineComp(t, store, eng, dir, "playoffs-q", state.CompFormatPlayoffs)
+	path := quarantineComp(t, store, eng, dir, "knockout-q", state.CompFormatKnockout)
 	breakBracket(t, path)
 
-	_, err := eng.QuarantineCorruptBracket("playoffs-q")
+	_, err := eng.QuarantineCorruptBracket("knockout-q")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "only record of its draw")
 	assert.Contains(t, err.Error(), "Repair the file")
@@ -123,11 +123,11 @@ func TestQuarantineCorruptBracket_LeagueHasNothingToRebuild(t *testing.T) {
 // happily agree with a broken gate.
 //
 // This is the test that would have caught the hole it now guards: the refusal
-// used to be a hand-written `Format == playoffs || Format == ""`, so an
+// used to be a hand-written `Format == knockout || Format == ""`, so an
 // UNRECOGNISED format -- a typo in a hand-edited config.md -- passed it,
 // reached the quarantine, and had its bracket moved aside with nothing built to
 // replace it. That format takes the draw pipeline's default branch and gets a
-// standalone playoffs bracket, so the file it lost was the only record of its
+// standalone knockout bracket, so the file it lost was the only record of its
 // draw. The table says which formats those are; this says the engine agrees.
 func TestQuarantineCorruptBracket_OutcomeFollowsTheFormatTable(t *testing.T) {
 	for i, tc := range loadFormatDrawsBracketTable(t) {

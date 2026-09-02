@@ -325,7 +325,7 @@ func TestRouterCreateEndpoint_EmptyPlayerList(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.Close()
 
 	w := httptest.NewRecorder()
@@ -422,13 +422,13 @@ func TestRouterCreateEndpoint_PoolsValidation(t *testing.T) {
 	}
 }
 
-func TestRouterCreateEndpoint_PlayoffsSuccess(t *testing.T) {
+func TestRouterCreateEndpoint_KnockoutSuccess(t *testing.T) {
 	router := NewRouter()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.WriteField("determined", "on")
 	writer.Close()
 
@@ -439,7 +439,7 @@ func TestRouterCreateEndpoint_PlayoffsSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
-	assert.Contains(t, w.Header().Get("Content-Disposition"), "playoffs-")
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "knockout-")
 	assert.Greater(t, w.Body.Len(), 0)
 }
 
@@ -450,7 +450,7 @@ func TestRouterCreateEndpoint_DownloadStatusFlow(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.WriteField("determined", "on")
 	writer.WriteField("downloadToken", downloadToken)
 	writer.Close()
@@ -519,7 +519,7 @@ func TestRouterCreateEndpoint_WithSeeds(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.WriteField("seeds", string(seedsJSON))
 	writer.WriteField("determined", "on")
 	writer.Close()
@@ -539,7 +539,7 @@ func TestRouterCreateEndpoint_InvalidSeeds(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.WriteField("seeds", "invalid json")
 	writer.Close()
 
@@ -562,7 +562,7 @@ func TestRouterCreateEndpoint_WithOptions(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1,Johnny\nJane Smith,Dojo2,Janey\nAlice,Dojo3,Ali\nBob,Dojo4,Bobby")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.WriteField("singleTree", "on")
 	writer.WriteField("withZekkenName", "on")
 	writer.WriteField("teamMatches", "2")
@@ -675,7 +675,7 @@ func TestRouterCreateEndpoint_DuplicateEntries(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1\nJohn Doe,Dojo1")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.Close()
 
 	w := httptest.NewRecorder()
@@ -725,7 +725,7 @@ func TestRouterCreateEndpoint_InvalidIntParams(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	writer.WriteField("playerList", "John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4")
-	writer.WriteField("tournamentType", "playoffs")
+	writer.WriteField("tournamentType", "knockout")
 	writer.WriteField("teamMatches", "invalid")
 	writer.WriteField("courts", "invalid")
 	writer.Close()

@@ -76,7 +76,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	//    large-draw edge case: TreePageLayout raises the page count to
 	//    NextPow2(numCourts), so every competition on 2 or more courts hit it.
 	// Load the stored bracket ONLY for the paths that actually consume it:
-	// naginata (its bronze gate) and a pure playoffs competition (its elimination
+	// naginata (its bronze gate) and a pure knockout competition (its elimination
 	// leaves — mp-ndfu). Still skipped for league/swiss/mixed, whose export has
 	// zero dependency on bracket.json, so a corrupted file can never abort an
 	// export that never needed it. Bronze gates on the stored bracket's
@@ -84,7 +84,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// two exports of one competition agree.
 	hasBronze := false
 	var bracket *state.Bracket
-	if comp.Naginata || isPurePlayoffs(comp, pools) {
+	if comp.Naginata || isPureKnockout(comp, pools) {
 		bracket, err = e.store.LoadBracket(id)
 		if err != nil {
 			return nil, err
@@ -105,10 +105,10 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// Elimination leaves for the knockout phase, shared with the results workbook
 	// (EliminationDraw) so both exports of one competition render the identical
 	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
-	// a pure playoffs competition (mp-ndfu, mp-0yd8). The IsPlayoffEnabled gate
+	// a pure knockout competition (mp-ndfu, mp-0yd8). The IsKnockoutEnabled gate
 	// below then drops the phantom bracket a league's placeholder finals imply.
 	draw := EliminationDraw(e.store, comp, pools, bracket, numCourts)
-	if draw != nil && comp.IsPlayoffEnabled() {
+	if draw != nil && comp.IsKnockoutEnabled() {
 		// 4b. Tree pages plus the Elimination Matches sheet, in the one mandatory
 		//     order RenderKnockoutPages enforces. This path used to skip the
 		//     Elimination blocks and junction numbering entirely, shipping a
@@ -135,7 +135,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// yields no elimination leaves at all (no pools, no first-round entrants
 		// and no participants to seed — e.g. a bracket saved with an empty first
 		// round). The bracket-leaf/participant fallback above already covers the
-		// normal pure-playoffs case (mp-ndfu), so this only fires for that
+		// normal pure-knockout case (mp-ndfu), so this only fires for that
 		// degenerate shape. The bronze block is then the only content on the
 		// sheet, rendered at court band 1, so numCourts=1 covers it exactly.
 		// nil rounds derive zero semi numbers, leaving both entrant slots

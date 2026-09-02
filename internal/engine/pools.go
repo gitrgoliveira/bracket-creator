@@ -115,7 +115,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// extraQualifiers is forced to standard for a non-poolFedKnockout
 		// format regardless of what comp.ExtraQualifiers holds, mirroring
 		// the same rule poolFedKnockout's own doc comment states: a stored
-		// non-standard value on a league/swiss/playoffs record must never
+		// non-standard value on a league/swiss/knockout record must never
 		// steer pool FORMATION.
 		extraQualifiers := state.ExtraQualifiersNone
 		if poolFedKnockout {

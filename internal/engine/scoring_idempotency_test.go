@@ -31,7 +31,7 @@ func TestRecordMatchResult_DuplicateCompletedSubmitIsIdempotent(t *testing.T) {
 
 		// 4 players → 2 rounds (semis + final). StartCompetition handles bracket
 		// generation so match IDs match what the engine expects.
-		createTestCompetition(t, store, compID, "playoffs", 3)
+		createTestCompetition(t, store, compID, "knockout", 3)
 		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 		require.NoError(t, eng.StartCompetition(compID))
 

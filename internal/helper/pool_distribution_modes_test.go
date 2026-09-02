@@ -32,7 +32,7 @@ import (
 // larger-pools rule (poolWinners+1 for a pool whose participant count
 // exceeds minSize) directly off REAL, already-formed pools -- the same test
 // double cmd/create-pools.go's cliExtraQualifierOverrides and
-// internal/engine/playoff_skeleton.go's extraQualifierOverrides use their
+// internal/engine/knockout_skeleton.go's extraQualifierOverrides use their
 // own state.Competition for, reimplemented here since a helper-package test
 // cannot import internal/state (state imports helper).
 func buildLargerPoolsOverrides(pools []Pool, minSize, poolWinners int) map[int]int {

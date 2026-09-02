@@ -13,7 +13,7 @@ import (
 // bc-lww1. A match write the timestamp guard drops must REPORT the drop, on
 // every path a write can take. That is a matrix, not a single case: a match id
 // resolves to a pool match or a knockout one only at run time, the knockout half
-// splits again into a round match and the bronze playoff (which lives outside
+// splits again into a round match and the bronze knockout (which lives outside
 // Rounds and is reached by a separate branch), and each of those is reached
 // through either of the two engine entry points a caller can pick.
 //
@@ -140,7 +140,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 			// Bronze lives in Bracket.ThirdPlaceMatch, NOT in Rounds, so the
 			// round scan never finds it and it is written by its own branch —
 			// the branch that used to discard `applied` outright.
-			name: "bronze playoff, plain writer",
+			name: "bronze knockout, plain writer",
 			file: "bracket.json",
 			seed: seedBracket(storedAt, true),
 			write: func(_ *testing.T, eng *Engine, _ *state.Store, compID, matchID string, r *state.MatchResult) error {
@@ -148,7 +148,7 @@ func TestSupersededIsReportedOnEveryWritePath(t *testing.T) {
 			},
 		},
 		{
-			name: "bronze playoff, tx twin",
+			name: "bronze knockout, tx twin",
 			file: "bracket.json",
 			seed: seedBracket(storedAt, true),
 			write: func(t *testing.T, eng *Engine, store *state.Store, compID, matchID string, r *state.MatchResult) error {
@@ -247,7 +247,7 @@ func seedBracket(storedAt int64, bronze bool) func(*testing.T, *Engine, *state.S
 	return func(t *testing.T, _ *Engine, store *state.Store, compID string) string {
 		t.Helper()
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: compID, Name: "Sup", Status: state.CompStatusPlayoffs,
+			ID: compID, Name: "Sup", Status: state.CompStatusKnockout,
 		}))
 		b := &state.Bracket{
 			Rounds: [][]state.BracketMatch{{

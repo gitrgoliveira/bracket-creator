@@ -333,25 +333,40 @@ type Competition struct {
 	WithZekkenName    bool              `yaml:"with_zekken_name" json:"withZekkenName"`
 	NumberPrefix      string            `yaml:"number_prefix,omitempty" json:"numberPrefix,omitempty"`
 	HasParticipantIDs bool              `yaml:"has_participant_ids,omitempty" json:"hasParticipantIDs,omitempty"`
-	// PoolMatchDuration / PlayoffMatchDuration are the retired WHOLE-MINUTE
+	// PoolMatchDuration / KnockoutMatchDuration are the retired WHOLE-MINUTE
 	// per-phase clock durations. They carry `json:"-"`: they are NOT part of
 	// the API in either direction. The only reason they still exist is that
 	// old config.md files on disk contain them, and ApplyCompetitionDefaults
 	// needs to read them once to migrate the value into the canonical seconds
 	// fields. It then zeroes them, so `omitempty` drops the keys on the next
 	// save and the file converges on the seconds-only schema.
+	//
+	// KnockoutMatchDuration's yaml tag is DELIBERATELY still the pre-rename
+	// "playoff_match_duration": old config.md files on disk carry those exact
+	// bytes forever, and this is a legacy READ key, not part of the knockout/
+	// playoffs wire-value rename (bc-terminology commit 1). Only the Go symbol
+	// changed, for consistency with its sibling; do not "fix" the tag to
+	// match.
+	//
 	// Never read these directly; read PoolMatchDurationSeconds /
-	// PlayoffMatchDurationSeconds below, which the store guarantees are
+	// KnockoutMatchDurationSeconds below, which the store guarantees are
 	// already populated and in band.
-	PoolMatchDuration    int `yaml:"pool_match_duration,omitempty" json:"-"`
-	PlayoffMatchDuration int `yaml:"playoff_match_duration,omitempty" json:"-"`
+	PoolMatchDuration     int `yaml:"pool_match_duration,omitempty" json:"-"`
+	KnockoutMatchDuration int `yaml:"playoff_match_duration,omitempty" json:"-"`
 
-	// PoolMatchDurationSeconds / PlayoffMatchDurationSeconds are THE per-phase
+	// PoolMatchDurationSeconds / KnockoutMatchDurationSeconds are THE per-phase
 	// clock durations, in SECONDS, allowing sub-minute granularity (e.g. 150 =
 	// 2m30s). This is the only duration representation on the wire and the only
 	// one written to new config.md files.
-	PoolMatchDurationSeconds    int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
-	PlayoffMatchDurationSeconds int `yaml:"playoff_match_duration_seconds,omitempty" json:"playoffMatchDurationSeconds,omitempty"`
+	//
+	// KnockoutMatchDurationSeconds' yaml/json tags were renamed from
+	// playoff_match_duration_seconds / playoffMatchDurationSeconds
+	// (bc-terminology commit 1, clean break: no permanent dual-accept). A
+	// config.md written under the old key before this rename is folded onto
+	// this field by upgradeCompetitionFormatLocked (legacy_upgrade.go), which
+	// is the ONE place still allowed to recognise the retired key.
+	PoolMatchDurationSeconds     int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
+	KnockoutMatchDurationSeconds int `yaml:"knockout_match_duration_seconds,omitempty" json:"knockoutMatchDurationSeconds,omitempty"`
 
 	// TeamMatchType selects the team-match format (FR-044). Empty value
 	// is treated as TeamMatchTypeFixed for backward compatibility; all
@@ -570,15 +585,15 @@ func ApplyCompetitionDefaults(c *Competition) {
 			c.PoolMatchDurationSeconds = ClampMatchSeconds(m * 60)
 		}
 	}
-	if c.PlayoffMatchDurationSeconds == 0 {
-		if m := firstPositive(c.PlayoffMatchDuration, c.MatchDuration); m > 0 {
-			c.PlayoffMatchDurationSeconds = ClampMatchSeconds(m * 60)
+	if c.KnockoutMatchDurationSeconds == 0 {
+		if m := firstPositive(c.KnockoutMatchDuration, c.MatchDuration); m > 0 {
+			c.KnockoutMatchDurationSeconds = ClampMatchSeconds(m * 60)
 		}
 	}
 	// Drop the retired fields so `omitempty` removes them from the next save
 	// and the on-disk file converges on the seconds-only schema.
 	c.PoolMatchDuration = 0
-	c.PlayoffMatchDuration = 0
+	c.KnockoutMatchDuration = 0
 	c.MatchDuration = 0
 }
 
@@ -610,7 +625,7 @@ func normalizeStoredDurations(c *Competition) {
 	}
 	ApplyCompetitionDefaults(c)
 	c.PoolMatchDurationSeconds = ClampMatchSeconds(c.PoolMatchDurationSeconds)
-	c.PlayoffMatchDurationSeconds = ClampMatchSeconds(c.PlayoffMatchDurationSeconds)
+	c.KnockoutMatchDurationSeconds = ClampMatchSeconds(c.KnockoutMatchDurationSeconds)
 }
 
 // firstPositive returns the first value greater than zero, or 0.
@@ -623,14 +638,14 @@ func firstPositive(vals ...int) int {
 	return 0
 }
 
-// IsPlayoffEnabled reports whether this competition runs a knockout/playoff
-// phase. League and pure-pools formats do not; mixed and playoffs do.
+// IsKnockoutEnabled reports whether this competition runs a knockout phase.
+// League and pure-pools formats do not; mixed and knockout do.
 //
-// FR-050, FR-051: when Format == "league", the UI must hide playoff-bracket
+// FR-050, FR-051: when Format == "league", the UI must hide knockout-bracket
 // affordances and present pool standings as final.
-func (c Competition) IsPlayoffEnabled() bool {
+func (c Competition) IsKnockoutEnabled() bool {
 	switch c.Format {
-	case CompFormatPlayoffs, CompFormatMixed:
+	case CompFormatKnockout, CompFormatMixed:
 		return true
 	default:
 		return false
@@ -835,7 +850,7 @@ const (
 	CompStatusSetup     CompetitionStatus = "setup"
 	CompStatusDrawReady CompetitionStatus = "draw-ready"
 	CompStatusPools     CompetitionStatus = "pools"
-	CompStatusPlayoffs  CompetitionStatus = "playoffs"
+	CompStatusKnockout  CompetitionStatus = "knockout"
 	CompStatusComplete  CompetitionStatus = "completed"
 	CompStatusInvalid   CompetitionStatus = "invalid"
 )
@@ -850,7 +865,7 @@ const (
 
 // Competition.Format values.
 const (
-	CompFormatPlayoffs = "playoffs"
+	CompFormatKnockout = "knockout"
 	CompFormatMixed    = "mixed"  // FR-050
 	CompFormatLeague   = "league" // FR-050
 	CompFormatSwiss    = "swiss"  // FR-050, FR-050a (US13)
@@ -1353,7 +1368,7 @@ type BracketMatch struct {
 	// (the structural guards only catch differing round/match counts).
 	//
 	// Additive and backward compatible in BOTH directions: omitempty keeps them
-	// out of every non-pool bracket (standalone playoffs leaves are real names,
+	// out of every non-pool bracket (standalone knockout leaves are real names,
 	// so nothing is recorded), an older binary ignores them, and a bracket drawn
 	// before they existed carries none, which is exactly how the resolver detects
 	// a legacy file (see engine/legacy_template_v1.go). The bronze
@@ -1372,9 +1387,9 @@ type Bracket struct {
 	// mixed (Pools + Knockout) competition at draw time so the operator can
 	// see the elimination structure that the pools feed, mirroring the Excel
 	// Tree sheet. A preview bracket is read-only: the actual knockout is
-	// played in the separate playoffs competition created from this source.
+	// played in the separate knockout competition created from this source.
 	Preview bool `json:"preview,omitempty"`
-	// ThirdPlaceMatch is the optional 3rd-place (bronze) playoff match. It is a
+	// ThirdPlaceMatch is the optional 3rd-place (bronze) knockout match. It is a
 	// SIBLING field rather than a row in Rounds: Rounds is power-of-two,
 	// position-encoded (propagateBracketWinner advances winner i into
 	// Rounds[rIdx+1][i/2]), so splicing a bronze match into that geometry would

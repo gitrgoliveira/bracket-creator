@@ -35,7 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// startNaginata4PlayerXlsx saves a 4-player naginata playoffs competition,
+// startNaginata4PlayerXlsx saves a 4-player naginata knockout competition,
 // starts it, and leaves the bracket ready for export or further assertions.
 // The competition ID, name, kind, format, pool size, courts, etc. match what
 // both NaginataThirdPlaceSlot and NaginataThirdPlacePrintAreaAndLayout need.
@@ -45,7 +45,7 @@ func startNaginata4PlayerXlsx(t *testing.T, eng *Engine, store *state.Store, com
 		ID:           compID,
 		Name:         "Naginata " + compID,
 		Kind:         "individual",
-		Format:       state.CompFormatPlayoffs,
+		Format:       state.CompFormatKnockout,
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,
@@ -65,7 +65,7 @@ func startNaginata4PlayerXlsx(t *testing.T, eng *Engine, store *state.Store, com
 }
 
 // TestExportCompetitionXlsx_NaginataThirdPlaceSlot verifies that the blank-
-// template export for a naginata playoffs competition includes a "3rd Place"
+// template export for a naginata knockout competition includes a "3rd Place"
 // slot on the Elimination Matches sheet so the operator can hand-score it.
 func TestExportCompetitionXlsx_NaginataThirdPlaceSlot(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)

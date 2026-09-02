@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type playoffOptions struct {
+type knockoutOptions struct {
 	teamMatches     int
 	courts          int
 	filePath        string
@@ -28,13 +28,18 @@ type playoffOptions struct {
 	SeedAssignments []domain.SeedAssignment
 }
 
-func newCreatePlayoffCmd() *cobra.Command {
+func newCreateKnockoutCmd() *cobra.Command {
 
-	o := &playoffOptions{}
+	o := &knockoutOptions{}
 
 	cmd := &cobra.Command{
-		Use:          "create-playoffs",
-		Short:        "Creates playoff brackets only",
+		Use:   "create-knockout",
+		Short: "Creates knockout brackets only",
+		// create-playoffs predates the sport-accurate rename ("playoffs" is a
+		// single tie-break bout in kendo regulations, not the bracket stage;
+		// see daihyosen). Kept as an alias, not just changelog text: existing
+		// scripts/muscle memory invoking the old verb must keep working.
+		Aliases:      []string{"create-playoffs"},
 		SilenceUsage: true,
 		// Args:         cobra.ExactArgs(1),
 		RunE: o.run,
@@ -61,7 +66,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	return cmd
 }
 
-func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
+func (o *knockoutOptions) run(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Reading file: %s\n", o.filePath)
 
 	entries, err := helper.ReadEntriesFromFile(o.filePath)
@@ -94,16 +99,16 @@ func (o *playoffOptions) run(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	err = o.createPlayoffs(entries)
+	err = o.createKnockout(entries)
 	if err != nil {
-		return fmt.Errorf("failed to create playoffs: %w", err)
+		return fmt.Errorf("failed to create knockout: %w", err)
 	}
 
 	fmt.Println("Excel file created successfully:", o.outputPath)
 	return nil
 }
 
-func (o *playoffOptions) createPlayoffs(entries []string) error {
+func (o *knockoutOptions) createKnockout(entries []string) error {
 	players, err := processEntries(entries, o.determined, o.withZekkenName)
 	if err != nil {
 		return err
@@ -176,11 +181,11 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	// Create balanced tree
 	tree := helper.CreateBalancedTree(names)
 
-	// A playoffs bracket has no pools, so R2-R7 do not apply: its placement is
+	// A knockout bracket has no pools, so R2-R7 do not apply: its placement is
 	// StandardSeeding's and stays untouched. R8 does apply, so the tree is cut
 	// into one region per shiaijo and paginated exactly like a pool-fed draw.
 	// nil pools skips the roster overlay.
-	draw := helper.NewPlayoffDraw(tree, o.courts)
+	draw := helper.NewKnockoutDraw(tree, o.courts)
 	plan := blankWorkbookCourtPlan(draw, courtNames)
 	eliminationMatchRounds, numPages, err := helper.RenderKnockoutPages(f, plan, o.singleTree, nil, nil, nil, nil)
 	if err != nil {
@@ -218,5 +223,5 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 }
 
 func init() {
-	rootCmd.AddCommand(newCreatePlayoffCmd())
+	rootCmd.AddCommand(newCreateKnockoutCmd())
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPlayoffOptionsRun_Success(t *testing.T) {
+func TestKnockoutOptionsRun_Success(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
@@ -26,7 +26,7 @@ func TestPlayoffOptionsRun_Success(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		determined: true,
@@ -37,7 +37,7 @@ func TestPlayoffOptionsRun_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
+func TestKnockoutOptionsRun_WithSeeds(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		seedsPath:  tmpSeeds.Name(),
@@ -72,7 +72,7 @@ func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestCreatePlayoffs_WithSeeds(t *testing.T) {
+func TestCreateKnockout_WithSeeds(t *testing.T) {
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
@@ -80,7 +80,7 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	// Path relative to cmd/ directory
 	seedsPath := filepath.Join("..", "tests", "fixtures", "winners.csv")
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter:   writer,
 		outputPath:     "dummy.xlsx",
 		seedsPath:      seedsPath,
@@ -94,8 +94,8 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	// Create playoffs
-	err := o.createPlayoffs(entries)
+	// Create knockout
+	err := o.createKnockout(entries)
 
 	// Ensure no error because seeds path is valid and names match
 	assert.NoError(t, err)
@@ -107,14 +107,14 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	assert.Greater(t, b.Len(), 0)
 }
 
-func TestCreatePlayoffs_MissingSeed(t *testing.T) {
+func TestCreateKnockout_MissingSeed(t *testing.T) {
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
 	seedsPath := filepath.Join("..", "tests", "fixtures", "winners.csv")
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "dummy.xlsx",
 		seedsPath:    seedsPath,
@@ -127,17 +127,17 @@ func TestCreatePlayoffs_MissingSeed(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	err := o.createPlayoffs(entries)
+	err := o.createKnockout(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "seeded participant not found")
 }
 
-func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
+func TestCreateKnockout_InvalidSeedsFile(t *testing.T) {
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "dummy.xlsx",
 		seedsPath:    filepath.Join("..", "tests", "fixtures", "missing.csv"),
@@ -150,35 +150,35 @@ func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	err := o.createPlayoffs(entries)
+	err := o.createKnockout(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse seeds file")
 }
 
-func TestCreatePlayoffs_DuplicateEntries(t *testing.T) {
+func TestCreateKnockout_DuplicateEntries(t *testing.T) {
 	var b bytes.Buffer
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: bufio.NewWriter(&b),
 	}
-	err := o.createPlayoffs([]string{"Alice", "Alice"})
+	err := o.createKnockout([]string{"Alice", "Alice"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate participant entries")
 }
 
-func TestCreatePlayoffs_WithZekken(t *testing.T) {
+func TestCreateKnockout_WithZekken(t *testing.T) {
 	var b bytes.Buffer
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter:   bufio.NewWriter(&b),
 		withZekkenName: true,
 		courts:         2,
 	}
-	err := o.createPlayoffs([]string{"Alice,Ali,D1", "Bob,Bobby,D2"})
+	err := o.createKnockout([]string{"Alice,Ali,D1", "Bob,Bobby,D2"})
 	assert.NoError(t, err)
 }
 
-// TestPlayoffOptionsRun_EmptyFile verifies that an empty input file returns
+// TestKnockoutOptionsRun_EmptyFile verifies that an empty input file returns
 // a "no entries found" error.
-func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
+func TestKnockoutOptionsRun_EmptyFile(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "empty-input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
@@ -189,7 +189,7 @@ func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		courts:     2,
@@ -199,9 +199,9 @@ func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "no entries")
 }
 
-// TestPlayoffOptionsRun_InvalidCourts verifies that an invalid court count
+// TestKnockoutOptionsRun_InvalidCourts verifies that an invalid court count
 // (over the court cap) returns an error from ValidateCourts.
-func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
+func TestKnockoutOptionsRun_InvalidCourts(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
@@ -214,7 +214,7 @@ func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		courts:     27, // exceeds the court cap
@@ -223,7 +223,7 @@ func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
+func TestKnockoutOptionsRun_InvalidOutputPath(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
@@ -231,7 +231,7 @@ func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
 	require.NoError(t, err)
 	tmpInput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: filepath.Join(t.TempDir(), "nonexistent", "output.xlsx"), // parent dir missing
 		courts:     1,
@@ -241,8 +241,8 @@ func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to open output file")
 }
 
-func TestPlayoffOptionsRun_FileNotFound(t *testing.T) {
-	o := &playoffOptions{
+func TestKnockoutOptionsRun_FileNotFound(t *testing.T) {
+	o := &knockoutOptions{
 		filePath:   "/nonexistent/input.csv",
 		outputPath: filepath.Join(t.TempDir(), "output.xlsx"),
 		courts:     1,

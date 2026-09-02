@@ -42,14 +42,14 @@ func ValidateCourtCount(numPlayers, numCourts int) error {
 //
 // It mirrors the format switch in runDrawPipeline exactly. League and Swiss
 // produce pools / rounds and never a bracket; mixed builds a preview
-// bracket after its pools; every other value, including "playoffs" and a
+// bracket after its pools; every other value, including "knockout" and a
 // legacy record carrying no format at all, falls to that switch's default
-// branch and generates a standalone playoffs bracket.
+// branch and generates a standalone knockout bracket.
 //
-// Deliberately NOT state.Competition.IsPlayoffEnabled: that predicate asks
-// whether the UI should offer playoff affordances and answers false for an
+// Deliberately NOT state.Competition.IsKnockoutEnabled: that predicate asks
+// whether the UI should offer knockout affordances and answers false for an
 // unset format, whereas the draw pipeline's default branch DOES build a
-// playoffs bracket for one. This check has to follow the pipeline, not the
+// knockout bracket for one. This check has to follow the pipeline, not the
 // UI. Mirrored client-side as formatDrawsBracket in
 // web-mobile/js/admin_helpers.jsx.
 func CompetitionDrawsBracket(format string) bool {

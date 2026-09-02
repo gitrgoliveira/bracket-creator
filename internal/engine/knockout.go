@@ -36,7 +36,7 @@ func bracketMatchPlayable(m *state.BracketMatch) bool {
 
 // bracketHasPoolPlaceholders reports whether any side anywhere in the bracket is
 // still an unseeded pool-origin finalist placeholder. Used to decide when every
-// pool has been folded into the knockout (status pools → playoffs).
+// pool has been folded into the knockout (status pools → knockout).
 func bracketHasPoolPlaceholders(b *state.Bracket) bool {
 	if b == nil {
 		return false
@@ -183,7 +183,7 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 //
 // Returns (resolvedNow, allResolved): how many bracket sides changed THIS call,
 // and whether the bracket now has zero pool-origin placeholders left (every pool
-// seeded). No-op (0, false, nil) for non-mixed competitions, standalone playoffs
+// seeded). No-op (0, false, nil) for non-mixed competitions, standalone knockout
 // brackets carry no pool placeholders.
 //
 // Boundary, by current design (bc-cse): the resolver above writes a

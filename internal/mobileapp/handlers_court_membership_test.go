@@ -49,7 +49,7 @@ func membershipVenue(t *testing.T, store *state.Store, compCourts []string, stat
 		Name: "Venue Cup", Password: "pw", Courts: []string{"A", "B", "C", "D"},
 	}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatPlayoffs,
+		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatKnockout,
 		Courts: compCourts, StartTime: "09:00", Status: status,
 	}))
 }
@@ -140,7 +140,7 @@ func orphanedVenue(t *testing.T, store *state.Store) {
 		Name: "Venue Cup", Password: "pw", Courts: []string{"A", "B", "C"},
 	}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatPlayoffs,
+		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatKnockout,
 		Courts: []string{"A", "B", "C", "D"}, StartTime: "09:00", Status: state.CompStatusSetup,
 	}))
 }
@@ -247,7 +247,7 @@ func TestCompetitionsBlockingCourtRemoval(t *testing.T) {
 		{"subset is fine", []*state.Competition{comp("X", []string{"A"}, state.CompStatusSetup)}, []string{"A", "B"}, []string{"A", "B"}, false},
 		{"orphaned live competition blocks", []*state.Competition{comp("X", []string{"A", "B"}, state.CompStatusSetup)}, []string{"A", "B"}, []string{"A"}, true},
 		{"draw-ready blocks", []*state.Competition{comp("X", []string{"B"}, state.CompStatusDrawReady)}, []string{"A", "B"}, []string{"A"}, true},
-		{"running blocks", []*state.Competition{comp("X", []string{"B"}, state.CompStatusPlayoffs)}, []string{"A", "B"}, []string{"A"}, true},
+		{"running blocks", []*state.Competition{comp("X", []string{"B"}, state.CompStatusKnockout)}, []string{"A", "B"}, []string{"A"}, true},
 		{"completed does not block", []*state.Competition{comp("X", []string{"B"}, state.CompStatusComplete)}, []string{"A", "B"}, []string{"A"}, false},
 		{"invalid does not block", []*state.Competition{comp("X", []string{"B"}, state.CompStatusInvalid)}, []string{"A", "B"}, []string{"A"}, false},
 		// An empty allocation means "inherit the tournament's courts", which
@@ -324,12 +324,12 @@ func TestUpdateCompetitionRejectsAChangeOntoAMissingShiaijo(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Venue Cup", Courts: []string{"A", "B"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatPlayoffs,
+		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatKnockout,
 		Courts: []string{"A", "B"}, StartTime: "09:00", Status: state.CompStatusSetup,
 	}))
 
 	w := shiaijoPutComp(t, r, "mudansha", map[string]any{
-		"name": "Mudansha", "format": "playoffs", "startTime": "09:00",
+		"name": "Mudansha", "format": "knockout", "startTime": "09:00",
 		"courts": []string{"C", "D"},
 	})
 
@@ -346,13 +346,13 @@ func TestUpdateCompetitionStaysEditableWhileOrphaned(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Venue Cup", Courts: []string{"A", "B", "C"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatPlayoffs,
+		ID: "mudansha", Name: "Mudansha", Kind: "individual", Format: state.CompFormatKnockout,
 		Courts: []string{"A", "B", "C", "D"}, StartTime: "09:00", Status: state.CompStatusSetup,
 	}))
 
 	t.Run("an unrelated edit succeeds", func(t *testing.T) {
 		w := shiaijoPutComp(t, r, "mudansha", map[string]any{
-			"name": "Mudansha Renamed", "format": "playoffs", "startTime": "10:00",
+			"name": "Mudansha Renamed", "format": "knockout", "startTime": "10:00",
 			"courts": []string{"A", "B", "C", "D"},
 		})
 		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
@@ -360,7 +360,7 @@ func TestUpdateCompetitionStaysEditableWhileOrphaned(t *testing.T) {
 
 	t.Run("dropping the orphan succeeds", func(t *testing.T) {
 		w := shiaijoPutComp(t, r, "mudansha", map[string]any{
-			"name": "Mudansha Renamed", "format": "playoffs", "startTime": "10:00",
+			"name": "Mudansha Renamed", "format": "knockout", "startTime": "10:00",
 			"courts": []string{"A", "B"},
 		})
 		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())

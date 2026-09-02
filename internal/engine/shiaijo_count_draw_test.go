@@ -30,7 +30,7 @@ func TestDrawPipelineRejectsIllegalShiaijoCount(t *testing.T) {
 		players[i] = fmt.Sprintf("P%02d", i+1)
 	}
 
-	for _, format := range []string{state.CompFormatMixed, state.CompFormatPlayoffs} {
+	for _, format := range []string{state.CompFormatMixed, state.CompFormatKnockout} {
 		for n := 1; n <= helper.MaxCourts; n++ {
 			t.Run(fmt.Sprintf("%s/courts=%d", format, n), func(t *testing.T) {
 				eng, store, _ := setupTestEngine(t)
@@ -128,8 +128,8 @@ func TestDrawPipelineIgnoresShiaijoCountForNonBracketFormats(t *testing.T) {
 
 // TestCompetitionDrawsBracket pins which formats the rule binds. The unset
 // format matters: the draw pipeline's default branch builds a standalone
-// playoffs bracket for it, so it must be in scope even though
-// state.Competition.IsPlayoffEnabled answers false for the same value.
+// knockout bracket for it, so it must be in scope even though
+// state.Competition.IsKnockoutEnabled answers false for the same value.
 func TestCompetitionDrawsBracket(t *testing.T) {
 	t.Parallel()
 
@@ -138,8 +138,8 @@ func TestCompetitionDrawsBracket(t *testing.T) {
 		draws  bool
 	}{
 		{state.CompFormatMixed, true},
-		{state.CompFormatPlayoffs, true},
-		{"", true}, // pipeline default branch generates playoffs
+		{state.CompFormatKnockout, true},
+		{"", true}, // pipeline default branch generates knockout
 		{state.CompFormatLeague, false},
 		{state.CompFormatSwiss, false},
 	}
@@ -150,10 +150,10 @@ func TestCompetitionDrawsBracket(t *testing.T) {
 		})
 	}
 
-	// The divergence from IsPlayoffEnabled is deliberate; pin it so a future
+	// The divergence from IsKnockoutEnabled is deliberate; pin it so a future
 	// "why are there two predicates?" cleanup has to read the reason first.
-	assert.False(t, (state.Competition{Format: ""}).IsPlayoffEnabled(),
-		"IsPlayoffEnabled is a UI-affordance predicate and excludes the unset format")
+	assert.False(t, (state.Competition{Format: ""}).IsKnockoutEnabled(),
+		"IsKnockoutEnabled is a UI-affordance predicate and excludes the unset format")
 	assert.True(t, CompetitionDrawsBracket(""),
 		"the draw pipeline still builds a bracket for an unset format")
 }
@@ -163,7 +163,7 @@ func TestCompetitionDrawsBracket(t *testing.T) {
 // court, so there is nothing to reject.
 func TestDrawPipelineSkipsShiaijoCountWithoutCourts(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	createTestCompetition(t, store, "no-courts", state.CompFormatPlayoffs, 4, func(c *state.Competition) {
+	createTestCompetition(t, store, "no-courts", state.CompFormatKnockout, 4, func(c *state.Competition) {
 		c.Courts = nil
 	})
 	saveTestParticipants(t, store, "no-courts", []string{"P1", "P2", "P3", "P4"})

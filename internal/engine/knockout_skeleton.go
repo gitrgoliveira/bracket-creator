@@ -7,8 +7,8 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// Playoff elimination-skeleton derivation, shared by both workbook builders so a
-// pure-playoffs competition (no pools, so the pool-fed draw returns nothing)
+// Knockout elimination-skeleton derivation, shared by both workbook builders so a
+// pure-knockout competition (no pools, so the pool-fed draw returns nothing)
 // still renders a bracket. The results export (internal/export) overlays scores
 // onto it; the blank-template export (Engine.ExportCompetitionXlsx) prints it
 // empty. Both MUST derive it the same way or the two exports of one competition
@@ -18,39 +18,39 @@ import (
 //
 // EliminationDraw is the single entry point both builders call.
 
-// isPurePlayoffs reports whether comp runs a standalone elimination bracket with
+// isPureKnockout reports whether comp runs a standalone elimination bracket with
 // no pool phase -- the case where the pool-fed draw yields nothing and the
 // leaves must come from the stored bracket / participant seeding instead. Both
-// the bracket-load guard (export.go) and playoffLeaves gate on this exact
+// the bracket-load guard (export.go) and knockoutLeaves gate on this exact
 // condition, so it lives in one predicate rather than two hand-copied literals.
-func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
-	return len(pools) == 0 && comp.Format == state.CompFormatPlayoffs
+func isPureKnockout(comp *state.Competition, pools []helper.Pool) bool {
+	return len(pools) == 0 && comp.Format == state.CompFormatKnockout
 }
 
-// playoffLeaves returns the first-round leaf order for a competition with NO
+// knockoutLeaves returns the first-round leaf order for a competition with NO
 // pool phase to draw from. Its only caller is EliminationDraw, and only after
 // that function's own poolDraw returned nil.
 //
-// A pure playoffs competition has no pools, so its leaves come from the frozen
-// bracket's own first-round order (PlayoffLeavesFromBracket, which cannot
+// A pure knockout competition has no pools, so its leaves come from the frozen
+// bracket's own first-round order (KnockoutLeavesFromBracket, which cannot
 // desync from the stored bracket the score overlay fills in), falling back to
 // participant seeding only pre-start, when no bracket exists yet. bracket may
-// be nil for a non-pure-playoffs caller: it is consulted only on the
-// pure-playoffs branch, where both callers load it.
+// be nil for a non-pure-knockout caller: it is consulted only on the
+// pure-knockout branch, where both callers load it.
 //
 // It used to be exported, and to re-run poolDraw itself so that it stayed
 // "total for any caller". There were never any such callers, and the branch was
 // unreachable through the one that exists, so what it actually bought was a
 // second exported entry into this derivation -- the thing EliminationDraw is
 // the single owner of (mp-ndfu) -- plus a redundant draw build.
-func playoffLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
-	if !isPurePlayoffs(comp, pools) {
+func knockoutLeaves(store *state.Store, comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) []string {
+	if !isPureKnockout(comp, pools) {
 		return nil
 	}
-	if leaves := PlayoffLeavesFromBracket(bracket); len(leaves) > 0 {
+	if leaves := KnockoutLeavesFromBracket(bracket); len(leaves) > 0 {
 		return leaves
 	}
-	return PlayoffFinalsFromParticipants(store, comp)
+	return KnockoutFinalsFromParticipants(store, comp)
 }
 
 // poolDraw builds the pool-fed court-first draw, or nil when the competition
@@ -187,7 +187,7 @@ func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolW
 // The two paths are NOT the same in where that bracket comes from, and the
 // difference matters:
 //
-//   - PURE PLAYOFFS reads the frozen bracket (PlayoffLeavesFromBracket), so the
+//   - PURE KNOCKOUT reads the frozen bracket (KnockoutLeavesFromBracket), so the
 //     printed sheet is the persisted bracket even if seeds.csv has since drifted.
 //   - POOL-FED (mixed) RE-DERIVES it, from the CURRENT pools, pool-winner count
 //     and comp.Courts. It equals the persisted bracket only while those three
@@ -209,8 +209,8 @@ func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolW
 // This predates the court-first draw: the pre-Phase-4 export derived courts from
 // comp.Courts the same way.
 //
-// The playoffs rebuild goes through helper.BuildSlotTree, NOT CreateBalancedTree.
-// PlayoffLeavesFromBracket hands back the frozen bracket's pow2 first round, so
+// The knockout rebuild goes through helper.BuildSlotTree, NOT CreateBalancedTree.
+// KnockoutLeavesFromBracket hands back the frozen bracket's pow2 first round, so
 // a ragged roster's leaf array carries "" bye slots, and only BuildSlotTree
 // collapses an all-empty half instead of giving it a node. CreateBalancedTree
 // gave every "" a leaf, so the sheet drew and numbered a junction for each
@@ -218,10 +218,10 @@ func extraQualifierOverrides(comp *state.Competition, pools []helper.Pool, poolW
 // Match 2 between two empty slots and every number after it off the bracket's
 // own (bc-cse). That is the same collapse the pool-fed draw applies in
 // buildRegion, so both formats now rebuild a leaf array the one way, and the
-// tree this yields is the tree generatePlayoffs itself cut into regions
+// tree this yields is the tree generateKnockout itself cut into regions
 // (CreateBalancedTree over the unpadded entrant list) -- BuildSlotTree is
 // TreeToLeafArray's inverse -- so the printed pages, the printed numbers and the
-// stored bracket all describe one draw. It is also what cmd/create-playoffs
+// stored bracket all describe one draw. It is also what cmd/create-knockout
 // prints, since it builds from the entrant list and never pads.
 //
 // Returns nil when there is nothing to render.
@@ -229,17 +229,17 @@ func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper
 	if draw := poolDraw(comp, pools, numCourts); draw != nil {
 		return draw
 	}
-	leaves := playoffLeaves(store, comp, pools, bracket)
+	leaves := knockoutLeaves(store, comp, pools, bracket)
 	if len(leaves) == 0 {
 		return nil
 	}
-	// nil (every slot a bye) falls through NewPlayoffDraw as a nil draw, which
+	// nil (every slot a bye) falls through NewKnockoutDraw as a nil draw, which
 	// the callers already treat as "nothing to render".
-	return helper.NewPlayoffDraw(helper.BuildSlotTree(leaves), numCourts)
+	return helper.NewKnockoutDraw(helper.BuildSlotTree(leaves), numCourts)
 }
 
-// PlayoffLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
-// build a pure-playoffs bracket, read straight from the frozen bracket's first
+// KnockoutLeavesFromBracket reconstructs the pow2 leaf ordering the engine used to
+// build a pure-knockout bracket, read straight from the frozen bracket's first
 // round: each round-1 match contributes SideA then SideB, in order, with "" for a
 // bye. Feeding THIS order to the export skeleton is what keeps the printed
 // "Round N - Match N" numbering equal to the stored bracket's MatchNumber even
@@ -248,9 +248,9 @@ func EliminationDraw(store *state.Store, comp *state.Competition, pools []helper
 // (assignBracketMatchNumbers vs helper.AssignMatchNumbers), but only over the
 // same SHAPE: the leaf order alone is not enough, the rebuild must also collapse
 // the "" slots below, or the numbering walks over a tree with extra nodes in it
-// (see EliminationDraw). Returns nil for a nil/empty bracket (e.g. a playoffs
+// (see EliminationDraw). Returns nil for a nil/empty bracket (e.g. a knockout
 // competition not yet started).
-func PlayoffLeavesFromBracket(bracket *state.Bracket) []string {
+func KnockoutLeavesFromBracket(bracket *state.Bracket) []string {
 	if bracket == nil || len(bracket.Rounds) == 0 {
 		return nil
 	}
@@ -262,15 +262,15 @@ func PlayoffLeavesFromBracket(bracket *state.Bracket) []string {
 	return leaves
 }
 
-// PlayoffFinalsFromParticipants seeds the competition's participants exactly as
-// generatePlayoffs does (ApplySeeds → optional numbering → StandardSeeding),
+// KnockoutFinalsFromParticipants seeds the competition's participants exactly as
+// generateKnockout does (ApplySeeds → optional numbering → StandardSeeding),
 // returning the seeded names to feed the elimination-tree skeleton. This is the
-// PRE-START fallback only: once a bracket exists, PlayoffLeavesFromBracket is used
+// PRE-START fallback only: once a bracket exists, KnockoutLeavesFromBracket is used
 // instead because it cannot desync from the frozen bracket. Since there is no
 // bracket to overlay when this runs, a best-effort (possibly unseeded) order is
 // acceptable. Returns nil when participants can't be loaded, in which case no
 // elimination sheet is rendered.
-func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
+func KnockoutFinalsFromParticipants(store *state.Store, comp *state.Competition) []string {
 	players, err := store.LoadParticipants(comp.ID, comp.EffectiveWithZekkenName())
 	if err != nil || len(players) == 0 {
 		return nil
@@ -279,7 +279,7 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 		if aerr := helper.ApplySeeds(players, seeds); aerr != nil {
 			// An unmatched seed name is non-fatal for a read-only export; the
 			// bracket still renders, just unseeded. Mirror the file's warn pattern.
-			fmt.Printf("export: warning: apply seeds for playoffs skeleton: %v\n", aerr)
+			fmt.Printf("export: warning: apply seeds for knockout skeleton: %v\n", aerr)
 		}
 	}
 	if comp.NumberPrefix != "" {
@@ -327,7 +327,7 @@ func CompetitionCourts(store *state.Store, comp *state.Competition) []string {
 // competition runs (Engine.UpdateMatchCourt), so the draw's geometry is only the
 // INITIAL answer. Keyed by match number because that is the identity the printed
 // sheet and the stored bracket already share by contract (see
-// PlayoffLeavesFromBracket). Unnumbered entries are byes and are never printed.
+// KnockoutLeavesFromBracket). Unnumbered entries are byes and are never printed.
 //
 // Returns nil for a nil/empty bracket, which the writers read as "no live
 // assignment, use the draw" -- the CLI's case, and a competition not yet drawn.

@@ -135,7 +135,7 @@ func qualifierSlotsFromLeaves(draw *KnockoutDraw, skeleton []Pool, ranks func(po
 // the tree BuildKnockoutDrawPerPool actually builds for it.
 //
 // overrides is exactly what production's own extraQualifierOverrides
-// (internal/engine/playoff_skeleton.go) builds from a competition's real
+// (internal/engine/knockout_skeleton.go) builds from a competition's real
 // pools -- pool index -> qualifier count, entries only for pools that differ
 // from defaultWinners -- derived here PRE-placement from target SIZES by
 // extraQualifierOverridesFromSizes instead, since the "is this pool

@@ -23,7 +23,7 @@ func TestBronzeDefaultCourt(t *testing.T) {
 	assert.Equal(t, "", bronzeDefaultCourt("", []string{}), "empty courts slice keeps empty court")
 }
 
-// createBronzeTestCompetition creates a playoffs competition with the naginata
+// createBronzeTestCompetition creates a knockout competition with the naginata
 // flag set (or not) so the bronze-match generation gate can be exercised.
 func createBronzeTestCompetition(t *testing.T, store *state.Store, id string, naginata bool) {
 	t.Helper()
@@ -31,7 +31,7 @@ func createBronzeTestCompetition(t *testing.T, store *state.Store, id string, na
 		ID:           id,
 		Name:         "Bronze Test",
 		Kind:         "individual",
-		Format:       state.CompFormatPlayoffs,
+		Format:       state.CompFormatKnockout,
 		PoolSize:     3,
 		PoolSizeMode: "min",
 		PoolWinners:  2,

@@ -108,13 +108,13 @@ func TestMaybeAutoCompletePools_OnePending(t *testing.T) {
 // competitions that are not in the Pools format.
 func TestMaybeAutoCompletePools_NonPoolsFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "auto-complete-playoffs"
+	compID := "auto-complete-knockout"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     compID,
-		Name:   "Playoffs Test",
-		Format: state.CompFormatPlayoffs,
-		Status: state.CompStatusPlayoffs,
+		Name:   "Knockout Test",
+		Format: state.CompFormatKnockout,
+		Status: state.CompStatusKnockout,
 		Courts: []string{"A"},
 	}))
 	// No pool matches on disk, all pool match loads return empty.
@@ -122,12 +122,12 @@ func TestMaybeAutoCompletePools_NonPoolsFormat(t *testing.T) {
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
 	// No matches at all → outer fast-path sees "all complete" (vacuously true),
-	// but the inner transform guard rejects CompFormatPlayoffs → no transition.
+	// but the inner transform guard rejects CompFormatKnockout → no transition.
 	assert.Equal(t, AutoCompleteNoChange, outcome, "non-pools format must not trigger auto-complete")
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+	assert.Equal(t, state.CompStatusKnockout, comp.Status)
 }
 
 // TestMaybeAutoCompletePools_AlreadyComplete verifies idempotency:
@@ -212,7 +212,7 @@ func TestStartCompetition_SwissFormat(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPools, comp.Status, "Swiss start must set status to pools, not playoffs")
+	assert.Equal(t, state.CompStatusPools, comp.Status, "Swiss start must set status to pools, not knockout")
 	assert.Equal(t, 1, comp.SwissCurrentRound, "Swiss start must set SwissCurrentRound to 1")
 
 	matches, err := store.LoadPoolMatches(compID)
@@ -380,13 +380,13 @@ func TestGenerateDraw_PoolsFormat(t *testing.T) {
 	assert.NotEmpty(t, poolMatches, "pool-matches must be written on GenerateDraw")
 }
 
-// TestGenerateDraw_PlayoffsFormat verifies GenerateDraw on a playoffs
+// TestGenerateDraw_KnockoutFormat verifies GenerateDraw on a knockout
 // competition writes bracket.json and sets draw-ready.
-func TestGenerateDraw_PlayoffsFormat(t *testing.T) {
+func TestGenerateDraw_KnockoutFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "generate-draw-playoffs"
+	compID := "generate-draw-knockout"
 
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0)
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 
 	require.NoError(t, eng.GenerateDraw(compID))
@@ -397,14 +397,14 @@ func TestGenerateDraw_PlayoffsFormat(t *testing.T) {
 
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.NotNil(t, bracket, "bracket must be written on GenerateDraw for playoffs")
+	assert.NotNil(t, bracket, "bracket must be written on GenerateDraw for knockout")
 }
 
 // TestGenerateDraw_MixedFormat_WritesPreviewBracket verifies that GenerateDraw
 // on a mixed (Pools + Knockout) competition also writes a PREVIEW bracket whose
 // leaves are pool-origin placeholders (mp-9dz). The operator sees the knockout
 // structure that the pools feed, mirroring the Excel Tree sheet, before the
-// separate Playoffs competition is created.
+// separate Knockout competition is created.
 func TestGenerateDraw_MixedFormat_WritesPreviewBracket(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "generate-draw-mixed-preview"
@@ -546,14 +546,14 @@ func TestStartCompetition_BackwardCompatSetup(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "start-backward-compat"
 
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0)
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 
 	require.NoError(t, eng.StartCompetition(compID))
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, comp.Status, "StartCompetition from Setup must set status to playoffs for playoffs format")
+	assert.Equal(t, state.CompStatusKnockout, comp.Status, "StartCompetition from Setup must set status to knockout for knockout format")
 }
 
 // TestGenerateDraw_ThenDiscardThenRegenerateAndStart exercises the full
@@ -594,12 +594,12 @@ func setupDrawReadyMixed(t *testing.T, names []string) (*Engine, *state.Store, s
 	return eng, store, compID
 }
 
-// setupDrawReadyPlayoffs creates a draw-ready playoffs competition.
-func setupDrawReadyPlayoffs(t *testing.T, names []string) (*Engine, *state.Store, string) {
+// setupDrawReadyKnockout creates a draw-ready knockout competition.
+func setupDrawReadyKnockout(t *testing.T, names []string) (*Engine, *state.Store, string) {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
-	compID := "replace-playoffs"
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0)
+	compID := "replace-knockout"
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0)
 
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
@@ -678,8 +678,8 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 	}
 }
 
-func TestReplaceParticipantInDraw_PlayoffsBracket(t *testing.T) {
-	eng, store, compID := setupDrawReadyPlayoffs(t, []string{"Alice", "Bob", "Charlie", "Dave"})
+func TestReplaceParticipantInDraw_KnockoutBracket(t *testing.T) {
+	eng, store, compID := setupDrawReadyKnockout(t, []string{"Alice", "Bob", "Charlie", "Dave"})
 
 	bracketBefore, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -703,7 +703,7 @@ func TestReplaceParticipantInDraw_NaginataBronzeMatch(t *testing.T) {
 	compID := "replace-bronze"
 	comp := &state.Competition{
 		ID: compID, Name: "Naginata Cup", Kind: "individual",
-		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Courts: []string{"A"},
 		StartTime: "09:00", Status: "setup", Naginata: true,
 	}
 	require.NoError(t, store.SaveCompetition(comp))

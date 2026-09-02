@@ -38,7 +38,7 @@ const defaultPerMatchClockSeconds = 180
 
 // perMatchElapsedMinutes returns the elapsed minutes a single match
 // should occupy on a court given the competition/tournament tuning.
-// Pool and playoff matches read their own per-phase clock duration
+// Pool and knockout matches read their own per-phase clock duration
 // (FR-053); team matches scale by bout count plus inter-bout
 // transitions (FR-058).
 //
@@ -48,21 +48,21 @@ const defaultPerMatchClockSeconds = 180
 // for kachinuki; EstimateForCounts surfaces the full best/avg/worst
 // range via perMatchElapsedMinutesBouts (mp-gmcg). Documented
 // trade-off; T150.
-func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournament, isPlayoff bool) int {
+func perMatchElapsedMinutes(comp *state.Competition, tournament *state.Tournament, isKnockout bool) int {
 	// Team match branch. comp.TeamSize == 0 means individual; >0
 	// means a per-bout calculation (see function doc for kachinuki).
 	bouts := 0.0
 	if comp != nil && comp.Kind == "team" && comp.TeamSize > 0 {
 		bouts = float64(comp.TeamSize)
 	}
-	return perMatchElapsedMinutesBouts(comp, tournament, isPlayoff, bouts)
+	return perMatchElapsedMinutesBouts(comp, tournament, isKnockout, bouts)
 }
 
 // perMatchElapsedMinutesBouts is perMatchElapsedMinutes with an explicit
 // (possibly fractional) bout count, so EstimateForCounts can price the
 // kachinuki best/avg/worst scenarios (mp-gmcg) with the exact same
 // clock/multiplier/floor rules as the nominal path.
-func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tournament, isPlayoff bool, bouts float64) int {
+func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tournament, isKnockout bool, bouts float64) int {
 	if comp == nil {
 		// No competition to tune from: anchor on the bare default clock,
 		// without the multiplier (preserves the pre-seconds behavior).
@@ -70,8 +70,8 @@ func perMatchElapsedMinutesBouts(comp *state.Competition, tournament *state.Tour
 	}
 
 	clockSec := comp.PoolMatchDurationSeconds
-	if isPlayoff {
-		clockSec = comp.PlayoffMatchDurationSeconds
+	if isKnockout {
+		clockSec = comp.KnockoutMatchDurationSeconds
 	}
 	if clockSec <= 0 {
 		clockSec = defaultPerMatchClockSeconds
@@ -222,7 +222,7 @@ func assignPoolMatchSlots(matches []state.MatchResult, comp *state.Competition, 
 	}
 
 	courtCursor := map[string]time.Time{}
-	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/)
+	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)
 
 	// Pre-anchor each known court to dayStart+OpeningBlock so a court
 	// with N>1 matches gets the opening offset applied to the first
@@ -289,7 +289,7 @@ func assignBracketMatchSlots(rounds [][]state.BracketMatch, comp *state.Competit
 		courtCursor[court] = dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 
-	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
+	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/)
 
 	for rIdx := range rounds {
 		round := rounds[rIdx]
@@ -369,7 +369,7 @@ func scheduleBronze(bracket *state.Bracket, comp *state.Competition, tournament 
 		lunchMin = parseDurationMinutes(tournament.LunchBlock)
 		lunchStart = parseClockHHMM(defaultLunchStartClock)
 	}
-	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isPlayoff*/)
+	perMatchMin := perMatchElapsedMinutes(comp, tournament, true /*isKnockout*/)
 	cursor := parseClockHHMM(final.ScheduledAt).Add(time.Duration(perMatchMin) * time.Minute)
 	cursor = skipCeremonyBlocks(cursor, lunchStart, lunchMin)
 	final.ScheduledAt = cursor.Format(scheduleClockLayout)

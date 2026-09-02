@@ -11,6 +11,11 @@ on:
 
 jobs:
   codeql:
+    # The job ID stays `codeql`. Code scanning derives an analysis key from the
+    # workflow path plus this ID (GITHUB_JOB), never from the display name, so
+    # renaming below is free while renaming the ID would start a fresh
+    # configuration and cost a round of "configuration not found" diffs.
+    name: CodeQL ${{ matrix.label }}
     runs-on: ubuntu-latest
 
     strategy:
@@ -20,7 +25,18 @@ jobs:
         # Go is the backend. javascript-typescript covers the web-mobile SPA,
         # the legacy web UI and the docs widgets: this repository analysed Go
         # alone until now, so none of that frontend code had ever been scanned.
-        language: [go, javascript-typescript]
+        #
+        # The two legs already run in parallel; splitting them into separate
+        # jobs would buy no wall-clock and would duplicate the pinned action
+        # references. They share one analysis key, being one job, and do not
+        # overwrite each other because the per-language `category` below keeps
+        # the uploads distinct. `label` exists only so the checks read
+        # "CodeQL Go" instead of "codeql (go)".
+        include:
+          - language: go
+            label: Go
+          - language: javascript-typescript
+            label: JavaScript
 
     steps:
       - name: Checkout

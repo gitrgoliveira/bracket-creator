@@ -42,9 +42,7 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 		}
 	}
 
-	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
-	}
+	helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 
 	seededPlayers := helper.StandardSeeding(players)
 	names := make([]string, len(seededPlayers))

@@ -211,9 +211,27 @@ func cliPoolDraw(t *testing.T, roster []parityEntrant, seeds []domain.SeedAssign
 	}
 	require.Len(t, draw.playerPool, len(roster), "every competitor should appear on the data sheet")
 
-	// Each shiaijo gets its own "Names to Print <label>" sheet whose column A
-	// holds "<pool letter><position>" tags (helper.CreateNamesWithPoolToPrint).
-	// That is the workbook's own statement of which pools run where.
+	// Each shiaijo gets its own "Names to Print <label>" sheet
+	// (helper.CreateNamesWithPoolToPrint). That is the workbook's own
+	// statement of which pools run where: column B on each row is a
+	// cross-sheet formula naming one competitor (buildNameFormula), and
+	// draw.playerPool (built off the data sheet above) already says which
+	// pool that competitor is in.
+	//
+	// bc-pnum: this used to read the tag in column A ("<pool letter>
+	// <position>", e.g. "A1"), which was only ever a bare fallback VALUE
+	// written when the workbook carried no competitor numbers at all
+	// (helper.printNameEntries). Numbering is unconditional now (every CLI
+	// run resolves a --number-prefix default), so column A is unconditionally
+	// a formula referencing the competitor's real Number cell (e.g. "K1"),
+	// which does not encode the pool the way the old fallback tag did. Column
+	// B's name formula still identifies the row's competitor either way, so
+	// reading through it (rather than the tag) works whether or not the
+	// workbook has numbers.
+	//
+	// Formula cells excelize just wrote carry no cached value, so GetRows
+	// (used only here to learn each sheet's row count) returns "" for both
+	// columns; CalcCellValue evaluates the formula for real.
 	//
 	// The sheets are DISCOVERED, never derived from the requested court count.
 	// A --courts value the pool count cannot carry is clamped
@@ -228,11 +246,16 @@ func cliPoolDraw(t *testing.T, roster []parityEntrant, seeds []domain.SeedAssign
 		}
 		nameRows, err := f.GetRows(sheet)
 		require.NoErrorf(t, err, "reading sheet %q", sheet)
-		for _, row := range nameRows {
-			if len(row) == 0 || row[0] == "" {
+		for r := range nameRows {
+			nameCell := fmt.Sprintf("B%d", r+1)
+			name, err := f.CalcCellValue(sheet, nameCell)
+			require.NoErrorf(t, err, "calc %s!%s", sheet, nameCell)
+			if name == "" {
 				continue
 			}
-			draw.poolCourt["Pool "+strings.TrimRight(row[0], "0123456789")] = label
+			pool, ok := draw.playerPool[name]
+			require.Truef(t, ok, "sheet %q names competitor %q not found on the data sheet", sheet, name)
+			draw.poolCourt[pool] = label
 		}
 	}
 	require.Len(t, draw.poolCourt, len(draw.poolSize), "every pool should be claimed by exactly one shiaijo")

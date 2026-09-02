@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -59,13 +58,14 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 
 	row := 1
 	for _, pool := range pools {
-		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
-
 		for _, player := range pool.Players {
-			tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
-			if player.Number != "" {
-				tag = player.Number
-			}
+			// The tag IS the competitor's number: it has to match the
+			// competition's number prefix, because that is what the desk and
+			// the tag's own QR resolve against. There is deliberately no
+			// pool-letter substitute for an unnumbered competitor -- a
+			// second, prefix-less numbering scheme on the printed tag was
+			// considered for this bead and rejected (bc-pnum).
+			tag := player.Number
 
 			// Generate QR once per player; reuse PNG for both tag copies.
 			// playerTagQRPNG returns nil,nil for empty inputs, so no guard needed.

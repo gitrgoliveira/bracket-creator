@@ -166,12 +166,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// pools.
 	}
 
-	if comp.NumberPrefix != "" {
-		counter := 1
-		for i := range pools {
-			counter = helper.AssignPlayerNumbers(pools[i].Players, comp.NumberPrefix, counter)
-		}
-	}
+	helper.NumberPools(pools, comp.NumberPrefix)
 
 	hasRounds := false
 	switch comp.PoolFormat {

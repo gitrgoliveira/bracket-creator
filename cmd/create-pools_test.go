@@ -142,6 +142,51 @@ func TestCreatePools_NumberPrefix(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestCreatePools_NumberPrefix_ByteIdenticalNumbering pins acceptance
+// criterion 2 (bc-pnum): a competition drawn with an EXPLICIT
+// --number-prefix numbers byte-identically to how it always has, prefix plus
+// one counter running straight through the pools in their published court
+// order. No Makefile example passes -n, so nothing else pins this shape; the
+// concern is that helper.DefaultNumberPrefix's new derivation path could leak
+// into (or shadow) the explicit-prefix path it sits beside in cmd/create-pools.go.
+func TestCreatePools_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   "prefix.xlsx",
+		numPlayers:   2,
+		poolWinners:  1,
+		courts:       1,
+		determined:   true, // no shuffle: roster order must match expected numbering
+		numberPrefix: "K",
+	}
+	entries := []string{
+		"Alice,DojoA",
+		"Bob,DojoB",
+		"Carol,DojoC",
+		"Dave,DojoD",
+	}
+	require.NoError(t, o.createPools(entries))
+	require.NoError(t, writer.Flush())
+
+	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, f.Close()) }()
+
+	rows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	var got []string
+	for i, row := range rows {
+		if i < 2 || len(row) < 4 { // rows 1-2 are the title/header block
+			continue
+		}
+		got = append(got, row[3]) // column D: Number (non-sanitized layout)
+	}
+	assert.Equal(t, []string{"K1", "K2", "K3", "K4"}, got,
+		"an explicit --number-prefix must number straight through the pools with no gap, duplicate or reordering")
+}
+
 func TestCreatePools_InvalidCourts(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
@@ -316,10 +361,14 @@ func TestCreatePools_RoundRobinSinglePoolOf8_RankingResolves(t *testing.T) {
 	require.NotZero(t, rankingHeaderRow, "could not find Ranking header")
 
 	// Kevin should be rank 1; the rank-1 ranking lookup must resolve to him.
+	// bc-pnum: numbering is unconditional now, so with no --number-prefix /
+	// --title-prefix given, the CLI derives helper.DefaultNumberPrefixFallback
+	// ("K") and the resolved cell reads "<number> <name>" (playerRef), not the
+	// bare name.
 	rank1Cell := fmt.Sprintf("G%d", rankingHeaderRow+1)
 	got, err := f.CalcCellValue(sheet, rank1Cell)
 	require.NoErrorf(t, err, "CalcCellValue %s", rank1Cell)
-	assert.Equal(t, "Kevin Clark", got,
+	assert.Equal(t, "K1 Kevin Clark", got,
 		"single round-robin pool of 8: rank-1 ranking cell %s should resolve to the player who won all 7 matches",
 		rank1Cell)
 
@@ -418,12 +467,19 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	}
 
 	const sheet = "Pool Matches"
-	// Team-match summary cells reference 'data'!$B$3, which is the cell
+	// Team-match summary cells reference data!$B$3, which is the cell
 	// holding Team Alpha's first listed member ("Alice Adams"). The data
 	// sheet uses the first member's name as the team's display label, so
 	// every search below that targets "Team Alpha" looks for either this
 	// formula reference or the resolved value "Alice Adams".
-	alphaTeamRef := "'data'!$B$3"
+	//
+	// bc-pnum: numbering is unconditional now, so with no --number-prefix /
+	// --title-prefix given, the CLI derives helper.DefaultNumberPrefixFallback
+	// ("K") and the name cell's formula is playerRef's composed
+	// "<numberCell>&\" \"&<nameCell>" form (unquoted sheet name, unlike
+	// sheetRef's quoted 'data'!...) rather than a bare sheetRef, so
+	// alphaTeamRef is now a SUBSTRING of the formula, not the whole of it.
+	alphaTeamRef := "data!$B$3"
 
 	// Find Team Alpha's team-match summary rows, column A or G holds the
 	// alphaTeamRef formula and the row below contains the "1" sub-bout label.
@@ -431,7 +487,7 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	for r := 1; r < 200; r++ {
 		whiteFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("A%d", r))
 		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", r))
-		if whiteFormula != alphaTeamRef && redFormula != alphaTeamRef {
+		if !strings.Contains(whiteFormula, alphaTeamRef) && !strings.Contains(redFormula, alphaTeamRef) {
 			continue
 		}
 		next, _ := f.GetCellValue(sheet, fmt.Sprintf("A%d", r+1))
@@ -446,7 +502,7 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	for _, sr := range summaryRows {
 		redFormula, _ := f.GetCellFormula(sheet, fmt.Sprintf("G%d", sr))
 		col := "B" // Team Alpha is white, write into leftVictories column.
-		if redFormula == alphaTeamRef {
+		if strings.Contains(redFormula, alphaTeamRef) {
 			col = "E" // Team Alpha is red, write into rightPoints column.
 		}
 		for sub := sr + 1; sub <= sr+3; sub++ {
@@ -455,14 +511,15 @@ func TestCreatePools_TeamsOf3RoundRobin_PointsWonAndLost(t *testing.T) {
 	}
 
 	// Find Team Alpha's IV/IL/IT/PW/PL row, column A resolves to
-	// "Alice Adams" (Alpha's first-member display label, see above),
-	// the next row's column A is NOT "1", and column E has a formula
-	// (PW). The earlier Team Alpha row in the W/L/T results table has
-	// no formula in column E.
+	// "K1 Alice Adams" (Alpha's first-member display label, prefixed with
+	// its derived number, see the alphaTeamRef comment above), the next
+	// row's column A is NOT "1", and column E has a formula (PW). The
+	// earlier Team Alpha row in the W/L/T results table has no formula in
+	// column E.
 	var alphaPwRow int
 	for r := 1; r < 200; r++ {
 		v, _ := f.CalcCellValue(sheet, fmt.Sprintf("A%d", r))
-		if v != "Alice Adams" {
+		if v != "K1 Alice Adams" {
 			continue
 		}
 		next, _ := f.GetCellValue(sheet, fmt.Sprintf("A%d", r+1))

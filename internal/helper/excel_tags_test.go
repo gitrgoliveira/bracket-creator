@@ -37,13 +37,17 @@ func TestCreateTagsSheetQR(t *testing.T) {
 func TestCreateTagsSheet(t *testing.T) {
 	// 1. Setup
 	f := excelize.NewFile()
+	// bc-pnum G5/G6: the tag IS the competitor's Number now, with no
+	// pool-letter fallback (CreateTagsSheet no longer composes one). Set
+	// Number directly on the fixture, as NumberPools would have before
+	// this sheet is ever built.
 	pools := []Pool{
 		{
 			PoolName: "Pool A",
 			Players: []Player{
-				{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1"},
-				{Name: "Player 2", PoolPosition: 2, Dojo: "Dojo Player 2"},
-				{Name: "Player 3", PoolPosition: 3, Dojo: "Dojo Player 3"},
+				{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1", Number: "K1"},
+				{Name: "Player 2", PoolPosition: 2, Dojo: "Dojo Player 2", Number: "K2"},
+				{Name: "Player 3", PoolPosition: 3, Dojo: "Dojo Player 3", Number: "K3"},
 			},
 		},
 	}
@@ -82,13 +86,13 @@ func TestCreateTagsSheet(t *testing.T) {
 	}
 
 	// 5. Verification - each tag appears twice consecutively (same A4 page)
-	// Player 1 (A1): rows 1 and 2
-	// Player 2 (A2): rows 3 and 4
-	// Player 3 (A3): rows 5 and 6
+	// Player 1 (K1): rows 1 and 2
+	// Player 2 (K2): rows 3 and 4
+	// Player 3 (K3): rows 5 and 6
 	expected := map[string]string{
-		"A1": "A1", "A2": "A1",
-		"A3": "A2", "A4": "A2",
-		"A5": "A3", "A6": "A3",
+		"A1": "K1", "A2": "K1",
+		"A3": "K2", "A4": "K2",
+		"A5": "K3", "A6": "K3",
 	}
 	for cell, want := range expected {
 		got, err := f.GetCellValue(sheetName, cell)

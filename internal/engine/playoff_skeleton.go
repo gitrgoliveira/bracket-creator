@@ -282,9 +282,7 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 			fmt.Printf("export: warning: apply seeds for playoffs skeleton: %v\n", aerr)
 		}
 	}
-	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
-	}
+	helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 	seeded := helper.StandardSeeding(players)
 	names := make([]string, len(seeded))
 	for i, p := range seeded {

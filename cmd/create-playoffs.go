@@ -49,7 +49,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
-	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Letter prefix for competitor numbers (e.g. 'K' produces K1, K2, ...); derived from --title-prefix when omitted")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -139,9 +139,14 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Using Zekken names")
 	}
 
-	if o.numberPrefix != "" {
-		helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
+	// --number-prefix stays optional to TYPE, but a competition is never drawn
+	// without one: an unprefixed number ("1", "2") would collide with every
+	// other competition's and is not a tag anyone can call at the desk. The CLI
+	// has no tournament to be unique within, so nothing is taken.
+	if o.numberPrefix == "" {
+		o.numberPrefix = helper.DefaultNumberPrefix(o.titlePrefix, nil)
 	}
+	helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
 
 	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
 

@@ -67,7 +67,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
-	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Letter prefix for competitor numbers (e.g. 'K' produces K1, K2, ...); derived from --title-prefix when omitted")
 	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default), \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo), or \"fill-bracket\" (pools are cut so winners plus a handful of drafted 2nd places exactly fill the knockout with no byes); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
@@ -271,12 +271,14 @@ func (o *poolOptions) createPools(entries []string) error {
 	// argument -- would silently title a two-shiaijo draw "Shiaijo A-D".
 	courtNames := helper.CourtLabels(o.courts)
 
-	if o.numberPrefix != "" {
-		counter := 1
-		for i := range pools {
-			counter = helper.AssignPlayerNumbers(pools[i].Players, o.numberPrefix, counter)
-		}
+	// --number-prefix stays optional to TYPE, but a competition is never drawn
+	// without one: an unprefixed number ("1", "2") would collide with every
+	// other competition's and is not a tag anyone can call at the desk. The CLI
+	// has no tournament to be unique within, so nothing is taken.
+	if o.numberPrefix == "" {
+		o.numberPrefix = helper.DefaultNumberPrefix(o.titlePrefix, nil)
 	}
+	helper.NumberPools(pools, o.numberPrefix)
 
 	f, err := excel.NewFileFromScratch()
 	if err != nil {

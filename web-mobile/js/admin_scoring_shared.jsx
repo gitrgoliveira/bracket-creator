@@ -686,7 +686,14 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       try {
         const detail = await window.API.fetchCompetitionDetails(compID);
         if (cancelled) return;
-        const all = window.compMatches ? window.compMatches(detail) : [];
+        // compMatchesForCompetition, NOT compMatches(detail): the detail
+        // response keeps the competition's identity under `config` and its
+        // match data as siblings, and compMatches needs one object with both.
+        // Passing `detail` straight in returned [] on every format, so this
+        // panel listed no matches to award after a kiken (mp-dej2).
+        const all = window.compMatchesForCompetition
+          ? window.compMatchesForCompetition(detail.config || detail, detail)
+          : [];
         const wname = (withdrawnPlayer?.name || "").trim();
         const wid = withdrawnPlayer?.id || "";
         const matchesForPlayer = all.filter(m => {

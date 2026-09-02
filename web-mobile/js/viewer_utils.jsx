@@ -47,6 +47,10 @@ export const poolLabel = (m) => leagueAwareLabel(m.compFormat, m.poolName);
 if (typeof window !== 'undefined') {
   window.poolLabel = poolLabel;
   window.leagueAwareLabel = leagueAwareLabel;
+  // admin_scoring_shared.jsx reads this off window (it already reads
+  // window.compMatches the same way) rather than adding an import edge from an
+  // admin module into the viewer graph.
+  window.compMatchesForCompetition = compMatchesForCompetition;
 }
 
 // Lazy window proxy for the shared DD-MM-YYYY date comparator. window.compareDmy
@@ -55,6 +59,34 @@ if (typeof window !== 'undefined') {
 // has executed). Kept here so both viewer_schedule.jsx and viewer_home.jsx import
 // a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
+
+// compMatchesForCompetition: the ONE way to call compMatches from a
+// GET /api/viewer/competitions/:id response.
+//
+// compMatches takes a SINGLE object carrying both halves of a competition: its
+// identity (id/name/format/status/kind/teamSize) AND its match data
+// (pools/poolMatches/bracket). That endpoint splits those apart, answering
+// {config, pools, poolMatches, bracket, standings} with the identity fields
+// nested under `config`, so every holder of that response has to recombine them
+// before calling. Handing the raw response straight to compMatches looks right
+// and silently yields NOTHING: `detail.status` is undefined, which trips the
+// "setup" early return below before a single match is read.
+//
+// That is not hypothetical. admin_scoring_shared.jsx's withdrawal panel did
+// exactly this, so after a kiken it listed no remaining matches to award, for
+// every format, and nothing caught it because the panel's list has no test.
+// Route new callers through here rather than spreading by hand (mp-dej2).
+//
+// `data` is the sibling half. It is a separate argument because the competition
+// page holds the two halves as separate PROPS rather than as one response, so a
+// detail-shaped-only signature would not serve it. Callers holding the response
+// pass `(detail.config || detail, detail)`; the fallback keeps a flat
+// competition object (the aggregate shape) working.
+export function compMatchesForCompetition(config, data) {
+  if (!config) return [];
+  const d = data || {};
+  return compMatches({ ...config, pools: d.pools, poolMatches: d.poolMatches, bracket: d.bracket });
+}
 
 export function compMatches(c) {
   const out = [];

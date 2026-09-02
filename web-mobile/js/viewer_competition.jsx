@@ -1,7 +1,7 @@
 // viewer_competition.jsx: page-level competition and overview components.
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
-import { TermV, competitionKindLabel, poolLabel, compMatches } from './viewer_utils.jsx';
+import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
@@ -43,7 +43,9 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // Collapsed onto the shared compMatches (viewer_utils.jsx) builder (mp-dej2):
   // this component receives pools/poolMatches/bracket as separate props (the
   // `competition` prop is detail.config, which carries none of them — see
-  // app.jsx), so they're synthesized back onto `c` for the call. compMatches
+  // app.jsx), so compMatchesForCompetition recombines the two halves. That
+  // helper is shared with the withdrawal panel so the recombination exists
+  // once rather than being spread by hand at each call site. compMatches
   // reads the flat poolMatches list directly rather than walking `pools`, so a
   // Swiss competition (pools: [] always — Swiss piggybacks pool-matches.csv
   // with a synthetic "Swiss-R1" pool name but never writes pools.csv) now
@@ -58,7 +60,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // consequence -- the bronze can now be currentMatch, and it renders outside
   // BracketTree -- which the bracket auto-scroll effect below handles.
   const allMatches = useMemo(
-    () => compMatches({ ...c, pools, poolMatches, bracket }),
+    () => compMatchesForCompetition(c, { pools, poolMatches, bracket }),
     // isEngi (not c.engi) because that is the binding this component closes
     // over elsewhere; it is a derived primitive, so it changes exactly when
     // c.engi does. c.status is a new input: compMatches early-returns [] for

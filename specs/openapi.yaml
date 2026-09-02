@@ -1074,15 +1074,22 @@ paths:
         `numberPrefix` is deliberately outside the output-affecting set: it
         only labels competitors, not what the draw generated, so changing it
         in ANY status (including `draw-ready`, `running` and `completed`)
-        returns 200. A successful settings save always re-derives every
-        competitor's number from the (possibly unchanged) `numberPrefix` and
-        rewrites `pools.csv` in place whenever a number actually differs; a
-        save that leaves the prefix untouched is a no-op rewrite. An empty
-        `numberPrefix` in the request is never stored as empty: the server
-        assigns a derived default (see `GET
-        /api/competitions/number-prefix-default`) the first time any
-        settings save or draw reaches a competition that doesn't have one yet
-        (including a legacy record created before this rule existed).
+        returns 200. An omitted or blank `numberPrefix` in the request is
+        never treated as "clear it": exactly like `teamMatchType` and
+        `extraQualifiers` above, it INHERITS the competition's currently
+        stored value, so a settings save that never mentions the field cannot
+        invent a new prefix for a competition that already has one. Only when
+        the competition has NO prefix stored yet (a legacy record written
+        before this rule existed, see below) does the server assign a derived
+        default instead of inheriting nothing (see `GET
+        /api/competitions/number-prefix-default` for the same derivation).
+        Every successful settings save then re-derives every competitor's
+        number from that EFFECTIVE `numberPrefix` and rewrites `pools.csv` in
+        place whenever a number actually differs from what is stored; a save
+        whose effective prefix matches the stored one makes no write to
+        `pools.csv` at all. The same default assignment happens the first
+        time `POST .../start` or `POST .../generate-draw` reaches a
+        competition that still has no prefix.
 
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
@@ -4017,14 +4024,18 @@ components:
           type: string
           description: |
             Letter prefix for competitor numbers (e.g. `"K"` produces `K1`,
-            `K2`, ...). Never empty on a competition the app has saved or
-            drawn: `POST /api/competitions`, a settings `PUT`, import, `POST
-            .../start` and `POST .../generate-draw` all assign a derived
-            default when it is absent, before persisting or drawing. A
-            legacy record written before this rule existed may still load
-            with it blank; its next save or draw assigns one. Can be changed
-            in any status, including after a draw exists; see the `PUT`
-            endpoint's description.
+            `K2`, ...). Never stored empty on a competition the app has saved
+            or drawn: `POST /api/competitions`, a settings `PUT`, import,
+            `POST .../start` and `POST .../generate-draw` all assign a
+            derived default the first time they reach a competition that has
+            NO prefix stored yet, before persisting or drawing. A request
+            that omits or blanks the field on an existing competition
+            INHERITS the stored value rather than triggering that
+            derivation (a settings `PUT` never has to echo the field back to
+            keep it). A legacy record written before this rule existed may
+            still load with it blank; its next save or draw assigns one. Can
+            be changed in any status, including after a draw exists; see the
+            `PUT` endpoint's description.
         hasParticipantIDs:
           type: boolean
         teamMatchType:

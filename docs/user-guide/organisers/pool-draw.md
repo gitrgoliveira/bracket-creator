@@ -66,7 +66,7 @@ Because the seeds are spread before the pools fill, the top seeds' pools sit on 
 
 ## Competitor numbers
 
-Every competition has a number prefix. You can set your own in competition setup, or leave it blank: the app then derives one from the competition's name, for example "Kendo Open" becomes K, or KO if K is already used by another competition that day. The setup and settings pages show you the derived prefix before you save, so you see it before it takes effect.
+Every competition has a number prefix. You can set your own in competition setup, or leave it blank: the app then derives one from the competition's name, for example "Kendo Open" becomes K, or KO if K is already used by another competition that day. The setup page always shows you the derived prefix as you type the name, before you save. The settings page shows it too, but only while the competition has no prefix stored yet; once one is saved, the field simply shows that stored value.
 
 Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
 

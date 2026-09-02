@@ -81,3 +81,14 @@ export function teamMatchTypeHint(isKachinuki) {
         ? "The winner of each bout stays on to face the next opponent. Bouts are scored one at a time."
         : "All bouts are scheduled up-front by lineup position: each fighter faces the opponent in the same position.";
 }
+
+// swissRoundLabel: "Swiss-R3" (the synthetic engine pool name, see
+// engine/swiss.go swissPoolName) → "Round 3"; any other shape (a real pool
+// name, "", null) is returned unchanged. This is the SINGLE owner of the
+// Swiss round label: viewer_utils.jsx's leagueAwareLabel, display_helpers.jsx's
+// phaseLabel, and admin_shiaijo.jsx's queue-group/context labels all call
+// through here rather than restating the "Swiss-R<N>" parse (mp-dej2).
+export function swissRoundLabel(poolName) {
+    const m = /^Swiss-R(\d+)$/.exec(poolName || "");
+    return m ? `Round ${m[1]}` : (poolName || "");
+}

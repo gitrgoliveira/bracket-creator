@@ -698,10 +698,10 @@ was lifted past and the side the empty sibling sat on (`Node.risen*`), so:
 - The tree pages draw a risen bout in its slot column with the winner line crossing the
   skipped round, exactly as the sheets draw it; byed names keep printing beside the
   bout they first fight, which was already the sheets' convention.
-- `NewPlayoffDraw` normalizes every playoffs tree through the slot codec so the CLI
+- `NewKnockoutDraw` normalizes every knockout tree through the slot codec so the CLI
   workbook, the app export and the stored bracket describe one geometry.
 
-A consequence worth knowing: with slot-true rounds, PLAYOFFS brackets no longer contain
+A consequence worth knowing: with slot-true rounds, KNOCKOUT brackets no longer contain
 any shape where numbering by leaf slot and numbering by round-position disagree (swept
 3-32 entrants); the pool-fed mixed draw on 2 shiaijo remains the discriminating fixture
 guarding the numbering tie-break.
@@ -1242,7 +1242,7 @@ to its expected content.
 | Page-to-court label | `internal/helper/helper.go:257` `SubtreeCourtIndex` | Remove the then-dead overflow clamp at `:267-269` |
 | Page roster overlay slice | `internal/helper/pool_bounds.go:13` `PoolBoundsForSubtree` | Remove the then-dead "last court absorbs the remainder" branch at `:32-36` |
 | Render orchestration | `internal/helper/excel_tree.go:118` `RenderKnockoutPages` (`TreePageLayout` at `:119`, `SubdivideTree` at `:123`) | Its documented ordering constraint is **void** once placement moves upstream in Phase 3; update the comment and any test relying on it |
-| CLI page entry points | `cmd/create-pools.go:244`, `cmd/create-playoffs.go:175`; `--single-tree` flags at `cmd/create-pools.go:56` and `cmd/create-playoffs.go:48` | `--single-tree` still wins |
+| CLI page entry points | `cmd/create-pools.go:244`, `cmd/create-knockout.go:175`; `--single-tree` flags at `cmd/create-pools.go:56` and `cmd/create-knockout.go:48` | `--single-tree` still wins |
 
 ### Shiaijo count (R9, Phase 2b)
 
@@ -1252,7 +1252,7 @@ to its expected content.
 | API, competition PUT | `internal/mobileapp/handlers_competition.go:757` |
 | The validator both call | `internal/mobileapp/handlers_tournament.go:117` `validateCompetitionCourts` (today it only delegates to `validateCourtLabels`) |
 | Engine | `internal/engine/court_validation.go:21` `ValidateCourtCount` (today only the idle-court cap) |
-| CLI `--courts` | `internal/helper/helper.go:93` `ValidateCourts` (today only the court-range cap, `MaxCourts` at `internal/helper/constants.go`). **Verified: both commands do route through it**, `cmd/create-pools.go:86` and `cmd/create-playoffs.go:75`, so one change covers both. **But `create-pools` re-clamps AFTER validating**: `:225-226` sets `o.courts = numPools` when courts exceed the pool count, so a legal `--courts 4` with 3 pools silently becomes an illegal **3**. R9 must be re-checked on the clamped value there. `create-playoffs`'s clamp (`:167-168`) is safe: it clamps to `RoundToPowerOf2`, always a power of two |
+| CLI `--courts` | `internal/helper/helper.go:93` `ValidateCourts` (today only the court-range cap, `MaxCourts` at `internal/helper/constants.go`). **Verified: both commands do route through it**, `cmd/create-pools.go:86` and `cmd/create-knockout.go:75`, so one change covers both. **But `create-pools` re-clamps AFTER validating**: `:225-226` sets `o.courts = numPools` when courts exceed the pool count, so a legal `--courts 4` with 3 pools silently becomes an illegal **3**. R9 must be re-checked on the clamped value there. `create-knockout`'s clamp (`:167-168`) is safe: it clamps to `RoundToPowerOf2`, always a power of two |
 | UI blocker + legacy warning | `web-mobile/js/admin_competition_settings.jsx:632-659`, the "Assigned shiaijo (courts)" field: label at `:633`, court pills at `:640-644`, the existing hard-cap and suggested-court hints at `:645-658`. Requires a rebuild (`//go:embed`) and a browser screenshot of the blocked state |
 
 ### Pool composition inputs (context for R6-2)
@@ -1437,7 +1437,7 @@ change if the operator rules differently.
   (`internal/domain/seed.go:41`) and `helper.ApplySeeds` (`internal/helper/seed.go:420`,
   rejection at `:444`) both reject duplicate ranks; with the operator choosing the
   order this stays as it is.
-- **Playoffs-only (non-pool) brackets**, which use `StandardSeeding` and are unaffected
+- **Knockout-only (non-pool) brackets**, which use `StandardSeeding` and are unaffected
   by R2-R7. R8 and R9 **do** apply to them and must be checked, since `TreePageLayout`,
   `SubdivideTree` and the court allocation are shared.
 - **Pool Draw and Pool Matches sheet layout.** Pool composition logic is unchanged;

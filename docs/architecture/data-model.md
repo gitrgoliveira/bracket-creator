@@ -108,7 +108,7 @@ classDiagram
     Pool "1" o-- "1..*" Player : draws from
 ```
 
-`Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
+`Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
 competitions. A competition in the `team` kind treats each `Player` entry as a team, with
 member names held in the entry's metadata.

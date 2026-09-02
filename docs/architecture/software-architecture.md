@@ -15,7 +15,7 @@ flowchart TB
     cli["CLI user<br/>(terminal)"]
 
     subgraph bin["bracket-creator (single Go binary)"]
-        cliCmds["CLI commands<br/>create-pools · create-playoffs · print"]
+        cliCmds["CLI commands<br/>create-pools · create-knockout · print"]
         serveCmd["serve<br/>(one-shot Excel web form)"]
         mobile["mobile-app<br/>(tournament server)"]
     end
@@ -42,7 +42,7 @@ nothing to install beyond the binary itself.
 flowchart LR
     root["bracket-creator (root, Cobra)"]
     root --> cp["create-pools"]
-    root --> cpp["create-playoffs"]
+    root --> ck["create-knockout"]
     root --> srv["serve (Excel web form :8080)"]
     root --> ma["mobile-app (server :8080)"]
     root --> hp["hash-password (bcrypt for locked mode)"]
@@ -51,7 +51,7 @@ flowchart LR
 ```
 
 Each command is an options struct with a `run()` method (`cmd/*.go`); `create-pools` and
-`create-playoffs` share `cmd/shared.go`. `main.go` embeds the web assets and calls
+`create-knockout` share `cmd/shared.go`. `main.go` embeds the web assets and calls
 `cmd.ExecuteWithResources(res)`.
 
 ## 3. Package layers
@@ -170,8 +170,8 @@ fan-out. Scoring is ACID; a legitimate operator change is never dropped.
 flowchart LR
     start["POST /api/competitions/:id/start"] --> eng["engine.StartCompetition"]
     eng --> mode{"format?"}
-    mode -->|pools + playoffs| pools["helper: greedy pools<br/>(dojo-conflict avoidance)<br/>court-aware seeding"]
-    mode -->|playoffs only| tree["helper/tree.go<br/>binary tree (max 16/tree)<br/>StandardSeeding"]
+    mode -->|pools + knockout| pools["helper: greedy pools<br/>(dojo-conflict avoidance)<br/>court-aware seeding"]
+    mode -->|knockout only| tree["helper/tree.go<br/>binary tree (max 16/tree)<br/>StandardSeeding"]
     pools --> store[("state.Store")]
     tree --> store
     store --> excelOpt["Excel / PDF export (on demand)"]

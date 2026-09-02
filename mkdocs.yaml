@@ -50,6 +50,7 @@ plugins:
   # so linked externally and indexed by search engines) to their new homes.
   - redirects:
       redirect_maps:
+        'user-guide/commands/create-playoffs.md': 'user-guide/commands/create-knockout.md'
         'user-guide/getting-started.md': 'user-guide/install/install.md'
         'user-guide/hosting.md': 'user-guide/install/hosting.md'
         'user-guide/input-format.md': 'user-guide/organisers/input-format.md'
@@ -123,7 +124,7 @@ nav:
           - Follow the tournament: user-guide/spectators/following.md
       - Command line:
           - create-pools: user-guide/commands/create-pools.md
-          - create-playoffs: user-guide/commands/create-playoffs.md
+          - create-knockout: user-guide/commands/create-knockout.md
           - mobile-app: user-guide/commands/mobile-app.md
           - print: user-guide/commands/print.md
           - hash-password: user-guide/commands/hash-password.md

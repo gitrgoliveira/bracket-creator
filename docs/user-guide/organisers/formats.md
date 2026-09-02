@@ -8,21 +8,21 @@ The following table summarises when each format fits best.
 
 | Format | Best for |
 |--------|----------|
-| Playoffs | Small fields or qualification rounds where a straight knockout is enough |
+| Knockout | Small fields or qualification rounds where a straight knockout is enough |
 | Mixed | Most events with a moderate-to-large field; pools thin the field before the knockout |
 | League | Small fields where every match matters and standings tell the full story |
 | Swiss | Large individual fields where you want many rounds but a full round-robin is impractical |
 
 !!! note
-    In the tournament app's competition setup, these formats are labelled **Knockout only** (Playoffs), **Pools + Knockout** (Mixed), **League**, and **Swiss**.
+    In the tournament app's competition setup, these formats are labelled **Knockout only**, **Pools + Knockout** (Mixed), **League**, and **Swiss**.
 
-## Playoffs
+## Knockout
 
-Playoffs is a direct single-elimination (knockout) format. Each match eliminates one competitor; the winner advances until one remains. There are no pools and no preliminary phase.
+Knockout is a direct single-elimination format. Each match eliminates one competitor; the winner advances until one remains. There are no pools and no preliminary phase.
 
-Use playoffs when the field is small, or when you are running a dedicated knockout stage after a separate qualifying event.
+Use knockout when the field is small, or when you are running a dedicated knockout stage after a separate qualifying event.
 
-A playoffs competition splits its bracket across shiai-jo just as a mixed one does, so it must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. See [Mixed](#mixed) below for the reason, or [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
+A knockout competition splits its bracket across shiai-jo just as a mixed one does, so it must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. See [Mixed](#mixed) below for the reason, or [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
 ## Mixed
 
@@ -34,7 +34,7 @@ The knockout half is not a fresh random draw. Each shiai-jo gets its own block o
 
 Because those blocks merge in pairs, a mixed competition must be assigned **1, 2, 4, 8 or 16 shiai-jo (courts)**. Two blocks produce one survivor, those survivors pair off again, and so on, so the count has to halve cleanly all the way down to a single final. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. A single shiai-jo is always allowed: where each pool sends up two or more qualifiers its block splits into two halves that act as partner shiai-jo, and where each sends up one, nothing crosses and the block is left whole.
 
-This applies to the competition's own allocation, not to the venue. A hall with three shiai-jo is normal and stays as it is: it runs each of its competitions on 1 or 2 of the three, and can run two competitions side by side to keep all three busy. Playoffs competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number the tournament has. See [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
+This applies to the competition's own allocation, not to the venue. A hall with three shiai-jo is normal and stays as it is: it runs each of its competitions on 1 or 2 of the three, and can run two competitions side by side to keep all three busy. Knockout competitions follow the same rule, because they also split their bracket across shiai-jo. League and Swiss competitions produce no bracket and can use any number the tournament has. See [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
 
 By default every pool sends the same number of qualifiers, set by **Winners per pool**. With pool size set to a minimum, two further options let oversized pools send an extra qualifier instead of leaving the difference as byes, or let pool sizes be chosen so the qualifiers fill the bracket exactly. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool).
 

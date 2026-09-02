@@ -14,7 +14,7 @@ Provide **exactly one**:
 
 | Flag | What it reads |
 |------|---------------|
-| `--input <dir>` | A directory of pre-existing bracket `.xlsx` files (for example, output from [`create-pools`](create-pools.md) or [`create-playoffs`](create-playoffs.md)). |
+| `--input <dir>` | A directory of pre-existing bracket `.xlsx` files (for example, output from [`create-pools`](create-pools.md) or [`create-knockout`](create-knockout.md)). |
 | `--tournament-data <dir>` | A [tournament app](../organisers/run-tournament.md) data directory; the workbooks are generated on the fly from competition state. |
 
 ## Types

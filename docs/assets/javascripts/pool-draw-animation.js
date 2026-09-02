@@ -550,7 +550,11 @@
       self.goto(self.step - 1);
     });
     this.playBtn = this.control(bar, "Play", "Place the competitors one after another", function () {
-      self.timer ? self.pause() : self.play();
+      if (self.timer) {
+        self.pause();
+      } else {
+        self.play();
+      }
     });
     this.playBtn.classList.add("bcda__btn--primary");
     this.nextBtn = this.control(bar, "Step", "Place the next competitor", function () {
@@ -645,7 +649,6 @@
   // then each split, then the pools themselves. One grid row per knockout
   // slot, so a branch is a cell spanning the rows beneath it.
   Widget.prototype.buildGrid = function () {
-    var self = this;
     var bits = this.result.totalBits;
     var leaves = 1 << bits;
     this.grid.innerHTML = "";

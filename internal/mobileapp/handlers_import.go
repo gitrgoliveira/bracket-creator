@@ -448,6 +448,12 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 			res.Error = fmt.Sprintf("competition ID %q already exists", comp.ID)
 			return nil
 		}
+		// Same defaulting the POST /competitions handler applies (G2): a
+		// manifest row is as capable of omitting number_prefix as a JSON
+		// body is, and this competition must not end up without one either.
+		if infraErr := assignDefaultNumberPrefix(store, comp, comp.ID); infraErr != nil {
+			return infraErr
+		}
 		if infraErr, uniqueErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, comp.ID); infraErr != nil {
 			return infraErr
 		} else if uniqueErr != nil {

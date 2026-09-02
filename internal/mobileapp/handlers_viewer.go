@@ -3,7 +3,6 @@ package mobileapp
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -37,12 +36,10 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 			return
 		}
 		// Playoffs-only: numbers were assigned in memory by generatePlayoffs
-		// but never written to disk. Re-derive them from participant order.
-		for i := range players {
-			if players[i].Number == "" {
-				players[i].Number = fmt.Sprintf("%s%d", numberPrefix, i+1)
-			}
-		}
+		// but never written to disk. Re-derive them from participant order,
+		// through the same helper generatePlayoffs itself calls so the two
+		// cannot drift (helper.Player is an alias of domain.Player).
+		helper.AssignPlayerNumbers(players, numberPrefix, 1)
 		return
 	}
 	byID := make(map[string]string)

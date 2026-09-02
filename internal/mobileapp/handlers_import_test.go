@@ -1022,6 +1022,51 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 	})
 }
 
+// TestImportCompetition_AssignsDefaultNumberPrefix pins item 4's import half
+// (bc-pnum G2): a manifest row is as capable of omitting number_prefix as any
+// other create path (POST /competitions, settings PUT), and this competition
+// must not end up without one either. Subtests run in order against one
+// store so the second import observes the first's derived "K" as taken.
+func TestImportCompetition_AssignsDefaultNumberPrefix(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+	}))
+
+	t.Run("omitted number_prefix is derived from the name", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-kendo-open", Name: "Kendo Open", Date: "11-06-2026"}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-kendo-open")
+		require.NoError(t, err)
+		require.NotNil(t, comp)
+		assert.Equal(t, "K", comp.NumberPrefix)
+	})
+
+	t.Run("a taken prefix is avoided (escalates to two initials)", func(t *testing.T) {
+		// "K" is already taken by the competition imported above, so this
+		// name's bare initial collides and DefaultNumberPrefix escalates.
+		entry := ImportManifestComp{ID: "imp-kendo-open-2", Name: "Kendo Open 2", Date: "11-06-2026"}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-kendo-open-2")
+		require.NoError(t, err)
+		require.NotNil(t, comp)
+		assert.Equal(t, "KO", comp.NumberPrefix)
+	})
+
+	t.Run("an explicit number_prefix in the manifest is preserved", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-explicit-prefix", Name: "Explicit Prefix", Date: "11-06-2026", NumberPrefix: "Z"}
+		res := importCompetition(store, entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-explicit-prefix")
+		require.NoError(t, err)
+		require.NotNil(t, comp)
+		assert.Equal(t, "Z", comp.NumberPrefix)
+	})
+}
+
 // The importer runs the SAME seeds-roster gate PUT /seeds runs
 // (rejectSeedsOffRoster, internal/mobileapp/validation.go), so a wrong-dojo
 // or ghost seed row cannot land through the manifest path just because the

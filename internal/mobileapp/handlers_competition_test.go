@@ -1945,6 +1945,123 @@ func TestGenerateDrawHandler(t *testing.T) {
 	})
 }
 
+// TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing pins R7 /
+// ensureNumberPrefix: a legacy competition (G7, saved before this rule
+// existed) can still load with an empty NumberPrefix, and both the
+// single-click POST .../start and the two-step POST .../generate-draw must
+// assign one BEFORE the engine draws -- there is no numberless mode to fall
+// back to (D1), so a legacy record cannot be allowed to draw without one.
+func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testing.T) {
+	t.Run("POST /start assigns a prefix before drawing", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		cid := "legacy-start"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Legacy Start", Format: state.CompFormatMixed, Kind: "individual",
+			Courts: []string{"A"}, PoolSize: 3, PoolWinners: 2, Status: state.CompStatusSetup,
+			// NumberPrefix intentionally left empty: this is the legacy shape.
+		}))
+		players := make([]domain.Player, 6)
+		for i := range players {
+			players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "Dojo"}
+		}
+		require.NoError(t, store.SaveParticipants(cid, players))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/start", nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.NotEmpty(t, stored.NumberPrefix, "a legacy empty prefix must be assigned before the draw runs")
+
+		pools, err := store.LoadPools(cid)
+		require.NoError(t, err)
+		require.NotEmpty(t, pools)
+		for _, p := range pools {
+			for _, pl := range p.Players {
+				assert.NotEmpty(t, pl.Number)
+				assert.Truef(t, strings.HasPrefix(pl.Number, stored.NumberPrefix),
+					"number %q should start with the assigned prefix %q", pl.Number, stored.NumberPrefix)
+			}
+		}
+	})
+
+	t.Run("POST /generate-draw assigns a prefix before drawing", func(t *testing.T) {
+		r, store, _, _, tempDir := setupTestRouter(t)
+		defer os.RemoveAll(tempDir)
+
+		cid := "legacy-generate-draw"
+		require.NoError(t, store.SaveCompetition(&state.Competition{
+			ID: cid, Name: "Legacy Generate Draw", Format: state.CompFormatPlayoffs,
+			Courts: []string{"A"}, Status: state.CompStatusSetup,
+		}))
+		players := make([]domain.Player, 4)
+		for i := range players {
+			players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "Dojo"}
+		}
+		require.NoError(t, store.SaveParticipants(cid, players))
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/generate-draw", nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		assert.NotEmpty(t, stored.NumberPrefix, "a legacy empty prefix must be assigned before the draw runs")
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+	})
+}
+
+// TestGETNumberPrefixDefault exercises the R9 preview endpoint (item 8): it
+// must return the exact value assignDefaultNumberPrefix would assign, since
+// the create and settings forms pre-fill from it and must never show the
+// operator a value a save would not actually land.
+func TestGETNumberPrefixDefault(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "existing-k", Name: "Existing K Comp", NumberPrefix: "K",
+	}))
+
+	getPrefix := func(t *testing.T, query string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/competitions/number-prefix-default"+query, nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		var got map[string]string
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+		return got["numberPrefix"]
+	}
+
+	t.Run("derives from name when nothing collides", func(t *testing.T) {
+		assert.Equal(t, "N", getPrefix(t, "?name=Novice%20Cup"))
+	})
+
+	t.Run("avoids a prefix already taken by another competition", func(t *testing.T) {
+		assert.Equal(t, "KO", getPrefix(t, "?name=Kendo%20Open"), "K is already used by existing-k, so it escalates to KO")
+	})
+
+	t.Run("exclude removes a competition's own prefix from the taken set", func(t *testing.T) {
+		// Without exclude, "Kendo Open" escalates to "KO" (see above) because
+		// existing-k already holds "K". Excluding existing-k's own id removes
+		// that entry from the taken set, so the bare initial is free again.
+		assert.Equal(t, "K", getPrefix(t, "?name=Kendo%20Open&exclude=existing-k"))
+	})
+
+	t.Run("empty name resolves via the fallback, still avoiding what's taken", func(t *testing.T) {
+		// No name -> nameInitials("") is empty -> DefaultNumberPrefixFallback
+		// ("K"), which collides with existing-k. The fallback has no second
+		// initial to escalate to, so it falls straight to a numeric suffix.
+		assert.Equal(t, "K2", getPrefix(t, ""))
+	})
+}
+
 // TestCreateCompetitionEngiTeamExclusion pins Copilot #326: engi (individual
 // PAIR paradigm) is mutually exclusive with team competitions. The admin UI
 // hides the Engi toggle unless kind=individual, but the server must reject the
@@ -2878,14 +2995,14 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 	})
 
-	// NumberPrefix and WithZekkenName reach the Excel generator (POST /create),
-	// so they are output-affecting and must be gated while draw-ready.
+	// WithZekkenName reaches the Excel generator (POST /create), so it is
+	// output-affecting and must be gated while draw-ready. numberPrefix is
+	// deliberately NOT in this loop (bc-pnum G4): see the ALLOW subtest below.
 	for _, tc := range []struct {
 		name  string
 		field string
 		value any
 	}{
-		{"REJECT numberPrefix change while draw-ready", "numberPrefix", "X"},
 		{"REJECT withZekkenName change while draw-ready", "withZekkenName", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2913,6 +3030,55 @@ func TestPUTCompetition_DrawReadyOutputAffectingGate(t *testing.T) {
 			assert.Equal(t, state.CompStatusDrawReady, stored.Status)
 		})
 	}
+
+	// bc-pnum G4: numberPrefix is explicitly OUTSIDE the output-affecting set.
+	// Changing it while draw-ready returns 200, not 409, and RenumberCompetitors
+	// rewrites pools.csv in place rather than requiring the draw to be discarded.
+	t.Run("ALLOW numberPrefix change while draw-ready, renumbers pools.csv", func(t *testing.T) {
+		// Seed a pool with numbers under the OLD prefix ("Y"), so a renumber to
+		// "X" is observable in the saved file rather than a no-op over blanks.
+		require.NoError(t, store.SavePools(cid, []helper.Pool{
+			{PoolName: "Pool A", Players: []helper.Player{
+				{Name: "Player 1", Dojo: "Dojo Player 1", Number: "Y1"},
+				{Name: "Player 2", Dojo: "Dojo Player 2", Number: "Y2"},
+			}},
+		}))
+
+		body, _ := json.Marshal(map[string]any{
+			"id":           cid,
+			"name":         "Draw Ready Gate",
+			"format":       state.CompFormatMixed,
+			"kind":         "individual",
+			"courts":       []string{"A"},
+			"poolSize":     4,
+			"poolWinners":  2,
+			"roundRobin":   false,
+			"mirror":       false,
+			"numberPrefix": "X", // the only output-affecting-looking change
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code,
+			"changing numberPrefix while draw-ready must return 200: %s", w.Body.String())
+
+		stored, err := store.LoadCompetition(cid)
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "X", stored.NumberPrefix)
+		// The draw is untouched: still draw-ready, not discarded/regenerated.
+		assert.Equal(t, state.CompStatusDrawReady, stored.Status)
+
+		pools, err := store.LoadPools(cid)
+		require.NoError(t, err)
+		require.Len(t, pools, 1)
+		require.Len(t, pools[0].Players, 2)
+		assert.Equal(t, "X1", pools[0].Players[0].Number,
+			"RenumberCompetitors must rewrite pools.csv under the new prefix")
+		assert.Equal(t, "X2", pools[0].Players[1].Number)
+	})
 
 	t.Run("ALLOW cosmetic Name rename while draw-ready", func(t *testing.T) {
 		// All output-affecting fields match the stored comp; only Name differs.

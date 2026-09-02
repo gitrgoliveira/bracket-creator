@@ -55,14 +55,27 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "D3", comp.Players[2].Number)
 	})
 
-	t.Run("playoffs-only: preserves existing non-empty Number", func(t *testing.T) {
+	// bc-pnum G8: this subtest used to assert the opposite -- that an
+	// existing non-empty Number survived the merge untouched. That guard
+	// (the playoffs-only branch's own `if players[i].Number == ""`) was
+	// RETIRED: participants.csv never persists Number, so the only Number
+	// this branch could ever see already set was one THIS SAME function had
+	// just assigned on an earlier call in the request; the preserve was
+	// unreachable in production, and preserving a stale value on purpose
+	// (rather than a competition's CURRENT prefix) is exactly the partial-
+	// preserve fallback D1 forbids. helper.AssignPlayerNumbers now runs
+	// unconditionally here, same as generatePlayoffs itself, so a
+	// NumberPrefix changed after a playoffs-only draw is reflected
+	// immediately on read -- there is no pools.csv for playoffs-only, so
+	// there is nothing to rewrite either (acceptance criterion 4).
+	t.Run("playoffs-only: re-derives unconditionally, overwriting any existing Number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
 			Format:       state.CompFormatPlayoffs,
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "STALE", Dojo: "Dojo Tanaka"}},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)
-		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
+		assert.Equal(t, "D1", comp.Players[0].Number, "must overwrite a stale Number with the current prefix, not preserve it")
 	})
 
 	t.Run("merges by id when HasParticipantIDs", func(t *testing.T) {

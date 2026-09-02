@@ -248,29 +248,36 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
-  // Depends on currentMatch?.id, not the object: re-scroll only when the target
-  // match actually changes, not on every currentMatch identity churn.
+  // Keyed on an id STRING, not a match object: re-scroll only when the target
+  // actually changes, not on every identity churn.
   //
-  // Gated on the tree actually containing the match (mp-dej2): allMatches now
-  // comes from the shared compMatches, which surfaces the bronze playoff as a
-  // first-class bracket match where the hand-rolled loop it replaced dropped it
-  // entirely. That is the correct list behaviour -- the bronze is a real bout
-  // and every other surface already showed it -- but it means currentMatch can
-  // now be a match the tree cannot centre. useAutoScrollToMatch bails silently
-  // on a missing ref, so an ungated target would quietly leave the tab wherever
-  // it was instead of centring on something. Skip rather than retarget: there
-  // is no "nearest" tree match to fall back to, and the bronze is rendered in
-  // full just below the tree, so it is not hidden from the operator.
+  // Which match the Bracket tab should centre on: currentMatch when the tree
+  // holds it, else the soonest running/upcoming match that IS in the tree.
+  //
+  // The fallback is the point, not a nicety. Before allMatches was collapsed
+  // onto the shared builder, the bronze never reached this page, so currentMatch
+  // was the final and the tab centred there. The bronze is scheduled just BEFORE
+  // the final (engine/bracket.go gives it the slot ahead of it on the same
+  // shiaijo), so it is now reliably the current match at exactly the moment an
+  // operator opens this tab, and simply skipping would leave the tab centred on
+  // nothing for the whole bronze slot. Targeting the bronze itself is not an
+  // option: it renders BELOW the tree, outside BracketTree, so it owns no ref
+  // and useAutoScrollToMatch bails silently.
+  //
+  // A plain string, not a match object or a Set: this feeds an effect that
+  // setStates, and a fresh object in that dep list re-fires it every render.
+  const bracketFocusId = (() => {
+    if (currentMatch && bracketRoundsContain(derivedBracket, currentMatch.id)) return currentMatch.id;
+    const inTree = (m) => m && bracketRoundsContain(derivedBracket, m.id);
+    const fallback = runningMatches.find(inTree) || upcomingMatches.find(inTree);
+    return fallback ? fallback.id : "";
+  })();
+
   React.useEffect(() => {
-    if (effectiveTab === "bracket" && currentMatch && bracketRoundsContain(derivedBracket, currentMatch.id)) {
-      setBracketScrollTarget(currentMatch.id + "::" + Date.now());
+    if (effectiveTab === "bracket" && bracketFocusId) {
+      setBracketScrollTarget(bracketFocusId + "::" + Date.now());
     }
-    // Deps deliberately unchanged: the containment test reads derivedBracket
-    // from the closure rather than taking it (or a derived Set) as a dep. A
-    // fresh object in this dep list re-fires the effect on every render, and
-    // the effect setStates, so it would spin.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTab, currentMatch?.id]);
+  }, [effectiveTab, bracketFocusId]);
 
   const hasBracketEl = effectiveTab === "bracket" && !!derivedBracket;
   React.useEffect(() => {

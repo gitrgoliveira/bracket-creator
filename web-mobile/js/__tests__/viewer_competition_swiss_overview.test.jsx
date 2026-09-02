@@ -220,6 +220,32 @@ describe('ViewerCompetition Overview shows Swiss round matches (mp-dej2)', () =>
       expect(ids).toContain('r1-m1');
     });
 
+    it('centres the Bracket tab on the final while the bronze is the current match', () => {
+      // The REGRESSION this guards. The bronze is scheduled just before the
+      // final, so once both are pending it is reliably currentMatch. Before the
+      // collapse the bronze never reached this page and the tab centred on the
+      // final; targeting the bronze instead centres on nothing, because it is
+      // drawn outside BracketTree and useAutoScrollToMatch bails on a missing
+      // ref. So the tab must fall back to the final, not merely skip.
+      const detail = normalizeCompetitionDetail(bronzeDetail());
+      const tree = runtime.mount(ViewerCompetition, {
+        tournament: { competitions: [detail], mode: 'public' },
+        competition: detail,
+        pools: detail.pools,
+        poolMatches: detail.poolMatches,
+        standings: detail.standings,
+        bracket: detail.bracket,
+        onBack: () => {},
+        tweaks: {},
+        activeTab: 'bracket',
+      });
+      const bt = findInTree(tree, (n) => n.type === global.window.BracketTree);
+      expect(bt).not.toBeNull();
+      // "<id>::<timestamp>" — assert on the id half.
+      const target = String(bt.props.autoScrollMatchId || '').split('::')[0];
+      expect(target).toBe('r1-m1');
+    });
+
     it('does not point the bracket auto-scroll at the bronze, which renders outside the tree', () => {
       const detail = normalizeCompetitionDetail(bronzeDetail());
       // Mount on the Bracket tab, where the auto-scroll effect runs.

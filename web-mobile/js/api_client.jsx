@@ -2594,6 +2594,27 @@ const API = {
         }
         return res.json();
     },
+    // Preview of the number prefix a save would assign when the field is
+    // empty (bc-pnum G2/R6): the create and settings forms call this to
+    // pre-fill the prefix field with the SAME value assignDefaultNumberPrefix
+    // would pick server-side, so what the operator sees before saving matches
+    // what would actually land. excludeID is the competition's own id on the
+    // settings form (so its own current prefix can't collide with itself)
+    // and "" on the create form (the competition doesn't exist yet).
+    async getNumberPrefixDefault(name, excludeID, password, signal) {
+        const params = new URLSearchParams();
+        if (name) params.append('name', name);
+        if (excludeID) params.append('exclude', excludeID);
+        const res = await fetch(`/api/competitions/number-prefix-default?${params.toString()}`, {
+            headers: { 'X-Tournament-Password': password },
+            signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to derive number prefix");
+        }
+        return res.json();
+    },
     async moveMatchCourt(compID, matchID, court, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
             method: 'PUT',

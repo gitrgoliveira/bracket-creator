@@ -36,6 +36,10 @@ const STUBBED_GLOBALS = {
   addMinutes: (t) => t,
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
+    // bc-pnum: the number-prefix pre-fill effect fires on mount as the name
+    // field changes (starting blank). Resolving "" keeps it a no-op for
+    // every fixture here, none of which is about numbering.
+    getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
   },
 };
 

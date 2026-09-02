@@ -68,6 +68,11 @@ const STUBBED_GLOBALS = {
     // Advisory fetch made on every competition mount; per-test overrides in the
     // draw-warning suite below.
     fetchDrawWarnings: vi.fn().mockResolvedValue([]),
+    // bc-pnum: AdminSettings' legacy-empty-prefix pre-fill effect fires on
+    // mount whenever the fixture's numberPrefix is empty. Resolving "" (not
+    // rejecting) keeps that effect a no-op for every fixture here, none of
+    // which is about numbering.
+    getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
   },
 };
 

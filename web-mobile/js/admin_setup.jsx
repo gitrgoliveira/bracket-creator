@@ -857,6 +857,32 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     return () => { controller.abort(); };
   }, [date, tournament.competitions, password]);
 
+  // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
+  // left blank would actually assign server-side (assignDefaultNumberPrefix),
+  // fetched from GET number-prefix-default (R9) rather than derived here --
+  // nothing is derived in JS, so this preview can never drift from what a
+  // save would land. Uses the EFFECTIVE name (deriveCompetitionName, the
+  // same call create() below makes) so the preview tracks the kind-based
+  // default too when the name field is left blank.
+  //
+  // Same touched-ref shape as the start-time auto-stack effect above: once
+  // the operator types into the prefix field, numberPrefixTouchedRef
+  // latches and this effect stops applying its result, so a later name edit
+  // cannot silently overwrite a value the operator chose.
+  const numberPrefixTouchedRef = useRefA(false);
+  useEffectA(() => {
+    if (numberPrefixTouchedRef.current) return;
+    const controller = new AbortController();
+    window.API.getNumberPrefixDefault(deriveCompetitionName(name, kind), "", password, controller.signal)
+      .then((res) => {
+        if (!controller.signal.aborted && !numberPrefixTouchedRef.current) {
+          setNumberPrefix(res && res.numberPrefix || "");
+        }
+      })
+      .catch(() => {});
+    return () => { controller.abort(); };
+  }, [name, kind, password]);
+
   const toggleCourt = (cc) => {
     // Clear a stale banner (client-side guard or server rejection) the moment
     // the operator changes the allocation, same as every other field's
@@ -1387,7 +1413,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
-            value={numberPrefix} onChange={setNumberPrefix}
+            value={numberPrefix} onChange={(raw) => { numberPrefixTouchedRef.current = true; setNumberPrefix(raw); }}
             hint={HINT_NUMBER_PREFIX} width={80} />
 
           {zekkenApplies(kind) && (

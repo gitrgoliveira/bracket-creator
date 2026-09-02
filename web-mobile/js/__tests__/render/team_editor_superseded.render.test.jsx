@@ -62,7 +62,7 @@ beforeEach(() => {
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1',
-      config: { format: 'playoffs', teamMatchType: 'fixed', naginata: false, players: [] },
+      config: { format: 'knockout', teamMatchType: 'fixed', naginata: false, players: [] },
     }),
     recordScore: vi.fn().mockResolvedValue(undefined),
     recordDaihyosen: vi.fn(),
@@ -85,7 +85,7 @@ function scheduledTeamMatch(overrides = {}) {
     court: 'A',
     compKind: 'team',
     teamSize: 3,
-    compFormat: 'playoffs',
+    compFormat: 'knockout',
     teamMatchType: 'fixed',
     sideA: { id: 'team-A', name: 'Team A' },
     sideB: { id: 'team-B', name: 'Team B' },
@@ -197,7 +197,7 @@ describe('team score editor: a failed write disarms the finish confirmation', ()
     return {
       id: 'm1', compId: 'comp1', status: 'running', phase: 'bracket',
       round: 'Final', court: 'A', compKind: 'team', teamSize: 3,
-      compFormat: 'playoffs', teamMatchType: 'fixed',
+      compFormat: 'knockout', teamMatchType: 'fixed',
       sideA: { id: 'team-A', name: 'Team A' },
       sideB: { id: 'team-B', name: 'Team B' },
       subResults: [

@@ -114,8 +114,8 @@ describe('ViewerCompetition Recent results excludes byes', () => {
     name: 'Knockout Cup',
     kind: 'individual',
     teamSize: 0,
-    format: 'playoffs',
-    status: 'playoffs',
+    format: 'knockout',
+    status: 'knockout',
     startTime: '09:00',
     courts: ['A'],
     config: {

@@ -5,12 +5,12 @@ function StatusBadge({ status, showRunningDot, format }) {
     setup: ["badge--setup", "Pending"],
     "draw-ready": ["badge--draw-ready", "Draw ready"],
     pools: ["badge--pools", "Pools"],
-    playoffs: ["badge--playoffs", "Playoffs"],
+    knockout: ["badge--knockout", "Knockout"],
     completed: ["badge--completed", "Completed"],
   };
   const [cls, rawLabel] = map[status || "setup"] || ["badge--setup", status];
   const label = (status === "pools" && format === "league") ? "League" : rawLabel;
-  const showRunning = showRunningDot && (status === "pools" || status === "playoffs");
+  const showRunning = showRunningDot && (status === "pools" || status === "knockout");
   return (
     <span className={`badge ${cls}`}>
       {showRunning && <span className="dot dot--running" style={{ marginRight: 4 }}></span>}

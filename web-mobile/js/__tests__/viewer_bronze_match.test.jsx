@@ -84,7 +84,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     name: 'Naginata Cup',
     kind: 'individual',
     teamSize: 0,
-    format: 'playoffs',
+    format: 'knockout',
     status: 'running',
     startTime: '09:00',
     courts: ['A'],

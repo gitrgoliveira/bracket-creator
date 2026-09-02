@@ -131,8 +131,8 @@ import {
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
   LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
-  LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
-  poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
+  LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
+  poolDurationLabel, poolDurationHint, poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
@@ -757,7 +757,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   // the correct default for a competition that hasn't run a single match
   // yet to estimate from.
   const [poolMatchDurationSeconds, setPoolMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.poolMatchDurationSeconds);
-  const [playoffMatchDurationSeconds, setPlayoffMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.playoffMatchDurationSeconds);
+  const [knockoutMatchDurationSeconds, setKnockoutMatchDurationSeconds] = useStateA(COMPETITION_DEFAULTS.knockoutMatchDurationSeconds);
   const [startTime, setStartTime] = useStateA(COMPETITION_DEFAULTS.startTime);
   // Once the operator types a start time, stop auto-stacking it (see the
   // effect below) so we never clobber a deliberate choice.
@@ -1039,7 +1039,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // post-construction pattern as poolFormat above, and gated the same
     // way as the fields controlling it: each duration only emitted when
     // its own field is actually shown (poolDurationVisible /
-    // playoffDurationVisible), so a duration typed while e.g. "mixed" was
+    // knockoutDurationVisible), so a duration typed while e.g. "mixed" was
     // selected doesn't ride along, unused, after a switch to a format
     // with no matching phase. Both are `omitempty` on the wire and 0
     // ("unset, use the scheduler default") is what buildEmptyCompetition's
@@ -1048,8 +1048,8 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (poolDurationVisible(format)) {
       c.poolMatchDurationSeconds = poolMatchDurationSeconds;
     }
-    if (playoffDurationVisible(format)) {
-      c.playoffMatchDurationSeconds = playoffMatchDurationSeconds;
+    if (knockoutDurationVisible(format)) {
+      c.knockoutMatchDurationSeconds = knockoutMatchDurationSeconds;
     }
     // League tie-break band. Same post-construction pattern as
     // leagueTwoThirdPlaces above; gated on the same predicate the control
@@ -1209,7 +1209,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           {/* bc-symm Gap 2: gated on roundRobinVisible (competition_shape.jsx),
               which is true only for "mixed" with poolFormat !== "partial" --
               the one combination where internal/engine/pools.go actually
-              reads comp.RoundRobin. Elsewhere (league, playoffs, swiss,
+              reads comp.RoundRobin. Elsewhere (league, knockout, swiss,
               partial-pool mixed) the field is stored but never consulted, so
               showing the checkbox there would let the operator toggle
               something with no effect. */}
@@ -1352,12 +1352,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
               the state this form submits can never itself be
               out-of-band -- there is nothing for a submit-time guard to
               catch that the leaf hasn't already refused to pass on. */}
-          {/* Always true on THIS screen -- `format` starts at "playoffs" and is
+          {/* Always true on THIS screen -- `format` starts at "knockout" and is
               only ever set from FORMAT_OPTIONS, and all four formats satisfy one
               of the two predicates. Kept for parity with the settings twin, where
               a stored legacy record can carry format: "" and the wrapper does
               real work. */}
-          {(poolDurationVisible(format) || playoffDurationVisible(format)) && (
+          {(poolDurationVisible(format) || knockoutDurationVisible(format)) && (
             <div className="row">
               {poolDurationVisible(format) && (
                 <div className="field">
@@ -1371,16 +1371,16 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
                   <div className="field__hint" id="create-pool-duration-hint">{poolDurationHint(format)}</div>
                 </div>
               )}
-              {playoffDurationVisible(format) && (
+              {knockoutDurationVisible(format) && (
                 <div className="field">
-                  <label className="field__label" htmlFor="create-playoff-duration">{LABEL_PLAYOFF_DURATION}</label>
+                  <label className="field__label" htmlFor="create-knockout-duration">{LABEL_KNOCKOUT_DURATION}</label>
                   <DurationInput
-                    id="create-playoff-duration"
-                    describedBy="create-playoff-duration-hint"
-                    seconds={playoffMatchDurationSeconds}
-                    onChange={(sec) => setPlayoffMatchDurationSeconds(Number.isFinite(sec) ? sec : 0)}
+                    id="create-knockout-duration"
+                    describedBy="create-knockout-duration-hint"
+                    seconds={knockoutMatchDurationSeconds}
+                    onChange={(sec) => setKnockoutMatchDurationSeconds(Number.isFinite(sec) ? sec : 0)}
                   />
-                  <div className="field__hint" id="create-playoff-duration-hint">{HINT_PLAYOFF_DURATION}</div>
+                  <div className="field__hint" id="create-knockout-duration-hint">{HINT_KNOCKOUT_DURATION}</div>
                 </div>
               )}
             </div>

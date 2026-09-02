@@ -226,7 +226,7 @@ describe('deriveAwards (standings-based)', () => {
     ]);
   });
 
-  it('falls back to standings when a bracket exists but the final has no winner (pools+playoffs placeholder)', () => {
+  it('falls back to standings when a bracket exists but the final has no winner (pools+knockout placeholder)', () => {
     // Simulates a pools-only competition where derivedBracket is a TBD
     // placeholder (rounds present, no winners). The standings fallback
     // should still produce the podium.

@@ -1575,7 +1575,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
 // disabling the ↑/↓ buttons. `onMove(m, direction)` swaps scheduledAt with the
 // adjacent same-competition row via two updateMatchTime calls.
 // Group an Upcoming slice for display so the operator sees what they'll be
-// scoring: pool matches by pool ("Pool A", "Pool B"), playoff matches by round
+// scoring: pool matches by pool ("Pool A", "Pool B"), knockout matches by round
 // ("Final", "Round 16"). League is a single round-robin table and needs no
 // grouping → returns null, and the caller renders a flat list. Groups keep
 // first-appearance (i.e. scheduled-time) order; pools are seeded contiguously
@@ -1597,7 +1597,7 @@ export function groupQueueMatches(matches) {
             // match under it. Same cross-competition behaviour as before, since
             // a shared roundIndex already merged those.
             key = "round:" + (m.round || "");
-            label = m.round || "Playoffs";
+            label = m.round || "Knockout";
         } else if (m.phase === "pool") {
             key = "pool:" + (m.poolName || "");
             // Swiss rounds piggyback on the pool pipeline with a synthetic

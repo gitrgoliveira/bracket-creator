@@ -48,7 +48,7 @@ describe('groupQueueMatches; the heading describes its members (mp-u37s)', () =>
   // raw. Phantom (hidden) matches never reach the queue.
   const queueRows = () => {
     const comp = {
-      id: 'c1', name: 'Knockout5', status: 'playoffs', format: 'playoffs',
+      id: 'c1', name: 'Knockout5', status: 'knockout', format: 'knockout',
       kind: 'individual', teamSize: 0, engi: false,
       bracket: { rounds: fivePlayerRounds() },
     };
@@ -113,7 +113,7 @@ describe('groupQueueMatches; the heading describes its members (mp-u37s)', () =>
     // bracket round can collide with, so label-keying still isolates it.
     const groups = groupQueueMatches([
       ...queueRows(),
-      { phase: 'bracket', compFormat: 'playoffs', round: '3rd Place', roundIndex: 3, id: 'bronze' },
+      { phase: 'bracket', compFormat: 'knockout', round: '3rd Place', roundIndex: 3, id: 'bronze' },
     ]);
     expect(groups.map((g) => g.label)).toEqual(['Semifinals', 'Quarterfinals', 'Final', '3rd Place']);
   });

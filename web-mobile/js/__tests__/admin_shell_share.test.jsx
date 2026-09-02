@@ -83,8 +83,8 @@ describe('CompCard share-button visibility', () => {
     expect(hasShareButton(vnode)).toBe(false);
   });
 
-  it('hides share button for started competition (playoffs)', () => {
-    const c = { id: 'men', name: 'Men', kind: 'individual', format: 'KO', status: 'playoffs', courts: [], players: [] };
+  it('hides share button for started competition (knockout)', () => {
+    const c = { id: 'men', name: 'Men', kind: 'individual', format: 'KO', status: 'knockout', courts: [], players: [] };
     const vnode = CompCard({ c, onOpen: noop, onStart: noop, tournament: selfRunTournament, showToast: noop });
     expect(hasShareButton(vnode)).toBe(false);
   });

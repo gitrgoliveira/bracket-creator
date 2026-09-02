@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -260,16 +261,10 @@ func TestCreateHandler_NoEngi_PWHeaderPresent(t *testing.T) {
 }
 
 // naginataKnockoutForm builds the POST /create body for a naginata knockout
-// competition. tournamentType is deliberately still the pre-rename literal
-// "playoffs": web/index.html (a later commit in this terminology
-// consolidation, bc-terminology) still posts that value, and this form
-// mirrors what the live page sends today, not the eventual one. The handler
-// accepts "knockout" too (see createTournamentHandler); once web/ is
-// converted this form should switch to "knockout" and the dual-accept
-// removed from the handler.
+// competition.
 func naginataKnockoutForm(playerList string) url.Values {
 	return url.Values{
-		"tournamentType": {"playoffs"},
+		"tournamentType": {"knockout"},
 		"playerList":     {playerList},
 		"courts":         {"1"},
 		"teamMatches":    {"0"},
@@ -297,7 +292,7 @@ func TestCreateHandler_NaginataKnockout_ThirdPlaceBlock(t *testing.T) {
 func TestCreateHandler_NoNaginata_NoThirdPlaceBlock(t *testing.T) {
 	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
 	v := url.Values{
-		"tournamentType": {"playoffs"},
+		"tournamentType": {"knockout"},
 		"playerList":     {roster},
 		"courts":         {"1"},
 		"teamMatches":    {"0"},
@@ -361,7 +356,7 @@ func findResultsRow(rows [][]string) int {
 // TestCreateHandler_NaginataKnockout_PrintAreaCoversThirdPlace verifies that the
 // POST /create response for a naginata knockout bracket has a _xlnm.Print_Area
 // defined name on the Elimination Matches sheet that covers the "3rd Place" block.
-// This exercises the create-knockout code path (tournamentType=playoffs, naginata=on).
+// This exercises the create-knockout code path (tournamentType=knockout, naginata=on).
 func TestCreateHandler_NaginataKnockout_PrintAreaCoversThirdPlace(t *testing.T) {
 	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
 	f := postCreate(t, naginataKnockoutForm(roster))
@@ -389,11 +384,9 @@ func TestCreateHandler_NaginataKnockout_PrintAreaCoversThirdPlace(t *testing.T) 
 
 // engiKnockoutForm builds the POST /create body for an engi knockout-only
 // competition: combined pair names, engi=on, naginata=on (bronze block).
-// tournamentType is deliberately still "playoffs"; see naginataKnockoutForm's
-// doc comment.
 func engiKnockoutForm(playerList string) url.Values {
 	return url.Values{
-		"tournamentType": {"playoffs"},
+		"tournamentType": {"knockout"},
 		"playerList":     {playerList},
 		"courts":         {"1"},
 		"teamMatches":    {"0"},
@@ -404,7 +397,7 @@ func engiKnockoutForm(playerList string) url.Values {
 }
 
 // TestCreateHandler_EngiKnockout_FlagsCaptions asserts that POST /create with
-// tournamentType=playoffs&engi=on routes the elimination blocks through the
+// tournamentType=knockout&engi=on routes the elimination blocks through the
 // engi rendering path: the match headers carry the "Fl" flag-count captions
 // (kendo knockout matches have no such captions).
 func TestCreateHandler_EngiKnockout_FlagsCaptions(t *testing.T) {
@@ -424,4 +417,33 @@ func TestCreateHandler_EngiKnockout_FlagsCaptions(t *testing.T) {
 	}
 	assert.Greater(t, found, 0,
 		"engi knockout elimination blocks must carry 'Fl' flag captions")
+}
+
+// TestCreateHandler_RetiredPlayoffsValueRejected pins the bc-terminology
+// commit 2 cleanup: createTournamentHandler used to accept the retired
+// "playoffs" tournamentType value as a temporary dual-accept shim for
+// web/index.html, which posted that literal before it was converted to
+// "knockout" (see web/index.html, web/js/app.js). Now that web/ posts
+// "knockout", "playoffs" must be rejected like any other invalid value.
+func TestCreateHandler_RetiredPlayoffsValueRejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/create", createTournamentHandler)
+
+	form := url.Values{
+		"tournamentType": {"playoffs"},
+		"playerList":     {"Alice, DA\nBob, DB"},
+		"courts":         {"1"},
+		"teamMatches":    {"0"},
+		"determined":     {"on"},
+	}
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/create", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Contains(t, response["error"], "Invalid tournament type")
 }

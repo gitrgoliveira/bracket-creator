@@ -232,7 +232,7 @@ describe('mergeTournamentPatch', () => {
       id: 't1', name: 'Old', password: 'X',
       competitions: [
         { id: 'c1', name: 'Pools', status: 'pools' }, // SSE-updated mid-flight
-        { id: 'c2', name: 'Playoffs', status: 'completed' }, // SSE-added mid-flight
+        { id: 'c2', name: 'Knockout', status: 'completed' }, // SSE-added mid-flight
       ],
     };
     const patch = { name: 'New tournament name' };
@@ -243,7 +243,7 @@ describe('mergeTournamentPatch', () => {
     // handler-definition time), reverting status changes on every save.
     expect(result.competitions).toEqual([
       { id: 'c1', name: 'Pools', status: 'pools' },
-      { id: 'c2', name: 'Playoffs', status: 'completed' },
+      { id: 'c2', name: 'Knockout', status: 'completed' },
     ]);
   });
 
@@ -287,7 +287,7 @@ describe('mergeTournamentPatch', () => {
 });
 
 // /deep-review round-12 finding (Copilot #6): the create-response from
-// the Go server (POST /competitions, POST /playoffs) shipped
+// the Go server (POST /competitions, POST /knockout) shipped
 // `players: null` because the Go `Players` slice was nil (the handler
 // constructed the response struct without populating Players from
 // disk). refreshCompsAfterCreate's refresh-failure fallback appended

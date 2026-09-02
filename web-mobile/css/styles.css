@@ -47,7 +47,7 @@
   --warn-ink: #78350f;    /* amber-900: strongest warning text, ~8:1 on --warn-soft */
 
   /* Success / present, green. The "this is checked-in / advancing / a winner /
-     succeeded" signal, distinct from the status-pipeline playoffs green
+     succeeded" signal, distinct from the status-pipeline knockout green
      (#ecfdf5/#065f46/#a7f3d0, badge-only carve-out) and never used for
      Aka/danger or running. Promoted from per-component literals that had spread
      across check-in rows, the seeding panel, league matrix, alerts and the
@@ -1100,7 +1100,7 @@ a:hover {
   border-color: #fed7aa;
 }
 
-.badge--playoffs {
+.badge--knockout {
   background: #ecfdf5;
   color: #065f46;
   border-color: #a7f3d0;
@@ -8929,7 +8929,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700;
 }
 
-/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or playoff
+/* Sub-group headers inside the Upcoming queue: pool name ("Pool A") or knockout
    round ("Final"), so the operator knows which pool/round they'll be scoring.
    Lighter than the .section-title above it, a secondary tier, not a peer. */
 .shiaijo-subgroup + .shiaijo-subgroup {

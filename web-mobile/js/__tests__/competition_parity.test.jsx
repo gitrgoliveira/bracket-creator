@@ -431,16 +431,16 @@ describe('competition CREATE vs SETTINGS: control ORDER parity (bc-symm Phase 6)
     // as a bare `poolDurationLabel,`, never followed by `(`, so the open
     // paren is what keeps the import line from matching.
     { key: 'Pool duration', pattern: 'poolDurationLabel(' },
-    // Playoff duration's two screens render through genuinely different
-    // shapes: admin_setup.jsx as an inline `{LABEL_PLAYOFF_DURATION}` JSX
+    // Knockout duration's two screens render through genuinely different
+    // shapes: admin_setup.jsx as an inline `{LABEL_KNOCKOUT_DURATION}` JSX
     // expression, admin_competition_settings.jsx as a bare argument to
     // durationField(...). One literal string cannot name both render
     // sites, so this is the file's one regex marker: it alternates between
     // the two call shapes. Neither arm matches the competition_shape.jsx
-    // import line (`LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,`),
+    // import line (`LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,`),
     // which has no `{`/`}` around the bare name and is never itself a
     // `durationField(...)` call.
-    { key: 'Playoff duration', pattern: /\{LABEL_PLAYOFF_DURATION\}|durationField\(LABEL_PLAYOFF_DURATION,/ },
+    { key: 'Knockout duration', pattern: /\{LABEL_KNOCKOUT_DURATION\}|durationField\(LABEL_KNOCKOUT_DURATION,/ },
     { key: 'Player number prefix', pattern: '{LABEL_NUMBER_PREFIX}' },
     { key: 'Zekken (participant CSV column)', pattern: '{LABEL_ZEKKEN}' },
     { key: 'Engi (kata pairs)', pattern: '{LABEL_ENGI}' },

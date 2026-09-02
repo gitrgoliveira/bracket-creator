@@ -58,7 +58,7 @@ describe('buildXlsxBody engi roster lines', () => {
 
 describe('buildXlsxBody naginata param', () => {
   const nagCfg = {
-    format: 'playoffs',
+    format: 'knockout',
     naginata: true,
     courts: ['A'],
   };
@@ -76,7 +76,7 @@ describe('buildXlsxBody naginata param', () => {
   });
 
   it('does NOT send naginata when cfg.naginata is absent', () => {
-    const body = buildXlsxBody({ format: 'playoffs', courts: ['A'] }, 'Test', four);
+    const body = buildXlsxBody({ format: 'knockout', courts: ['A'] }, 'Test', four);
     expect(body.get('naginata')).toBeNull();
   });
 });
@@ -123,7 +123,7 @@ describe('buildXlsxBody non-engi roster lines', () => {
 
 describe('buildXlsxBody courts guard', () => {
   const baseCfg = {
-    format: 'playoffs',
+    format: 'knockout',
   };
 
   const four = [

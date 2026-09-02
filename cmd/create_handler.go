@@ -61,11 +61,7 @@ func createTournamentHandler(c *gin.Context) {
 	}
 
 	tournamentType := c.PostForm("tournamentType")
-	// "playoffs" is accepted here ONLY because web/index.html (a later commit
-	// in this terminology consolidation, bc-terminology) still posts that
-	// literal value. Once web/ is converted to post "knockout", remove the
-	// "playoffs" arm here and in the switch below.
-	if tournamentType != "pools" && tournamentType != "knockout" && tournamentType != "playoffs" {
+	if tournamentType != "pools" && tournamentType != "knockout" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid tournament type",
 		})
@@ -196,9 +192,7 @@ func createTournamentHandler(c *gin.Context) {
 			return
 		}
 
-	case "knockout", "playoffs":
-		// The "playoffs" case is temporary; see the comment on the validation
-		// guard above.
+	case "knockout":
 		o := &knockoutOptions{
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
@@ -225,8 +219,8 @@ func createTournamentHandler(c *gin.Context) {
 			return
 		}
 	}
-	// No default: tournamentType is validated to be "pools", "knockout" or
-	// (temporarily) "playoffs" by the guard near the top of this handler.
+	// No default: tournamentType is validated to be "pools" or "knockout" by
+	// the guard near the top of this handler.
 
 	// Ensure data is written to the buffer
 	if err := inMemoryWriter.Flush(); err != nil {

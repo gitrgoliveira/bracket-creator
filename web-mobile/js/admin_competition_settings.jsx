@@ -31,8 +31,8 @@ import {
   LABEL_SWISS_ROUNDS, HINT_SWISS_ROUNDS, swissRoundsVisible,
   LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
-  LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
-  poolDurationLabel, poolDurationHint, poolDurationVisible, playoffDurationVisible,
+  LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
+  poolDurationLabel, poolDurationHint, poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES,
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
@@ -162,7 +162,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // clockToElapsedMultiplier, or slowestCourtBufferPct on the tournament
   // settings screen and then returns here: otherwise the display would be
   // stale until a competition field changed (Finding 5 fix).
-  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
+  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts, c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat, c.swissRounds, c.checkInEnabled, password,
     tournament?.openingBlock, tournament?.lunchBlock, tournament?.closingBlock,
     tournament?.clockToElapsedMultiplier, tournament?.slowestCourtBufferPct]);
   // AdminSettings unmounts when the user navigates to a different section
@@ -216,7 +216,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       });
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -426,7 +426,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // back to the last-saved value); an explicit clear stages 0, which is
       // finite and therefore round-trips as a genuine reset to the default.
       poolMatchDurationSeconds: safeNonNegInt(effective.poolMatchDurationSeconds, latestC.poolMatchDurationSeconds || 0),
-      playoffMatchDurationSeconds: safeNonNegInt(effective.playoffMatchDurationSeconds, latestC.playoffMatchDurationSeconds || 0),
+      knockoutMatchDurationSeconds: safeNonNegInt(effective.knockoutMatchDurationSeconds, latestC.knockoutMatchDurationSeconds || 0),
       // T190 (FR-050a): swissRounds is editable pre-start; safeInt
       // preserves the previously-saved value when the input is
       // cleared (so the cleared display doesn't clobber the disk
@@ -660,7 +660,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     });
   const hasDurationError = Object.keys(durationErrors).length > 0;
 
-  // Render one per-phase m:ss duration field. Pool and playoff differ only in
+  // Render one per-phase m:ss duration field. Pool and knockout differ only in
   // label/hint/field-key, so share the markup to keep the two hint strings in
   // step. The label owns the field via htmlFor/id, so a screen reader announces
   // "Pool match duration" rather than a bare "minutes".
@@ -701,7 +701,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // naginata) remain editable. Discard the draw from the competition header to
   // unlock everything.
   const isDrawReady = local.status === "draw-ready";
-  // Engi and Naginata are locked once the competition has started (pools, playoffs,
+  // Engi and Naginata are locked once the competition has started (pools, knockout,
   // completed, or any future status beyond draw-ready): flipping engi mid-tournament
   // changes the scoring paradigm; flipping naginata affects the bronze match.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
@@ -777,9 +777,9 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
 
   // Same shape as the courts trio directly above, for the same reproduced
   // failure: normalizePoolConfig (handlers_competition.go) zeroes poolSize/
-  // poolWinners on every stored league/playoffs competition, and
+  // poolWinners on every stored league/knockout competition, and
   // normalizeConfigForFormat only clears those fields on the way OUT of
-  // "mixed" -- flipping a stored playoffs competition (poolSize: 0,
+  // "mixed" -- flipping a stored knockout competition (poolSize: 0,
   // poolWinners: 0) back INTO "mixed" here is a no-op for them. So
   // poolSettingsErr is computed against local.format, not c.format: toggling
   // the "Pools + Knockout" pill flips it non-null on its own, with no pool
@@ -794,7 +794,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   // is the one outcome this must not cause.
   //
   // The concrete failure this closes: before this guard, switching a stored
-  // playoffs competition to "mixed" left "Players per pool" showing 0, both
+  // knockout competition to "mixed" left "Players per pool" showing 0, both
   // Save buttons enabled, and a click took an HTTP 400 whose raw server
   // string ("mixed format requires a pool size of at least 1") reached the
   // operator verbatim -- while the create form already refused the identical
@@ -1394,15 +1394,15 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       </div>
       {/* FR-052..FR-054 / T047: per-phase match-duration inputs. Visibility
           and label/hint text now come from competition_shape.jsx
-          (poolDurationVisible/playoffDurationVisible, poolDurationLabel/
+          (poolDurationVisible/knockoutDurationVisible, poolDurationLabel/
           poolDurationHint) so this row can't drift from the create form's
           copy of the same two fields. */}
-      {(poolDurationVisible(local.format) || playoffDurationVisible(local.format)) && (
+      {(poolDurationVisible(local.format) || knockoutDurationVisible(local.format)) && (
         <div className="row">
           {poolDurationVisible(local.format) &&
             durationField(poolDurationLabel(local.format), "poolMatchDurationSeconds", poolDurationHint(local.format))}
-          {playoffDurationVisible(local.format) &&
-            durationField(LABEL_PLAYOFF_DURATION, "playoffMatchDurationSeconds", HINT_PLAYOFF_DURATION)}
+          {knockoutDurationVisible(local.format) &&
+            durationField(LABEL_KNOCKOUT_DURATION, "knockoutMatchDurationSeconds", HINT_KNOCKOUT_DURATION)}
         </div>
       )}
       {/* mp-zoh Phase 4: inline schedule estimate. Shown below duration inputs */}
@@ -1501,7 +1501,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
         </button>
       </div>
       <div style={{ marginTop: 24, padding: 16, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
-        {(local.status === "pools" || local.status === "playoffs") && (
+        {(local.status === "pools" || local.status === "knockout") && (
           <div>
             <button type="button" className="btn btn--danger btn--ghost" disabled={invalidating || deleting} onClick={async () => {
               if (await window.confirmDialog({ message: `Mark "${local.name}" as invalid? It will be excluded from results and can be deleted afterwards.`, confirmLabel: "Mark invalid", danger: true })) {

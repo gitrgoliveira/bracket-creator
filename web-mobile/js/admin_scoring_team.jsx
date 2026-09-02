@@ -1043,7 +1043,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const compFormat = m.compFormat || compMeta?.config?.format || "";
   const isNaginataTeam = !!compMeta?.config?.naginata;
   // Knockout phase = a bracket match. A POOL match is never knockout, even in a
-  // mixed/playoffs competition: pool team matches may legitimately draw
+  // mixed/knockout competition: pool team matches may legitimately draw
   // (hikiwake) and resolve ties via the auto-injected pool daihyosen, NOT an
   // in-match representative bout. The compFormat clause is only a fallback for
   // bracket/unknown-phase matches in KO-bearing formats: it must exclude
@@ -1051,7 +1051,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // in-match daihyosen affordance wrongly appears (the comment above this line
   // already states daihyosen is knockout-only).
   const isKnockoutPhase = m.phase === "bracket"
-    || ((compFormat === "playoffs" || compFormat === "mixed") && m.phase !== "pool");
+    || ((compFormat === "knockout" || compFormat === "mixed") && m.phase !== "pool");
 
   // Whether an inline position PUT is in flight (prevents double-submit).
   const [inlineLineupSaving, setInlineLineupSaving] = useStateA(false);

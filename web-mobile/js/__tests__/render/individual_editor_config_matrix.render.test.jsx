@@ -146,13 +146,13 @@ describe('individual editor IMPOSSIBLE CELLS (asserted, not skipped)', () => {
   // Expectations are pinned explicitly, mirroring the team suite's map (its
   // knockout gate has a format clause this editor lacks, so a shared derived
   // expectation cannot exist). Pinned:
-  //   playoffs × pool      → draw ALLOWED: a mis-stamped playoffs match could
+  //   knockout × pool      → draw ALLOWED: a mis-stamped knockout match could
   //                          record a hikiwake, which knockout advancement
   //                          cannot consume. Ruled on by mp-yqxn.2.
   //   league|swiss × bracket → draw blocked by the phase stamp alone. Ruled on
   //                          by mp-yqxn.3 (league) / mp-yqxn.4 (swiss).
   const IMPOSSIBLE_EXPECT_DRAW_DISABLED = {
-    'playoffs/pool': false,
+    'knockout/pool': false,
     'league/bracket': true,
     'swiss/bracket': true,
   };

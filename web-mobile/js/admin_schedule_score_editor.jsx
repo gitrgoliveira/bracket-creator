@@ -166,12 +166,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             because the filter trivially makes filtered all-completed, which would
             misleadingly fire the banner. The wording is intentionally generic: this
             view spans all match phases (pool + bracket) and all competition formats
-            (pools/mixed/playoffs/league/swiss), so we don't claim "Pool play is
+            (pools/mixed/knockout/league/swiss), so we don't claim "Pool play is
             complete" or point at a specific next tab. */}
         {statusFilter !== "complete" && allMatchesCompleted(filtered) && (
           <div className="alert alert--success" style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>All matches scored</div>
-            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Open the competition to review standings, generate playoffs, or start the next phase.</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Open the competition to review standings, generate knockout, or start the next phase.</div>
           </div>
         )}
         {filtered.map((m) => {

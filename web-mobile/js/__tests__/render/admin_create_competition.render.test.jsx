@@ -153,7 +153,7 @@ describe('AdminCreateCompetition shiaijo-count guard (bc-draw R9 gap 2)', () => 
   //
   // Both formats, because the emptiness rule is NOT scoped by format the way
   // the count rule is: a league has to run somewhere too.
-  it.each(['playoffs', 'league'])('refuses an empty selection instead of quietly picking a shiaijo (%s)', async (format) => {
+  it.each(['knockout', 'league'])('refuses an empty selection instead of quietly picking a shiaijo (%s)', async (format) => {
     const { container } = await mountForm();
     if (format === 'league') {
       await act(async () => {

@@ -302,7 +302,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           </div>
           {/* Suppress the "League" badge during pools: the active tab already
               reads "League", so the badge is pure redundancy. Other statuses
-              (Playoffs / Completed) still carry information, so keep those. */}
+              (Knockout / Completed) still carry information, so keep those. */}
           {!(c.status === "pools" && c.format === "league") && (
             <StatusBadge status={c.status} showRunningDot format={c.format} />
           )}
@@ -554,7 +554,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
       ) : null}
 
       {/* League standings summary (mp-ldnr) */}
-      {isLeague && leagueStandings.length > 0 && (c.status === "pools" || c.status === "playoffs" || c.status === "completed") && (
+      {isLeague && leagueStandings.length > 0 && (c.status === "pools" || c.status === "knockout" || c.status === "completed") && (
         <div className="pool pool--overview-summary" data-testid="league-overview-standings">
           {leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} testId="league-overview-winner" marginBottom={12} />}
           <div className="pool__head">

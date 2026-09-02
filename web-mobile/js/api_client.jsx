@@ -1949,12 +1949,12 @@ const API = {
         return body;
     },
     // completeCompetition: POST /competitions/:id/complete. The only trigger
-    // for a bracket-based competition (playoffs, or mixed once its knockout is
+    // for a bracket-based competition (knockout, or mixed once its knockout is
     // running) to reach status "completed": MaybeAutoCompletePools only
     // auto-transitions the League format, so a finished bracket otherwise sits
-    // in "pools"/"playoffs" forever and the public viewer's Awards tab (gated
+    // in "pools"/"knockout" forever and the public viewer's Awards tab (gated
     // on status === "completed") never becomes reachable. 400 when the
-    // competition isn't in "pools" or "playoffs" status (already completed, or
+    // competition isn't in "pools" or "knockout" status (already completed, or
     // not started yet), or a naginata 3rd-place match is still unscored; 404
     // when the competition doesn't exist. Elevated-gated (irreversible), so it
     // takes the admin password like discardDraw.

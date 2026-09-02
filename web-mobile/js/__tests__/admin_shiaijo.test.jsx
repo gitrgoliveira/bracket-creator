@@ -74,9 +74,9 @@ describe('shiaijoStandingsKind; standings viewer routing follows format (mp-ahu6
     expect(shiaijoStandingsKind({ compFormat: 'swiss' })).toBe('swiss');
   });
 
-  it('routes mixed and playoffs matches to the draw-order viewer', () => {
+  it('routes mixed and knockout matches to the draw-order viewer', () => {
     expect(shiaijoStandingsKind({ compFormat: 'mixed' })).toBe('pool');
-    expect(shiaijoStandingsKind({ compFormat: 'playoffs' })).toBe('pool');
+    expect(shiaijoStandingsKind({ compFormat: 'knockout' })).toBe('pool');
   });
 
   it('defaults to the draw-order viewer for a missing/unknown format', () => {
@@ -559,7 +559,7 @@ describe('groupQueueMatches; Upcoming queue grouping', () => {
     expect(groups[1].matches.map((m) => m.id)).toEqual(['b1']);
   });
 
-  it('groups playoff matches by round name', () => {
+  it('groups knockout matches by round name', () => {
     const groups = groupQueueMatches([
       bracket('Semifinals', 0, 's1'), bracket('Semifinals', 0, 's2'), bracket('Final', 1, 'f1'),
     ]);

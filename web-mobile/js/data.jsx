@@ -22,7 +22,7 @@
 // Competition: one event within a tournament (e.g., "Men's Individual", "Women's Teams").
 //   - kind: "individual" | "team"  (the only two kinds; any division, e.g.
 //     Men's / Women's / Youth, is expressed in the competition name)
-//   - format: "playoffs" (knockout only) | "mixed" (pools + knockout) | "league" | "swiss"
+//   - format: "knockout" (direct elimination only) | "mixed" (pools + knockout) | "league" | "swiss"
 //     Note: the sample generator (applyFormat) only simulates "mixed" fully;
 //     "league" and "swiss" fall back to bracket-only display in demo data.
 //   - has its own list of competitors (players or teams).
@@ -209,7 +209,7 @@ function poolWinners(pools) {
 
 // ---------- Competition ----------
 // kind: "individual" | "team"
-// format: "playoffs" | "mixed" | "league" | "swiss"
+// format: "knockout" | "mixed" | "league" | "swiss"
 function buildEmptyCompetition(args) {
   if (!args) { console.error("buildEmptyCompetition: args is undefined!"); return null; }
   const { id, name, kind, format, sampleRoster = "medium", courts, seedCount, status, startTime, date, teamSize, poolMode, poolSize, winnersPerPool, withZekkenName, numberPrefix, checkInEnabled, roundRobin } = args;
@@ -252,11 +252,11 @@ function applyFormat(c) {
     c.pools = buildPools(c.players, { poolMode: c.poolSizeMode, poolSize: c.poolSize, winnersPerPool: c.poolWinners, courts: c.courts });
     if (c.status === "pools") {
       simulatePools(c.pools, 0.6);
-      // ALSO build empty bracket scaffold so the playoffs tab is visible/in-progress alongside pools
-      // (some federations seed playoffs early; others wait: we show it as TBD).
+      // ALSO build empty bracket scaffold so the knockout tab is visible/in-progress alongside pools
+      // (some federations seed knockout early; others wait: we show it as TBD).
       const placeholder = c.pools.map((_, i) => ({ id: `tbd-${i}`, name: `TBD`, dojo: "", seed: null }));
       c.bracket = buildBracket(placeholder.slice(0, Math.min(placeholder.length, 8)), c.courts);
-    } else if (c.status === "playoffs") {
+    } else if (c.status === "knockout") {
       simulatePools(c.pools, 1);
       c.bracket = buildBracket(poolWinners(c.pools), c.courts); advanceByes(c.bracket);
       simulateRounds(c.bracket, 1, true);
@@ -266,9 +266,9 @@ function applyFormat(c) {
       simulateRounds(c.bracket, c.bracket.length);
     }
   } else {
-    // "playoffs", "league", and "swiss" all use a knockout bracket for sample data.
+    // "knockout", "league", and "swiss" all use a knockout bracket for sample data.
     c.bracket = buildBracket(c.players, c.courts); advanceByes(c.bracket);
-    if (c.status === "playoffs") simulateRounds(c.bracket, Math.max(1, Math.floor(c.bracket.length / 2)), true);
+    if (c.status === "knockout") simulateRounds(c.bracket, Math.max(1, Math.floor(c.bracket.length / 2)), true);
     if (c.status === "completed") simulateRounds(c.bracket, c.bracket.length);
   }
   if (c.bracket && c.bracket[0]) scheduleRound(c.bracket[0], c.startTime, 5, c.courts);
@@ -288,17 +288,17 @@ function competitionStatus(comps) {
   if (!comps.length) return "setup";
   if (comps.every((c) => c.status === "completed")) return "completed";
   if (comps.some((c) => c.status === "pools")) return "pools";
-  if (comps.some((c) => c.status === "playoffs")) return "playoffs";
+  if (comps.some((c) => c.status === "knockout")) return "knockout";
   if (comps.every((c) => c.status === "setup")) return "setup";
-  return "playoffs";
+  return "knockout";
 }
 
 const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A", "B", "C"];
     const comps = [
-      buildCompetition({ id: "lc26-mi", name: "Men's Individual", kind: "individual", format: "playoffs", sampleRoster: "medium", seedCount: 4, status: "playoffs", startTime: "09:00", courts: ["A","B"] }),
-      buildCompetition({ id: "lc26-wi", name: "Women's Individual", kind: "individual", format: "playoffs", sampleRoster: "small", seedCount: 2, status: "playoffs", startTime: "09:00", courts: ["C"] }),
+      buildCompetition({ id: "lc26-mi", name: "Men's Individual", kind: "individual", format: "knockout", sampleRoster: "medium", seedCount: 4, status: "knockout", startTime: "09:00", courts: ["A","B"] }),
+      buildCompetition({ id: "lc26-wi", name: "Women's Individual", kind: "individual", format: "knockout", sampleRoster: "small", seedCount: 2, status: "knockout", startTime: "09:00", courts: ["C"] }),
       buildCompetition({ id: "lc26-mt", name: "Men's Teams", kind: "team", format: "mixed", sampleRoster: "small", seedCount: 0, status: "setup", startTime: "14:00", teamSize: 5, courts: ["A","B"] }),
     ];
     return buildTournament({ id: "lc2026", name: "London Cup 2026", date: "2026-05-12", venue: "Crystal Palace Sports Centre", courts, status: competitionStatus(comps), competitions: comps });
@@ -316,8 +316,8 @@ const SAMPLE_TOURNAMENTS = [
   (() => {
     const courts = ["A"];
     const comps = [
-      buildCompetition({ id: "wk-yi", name: "Youth Individual", kind: "individual", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
-      buildCompetition({ id: "wk-bi", name: "Beginners Individual", kind: "individual", format: "playoffs", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
+      buildCompetition({ id: "wk-yi", name: "Youth Individual", kind: "individual", format: "knockout", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
+      buildCompetition({ id: "wk-bi", name: "Beginners Individual", kind: "individual", format: "knockout", sampleRoster: "small", seedCount: 0, status: "setup", courts: ["A"] }),
     ];
     return buildTournament({ id: "wakaba-cup", name: "Wakaba Cup: Beginners", date: "2026-06-04", venue: "Sanshukai Dojo", courts, status: "setup", competitions: comps });
   })(),

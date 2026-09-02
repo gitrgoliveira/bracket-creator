@@ -4,7 +4,7 @@ import { installSettingsHarness, mountSettings } from './settings_mount_harness.
 
 // bc-symm: pins the wiring behind a browser-verified gap this PR itself made
 // reachable. normalizePoolConfig (internal/mobileapp/handlers_competition.go)
-// zeroes poolSize/poolWinners on every stored league/playoffs competition;
+// zeroes poolSize/poolWinners on every stored league/knockout competition;
 // normalizeConfigForFormat (competition_shape.jsx) only clears those fields
 // on the way OUT of "mixed", so flipping such a competition back INTO
 // "mixed" on the Settings screen is a no-op for them. Before the fix, the
@@ -16,7 +16,7 @@ import { installSettingsHarness, mountSettings } from './settings_mount_harness.
 // competition_shape.test.jsx proves poolSettingsError itself is correct in
 // isolation. It does NOT prove the Settings screen's Save button and inline
 // error actually route through it -- this file closes that gap by driving
-// the real component: mount AdminSettings with a stored playoffs
+// the real component: mount AdminSettings with a stored knockout
 // competition, click the "Pools + Knockout" pill, and assert Save disables
 // and the error appears on screen; then repair the values and assert Save
 // re-enables.
@@ -45,7 +45,7 @@ function makeCompetition(overrides = {}) {
     id: 'c1',
     name: 'Autumn Cup',
     status: 'setup',
-    format: 'playoffs',
+    format: 'knockout',
     kind: 'individual',
     teamSize: 0,
     teamMatchType: 'fixed',
@@ -78,11 +78,11 @@ const fieldInput = (container, labelText) => {
 const POOL_ERR = 'Players per pool must be a whole number ≥ 3.';
 
 describe('bc-symm: Settings gates Save on poolSettingsError, change-scoped', () => {
-  it('switching a stored playoffs competition (poolSize 0) to "Pools + Knockout" blocks both Save buttons and shows the error, until the operator repairs the values', async () => {
+  it('switching a stored knockout competition (poolSize 0) to "Pools + Knockout" blocks both Save buttons and shows the error, until the operator repairs the values', async () => {
     const { container } = await mountSettings(makeCompetition(), noop);
 
     // Sanity: the pool-size fields are not even rendered yet -- the "mixed"
-    // section is gated on local.format === "mixed" and we start on playoffs.
+    // section is gated on local.format === "mixed" and we start on knockout.
     expect(fieldInput(container, 'Players per pool')).toBeNull();
 
     const mixedPill = byText(container, 'button', 'Pools + Knockout');

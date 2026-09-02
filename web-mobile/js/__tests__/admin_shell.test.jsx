@@ -173,20 +173,20 @@ describe('CompCard', () => {
 
   it('renders a competition with null courts/players without throwing', () => {
     const c = {
-      id: 'x', name: 'X', format: 'playoffs', status: 'setup',
+      id: 'x', name: 'X', format: 'knockout', status: 'setup',
       courts: null, players: null,
     };
     expect(() => CompCard({ c, onOpen: noop, onStart: noop })).not.toThrow();
   });
 
   it('renders a competition with missing courts/players without throwing', () => {
-    const c = { id: 'y', name: 'Y', format: 'playoffs', status: 'setup' };
+    const c = { id: 'y', name: 'Y', format: 'knockout', status: 'setup' };
     expect(() => CompCard({ c, onOpen: noop, onStart: noop })).not.toThrow();
   });
 
   it('still renders a fully-populated competition', () => {
     const c = {
-      id: 'z', name: 'Z', format: 'playoffs', status: 'pools',
+      id: 'z', name: 'Z', format: 'knockout', status: 'pools',
       courts: ['A', 'B'], players: [{ id: 'p1' }, { id: 'p2' }],
     };
     expect(() => CompCard({ c, onOpen: noop, onStart: noop })).not.toThrow();
@@ -195,19 +195,19 @@ describe('CompCard', () => {
   // Copilot review (PR #195): with no date/startTime and empty courts the
   // meta line must not render a dangling " · " separator.
   it('omits the meta separator entirely when courts and date/time are empty', () => {
-    const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', courts: null };
+    const c = { id: 'x', name: 'X', format: 'knockout', status: 'setup', courts: null };
     expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).not.toContain('·');
   });
 
   it('does not lead the court list with a separator when nothing precedes it', () => {
-    const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', courts: ['A', 'B'] };
+    const c = { id: 'x', name: 'X', format: 'knockout', status: 'setup', courts: ['A', 'B'] };
     const text = collectText(CompCard({ c, onOpen: noop, onStart: noop }));
     expect(text).toContain('A, B');
     expect(text).not.toContain('·');
   });
 
   it('separates date from the court list with " · " when both are present', () => {
-    const c = { id: 'x', name: 'X', format: 'playoffs', status: 'setup', date: '2026-06-01', courts: ['A'] };
+    const c = { id: 'x', name: 'X', format: 'knockout', status: 'setup', date: '2026-06-01', courts: ['A'] };
     expect(collectText(CompCard({ c, onOpen: noop, onStart: noop }))).toContain('·');
   });
 });

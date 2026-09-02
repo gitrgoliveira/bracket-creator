@@ -91,7 +91,7 @@ describe('buildAllWinnersPublic', () => {
         [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
       ],
     };
-    const comp = { id: 'ko-1', name: 'Knockout', format: 'playoffs', status: 'completed', players: [] };
+    const comp = { id: 'ko-1', name: 'Knockout', format: 'knockout', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, config: comp, players: [] });
 
     const results = await window.buildAllWinnersPublic([comp], {
@@ -109,9 +109,9 @@ describe('buildAllWinnersPublic', () => {
     expect(results[0].podium).toHaveLength(4);
   });
 
-  it('filters out linked playoffs comp (sourceCompID set); not fetched or returned', async () => {
+  it('filters out linked knockout comp (sourceCompID set); not fetched or returned', async () => {
     const mixedComp = { id: 'mixed-1', name: 'Pools+KO', format: 'mixed', status: 'completed' };
-    const playoffComp = { id: 'po-1', name: 'Playoffs', format: 'playoffs', sourceCompID: 'mixed-1', status: 'completed' };
+    const knockoutComp = { id: 'po-1', name: 'Knockout', format: 'knockout', sourceCompID: 'mixed-1', status: 'completed' };
     const bracket = {
       rounds: [
         [{ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' }, { sideA: 'Carol', sideB: 'Dan', winner: 'Carol' }],
@@ -120,7 +120,7 @@ describe('buildAllWinnersPublic', () => {
     };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, players: [] });
 
-    const results = await window.buildAllWinnersPublic([mixedComp, playoffComp], {
+    const results = await window.buildAllWinnersPublic([mixedComp, knockoutComp], {
       fetchCompetitionDetails,
       swissStandings: null,
     });
@@ -182,8 +182,8 @@ describe('buildAllWinnersPublic', () => {
   });
 
   it('only processes completed competitions (non-completed are skipped)', async () => {
-    const running = { id: 'r-1', name: 'Running', format: 'playoffs', status: 'pools', players: [] };
-    const setup = { id: 's-1', name: 'Setup', format: 'playoffs', status: 'setup', players: [] };
+    const running = { id: 'r-1', name: 'Running', format: 'knockout', status: 'pools', players: [] };
+    const setup = { id: 's-1', name: 'Setup', format: 'knockout', status: 'setup', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, players: [] });
 
     const results = await window.buildAllWinnersPublic([running, setup], {
@@ -215,7 +215,7 @@ describe('buildAllWinnersPublic', () => {
   });
 
   it('returns error field when fetchCompetitionDetails throws, without rejecting the whole Promise', async () => {
-    const comp = { id: 'err-1', name: 'Broken', format: 'playoffs', status: 'completed', players: [] };
+    const comp = { id: 'err-1', name: 'Broken', format: 'knockout', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockRejectedValue(new Error('Network error'));
 
     const results = await window.buildAllWinnersPublic([comp], {

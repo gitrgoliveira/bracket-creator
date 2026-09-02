@@ -108,7 +108,7 @@ describe('competitionDrawBlocker: seeding', () => {
 
   // League and Swiss draw no bracket, but their seeds are still read, so a
   // half-typed seeding must block them the same way.
-  it.each(['league', 'swiss', 'playoffs', 'mixed'])('applies to %s', (format) => {
+  it.each(['league', 'swiss', 'knockout', 'mixed'])('applies to %s', (format) => {
     expect(competitionDrawBlocker(comp(seeded(null, 4), { format }), venue).reason)
       .toContain('not been set');
   });

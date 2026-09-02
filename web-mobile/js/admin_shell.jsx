@@ -29,7 +29,7 @@ const FORMAT_LABEL_LONG = {
   mixed: "Pools then knockout",
   league: "League (round-robin)",
   swiss: "Swiss rounds",
-  playoffs: "Knockout (direct elimination)",
+  knockout: "Knockout (direct elimination)",
 };
 
 function Breadcrumbs({ items }) {
@@ -232,7 +232,7 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
 
 function initialSectionFor(status) {
   if (status === "setup") return "participants";
-  if (status === "pools" || status === "playoffs") return "scores";
+  if (status === "pools" || status === "knockout") return "scores";
   return "overview";
 }
 
@@ -271,7 +271,7 @@ function AllWinnersModal({ comps, onClose }) {
 
   // Stable signature of every comp's id:status. A pools+knockout podium can
   // change without the *completed* set changing; e.g. a mixed comp is already
-  // completed (pools done) while its linked playoffs comp finishes its final.
+  // completed (pools done) while its linked knockout comp finishes its final.
   // Keying the effect on all comps' statuses makes the open modal refetch when
   // any competition completes or its knockout resolves, rather than showing
   // stale results.
@@ -422,7 +422,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
     return { totalMatches, doneMatches, runningMatches, totalParticipants };
   }, [comps]);
 
-  const running = comps.filter((c) => c.status === "pools" || c.status === "playoffs");
+  const running = comps.filter((c) => c.status === "pools" || c.status === "knockout");
   // No competitions yet: the "Add competition" tile is the operator's primary
   // next step, so it's promoted from a quiet dashed placeholder to a loud CTA.
   const noComps = comps.length === 0;
@@ -798,7 +798,7 @@ function CompCard({ c, onOpen, onStart, tournament, showToast }) {
               ⚠ Cannot start: {startBlocker.reason} Open this competition. {startBlocker.fix}
             </div>
           )}
-          {(c.status === "pools" || c.status === "playoffs") && (
+          {(c.status === "pools" || c.status === "knockout") && (
             <button type="button" className="btn btn--primary btn--sm btn--full" onClick={(e) => { e.stopPropagation(); onOpen(); }}>Go to Scoring →</button>
           )}
           {c.status === "completed" && (

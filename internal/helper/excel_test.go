@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -745,6 +746,12 @@ func TestSetupNamesToPrintLayout(t *testing.T) {
 	}
 }
 
+// TestCreateNamesToPrint pins D1 (bc-pnum): a Names to Print sheet built from
+// players with no number cell (pCoords carries no numberCell for either
+// player here) gets EMPTY position cells, not a pool-letter or PoolPosition
+// substitute. printNameEntries used to fall back to entry.fallbackTag
+// (removed outright); if that fallback were reintroduced, A1/A2 would read
+// "1"/"2" and this test would go red.
 func TestCreateNamesToPrint(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
@@ -764,13 +771,45 @@ func TestCreateNamesToPrint(t *testing.T) {
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
-	if valA1 != "1" {
-		t.Errorf("Expected '1', got '%s'", valA1)
-	}
+	assert.Equal(t, "", valA1, "no numberCell in pCoords: the position cell must be left empty, never a fallback")
 	valA2, _ := f.GetCellValue(sheet, "A2")
-	if valA2 != "2" {
-		t.Errorf("Expected '2', got '%s'", valA2)
+	assert.Equal(t, "", valA2, "no numberCell in pCoords: the position cell must be left empty, never a fallback")
+
+	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
+	assert.Equal(t, -1, idx, "template sheet should be deleted")
+}
+
+// TestCreateNamesToPrint_WithNumberCell is the numbered counterpart of
+// TestCreateNamesToPrint above: when pCoords DOES carry a numberCell (the
+// unconditional-numbering shape every real caller produces since bc-pnum),
+// the position cell is a cross-sheet formula pointing at it, resolving to the
+// player's actual competitor number.
+func TestCreateNamesToPrint_WithNumberCell(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet(SheetNamesToPrint)
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "K1"))
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A3", "K2"))
+
+	players := []Player{
+		{Name: "Player1", PoolPosition: 1, Number: "K1"},
+		{Name: "Player2", PoolPosition: 2, Number: "K2"},
 	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
+	}
+
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+
+	sheet := "Names to Print A"
+	valA1, err := f.CalcCellValue(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, "K1", valA1)
+	valA2, err := f.CalcCellValue(sheet, "A2")
+	require.NoError(t, err)
+	assert.Equal(t, "K2", valA2)
 
 	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
 	assert.Equal(t, -1, idx, "template sheet should be deleted")
@@ -803,6 +842,12 @@ func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 	assert.Equal(t, -1, idx, "template sheet should be deleted")
 }
 
+// TestCreateNamesWithPoolToPrint pins D1 (bc-pnum): a Names to Print sheet
+// built from pools whose players have no number cell gets EMPTY position
+// cells, never the pool-letter tag ("A1", "A2", ...) CreateNamesWithPoolToPrint
+// used to compose as a fallback. That composition has been removed outright;
+// if it were reintroduced, A1/A2 would read "A1"/"A2" and this test would go
+// red.
 func TestCreateNamesWithPoolToPrint(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()
@@ -827,13 +872,50 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
-	if valA1 != "A1" {
-		t.Errorf("Expected 'A1', got '%s'", valA1)
-	}
+	assert.Equal(t, "", valA1, "no numberCell in pCoords: the position cell must be left empty, never a pool-letter fallback")
 	valA2, _ := f.GetCellValue(sheet, "A2")
-	if valA2 != "A2" {
-		t.Errorf("Expected 'A2', got '%s'", valA2)
+	assert.Equal(t, "", valA2, "no numberCell in pCoords: the position cell must be left empty, never a pool-letter fallback")
+
+	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
+	assert.Equal(t, -1, idx, "template sheet should be deleted")
+}
+
+// TestCreateNamesWithPoolToPrint_WithNumberCell is the numbered counterpart:
+// when pCoords carries a numberCell (the shape every real caller produces
+// since numbering became unconditional), the position cell is a cross-sheet
+// formula resolving to the player's actual competitor number, not the pool
+// letter.
+func TestCreateNamesWithPoolToPrint_WithNumberCell(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet(SheetNamesToPrint)
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "K1"))
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A3", "K2"))
+
+	pools := []Pool{
+		{
+			PoolName: "Pool A",
+			Players: []Player{
+				{Name: "Player1", PoolPosition: 1, Dojo: "Dojo Player1", Number: "K1"},
+				{Name: "Player2", PoolPosition: 2, Dojo: "Dojo Player2", Number: "K2"},
+			},
+		},
 	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(pools[0].Players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
+	}
+
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords)
+
+	sheet := "Names to Print A"
+	valA1, err := f.CalcCellValue(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, "K1", valA1)
+	valA2, err := f.CalcCellValue(sheet, "A2")
+	require.NoError(t, err)
+	assert.Equal(t, "K2", valA2)
 
 	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
 	assert.Equal(t, -1, idx, "template sheet should be deleted")

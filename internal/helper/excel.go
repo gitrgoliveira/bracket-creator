@@ -1730,8 +1730,7 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 }
 
 type nameEntry struct {
-	player      Player
-	fallbackTag interface{}
+	player Player
 }
 
 // courtSheetName names the per-shiaijo "Names to Print" sheet after the shiaijo
@@ -1800,7 +1799,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 
 		entries := make([]nameEntry, len(courtPlayers))
 		for i, p := range courtPlayers {
-			entries[i] = nameEntry{player: p, fallbackTag: p.PoolPosition}
+			entries[i] = nameEntry{player: p}
 		}
 
 		sheetName := courtSheetName(courts, c)
@@ -1837,12 +1836,8 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	for court, poolIdxs := range poolsByCourt {
 		for _, poolIdx := range poolIdxs {
 			pool := pools[poolIdx]
-			poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
 			for _, player := range pool.Players {
-				entriesByCourt[court] = append(entriesByCourt[court], nameEntry{
-					player:      player,
-					fallbackTag: fmt.Sprintf("%s%d", poolLetter, player.PoolPosition),
-				})
+				entriesByCourt[court] = append(entriesByCourt[court], nameEntry{player: player})
 			}
 		}
 	}
@@ -1874,11 +1869,19 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 		nameCell := fmt.Sprintf("B%d", row)
 		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
 
+		// D1 (bc-pnum): no fallback. A player with no number cell (a
+		// competition that hasn't been numbered) gets an EMPTY position cell,
+		// never a substitute composed here -- the pool-letter tag this branch
+		// used to write (nameEntry.fallbackTag) has been removed outright, not
+		// just made unreachable, so it cannot silently come back.
+		// D1 (bc-pnum): no fallback. A player with no number cell (a
+		// competition that hasn't been numbered) gets an EMPTY position cell,
+		// never a substitute composed here -- the pool-letter tag this branch
+		// used to write (nameEntry.fallbackTag) has been removed outright, not
+		// just made unreachable, so it cannot silently come back.
 		coord := pCoords[playerCoordKey(entry.player)]
 		if coord.numberCell != "" {
 			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, sheetRef(coord.sheetName, coord.numberCell)))
-		} else {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, entry.fallbackTag))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 

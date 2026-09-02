@@ -105,3 +105,40 @@ func TestCreateTagsSheet(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateTagsSheet_EmptyNumber pins D1 (bc-pnum): a player with no Number
+// gets an EMPTY tag, never the pool-letter substitute ("A1", "A2", ...)
+// CreateTagsSheet used to compose when Number was blank. That fallback has
+// been removed outright (tag is now always exactly player.Number); if it
+// were reintroduced, these cells would read "A1"/"A2" instead of "" and this
+// test would go red. No prior test exercised the empty-Number path: every
+// existing fixture set Number, so the fallback's removal was previously
+// unpinned.
+func TestCreateTagsSheet_EmptyNumber(t *testing.T) {
+	f := excelize.NewFile()
+	pools := []Pool{
+		{
+			PoolName: "Pool A",
+			Players: []Player{
+				{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1"},
+				{Name: "Player 2", PoolPosition: 2, Dojo: "Dojo Player 2"},
+			},
+		},
+	}
+
+	if err := CreateTagsSheet(f, pools, ""); err != nil {
+		t.Fatalf("CreateTagsSheet failed: %v", err)
+	}
+
+	sheetName := SheetTags
+	for _, cell := range []string{"A1", "A2", "A3", "A4"} {
+		got, err := f.GetCellValue(sheetName, cell)
+		if err != nil {
+			t.Errorf("Failed to get cell %s: %v", cell, err)
+			continue
+		}
+		if got != "" {
+			t.Errorf("Expected cell %s to be empty (no Number, no fallback), got %q", cell, got)
+		}
+	}
+}

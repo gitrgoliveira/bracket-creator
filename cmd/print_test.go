@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,53 @@ func setupTestTournamentData(t *testing.T) string {
 	require.NoError(t, eng.StartCompetition("test-comp"))
 
 	return dir
+}
+
+// TestPrintAllSkippedExitsCleanly covers a tournament-data directory whose
+// only competition is Swiss (no static bracket to export -- Swiss export is
+// not yet implemented). ExportTournamentWorkbooks skips it, leaving
+// len(sources)==0 with err==nil; before the fix o.generatePDFs ran anyway
+// and failed with pdf's "no source workbooks provided", a confusing error
+// even though the warning above already explained the omission correctly.
+// The command must instead print an informative line to stderr and exit
+// nil: nothing failed, every competition was legitimately unexportable.
+// Requires soffice: pdf.NewGenerator() is called after the export/skip step
+// in run(), so soffice must be present to reach it.
+func TestPrintAllSkippedExitsCleanly(t *testing.T) {
+	if _, err := pdf.NewGenerator(); err != nil {
+		t.Skipf("skipping: LibreOffice not available (%v)", err)
+	}
+
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      "setup",
+	}))
+
+	cmd := newPrintCmd()
+	stderr := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+	cmd.SetOut(stdout)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"--type=all",
+		"--tournament-data=" + dir,
+		"--output-dir=" + t.TempDir(),
+	})
+
+	err = cmd.Execute()
+	require.NoError(t, err, "an all-skipped tournament must exit cleanly, not error; stderr=%s", stderr.String())
+	assert.Contains(t, stderr.String(), "no exportable competitions found")
+	assert.Contains(t, stderr.String(), "swiss-only")
+	assert.NotContains(t, stderr.String(), "no source workbooks provided",
+		"must not leak the internal pdf-generator error string")
 }
 
 // TestPrintTournamentDataStoreConstruction verifies that --tournament-data builds

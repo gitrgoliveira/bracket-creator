@@ -245,10 +245,13 @@ func TestPrintHandler_SwissSkippedAndWarned(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code,
 		"the renderable competition alone must still produce a booklet; got %d: %s", w.Code, w.Body.String())
 
-	// (a) response header names the skipped competition.
+	// (a) response header names the skipped competition by ID, not by Name:
+	// header values are decoded as latin-1 by clients, so a non-ASCII Name
+	// would mangle here (see TestSkippedCompetitionsHeaderValue_ASCIIOnly).
+	// The ID is guaranteed ASCII, so it is what the header carries.
 	skippedHeader := w.Header().Get("X-Skipped-Competitions")
-	assert.Contains(t, skippedHeader, "Swiss Comp")
 	assert.Contains(t, skippedHeader, "swiss-comp")
+	assert.NotContains(t, skippedHeader, "Swiss Comp")
 
 	// (b) the ZIP itself carries a plain-text entry -- the one an operator
 	// actually sees when they open the archive, since a streamed
@@ -285,4 +288,81 @@ func TestPrintHandler_SwissSkippedAndWarned(t *testing.T) {
 		}
 	}
 	assert.True(t, hasPDF, "the renderable competition's PDF must still be produced")
+}
+
+// TestPrintHandler_AllSkippedReturns422 covers a tournament that is entirely
+// Swiss: ExportTournamentWorkbooks skips every competition, so len(sources)
+// is 0 with err == nil. Before the fix this fell through to
+// gen.GenerateAll/GenerateGroups, which fail with "no source workbooks
+// provided" and surface as a misleading HTTP 500 -- the operator never sees
+// the skipped-competition detail that exists to explain the omission. The
+// handler must instead recognise the all-skipped case itself and return 422
+// naming the skipped competition and its reason, without ever reaching the
+// PDF generator. The handler calls pdf.NewGenerator() (LibreOffice
+// detection) before the export/skip step, so soffice must be present to
+// reach this code path at all; skip cleanly when it is absent.
+func TestPrintHandler_AllSkippedReturns422(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soffice-dependent test in short mode")
+	}
+	if !sofficeAvailable() {
+		t.Skip("soffice not available in this environment")
+	}
+
+	r, store, _, _ := setupPrintTestRouter(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only Comp",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      state.CompStatusSetup,
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/print/registration", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code,
+		"an all-skipped tournament must return 422, not 500; body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "Swiss Only Comp")
+	assert.Contains(t, w.Body.String(), "swiss-only")
+	assert.NotContains(t, w.Body.String(), "no source workbooks provided",
+		"the response must not leak the internal pdf-generator error string")
+}
+
+// TestSkippedCompetitionsHeaderValue_ASCIIOnly pins the fix for the
+// mojibake finding: a competition Name containing non-ASCII characters
+// (kanji, here) must never reach the X-Skipped-Competitions header, since
+// HTTP clients decode header values as latin-1 and would mangle it. The ZIP
+// entry (writeSkippedCompetitionsEntry), which has no such constraint,
+// still carries the full name.
+func TestSkippedCompetitionsHeaderValue_ASCIIOnly(t *testing.T) {
+	skipped := []engine.SkippedCompetition{
+		{ID: "kanji-comp", Name: "剣道大会", Reason: "Swiss export is not yet implemented"},
+	}
+
+	header := skippedCompetitionsHeaderValue(skipped)
+	for i, r := range header {
+		assert.Lessf(t, r, rune(0x80), "header value must be pure ASCII, found %q at byte %d in %q", r, i, header)
+	}
+	assert.Contains(t, header, "kanji-comp")
+	assert.NotContains(t, header, "剣道大会")
+
+	// The ZIP entry, by contrast, is expected to carry the full UTF-8 name.
+	buf := &bytes.Buffer{}
+	zw := zip.NewWriter(buf)
+	require.NoError(t, writeSkippedCompetitionsEntry(zw, skipped))
+	require.NoError(t, zw.Close())
+
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	require.NoError(t, err)
+	require.Len(t, zr.File, 1)
+	rc, err := zr.File[0].Open()
+	require.NoError(t, err)
+	defer rc.Close()
+	content, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "剣道大会")
 }

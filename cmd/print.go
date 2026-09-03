@@ -132,6 +132,18 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		}
 		reportSkippedCompetitions(cmd, skipped)
 		sourcesLabel = o.tournamentData
+
+		// Every competition was skipped (e.g. an all-Swiss tournament): there
+		// is nothing left to generate PDFs from, and o.generatePDFs would
+		// otherwise fail with pdf's "no source workbooks provided". That
+		// would misreport a correct outcome as an error -- nothing actually
+		// failed, every competition was legitimately unexportable, and each
+		// was already named in a warning above via reportSkippedCompetitions.
+		// Exit cleanly with an informative note instead.
+		if len(sources) == 0 {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no exportable competitions found; nothing to print")
+			return nil
+		}
 	}
 
 	gen, err := pdf.NewGenerator()

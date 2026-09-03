@@ -95,6 +95,22 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 			return
 		}
 
+		// Every competition was skipped (e.g. an all-Swiss tournament): there
+		// is nothing left to hand to the PDF generator, which would otherwise
+		// fail with "no source workbooks provided" and surface as a
+		// misleading 500. ExportTournamentWorkbooks already errors above with
+		// "no competitions to export" when there are none at all, so
+		// len(sources)==0 here means every competition that DID exist was
+		// skipped -- report why, per competition, as a 422 instead of
+		// falling through to PDF generation.
+		if len(sources) == 0 {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{
+				"error":   "no competitions could be exported; every competition was skipped",
+				"skipped": skippedCompetitionsDetail(skipped),
+			})
+			return
+		}
+
 		// Generate PDFs, either all groups or the single requested group.
 		var produced map[string]string
 		if printType == "all" {
@@ -184,13 +200,41 @@ func streamPDFIntoZip(zw *zip.Writer, pdfPath string) error {
 	return nil
 }
 
+// skippedCompetitionsDetail renders the skipped list for the 422 JSON error
+// body returned when every competition was skipped. Unlike the
+// X-Skipped-Competitions header (see skippedCompetitionsHeaderValue), a JSON
+// response body has no ASCII constraint, so the full UTF-8 competition name
+// is safe to include here directly.
+func skippedCompetitionsDetail(skipped []engine.SkippedCompetition) []gin.H {
+	details := make([]gin.H, 0, len(skipped))
+	for _, s := range skipped {
+		details = append(details, gin.H{
+			"id":     s.ID,
+			"name":   s.Name,
+			"reason": s.Reason,
+		})
+	}
+	return details
+}
+
 // skippedCompetitionsHeaderValue renders the skipped-competition list as a
 // single HTTP header value (semicolon-separated; header values cannot carry
 // newlines).
+//
+// It carries the competition ID, never the Name. Kendo competition names
+// routinely contain kanji or accented characters, and Go does not reject
+// them here -- httpguts.ValidHeaderFieldValue permits bytes >= 0x80, so a
+// non-ASCII name would pass validation -- but HTTP clients decode header
+// values as latin-1, so UTF-8 bytes would arrive as mojibake rather than an
+// error. Competition IDs are guaranteed ASCII (state.validIDPattern,
+// enforced by state.ValidateCompetitionID), so they round-trip safely
+// through a header. The full UTF-8 name has no such constraint and is
+// preserved instead in the SKIPPED-COMPETITIONS.txt ZIP entry (see
+// writeSkippedCompetitionsEntry).
 func skippedCompetitionsHeaderValue(skipped []engine.SkippedCompetition) string {
 	parts := make([]string, 0, len(skipped))
 	for _, s := range skipped {
-		parts = append(parts, fmt.Sprintf("%s (%s): %s", s.Name, s.ID, s.Reason))
+		parts = append(parts, fmt.Sprintf("%s: %s", s.ID, s.Reason))
 	}
 	return strings.Join(parts, "; ")
 }

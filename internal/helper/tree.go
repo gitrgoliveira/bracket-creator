@@ -250,8 +250,8 @@ func SemifinalMatchNumbers(rounds [][]*Node) (semiA, semiB int) {
 // create-pools/playoffs, internal/engine/bracket.go).
 //
 // helper cannot import internal/state, so this takes a bare bool rather than
-// a state.Competition: the CLI (cmd/shared.go) passes its own naginata flag
-// literally, while the mobile app (internal/engine/bracket.go) passes
+// a state.Competition: the CLI (cmd/shared.go) passes its own thirdPlaceMatch
+// flag literally, while the mobile app (internal/engine/bracket.go) passes
 // state.Competition.RequiresSingleThirdPlace() -- the generalised, per-format
 // rule (bc-3rdp), of which naginata is only one input among several. The
 // parameter name reflects what it now means to EVERY caller, not just the

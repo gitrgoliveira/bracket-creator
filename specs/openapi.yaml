@@ -1017,6 +1017,13 @@ paths:
         `draw-ready`, but are not blocked once the competition has moved
         past it.
 
+
+        The pre-rename key `playoffMatchDurationSeconds` is REFUSED with 400
+        rather than ignored. An unrecognised key would otherwise be dropped by
+        the decoder while the transform still assigned the current field, so a
+        client sending the old name would silently reset the stored knockout
+        duration. Send `knockoutMatchDurationSeconds`.
+
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
         if `date` is non-empty and not in canonical `DD-MM-YYYY`

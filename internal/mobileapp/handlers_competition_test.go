@@ -1236,6 +1236,38 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 // PUT settings path persists the canonical *Seconds fields to disk, and the
 // GET read handlers normalize legacy whole-minute / single-field durations
 // into *Seconds so the SPA always receives resolved values.
+// A console left open across an upgrade still posts the pre-rename key. The
+// decoder drops an unrecognised key, and the settings transform assigns
+// KnockoutMatchDurationSeconds unconditionally, so before this guard the
+// operator's stored duration was silently reset to unset. The retired FORMAT
+// value in the same body already 400s, so the two retired inputs behaved in
+// opposite ways: one loud, one destructive. Both are loud now.
+func TestPUTCompetition_RetiredDurationKeyIsRefused(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	seed := state.Competition{
+		ID: "stale-tab", Name: "Stale Tab", Date: "12-05-2026", Format: "mixed",
+		PoolMatchDurationSeconds: 150, KnockoutMatchDurationSeconds: 240,
+	}
+	require.NoError(t, store.SaveCompetition(&seed))
+
+	// The pre-rename bundle's body: it never names the current key.
+	body := []byte(`{"id":"stale-tab","name":"Stale Tab","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"playoffMatchDurationSeconds":240}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/stale-tab", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "the retired key must be refused, not silently dropped")
+	assert.Contains(t, w.Body.String(), "knockoutMatchDurationSeconds", "the error must name the current key")
+
+	stored, err := store.LoadCompetition("stale-tab")
+	require.NoError(t, err)
+	assert.Equal(t, 240, stored.KnockoutMatchDurationSeconds,
+		"the operator's stored duration must survive the refused write")
+}
+
 func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

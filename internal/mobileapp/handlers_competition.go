@@ -300,6 +300,23 @@ const defaultPoolSize = 4
 type competitionUpdateRequest struct {
 	state.Competition
 	ExtraQualifiers *string `json:"extraQualifiers"`
+
+	// RetiredKnockoutMatchDurationSeconds exists ONLY to detect a client still
+	// sending the pre-rename key and refuse it. It is never read as a value.
+	//
+	// The rename (playoffs -> knockout) left this body with two retired inputs
+	// that behaved in opposite ways: `format: "playoffs"` 400s via
+	// validateCompetitionFormat, while an unrecognised JSON key was simply
+	// dropped by the decoder -- and because the transform assigns
+	// KnockoutMatchDurationSeconds unconditionally, the decoder's zero then
+	// overwrote whatever the operator had stored. So the same stale client got
+	// a loud refusal for one retired input and silent data loss for the other.
+	// Refusing here makes the whole retired-input surface behave one way.
+	//
+	// Reachable in practice: compiled assets are served with a 5 minute
+	// max-age and an already-loaded tab never re-fetches them, so a console
+	// left open across an upgrade keeps sending this key.
+	RetiredKnockoutMatchDurationSeconds *int `json:"playoffMatchDurationSeconds"`
 }
 
 // normalizeExtraQualifiers zeroes ExtraQualifiers (bc-qual LP-5a) for the
@@ -951,6 +968,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		comp := req.Competition
 		if req.ExtraQualifiers != nil {
 			comp.ExtraQualifiers = *req.ExtraQualifiers
+		}
+		// Refuse the pre-rename duration key rather than letting the decoder
+		// drop it and the transform zero the stored value. See the field's
+		// comment on competitionUpdateRequest.
+		if req.RetiredKnockoutMatchDurationSeconds != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "playoffMatchDurationSeconds was renamed to knockoutMatchDurationSeconds; reload the page to pick up the current version"})
+			return
 		}
 		// Reject mismatched body.ID rather than silently overriding it.
 		// Pre-fix, a caller doing `PUT /api/competitions/comp-a` with

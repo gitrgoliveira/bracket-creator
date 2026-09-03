@@ -83,7 +83,7 @@ The admin UI prompts for the destructive-ops password each time a gated action i
 
 ### In file mode
 
-Set the destructive-ops password from **Admin > Edit details > Destructive-ops password**. The field is write-only and is never displayed. Changing it after it has been set requires supplying the current value first. While the field is unset, gated actions fall back to requiring the main admin password only.
+Set the destructive-ops password from **Admin > Edit details > Destructive-ops password**. The field is write-only and is never displayed. Changing it after it has been set requires supplying the current value first. While the field is unset, gated actions fall back to requiring the main admin password only. If you forget it, edit the `admin_password` field in `tournament.md` between rounds, as with any hand edit to the data folder; the main admin password is the `password` field in the same file.
 
 ### In locked mode
 

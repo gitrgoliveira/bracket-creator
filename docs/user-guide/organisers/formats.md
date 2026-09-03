@@ -57,13 +57,13 @@ Use Swiss for large individual fields where a full round-robin would require too
 
 Before play begins, set the number of rounds in the competition settings. You can change this number later, including after rounds have started; the next round you generate uses the updated number. Then follow these steps for each round:
 
-1. **Start the competition.** Round 1 pairings are generated automatically. If seeds are set, round 1 uses fold pairing (1 vs N, 2 vs N-1, and so on). Without seeds, the pairing is deterministic-random. From round 2 onward, players with similar win records face each other.
+1. **Start the competition.** Round 1 pairings are generated automatically. If seeds are set, round 1 uses fold pairing (1 vs N, 2 vs N-1, and so on). Without seeds, the pairing is deterministic-random. From round 2 onward, players with similar win records face each other. With an odd number of active competitors, one receives a bye each round: the lowest-ranked competitor who has not had one yet, recorded as a win with no points scored.
 
 2. **Record match results.** Scorers enter results in the tournament app. All matches in the current round must be completed before you can advance.
 
 3. **Review the standings.** Standings update in real time and are ranked by wins, then the scoring detail for the competition kind (points scored for individual, the full [team tie-break chain](team-tournaments.md#team-standings-and-tie-breaks) for teams, accumulated flags for [Engi](naginata.md#standings)), then head-to-head. The standings page is public and visible to competitors and spectators.
 
-4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings.
+4. **Generate the next round.** Once all matches in the current round are complete, use the admin panel to generate the next round's pairings. The app refuses to generate a round while any match in the current round is unfinished, and it stops after the last round you set.
 
 Repeat steps 2 through 4 until all rounds are done.
 

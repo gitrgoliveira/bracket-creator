@@ -11,7 +11,7 @@ Luke Rodriguez, Team Beta
 Michael Lewis, Team Gamma
 ```
 
-The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**: a row with no dojo is rejected, because a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. The dojo is what the draw uses to keep dojo-mates apart, in the pools and in the first round of a knockout.
+The first column is the participant name. The second column is the dojo or team affiliation. **Both are needed**: a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. The tournament app rejects a row with no dojo. The command line does not: a row with only a name is read with the dojo `NA`, so every such row counts as one shared dojo for the draw. Further columns are accepted and kept as metadata, such as a dan grade; they do not affect the draw.
 
 ## Zekken display name
 
@@ -32,7 +32,7 @@ For team tournaments (`--team-matches N`), each row is one team: the name column
 - A competitor is identified by **name and dojo together**. Two people who share a name are accepted as long as their dojos differ, which is common with widespread surnames; the same name at the same dojo is one person entered twice and is rejected before any bracket is generated.
 - The dojo must not be blank. A roster stored before this rule existed, or edited by hand, still loads so it can be repaired. Until the blank dojo is fixed, the app refuses every change to that roster (check-ins included) and refuses to generate a draw from it, and each refusal names the participant to fix. Importing a saved tournament is refused the same way: correct the dojo in the archive's participant file and import again.
 - **Team names are the exception**: two teams may not share a name even at different dojos, because a team's name is what identifies it in results.
-- Names in a [seeds file](../commands/create-pools.md#seeding) must match the CSV exactly (case-sensitive).
+- Names in a [seeds file](../commands/create-pools.md#seeding) must name a participant in the CSV. Matching ignores case and accents, because both lists are normalised the same way when read.
 
 ## Seeds file
 
@@ -45,4 +45,4 @@ Rank,Name
 3,Eddard Stark
 ```
 
-Pass it with `--seeds seeds.csv`. Only the listed participants are seeded; all others are placed randomly.
+Pass it with `--seeds seeds.csv`. Only the listed participants are seeded; all others are placed randomly. A rank given to two names, or a name that is not in the participant list, stops the run with an error naming the offender.

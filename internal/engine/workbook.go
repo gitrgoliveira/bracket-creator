@@ -27,9 +27,10 @@ import (
 //  4. Knockout: Tree pages + Elimination Matches, when the competition has a
 //     playoff phase AND a derivable draw (helper.RenderKnockoutPages ->
 //     helper.PrintEliminationWithBronze), else ErrBracketDrawMismatch when
-//     the persisted bracket already carries a third-place bout that this
-//     call's draw cannot re-derive -- see the hasBronze comment below for why
-//     that state is refused rather than partially rendered.
+//     the persisted bracket already carries knockout content (see
+//     bracketHasKnockoutContent) that this call's draw cannot re-derive --
+//     see that predicate's comment below for why that state is refused
+//     rather than partially rendered.
 //  5. Delete the "Tree" template sheet (f.DeleteSheet)
 //  6. Names to Print sheet, one per shiaijo (helper.CreateNamesWithPoolToPrint)
 //  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet)
@@ -112,7 +113,9 @@ func RenderCompetitionWorkbook(
 	// naginata.md). comp.Naginata is how that rule is currently encoded for a
 	// knockout -- note the league path expresses the same question with its own
 	// explicit field, LeagueTwoThirdPlaces, so "can this competition award a
-	// joint third?" has two unrelated spellings in the tree today.
+	// joint third?" has two unrelated spellings in the tree today (see
+	// state.Competition.RequiresSingleThirdPlace, the named predicate for
+	// that question).
 	//
 	// bracket.ThirdPlaceMatch is only ever written when comp.Naginata was true
 	// at generation time (buildBracketFromDraw, gated on
@@ -145,30 +148,63 @@ func RenderCompetitionWorkbook(
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
 			plan, comp.Mirror, comp.Engi, hasBronze)
-	} else if hasBronze {
-		// The stored bracket already carries a third-place bout, but this
-		// call's draw came back empty: the bracket and the competition's
-		// current settings disagree. Reachable through a real write path,
-		// not just a hand-edited bracket.json -- comp.ExtraQualifiers
-		// carries no `started` guard in PUT /api/competitions/:id (unlike
-		// its Naginata/Engi/Format/Kind/TeamMatchType siblings, which all
-		// reject a change once the competition has started), so an operator
-		// can flip it after the bracket -- bronze block included -- was
-		// already built. EliminationDraw re-derives the draw from the
-		// CURRENT pools and comp.ExtraQualifiers at export time (its own
-		// doc comment: "equals the persisted bracket only while [pools,
-		// poolWinners, courts] are unchanged since the draw"), and
+	} else if comp.IsPlayoffEnabled() && bracketHasKnockoutContent(bracket) {
+		// The stored bracket already carries knockout content -- a
+		// third-place bout, or at least one round-1-or-later match -- but
+		// this call's draw came back empty: the bracket and the
+		// competition's current settings disagree. Reachable through a real
+		// write path, not just a hand-edited bracket.json -- comp.
+		// ExtraQualifiers carries no `started` guard in PUT
+		// /api/competitions/:id (unlike its Naginata/Engi/Format/Kind/
+		// TeamMatchType siblings, which all reject a change once the
+		// competition has started), so an operator can flip it after the
+		// bracket was already built. EliminationDraw re-derives the draw
+		// from the CURRENT pools and comp.ExtraQualifiers at export time
+		// (its own doc comment: "equals the persisted bracket only while
+		// [pools, poolWinners, courts] are unchanged since the draw"), and
 		// buildPoolFedDraw's larger-pools/fill-bracket builders can mark a
 		// shape "out of scope" and degrade to nil for it -- at which point
-		// EliminationDraw returns nil even though bracket.ThirdPlaceMatch is
-		// still on disk from the original draw.
+		// EliminationDraw returns nil even though the bracket's matches are
+		// still on disk from the original draw. The bronze-only shape
+		// (mp-yuy8 phase 3) was the first instance found; a stored bracket
+		// with real Rounds content and no bronze block falls through the
+		// same gap for the identical reason, so both are refused by the one
+		// predicate rather than the narrower bronze-only test.
 		//
-		// Rendering only the bronze block here would produce an Elimination
-		// Matches sheet with a lone 3rd-place block and NO other knockout
-		// content -- a silently-partial workbook the operator has no way to
-		// tell is partial. Refuse instead: the operator must discard and
-		// regenerate the draw, or restore the settings the bracket was
+		// Rendering here would produce an Elimination Matches sheet with
+		// only whatever fragment of the stored bracket happens to survive
+		// (or, for the bronze-only shape, nothing at all but a lone 3rd-
+		// place block) -- a silently-partial workbook the operator has no
+		// way to tell is partial. Refuse instead: the operator must discard
+		// and regenerate the draw, or restore the settings the bracket was
 		// built with.
+		//
+		// comp.IsPlayoffEnabled() is required here, and is a NARROWER gate
+		// than "this competition has a knockout": IsPlayoffEnabled (state/
+		// models.go:631, switch on CompFormatPlayoffs/CompFormatMixed only)
+		// returns false for Format == "" -- yet runDrawPipeline's generation
+		// switch (internal/engine/competition.go:934, the `default:` case)
+		// treats an EMPTY Format as standalone playoffs and builds a real
+		// bracket via generatePlayoffs for it, and validateCompetitionFormat
+		// (internal/mobileapp/handlers_competition.go:196-203) explicitly
+		// accepts "" as a valid stored value, so this is not a hand-edited
+		// corner case. A stored bracket with real Rounds content therefore
+		// CAN exist for a competition whose CURRENT Format reads "" here,
+		// and that shape now falls through this guard unrefused, exactly as
+		// it did before mp-yuy8's widening: draw is nil (poolDraw needs
+		// pools; playoffLeaves requires isPurePlayoffs, which also tests
+		// Format == CompFormatPlayoffs and is equally blind to ""), the
+		// first branch above is skipped (IsPlayoffEnabled() false), and this
+		// branch is now ALSO skipped, so step 4 renders nothing and the
+		// Elimination Matches sheet stays empty. This is a KNOWN GAP, named
+		// here rather than closed: the real fix is teaching
+		// IsPlayoffEnabled and isPurePlayoffs (playoff_skeleton.go:26) that
+		// "" means playoffs, matching generation, but that is a two-predicate
+		// semantic change affecting legacy on-disk competitions and is out
+		// of scope for this bead. Gating on IsPlayoffEnabled() here is
+		// deliberate: without it, this refusal would ALSO fire for that
+		// empty-Format competition -- a real, reachable, previously-working
+		// export -- which is a regression this bead must not ship.
 		return nil, ErrBracketDrawMismatch
 	}
 	// The bare "Tree" sheet is a layout scaffold, never output. Delete it
@@ -192,4 +228,35 @@ func RenderCompetitionWorkbook(
 	}
 
 	return poolsByCourt, nil
+}
+
+// bracketHasKnockoutContent reports whether bracket carries knockout content
+// that RenderCompetitionWorkbook's step 4 would need to show: a third-place
+// bout, or at least one match in any round. It is the guard for
+// ErrBracketDrawMismatch above -- widened from an earlier version that only
+// checked ThirdPlaceMatch (the bronze-only shape, mp-yuy8 phase 3) and so
+// missed an identical defect one step over: a stored bracket with non-empty
+// Rounds but no third-place match, whose draw also cannot be re-derived at
+// export time, used to fall through and render an Elimination Matches sheet
+// with NO content at all -- a silently-partial workbook, no bronze involved.
+//
+// A nil bracket, or one with Rounds == [][]BracketMatch{} (parseBracketFile's
+// never-nil result for a missing bracket.json, state/bracket.go), correctly
+// reads as no content: a competition mid-pools with nothing drawn yet must
+// still export past step 4. A Rounds slice whose inner slices are all empty
+// reads the same way, for the same reason -- an empty round carries no match
+// this sheet would need to show either.
+func bracketHasKnockoutContent(bracket *state.Bracket) bool {
+	if bracket == nil {
+		return false
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		return true
+	}
+	for _, round := range bracket.Rounds {
+		if len(round) > 0 {
+			return true
+		}
+	}
+	return false
 }

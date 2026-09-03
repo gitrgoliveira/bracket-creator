@@ -105,14 +105,15 @@ var ErrSwissExportUnsupported = errors.New("not yet implemented: Swiss competiti
 // ErrBracketDrawMismatch is returned by RenderCompetitionWorkbook (and
 // therefore by Engine.ExportCompetitionXlsx, internal/export.
 // BuildResultsWorkbook, and ExportTournamentWorkbooks) when the persisted
-// bracket carries knockout content -- specifically, a third-place bout --
-// that cannot be re-derived from the competition's CURRENT settings. This
-// happens when a setting the draw depends on (e.g. ExtraQualifiers) changes
-// after the bracket was built, so the stored bracket and a freshly-derived
-// draw disagree. Rendering anyway would produce a workbook with only the
-// disagreeing fragment (here, a lone 3rd-place block) and no way for the
-// operator to tell the rest is missing, so this is refused outright rather
-// than rendered partially. Handlers should return HTTP 422 with the
-// sentinel's message, which tells the operator what to do about it without
-// naming any internal identifier.
+// bracket carries knockout content -- a third-place bout, or any real round
+// match (see bracketHasKnockoutContent, workbook.go) -- that cannot be
+// re-derived from the competition's CURRENT settings. This happens when a
+// setting the draw depends on (e.g. ExtraQualifiers) changes after the
+// bracket was built, so the stored bracket and a freshly-derived draw
+// disagree. Rendering anyway would produce a workbook with only the
+// disagreeing fragment (a lone 3rd-place block, or no knockout content at
+// all) and no way for the operator to tell the rest is missing, so this is
+// refused outright rather than rendered partially. Handlers should return
+// HTTP 422 with the sentinel's message, which tells the operator what to do
+// about it without naming any internal identifier.
 var ErrBracketDrawMismatch = errors.New("this competition's stored bracket does not match its current settings, so the knockout stage cannot be exported; discard and regenerate the draw, or restore the settings the bracket was originally built with")

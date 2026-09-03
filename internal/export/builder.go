@@ -180,13 +180,13 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// overlayPlayoffBracketNames work by SCANNING the sheet the shared
 	// pipeline just produced for header cells ("Round N - Match N" / "3rd
 	// Place"), so when the pipeline rendered nothing there (no derivable
-	// draw, and no third-place bout to disagree about it -- the
-	// draw-mismatch case above ERRORS OUT of RenderCompetitionWorkbook
-	// before this function ever reaches here) they find nothing and are a
-	// no-op -- identical to skipping the call outright. Keeping the broader
-	// gate rather than nesting inside `draw != nil && IsPlayoffEnabled()` is
-	// therefore just avoiding a redundant condition, not covering a
-	// reachable divergence.
+	// draw, and no stored knockout content to disagree about it --
+	// bracketHasKnockoutContent false, so the draw-mismatch case above
+	// ERRORS OUT of RenderCompetitionWorkbook before this function ever
+	// reaches here) they find nothing and are a no-op -- identical to
+	// skipping the call outright. Keeping the broader gate rather than
+	// nesting inside `draw != nil && IsPlayoffEnabled()` is therefore just
+	// avoiding a redundant condition, not covering a reachable divergence.
 	if bracket != nil {
 		bracketByNum := buildBracketMatchIndex(bracket)
 		thirdPlaceMatch := bracket.ThirdPlaceMatch

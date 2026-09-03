@@ -3882,7 +3882,18 @@ func TestBuildResultsWorkbook_KachinukiDetailSheet(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	comp.Format = state.CompFormatMixed
+	// Format is Playoffs, not Mixed (mp-yuy8 task 1): a Mixed competition
+	// with an EMPTY pools list but a bracket that already carries real
+	// round content is not a shape any real write path produces (Mixed
+	// always populates pools.csv before it ever builds a bracket) -- it is
+	// exactly the bracket/settings mismatch ErrBracketDrawMismatch refuses.
+	// Playoffs with no pools is the shape this fixture actually needs:
+	// PlayoffLeavesFromBracket reads the leaf order straight off the same
+	// hand-crafted bracket below, so the draw derives cleanly and the
+	// Kachinuki Detail sheet assertion further down still exercises the
+	// same bracket-bout-log data path, independent of pool/elimination
+	// rendering.
+	comp.Format = state.CompFormatPlayoffs
 	comp.TeamMatchType = state.TeamMatchTypeKachinuki
 	comp.TeamSize = 3
 	require.NoError(t, store.SaveCompetition(comp))

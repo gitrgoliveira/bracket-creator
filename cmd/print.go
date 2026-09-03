@@ -242,11 +242,13 @@ func collectWorkbooks(dir string, teamFiles []string) ([]pdf.SourceWorkbook, err
 }
 
 // reportSkippedCompetitions warns the operator, one line per competition,
-// about every Swiss competition ExportTournamentWorkbooks left out of the
-// booklet (Swiss export is not yet implemented -- bc-swex). Printed to
-// stderr, since it is a warning about an incomplete result rather than the
-// command's normal output. A silent omission would leave the operator
-// believing the printed booklet covers every competition when it does not.
+// about every competition ExportTournamentWorkbooks left out of the booklet
+// -- a Swiss competition (no static bracket to export; Swiss export is not
+// yet implemented -- bc-swex) or one whose stored bracket no longer matches
+// its current settings (engine.ErrBracketDrawMismatch). Printed to stderr,
+// since it is a warning about an incomplete result rather than the command's
+// normal output. A silent omission would leave the operator believing the
+// printed booklet covers every competition when it does not.
 func reportSkippedCompetitions(cmd *cobra.Command, skipped []engine.SkippedCompetition) {
 	for _, s := range skipped {
 		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),

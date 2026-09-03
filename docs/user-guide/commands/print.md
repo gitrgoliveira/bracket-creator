@@ -17,14 +17,22 @@ Provide **exactly one**:
 | `--input <dir>` | A directory of pre-existing bracket `.xlsx` files (for example, output from [`create-pools`](create-pools.md) or [`create-playoffs`](create-playoffs.md)). |
 | `--tournament-data <dir>` | A [tournament app](../organisers/run-tournament.md) data directory; the workbooks are generated on the fly from competition state. |
 
-!!! note "Swiss competitions are not included"
+!!! note "Some competitions can be left out of the booklet"
 
-    A Swiss competition has no pools and no fixed bracket, so there is nothing
-    to lay out on a printed sheet yet. With `--tournament-data`, Swiss
-    competitions are left out of the booklet and each one is named in a warning
-    on the console. Every other competition still prints as usual. To follow a
-    Swiss competition on the day, use the live standings view in the tournament
-    app.
+    With `--tournament-data`, a competition is skipped, rather than aborting
+    the whole booklet, when it has nothing renderable:
+
+    - A Swiss competition has no pools and no fixed bracket, so there is
+      nothing to lay out on a printed sheet yet. To follow a Swiss
+      competition on the day, use the live standings view in the tournament
+      app instead.
+    - A competition whose stored bracket no longer matches its current
+      settings (for example, its qualifier count was changed after the
+      bracket was built) cannot be rendered until the draw is regenerated or
+      the settings are restored.
+
+    Each skipped competition is named in a warning on the console. Every
+    other competition still prints as usual.
 
 ## Types
 

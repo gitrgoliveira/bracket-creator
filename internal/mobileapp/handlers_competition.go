@@ -2236,19 +2236,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
-			// Swiss has no static bracket to export; surface a clear 422 rather
-			// than a generic 500, mirroring RegisterExportResultsHandlers'
-			// handling of the same sentinel for the results-workbook path.
-			if errors.Is(err, engine.ErrSwissExportUnsupported) {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
-				return
-			}
-			// The stored bracket disagrees with the competition's current
-			// settings and cannot be faithfully rendered; also 422, not 500 --
-			// this is a state conflict the operator can resolve (regenerate
-			// the draw, or restore the settings), not a server fault.
-			if errors.Is(err, engine.ErrBracketDrawMismatch) {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			// Swiss (no static bracket) and a stored bracket that no longer
+			// matches the competition's current settings both surface as a
+			// 422, not a 500 -- see respondUnexportableCompetitionError,
+			// shared with RegisterExportResultsHandlers' handling of the
+			// same two sentinels for the results-workbook path.
+			if respondUnexportableCompetitionError(c, err) {
 				return
 			}
 			internalError(c, err)

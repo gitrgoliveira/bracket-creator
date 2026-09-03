@@ -56,6 +56,60 @@ func TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch(t *testing.T) {
 	assert.ErrorIs(t, err, ErrBracketDrawMismatch)
 }
 
+// TestExportCompetitionXlsx_RejectsRoundsOnlyDrawMismatch pins mp-yuy8 task
+// 1's widening of the ErrBracketDrawMismatch guard from hasBronze (bracket.
+// ThirdPlaceMatch != nil) to bracketHasKnockoutContent, which also catches a
+// stored bracket carrying real Rounds content -- no third-place bout
+// involved. Before the widening this shape fell through step 4 silently and
+// rendered an Elimination Matches sheet with NO knockout content at all,
+// exactly the "silently-partial workbook" ErrBracketDrawMismatch exists to
+// prevent for the bronze-only case.
+//
+// Reachable the same way the bronze-only mismatch is (see
+// TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch above and
+// TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders,
+// internal/export/pipeline_parity_test.go, for the fuller drift story):
+// comp.ExtraQualifiers carries no `started` guard in PUT
+// /api/competitions/:id, so an operator can flip a Mixed competition's
+// ExtraQualifiers to a value buildPoolFedDraw marks "out of scope" for the
+// CURRENT pool shape after the original (non-naginata, no bronze block)
+// bracket was already built. This fixture hand-constructs the resulting
+// shape directly, the same simplification the bronze-only fixture uses:
+// empty pools so EliminationDraw's re-derivation comes back nil (poolDraw:
+// no pools; playoffLeaves: not pure playoffs since Format is Mixed, so nil)
+// while the bracket's Rounds are still on disk from the original draw.
+func TestExportCompetitionXlsx_RejectsRoundsOnlyDrawMismatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "rounds-only-mismatch"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Rounds Only Mismatch Comp",
+		Kind:   "individual",
+		Format: state.CompFormatMixed,
+		Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:     "m-r1-0",
+					SideA:  "Alice",
+					SideB:  "Bob",
+					Status: state.MatchStatusScheduled,
+				},
+			},
+		},
+	}))
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.Error(t, err)
+	assert.Nil(t, data)
+	assert.ErrorIs(t, err, ErrBracketDrawMismatch)
+}
+
 // TestExportTournamentWorkbooks_SkipsBracketDrawMismatchAndReportsIt mirrors
 // TestExportTournamentWorkbooks_SkipsSwissAndReportsIt: one competition in
 // this state must not abort the whole print booklet for every OTHER

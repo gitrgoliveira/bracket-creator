@@ -637,6 +637,31 @@ func (c Competition) IsPlayoffEnabled() bool {
 	}
 }
 
+// RequiresSingleThirdPlace reports whether this competition's knockout stage
+// must decide a SINGLE 3rd place, via a bronze/decider match, rather than
+// kendo's standard convention of awarding JOINT 3rd to both beaten
+// semi-finalists with no decider played at all. Naginata decides a single
+// 3rd (docs/user-guide/organisers/naginata.md, run-tournament.md ~line 235),
+// so Naginata is this rule's CURRENT encoding for a knockout -- the sole
+// caller is buildBracketFromDraw (internal/engine/bracket.go), gating
+// helper.NeedsBronzeBlock exactly as comp.Naginata did before this method
+// existed, so this is a rename, not a behaviour change.
+//
+// The league stage asks the IDENTICAL question with its own explicit field,
+// LeagueTwoThirdPlaces, but in the OPPOSITE polarity (true means joint 3rd
+// places ARE awarded, i.e. a single 3rd is NOT required) -- see that field's
+// doc comment and applyJointThirdRanks (internal/engine/scoring.go). That
+// field is deliberately NOT read here: unifying the two spellings into one
+// format-branching predicate is a real design decision (what the default
+// should be per format, migrating existing on-disk competitions, a settings
+// UI control, which draw/bracket code would need to read it) that this
+// method does not make. It exists to give the KNOCKOUT rule one name instead
+// of a bare Naginata literal at each call site, so a future unification has
+// exactly one knockout-side call to repoint.
+func (c Competition) RequiresSingleThirdPlace() bool {
+	return c.Naginata
+}
+
 // EffectivePoolWinners returns the number of finishers each pool promotes to the
 // knockout, defaulting to 2 when unset (<=0). Single source of truth for the
 // qualifier count so the draw-time validation (pools.go), preview-bracket build

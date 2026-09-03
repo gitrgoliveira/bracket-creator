@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestExportCompetitionXlsx_RejectsSwiss pins bc-yuy8 Phase 2a: Swiss has no
+// TestExportCompetitionXlsx_RejectsSwiss pins mp-yuy8 Phase 2a: Swiss has no
 // pools and no static bracket, so ExportCompetitionXlsx must reject it with
 // the shared sentinel BEFORE doing any rendering work, rather than emitting
 // an effectively empty workbook (measured pre-fix: sheets present but the

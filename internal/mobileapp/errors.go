@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -52,6 +53,33 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 		msg = publicMsg[0]
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+}
+
+// respondUnexportableCompetitionError checks err against the two sentinels a
+// workbook-export path can fail with -- engine.ErrSwissExportUnsupported
+// (Swiss has no static bracket to export) and engine.ErrBracketDrawMismatch
+// (the stored bracket no longer matches the competition's current settings)
+// -- and, if it matches either, writes {"error": err.Error()} as an HTTP 422
+// and reports true; the caller must return immediately when this returns
+// true. Both are state conflicts the operator can resolve (regenerate the
+// draw, restore the settings, or use the live standings view), not server
+// faults, hence 422 rather than 500.
+//
+// Shared by the blank-template export route (GET .../export,
+// handlers_competition.go) and the results-archive export route (GET
+// .../export-results, handlers_export.go) so the same two-sentinel mapping
+// does not drift into two hand-copied bodies -- mirrors
+// respondRosterWriteError's shape below for the same reason.
+//
+// export.ErrSwissExportUnsupported is a plain alias of
+// engine.ErrSwissExportUnsupported (see that var's doc comment), so checking
+// the engine sentinel here matches errors produced by either export path.
+func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
+	if !errors.Is(err, engine.ErrSwissExportUnsupported) && !errors.Is(err, engine.ErrBracketDrawMismatch) {
+		return false
+	}
+	c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+	return true
 }
 
 // classifyRosterWriteError maps one of the participant-roster write sentinel

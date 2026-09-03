@@ -36,10 +36,10 @@ var engineOnlySheets = []string{helper.SheetTags}
 // Names to Print X / Kachinuki Detail / ..." sheet pipeline for one
 // competition: Engine.ExportCompetitionXlsx (internal/engine/export.go, the
 // blank-template export) and BuildResultsWorkbook (internal/export/builder.go,
-// the results export). The two functions are hand-maintained parallel copies
-// of the same sheet sequence, and a sheet added to one and not the other has
-// already shipped as a real bug (mp-8b1b finding R8: the Kachinuki Detail
-// sheet was added to only one of the two builders) -- every existing
+// the results export). Before mp-yuy8 the two functions were hand-maintained
+// parallel copies of the same sheet sequence, and a sheet added to one and
+// not the other shipped as a real bug (mp-8b1b finding R8: the Kachinuki
+// Detail sheet was added to only one of the two builders) -- every existing
 // GetSheetList() assertion in this package (and in internal/engine) only
 // exercises ONE of the two paths, so nothing previously caught a builder
 // drifting out of sync with its twin.
@@ -47,13 +47,17 @@ var engineOnlySheets = []string{helper.SheetTags}
 // This test lives in package export (not engine) because internal/export
 // already imports internal/engine; the reverse would be an import cycle.
 //
-// The two paths converge further under mp-yuy8 (a shared export pipeline).
-// That extraction does NOT make this guard a tautology, and it must not be
-// simplified away or deleted once it lands: both builders will still add
-// their OWN path-specific sheets around the shared pipeline (the engine's
-// Tags sheet today, and whatever either grows later), so this test keeps
-// asserting that those extras never silently diverge. The extraction is
-// expected to make the test pass MORE trivially, not make it pointless.
+// The two paths now converge on engine.RenderCompetitionWorkbook, the shared
+// sheet pipeline mp-yuy8 extracted. That extraction does NOT make this guard
+// a tautology, and it must not be simplified away or deleted: both builders
+// still add their OWN path-specific extras around the shared pipeline (the
+// blank-template export's Tags sheet, the results export's score/standings
+// overlays, and whatever either grows later), so this test keeps asserting
+// that those extras never silently diverge. The extraction made the test
+// pass more trivially for the SHARED steps, not pointless: it is what caught
+// this bead's own kachinuki_team_bracket_bouts fixture regression when the
+// bracket-draw-mismatch guard (see ErrBracketDrawMismatch) was widened to
+// cover more than the bronze-only shape.
 //
 // Table-driven over competition SHAPES: a single non-kachinuki fixture is not
 // enough, because Engine.collectKachinukiMatches returns nil for a
@@ -113,12 +117,28 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			// Engine.collectKachinukiMatches and Engine.KachinukiDetailMatches
 			// read straight off disk, independent of pool/elimination-sheet
 			// rendering.
+			//
+			// Format is Playoffs, not Mixed (mp-yuy8 task 1): a Mixed
+			// competition with an EMPTY pools list but a bracket that
+			// already carries real round content is not a shape any real
+			// write path produces (Mixed always populates pools.csv before
+			// it ever builds a bracket), and since bracketHasKnockoutContent
+			// was widened to refuse a stored bracket with non-empty Rounds
+			// that this workbook cannot re-derive a draw for,
+			// EliminationDraw's pool-fed branch returning nil for an empty
+			// pools list (not a genuine re-derivation failure) would
+			// otherwise trip that refusal here. Playoffs with no pools is
+			// the shape this fixture actually needs: PlayoffLeavesFromBracket
+			// reads the leaf order straight off the same hand-crafted
+			// bracket, so the draw derives cleanly and the Kachinuki Detail
+			// sheet assertion below still exercises the same "independent of
+			// pool/elimination rendering" data path.
 			name: "kachinuki_team_bracket_bouts",
 			configure: func(t *testing.T, store *state.Store, eng *engine.Engine, compID string) {
 				t.Helper()
 				comp, err := store.LoadCompetition(compID)
 				require.NoError(t, err)
-				comp.Format = state.CompFormatMixed
+				comp.Format = state.CompFormatPlayoffs
 				comp.TeamMatchType = state.TeamMatchTypeKachinuki
 				comp.TeamSize = 3
 				require.NoError(t, store.SaveCompetition(comp))

@@ -82,12 +82,13 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		}
 		defer func() { _ = os.RemoveAll(workDir) }()
 
-		// Export all competitions to XLSX workbooks. Swiss competitions are
-		// skipped rather than aborting the whole booklet (Swiss export is not
-		// yet implemented -- bc-swex); skipped is reported to the operator
-		// below via both a response header and a text entry inside the ZIP,
-		// since a streamed application/zip response has no JSON body to carry
-		// a warning in.
+		// Export all competitions to XLSX workbooks. A Swiss competition (no
+		// static bracket; Swiss export is not yet implemented -- bc-swex) or
+		// one whose stored bracket no longer matches its current settings
+		// (engine.ErrBracketDrawMismatch) is skipped rather than aborting the
+		// whole booklet; skipped is reported to the operator below via both a
+		// response header and a text entry inside the ZIP, since a streamed
+		// application/zip response has no JSON body to carry a warning in.
 		sources, skipped, err := eng.ExportTournamentWorkbooks(workDir)
 		if err != nil {
 			internalError(c, err, "export workbooks")
@@ -199,15 +200,19 @@ func skippedCompetitionsHeaderValue(skipped []engine.SkippedCompetition) string 
 // booklet and why. This is the entry an operator actually reads: the ZIP is
 // the only payload a streamed application/zip response carries, so a header
 // alone would be invisible to anyone who just downloads and opens the file.
+//
+// No generic trailing explanation is appended: each entry's Reason IS the
+// sentinel's own message (engine.ErrSwissExportUnsupported or
+// engine.ErrBracketDrawMismatch), and both are already written to be
+// operator-actionable on their own -- a shared paragraph describing only one
+// of the two possible causes would mislabel the other whenever both kinds of
+// skip land in the same booklet.
 func writeSkippedCompetitionsEntry(zw *zip.Writer, skipped []engine.SkippedCompetition) error {
 	var body strings.Builder
 	body.WriteString("The following competitions were NOT included in this export:\n\n")
 	for _, s := range skipped {
 		fmt.Fprintf(&body, "- %s (%s): %s\n", s.Name, s.ID, s.Reason)
 	}
-	body.WriteString("\nSwiss-format competitions have no static bracket (results are per-round " +
-		"pairings plus a running standings table), so there is nothing to render into a printable " +
-		"workbook yet. Use the live Swiss standings/round view for these competitions instead.\n")
 
 	entry, err := zw.Create("SKIPPED-COMPETITIONS.txt")
 	if err != nil {

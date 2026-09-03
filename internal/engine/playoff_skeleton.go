@@ -23,8 +23,14 @@ import (
 // leaves must come from the stored bracket / participant seeding instead. Both
 // the bracket-load guard (export.go) and playoffLeaves gate on this exact
 // condition, so it lives in one predicate rather than two hand-copied literals.
+//
+// Goes through comp.EffectiveFormat() rather than comp.Format directly: an
+// unset Format ("") is standalone playoffs too (runDrawPipeline's generation
+// switch falls to its default case for it), and this predicate must agree
+// with generation or a bracket generated for an empty-Format competition
+// would have no leaf source at export time.
 func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
-	return len(pools) == 0 && comp.Format == state.CompFormatPlayoffs
+	return len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatPlayoffs
 }
 
 // playoffLeaves returns the first-round leaf order for a competition with NO

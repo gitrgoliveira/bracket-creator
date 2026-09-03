@@ -301,7 +301,10 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if comp.NumberPrefix != "" {
 		pools, _ := store.LoadPools(comp.ID)
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
+		// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs
+		// too, and mergePoolNumbersIntoPlayersSlice's playoffs-only branch must
+		// see that or it silently skips number assignment for those entrants.
+		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.EffectiveFormat())
 	}
 	return players
 }

@@ -197,7 +197,11 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		// broken ''! references for the entrant name cells. Overwrite them with
 		// the stored bracket's literal names (empty for unresolved slots) so the
 		// sheet is a valid literal snapshot with no broken formulas.
-		if len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
+		//
+		// comp.EffectiveFormat(), not comp.Format directly: an unset Format ("")
+		// is standalone playoffs too (generation's default case), so it has the
+		// identical no-pool-data-sheet shape and needs the identical overlay.
+		if len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatPlayoffs {
 			if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
 				return nil, fmt.Errorf("export: overlay playoff names: %w", err)
 			}

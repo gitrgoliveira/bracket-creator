@@ -499,6 +499,31 @@ func (c *Competition) EffectiveWithZekkenName() bool {
 	return c.WithZekkenName
 }
 
+// EffectiveFormat returns CompFormatPlayoffs when Format is unset ("") and
+// Format unchanged otherwise. Every reader that asks "what format does this
+// competition run" must go through this rather than comparing c.Format
+// directly, for two reasons that both point the same way:
+//
+//   - Generation has always treated "" as standalone playoffs: runDrawPipeline's
+//     generation switch (internal/engine/competition.go) falls to its `default:`
+//     case for "", which calls generatePlayoffs, exactly as it does for the
+//     literal "playoffs" value. A predicate that reads Format literally and
+//     disagrees with that is answering a different question than the one
+//     generation already answered.
+//   - "" is a legitimate STORED value, not a hand-edited corner case:
+//     validateCompetitionFormat (internal/mobileapp/handlers_competition.go)
+//     explicitly accepts it, so a real competition can persist it indefinitely.
+//
+// Introduced to close the gap where IsPlayoffEnabled and isPurePlayoffs
+// (internal/engine/playoff_skeleton.go) compared Format literally and were
+// blind to "", while generation was not -- see IsPlayoffEnabled's doc comment.
+func (c Competition) EffectiveFormat() string {
+	if c.Format == "" {
+		return CompFormatPlayoffs
+	}
+	return c.Format
+}
+
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team
 // competition. The single spelling of this predicate (mp-gmcg review): before
 // this method it was reimplemented inline at 7 call sites across
@@ -624,12 +649,14 @@ func firstPositive(vals ...int) int {
 }
 
 // IsPlayoffEnabled reports whether this competition runs a knockout/playoff
-// phase. League and pure-pools formats do not; mixed and playoffs do.
+// phase. League and pure-pools formats do not; mixed and playoffs do. An
+// unset Format ("") counts as playoffs, via EffectiveFormat -- generation
+// has always treated it that way, so this predicate must agree.
 //
 // FR-050, FR-051: when Format == "league", the UI must hide playoff-bracket
 // affordances and present pool standings as final.
 func (c Competition) IsPlayoffEnabled() bool {
-	switch c.Format {
+	switch c.EffectiveFormat() {
 	case CompFormatPlayoffs, CompFormatMixed:
 		return true
 	default:

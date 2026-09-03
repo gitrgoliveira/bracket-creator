@@ -156,3 +156,70 @@ func TestExportTournamentWorkbooks_SkipsBracketDrawMismatchAndReportsIt(t *testi
 	assert.Equal(t, "Bronze Mismatch Comp", skipped[0].Name)
 	assert.NotEmpty(t, skipped[0].Reason)
 }
+
+// TestExportCompetitionXlsx_EmptyFormatRendersKnockout pins mp-yuy8's
+// state.Competition.EffectiveFormat fix: a competition whose Format was
+// never set is standalone playoffs (runDrawPipeline's generation switch has
+// always built a real bracket via generatePlayoffs for "" in its `default:`
+// case, identically to the literal "playoffs" value), so its export must
+// render a proper knockout rather than the empty Elimination Matches sheet
+// the workbook.go KNOWN GAP used to produce. Before EffectiveFormat existed,
+// IsPlayoffEnabled() and isPurePlayoffs() both compared Format literally and
+// answered false for "", so EliminationDraw's leaf source (playoffLeaves)
+// was never reached and step 4 rendered nothing -- with no error, so the
+// gap was silent.
+func TestExportCompetitionXlsx_EmptyFormatRendersKnockout(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "empty-format-knockout"
+
+	createTestCompetition(t, store, compID, "", 0)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	f := openExportedWorkbook(t, eng, compID)
+	elim, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+	assert.Equal(t, 3, countEliminationMatchBlocks(elim),
+		"a 4-entrant standalone playoffs bracket must render 3 match blocks (F-1) even though Format was never set")
+}
+
+// TestExportCompetitionXlsx_EmptyFormatRejectsDrawMismatch is the empty-Format
+// twin of TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch: the same
+// bronze-only mismatch shape (a stored bracket carrying a third-place bout
+// but no re-derivable Rounds content), constructed for a competition whose
+// Format is "" rather than the literal "playoffs" value. It must be refused
+// with ErrBracketDrawMismatch, not rendered as a silently-partial workbook.
+//
+// Before EffectiveFormat, this shape was NOT refused for an empty-Format
+// competition: IsPlayoffEnabled() answered false for Format == "", so the
+// guard's own `comp.IsPlayoffEnabled() && bracketHasKnockoutContent(bracket)`
+// condition never fired, and step 4 silently rendered an empty Elimination
+// Matches sheet instead of erroring -- the reachable half of the KNOWN GAP
+// workbook.go used to document.
+func TestExportCompetitionXlsx_EmptyFormatRejectsDrawMismatch(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "empty-format-mismatch"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Empty Format Mismatch Comp",
+		Kind:     "individual",
+		Format:   "",
+		Naginata: true,
+		Courts:   []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			Status: state.MatchStatusScheduled,
+		},
+	}))
+
+	data, err := eng.ExportCompetitionXlsx(compID)
+	require.Error(t, err)
+	assert.Nil(t, data)
+	assert.ErrorIs(t, err, ErrBracketDrawMismatch)
+}

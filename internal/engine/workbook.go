@@ -180,31 +180,21 @@ func RenderCompetitionWorkbook(
 		// built with.
 		//
 		// comp.IsPlayoffEnabled() is required here, and is a NARROWER gate
-		// than "this competition has a knockout": IsPlayoffEnabled (state/
-		// models.go:631, switch on CompFormatPlayoffs/CompFormatMixed only)
-		// returns false for Format == "" -- yet runDrawPipeline's generation
-		// switch (internal/engine/competition.go:934, the `default:` case)
-		// treats an EMPTY Format as standalone playoffs and builds a real
-		// bracket via generatePlayoffs for it, and validateCompetitionFormat
-		// (internal/mobileapp/handlers_competition.go:196-203) explicitly
-		// accepts "" as a valid stored value, so this is not a hand-edited
-		// corner case. A stored bracket with real Rounds content therefore
-		// CAN exist for a competition whose CURRENT Format reads "" here,
-		// and that shape now falls through this guard unrefused, exactly as
-		// it did before mp-yuy8's widening: draw is nil (poolDraw needs
-		// pools; playoffLeaves requires isPurePlayoffs, which also tests
-		// Format == CompFormatPlayoffs and is equally blind to ""), the
-		// first branch above is skipped (IsPlayoffEnabled() false), and this
-		// branch is now ALSO skipped, so step 4 renders nothing and the
-		// Elimination Matches sheet stays empty. This is a KNOWN GAP, named
-		// here rather than closed: the real fix is teaching
-		// IsPlayoffEnabled and isPurePlayoffs (playoff_skeleton.go:26) that
-		// "" means playoffs, matching generation, but that is a two-predicate
-		// semantic change affecting legacy on-disk competitions and is out
-		// of scope for this bead. Gating on IsPlayoffEnabled() here is
-		// deliberate: without it, this refusal would ALSO fire for that
-		// empty-Format competition -- a real, reachable, previously-working
-		// export -- which is a regression this bead must not ship.
+		// than "this competition has a knockout": it excludes league and
+		// swiss, which never have a bracket to mismatch in the first place.
+		//
+		// Format == "" is IN scope here, not an exclusion: IsPlayoffEnabled
+		// and isPurePlayoffs (playoff_skeleton.go) both go through
+		// state.Competition.EffectiveFormat(), which reads an unset Format as
+		// standalone playoffs -- matching runDrawPipeline's generation switch,
+		// whose `default:` case has always built a real bracket via
+		// generatePlayoffs for "" exactly as it does for the literal
+		// "playoffs" value. Before EffectiveFormat existed, both predicates
+		// compared Format literally and were blind to "", so a stored bracket
+		// with real Rounds content but no re-derivable draw for an
+		// empty-Format competition fell through this guard unrefused and step
+		// 4 rendered nothing -- an empty Elimination Matches sheet with no
+		// error. EffectiveFormat is why that shape is now caught here instead.
 		return nil, ErrBracketDrawMismatch
 	}
 	// The bare "Tree" sheet is a layout scaffold, never output. Delete it

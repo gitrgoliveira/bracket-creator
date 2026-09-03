@@ -366,3 +366,22 @@ func TestSkippedCompetitionsHeaderValue_ASCIIOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "剣道大会")
 }
+
+// TestSentinelReasonsContainNoDelimiterPipe is a tripwire, not a regression
+// pin: skippedCompetitionsHeaderValue joins entries with " | "
+// (deliberately not "; ", since our own sentinel reasons contain
+// semicolons -- see that function's doc comment and mp-yuy8). If a future
+// sentinel reason is ever written to contain a "|" byte, it would silently
+// split into two header entries the same way the semicolon delimiter once
+// did. This test fails loudly the moment that happens, for every sentinel
+// reason the export paths can hand to skippedCompetitionsHeaderValue.
+func TestSentinelReasonsContainNoDelimiterPipe(t *testing.T) {
+	sentinels := []error{
+		engine.ErrSwissExportUnsupported,
+		engine.ErrBracketDrawMismatch,
+	}
+	for _, sentinel := range sentinels {
+		assert.NotContainsf(t, sentinel.Error(), "|",
+			"sentinel reason must not contain the header delimiter '|': %q", sentinel.Error())
+	}
+}

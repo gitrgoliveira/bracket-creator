@@ -218,8 +218,13 @@ func skippedCompetitionsDetail(skipped []engine.SkippedCompetition) []gin.H {
 }
 
 // skippedCompetitionsHeaderValue renders the skipped-competition list as a
-// single HTTP header value (semicolon-separated; header values cannot carry
-// newlines).
+// single HTTP header value, entries joined by " | " (header values cannot
+// carry newlines). The delimiter is deliberately NOT "; ": our own sentinel
+// reason strings (engine.ErrSwissExportUnsupported,
+// engine.ErrBracketDrawMismatch) contain semicolons, so joining on "; "
+// would let a single reason parse back as two entries and silently drop
+// the tail on the JS side. No reason string may contain "|" either --
+// TestSentinelReasonsContainNoDelimiterPipe pins that.
 //
 // It carries the competition ID, never the Name. Kendo competition names
 // routinely contain kanji or accented characters, and Go does not reject
@@ -236,7 +241,7 @@ func skippedCompetitionsHeaderValue(skipped []engine.SkippedCompetition) string 
 	for _, s := range skipped {
 		parts = append(parts, fmt.Sprintf("%s: %s", s.ID, s.Reason))
 	}
-	return strings.Join(parts, "; ")
+	return strings.Join(parts, " | ")
 }
 
 // writeSkippedCompetitionsEntry adds a SKIPPED-COMPETITIONS.txt entry to the

@@ -29,12 +29,13 @@ type SkippedCompetition struct {
 // can exclude them. compIDs, when non-empty, restricts export to those
 // competitions; otherwise all competitions are exported.
 //
-// Swiss competitions are SKIPPED rather than aborting the whole batch: Swiss
-// has no static bracket to render (ExportCompetitionXlsx's
-// ErrSwissExportUnsupported), and one Swiss competition in an otherwise
-// printable tournament must not make the entire booklet unprintable. Every
-// skipped competition is reported in the second return value so both
-// callers (cmd/print.go, handlers_print.go) can warn the operator rather than
+// A competition ExportCompetitionXlsx cannot render -- Swiss (no static
+// bracket) or a stored bracket that no longer matches the competition's
+// current settings (ErrBracketDrawMismatch) -- is SKIPPED rather than
+// aborting the whole batch: one such competition in an otherwise printable
+// tournament must not make the entire booklet unprintable. Every skipped
+// competition is reported in the second return value so both callers
+// (cmd/print.go, handlers_print.go) can warn the operator rather than
 // silently omitting it.
 func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]pdf.SourceWorkbook, []SkippedCompetition, error) {
 	ids := compIDs
@@ -70,13 +71,14 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 			// A competition this pipeline cannot render is SKIPPED, never
 			// fatal: one such competition must not make an otherwise
 			// printable tournament booklet unprintable. The skip is driven
-			// off the sentinel rather than re-testing comp.Format here, so
-			// ExportCompetitionXlsx stays the SINGLE owner of what is
-			// exportable -- a format gaining support (bc-swex) then changes
-			// one place, and cannot leave this loop silently skipping a
-			// competition the exporter has learned to render. Every skip is
-			// returned to the caller, which warns the operator.
-			if errors.Is(err, ErrSwissExportUnsupported) {
+			// off the sentinel(s) rather than re-testing comp.Format or
+			// bracket state here, so ExportCompetitionXlsx stays the SINGLE
+			// owner of what is exportable -- a format gaining support
+			// (bc-swex) then changes one place, and cannot leave this loop
+			// silently skipping a competition the exporter has learned to
+			// render. Every skip is returned to the caller, which warns the
+			// operator.
+			if isUnexportable(err) {
 				skipped = append(skipped, SkippedCompetition{
 					ID:     id,
 					Name:   title,
@@ -99,4 +101,13 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 		})
 	}
 	return sources, skipped, nil
+}
+
+// isUnexportable reports whether err is one of the sentinels
+// ExportCompetitionXlsx returns for a competition it cannot render at all --
+// as opposed to a real failure (I/O, corrupt state) that should abort the
+// whole batch. Centralised here so a third such sentinel has exactly one
+// place to be added, rather than a new errors.Is call at every skip site.
+func isUnexportable(err error) bool {
+	return errors.Is(err, ErrSwissExportUnsupported) || errors.Is(err, ErrBracketDrawMismatch)
 }

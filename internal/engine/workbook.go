@@ -26,11 +26,10 @@ import (
 //  3. Pool Matches sheet (helper.PrintPoolMatches)
 //  4. Knockout: Tree pages + Elimination Matches, when the competition has a
 //     playoff phase AND a derivable draw (helper.RenderKnockoutPages ->
-//     helper.PrintEliminationWithBronze), else the narrow bronze-only
-//     fallback when the persisted bracket already carries a third-place bout
-//     that this call's draw cannot re-derive (helper.PrintBronzeBlockWithPrintArea).
-//     See the hasBronze comment below for why that fallback is now SHARED
-//     rather than engine-only (mp-yuy8 criterion 5).
+//     helper.PrintEliminationWithBronze), else ErrBracketDrawMismatch when
+//     the persisted bracket already carries a third-place bout that this
+//     call's draw cannot re-derive -- see the hasBronze comment below for why
+//     that state is refused rather than partially rendered.
 //  5. Delete the "Tree" template sheet (f.DeleteSheet)
 //  6. Names to Print sheet, one per shiaijo (helper.CreateNamesWithPoolToPrint)
 //  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet)
@@ -43,8 +42,7 @@ import (
 // Elimination Matches sheets, and it is safe for them to run AFTER this
 // function returns rather than interleaved where they used to sit: nothing
 // this function does past PrintPoolMatches (step 3) and
-// PrintEliminationWithBronze/PrintBronzeBlockWithPrintArea (step 4) touches
-// either sheet again. Steps 5-7 write to the Tree, Names to Print and
+// PrintEliminationWithBronze (step 4) touches either sheet again. Steps 5-7 write to the Tree, Names to Print and
 // Kachinuki Detail sheets, none of which any overlay reads or writes.
 //
 // Parameters are explicit values, not a *state.Store: every strict/best-
@@ -107,9 +105,18 @@ func RenderCompetitionWorkbook(
 		comp.Mirror, poolCoords, playerCoords, comp.Engi,
 	)
 
-	// hasBronze: bracket.ThirdPlaceMatch is only ever written when
-	// comp.Naginata was true at generation time (buildBracketFromDraw,
-	// gated on helper.NeedsBronzeBlock -- see bracket.go), and Naginata is
+	// hasBronze: a third-place bout exists only for a competition that cannot
+	// award a JOINT third place. Kendo's knockout gives both beaten
+	// semi-finalists an equal 3rd and plays no bronze match at all; naginata
+	// decides a single 3rd, so it needs one (docs/user-guide/organisers/
+	// naginata.md). comp.Naginata is how that rule is currently encoded for a
+	// knockout -- note the league path expresses the same question with its own
+	// explicit field, LeagueTwoThirdPlaces, so "can this competition award a
+	// joint third?" has two unrelated spellings in the tree today.
+	//
+	// bracket.ThirdPlaceMatch is only ever written when comp.Naginata was true
+	// at generation time (buildBracketFromDraw, gated on
+	// helper.NeedsBronzeBlock -- see bracket.go), and Naginata is
 	// locked once the competition starts (PUT /api/competitions/:id rejects
 	// a change while started; a bracket only exists once started). So a
 	// non-nil ThirdPlaceMatch here always implies Naginata, and testing it
@@ -139,34 +146,30 @@ func RenderCompetitionWorkbook(
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
 			plan, comp.Mirror, comp.Engi, hasBronze)
 	} else if hasBronze {
-		// Narrow fallback (mp-yuy8 criterion 5, decided KEEP -- shared, not
-		// engine-only): a competition whose bracket already carries a
-		// third-place bout but yields no elimination leaves at export time.
-		// This is reachable through a real write path, not just a hand-
-		// edited bracket.json: comp.ExtraQualifiers carries no `started`
-		// guard in PUT /api/competitions/:id (unlike its Naginata/Engi/
-		// Format/Kind/TeamMatchType siblings, which all reject a change
-		// once the competition has started), so an operator can flip it
-		// after the bracket -- bronze block included -- was already built.
-		// EliminationDraw re-derives the draw from the CURRENT pools and
-		// comp.ExtraQualifiers at export time (its own doc comment: "equals
-		// the persisted bracket only while [pools, poolWinners, courts] are
-		// unchanged since the draw"), and buildPoolFedDraw's larger-pools/
-		// fill-bracket builders can mark a shape "out of scope" and degrade
-		// to nil for it -- at which point EliminationDraw returns nil even
-		// though bracket.ThirdPlaceMatch is still on disk from the original
-		// draw. The bronze block is then the only content this sheet can
-		// show, at court band 1 (numCourts=1 covers it exactly); nil rounds
-		// derive zero semi numbers, leaving both entrant slots
-		// hand-fillable.
+		// The stored bracket already carries a third-place bout, but this
+		// call's draw came back empty: the bracket and the competition's
+		// current settings disagree. Reachable through a real write path,
+		// not just a hand-edited bracket.json -- comp.ExtraQualifiers
+		// carries no `started` guard in PUT /api/competitions/:id (unlike
+		// its Naginata/Engi/Format/Kind/TeamMatchType siblings, which all
+		// reject a change once the competition has started), so an operator
+		// can flip it after the bracket -- bronze block included -- was
+		// already built. EliminationDraw re-derives the draw from the
+		// CURRENT pools and comp.ExtraQualifiers at export time (its own
+		// doc comment: "equals the persisted bracket only while [pools,
+		// poolWinners, courts] are unchanged since the draw"), and
+		// buildPoolFedDraw's larger-pools/fill-bracket builders can mark a
+		// shape "out of scope" and degrade to nil for it -- at which point
+		// EliminationDraw returns nil even though bracket.ThirdPlaceMatch is
+		// still on disk from the original draw.
 		//
-		// This fallback used to fire only from Engine.ExportCompetitionXlsx.
-		// Extending it to the results export too is the one deliberate
-		// behaviour change this extraction makes: a results workbook built
-		// from this exact degenerate shape now shows the bronze block it
-		// previously dropped silently, with no elimination content at all.
-		helper.PrintBronzeBlockWithPrintArea(f, 2, comp.TeamSize, comp.Mirror, comp.Engi, helper.CourtLabels(1), "", nil, nil)
-		helper.SetSheetLayoutPortraitA4DownThenOver(f, helper.SheetEliminationMatches, 1)
+		// Rendering only the bronze block here would produce an Elimination
+		// Matches sheet with a lone 3rd-place block and NO other knockout
+		// content -- a silently-partial workbook the operator has no way to
+		// tell is partial. Refuse instead: the operator must discard and
+		// regenerate the draw, or restore the settings the bracket was
+		// built with.
+		return nil, ErrBracketDrawMismatch
 	}
 	// The bare "Tree" sheet is a layout scaffold, never output. Delete it
 	// whether it was copied into pages above or left unused (a format with no

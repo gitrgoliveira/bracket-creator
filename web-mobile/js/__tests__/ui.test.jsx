@@ -27,6 +27,27 @@ describe('UI Components', () => {
       expect(badge.children).not.toContain('Pools');
     });
 
+    it('should show "Swiss" label for pools status when format is swiss (mp-dej2)', () => {
+      // Swiss piggybacks the pool pipeline (its matches live in
+      // pool-matches.csv) but never writes pools.csv and has no pools at all,
+      // so "Pools" misdescribes it on every surface the badge appears on.
+      const badge = StatusBadge({ status: 'pools', format: 'swiss' });
+      expect(badge.children).toContain('Swiss');
+    });
+
+    it('swiss status badge must NEVER render "Pools" (same terminology boundary as league)', () => {
+      const badge = StatusBadge({ status: 'pools', format: 'swiss' });
+      expect(badge.children).not.toContain('Pools');
+    });
+
+    it('keeps the running dot for a swiss competition in the pools phase', () => {
+      // The label changes; the phase does not. A running Swiss round must
+      // still show the live dot exactly as a pool phase does.
+      const badge = StatusBadge({ status: 'pools', format: 'swiss', showRunningDot: true });
+      const dot = badge.children.find(c => c && c.props && c.props.className === 'dot dot--running');
+      expect(dot).toBeDefined();
+    });
+
     it('should still show "Pools" label for pools status when format is mixed', () => {
       const badge = StatusBadge({ status: 'pools', format: 'mixed' });
       expect(badge.children).toContain('Pools');

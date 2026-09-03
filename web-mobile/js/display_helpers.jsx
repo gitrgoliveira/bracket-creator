@@ -3,7 +3,7 @@
 // LobbyDisplay, and StreamingOverlay. No module-level side-effects.
 
 import { withNumber } from './match_scoreboard.jsx';
-import { poolNameOf, isSupplementaryBout } from './pool_ids.jsx';
+import { poolNameOf, isSupplementaryBout, swissRoundLabel } from './pool_ids.jsx';
 
 // NOTE: this module is the shared *leaf* in the display graph: presentation
 // modules (scoreboard, lobby, streaming) import from here, not vice versa.
@@ -227,6 +227,26 @@ function queueLabelCompact(m) {
 // like a bug. Suppress it; the completed/total counter carries the progress.
 function phaseLabel(m, isBracket, roundIndex, totalRounds, format) {
     if (format === "league") return "";
+    // Swiss piggybacks pool-matches.csv under a synthetic "Swiss-R<N>" pool
+    // name (never a real bracket) — translate it before the raw
+    // phaseName/poolName returns below, or the TV board / lobby leak the
+    // synthetic id straight to spectators (mp-dej2).
+    //
+    // The id fallback is LOAD-BEARING, not defensive padding: the display
+    // surfaces build their rows straight off `c.poolMatches` (see
+    // findRunningOnCourt / findUpcomingOnCourt above), and the wire shape
+    // there is state.MatchResult, which carries NO poolName or phaseName —
+    // that stamping is viewer_utils.compMatches' job and display does not use
+    // it. So on the board BOTH of those are undefined and the id is the only
+    // carrier, exactly as the non-Swiss path below already relies on. Without
+    // it this branch returns "" and the phase goes blank on the one surface
+    // it exists to fix. Guarded on !isBracket for the same reason as that
+    // path: poolNameOf matches any "*-<digits>" id, so a bracket id would
+    // otherwise yield a bogus pool-like label.
+    // swissRoundLabel (pool_ids.jsx) returns its input unchanged when it is
+    // not Swiss-shaped, so this is a no-op for any other format that reaches
+    // here with format unset/misreported.
+    if (format === "swiss") return swissRoundLabel(m.phaseName || m.poolName || (!isBracket ? poolNameOf(m.id) : ""));
     if (m.phaseName) return m.phaseName;
     if (m.poolName) return m.poolName;
     // Bracket matches reach the display surfaces straight off c.bracket.rounds

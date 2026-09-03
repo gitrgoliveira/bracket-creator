@@ -378,7 +378,7 @@ func TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers(t *testing.T) {
 			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable pools.csv, got %q", p.Name, p.Number)
 		}
 		assert.Empty(t, comp.ProvisionalNumbers, "a drawn competition never carries provisional numbers")
-		assert.Contains(t, string(w.Body.Bytes()), `"file":"pools.csv"`, "the unreadable file must be named in the item's dataIssues, not only in the server log")
+		assert.Contains(t, w.Body.String(), `"file":"pools.csv"`, "the unreadable file must be named in the item's dataIssues, not only in the server log")
 	}
 	assert.True(t, found, "the competition must still be listed")
 }

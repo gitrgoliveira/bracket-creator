@@ -20,17 +20,17 @@ Lineups appear on the viewer, the court display, and the streaming overlay, so c
 
 ## How a team encounter is decided
 
-This is how a **regular** team encounter, where every position plays its opposite number, is decided. Kachinuki encounters are decided bout by bout instead; see [Kachinuki (winner stays on)](#kachinuki-winner-stays-on) below.
+This is how a **regular** team encounter, where every position plays its opposite number, is decided. Kachinuki encounters are decided bout by bout instead; refer to [Kachinuki (winner stays on)](#kachinuki-winner-stays-on).
 
 Individual bouts are scored first. Once all bouts are done, the encounter result is determined in this order:
 
 1. The team with the highest number of individual wins (victories) wins the encounter.
 2. If wins are equal, the team with the highest points scored wins.
-3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
+3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). Refer to [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
 
 ## Kachinuki (winner stays on)
 
-In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. Kachinuki is run under one of two rule sets, described below. Because only the shiai-jo operator knows which rule set governs a match, and because team sizes are flexible, the app never decides on its own when a kachinuki encounter is over: the court operator does, using the buttons in the score editor.
+In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. Kachinuki is run under one of two rule sets, described in [Kachinuki modes](#kachinuki-modes). Because only the shiai-jo operator knows which rule set governs a match, and because team sizes are flexible, the app never decides on its own when a kachinuki encounter is over: the court operator does, using the buttons in the score editor.
 
 ### Kachinuki modes
 
@@ -49,7 +49,7 @@ How each situation plays out at the table:
 | A tie involving one Taisho | The Taisho retires like anyone else. If their team now has nobody left, tap **Record bout**: the app adds the next bout, pairing the surviving team's next fighter with the fighter who just tied. Under this mode that fighter is out, so give the surviving fighter the walkover (**Fusensho**), then **End match** on that point. | The Taisho stays on. Tap **Record bout**: the app adds the next bout with the same Taisho against the opponent's next fighter. Nothing to re-type; score it as normal. |
 | A tie between the two Taisho | **End match** records a drawn encounter in pools and leagues. In a knockout there are no drawn encounters, so End match is held back: use **Encho** until one Taisho scores, then **End match**. | **Encho**, in any stage: the same pair fights on until one takes a point, then **End match**. |
 
-The clip below walks through the flows end to end, recorded from the score editor:
+The following clip walks through the flows end to end, recorded from the score editor:
 
 <video controls muted playsinline width="100%">
   <source src="../../../videos/kachinuki-demo.webm" type="video/webm">
@@ -115,7 +115,7 @@ In pools, league, and Swiss, team standings are resolved in this order:
 7. Points scored
 8. Points lost (fewer is better)
 
-In Swiss, two further tie-breaks apply after the eight criteria above:
+In Swiss, two further tie-breaks apply after those eight criteria:
 head-to-head (the team that won the direct encounter ranks higher), then
 name order as the final deterministic fallback.
 
@@ -127,4 +127,4 @@ name order as the final deterministic fallback.
     - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
     - **League**: the operator decides. From the League tab, either run a daihyosen among the tied teams or accept the shared ranks to finalise standings with the tie left in place. This choice is available for any tied position, including joint first, once every regular league match is complete.
 
-    A tie that does not affect advancement is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). See [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.
+    A tie that does not affect advancement is left as a shared rank with no extra bout. If a daihyosen still cannot separate the teams, it goes to chusen (drawing lots). Refer to [Recording decisions](../court-operators/recording-decisions.md) for the procedures for both.

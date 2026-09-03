@@ -1,10 +1,10 @@
 # Choosing your setup
 
-Two independent questions shape every tournament you run with bracket-creator. First, how digital your venue is: whether you print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). Because these questions are independent, you choose each one separately and combine them however suits your event.
+Two questions shape every tournament you run with bracket-creator. First, how digital your venue is: whether you print and score on paper, keep one device per shiai-jo, or run fully on-screen scoreboards with real-time mobile pages. Second, who runs and scores the matches: trained staff behind an admin password (officiated) or competitors scoring their own bouts with no password required (self-run). You choose each one separately, with one constraint: self-run needs the tournament app, so it requires at least the partially connected level. An officiated event can run at any level, including fully offline.
 
 ## Digitisation level
 
-How far you digitise determines which surfaces you use on the day. See [Three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for a full explanation of each level.
+How far you digitise determines which surfaces you use on the day. Refer to [Three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for a full explanation of each level.
 
 - **Offline.** Print the Excel brackets and score on paper. No networked devices are needed at the courts.
 - **Partially connected.** One device per shiai-jo keeps courts in sync through the tournament app.
@@ -12,7 +12,7 @@ How far you digitise determines which surfaces you use on the day. See [Three wa
 
 ## Operating model
 
-The operating model controls who can record scores and advance matches. In **officiated** mode, staff authenticate with the admin password and run every match. In **self-run** mode, competitors report their own results with no password barrier. See [Operating modes](../organisers/operating-modes.md) for the full rules on both models, including guidance on when to choose each one.
+The operating model controls who can record scores and advance matches. In **officiated** mode, staff authenticate with the admin password and run every match. In **self-run** mode, competitors report their own results with no password barrier. Refer to [Operating modes](../organisers/operating-modes.md) for the full rules on both models, including guidance on when to choose each one.
 
 ## Choose by how you run the day
 
@@ -49,12 +49,12 @@ The app runs on several screens at the same time, and each surface is designed f
 A few consequences worth planning around:
 
 - **The operator console is the one surface with a real minimum.** Scoring screens put a full team encounter, its bout rows, and the controls on one screen, so a small phone is not a practical operator device. A laptop works equally well if you have one per shiai-jo.
-- **Display screens are optional.** Without them you are at the partially connected level described above: results still reach phones, but you will also print scoreboards for the courts. Competitor tags are printed at every level, so they are not a cost of skipping the screens.
-- **The court display is usually driven from the operator's own machine** over an HDMI cable rather than from a separate device. The console and the board are then two tabs in one browser on one computer, so scores reach the board without a network hop and it keeps updating through a Wi-Fi drop. This is a client-side arrangement at the court and holds whichever way you host the server. See [Keep the court scoreboard alive on the same machine](../../architecture/infrastructure-architecture.md#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi).
+- **Display screens are optional.** Without them you are at the partially connected level of [Digitisation level](#digitisation-level): results still reach phones, but you will also print scoreboards for the courts. Competitor tags are printed at every level, so they are not a cost of skipping the screens.
+- **The court display is usually driven from the operator's own machine** over an HDMI cable rather than from a separate device. The console and the board are then two tabs in one browser on one computer, so scores reach the board without a network hop and it keeps updating through a Wi-Fi drop. This is a client-side arrangement at the court and holds whichever way you host the server. Refer to [Keep the court scoreboard alive on the same machine](../../architecture/infrastructure-architecture.md#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi).
 - **Spectator phones may be on cellular** rather than venue Wi-Fi when the app is cloud-hosted, so they do not add to your local network load.
 
-See [Following a tournament](../spectators/following.md) for the full list of display and viewer URLs, including the streaming overlay variant.
+Refer to [Following a tournament](../spectators/following.md) for the full list of display and viewer URLs, including the streaming overlay variant.
 
-## New to bracket-creator?
+## Start with your first tournament
 
 If this is your first time using the app, work through [Your first tournament](first-tournament.md) for the fastest path from an empty server to real-time results on a screen.

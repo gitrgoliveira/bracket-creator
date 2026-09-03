@@ -1,6 +1,6 @@
 # Record match decisions
 
-Not every bout is decided on points. The score editor records the kendo outcomes described here. Open the score editor from the **Scores** tab on a competition page, or from a match card in the court console (see [Score a match](scoring-a-match.md)).
+Not every bout is decided on points. The score editor records the kendo outcomes described here. Open the score editor from the **Scores** tab on a competition page, or from a match card in the court console (refer to [Score a match](scoring-a-match.md)).
 
 ![The score editor's decision controls: Decide by hantei, Kiken (Voluntary and Injury), Fusenpai, and Fusensho (team only).](../../screenshots/mobile-score-editor.png)
 
@@ -26,7 +26,7 @@ A default win (kiken, fusenpai, or fusensho) awards the winner the match points 
 
 ## Hikiwake
 
-A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses.
+A hikiwake is a draw. It applies in pool, league, and Swiss matches (not in the knockout phase) and contributes to the standings separately from wins and losses. To record one, tap **Mark draw** between the two sides in the score editor; in a team encounter, tap **Tie (hikiwake)** on the bout's row.
 
 ## Encho (overtime)
 
@@ -36,7 +36,7 @@ In the score editor, open the **Overtime** control and tick **Encho started**. A
 
 ![The score editor during a second overtime period: the Encho started box is ticked, the period counter reads two, and the header shows the overtime readout.](../../screenshots/mobile-encho-overtime.png)
 
-Completed results follow the paper score sheet's layout. The centre, between the two sides' points, only ever carries one mark: **vs** when no special mark applies, **X** for a tie, **(E)** for a match that went to overtime, or **(DH)** for a team encounter sent to a representative bout. The marks never combine: a match that went to encho cannot end in a tie, and a daihyosen has no overtime. A side with no points shows a plain dash. A match won by men in regulation reads **M vs -** and the same win in overtime reads **M (E) -** on the court console and the public viewer; the exported results workbook carries the same **(E)** marker in its centre column, with a no-points cell left blank rather than dashed. The marker is the same however many overtime periods were fought, because the counter records the number for the tournament log but results never show it.
+Completed results follow the paper score sheet's layout. The centre, between the two sides' points, only ever carries one mark: **vs** when no special mark applies, **X** for a tie, **(E)** for a match that went to overtime, or **(DH)** for a team encounter sent to a representative bout. The marks never combine: a match that went to encho cannot end in a tie, and a daihyosen has no overtime. A side with no points shows a plain dash. A match won by men in regulation reads **M vs –** and the same win in overtime reads **M (E) –** on the court console and the public viewer; the exported results workbook carries the same **(E)** marker in its centre column, with a no-points cell left blank rather than dashed. The marker is the same however many overtime periods were fought, because the counter records the number for the tournament log but results never show it.
 
 Everything else is a result, written beside the competitor it names: **Ht** next to the winner of a judges' decision, **Kiken** next to the competitor who withdrew, **Fus.** next to a no-show. A match decided by hantei after a tied overtime reads **M Ht (E) K**, with the winner's mark on the winner's side of the centre. A team encounter shows its team totals in the score cell instead, so for those the marks appear on the bracket and in the exported workbook.
 
@@ -51,7 +51,7 @@ It applies in two situations:
 - In the knockout phase, when a team encounter finishes level.
 - In team pool or league play, when two teams finish equal on every ranking criterion and the tie decides who advances or how they are seeded.
 
-A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; see [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
+A tie that does not affect advancement is left as a shared rank with no extra bout. In league play, running the daihyosen is the operator's choice rather than an automatic step; refer to [Team standings and tie-breaks](../organisers/team-tournaments.md#team-standings-and-tie-breaks) for both options.
 
 The bout is a single-point ippon-shobu with no time limit, between one representative from each tied team; because it runs until someone scores, a daihyosen has no encho. The score editor lets you pick each team's representative from its roster. On the court console, the bout appears with a **(DH)** mark in the centre of the score. In pool and league standings, the team that won its daihyosen carries a **DH** badge.
 

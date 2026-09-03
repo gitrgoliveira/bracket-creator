@@ -12,16 +12,16 @@ Officiated mode is the default. Every action (scoring, check-in, starting, and c
 
 ### Self-run mode
 
-In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
+In self-run mode, scoring, check-in, and starting competitions are open to anyone without a password, so competitors or table helpers can run and score their own matches. Completing a competition is irreversible, so it stays behind the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)). A public self-registration page also becomes available for competitors to sign themselves up, for individual competitions only and only while the competition is still in setup, before the draw is generated.
 
-Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, team lineups, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (see [Destructive-ops password](#destructive-ops-password)).
+Two kinds of action stay gated in self-run mode. Organiser setup (creating and editing competitions, tournament settings, seeds, scheduling, team lineups, match decisions such as kiken, and exports) still requires the admin password. Destructive actions (deleting a competition, discarding a draw, editing the roster, and completing a competition) require the destructive-ops password (refer to [Destructive-ops password](#destructive-ops-password)).
 
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 
 !!! note
     In file mode, self-run requires a destructive-ops password. Without one, destructive actions would be completely unprotected, so the app refuses to create or save a self-run tournament until a destructive-ops password is set (you can set it in the same step).
 
-See the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.
+Refer to the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.
 
 ## Admin authentication mode
 
@@ -44,13 +44,13 @@ To set up locked mode:
 
 1. Generate the hash with the `hash-password` command. The command reads the password from standard input with no prompt, and the terminal does not hide what you type, so pipe it in from a secrets manager or a here-doc rather than typing it interactively:
 
-    ```
+    ```bash
     printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
     ```
 
 2. Pass the hash and the flag when you start the server:
 
-    ```
+    ```bash
     TOURNAMENT_PASSWORD_HASH='$2a$10$...' bracket-creator mobile-app --lock-password -f ./tournament-data
     ```
 
@@ -61,7 +61,7 @@ In locked mode:
 - To rotate the credential, restart the server with a new hash.
 - If `--lock-password` is set but `TOURNAMENT_PASSWORD_HASH` is empty or malformed, the server refuses to start (fail-closed).
 
-See the [`hash-password` command reference](../commands/hash-password.md) for full details.
+Refer to the [`hash-password` command reference](../commands/hash-password.md) for full details.
 
 ## Destructive-ops password
 
@@ -89,7 +89,7 @@ Set the destructive-ops password from **Admin > Edit details > Destructive-ops p
 
 Supply the destructive-ops password as a bcrypt hash in the `TOURNAMENT_ADMIN_PASSWORD_HASH` environment variable. It cannot be changed through the UI.
 
-```
+```bash
 printf '%s' "$MY_DESTRUCTIVE_OPS_SECRET" | bracket-creator hash-password
 
 TOURNAMENT_PASSWORD_HASH='$2a$10$...main...' \
@@ -107,6 +107,6 @@ Over plain HTTP, both passwords travel in clear text on every request. Anyone wi
 
 For a real security boundary:
 
-- Run the server behind TLS. See [Hosting](../install/hosting.md) for guidance.
+- Run the server behind TLS. Refer to [Hosting](../install/hosting.md) for guidance.
 - Use locked mode for any deployment reachable from the internet.
 - Be aware that in file mode the password reset is unauthenticated: anyone who can reach the server can set a new admin password without knowing the current one, which locks out the operator or takes over the tournament. Locked mode disables reset entirely, so any internet-exposed deployment should use locked mode.

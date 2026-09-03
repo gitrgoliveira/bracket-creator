@@ -140,13 +140,13 @@ flowchart TB
 | Device | What it runs | Notes |
 |---|---|---|
 | Operator console (1 per court) | admin scoring SPA | tablet/desktop surface; authenticates with the tournament password; scores its own shiai-jo |
-| Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL; read-only, no auth. **Preferred: drive it from the operator console's own machine** via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (see [Keep the court scoreboard alive on the same machine](#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi) below). A standalone smart-TV browser or separate mini-PC also works but loses that offline path |
+| Display screen (1 per court, optional) | public display / scoreboard view | a browser at a display URL; read-only, no auth. **Preferred: drive it from the operator console's own machine** via an HDMI cable to a TV or monitor, so the board survives a Wi-Fi outage (refer to [Keep the court scoreboard alive on the same machine](#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi)). A standalone smart-TV browser or separate mini-PC also works but loses that offline path |
 | Spectator phones | public viewer (mobile-first) | can be on cellular; they don't need venue Wi-Fi when the app is cloud-hosted |
 
 **Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
 calls. A four-court event is roughly 4 operators + 4 displays + N spectators of concurrent SSE
 clients, comfortably within `SSE_MAX_CLIENTS`, but every real-time update fans out to all of them
-(see [Capacity & scaling](#5-capacity-scaling)).
+(refer to [Capacity & scaling](#5-capacity-scaling)).
 
 **Two venue patterns:**
 
@@ -176,7 +176,7 @@ scoreboard freezes during a Wi-Fi outage:
   private same-origin channel: every score the operator records reaches the board **directly,
   on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
-  open. The board shows a small amber dot while it is running on this local feed (see
+  open. The board shows a small amber dot while it is running on this local feed (refer to
   [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
 - **Separate device (a smart-TV browser, or the display on its own mini-PC).** Simpler cabling,
   but the board only ever updates over the network, so a Wi-Fi outage freezes it until the link
@@ -248,7 +248,7 @@ flowchart TB
 
 | Variable | Flag | Default | Purpose |
 |---|---|---|---|
-| `TOURNAMENT_DATA_DIR` | `-f/--folder` | `./tournament-data` | where state is stored |
+| `TOURNAMENT_DATA_DIR` | `-f/--folder` | `.` (the current directory; `make run-mobile` and the Compose file set `./tournament-data`) | where state is stored |
 | `PORT` | `-p/--port` | 8080 | listen port |
 | `BIND_ADDRESS` | `-b/--bind` | localhost | listen address |
 | `LOCK_PASSWORD` | `--lock-password` | false | enable locked (bcrypt) auth; disables reset endpoint |

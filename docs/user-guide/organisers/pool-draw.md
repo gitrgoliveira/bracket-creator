@@ -2,14 +2,14 @@
 
 In a competition with a pool phase, generating the draw decides which pool every competitor fights in. This page explains how those places are worked out, so you can check a pool sheet before you publish it and answer questions about it at the desk.
 
-The same rules apply to team competitions, with each team placed as one entrant. For what happens after the pools, which pool feeds which knockout slot, see [The knockout draw](knockout-draw.md).
+The same rules apply to team competitions, with each team placed as one entrant. For what happens after the pools, which pool feeds which knockout slot, refer to [The knockout draw](knockout-draw.md).
 
 ## What the draw starts from
 
 The draw itself is deterministic: the same entrants, in the same order, with the same settings, always produce the same pools. Any randomness happens before the draw, and you control it:
 
-- The **tournament app** draws from the participant list as it stands. Use **Shuffle unseeded** in the participants panel to randomise unranked positions first if you want a random order; see [Adding participants](run-tournament.md#adding-participants). When at least one participant is checked in, only checked-in participants join the draw; see [Check-in workflow](run-tournament.md#check-in-workflow).
-- The **command line** shuffles the entry list before drawing, so two runs over the same file produce different pools. Pass `--determined` to skip the shuffle and draw in file order. See [create-pools](../commands/create-pools.md).
+- The **tournament app** draws from the participant list as it stands. Use **Shuffle unseeded** in the participants panel to randomise unranked positions first if you want a random order; refer to [Adding participants](run-tournament.md#adding-participants). When at least one participant is checked in, only checked-in participants join the draw; refer to [Check-in workflow](run-tournament.md#check-in-workflow).
+- The **command line** shuffles the entry list before drawing, so two runs over the same file produce different pools. Pass `--determined` to skip the shuffle and draw in file order. Refer to [create-pools](../commands/create-pools.md).
 
 ## How many pools, and their sizes
 
@@ -22,11 +22,11 @@ Where the differently sized pools end up on the sheet is decided by the shiai-jo
 
 Two settings are refused rather than drawn. A minimum pool size larger than the entrant count cannot form a single pool, and a **Pools + Knockout** competition whose entrants would form only one pool is refused when you start it, because one pool with a two-competitor final is a league in all but name. Both refusals name the entrant count and the pool size, and both are resolved the same way: reduce the pool size, add entrants, or change the format to League.
 
-The **Fit the knockout** qualifier option chooses its own pool count so that the qualifiers fill the bracket exactly; see [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool). Which pool each competitor lands in still follows the rules below.
+The **Fit the knockout** qualifier option chooses its own pool count so that the qualifiers fill the bracket exactly; refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool). Which pool each competitor lands in still follows the rules in [Who lands in which pool](#who-lands-in-which-pool).
 
 ## Who lands in which pool
 
-**Seeded competitors** are placed first, in rank order: in different pools and, as far as the shape allows, on different shiai-jo and at opposite ends of each shiai-jo's set of pools. Two seeds never share a pool; where a configuration cannot satisfy every constraint, the deepest one gives way and the draw warns you which. [Seeding](knockout-draw.md#seeding) describes how far apart the draw keeps them. Their dojos are recorded before anyone else is placed.
+**Seeded competitors** are placed first, in rank order: in different pools and, as far as the shape allows, on different shiai-jo and at opposite ends of each shiai-jo's set of pools. Two seeds never share a pool; where a configuration cannot satisfy every constraint, the deepest one gives way, and the competition page shows a banner, **Seeding: the draw could not honour every rule**, listing what gave way. [Seeding](knockout-draw.md#seeding) describes how far apart the draw keeps them. Their dojos are recorded before anyone else is placed.
 
 **Everyone else** is then placed one at a time, in the order the list arrives (shuffled upstream, as described at the top of this page); the draw does not reorder it. Before anyone is placed, the draw works out which branch of the knockout tree each pool's qualifiers will feed, and every placement is recorded per pool and per branch. Each competitor descends that tree: at every fork, the branch holding fewer of their dojo wins, then the one with more room, and the same rule picks the pool at the bottom. That descent is what keeps a dojo apart: its second member lands in the opposite half, its third and fourth in untouched quarters, without the draw ever needing to look ahead.
 
@@ -36,10 +36,10 @@ Once every competitor has a pool, the draw examines the finished result and exch
 
 ### Watch a draw being made
 
-The walk-through below applies the rules on this page to two example rosters. Step through it one competitor at a time, or press Play and watch the pools fill. At each fork it shows how many of that competitor's dojo already sit on either side of the bracket, and which way that sends them.
+The following walk-through applies the rules on this page to two example rosters. Step through it one competitor at a time, or press Play and watch the pools fill. At each fork it shows how many of that competitor's dojo already sit on either side of the bracket, and which way that sends them.
 
 <div data-pool-draw-animation>
-  <p>This walk-through needs JavaScript. Everything it demonstrates is described in the text above and below it.</p>
+  <p>This walk-through needs JavaScript. Everything it demonstrates is described in the rest of this page.</p>
 </div>
 
 Both rosters, and the pools the draw produces from them, come from the application itself rather than from a hand-written example.
@@ -60,7 +60,7 @@ With two qualifiers per pool the second place crosses to a partner region, and a
 
 ## Pools onto shiai-jo
 
-Pools are assigned to shiai-jo in contiguous blocks: with six pools on two shiai-jo, pools A, B and C fight on the first and pools D, E and F on the second. When the counts do not divide evenly, the earlier shiai-jo take one pool more. A shiai-jo with no pool to run would stand idle, so the draw steps the competition's shiai-jo count down when there are fewer pools than shiai-jo; see [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
+Pools are assigned to shiai-jo in contiguous blocks: with six pools on two shiai-jo, pools A, B and C fight on the first and pools D, E and F on the second. When the counts do not divide evenly, the earlier shiai-jo take one pool more. A shiai-jo with no pool to run would stand idle, so the draw steps the competition's shiai-jo count down when there are fewer pools than shiai-jo; refer to [How many shiai-jo a competition can use](knockout-draw.md#how-many-shiai-jo-a-competition-can-use).
 
 Because the seeds are spread before the pools fill, the top seeds' pools sit on different shiai-jo wherever the counts allow, and their pool matches run in parallel rather than one after another on the same shiai-jo.
 

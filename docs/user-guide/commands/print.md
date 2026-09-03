@@ -6,7 +6,7 @@ Renders bracket Excel workbooks into grouped, print-ready **PDFs** (competitor t
 bracket-creator print --type <type> (--input <dir> | --tournament-data <dir>) [flags]
 ```
 
-This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine; use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine (see [When to use the CLI](#when-to-use-the-cli)).
+This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine; use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine (refer to [When to use the CLI](#when-to-use-the-cli)).
 
 ## Input modes
 
@@ -32,24 +32,31 @@ Provide **exactly one**:
 
 ## Other flags
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--output` | `-o` | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
-| `--output-dir` | | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
-| `--team-file` | | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable; defaults to any filename containing `team`. |
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | (none) | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
+| `--output-dir` | | (none) | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
+| `--team-file` | | any filename containing `team` | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable. |
 
 An output target is always required: for a single `--type`, provide exactly one of `--output` or `--output-dir`; `--type=all` requires `--output-dir` (and rejects `--output`).
 
 ## Usage
 
+Generate every PDF group from a folder of bracket workbooks:
+
 ```bash
-# Generate every PDF group from a folder of bracket workbooks
 bracket-creator print --type=all --input=./xlsx/ --output-dir=./pdfs
+```
 
-# Generate everything from a tournament-data directory
+Generate everything from a tournament-data directory:
+
+```bash
 bracket-creator print --type=all --tournament-data=tournament-data/ --output-dir=./pdfs
+```
 
-# Competitor tags only, to a single file
+Competitor tags only, to a single file:
+
+```bash
 bracket-creator print --type=tags --input=./xlsx/ -o ./tags.pdf
 ```
 

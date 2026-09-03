@@ -724,6 +724,7 @@
     var self = this;
     if (this.step >= this.result.steps.length) this.goto(0);
     this.playBtn.textContent = "Pause";
+    this.playBtn.title = "Pause the walk-through";
     this.timer = window.setInterval(function () {
       if (self.step >= self.result.steps.length) {
         self.pause();
@@ -738,7 +739,10 @@
       window.clearInterval(this.timer);
       this.timer = null;
     }
-    if (this.playBtn) this.playBtn.textContent = "Play";
+    if (this.playBtn) {
+      this.playBtn.textContent = "Play";
+      this.playBtn.title = "Place the competitors one after another";
+    }
   };
 
   // goto renders the draw after n competitors have been placed. n === 0 is

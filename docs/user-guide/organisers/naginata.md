@@ -104,7 +104,7 @@ and Shiro (white):
   Shift), **`Backspace`** undoes the last flag you added, and **`Enter`** saves.
 - A bout's flags must total 1, 3, or 5. The panel is always an odd size, so
   there is always a majority and a bout can never end in a draw. The editor
-  flags any other total and will not let you save it.
+  flags any other total and does not let you save it.
 - The side with more flags wins the bout.
 
 ### Standings
@@ -117,7 +117,7 @@ following criteria, in order:
 3. Head-to-head (Swiss only): when two pairs are tied on wins and flags, the
    pair that won their direct bout ranks higher.
 4. Name order (alphabetical by the pair's first listed member), when the
-   criteria above are all equal.
+   criteria listed in this section are all equal.
 
 Both the winning and the losing side's flags count toward that side's own tally,
 so a pair that loses by three flags to two still keeps its two flags.
@@ -126,11 +126,11 @@ so a pair that loses by three flags to two still keeps its two flags.
 
 Engi never holds a supplementary tie-break bout (no ippon-shobu, no daihyosen):
 a ranking that is still tied after wins and flags is settled by the head-to-head
-(in Swiss) and name-order fallbacks above.
+(in Swiss) and name-order fallbacks listed in this section.
 
 ### Excel exports
 
-Both Excel downloads on the competition page (see
+Both Excel downloads on the competition page (refer to
 [Export and print](run-tournament.md#export-and-print)) understand Engi:
 
 - Each pair is a single competitor throughout both workbooks. The data sheet

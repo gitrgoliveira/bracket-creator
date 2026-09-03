@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"gopkg.in/yaml.v3"
@@ -66,7 +67,7 @@ type ImportResult struct {
 	Error            string `json:"error,omitempty"`
 }
 
-func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, elevated ElevatedVerifier) {
+func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.POST("/tournament/import", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		if err := c.Request.ParseMultipartForm(64 << 20); err != nil { // 64 MB limit
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse multipart form: " + err.Error()})
@@ -114,7 +115,7 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, el
 
 		var results []ImportResult
 		for _, entry := range manifest.Competitions {
-			r := importCompetition(store, entry, fileMap)
+			r := importCompetition(store, eng, entry, fileMap)
 			results = append(results, r)
 		}
 
@@ -123,7 +124,7 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, el
 	})
 }
 
-func importCompetition(store *state.Store, entry ImportManifestComp, files map[string][]byte) ImportResult {
+func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManifestComp, files map[string][]byte) ImportResult {
 	// Pre-trim Name so the ImportResult returned to the client matches
 	// the canonical record we save. Pre-fix: res.Name = entry.Name kept
 	// any leading/trailing whitespace from the manifest, so the import
@@ -451,7 +452,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		// Same defaulting the POST /competitions handler applies (G2): a
 		// manifest row is as capable of omitting number_prefix as a JSON
 		// body is, and this competition must not end up without one either.
-		if infraErr := assignDefaultNumberPrefix(store, comp, comp.ID); infraErr != nil {
+		if infraErr := assignDefaultNumberPrefix(eng, comp, comp.ID); infraErr != nil {
 			return infraErr
 		}
 		if infraErr, uniqueErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, comp.ID); infraErr != nil {

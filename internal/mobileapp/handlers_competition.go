@@ -384,33 +384,6 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	return nil
 }
 
-// takenNumberPrefixes lists every NumberPrefix already in use by a
-// competition other than excludeID. It is the one place that list is
-// gathered: assignDefaultNumberPrefix needs it to derive a non-colliding
-// default, and GET .../number-prefix-default (item 8) needs the identical set
-// so the value it previews for the operator is the value assignment would
-// actually pick.
-func takenNumberPrefixes(store *state.Store, excludeID string) ([]string, error) {
-	ids, err := store.ListCompetitions()
-	if err != nil {
-		return nil, fmt.Errorf("list competitions: %w", err)
-	}
-	taken := make([]string, 0, len(ids))
-	for _, existingID := range ids {
-		if existingID == excludeID {
-			continue
-		}
-		existing, err := store.LoadCompetition(existingID)
-		if err != nil {
-			return nil, fmt.Errorf("load competition %s: %w", existingID, err)
-		}
-		if existing != nil {
-			taken = append(taken, existing.NumberPrefix)
-		}
-	}
-	return taken, nil
-}
-
 // assignDefaultNumberPrefix gives comp a number prefix when the request did not
 // carry one, derived from the competition's name and avoiding every prefix
 // already in use. It is the app-side twin of the CLI's own defaulting (see
@@ -427,15 +400,15 @@ func takenNumberPrefixes(store *state.Store, excludeID string) ([]string, error)
 //
 // Returns an infrastructure error only; a derived prefix is always within the
 // length cap (helper.MaxNumberPrefixLen matches MaxLenCompetitionNumberPrefix).
-func assignDefaultNumberPrefix(store *state.Store, comp *state.Competition, excludeID string) error {
+func assignDefaultNumberPrefix(eng *engine.Engine, comp *state.Competition, excludeID string) error {
 	if strings.TrimSpace(comp.NumberPrefix) != "" {
 		return nil
 	}
-	taken, err := takenNumberPrefixes(store, excludeID)
+	prefix, err := eng.DefaultNumberPrefixFor(comp.Name, excludeID)
 	if err != nil {
 		return err
 	}
-	comp.NumberPrefix = helper.DefaultNumberPrefix(comp.Name, taken)
+	comp.NumberPrefix = prefix
 	return nil
 }
 
@@ -494,7 +467,7 @@ func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, allow
 		if comp == nil || !allowed(comp.Status) || strings.TrimSpace(comp.NumberPrefix) != "" {
 			return nil
 		}
-		if err := assignDefaultNumberPrefix(store, comp, id); err != nil {
+		if err := assignDefaultNumberPrefix(eng, comp, id); err != nil {
 			return err
 		}
 		infraErr, validationErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)
@@ -646,25 +619,26 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// number prefix assignDefaultNumberPrefix would pick for a competition
 	// named name, excluding exclude's own current prefix from the taken set
 	// (so re-deriving for an existing competition doesn't make its own
-	// prefix collide with itself). Read-only, over the same
-	// takenNumberPrefixes + helper.DefaultNumberPrefix primitives
-	// assignDefaultNumberPrefix itself calls (R9), so the value previewed
-	// here is the value a save would actually assign.
+	// prefix collide with itself). Read-only, over the engine's one
+	// derivation (engine.DefaultNumberPrefixFor, R6/R9), the same call every
+	// assigning path makes, so the value previewed here is the value a save
+	// would actually assign.
 	//
 	// The create form calls this with exclude="" (the competition doesn't
-	// exist yet, so nothing to exclude); the settings form passes its own id.
+	// exist yet, so nothing to exclude). Nothing else calls it today:
+	// competitions saved by an earlier version without a prefix are migrated
+	// when the app starts (engine.MigrateNumberPrefixes), so the settings
+	// form never has an empty value to preview for.
 	// A blank name is a valid query (the operator hasn't typed one yet) and
 	// resolves through helper.DefaultNumberPrefix's own fallback, same as
 	// every other caller.
 	r.GET("/competitions/number-prefix-default", func(c *gin.Context) {
-		name := c.Query("name")
-		exclude := c.Query("exclude")
-		taken, err := takenNumberPrefixes(store, exclude)
+		prefix, err := eng.DefaultNumberPrefixFor(c.Query("name"), c.Query("exclude"))
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"numberPrefix": helper.DefaultNumberPrefix(name, taken)})
+		c.JSON(http.StatusOK, gin.H{"numberPrefix": prefix})
 	})
 
 	r.POST("/competitions", func(c *gin.Context) {
@@ -944,7 +918,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				return nil
 			}
 			var infraErr error
-			if dErr := assignDefaultNumberPrefix(store, &comp, ""); dErr != nil {
+			if dErr := assignDefaultNumberPrefix(eng, &comp, ""); dErr != nil {
 				return dErr
 			}
 			infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, "")
@@ -1680,7 +1654,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if comp.NumberPrefix == "" {
 					comp.NumberPrefix = current.NumberPrefix
 				}
-				if dErr := assignDefaultNumberPrefix(store, &comp, id); dErr != nil {
+				if dErr := assignDefaultNumberPrefix(eng, &comp, id); dErr != nil {
 					return nil, dErr
 				}
 				infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)

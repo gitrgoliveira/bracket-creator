@@ -1010,13 +1010,15 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(rowNums).toEqual(['A1', 'A2', 'A3']);
   });
 
-  it('falls back to draw-order index when player.number is not set', () => {
+  it('shows no number when player.number is not set: no index substitute', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
     const ths = allHeaders(tree);
     const colHeaders = ths.filter(h => h.props?.className?.includes('league-matrix__col-head'));
-    // Column headers always show a visible label: the 1-based draw-order
-    // position index when the player has no assigned number.
-    expect(colHeaders.map(h => textContent(h))).toEqual(['1', '2', '3']);
+    // No fallback: the matrix never invents a number. Every competition has
+    // a prefix and the server composes a number for every roster entry, so a
+    // missing one is data to show as missing, not to paper over with the
+    // draw-order index this test used to pin.
+    expect(colHeaders.map(h => textContent(h))).toEqual(['', '', '']);
 
     const rowHeads = allCells(tree).filter(c => c.props?.className?.includes('league-matrix__row-head'));
     const rowNums = rowHeads.map(td => {
@@ -1024,9 +1026,9 @@ describe('LeagueMatrix (mp-f4xo)', () => {
       const numSpan = spans.find(s => s?.props?.className?.includes('league-matrix__num'));
       return textContent(numSpan);
     });
-    // The number span is now always rendered, mirroring the column index so
-    // row N and column N cross-reference the same player.
-    expect(rowNums).toEqual(['1', '2', '3']);
+    // The number span is still rendered (its slot keeps the row layout
+    // stable) but carries nothing, the same as the column header.
+    expect(rowNums).toEqual(['', '', '']);
   });
 
   // Regression: two participants share a name but have different dojos/ids.

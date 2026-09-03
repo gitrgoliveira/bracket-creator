@@ -301,7 +301,7 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if comp.NumberPrefix != "" {
 		pools, _ := store.LoadPools(comp.ID)
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
+		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools)
 	}
 	return players
 }

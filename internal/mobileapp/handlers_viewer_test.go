@@ -29,14 +29,23 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
-	t.Run("no-op when pools is empty and format is not playoffs", func(t *testing.T) {
+	t.Run("no pools and not playoffs: provisional numbers from participant order", func(t *testing.T) {
+		// Before the draw a mixed competition has no pools.csv, so the
+		// check-in desk's provisional number is composed HERE from
+		// registration order, by the same helper the draw uses; the SPA
+		// composes nothing (bc-pnum D1/R1). The draw's pools.csv numbers
+		// then replace these on the next read.
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
+			Players: []domain.Player{
+				{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"},
+				{ID: "p2", Name: "Suzuki", Dojo: "Dojo Suzuki"},
+			},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)
-		assert.Equal(t, "", comp.Players[0].Number)
+		assert.Equal(t, "K1", comp.Players[0].Number)
+		assert.Equal(t, "K2", comp.Players[1].Number)
 	})
 
 	t.Run("assigns sequential numbers for playoffs-only with no pools", func(t *testing.T) {
@@ -266,4 +275,52 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	assert.Equal(t, float64(1), match0["hansokuB"])
 	assert.NotContains(t, match0, "scoreA")
 	assert.NotContains(t, match0, "scoreB")
+}
+
+// TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw pins the payload
+// the operator console's check-in list reads: before a draw exists the
+// competitors carry PROVISIONAL registration-order numbers under the prefix,
+// composed server-side; once pools.csv exists its numbers replace them. The
+// revert this pins is the old early return for non-playoffs formats with no
+// pools, which left the SPA composing the provisional number itself.
+func TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-numbers"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Viewer Numbers", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
+		NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+
+	numbers := func(t *testing.T) []string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		var body struct {
+			Config state.Competition `json:"config"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		out := make([]string, 0, len(body.Config.Players))
+		for _, p := range body.Config.Players {
+			out = append(out, p.Number)
+		}
+		return out
+	}
+
+	assert.Equal(t, []string{"K1", "K2"}, numbers(t), "pre-draw: provisional registration-order numbers")
+
+	// The draw puts Bob first: pools.csv wins over registration order.
+	require.NoError(t, store.SavePools(cid, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob", Number: "K1"},
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice", Number: "K2"},
+	}}}))
+	assert.Equal(t, []string{"K2", "K1"}, numbers(t), "post-draw: pools.csv numbers")
 }

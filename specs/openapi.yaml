@@ -984,10 +984,11 @@ paths:
         Read-only and side-effect free: it previews a value, it does not
         assign or store one. The create form calls it as the operator types
         the name, with `exclude` omitted (the competition doesn't exist yet,
-        so nothing to exclude from the taken set). The settings form calls it
-        for a legacy competition whose stored `numberPrefix` is still empty,
-        passing its own `id` as `exclude` so its own (empty) prefix can't
-        collide with itself.
+        so nothing to exclude from the taken set). `exclude` names a
+        competition whose own prefix must not count as taken; no client uses
+        it today, because competitions saved by an earlier version without a
+        prefix are migrated when the app starts, so the settings form never
+        has an empty value to preview for.
       security:
         - TournamentPassword: []
       parameters:
@@ -4150,7 +4151,14 @@ components:
           description: Seed rank (0 = unseeded).
         number:
           type: string
-          description: The competitor's "tag"; assigned number = prefix + sequence (e.g. "K1"). Only present when numberPrefix is set.
+          description: |
+            The competitor's "tag": prefix + sequence (e.g. "K1"). Once a draw
+            exists it is the number pools.csv holds, in draw order. Before the
+            draw (and for playoffs-only competitions, which never write
+            pools.csv) it is composed from participant order under the
+            competition's prefix, so a competition in setup shows a
+            PROVISIONAL number that the draw then replaces. Every competition
+            has a prefix, so this is always present when the roster is.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.

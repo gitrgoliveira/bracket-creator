@@ -72,7 +72,6 @@ const STUBBED_GLOBALS = {
     // mount whenever the fixture's numberPrefix is empty. Resolving "" (not
     // rejecting) keeps that effect a no-op for every fixture here, none of
     // which is about numbering.
-    getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
   },
 };
 
@@ -355,41 +354,6 @@ describe('AdminSettings Save buttons (bc-draw R9 gap 1)', () => {
     const saves = saveButtons(container);
     expect(saves).toHaveLength(2);
     saves.forEach((b) => expect(b.disabled).toBe(true));
-  });
-});
-
-// bc-pnum F5(c): AdminSettings pre-fills the number-prefix field from the
-// server's derivation ONLY for a legacy competition (c.numberPrefix empty on
-// disk, G7). A competition that already has a stored prefix must never have
-// this effect fire at all: firing on mount for every competition would
-// preview a value the server would never actually assign (the derivation
-// only runs when the stored field is truly empty), and the extra fetch on
-// every settings-tab mount would be pure waste.
-describe('AdminSettings number-prefix pre-fill (bc-pnum F5c)', () => {
-  afterEach(() => {
-    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: '' });
-  });
-
-  it('fires and pre-fills when the stored prefix is empty (legacy competition)', async () => {
-    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'M' });
-    const comp = makeCompetition({ numberPrefix: '' });
-    const { container } = await mountSection('settings', { comp });
-
-    expect(window.API.getNumberPrefixDefault).toHaveBeenCalled();
-    const input = container.querySelector('input[placeholder="e.g. A"]');
-    expect(input).not.toBeNull();
-    await waitFor(() => expect(input.value).toBe('M'));
-  });
-
-  it('does not fire when a prefix is already stored', async () => {
-    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'Z' });
-    const comp = makeCompetition({ numberPrefix: 'K' });
-    const { container } = await mountSection('settings', { comp });
-
-    expect(window.API.getNumberPrefixDefault).not.toHaveBeenCalled();
-    const input = container.querySelector('input[placeholder="e.g. A"]');
-    expect(input).not.toBeNull();
-    expect(input.value).toBe('K');
   });
 });
 

@@ -505,8 +505,8 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
         <thead>
           <tr>
             <th className="league-matrix__corner"></th>
-            {players.map((p, i) => (
-              <th key={pkey(p)} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
+            {players.map((p) => (
+              <th key={pkey(p)} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || ""}</th>
             ))}
           </tr>
         </thead>
@@ -514,7 +514,7 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
           {players.map((rowPlayer, ri) => (
             <tr key={pkey(rowPlayer)} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
               <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
-                <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
+                <span className="league-matrix__num">{rowPlayer.number || ""}</span>
                 <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {

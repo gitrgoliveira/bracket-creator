@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -90,4 +91,97 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 		return nil
 	})
 	return changed, err
+}
+
+// TakenNumberPrefixes returns the number prefix of every competition except
+// excludeID, the set helper.DefaultNumberPrefix avoids. It takes no lock of
+// its own: callers that must not race a concurrent create hold
+// Store.WithCompetitionRenameLock around it, as the mobileapp handlers and
+// MigrateNumberPrefixes do.
+func (e *Engine) TakenNumberPrefixes(excludeID string) ([]string, error) {
+	ids, err := e.store.ListCompetitions()
+	if err != nil {
+		return nil, fmt.Errorf("list competitions: %w", err)
+	}
+	taken := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == excludeID {
+			continue
+		}
+		comp, err := e.store.LoadCompetition(id)
+		if err != nil {
+			return nil, fmt.Errorf("load competition %s: %w", id, err)
+		}
+		if comp != nil {
+			taken = append(taken, comp.NumberPrefix)
+		}
+	}
+	return taken, nil
+}
+
+// DefaultNumberPrefixFor is the ONE server-side derivation of a competition's
+// default number prefix (R6): helper.DefaultNumberPrefix over the prefixes
+// every other competition holds. Create, settings, import, the
+// start/generate-draw pre-flight, the preview endpoint and the load-time
+// migration all resolve through here, so what any of them assigns is what the
+// others would have.
+func (e *Engine) DefaultNumberPrefixFor(name, excludeID string) (string, error) {
+	taken, err := e.TakenNumberPrefixes(excludeID)
+	if err != nil {
+		return "", err
+	}
+	return helper.DefaultNumberPrefix(name, taken), nil
+}
+
+// MigrateNumberPrefixes brings a tournament-data folder written before the
+// never-empty-prefix rule up to it at LOAD time: every competition whose
+// stored prefix is empty is given the derived default (unique against the
+// rest, including the ones assigned earlier in this same pass) and its
+// pools.csv is numbered under it. The mobile-app command runs it once at
+// startup, after the store's own WAL replay and before serving, so no request
+// ever meets a legacy competition (operator ruling 2026-09-03: migrate on
+// load, not on the next save). Returns the ids it migrated, in the store's
+// listing order; a second run finds nothing and returns none.
+//
+// Holds the competition-rename lock for the whole pass for the same reason
+// the create and settings handlers hold it around their derivation: the taken
+// set must not move under it. At startup nothing else is running, but the
+// lock costs nothing and keeps the invariant local to this function.
+func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
+	var migrated []string
+	err := e.store.WithCompetitionRenameLock(func() error {
+		ids, err := e.store.ListCompetitions()
+		if err != nil {
+			return fmt.Errorf("list competitions: %w", err)
+		}
+		var taken []string
+		var pending []*state.Competition
+		for _, id := range ids {
+			comp, err := e.store.LoadCompetition(id)
+			if err != nil {
+				return fmt.Errorf("load competition %s: %w", id, err)
+			}
+			if comp == nil {
+				continue
+			}
+			if strings.TrimSpace(comp.NumberPrefix) == "" {
+				pending = append(pending, comp)
+				continue
+			}
+			taken = append(taken, comp.NumberPrefix)
+		}
+		for _, comp := range pending {
+			comp.NumberPrefix = helper.DefaultNumberPrefix(comp.Name, taken)
+			taken = append(taken, comp.NumberPrefix)
+			if err := e.store.SaveCompetition(comp); err != nil {
+				return fmt.Errorf("migrate %s: save competition: %w", comp.ID, err)
+			}
+			if _, err := e.RenumberCompetitors(comp.ID); err != nil {
+				return fmt.Errorf("migrate %s: %w", comp.ID, err)
+			}
+			migrated = append(migrated, comp.ID)
+		}
+		return nil
+	})
+	return migrated, err
 }

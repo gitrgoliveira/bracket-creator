@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"runtime"
 	"testing"
@@ -182,4 +183,51 @@ func TestRenumberCompetitors_NotFound(t *testing.T) {
 	assert.False(t, changed, "a not-found error must report changed=false, not a partial success")
 	var nfe *NotFoundError
 	assert.ErrorAs(t, err, &nfe, "unknown compID must return NotFoundError")
+}
+
+// TestMigrateNumberPrefixes pins the load-time migration: competitions saved
+// without a prefix get the derived default, unique against every other
+// competition INCLUDING the ones assigned in the same pass, their pools.csv
+// is numbered under it, prefixed competitions are untouched, and a second run
+// is a no-op.
+func TestMigrateNumberPrefixes(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := New(store)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "kendo", Name: "Kendo", Format: state.CompFormatMixed, NumberPrefix: "K", Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePools("kendo", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{Name: "A", Dojo: "D", Number: "K1"}}}}))
+	// Two legacy competitions whose initials both start with K: the first
+	// must avoid "K" (taken by kendo) and the second must avoid what the
+	// first was just given.
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "kendo-open", Name: "Kendo Open", Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePools("kendo-open", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{Name: "B", Dojo: "D"}, {Name: "C", Dojo: "D"}}}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "kendo-open-2", Name: "Kendo Open", Format: state.CompFormatMixed, Status: state.CompStatusSetup}))
+
+	migrated, err := eng.MigrateNumberPrefixes()
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"kendo-open", "kendo-open-2"}, migrated)
+
+	untouched, err := store.LoadCompetition("kendo")
+	require.NoError(t, err)
+	assert.Equal(t, "K", untouched.NumberPrefix)
+	first, err := store.LoadCompetition("kendo-open")
+	require.NoError(t, err)
+	second, err := store.LoadCompetition("kendo-open-2")
+	require.NoError(t, err)
+	assert.NotEmpty(t, first.NumberPrefix)
+	assert.NotEmpty(t, second.NumberPrefix)
+	assert.NotEqual(t, "K", first.NumberPrefix)
+	assert.NotEqual(t, first.NumberPrefix, second.NumberPrefix, "the second assignment must avoid the first")
+
+	pools, err := store.LoadPools("kendo-open")
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	for i, p := range pools[0].Players {
+		assert.Equalf(t, fmt.Sprintf("%s%d", first.NumberPrefix, i+1), p.Number, "pools.csv must be numbered by the migration")
+	}
+
+	again, err := eng.MigrateNumberPrefixes()
+	require.NoError(t, err)
+	assert.Empty(t, again, "a second run finds nothing to migrate")
 }

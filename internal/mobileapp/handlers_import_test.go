@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -966,7 +967,7 @@ func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
 
 	t.Run("omitted courts inherit the tournament's courts", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-no-courts", Name: "No Courts", Date: "11-06-2026"}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-no-courts")
 		require.NoError(t, err)
@@ -975,7 +976,7 @@ func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
 
 	t.Run("explicit manifest courts are preserved", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-one-court", Name: "One Court", Date: "11-06-2026", Courts: []string{"B"}}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-one-court")
 		require.NoError(t, err)
@@ -1000,7 +1001,7 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 
 	t.Run("a manifest court the tournament does not have is refused", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-orphan", Name: "Orphan", Date: "11-06-2026", Courts: []string{"C"}}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.NotEmpty(t, res.Error, "a competition on shiaijo C cannot run at a venue with only A and B")
 		assert.Contains(t, res.Error, "courts:")
 		// Refused means NOT written: a row that fails validation must leave no
@@ -1014,7 +1015,7 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 
 	t.Run("a subset of the tournament's shiaijo still imports", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-subset", Name: "Subset", Date: "11-06-2026", Courts: []string{"B"}}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-subset")
 		require.NoError(t, err)
@@ -1036,7 +1037,7 @@ func TestImportCompetition_AssignsDefaultNumberPrefix(t *testing.T) {
 
 	t.Run("omitted number_prefix is derived from the name", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-kendo-open", Name: "Kendo Open", Date: "11-06-2026"}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-kendo-open")
 		require.NoError(t, err)
@@ -1048,7 +1049,7 @@ func TestImportCompetition_AssignsDefaultNumberPrefix(t *testing.T) {
 		// "K" is already taken by the competition imported above, so this
 		// name's bare initial collides and DefaultNumberPrefix escalates.
 		entry := ImportManifestComp{ID: "imp-kendo-open-2", Name: "Kendo Open 2", Date: "11-06-2026"}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-kendo-open-2")
 		require.NoError(t, err)
@@ -1058,7 +1059,7 @@ func TestImportCompetition_AssignsDefaultNumberPrefix(t *testing.T) {
 
 	t.Run("an explicit number_prefix in the manifest is preserved", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-explicit-prefix", Name: "Explicit Prefix", Date: "11-06-2026", NumberPrefix: "Z"}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-explicit-prefix")
 		require.NoError(t, err)
@@ -1094,7 +1095,7 @@ func TestImportCompetition_RejectsSeedsOffRoster(t *testing.T) {
 			Participants: "participants.csv",
 			Seeds:        "seeds.csv",
 		}
-		res := importCompetition(store, entry, files)
+		res := importCompetition(store, engine.New(store), entry, files)
 		require.NotEmpty(t, res.Error, "a seed naming Alice under the wrong dojo must not import cleanly")
 		assert.Contains(t, res.Error, "not on this competition's roster")
 		assert.Contains(t, res.Error, `"Alice" (rank 1)`)
@@ -1120,7 +1121,7 @@ func TestImportCompetition_RejectsSeedsOffRoster(t *testing.T) {
 			Participants: "participants.csv",
 			Seeds:        "seeds.csv",
 		}
-		res := importCompetition(store, entry, okFiles)
+		res := importCompetition(store, engine.New(store), entry, okFiles)
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		assert.Equal(t, 2, res.SeedCount)
 		assert.Equal(t, 2, res.ParticipantCount)

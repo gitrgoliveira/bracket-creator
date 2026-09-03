@@ -63,7 +63,6 @@ function defaultStubbedGlobals() {
       // mount whenever the fixture's numberPrefix is empty. Resolving "" (not
       // rejecting) keeps that effect a no-op for every existing fixture here,
       // none of which is about numbering.
-      getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
     },
   };
 }

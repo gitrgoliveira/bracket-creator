@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
@@ -208,11 +209,11 @@ func TestImportCompetitionInheritedCourtsMatchExplicit(t *testing.T) {
 		t.Run(fmt.Sprintf("venue=%d", venue), func(t *testing.T) {
 			store := newStore(t, venue)
 
-			explicit := importCompetition(store, ImportManifestComp{
+			explicit := importCompetition(store, engine.New(store), ImportManifestComp{
 				ID: "imp-explicit", Name: "Explicit", Date: "11-06-2026",
 				Format: "mixed", Courts: shiaijoLabels(venue),
 			}, map[string][]byte{})
-			inherited := importCompetition(store, ImportManifestComp{
+			inherited := importCompetition(store, engine.New(store), ImportManifestComp{
 				ID: "imp-inherited", Name: "Inherited", Date: "11-06-2026",
 				Format: "mixed",
 			}, map[string][]byte{})
@@ -233,7 +234,7 @@ func TestImportCompetitionInheritedCourtsMatchExplicit(t *testing.T) {
 
 	t.Run("a legal venue count is still inherited", func(t *testing.T) {
 		store := newStore(t, 2)
-		res := importCompetition(store, ImportManifestComp{
+		res := importCompetition(store, engine.New(store), ImportManifestComp{
 			ID: "imp-ok", Name: "OK", Date: "11-06-2026", Format: "mixed",
 		}, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
@@ -246,7 +247,7 @@ func TestImportCompetitionInheritedCourtsMatchExplicit(t *testing.T) {
 		// The format scope survives the reordering: a league has no bracket
 		// blocks to merge, so it may inherit any venue.
 		store := newStore(t, 3)
-		res := importCompetition(store, ImportManifestComp{
+		res := importCompetition(store, engine.New(store), ImportManifestComp{
 			ID: "imp-league", Name: "League", Date: "11-06-2026", Format: "league",
 		}, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
@@ -268,7 +269,7 @@ func TestImportCompetitionRejectsIllegalShiaijoCount(t *testing.T) {
 				Name: "T", Date: "11-06-2026", Courts: shiaijoLabels(helper.MaxCourts),
 			}))
 
-			res := importCompetition(store, ImportManifestComp{
+			res := importCompetition(store, engine.New(store), ImportManifestComp{
 				ID: "imp", Name: "Imp", Date: "11-06-2026",
 				Format: "mixed", Courts: shiaijoLabels(n),
 			}, map[string][]byte{})

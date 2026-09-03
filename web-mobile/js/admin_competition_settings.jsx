@@ -624,35 +624,6 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     if (clashWarnings) setClashWarnings(null);
   };
 
-  // bc-pnum G7/R6: a legacy competition (numberPrefix empty on disk, drawn
-  // before this rule existed) pre-fills the settings field with the SAME
-  // value assignDefaultNumberPrefix would pick on its next save, fetched
-  // from GET number-prefix-default (R9) -- nothing is derived in JS. Routes
-  // through `update` (not a bare setLocal) so the pre-filled value is added
-  // to editedFieldsRef: without that, the sync effect above would overwrite
-  // it back to the still-empty c.numberPrefix the next time any OTHER field
-  // changes via SSE. Marking it dirty is correct, not incidental: relative
-  // to what's actually stored ("") the form now holds a real unsaved value,
-  // and Save is what persists it.
-  //
-  // numberPrefixTouchedRef is the same "never clobber what the operator
-  // typed" latch item 8 uses on the create form: the numberPrefix
-  // TextField's onChange sets it before calling update, so a deliberate
-  // edit (including clearing the field back to empty) permanently stops
-  // this effect from re-applying its own suggestion.
-  const numberPrefixTouchedRef = useRefA(false);
-  useEffectA(() => {
-    if (c.numberPrefix || numberPrefixTouchedRef.current) return;
-    const controller = new AbortController();
-    window.API.getNumberPrefixDefault(c.name, c.id, password, controller.signal)
-      .then((res) => {
-        if (controller.signal.aborted || numberPrefixTouchedRef.current) return;
-        if (res && res.numberPrefix) update("numberPrefix", res.numberPrefix);
-      })
-      .catch(() => {});
-    return () => { controller.abort(); };
-  }, [c.id, c.numberPrefix, c.name, password]);
-
   // The Format and Kind pills below call `update("format", ...)` /
   // `update("kind", ...)` directly -- staging ONLY the field itself, never
   // re-normalizing on the tap. See normalizeConfigForFormat's and
@@ -1509,7 +1480,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           not blank: a blank is inherited as the stored prefix on save (G2a),
           so it renumbers nothing and must not threaten a reprint. */}
       <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
-        value={local.numberPrefix} onChange={(raw) => { numberPrefixTouchedRef.current = true; update("numberPrefix", raw.substring(0, 3)); }}
+        value={local.numberPrefix} onChange={(raw) => update("numberPrefix", raw.substring(0, 3))}
         hint={lockedAfterDraw && (local.numberPrefix || "").trim() !== "" && (local.numberPrefix || "").trim() !== (c.numberPrefix || "").trim()
           ? `${HINT_NUMBER_PREFIX} Every competitor will be renumbered and any tags already printed must be reprinted.`
           : HINT_NUMBER_PREFIX}

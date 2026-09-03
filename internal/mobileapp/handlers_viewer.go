@@ -15,33 +15,35 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// mergePoolNumbersIntoPlayersSlice, copy the assigned competitor Number
-// (e.g. "K1") from pools.csv onto the given players slice in place.
-// participants.csv does NOT persist Number, it is assigned at draw time by
-// AssignPlayerNumbers and only persisted into pools.csv. Without this merge
-// the viewer API never carries the numberPrefix-derived numbers, so
-// TV/overlay/viewer surfaces can't render them (mp-13y). No-op when
-// numberPrefix is empty or either slice is empty. Match by id first
-// (HasParticipantIDs case), fall back to name.
+// mergePoolNumbersIntoPlayersSlice fills each player's Number (e.g. "K1") in
+// place. participants.csv never persists Number: the draw assigns it and
+// persists it only in pools.csv, so every payload that shows a number derives
+// it here at read time (mp-13y), and the operator console reads these same
+// public payloads for its check-in list.
 //
-// For playoffs-only competitions (format == "playoffs") there is no pools.csv
-// and nothing else composes a number (generatePlayoffs builds its tree from
-// names alone), so the number is composed HERE, at read time: sequential in
-// participant order under the competition's current prefix, through the one
-// composition helper (G8).
-func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
+// Two sources, one rule:
+//   - a pools.csv exists: the number is the one it holds, matched by id first
+//     (HasParticipantIDs case) and by name as the legacy fallback for rosters
+//     drawn before ids existed;
+//   - no pools.csv exists: the number is composed from participant order under
+//     the competition's prefix, through the same helper the draw itself uses.
+//     For a playoffs-only competition that IS the competitor's number (its
+//     draw never writes pools.csv); for any other format it is the
+//     PROVISIONAL number the check-in desk calls before the draw runs, which
+//     the draw then replaces (the admin roster styles it as provisional while
+//     the competition is still in setup). Nothing composes a number anywhere
+//     else (bc-pnum D1/R1).
+//
+// No-op when numberPrefix is empty or the roster is empty.
+func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool) {
 	if numberPrefix == "" || len(players) == 0 {
 		return
 	}
 	if len(pools) == 0 {
-		if format != state.CompFormatPlayoffs {
-			return
-		}
-		// Playoffs-only: nothing on disk carries a number, so derive it from
-		// participant order under the current prefix, through the one
-		// composition helper (helper.Player is an alias of domain.Player). A
-		// prefix change is therefore reflected on the next read with no file
-		// write.
+		// Nothing on disk carries a number: compose it from participant order
+		// under the current prefix, through the one composition helper
+		// (helper.Player is an alias of domain.Player). A prefix change is
+		// therefore reflected on the next read with no file write.
 		helper.AssignPlayerNumbers(players, numberPrefix, 1)
 		return
 	}
@@ -79,7 +81,7 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.Format)
+	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools)
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the

@@ -456,27 +456,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
-  // The draw assigns the final, pool-interleaved numbers (player.number);
-  // before that there is none. We surface a stable registration-order number
-  // (numberPrefix + position in c.players) so operators can call competitors
-  // by number during check-in. Keyed off the unfiltered roster so the number
-  // doesn't jump when the list is searched/sorted. Rendered as provisional
-  // (muted, dotted) since the final numbers may differ after the draw.
-  const provisionalNumberById = useMemoA(() => {
-    // Null-prototype object: keys are user-controlled (window.checkinPid(p)), so
-    // a participant named "__proto__" or "constructor" against a plain `{}` map
-    // could pollute the prototype chain or return inherited values on lookup.
-    // `Object.create(null)` removes both risks and keeps the `map[key]` /
-    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
-    const map = Object.create(null);
-    if (c.numberPrefix) {
-      (c.players || []).forEach((p, i) => {
-        map[window.checkinPid(p)] = `${c.numberPrefix}${i + 1}`;
-      });
-    }
-    return map;
-  }, [c.players, c.numberPrefix]);
+  // Competitor numbers (p.number) come from the server's admin payload
+  // (attachCompetitorNumbers): the pools.csv numbers once a draw exists, and
+  // before that a PROVISIONAL registration-order number under the
+  // competition's prefix, composed by the same helper the draw uses. Nothing
+  // is composed here (bc-pnum D1/R1); this file only decides how to STYLE
+  // the number, provisional until the draw runs (see isSetup below).
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
@@ -1140,9 +1125,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
                           {p.number ? (
-                            <span className="num-prefix">{p.number}</span>
-                          ) : provisionalNumberById[window.checkinPid(p)] ? (
-                            <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
+                            isSetup ? (
+                              <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{p.number}</span>
+                            ) : (
+                              <span className="num-prefix">{p.number}</span>
+                            )
                           ) : null}
                           {p.name}
                         </div>

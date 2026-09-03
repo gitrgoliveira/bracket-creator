@@ -342,6 +342,42 @@ describe('AdminCreateCompetition number-prefix pre-fill latch (bc-pnum F5c)', ()
     }
   });
 
+  it('debounces the prefix fetch: one call per pause in typing, not one per keystroke', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    const getNumberPrefixDefault = vi.fn(() => Promise.resolve({ numberPrefix: 'I' }));
+    window.API.getNumberPrefixDefault = getNumberPrefixDefault;
+    try {
+      // Mount on real timers (the harness awaits real async work), let the
+      // mount's own debounced fetch land, THEN switch to fake timers so the
+      // keystrokes below are driven deterministically.
+      const { container } = await mountForm();
+      await act(async () => {
+        await new Promise((resolve) => { setTimeout(resolve, 400); });
+      });
+      const afterMount = getNumberPrefixDefault.mock.calls.length;
+      expect(afterMount).toBe(1);
+
+      vi.useFakeTimers();
+      try {
+        for (const value of ['S', 'Sp', 'Spr', 'Spri', 'Sprin']) {
+          await act(async () => { fireEvent.change(nameField(container), { target: { value } }); });
+          await act(async () => { vi.advanceTimersByTime(50); });
+        }
+        // Five keystrokes 50 ms apart: still inside one 250 ms window, so no
+        // fetch has fired yet. The revert this pins is dropping the
+        // setTimeout and fetching on every effect run (six calls here).
+        expect(getNumberPrefixDefault.mock.calls.length).toBe(afterMount);
+        await act(async () => { vi.advanceTimersByTime(300); });
+        expect(getNumberPrefixDefault.mock.calls.length).toBe(afterMount + 1);
+        expect(getNumberPrefixDefault.mock.calls[afterMount][0]).toBe('Sprin');
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+
   it('a typed prefix survives a later name change', async () => {
     const original = window.API.getNumberPrefixDefault;
     // Returns a DIFFERENT value once the name becomes "Spring Open", so a

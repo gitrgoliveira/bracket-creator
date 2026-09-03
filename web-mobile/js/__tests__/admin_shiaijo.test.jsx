@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, swissRoundLabel, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
+import { swissRoundLabel } from '../pool_ids.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
 // carries an IV (Individual Victories) label, since a raw figure could read as

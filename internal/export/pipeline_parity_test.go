@@ -235,6 +235,91 @@ func TestExportPipelineSheetParity(t *testing.T) {
 	}
 }
 
+// TestExportPipeline_BronzeOnlyFallbackAppearsInBothBuilders pins mp-yuy8
+// criterion 5's decision: the narrow bronze-only fallback -- a persisted
+// bracket that already carries a third-place bout, but whose knockout draw
+// cannot be re-derived at export time -- now fires for BOTH workbook
+// builders (engine.RenderCompetitionWorkbook, shared by
+// Engine.ExportCompetitionXlsx and BuildResultsWorkbook), not just the
+// blank-template export it used to be exclusive to.
+//
+// Reachable through a real write path, not just a hand-edited bracket.json:
+// comp.ExtraQualifiers carries no `started` guard in PUT
+// /api/competitions/:id (internal/mobileapp/handlers_competition.go) --
+// unlike its Naginata/Engi/Format/Kind/TeamMatchType siblings, which all
+// reject a change once the competition has started, `current.ExtraQualifiers
+// = comp.ExtraQualifiers` merges unconditionally past draw-ready. An operator
+// can therefore flip a Naginata competition's ExtraQualifiers to a value
+// buildPoolFedDraw marks "out of scope" for the CURRENT pool shape after the
+// original bracket -- bronze block included, since Naginata itself IS locked
+// post-start -- was already built. This fixture hand-constructs the resulting
+// shape directly (no pools, no participants, a bracket with an empty first
+// round and a ThirdPlaceMatch) rather than replaying the PUT handler:
+// EliminationDraw's re-derivation returns nil (poolDraw: no pools;
+// playoffLeaves: PlayoffLeavesFromBracket finds no rounds and
+// PlayoffFinalsFromParticipants finds no participants) while
+// bracket.ThirdPlaceMatch is still on disk from the original draw -- the
+// exact "draw == nil, hasBronze == true" state the fallback exists for.
+func TestExportPipeline_BronzeOnlyFallbackAppearsInBothBuilders(t *testing.T) {
+	t.Parallel()
+	dir, err := os.MkdirTemp("", "export-pipeline-bronze-fallback-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := engine.New(store)
+
+	compID := "bronze-fallback-comp"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Bronze Fallback Comp",
+		Kind:     "individual",
+		Format:   state.CompFormatPlayoffs,
+		Naginata: true,
+		Courts:   []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{}))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{},
+		ThirdPlaceMatch: &state.BracketMatch{
+			ID:     "m-bronze",
+			Status: state.MatchStatusScheduled,
+		},
+	}))
+
+	engineBytes, err := eng.ExportCompetitionXlsx(compID)
+	require.NoError(t, err)
+	resultsBytes, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{"blank-template export", engineBytes},
+		{"results export", resultsBytes},
+	} {
+		f, err := excelize.OpenReader(bytes.NewReader(tc.data))
+		require.NoError(t, err)
+		rows, err := f.GetRows(helper.SheetEliminationMatches)
+		require.NoError(t, err)
+		_ = f.Close()
+
+		found := false
+		for _, row := range rows {
+			for _, cell := range row {
+				if cell == helper.ThirdPlaceLabel {
+					found = true
+				}
+			}
+		}
+		assert.Truef(t, found, "%s: Elimination Matches sheet must carry a %q header from the bronze-only fallback",
+			tc.name, helper.ThirdPlaceLabel)
+	}
+}
+
 // sheetList opens xlsx bytes and returns its sheet names.
 func sheetList(t *testing.T, data []byte) []string {
 	t.Helper()

@@ -2126,6 +2126,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			if players, lerr := store.LoadParticipantsOpt(id, updated.EffectiveWithZekkenName(), loadOpts); lerr == nil {
 				updated.Players = players
+				// The console merges this response over its list entry, so the
+				// provisional numbers must move with the roster they index.
+				updated.ProvisionalNumbers = provisionalCompetitorNumbers(updated)
 			} else {
 				fmt.Printf("Warning: PUT /api/competitions/%s, failed to re-load participants for roster-PUT response (falling back to request body): %v\n", id, lerr)
 				updated.Players = comp.Players // fallback: echo body
@@ -2137,6 +2140,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			// than nil (which JSON-encodes as null).
 			if players, lerr := store.LoadParticipants(id, updated.EffectiveWithZekkenName()); lerr == nil {
 				updated.Players = players
+				// The console merges this response over its list entry, so the
+				// provisional numbers must move with the roster they index.
+				updated.ProvisionalNumbers = provisionalCompetitorNumbers(updated)
 			} else {
 				fmt.Printf("Warning: failed to load participants for settings-PUT response: %v\n", lerr)
 				updated.Players = []domain.Player{}

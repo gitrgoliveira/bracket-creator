@@ -119,9 +119,11 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	// conflict. That is the right place for this to surface: this function's
 	// contract is a best-effort SUGGESTION, not a uniqueness guarantee. The
 	// one caller that does not re-validate, the load-time migration
-	// (engine.MigrateNumberPrefixes), derives over the COMPLETE taken set
-	// including its own in-pass assignments, so it can only collide once a
-	// tournament holds a thousand same-initial competitions.
+	// (engine.MigrateNumberPrefixes), derives over the taken set of every
+	// competition it could READ, including its own in-pass assignments; a
+	// competition it had to skip keeps a prefix that set does not know, so a
+	// collision with it is possible and surfaces as that competition's next
+	// settings save being refused, which names the conflict.
 	return lastCandidate
 }
 

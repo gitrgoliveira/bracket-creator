@@ -378,6 +378,35 @@ func TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers(t *testing.T) {
 			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable pools.csv, got %q", p.Name, p.Number)
 		}
 		assert.Empty(t, comp.ProvisionalNumbers, "a drawn competition never carries provisional numbers")
+		assert.Contains(t, string(w.Body.Bytes()), `"file":"pools.csv"`, "the unreadable file must be named in the item's dataIssues, not only in the server log")
 	}
 	assert.True(t, found, "the competition must still be listed")
+}
+
+// TestProvisionalCompetitorNumbers pins where the separate provisional list
+// exists: only for a competition a draw can still be generated from, with a
+// prefix and a roster, and never for Swiss, whose draw assigns no number that
+// could replace it.
+func TestProvisionalCompetitorNumbers(t *testing.T) {
+	roster := []domain.Player{{ID: "p1", Name: "A", Dojo: "D"}, {ID: "p2", Name: "B", Dojo: "D"}}
+	for _, tc := range []struct {
+		name string
+		comp *state.Competition
+		want []string
+	}{
+		{"setup mixed", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusSetup, NumberPrefix: "K", Players: roster}, []string{"K1", "K2"}},
+		{"legacy empty status", &state.Competition{Format: state.CompFormatMixed, Status: "", NumberPrefix: "K", Players: roster}, []string{"K1", "K2"}},
+		{"draw-ready", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusDrawReady, NumberPrefix: "K", Players: roster}, nil},
+		{"running", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusPools, NumberPrefix: "K", Players: roster}, nil},
+		{"no prefix", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusSetup, Players: roster}, nil},
+		{"swiss", &state.Competition{Format: state.CompFormatSwiss, Status: state.CompStatusSetup, NumberPrefix: "S", Players: roster}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := provisionalCompetitorNumbers(tc.comp)
+			assert.Equal(t, tc.want, got)
+			for _, p := range tc.comp.Players {
+				assert.Empty(t, p.Number, "Player.Number itself must stay untouched")
+			}
+		})
+	}
 }

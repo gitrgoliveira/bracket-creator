@@ -88,9 +88,12 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 // public surfaces show only assigned numbers, the operator's roster shows
 // these styled provisional until the draw replaces them. Nil in every other
 // status, so a drawn competition, and one whose draw is on disk but would not
-// parse, never carries them.
+// parse, never carries them. Nor does a Swiss competition: its draw assigns
+// no number at all (it never writes pools.csv), so a "provisional" number
+// that nothing ever replaces would be a promise the format cannot keep; Swiss
+// numbering is its own open question (bc-swnm).
 func provisionalCompetitorNumbers(comp *state.Competition) []string {
-	if comp == nil || comp.NumberPrefix == "" || len(comp.Players) == 0 || !engine.CanGenerateDraw(comp.Status) {
+	if comp == nil || comp.NumberPrefix == "" || len(comp.Players) == 0 || !engine.CanGenerateDraw(comp.Status) || comp.Format == state.CompFormatSwiss {
 		return nil
 	}
 	numbered := make([]domain.Player, len(comp.Players))
@@ -232,11 +235,15 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	comp.Players = players
 	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
 	// pools.csv read entirely when no prefix is configured (the common case).
+	var poolsErr error
 	if comp.NumberPrefix != "" {
-		pools, poolsErr := store.LoadPools(compID)
+		var pools []helper.Pool
+		pools, poolsErr = store.LoadPools(compID)
 		if poolsErr != nil {
 			// Reported, not merged: an unreadable pools.csv must show as
-			// MISSING numbers, never as composed ones (D1).
+			// MISSING numbers, never as composed ones (D1). It also joins the
+			// payload's dataIssues below, so the operator console names the
+			// file instead of showing every number gone with no explanation.
 			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
 		} else {
 			mergePoolNumbersIntoPlayers(comp, pools)
@@ -275,7 +282,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// off (see the comment above the participant load), which is why it is the
 	// right place for it despite the endpoint being public: the audience gate
 	// is at render time, and the detail is parser syntax, never competitor data.
-	if issues := dataIssuesFrom(pmErr, brErr); len(issues) > 0 {
+	if issues := dataIssuesFrom(pmErr, brErr, poolsErr); len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
 	return payload

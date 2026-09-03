@@ -2321,6 +2321,41 @@ func TestPUTCompetition_HealOnlyRenumberBroadcasts(t *testing.T) {
 	}
 }
 
+// TestPUTCompetition_RosterResponseCarriesProvisionalNumbers pins that a
+// roster save's response carries provisionalNumbers alongside the fresh
+// players: the console merges that response over its list entry, and a
+// response with players but no numbers would leave the old array misaligned
+// with the new rows (the roster then shows no provisional numbers at all
+// until the next fetch, by the SPA's own length guard).
+func TestPUTCompetition_RosterResponseCarriesProvisionalNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "roster-provisional"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Roster Provisional", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup, NumberPrefix: "K",
+	}))
+	body, _ := json.Marshal(state.Competition{
+		ID: cid, Name: "Roster Provisional",
+		Players: []domain.Player{
+			{ID: "p1-uuid", Name: "Alice", Dojo: "Dojo Alice"},
+			{ID: "p2-uuid", Name: "Bob", Dojo: "Dojo Bob"},
+			{ID: "p3-uuid", Name: "Cara", Dojo: "Dojo Cara"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp state.Competition
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Players, 3)
+	assert.Equal(t, []string{"K1", "K2", "K3"}, resp.ProvisionalNumbers, "the response must carry numbers aligned with the roster it returns")
+}
+
 // TestCreateCompetitionEngiTeamExclusion pins Copilot #326: engi (individual
 // PAIR paradigm) is mutually exclusive with team competitions. The admin UI
 // hides the Engi toggle unless kind=individual, but the server must reject the

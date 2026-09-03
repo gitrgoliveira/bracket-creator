@@ -100,7 +100,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
 
   const tournament = t || (c ? { competitions: [c] } : { competitions: [] });
   const allMatches = useMemoA(
-    () => tournament.competitions.flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
+    () => (tournament.competitions || []).flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
     [tournament]
   );
   // Resolved against allMatches, NOT the filtered list: a match that completes

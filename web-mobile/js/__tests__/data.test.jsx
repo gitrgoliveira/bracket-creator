@@ -3,6 +3,7 @@ import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
   buildPools, computeStandings, parseParticipantLines
 } from '../data.jsx';
+import { provisionalNumberMap } from '../data.jsx';
 
 describe('Data Utils', () => {
   describe('standardSeedOrder', () => {
@@ -119,5 +120,32 @@ describe('parseParticipantLines', () => {
     const [p] = parseParticipantLines(['Bob Lee, Kyoto, vip'], false);
     expect(p.source).toBe('');
     expect(p.danGrade).toBe('vip');
+  });
+});
+
+// bc-pnum: the check-in list's provisional numbers are the server's
+// index-aligned provisionalNumbers array; the SPA only keys it by checkinPid
+// and refuses a misaligned array rather than mislabel the roster.
+describe('provisionalNumberMap', () => {
+  const roster = [
+    { id: 'p-1', name: 'Alice', dojo: 'Dojo Alice' },
+    { name: 'Bob', dojo: 'Dojo Bob' }, // legacy row without an id
+  ];
+
+  it('keys the aligned array by checkinPid, ids and composite keys alike', () => {
+    const map = provisionalNumberMap(roster, ['K1', 'K2']);
+    expect(map['p-1']).toBe('K1');
+    expect(map['Bob|Dojo Bob']).toBe('K2');
+  });
+
+  it('yields an empty map when the array is misaligned with the roster', () => {
+    expect(Object.keys(provisionalNumberMap(roster, ['K1']))).toEqual([]);
+    expect(Object.keys(provisionalNumberMap(roster, ['K1', 'K2', 'K3']))).toEqual([]);
+  });
+
+  it('yields an empty map when either side is absent', () => {
+    expect(Object.keys(provisionalNumberMap(roster, undefined))).toEqual([]);
+    expect(Object.keys(provisionalNumberMap(undefined, ['K1']))).toEqual([]);
+    expect(Object.keys(provisionalNumberMap([], []))).toEqual([]);
   });
 });

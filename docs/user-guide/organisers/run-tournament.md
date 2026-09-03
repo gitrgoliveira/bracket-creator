@@ -196,6 +196,8 @@ Click **Generate draw** to produce the bracket. The competition enters `draw-rea
 - Knockout competitions show the bracket tree.
 - Swiss competitions show round 1.
 
+If a seeding rule could not be honoured, a banner above the preview reads **Seeding: the draw could not honour every rule** and lists what gave way. The draw still stands; refer to [Seeding](knockout-draw.md#seeding) for which rule gives way first.
+
 You can still toggle individual check-in status during `draw-ready`, but roster edits (add, remove, reorder) are locked.
 
 When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
@@ -214,7 +216,7 @@ When the preview looks correct, click **Start competition** to move to match pla
 
 The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results; operators do not edit them by hand, with one exception: chusen (drawing lots), the last-resort tie-break for a consequential team-pool tie that a daihyosen cannot settle (refer to [Recording decisions](../court-operators/recording-decisions.md)). When a daihyosen settles a tie that determines pool advancement, the winning side carries a **DH** badge in the standings.
 
-After all pool matches are complete, advance pool winners to the elimination bracket from the Pools tab. The bracket updates in real time as results come in.
+Pool finishers move into the knockout bracket on their own: as soon as a pool's last match is scored, its qualifiers are seeded into their bracket slots, and those knockout matches can be scored without waiting for the other pools. Once the last pool is seeded, the competition moves to the knockout phase. The bracket updates in real time as results come in.
 
 ![Pools view](../../screenshots/mobile-pool-standings.png)
 
@@ -269,6 +271,8 @@ Tournament state is stored as plain files inside the data folder you specified w
 - `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and the admin password and destructive-ops password.
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
+
+Refer to [Data model](../../architecture/data-model.md) for every file in the folder and what each holds.
 
 !!! warning
     Edit data files only between rounds, not while the server is actively processing match results. Concurrent writes can produce inconsistent state.

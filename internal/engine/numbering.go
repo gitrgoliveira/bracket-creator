@@ -64,7 +64,11 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 			return nil
 		}
 
-		before := make([]string, 0, len(pools))
+		total := 0
+		for _, pool := range pools {
+			total += len(pool.Players)
+		}
+		before := make([]string, 0, total)
 		for _, pool := range pools {
 			for _, p := range pool.Players {
 				before = append(before, p.Number)

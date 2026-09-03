@@ -212,3 +212,29 @@ func TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics(t *testing.T) {
 	assert.Equal(t, "999", got)
 	assert.LessOrEqual(t, len(got), MaxNumberPrefixLen)
 }
+
+// TestNameInitials_AccentedAndOtherScripts pins the word-initial rule: a Latin
+// letter with diacritics folds to its base, a letter from another script
+// starts a word but contributes no initial, and non-letters separate words.
+func TestNameInitials_AccentedAndOtherScripts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"Épée Open", "EO"},
+		{"Ångström Cup", "AC"},
+		{"Öl Kendo", "OK"},
+		{"élite", "E"},
+		{"剣道 Open", "O"},
+		{"剣道", ""},
+		{"café-au-lait", "CAL"},
+		{"Under 18", "U"},
+		{"Kendo Open Senior Final", "KOS"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, nameInitials(tc.name))
+		})
+	}
+	assert.Equal(t, "E", DefaultNumberPrefix("Épée Open", nil), "the accented initial reaches the derived prefix")
+	assert.Equal(t, DefaultNumberPrefixFallback, DefaultNumberPrefix("剣道", nil), "no Latin letters: the fallback")
+}

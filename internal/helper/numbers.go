@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // DefaultNumberPrefixFallback is the prefix DefaultNumberPrefix returns when a
@@ -128,25 +131,48 @@ func DefaultNumberPrefix(name string, taken []string) string {
 }
 
 // nameInitials reduces a name to the uppercased ASCII initials of its words,
-// capped at MaxNumberPrefixLen. Non-letters are word separators, so "Kendo -
-// Open (Senior)" reads as three words. Returns "" when the name holds no ASCII
-// letters, which is what makes the fallback constant necessary.
+// capped at MaxNumberPrefixLen. Any letter starts or continues a word and any
+// non-letter separates words, so "Kendo - Open (Senior)" reads as three words
+// and "Under 18" as one. A word's initial is the letter's Latin base
+// (initialOf): "Épée Open" gives "EO", not "PO". A word starting with a letter
+// outside the Latin script contributes no initial, so "剣道 Open" gives "O",
+// and a name with no Latin letters at all returns "", which is what makes the
+// fallback constant necessary.
 func nameInitials(name string) string {
 	var b strings.Builder
 	inWord := false
 	for _, r := range name {
-		switch {
-		case r >= 'A' && r <= 'Z', r >= 'a' && r <= 'z':
-			if !inWord {
-				b.WriteRune(unicode.ToUpper(r))
+		if !unicode.IsLetter(r) {
+			inWord = false
+			continue
+		}
+		if !inWord {
+			if c, ok := initialOf(r); ok {
+				b.WriteByte(c)
 				if b.Len() == MaxNumberPrefixLen {
 					return b.String()
 				}
 			}
-			inWord = true
-		default:
-			inWord = false
 		}
+		inWord = true
 	}
 	return b.String()
+}
+
+// initialOf returns the uppercased ASCII letter a word-initial letter
+// contributes to a prefix. A Latin letter carrying diacritics folds to its
+// base through NFD decomposition ("É" -> "E", "Å" -> "A", "Ö" -> "O"), so an
+// accented first letter is captured rather than skipped. A letter that has no
+// ASCII base (another script) contributes nothing: a competitor number is a
+// tag the desk calls and prints, and the derived prefix stays within A-Z so
+// it never depends on a font, a keyboard or a URL encoder.
+func initialOf(r rune) (byte, bool) {
+	base, _ := utf8.DecodeRuneInString(norm.NFD.String(string(r)))
+	switch {
+	case base >= 'A' && base <= 'Z':
+		return byte(base), true
+	case base >= 'a' && base <= 'z':
+		return byte(base - 'a' + 'A'), true
+	}
+	return 0, false
 }

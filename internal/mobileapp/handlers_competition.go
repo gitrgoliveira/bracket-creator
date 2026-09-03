@@ -2068,6 +2068,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// needs to know the retry is what fixes it, not that the save itself
 				// was refused.
 				log.Printf("mobileapp: PUT /api/competitions/%s: settings saved but renumber failed after a prefix change: %v", id, rErr)
+				// The settings DID land (config.md carries the new prefix), so
+				// open clients must still be told to refetch: without this
+				// broadcast they keep showing the old prefix until a reload, and
+				// the operator's own retry would look like it changed nothing.
+				// The retry itself takes the non-fatal branch above (the prefix
+				// no longer moves) and heals pools.csv once it is repaired.
+				hub.Broadcast(EventTournamentUpdated, nil)
 				c.JSON(http.StatusInternalServerError, gin.H{
 					"error": "settings were saved but competitors could not be renumbered; save again once pools.csv is repaired",
 				})

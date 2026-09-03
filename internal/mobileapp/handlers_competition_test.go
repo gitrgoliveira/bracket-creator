@@ -3514,7 +3514,9 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 	})
 
 	t.Run("prefix moved: 500 naming that settings were saved but renumbering failed", func(t *testing.T) {
-		r, store, _, _, dir := setupTestRouter(t)
+		r, store, _, hub, dir := setupTestRouter(t)
+		ch := hub.Subscribe()
+		defer hub.Unsubscribe(ch)
 
 		const cid = "renumber-fail-prefix"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -3542,6 +3544,17 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		stored, err := store.LoadCompetition(cid)
 		require.NoError(t, err)
 		assert.Equal(t, "X", stored.NumberPrefix, "config.md must still carry the new prefix: the settings save itself succeeded")
+
+		// The prefix landed, so open clients are told to refetch even though
+		// the response is a 500 (the revert this pins: returning without the
+		// broadcast, which left every board on the old prefix until a reload).
+		select {
+		case msg := <-ch:
+			env := decodeHubEvent(t, msg)
+			assert.Equal(t, EventTournamentUpdated, env.Type)
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for the tournament_updated broadcast after a half-landed prefix change")
+		}
 	})
 
 	// G2a x G4c: a PUT that OMITS numberPrefix inherits the stored one, so it

@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"io/fs"
 	"testing"
 	"testing/fstest"
 
@@ -10,13 +11,30 @@ import (
 func TestFrontendBundleMissing(t *testing.T) {
 	tests := []struct {
 		name    string
-		fsys    fstest.MapFS
+		fsys    fs.FS
 		missing bool
 	}{
 		{
-			name:    "built bundle present",
-			fsys:    fstest.MapFS{"web-mobile/dist/app.js": &fstest.MapFile{Data: []byte("// app")}},
+			name: "both dist and vendor present",
+			fsys: fstest.MapFS{
+				"web-mobile/dist/app.js":          &fstest.MapFile{Data: []byte("// app")},
+				"web-mobile/vendor/preact.min.js": &fstest.MapFile{Data: []byte("// preact")},
+			},
 			missing: false,
+		},
+		{
+			name: "dist only, vendor still a placeholder",
+			fsys: fstest.MapFS{
+				"web-mobile/dist/app.js": &fstest.MapFile{Data: []byte("// app")},
+			},
+			missing: true,
+		},
+		{
+			name: "vendor only, dist still a placeholder",
+			fsys: fstest.MapFS{
+				"web-mobile/vendor/preact.min.js": &fstest.MapFile{Data: []byte("// preact")},
+			},
+			missing: true,
 		},
 		{
 			name:    "placeholder only, as on a go install checkout",
@@ -28,16 +46,18 @@ func TestFrontendBundleMissing(t *testing.T) {
 			fsys:    fstest.MapFS{},
 			missing: true,
 		},
+		{
+			// cmd's TestMain wires resources.NewResources(nil, nil), so the
+			// router is built over a nil fs.FS; the check must answer
+			// "missing" rather than panic.
+			name:    "nil fs.FS",
+			fsys:    nil,
+			missing: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.missing, FrontendBundleMissing(tt.fsys))
 		})
 	}
-}
-
-func TestFrontendBundleMissing_NilFS(t *testing.T) {
-	// cmd's TestMain wires resources.NewResources(nil, nil), so the router is
-	// built over a nil fs.FS; the check must answer "missing" rather than panic.
-	assert.True(t, FrontendBundleMissing(nil))
 }

@@ -117,7 +117,7 @@ Rank,Name
 3,Eddard Stark
 ```
 
-Pass it with `--seeds seeds.csv`. Names must match the participant CSV exactly (case-sensitive). Unseeded participants are placed randomly around the seeds.
+Pass it with `--seeds seeds.csv`. Names must match the participant name exactly, accents included; both lists are title-cased on read, so only differences beyond the first letter of each word matter. Unseeded participants are placed randomly around the seeds.
 
 The rank order matters in the elimination tree as well as in the pool draw: seeds 1 and 3 land in one half and seeds 2 and 4 in the other, each in its own quarter. Refer to [Seeding in the knockout draw](../organisers/knockout-draw.md#seeding).
 

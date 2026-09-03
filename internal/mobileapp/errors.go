@@ -79,7 +79,7 @@ func classifyRosterWriteError(err error) (status int, ok bool) {
 		return http.StatusConflict, true
 	case errors.Is(err, state.ErrReservedName):
 		return http.StatusBadRequest, true
-	case errors.Is(err, state.ErrBlankDojo):
+	case errors.Is(err, state.ErrBlankDojo), errors.Is(err, state.ErrBlankName):
 		return http.StatusBadRequest, true
 	default:
 		return 0, false

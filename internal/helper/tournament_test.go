@@ -213,6 +213,7 @@ func TestCreatePlayers_MissingName(t *testing.T) {
 	tests := []struct {
 		name        string
 		entries     []string
+		withZekken  bool
 		wantErr     bool
 		errContains []string
 	}{
@@ -232,11 +233,18 @@ func TestCreatePlayers_MissingName(t *testing.T) {
 			wantErr:     true,
 			errContains: []string{"entry 1: missing name", "entry 2: missing name"},
 		},
+		{
+			name:        "blank name and missing dojo are both reported",
+			entries:     []string{"Alice, ALICE, ", ", BOB, Dojo B"},
+			withZekken:  true,
+			wantErr:     true,
+			errContains: []string{"entry 1: missing dojo", "entry 2: missing name"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			players, err := CreatePlayers(tt.entries, false)
+			players, err := CreatePlayers(tt.entries, tt.withZekken)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, players)
@@ -1059,10 +1067,20 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			// first field is blank: the missing-name check now rejects it
 			// rather than silently building a player with an empty name.
 			name:        "leading comma produces a blank name",
-			entries:     []string{",John Doe, Dojo A,", "Jane Smith, Dojo B,"},
+			entries:     []string{",John Doe, Dojo A"},
 			withZekken:  false,
 			wantErr:     true,
 			errContains: "entry 1: missing name",
+		},
+		{
+			name:       "trailing comma still parses",
+			entries:    []string{"Jane Smith, Dojo B,"},
+			withZekken: false,
+			wantErr:    false,
+			validate: func(t *testing.T, players []Player) {
+				require.Len(t, players, 1)
+				assert.Equal(t, "Jane Smith", players[0].Name)
+			},
 		},
 		{
 			name:        "multiple validation errors",

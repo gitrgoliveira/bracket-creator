@@ -291,16 +291,45 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // the DRAW itself refuses, at this one shared pre-flight.
 var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must have a dojo")
 
+// ErrBlankNameInDraw is the sentinel identifying a draw refused because the
+// roster contains at least one player with an empty Name. Match it with
+// errors.Is; the returned error names the offending row by POSITION, not by
+// name (the name is what's blank), so the operator knows exactly which row
+// of the loaded roster to repair.
+//
+// DISTINCT from state.ErrBlankName (internal/state/participants.go), the
+// participant-WRITE floor: different packages, different sentinel values,
+// on purpose -- errors.Is(drawErr, state.ErrBlankName) would silently never
+// match this one despite the shared concept, which is exactly why this one
+// carries the "InDraw" suffix rather than the same bare name.
+//
+// Participant LOADING stays blank-tolerant on purpose (state.LoadParticipants
+// and its CSV parser accept a blank name, so a legacy or hand-edited roster
+// can still be loaded and the offending row repaired in the UI/CSV) -- only
+// the DRAW itself refuses, at this one shared pre-flight.
+var ErrBlankNameInDraw = errors.New("cannot draw pools: every competitor must have a name")
+
 // validateNoBlankDojo is the one pre-flight check shared by
 // BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
 // BuildPoolPhaseFillBracketTreeAware (all three funnel through
 // buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
 // attempt regardless of which entry point the caller used). Returns nil
-// when every player has a non-blank Dojo. Trims before comparing (matching
-// state.ErrBlankDojo's own write-floor check, saveParticipantsNoLock) so a
-// future in-memory producer that hands this a whitespace-only Dojo without
-// going through that floor first cannot slip "   " past this guard too.
+// when every player has a non-blank Name and Dojo. Trims before comparing
+// (matching state.ErrBlankName/state.ErrBlankDojo's own write-floor checks,
+// saveParticipantsNoLock) so a future in-memory producer that hands this a
+// whitespace-only field without going through that floor first cannot slip
+// "   " past this guard too.
+//
+// The name check runs first and returns on the first offending row: a blank
+// name has no name to report, so identifying every offending row by name
+// (the way the dojo check below does) is not available here.
 func validateNoBlankDojo(players []Player) error {
+	for idx, p := range players {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("%w: row %d", ErrBlankNameInDraw, idx+1)
+		}
+	}
+
 	var names []string
 	for _, p := range players {
 		if strings.TrimSpace(p.Dojo) == "" {

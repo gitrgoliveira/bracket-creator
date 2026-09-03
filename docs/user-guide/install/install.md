@@ -108,7 +108,7 @@ rm -f ${TAR_FILE}
 go install github.com/gitrgoliveira/bracket-creator@latest
 ```
 
-`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands. The `serve` web UI works, because its assets are committed to the module. The `mobile-app` web UI renders blank, because its compiled JavaScript bundle and vendored runtime are build artifacts that are not checked in. The server says so at startup: a log line beginning `Warning: the tournament app front-end bundle is missing` means the binary was built without the bundle, not that the network is at fault. The Excel-generating CLI commands work normally. Use Docker, Homebrew, or a release binary if you need the tournament app.
+`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands. The `serve` web UI works, because its assets are committed to the module. The `mobile-app` web UI renders blank, because its compiled JavaScript bundle and vendored runtime are build artifacts that are not checked in. The server says so at startup: a log line containing `front-end bundle is missing` means the binary was built without the bundle or its vendored runtime, not that the network is at fault. The Excel-generating CLI commands work normally. Use Docker, Homebrew, or a release binary if you need the tournament app.
 
 ## Build from source
 

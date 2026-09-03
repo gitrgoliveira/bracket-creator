@@ -64,13 +64,11 @@ func TestProcessEntries_BlankName(t *testing.T) {
 	tests := []struct {
 		name        string
 		entries     []string
-		wantErr     bool
 		errContains string
 	}{
 		{
 			name:        "blank name is rejected",
 			entries:     []string{"John Doe, Dojo A", ", Dojo B"},
-			wantErr:     true,
 			errContains: "entry 2: missing name",
 		},
 		{
@@ -94,10 +92,9 @@ func TestProcessEntries_BlankName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			players, err := processEntries(tt.entries, true, false)
-			if tt.wantErr {
+			if tt.errContains != "" {
 				require.Error(t, err)
 				assert.Nil(t, players)
-				assert.Contains(t, err.Error(), "missing name")
 				assert.Contains(t, err.Error(), tt.errContains)
 				return
 			}

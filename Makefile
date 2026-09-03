@@ -241,7 +241,7 @@ docker/build: ## Build Docker image
 docker/run: docker/build ## Run the application in Docker
 	docker run -p 8080:8080 $(IMAGE_NAME):latest
 
-pre-commit: go/test go/security ## Run pre-commit checks
+pre-commit: go/test go/security docs/prose ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
 # Documentation (MkDocs Material): pinned toolchain.
@@ -285,7 +285,7 @@ docs/linkcheck: docs/build ## Build docs, then check the built site for broken l
 	$(DOCS_BIN)/python docs/check_links.py site
 
 docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
-	python3 docs/check_prose.py docs
+	$(PYTHON) docs/check_prose.py docs
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

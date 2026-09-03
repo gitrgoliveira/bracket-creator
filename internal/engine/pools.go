@@ -126,9 +126,10 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			// Wrapped as a *ValidationError (-> HTTP 400 at the
 			// generate-draw handler), matching the fill-bracket branch
 			// above: every error this call can return -- formation
-			// (poolTargetSizes), the blank-dojo pre-flight
-			// (helper.ErrBlankDojoInDraw, bc-dojo-least-conflicted-pool FIX 1),
-			// or the defensive "no pool has room" placement guard -- is an
+			// (poolTargetSizes), the blank-name/blank-dojo pre-flight
+			// (helper.ErrBlankNameInDraw / helper.ErrBlankDojoInDraw,
+			// bc-dojo-least-conflicted-pool FIX 1), or the defensive
+			// "no pool has room" placement guard -- is an
 			// operator-actionable roster/config problem, never an internal
 			// bug the operator cannot act on.
 			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())

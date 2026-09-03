@@ -70,59 +70,49 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		records = append(records, fields)
 	}
 
-	// Blank-name rejection lives here, not in CreatePlayersFromRecords: this
-	// is the entry point for the CLI, the legacy web UI's parse endpoint and
-	// archive import, all of which take raw string entries. The roster
+	// Blank-name rejection is enabled here, not in CreatePlayersFromRecords:
+	// this is the entry point for the CLI, the legacy web UI's parse endpoint
+	// and archive import, all of which take raw string entries. The roster
 	// loader in internal/state calls CreatePlayersFromRecords directly and
 	// stays tolerant of a blank name on purpose, so a hand-edited
 	// participants.csv can still be loaded and repaired.
-	var missing []string
-	for i, rec := range records {
-		allBlank := true
-		for _, f := range rec {
-			if strings.TrimSpace(f) != "" {
-				allBlank = false
-				break
-			}
-		}
-		if allBlank {
-			continue
-		}
-		if len(rec) == 0 || strings.TrimSpace(rec[0]) == "" {
-			// Quote the row: the CLI shuffles entries before this runs, so the
-			// entry number alone does not identify a line in the file.
-			missing = append(missing, fmt.Sprintf("entry %d: missing name in %q", i+1, strings.Join(rec, ",")))
-		}
-	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("participant validation failed:\n%s", strings.Join(missing, "\n"))
-	}
-
-	return CreatePlayersFromRecords(records, withZekkenName)
+	return createPlayersFromRecords(records, withZekkenName, true)
 }
 
 // CreatePlayersFromRecords builds players from pre-parsed CSV records
 // (each record is a slice of fields). Use this when the CSV has already
 // been parsed by encoding/csv so that quoted commas are handled correctly.
+//
+// The roster loader in internal/state calls this directly and stays
+// tolerant of a blank name on purpose, so a hand-edited participants.csv
+// can still be loaded and repaired.
 func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player, error) {
+	return createPlayersFromRecords(records, withZekkenName, false)
+}
+
+// createPlayersFromRecords is the shared body behind CreatePlayers (which
+// requires a name on every row) and CreatePlayersFromRecords (which does
+// not, so callers repairing a hand-edited roster can still load it).
+func createPlayersFromRecords(records [][]string, withZekkenName, requireName bool) ([]Player, error) {
 	players := make([]Player, 0, len(records))
 	var errors []string
 	seenNames := make(map[string]int)
 	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, line := range records {
-		allEmpty := true
-		for _, f := range line {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
+		if isBlankRecord(line) {
 			continue
 		}
 		for j := range line {
 			line[j] = strings.TrimSpace(line[j])
+		}
+
+		if requireName && line[0] == "" {
+			// Quote the row: callers may have shuffled or dropped blank lines
+			// before this runs, so the entry number alone does not identify a
+			// line in the file.
+			errors = append(errors, fmt.Sprintf("entry %d: missing name in %q", i+1, strings.Join(line, ",")))
+			continue
 		}
 
 		player := Player{

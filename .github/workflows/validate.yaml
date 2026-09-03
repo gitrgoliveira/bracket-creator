@@ -241,6 +241,9 @@ jobs:
       - name: Checkout Source
         uses: actions/checkout@v7
 
+      - name: Check public-prose rules
+        run: python3 docs/check_prose.py docs
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -254,6 +257,3 @@ jobs:
 
       - name: Check internal links and anchors
         run: python3 docs/check_links.py site
-
-      - name: Check public-prose rules
-        run: python3 docs/check_prose.py docs

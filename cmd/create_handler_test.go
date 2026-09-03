@@ -19,10 +19,10 @@ import (
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 )
 
-// postCreate drives createTournamentHandler exactly as cmd/mobile_app.go wires
-// it (a single POST /create route on a bare gin engine) and returns the parsed
-// workbook from a successful response.
-func postCreate(t *testing.T, form url.Values) *excelize.File {
+// postCreateRaw drives createTournamentHandler exactly as cmd/mobile_app.go
+// wires it (a single POST /create route on a bare gin engine) and returns the
+// recorder unjudged, so refusal paths can assert on it too.
+func postCreateRaw(t *testing.T, form url.Values) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -32,6 +32,13 @@ func postCreate(t *testing.T, form url.Values) *excelize.File {
 	req, _ := http.NewRequest(http.MethodPost, "/create", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	r.ServeHTTP(w, req)
+	return w
+}
+
+// postCreate returns the parsed workbook from a successful response.
+func postCreate(t *testing.T, form url.Values) *excelize.File {
+	t.Helper()
+	w := postCreateRaw(t, form)
 
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 	require.Positive(t, w.Body.Len())
@@ -426,21 +433,13 @@ func TestCreateHandler_EngiKnockout_FlagsCaptions(t *testing.T) {
 // "knockout" (see web/index.html, web/js/app.js). Now that web/ posts
 // "knockout", "playoffs" must be rejected like any other invalid value.
 func TestCreateHandler_RetiredPlayoffsValueRejected(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.POST("/create", createTournamentHandler)
-
-	form := url.Values{
+	w := postCreateRaw(t, url.Values{
 		"tournamentType": {"playoffs"},
 		"playerList":     {"Alice, DA\nBob, DB"},
 		"courts":         {"1"},
 		"teamMatches":    {"0"},
 		"determined":     {"on"},
-	}
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/create", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.ServeHTTP(w, req)
+	})
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 	var response map[string]interface{}

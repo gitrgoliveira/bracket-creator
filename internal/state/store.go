@@ -108,13 +108,11 @@ func NewStore(folder string) (*Store, error) {
 	}
 
 	// Convert every competition's legacy on-disk shapes EAGERLY, here, rather
-	// than lazily on first touch (legacy_upgrade.go): a live tournament must
-	// not discover mid-event that a "playoffs"-era config.md silently forgot
-	// its knockout stage. Runs after init() releases s.mu (ListCompetitions
-	// takes its own RLock; calling it while init() still held the write lock
-	// would deadlock). A failure here fails store construction, which is the
-	// operator-visible half of the divergence documented on
-	// upgradeCompetitionFormatLocked.
+	// than lazily on first touch; see legacy_upgrade.go for why, and for why a
+	// failure here fails store construction instead of being logged.
+	//
+	// Runs after init() releases s.mu: ListCompetitions takes its own RLock, so
+	// calling it while init() still held the write lock would deadlock.
 	if err := s.SweepLegacyUpgrades(); err != nil {
 		return nil, err
 	}

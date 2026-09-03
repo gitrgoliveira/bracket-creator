@@ -117,13 +117,12 @@ func (s *Store) EnsureLegacyUpgraded(compID string) error {
 // -- the same per-competition entry point the lazy read paths call -- over
 // every id ListCompetitions reports, rather than a second conversion path.
 //
-// A live tournament must not discover mid-event that its knockout stage
-// silently isn't there (IsKnockoutEnabled misses every switch arm on an
-// unconverted "playoffs" value), so this returns a combined error naming
-// every competition whose conversion failed instead of stopping at the
-// first one: a single startup failure message should tell the operator the
-// full extent of the problem, not make them fix-and-restart repeatedly to
-// discover it one competition at a time.
+// Why eagerly rather than lazily: see EnsureLegacyUpgraded's call-site comment.
+//
+// It returns a combined error naming every competition whose conversion failed
+// instead of stopping at the first, so one startup failure message tells the
+// operator the full extent of the problem rather than making them
+// fix-and-restart to discover it one competition at a time.
 func (s *Store) SweepLegacyUpgrades() error {
 	ids, err := s.ListCompetitions()
 	if err != nil {
@@ -254,23 +253,9 @@ type legacyKnockoutDuration struct {
 //     (see legacyKnockoutDuration above for why this one needs raw-YAML
 //     recovery while the whole-minute legacy field does not).
 func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
-	path := s.compPath(compID, "config.md")
-	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath which calls filepath.Clean
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // no config yet; nothing to convert
-		}
-		return err
-	}
-
-	var legacy legacyKnockoutDuration
-	if err := parseFrontMatter(raw, &legacy); err != nil {
-		return err
-	}
-
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil || comp == nil {
-		return err
+		return err // a missing config.md loads as nil: nothing to convert
 	}
 
 	const legacyPlayoffsValue = "playoffs"
@@ -283,12 +268,40 @@ func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
 		comp.Status = CompStatusKnockout
 		changed = true
 	}
-	if comp.KnockoutMatchDurationSeconds == 0 && legacy.PlayoffMatchDurationSeconds > 0 {
-		comp.KnockoutMatchDurationSeconds = ClampMatchSeconds(legacy.PlayoffMatchDurationSeconds)
-		changed = true
+	// Only a competition with no canonical duration can be carrying the retired
+	// seconds key, so the second read of config.md is skipped for every file
+	// that has already converged -- which, after the first sweep, is all of them.
+	if comp.KnockoutMatchDurationSeconds == 0 {
+		legacy, err := s.legacyDurationSeconds(compID)
+		if err != nil {
+			return err
+		}
+		if legacy > 0 {
+			comp.KnockoutMatchDurationSeconds = ClampMatchSeconds(legacy)
+			changed = true
+		}
 	}
 	if !changed {
 		return nil
 	}
 	return s.saveCompetitionLocked(comp, s.directWrite)
+}
+
+// legacyDurationSeconds re-reads config.md for the retired
+// playoff_match_duration_seconds key, which the renamed Competition field can
+// no longer see. Returns 0 when the file is gone or carries no such key.
+func (s *Store) legacyDurationSeconds(compID string) (int, error) {
+	path := s.compPath(compID, "config.md")
+	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath which calls filepath.Clean
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var legacy legacyKnockoutDuration
+	if err := parseFrontMatter(raw, &legacy); err != nil {
+		return 0, err
+	}
+	return legacy.PlayoffMatchDurationSeconds, nil
 }

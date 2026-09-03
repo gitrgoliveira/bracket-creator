@@ -211,3 +211,103 @@ func TestLegacyPlayoffMatchDurationSecondsFoldsOntoKnockoutKey(t *testing.T) {
 	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 180")
 	assert.NotContains(t, string(raw), "playoff_match_duration_seconds")
 }
+
+// TestLoadCompetitionUpgradesLegacyFormatOnLoad pins the gap closed by wiring
+// EnsureLegacyUpgraded into Store.LoadCompetition itself: before this,
+// LoadCompetition read straight through loadCached and could serve a
+// config.md still carrying the retired "playoffs" wire values with no error
+// at all, since Format/Status are bare strings with no load-time validator.
+//
+// The legacy config.md is written to disk AFTER NewStore returns, so the
+// eager startup sweep (SweepLegacyUpgrades) never sees it and cannot be what
+// converts it -- this isolates LoadCompetition's OWN call to
+// EnsureLegacyUpgraded from the sweep's.
+func TestLoadCompetitionUpgradesLegacyFormatOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
+
+	comp, err := s.LoadCompetition("bracket-court-d")
+	require.NoError(t, err)
+	require.NotNil(t, comp)
+	assert.Equal(t, state.CompFormatKnockout, comp.Format, "format: playoffs must convert to knockout on load, not just via the startup sweep")
+	assert.Equal(t, state.CompStatusKnockout, comp.Status, "status: playoffs must convert to knockout on load")
+	assert.Equal(t, 300, comp.KnockoutMatchDurationSeconds, "the legacy playoff_match_duration: 5 (minutes) must still fold to 300s")
+
+	// The on-disk file converges too, exactly as the sweep path does.
+	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "format: knockout")
+	assert.Contains(t, string(raw), "status: knockout")
+	assert.NotContains(t, string(raw), "playoffs")
+}
+
+// TestLoadCompetitionMissingReturnsNilNil pins that wiring
+// EnsureLegacyUpgraded into LoadCompetition must not change its contract for
+// a competition that does not exist on disk: EnsureLegacyUpgraded's own
+// conversion (upgradeCompetitionFormatLocked) already returns nil when
+// config.md is missing (nothing to convert), and this confirms that holds
+// through LoadCompetition too, rather than the new call turning a plain
+// "not found" into an error.
+func TestLoadCompetitionMissingReturnsNilNil(t *testing.T) {
+	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	comp, err := s.LoadCompetition("does-not-exist")
+	require.NoError(t, err)
+	assert.Nil(t, comp)
+}
+
+// TestNewStoreSurvivesSweepFailureButLoadCompetitionRefuses pins the other
+// half of the gap closure: now that LoadCompetition enforces the format/
+// status conversion itself, the eager startup sweep no longer needs to be
+// fatal. A single competition whose config.md cannot be rewritten (its
+// directory is read-only) must not take down store construction for every
+// other competition and court -- but it must also not be silently served:
+// LoadCompetition still refuses it.
+//
+// Same failure-forcing technique as TestEnsureLegacyUpgradedRetriesAfterFailure:
+// os.MkdirAll on an already-existing directory is a no-op, so making the
+// directory read-only only bites once the rewrite tries to create its
+// atomic-write temp file. The fixture needs a valid `id:` in its front
+// matter (bracket-court-d, matching the directory name) to reach that write
+// at all.
+func TestNewStoreSurvivesSweepFailureButLoadCompetitionRefuses(t *testing.T) {
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
+
+	require.NoError(t, os.Chmod(compDir, 0o500))
+	defer func() { _ = os.Chmod(compDir, 0o700) }() // let t.TempDir() clean up afterwards
+
+	// The sweep hits this competition during construction and fails to
+	// convert it (read-only directory), but that failure must be logged, not
+	// propagated: store construction must still succeed so every other
+	// competition and court can start.
+	s, err := state.NewStore(dir)
+	require.NoError(t, err, "a single competition's sweep failure must not fail store construction")
+
+	// The broken competition must still refuse to be served in its
+	// unconverted shape: LoadCompetition enforces what the sweep couldn't.
+	comp, err := s.LoadCompetition("bracket-court-d")
+	require.Error(t, err, "an unconverted legacy competition must not be silently served")
+	assert.Nil(t, comp)
+
+	// Restore write access and confirm the competition recovers: the
+	// once-map must not have been poisoned by the earlier failure.
+	require.NoError(t, os.Chmod(compDir, 0o700))
+	comp2, err := s.LoadCompetition("bracket-court-d")
+	require.NoError(t, err)
+	require.NotNil(t, comp2)
+	assert.Equal(t, state.CompFormatKnockout, comp2.Format)
+}

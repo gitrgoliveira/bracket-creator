@@ -38,21 +38,30 @@ import (
 //   - config.md's retired "playoffs" format/status values, and the retired
 //     playoff_match_duration_seconds key, convert ON READ (or rather, once
 //     per process, exactly like the seed-dojo case) via
-//     upgradeCompetitionFormatLocked below. Unlike the two shapes above, this
-//     one is ALSO swept EAGERLY at store construction (see
-//     SweepLegacyUpgrades, called from NewStore) rather than waiting for the
-//     competition's first touch: a live tournament must not discover mid-
-//     event that its bracket stage silently isn't there. See
-//     upgradeCompetitionFormatLocked's own doc comment for why its failure
-//     policy also diverges from the log-and-continue default below.
+//     upgradeCompetitionFormatLocked below. EVERY standing reader of a
+//     competition record -- Store.LoadCompetition, loadParticipants, and
+//     ParticipantsFingerprint -- calls EnsureLegacyUpgraded first and
+//     refuses the read if it fails, which is what makes this shape safe to
+//     serve: a competition can never be handed out still carrying the
+//     retired values. This one is ALSO swept EAGERLY at store construction
+//     (see SweepLegacyUpgrades, called from NewStore) rather than waiting
+//     for the competition's first touch, so an operator gets an early,
+//     whole-folder warning instead of discovering the problem one
+//     competition at a time as each is later touched -- but the sweep is a
+//     best-effort head start, not the safety net; see the call site inside
+//     EnsureLegacyUpgraded below for why its failure policy also diverges
+//     from the log-and-continue default below.
 //
-// EnsureLegacyUpgraded runs BEFORE loadParticipants takes its read lock, once
-// per competition per process: the conversion needs the per-comp WRITE lock,
-// and writing from under the reader's RLock would race the other readers
-// doing the same. Callers that FINGERPRINT files before their first load
-// (StartCompetition's drift guard, via ParticipantsFingerprint below) must run
-// this first, or the conversion lands between snapshot and re-check and reads
-// as operator drift.
+// EnsureLegacyUpgraded runs BEFORE loadParticipants and Store.LoadCompetition
+// take their read lock, once per competition per process: the conversion
+// needs the per-comp WRITE lock, and writing from under the reader's RLock
+// would race the other readers doing the same. Both call sites acquire and
+// release this write lock fully before taking their own RLock afterwards --
+// sequential, never nested -- so this cannot deadlock the way calling it
+// while already holding that lock would. Callers that FINGERPRINT files
+// before their first load (StartCompetition's drift guard, via
+// ParticipantsFingerprint below) must run this first, or the conversion lands
+// between snapshot and re-check and reads as operator drift.
 //
 // Failure policy: a failed SEED-DOJO conversion is logged and NOT retried
 // until the next process start (the once-map is stamped regardless). The
@@ -85,17 +94,27 @@ func (s *Store) EnsureLegacyUpgraded(compID string) error {
 	// and returns false, so the competition quietly forgets it has a
 	// knockout stage. Silent wrong behaviour is worse than a loud failure.
 	//
-	// This propagates all the way up in both directions that matter: the
-	// startup sweep (SweepLegacyUpgrades, invoked from NewStore) turns it
-	// into a hard startup failure -- the real defence, since it runs before
-	// the app accepts any traffic -- and the lazy hot-path caller
-	// (loadParticipants) also refuses the read rather than silently serving
-	// a mis-classified competition. In ordinary operation the sweep already
-	// converts every on-disk competition before this lazy path can ever run,
-	// so reaching this branch here at all means the sweep did not cover this
-	// competition (e.g. it raced a concurrent write). Do not "fix" this back
-	// to a bare log.Printf-and-continue to match the seed-dojo policy above;
-	// that policy's safety argument does not hold for this conversion.
+	// The REAL defence is every standing load path refusing to hand out a
+	// competition it could not convert: Store.LoadCompetition and
+	// loadParticipants both call EnsureLegacyUpgraded before reading
+	// config.md, so a competition stuck in the legacy shape simply cannot be
+	// served, no matter how it got that way. That is what lets NewStore's
+	// eager SweepLegacyUpgrades call be non-fatal (see its call site in
+	// NewStore): the sweep is a best-effort head start that converts the
+	// whole folder up front and logs loudly if it can't, but the load paths
+	// are what actually enforce the invariant, so one broken config.md no
+	// longer needs to take down the process to stay safe.
+	//
+	// Reaching this branch here means the sweep either hasn't run yet for
+	// this competition (raced a concurrent write) or already tried and
+	// failed for it (logged at startup, not stamped in the once-map below,
+	// so every subsequent read -- lazy or via a later manual sweep --
+	// retries it here). Do not "fix" this back to a bare log.Printf-and-
+	// continue to match the seed-dojo policy above; that policy's safety
+	// argument does not hold for this conversion, because a load path that
+	// swallowed this error would silently serve a mis-classified
+	// competition, which is exactly what this whole mechanism exists to
+	// prevent.
 	if err := s.upgradeCompetitionFormatLocked(compID); err != nil {
 		// Do NOT stamp the once-map on this path. Stamping here is exactly the
 		// silent mis-classification this function exists to prevent: a later
@@ -120,9 +139,13 @@ func (s *Store) EnsureLegacyUpgraded(compID string) error {
 // Why eagerly rather than lazily: see EnsureLegacyUpgraded's call-site comment.
 //
 // It returns a combined error naming every competition whose conversion failed
-// instead of stopping at the first, so one startup failure message tells the
-// operator the full extent of the problem rather than making them
-// fix-and-restart to discover it one competition at a time.
+// instead of stopping at the first, so the caller's one log line at startup
+// (NewStore logs rather than fails on this error; see its call site) tells
+// the operator the full extent of the problem across the whole folder,
+// rather than surfacing each broken competition one at a time as it is later
+// touched. The load paths (Store.LoadCompetition, loadParticipants), not
+// this sweep, are what actually refuse to serve a competition this call
+// failed to convert -- see EnsureLegacyUpgraded's doc comment.
 func (s *Store) SweepLegacyUpgrades() error {
 	ids, err := s.ListCompetitions()
 	if err != nil {

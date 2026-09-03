@@ -84,11 +84,19 @@ export const compareDmy = (a, b) => window.compareDmy(a, b);
 // `data` is the sibling half. It is a separate argument because the competition
 // page holds the two halves as separate PROPS rather than as one response, so a
 // detail-shaped-only signature would not serve it. Callers holding the response
-// pass `(detail.config || detail, detail)`; the fallback keeps a flat
-// competition object (the aggregate shape) working.
+// pass `(detail.config || detail, detail)`.
+//
+// `data` DEFAULTS TO `config`, so a one-argument call on a flat competition (the
+// aggregate shape, which carries pools/poolMatches/bracket at the top level)
+// reads those fields off the object it was given. Defaulting to `{}` instead
+// would overwrite them with undefined and return [] — reintroducing, in the
+// helper written to abolish it, the exact silent-empty this function exists to
+// prevent. It is published on `window` and its comment invites new callers, so
+// the wrong call has to be the one that cannot happen. An explicit `{}` still
+// means "no match data": only a missing argument falls back (bc-cmfc).
 export function compMatchesForCompetition(config, data) {
   if (!config) return [];
-  const d = data || {};
+  const d = data || config;
   return compMatches({ ...config, pools: d.pools, poolMatches: d.poolMatches, bracket: d.bracket });
 }
 

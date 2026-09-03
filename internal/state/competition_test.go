@@ -279,6 +279,19 @@ func TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverMinutes(t *testin
 	assert.Zero(t, c.KnockoutMatchDurationSecondsLegacy, "the retired seconds field is cleared either way")
 }
 
+// The GLOBAL match_duration key is a separate fallback from the knockout-specific
+// one, and it is the shape real legacy files actually carry: the review of #413
+// named `match_duration: 3` alongside a custom playoff_match_duration_seconds as
+// the case that silently lost the operator's value. Pinning it separately because
+// the sibling test above would still pass if the fold only outranked
+// KnockoutMatchDuration and not MatchDuration.
+func TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverGlobalMinutes(t *testing.T) {
+	c := &Competition{MatchDuration: 3, KnockoutMatchDurationSecondsLegacy: 240}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 240, c.KnockoutMatchDurationSeconds, "the retired seconds key must win over the global match_duration (180)")
+	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "the pool phase still takes the global fallback")
+}
+
 // TestCompetitionSecondsRoundTrip verifies the *Seconds fields persist through
 // YAML with their snake_case tags.
 func TestCompetitionSecondsRoundTrip(t *testing.T) {

@@ -111,13 +111,17 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	}
 	// Exhausted every candidate up to the length cap: every one of them is
 	// already taken. Return the last one tried rather than inventing a value
-	// beyond MaxNumberPrefixLen -- every caller (checkUniqueCompFields, on the
-	// create, settings-save, import and start/generate-draw paths)
-	// re-validates uniqueness against
+	// beyond MaxNumberPrefixLen -- every request-driven caller
+	// (checkUniqueCompFields, on the create, settings-save, import and
+	// start/generate-draw paths) re-validates uniqueness against
 	// the SAME taken set and rejects the collision with its own "prefix
 	// already used by competition ..." error, which names the actual
 	// conflict. That is the right place for this to surface: this function's
-	// contract is a best-effort SUGGESTION, not a uniqueness guarantee.
+	// contract is a best-effort SUGGESTION, not a uniqueness guarantee. The
+	// one caller that does not re-validate, the load-time migration
+	// (engine.MigrateNumberPrefixes), derives over the COMPLETE taken set
+	// including its own in-pass assignments, so it can only collide once a
+	// tournament holds a thousand same-initial competitions.
 	return lastCandidate
 }
 

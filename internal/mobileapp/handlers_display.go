@@ -300,8 +300,14 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
 	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if comp.NumberPrefix != "" {
-		pools, _ := store.LoadPools(comp.ID)
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools)
+		pools, err := store.LoadPools(comp.ID)
+		if err != nil {
+			// Reported, not merged: an unreadable pools.csv must show as
+			// MISSING numbers on the overlay, never as composed ones (D1).
+			log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
+		} else {
+			mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
+		}
 	}
 	return players
 }

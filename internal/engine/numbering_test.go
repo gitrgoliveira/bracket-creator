@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -230,4 +231,80 @@ func TestMigrateNumberPrefixes(t *testing.T) {
 	again, err := eng.MigrateNumberPrefixes()
 	require.NoError(t, err)
 	assert.Empty(t, again, "a second run finds nothing to migrate")
+}
+
+// TestMigrateNumberPrefixes_OneBadCompetitionDoesNotStopTheRest pins the
+// availability rule: an unreadable config.md and an unparseable pools.csv are
+// each that competition's problem, logged, and the pass carries on. The
+// revert this pins: returning the first error, which turned one bad file into
+// a refusal to start the whole app.
+func TestMigrateNumberPrefixes_OneBadCompetitionDoesNotStopTheRest(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken-config", Name: "Broken", Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "broken-config", "config.md"), []byte("not front matter at all"), 0o600))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken-pools", Name: "Broken Pools", Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "broken-pools", "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fine", Name: "Fine", Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePools("fine", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{Name: "A", Dojo: "D"}}}}))
+
+	migrated, err := eng.MigrateNumberPrefixes()
+	require.NoError(t, err, "one bad competition must not stop the migration")
+	assert.ElementsMatch(t, []string{"broken-pools", "fine"}, migrated, "the readable competitions are still migrated; the unreadable config is skipped")
+
+	fine, err := store.LoadCompetition("fine")
+	require.NoError(t, err)
+	assert.NotEmpty(t, fine.NumberPrefix)
+	pools, err := store.LoadPools("fine")
+	require.NoError(t, err)
+	assert.Equal(t, fine.NumberPrefix+"1", pools[0].Players[0].Number)
+
+	brokenPools, err := store.LoadCompetition("broken-pools")
+	require.NoError(t, err)
+	assert.NotEmpty(t, brokenPools.NumberPrefix, "the prefix is saved even though its pools.csv could not be numbered")
+}
+
+// TestMigrateNumberPrefixes_ResumesNumberingOnTheNextStart pins resumability:
+// a competition that already has a prefix but whose pools.csv is still
+// unnumbered (the shape a failed earlier pass leaves behind) is numbered by
+// the next run, even though it assigns no prefix. The revert this pins:
+// numbering only the competitions assigned in the same pass.
+func TestMigrateNumberPrefixes_ResumesNumberingOnTheNextStart(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := New(store)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "half-migrated", Name: "Half", Format: state.CompFormatMixed, Status: state.CompStatusPools, NumberPrefix: "H"}))
+	require.NoError(t, store.SavePools("half-migrated", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{Name: "A", Dojo: "D"}, {Name: "B", Dojo: "D"}}}}))
+
+	migrated, err := eng.MigrateNumberPrefixes()
+	require.NoError(t, err)
+	assert.Empty(t, migrated, "no prefix was assigned")
+	pools, err := store.LoadPools("half-migrated")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"H1", "H2"}, []string{pools[0].Players[0].Number, pools[0].Players[1].Number})
+}
+
+// TestTakenNumberPrefixesAndDefaultFor pins the engine's one derivation: the
+// taken set excludes the named competition and the default avoids the rest.
+func TestTakenNumberPrefixesAndDefaultFor(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := New(store)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "a", Name: "Kendo", Format: state.CompFormatMixed, NumberPrefix: "K"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "b", Name: "Kendo Open", Format: state.CompFormatMixed, NumberPrefix: "KO"}))
+
+	taken, err := eng.TakenNumberPrefixes("b")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"K"}, taken, "excludeID's own prefix is not taken")
+
+	prefix, err := eng.DefaultNumberPrefixFor("Kendo Open", "")
+	require.NoError(t, err)
+	assert.Equal(t, "KO2", prefix, "K and KO are both taken")
+	prefix, err = eng.DefaultNumberPrefixFor("Kendo Open", "b")
+	require.NoError(t, err)
+	assert.Equal(t, "KO", prefix, "re-deriving for b may reuse b's own prefix")
 }

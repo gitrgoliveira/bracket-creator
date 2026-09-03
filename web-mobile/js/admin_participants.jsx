@@ -456,12 +456,23 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  // Competitor numbers (p.number) come from the server's admin payload
-  // (attachCompetitorNumbers): the pools.csv numbers once a draw exists, and
-  // before that a PROVISIONAL registration-order number under the
-  // competition's prefix, composed by the same helper the draw uses. Nothing
-  // is composed here (bc-pnum D1/R1); this file only decides how to STYLE
-  // the number, provisional until the draw runs (see isSetup below).
+  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
+  // They come from the server: the viewer payload of a competition still in
+  // setup carries provisionalNumbers, one per c.players in the same order,
+  // composed by the same helper the draw uses (bc-pnum D1/R1: nothing is
+  // composed here). Once the draw runs, player.number carries the assigned
+  // number instead and the array is gone. Keyed off the unfiltered roster so
+  // the number doesn't jump when the list is searched/sorted; rendered as
+  // provisional (muted, dotted) since the final numbers may differ.
+  const provisionalNumberById = useMemoA(() => {
+    // Null-prototype object: keys are user-controlled (window.checkinPid(p)).
+    const map = Object.create(null);
+    const nums = c.provisionalNumbers || [];
+    (c.players || []).forEach((p, i) => {
+      if (nums[i]) map[window.checkinPid(p)] = nums[i];
+    });
+    return map;
+  }, [c.players, c.provisionalNumbers]);
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
@@ -1125,11 +1136,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
                           {p.number ? (
-                            isSetup ? (
-                              <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{p.number}</span>
-                            ) : (
-                              <span className="num-prefix">{p.number}</span>
-                            )
+                            <span className="num-prefix">{p.number}</span>
+                          ) : provisionalNumberById[window.checkinPid(p)] ? (
+                            <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
                           ) : null}
                           {p.name}
                         </div>

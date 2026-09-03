@@ -471,6 +471,15 @@ type Competition struct {
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
+	// ProvisionalNumbers is set on the viewer payloads of a competition still
+	// in setup that has a number prefix: one entry per Players, in the same
+	// order, holding the registration-order number the check-in desk calls
+	// BEFORE the draw. It is a separate field from Player.Number on purpose:
+	// a provisional number is a different fact from an assigned one. The
+	// public surfaces show only assigned numbers; the operator's roster shows
+	// these, styled provisional, until the draw replaces them. Never
+	// persisted; absent in every other status.
+	ProvisionalNumbers []string `yaml:"-" json:"provisionalNumbers,omitempty"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this

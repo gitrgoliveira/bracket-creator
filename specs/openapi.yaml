@@ -4101,6 +4101,18 @@ components:
             `GET /api/viewer/competitions/{id}`). Always empty in admin competition responses.
           items:
             $ref: '#/components/schemas/Player'
+        provisionalNumbers:
+          type: array
+          description: >
+            Only on the viewer responses of a competition still in setup that has a
+            number prefix: one entry per `players`, in the same order, holding the
+            registration-order number the check-in desk calls before the draw. A
+            different fact from `Player.number` (which the draw assigns), carried
+            separately so public surfaces show only assigned numbers; the operator's
+            roster shows these as provisional until the draw replaces them. Absent in
+            every other status.
+          items:
+            type: string
 
     FightingSpiritAward:
       type: object
@@ -4152,13 +4164,13 @@ components:
         number:
           type: string
           description: |
-            The competitor's "tag": prefix + sequence (e.g. "K1"). Once a draw
-            exists it is the number pools.csv holds, in draw order. Before the
-            draw (and for playoffs-only competitions, which never write
-            pools.csv) it is composed from participant order under the
-            competition's prefix, so a competition in setup shows a
-            PROVISIONAL number that the draw then replaces. Every competition
-            has a prefix, so this is always present when the roster is.
+            The competitor's ASSIGNED number: prefix + sequence (e.g. "K1").
+            Present only on the viewer and display payloads, and only once the
+            draw has assigned it: from pools.csv (draw order) when one exists,
+            or from participant order for a playoffs-only competition, whose
+            draw never writes pools.csv. Absent before the draw (see the
+            competition's `provisionalNumbers`), absent on the participants
+            endpoint, and absent when the draw on disk cannot be read.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.

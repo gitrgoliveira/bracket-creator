@@ -59,10 +59,6 @@ function defaultStubbedGlobals() {
       fetchDrawWarnings: vi.fn().mockResolvedValue([]),
       // saveNow runs a post-save clash check before navigating away.
       getScheduleClashes: vi.fn().mockResolvedValue([]),
-      // bc-pnum: AdminSettings' legacy-empty-prefix pre-fill effect fires on
-      // mount whenever the fixture's numberPrefix is empty. Resolving "" (not
-      // rejecting) keeps that effect a no-op for every existing fixture here,
-      // none of which is about numbering.
     },
   };
 }

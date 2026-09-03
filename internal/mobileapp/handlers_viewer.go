@@ -15,35 +15,39 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// mergePoolNumbersIntoPlayersSlice fills each player's Number (e.g. "K1") in
-// place. participants.csv never persists Number: the draw assigns it and
-// persists it only in pools.csv, so every payload that shows a number derives
-// it here at read time (mp-13y), and the operator console reads these same
-// public payloads for its check-in list.
+// mergePoolNumbersIntoPlayersSlice fills each player's ASSIGNED Number (e.g.
+// "K1") in place. participants.csv never persists Number: the draw assigns it
+// and persists it only in pools.csv, so every payload that shows a number
+// derives it here at read time (mp-13y).
 //
-// Two sources, one rule:
+// Two sources, both "assigned by the draw":
 //   - a pools.csv exists: the number is the one it holds, matched by id first
 //     (HasParticipantIDs case) and by name as the legacy fallback for rosters
 //     drawn before ids existed;
-//   - no pools.csv exists: the number is composed from participant order under
-//     the competition's prefix, through the same helper the draw itself uses.
-//     For a playoffs-only competition that IS the competitor's number (its
-//     draw never writes pools.csv); for any other format it is the
-//     PROVISIONAL number the check-in desk calls before the draw runs, which
-//     the draw then replaces (the admin roster styles it as provisional while
-//     the competition is still in setup). Nothing composes a number anywhere
-//     else (bc-pnum D1/R1).
+//   - the competition is playoffs-only: its draw never writes pools.csv and
+//     its number IS participant order under the prefix, composed through the
+//     same helper the draw uses.
 //
-// No-op when numberPrefix is empty or the roster is empty.
-func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool) {
+// Any other format with no pools is left WITHOUT numbers: before the draw the
+// operator's roster shows the separate ProvisionalNumbers instead (see
+// provisionalCompetitorNumbers), and a public surface never shows a number
+// the draw has not assigned. Callers pass pools only from a SUCCESSFUL read:
+// an unreadable pools.csv is reported, not treated as "no draw yet", so a
+// corrupt file cannot make this compose numbers that contradict the draw on
+// disk. No-op when numberPrefix is empty or the roster is empty.
+func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
 	if numberPrefix == "" || len(players) == 0 {
 		return
 	}
 	if len(pools) == 0 {
-		// Nothing on disk carries a number: compose it from participant order
-		// under the current prefix, through the one composition helper
-		// (helper.Player is an alias of domain.Player). A prefix change is
-		// therefore reflected on the next read with no file write.
+		if format != state.CompFormatPlayoffs {
+			return
+		}
+		// Playoffs-only: nothing on disk carries a number, so derive it from
+		// participant order under the current prefix, through the one
+		// composition helper (helper.Player is an alias of domain.Player). A
+		// prefix change is therefore reflected on the next read with no file
+		// write.
 		helper.AssignPlayerNumbers(players, numberPrefix, 1)
 		return
 	}
@@ -74,6 +78,31 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 	}
 }
 
+// provisionalCompetitorNumbers composes the registration-order numbers the
+// check-in desk calls BEFORE the draw, for a competition still in setup (the
+// statuses a draw can be generated from, engine.CanGenerateDraw) that has a
+// prefix: one entry per comp.Players, in the same order, through the one
+// composition helper on a COPY so Player.Number itself stays empty. It is
+// carried as its own field (Competition.ProvisionalNumbers), not as Number,
+// because a provisional number is a different fact from an assigned one: the
+// public surfaces show only assigned numbers, the operator's roster shows
+// these styled provisional until the draw replaces them. Nil in every other
+// status, so a drawn competition, and one whose draw is on disk but would not
+// parse, never carries them.
+func provisionalCompetitorNumbers(comp *state.Competition) []string {
+	if comp == nil || comp.NumberPrefix == "" || len(comp.Players) == 0 || !engine.CanGenerateDraw(comp.Status) {
+		return nil
+	}
+	numbered := make([]domain.Player, len(comp.Players))
+	copy(numbered, comp.Players)
+	helper.AssignPlayerNumbers(numbered, comp.NumberPrefix, 1)
+	out := make([]string, len(numbered))
+	for i := range numbered {
+		out[i] = numbered[i].Number
+	}
+	return out
+}
+
 // mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
 // pointer. Existing call sites that hold a *Competition keep their idiomatic
 // form; the work happens in the slice-typed helper below.
@@ -81,7 +110,7 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools)
+	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.Format)
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
@@ -206,9 +235,13 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	if comp.NumberPrefix != "" {
 		pools, poolsErr := store.LoadPools(compID)
 		if poolsErr != nil {
+			// Reported, not merged: an unreadable pools.csv must show as
+			// MISSING numbers, never as composed ones (D1).
 			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
+		} else {
+			mergePoolNumbersIntoPlayers(comp, pools)
 		}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 	}
 
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
@@ -395,8 +428,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// mp-13y: merge assigned competitor Number from pools.csv onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
-			// on the TV display, streaming overlay, and viewer card.
+			// on the TV display, streaming overlay, and viewer card. (A pools
+			// read error has already returned above, so pools is trustworthy.)
 			mergePoolNumbersIntoPlayers(comp, pools)
+			comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 
 			// Redact operator-only audit fields before this PUBLIC payload.
 			stripMatchesAudit(poolMatches)

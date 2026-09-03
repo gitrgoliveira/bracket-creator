@@ -1826,10 +1826,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	entriesByCourt := make([][]Player, numCourts)
 	for court, poolIdxs := range poolsByCourt {
 		for _, poolIdx := range poolIdxs {
-			pool := pools[poolIdx]
-			for _, player := range pool.Players {
-				entriesByCourt[court] = append(entriesByCourt[court], player)
-			}
+			entriesByCourt[court] = append(entriesByCourt[court], pools[poolIdx].Players...)
 		}
 	}
 

@@ -228,6 +228,9 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	if err != nil {
 		log.Printf("Warning: web-mobile directory not found: %v", err)
 	} else {
+		if frontendBundleMissing(mobileFS) {
+			log.Printf("Warning: the tournament app front-end bundle is missing (web-mobile/dist holds only the placeholder), so the mobile-app web UI will render blank. Build with make go/build or use a release binary.")
+		}
 		// One validator per ROUTER, computed on first use rather than at
 		// startup, and captured by the handler below. sync.OnceValue keeps the
 		// laziness (nothing hashes unless a static asset is actually requested)

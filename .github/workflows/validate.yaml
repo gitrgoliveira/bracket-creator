@@ -254,3 +254,6 @@ jobs:
 
       - name: Check internal links and anchors
         run: python3 docs/check_links.py site
+
+      - name: Check public-prose rules
+        run: python3 docs/check_prose.py docs

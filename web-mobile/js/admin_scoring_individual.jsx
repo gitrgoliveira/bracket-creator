@@ -184,7 +184,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // elsewhere: "an explicit value in result always wins", so this editor would
   // put its stale name back. That is the case this closes.
   useAdoptFromServer({
-    signature: `${m.repPlayerA || ""} ${m.repPlayerB || ""}`,
+    signature: `${m.repPlayerA || ""}\0${m.repPlayerB || ""}`,
     apply: () => { setRepPlayerA(m.repPlayerA || ""); setRepPlayerB(m.repPlayerB || ""); },
   });
   // doSubmit's setSubmitting(false) in finally fires post-await; if the

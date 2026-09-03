@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	excelize "github.com/xuri/excelize/v2"
@@ -71,6 +72,12 @@ func processEntries(entries []string, determined bool, withZekkenName bool) ([]h
 	// Drop empty strings (blank lines) without warning, duplicates have
 	// already been rejected above.
 	entries = helper.RemoveDuplicates(entries)
+	for i, entry := range entries {
+		name, _, _ := strings.Cut(entry, ",")
+		if strings.TrimSpace(name) == "" {
+			return nil, fmt.Errorf("entry %d has no participant name: %q", i+1, entry)
+		}
+	}
 	if !determined {
 		if err := shuffleStrings(entries); err != nil {
 			return nil, fmt.Errorf("shuffling entries: %w", err)

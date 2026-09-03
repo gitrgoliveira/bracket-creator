@@ -1,13 +1,13 @@
 // viewer_competition.jsx: page-level competition and overview components.
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
-import { TermV, competitionKindLabel, poolLabel } from './viewer_utils.jsx';
+import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
 import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
-import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -17,6 +17,12 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
+// bracketRoundsContain: is this match id drawn INSIDE BracketTree? The bronze
+// (3rd-place) playoff is a sibling of bracket.rounds and is rendered below the
+// tree, so it is not, and the tree holds no ref by which to scroll to it.
+const bracketRoundsContain = (bracket, id) =>
+  !!id && !!bracket && Array.isArray(bracket.rounds)
+  && bracket.rounds.some((round) => (round || []).some((m) => m && m.id === id));
 // DH-winner detection uses isPoolDaihyosenBout (pool_ids.jsx): a suffix match
 // (…-DH-N), daihyosen-specific, so a pool name containing "-DH-" can't
 // false-positive a regular match. Routing a bout to the individual (rep-bout)
@@ -30,49 +36,38 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const c = competition;
   const isEngi = !!(c && c.engi);
 
-  // Deps enumerate the primitive c.* fields this memo (and teamMatchTypeFor(c),
-  // which the linter can't see into) actually reads, deliberately NOT the whole
-  // `c` object whose identity churns every render.
-  const allMatches = useMemo(() => {
-    const out = [];
-    const compTMT = teamMatchTypeFor(c);
-    if (pools) {
-        pools.forEach((p) => {
-            // Exact parsed pool name, not a raw prefix: startsWith("Pool A-")
-            // would also swallow "Pool A-East-…" ids. poolNameOf strips any
-            // DH/TB suffix (matches the backend equality rule in daihyosen.go).
-            const matches = poolMatches ? poolMatches.filter(m => poolNameOf(m.id) === p.poolName) : [];
-            matches.forEach((m) => {
-                // A daihyosen ('-DH-') or tiebreaker ('-TB-') is a single
-                // ippon-shobu rep bout even in a team comp: force compKind/teamSize
-                // so isTeam checks route it to the individual editor (mirrors
-                // enrichPoolMatchWithComp in admin_pools.jsx).
-                const isRepBout = isSupplementaryBout(m.id || "");
-                out.push({ ...m, phase: "pool", phaseName: p.poolName, poolName: p.poolName, compFormat: c.format, compId: c.id, compName: c.name, compKind: isRepBout ? "" : c.kind, teamSize: isRepBout ? 0 : c.teamSize, compEngi: isRepBout ? false : isEngi, teamMatchType: isRepBout ? "" : compTMT });
-            });
-        });
-    }
-    // mp-9dz/mp-8jbo: a preview bracket (bracket.preview === true) on a mixed
-    // (Pools + Knockout) competition carries pool-origin TBD placeholders
-    // ("Pool A-1st", "Pool B-2nd", …). These must NOT flow into allMatches
-    // because allMatches feeds Up next / upcoming / recent / watchlist, and
-    // spectators would see meaningless placeholder entries. The Bracket tab
-    // renders `bracket`/`derivedBracket` directly and is NOT affected.
-    if (bracket && bracket.rounds && !bracket.preview) {
-        bracket.rounds.forEach((round, ri) => {
-            // window.bracketRoundLabel is the ONE round-naming primitive: it keys
-            // on the match's effective round (mp-7f2w displayRound), so an Overview
-            // row and the Bracket tab column above the same match always agree.
-            // roundLabel(ri, …) named a DIFFERENT round whenever a bye collapsed
-            // one (mp-u37s). roundIndex stays RAW: lineup fetches key on it.
-            round.forEach((m) => out.push({ ...m, phase: "bracket", round: window.bracketRoundLabel(m, ri, bracket.rounds.length), phaseName: window.bracketRoundLabel(m, ri, bracket.rounds.length), roundIndex: ri, compId: c.id, compName: c.name, compKind: c.kind, teamSize: c.teamSize, compEngi: isEngi, teamMatchType: compTMT }));
-        });
-    }
-    return out;
-    // isEngi (not c.engi) because that is the binding the memo closes over; it
-    // is a derived primitive, so it changes exactly when c.engi does.
+  // Deps enumerate the primitive c.* fields this memo (and teamMatchTypeFor(c)
+  // via compMatches, which the linter can't see into) actually reads,
+  // deliberately NOT the whole `c` object whose identity churns every render.
+  //
+  // Collapsed onto the shared compMatches (viewer_utils.jsx) builder (mp-dej2):
+  // this component receives pools/poolMatches/bracket as separate props (the
+  // `competition` prop is detail.config, which carries none of them — see
+  // app.jsx), so compMatchesForCompetition recombines the two halves. That
+  // helper is shared with the withdrawal panel so the recombination exists
+  // once rather than being spread by hand at each call site. compMatches
+  // reads the flat poolMatches list directly rather than walking `pools`, so a
+  // Swiss competition (pools: [] always — Swiss piggybacks pool-matches.csv
+  // with a synthetic "Swiss-R1" pool name but never writes pools.csv) now
+  // contributes its matches here exactly as it already did to
+  // home/watchlist/schedule/find-my-matches, which call compMatches directly.
+  //
+  // The collapse is NOT Swiss-only in what it adds. compMatches also emits the
+  // bronze (3rd-place) playoff, a sibling of bracket.rounds that the loop this
+  // replaced never walked, so that bout now reaches Up next / Recent results
+  // here as it always has on every other surface. That is the fix working, not
+  // a side effect: the page was dropping a real bout. It does have one
+  // consequence -- the bronze can now be currentMatch, and it renders outside
+  // BracketTree -- which the bracket auto-scroll effect below handles.
+  const allMatches = useMemo(
+    () => compMatchesForCompetition(c, { pools, poolMatches, bracket }),
+    // isEngi (not c.engi) because that is the binding this component closes
+    // over elsewhere; it is a derived primitive, so it changes exactly when
+    // c.engi does. c.status is a new input: compMatches early-returns [] for
+    // "setup" (no draw yet), a no-op in practice.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format, isEngi, c.teamMatchType, c.config?.teamMatchType]);
+    [pools, poolMatches, bracket, c.id, c.name, c.kind, c.teamSize, c.format, isEngi, c.teamMatchType, c.config?.teamMatchType, c.status]
+  );
 
   // mp-xhaa: the schedule filter and bracket/pool highlight are driven by the
   // unified watchlist (resolved to flat players, so dojo entries expand to
@@ -152,16 +147,13 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // hasBothSides, never `m.sideA && m.sideB`: normalizeMatch substitutes a
     // truthy {id:"",name:""} for a missing side.
     //
-    // SWISS is NOT affected by this filter, despite building a bye in the same
-    // one-real-side shape ({SideA: name, SideB: "", Winner: name, completed} —
-    // engine/swiss.go). Swiss piggybacks on pool-matches.csv but never writes
-    // pools.csv, so the viewer payload carries `pools: []` with the matches in
-    // poolMatches (verified against a live 5-player Swiss round: 3 poolMatches,
-    // pools empty). The loop above walks `pools`, so NO Swiss match reaches
-    // allMatches at all and none of these three lists can contain one. A Swiss
-    // bye therefore does not appear here for a different reason than a knockout
-    // bye, and the operator has ruled that acceptable. Do not add a Swiss case
-    // to this filter expecting it to change anything.
+    // SWISS byes ({SideA: name, SideB: "", Winner: name, completed} —
+    // engine/swiss.go) reach allMatches like every other Swiss match (mp-dej2:
+    // allMatches now runs through the shared compMatches builder instead of a
+    // pools-only loop), but a bye has only one real side, so it is excluded by
+    // this SAME hasBothSides filter as a knockout bye, for the same reason. The
+    // operator has ruled that acceptable (PR #382). Do not add a Swiss case to
+    // this filter expecting it to change anything.
     const recent = allMatches
       .filter((m) => m.status === "completed" && m.winner && hasBothSides(m) && matchInvolvesWatched(m))
       .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
@@ -256,14 +248,36 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const [selectedMatch, setSelectedMatch] = useState(null);
   const [bracketOverflowRight, setBracketOverflowRight] = useState(false);
 
-  // Depends on currentMatch?.id, not the object: re-scroll only when the target
-  // match actually changes, not on every currentMatch identity churn.
+  // Keyed on an id STRING, not a match object: re-scroll only when the target
+  // actually changes, not on every identity churn.
+  //
+  // Which match the Bracket tab should centre on: currentMatch when the tree
+  // holds it, else the soonest running/upcoming match that IS in the tree.
+  //
+  // The fallback is the point, not a nicety. Before allMatches was collapsed
+  // onto the shared builder, the bronze never reached this page, so currentMatch
+  // was the final and the tab centred there. The bronze is scheduled just BEFORE
+  // the final (engine/bracket.go gives it the slot ahead of it on the same
+  // shiaijo), so it is now reliably the current match at exactly the moment an
+  // operator opens this tab, and simply skipping would leave the tab centred on
+  // nothing for the whole bronze slot. Targeting the bronze itself is not an
+  // option: it renders BELOW the tree, outside BracketTree, so it owns no ref
+  // and useAutoScrollToMatch bails silently.
+  //
+  // A plain string, not a match object or a Set: this feeds an effect that
+  // setStates, and a fresh object in that dep list re-fires it every render.
+  const bracketFocusId = (() => {
+    if (currentMatch && bracketRoundsContain(derivedBracket, currentMatch.id)) return currentMatch.id;
+    const inTree = (m) => m && bracketRoundsContain(derivedBracket, m.id);
+    const fallback = runningMatches.find(inTree) || upcomingMatches.find(inTree);
+    return fallback ? fallback.id : "";
+  })();
+
   React.useEffect(() => {
-    if (effectiveTab === "bracket" && currentMatch) {
-      setBracketScrollTarget(currentMatch.id + "::" + Date.now());
+    if (effectiveTab === "bracket" && bracketFocusId) {
+      setBracketScrollTarget(bracketFocusId + "::" + Date.now());
     }
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveTab, currentMatch?.id]);
+  }, [effectiveTab, bracketFocusId]);
 
   const hasBracketEl = effectiveTab === "bracket" && !!derivedBracket;
   React.useEffect(() => {

@@ -87,7 +87,7 @@ A competition moves through three phases:
 
 1. **Setup**: configure participants, seeding, and optional check-in.
 2. **Draw preview** (`draw-ready`): review the generated pools, bracket, or first Swiss round. The roster is locked during this phase.
-3. **Match play**: competitions with a pool phase start in `pools` status; knockout-only formats start in `playoffs`.
+3. **Match play**: Pools + Knockout, League, and Swiss competitions all start in `pools` status, which is the shared name for the phase their matches run in rather than a claim that each one has pools. Knockout-only competitions start in `playoffs`.
 
 ![Competition setup overview](../../screenshots/mobile-participants.png)
 

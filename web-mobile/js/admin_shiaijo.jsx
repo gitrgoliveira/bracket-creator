@@ -22,6 +22,9 @@ import { realIppons } from './result_slot.jsx';
 // api_client.jsx does not apply to it — the same move admin_scoring_shared.jsx
 // already makes.
 import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKEW_REASON_TEXT } from './write_result.jsx';
+// swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
+// carry its own copy.
+import { swissRoundLabel } from './pool_ids.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -1813,14 +1816,6 @@ export function shiaijoStandingsKind(match) {
     return match.compFormat === "league" ? "league" : "pool";
 }
 
-// "Swiss-R3" (the synthetic engine pool name, see engine/swiss.go
-// swissPoolName) → "Round 3" for the panel header; any other shape is
-// returned unchanged.
-export function swissRoundLabel(poolName) {
-    const m = /^Swiss-R(\d+)$/.exec(poolName || "");
-    return m ? `Round ${m[1]}` : (poolName || "");
-}
-
 // Collapsible context for the match being scored:
 //   • pool phase  → live standings + results for the current pool, routed by
 //     shiaijoStandingsKind. Pools also show which pool is next on this
@@ -1833,10 +1828,11 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     const standingsKind = shiaijoStandingsKind(match);
     const isLeagueComp = standingsKind === "league";
     const isSwissComp = standingsKind === "swiss";
+    // leagueAwareLabel (viewer_utils.jsx) already folds the swiss case in via
+    // swissRoundLabel, so the isSwissComp ternary that used to sit here is
+    // redundant (mp-dej2).
     const phaseLabel = isPool
-        ? (isSwissComp
-            ? swissRoundLabel(match.poolName)
-            : window.leagueAwareLabel(match.compFormat, match.poolName, "Pool"))
+        ? window.leagueAwareLabel(match.compFormat, match.poolName, "Pool")
         : (match.round || "Elimination");
     const PoolsViewer = window.PoolsViewer;
     const LeagueStandingsViewer = window.LeagueStandingsViewer;

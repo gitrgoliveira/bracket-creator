@@ -31,7 +31,7 @@ func TestFrontendBundleMissing(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.missing, frontendBundleMissing(tt.fsys))
+			assert.Equal(t, tt.missing, FrontendBundleMissing(tt.fsys))
 		})
 	}
 }
@@ -39,5 +39,5 @@ func TestFrontendBundleMissing(t *testing.T) {
 func TestFrontendBundleMissing_NilFS(t *testing.T) {
 	// cmd's TestMain wires resources.NewResources(nil, nil), so the router is
 	// built over a nil fs.FS; the check must answer "missing" rather than panic.
-	assert.True(t, frontendBundleMissing(nil))
+	assert.True(t, FrontendBundleMissing(nil))
 }

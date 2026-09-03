@@ -69,6 +69,35 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		}
 		records = append(records, fields)
 	}
+
+	// Blank-name rejection lives here, not in CreatePlayersFromRecords: this
+	// is the entry point for the CLI, the legacy web UI's parse endpoint and
+	// archive import, all of which take raw string entries. The roster
+	// loader in internal/state calls CreatePlayersFromRecords directly and
+	// stays tolerant of a blank name on purpose, so a hand-edited
+	// participants.csv can still be loaded and repaired.
+	var missing []string
+	for i, rec := range records {
+		allBlank := true
+		for _, f := range rec {
+			if strings.TrimSpace(f) != "" {
+				allBlank = false
+				break
+			}
+		}
+		if allBlank {
+			continue
+		}
+		if len(rec) == 0 || strings.TrimSpace(rec[0]) == "" {
+			// Quote the row: the CLI shuffles entries before this runs, so the
+			// entry number alone does not identify a line in the file.
+			missing = append(missing, fmt.Sprintf("entry %d: missing name in %q", i+1, strings.Join(rec, ",")))
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("participant validation failed:\n%s", strings.Join(missing, "\n"))
+	}
+
 	return CreatePlayersFromRecords(records, withZekkenName)
 }
 

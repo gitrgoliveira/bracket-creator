@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -193,7 +194,11 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	scheduleEnabled := parseScheduleEnabled(os.Getenv(ScheduleEnabledEnv))
 	slog.Info("mobile-app: schedule feature flag", "scheduleEnabled", scheduleEnabled)
 
-	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, GetResources(), verifier, hub, scheduleEnabled)
+	res := GetResources()
+	if mobileapp.FrontendBundleMissing(res.GetMobileWebFS()) {
+		log.Printf("Warning: the tournament app front-end bundle is missing (web-mobile/dist holds only the placeholder), so the mobile-app web UI will render blank. Build with make go/build or use a release binary.")
+	}
+	r, _, apiLimiter := mobileapp.NewRouterWithHub(store, eng, res, verifier, hub, scheduleEnabled)
 
 	// Mount the stateless tournament-generation endpoint (same handler the
 	// `serve` web app uses) so the in-app "Download .xlsx" button runs the

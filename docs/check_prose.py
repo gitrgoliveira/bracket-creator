@@ -41,42 +41,31 @@ EM_DASH = "—"
 SEE_LINK_RE = re.compile(r"\b[Ss]ee (the |also )?\[")
 INTERNAL_ID_RE = re.compile(r"\b(mp|bc)-[a-z0-9]{3,4}\b")
 MAT_RE = re.compile(r"\bmats?\b", re.IGNORECASE)
-CLASS_ATTR_RE = re.compile(r'class="[^"]*"')
 
 # Internal-id matches that are actually CSS class names, not bead references.
 INTERNAL_ID_CLASS_ALLOWLIST = {"bc-fig"}
 
 
-def in_class_attr(line: str, start: int, end: int) -> bool:
-    """True when line[start:end] falls inside a class="..." attribute value."""
-    for m in CLASS_ATTR_RE.finditer(line):
-        if m.start() <= start and end <= m.end():
-            return True
-    return False
-
-
-def check_line(line: str) -> list[tuple[str, str]]:
-    """Return a list of (rule, excerpt) violations for one line of prose."""
-    violations: list[tuple[str, str]] = []
+def check_line(line: str) -> list[str]:
+    """Return the deduplicated list of rule names violated by one prose line."""
+    rules: list[str] = []
 
     if EM_DASH in line:
-        violations.append(("em-dash", line.strip()))
+        rules.append("em-dash")
 
     if SEE_LINK_RE.search(line):
-        violations.append(("see-link", line.strip()))
+        rules.append("see-link")
 
     for m in INTERNAL_ID_RE.finditer(line):
-        token = m.group(0)
-        if token in INTERNAL_ID_CLASS_ALLOWLIST:
+        if m.group(0) in INTERNAL_ID_CLASS_ALLOWLIST:
             continue
-        if in_class_attr(line, m.start(), m.end()):
-            continue
-        violations.append(("internal-id", line.strip()))
+        if "internal-id" not in rules:
+            rules.append("internal-id")
 
     if MAT_RE.search(line):
-        violations.append(("mat", line.strip()))
+        rules.append("mat")
 
-    return violations
+    return rules
 
 
 def iter_prose_lines(text: str):
@@ -89,10 +78,6 @@ def iter_prose_lines(text: str):
         if in_html_comment:
             if "-->" in line:
                 in_html_comment = False
-                # Anything after the closing marker on the same line is prose.
-                after = line.split("-->", 1)[1]
-                if after.strip():
-                    yield lineno, after
             continue
 
         if stripped.startswith("```"):
@@ -103,16 +88,8 @@ def iter_prose_lines(text: str):
             continue
 
         if "<!--" in line:
-            before, _, rest = line.partition("<!--")
-            if "-->" in rest:
-                after = rest.split("-->", 1)[1]
-                combined = before + after
-                if combined.strip():
-                    yield lineno, combined
-            else:
+            if "-->" not in line:
                 in_html_comment = True
-                if before.strip():
-                    yield lineno, before
             continue
 
         yield lineno, line
@@ -132,17 +109,16 @@ def main() -> int:
                 continue
             md_files.append(path)
 
-    violations: list[tuple[str, int, str, str]] = []
+    bad = False
     for path in sorted(md_files):
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
         for lineno, line in iter_prose_lines(text):
-            for rule, excerpt in check_line(line):
-                violations.append((path, lineno, rule, excerpt))
+            for rule in check_line(line):
+                bad = True
+                print(f"{path}:{lineno}: {rule}: {line.strip()}")
 
-    if violations:
-        for path, lineno, rule, excerpt in violations:
-            print(f"{path}:{lineno}: {rule}: {excerpt}")
+    if bad:
         return 1
 
     print(f"OK: {len(md_files)} files, no prose-rule violations")

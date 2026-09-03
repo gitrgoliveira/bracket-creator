@@ -35,7 +35,7 @@ What Correct offers depends on the format:
 
     ![The Fusenpai panel on a reopened encounter: a side picker, a required reason box prompting "Why is this match being ended again?", a note that the match was reopened so ending it again needs a reason, and a Record button held back until the reason is filled in.](../../screenshots/decision-reason-after-reopen.png)
 
-    Whichever way you end it, the editor asks for the same reason:
+    Ending it on a scored bout asks in the same dialog, with **Ended by mistake** offered as the first reason:
 
     ![Ending a reopened encounter: the editor asks for a reason, with "Ended by mistake" already selected and a note box beside it](../../screenshots/kachinuki-reopen-reason.png)
 

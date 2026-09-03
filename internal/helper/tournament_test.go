@@ -209,6 +209,47 @@ func TestCreatePlayersDuplicates(t *testing.T) {
 	}
 }
 
+func TestCreatePlayers_MissingName(t *testing.T) {
+	tests := []struct {
+		name        string
+		entries     []string
+		wantErr     bool
+		errContains []string
+	}{
+		{
+			name:        "blank name is reported with its entry number",
+			entries:     []string{"John Doe, Dojo A", ", Dojo B"},
+			wantErr:     true,
+			errContains: []string{"participant validation failed", "entry 2: missing name"},
+		},
+		{
+			name:    "whitespace-only entry is skipped",
+			entries: []string{"John Doe, Dojo A", "   "},
+		},
+		{
+			name:        "two blank names are both reported",
+			entries:     []string{", Dojo A", ", Dojo B"},
+			wantErr:     true,
+			errContains: []string{"entry 1: missing name", "entry 2: missing name"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			players, err := CreatePlayers(tt.entries, false)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, players)
+				for _, s := range tt.errContains {
+					assert.Contains(t, err.Error(), s)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestCreatePools(t *testing.T) {
 	createPlayers := func(n int, dojoModulo int) []Player {
 		players := make([]Player, n)
@@ -1014,17 +1055,14 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name:       "leading and trailing commas",
-			entries:    []string{",John Doe, Dojo A,", "Jane Smith, Dojo B,"},
-			withZekken: false,
-			wantErr:    false,
-			validate: func(t *testing.T, players []Player) {
-				if len(players) != 2 {
-					t.Fatalf("Expected 2 players, got %d", len(players))
-				}
-				// First entry has empty first field, so name becomes ""
-				// This might be a valid test case or might need error handling
-			},
+			// A leading comma shifts the name out of the first field, so the
+			// first field is blank: the missing-name check now rejects it
+			// rather than silently building a player with an empty name.
+			name:        "leading comma produces a blank name",
+			entries:     []string{",John Doe, Dojo A,", "Jane Smith, Dojo B,"},
+			withZekken:  false,
+			wantErr:     true,
+			errContains: "entry 1: missing name",
 		},
 		{
 			name:        "multiple validation errors",

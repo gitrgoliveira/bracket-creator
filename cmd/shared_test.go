@@ -71,7 +71,7 @@ func TestProcessEntries_BlankName(t *testing.T) {
 			name:        "blank name is rejected",
 			entries:     []string{"John Doe, Dojo A", ", Dojo B"},
 			wantErr:     true,
-			errContains: ", Dojo B",
+			errContains: "entry 2: missing name",
 		},
 		{
 			name:    "normal list still passes",
@@ -83,6 +83,12 @@ func TestProcessEntries_BlankName(t *testing.T) {
 			name:    "name-only entry still passes",
 			entries: []string{"Bob Brown"},
 		},
+		{
+			// A whitespace-only entry is dropped as a blank line before
+			// validation ever sees it, not reported as a missing name.
+			name:    "whitespace-only entry is skipped",
+			entries: []string{"John Doe, Dojo A", "   "},
+		},
 	}
 
 	for _, tt := range tests {
@@ -91,12 +97,11 @@ func TestProcessEntries_BlankName(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, players)
-				assert.Contains(t, err.Error(), "has no participant name")
+				assert.Contains(t, err.Error(), "missing name")
 				assert.Contains(t, err.Error(), tt.errContains)
 				return
 			}
 			require.NoError(t, err)
-			assert.Len(t, players, len(tt.entries))
 		})
 	}
 }

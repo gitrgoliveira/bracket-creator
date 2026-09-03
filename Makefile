@@ -276,17 +276,16 @@ docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
 	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
 	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
-docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
+docs/build: $(DOCS_STAMP) docs/prose ## Build static documentation site (output: site/)
 	@echo "Building documentation..."
 	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
-	$(DOCS_BIN)/python docs/check_prose.py docs
 
 docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
 	@echo "Checking internal documentation links..."
 	$(DOCS_BIN)/python docs/check_links.py site
 
-docs/prose: ## Check the docs sources against the public-prose rules
-	$(DOCS_BIN)/python docs/check_prose.py docs
+docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
+	python3 docs/check_prose.py docs
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

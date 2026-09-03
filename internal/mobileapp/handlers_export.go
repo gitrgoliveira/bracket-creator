@@ -37,6 +37,14 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 				return
 			}
+			// The stored bracket disagrees with the competition's current
+			// settings and cannot be faithfully rendered; also 422, not 500 --
+			// this is a state conflict the operator can resolve (regenerate
+			// the draw, or restore the settings), not a server fault.
+			if errors.Is(err, engine.ErrBracketDrawMismatch) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+				return
+			}
 			// Unknown competition -> 404, matching every other competition endpoint.
 			if errors.Is(err, export.ErrCompetitionNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "competition not found"})

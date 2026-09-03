@@ -235,20 +235,25 @@ func TestExportPipelineSheetParity(t *testing.T) {
 	}
 }
 
-// TestExportPipeline_BronzeOnlyFallbackAppearsInBothBuilders pins mp-yuy8
-// criterion 5's decision: the narrow bronze-only fallback -- a persisted
-// bracket that already carries a third-place bout, but whose knockout draw
-// cannot be re-derived at export time -- now fires for BOTH workbook
+// TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders pins mp-yuy8
+// PHASE 3's correction: a persisted bracket that already carries a
+// third-place bout, but whose knockout draw cannot be re-derived at export
+// time, is a state conflict, not a partial-render opportunity. Both workbook
 // builders (engine.RenderCompetitionWorkbook, shared by
-// Engine.ExportCompetitionXlsx and BuildResultsWorkbook), not just the
-// blank-template export it used to be exclusive to.
+// Engine.ExportCompetitionXlsx and BuildResultsWorkbook) must now refuse this
+// shape with engine.ErrBracketDrawMismatch rather than rendering an
+// Elimination Matches sheet that carries only the lone 3rd-place block and no
+// other knockout content -- a silently-partial workbook the operator has no
+// way to tell is partial.
 //
-// Reachable through a real write path, not just a hand-edited bracket.json:
-// comp.ExtraQualifiers carries no `started` guard in PUT
-// /api/competitions/:id (internal/mobileapp/handlers_competition.go) --
-// unlike its Naginata/Engi/Format/Kind/TeamMatchType siblings, which all
-// reject a change once the competition has started, `current.ExtraQualifiers
-// = comp.ExtraQualifiers` merges unconditionally past draw-ready. An operator
+// The fixture and its reachability story are unchanged from the original
+// bronze-only-fallback test this replaces: reachable through a real write
+// path, not just a hand-edited bracket.json. comp.ExtraQualifiers carries no
+// `started` guard in PUT /api/competitions/:id
+// (internal/mobileapp/handlers_competition.go) -- unlike its
+// Naginata/Engi/Format/Kind/TeamMatchType siblings, which all reject a change
+// once the competition has started, `current.ExtraQualifiers =
+// comp.ExtraQualifiers` merges unconditionally past draw-ready. An operator
 // can therefore flip a Naginata competition's ExtraQualifiers to a value
 // buildPoolFedDraw marks "out of scope" for the CURRENT pool shape after the
 // original bracket -- bronze block included, since Naginata itself IS locked
@@ -259,10 +264,10 @@ func TestExportPipelineSheetParity(t *testing.T) {
 // playoffLeaves: PlayoffLeavesFromBracket finds no rounds and
 // PlayoffFinalsFromParticipants finds no participants) while
 // bracket.ThirdPlaceMatch is still on disk from the original draw -- the
-// exact "draw == nil, hasBronze == true" state the fallback exists for.
-func TestExportPipeline_BronzeOnlyFallbackAppearsInBothBuilders(t *testing.T) {
+// exact "draw == nil, hasBronze == true" state that now errors.
+func TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders(t *testing.T) {
 	t.Parallel()
-	dir, err := os.MkdirTemp("", "export-pipeline-bronze-fallback-*")
+	dir, err := os.MkdirTemp("", "export-pipeline-bronze-mismatch-*")
 	require.NoError(t, err)
 	defer os.RemoveAll(dir)
 
@@ -270,10 +275,10 @@ func TestExportPipeline_BronzeOnlyFallbackAppearsInBothBuilders(t *testing.T) {
 	require.NoError(t, err)
 	eng := engine.New(store)
 
-	compID := "bronze-fallback-comp"
+	compID := "bronze-mismatch-comp"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:       compID,
-		Name:     "Bronze Fallback Comp",
+		Name:     "Bronze Mismatch Comp",
 		Kind:     "individual",
 		Format:   state.CompFormatPlayoffs,
 		Naginata: true,
@@ -289,35 +294,13 @@ func TestExportPipeline_BronzeOnlyFallbackAppearsInBothBuilders(t *testing.T) {
 		},
 	}))
 
-	engineBytes, err := eng.ExportCompetitionXlsx(compID)
-	require.NoError(t, err)
-	resultsBytes, err := BuildResultsWorkbook(store, eng, compID)
-	require.NoError(t, err)
+	_, err = eng.ExportCompetitionXlsx(compID)
+	assert.ErrorIsf(t, err, engine.ErrBracketDrawMismatch,
+		"blank-template export: must refuse the bronze-only-mismatch shape, not render it partially")
 
-	for _, tc := range []struct {
-		name string
-		data []byte
-	}{
-		{"blank-template export", engineBytes},
-		{"results export", resultsBytes},
-	} {
-		f, err := excelize.OpenReader(bytes.NewReader(tc.data))
-		require.NoError(t, err)
-		rows, err := f.GetRows(helper.SheetEliminationMatches)
-		require.NoError(t, err)
-		_ = f.Close()
-
-		found := false
-		for _, row := range rows {
-			for _, cell := range row {
-				if cell == helper.ThirdPlaceLabel {
-					found = true
-				}
-			}
-		}
-		assert.Truef(t, found, "%s: Elimination Matches sheet must carry a %q header from the bronze-only fallback",
-			tc.name, helper.ThirdPlaceLabel)
-	}
+	_, err = BuildResultsWorkbook(store, eng, compID)
+	assert.ErrorIsf(t, err, engine.ErrBracketDrawMismatch,
+		"results export: must refuse the bronze-only-mismatch shape, not render it partially")
 }
 
 // sheetList opens xlsx bytes and returns its sheet names.

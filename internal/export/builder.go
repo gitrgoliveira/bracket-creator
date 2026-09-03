@@ -179,15 +179,14 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// knockout step gates on): both overlayBracketScores and
 	// overlayPlayoffBracketNames work by SCANNING the sheet the shared
 	// pipeline just produced for header cells ("Round N - Match N" / "3rd
-	// Place"), so when the pipeline rendered nothing (neither the main
-	// knockout branch nor the bronze-only fallback fired) they find nothing
-	// and are a no-op -- identical to skipping the call outright. The one
-	// case this gate difference matters is the bronze-only fallback
-	// (mp-yuy8 criterion 5): when it fires, it prints a "3rd Place" header
-	// with no draw at all, and gating this overlay the OLD way (nested
-	// inside `draw != nil && IsPlayoffEnabled()`) would silently skip
-	// writing that block's literal score, defeating the point of sharing the
-	// fallback in the first place.
+	// Place"), so when the pipeline rendered nothing there (no derivable
+	// draw, and no third-place bout to disagree about it -- the
+	// draw-mismatch case above ERRORS OUT of RenderCompetitionWorkbook
+	// before this function ever reaches here) they find nothing and are a
+	// no-op -- identical to skipping the call outright. Keeping the broader
+	// gate rather than nesting inside `draw != nil && IsPlayoffEnabled()` is
+	// therefore just avoiding a redundant condition, not covering a
+	// reachable divergence.
 	if bracket != nil {
 		bracketByNum := buildBracketMatchIndex(bracket)
 		thirdPlaceMatch := bracket.ThirdPlaceMatch

@@ -90,7 +90,11 @@ specs/*/*
 # UAT walks. Tracked so the audit trail survives across machines and reviewers.
 !specs/*/screenshots/
 !specs/*/screenshots/*.png
-.specify
+# .specify is tool state, except the constitution, which CLAUDE.md requires every clone to read.
+.specify/*
+!.specify/memory/
+.specify/memory/*
+!.specify/memory/constitution.md
 .agent*
 .playwright-mcp
 # The Playwright MCP writes browser_take_screenshot files to the repo/worktree

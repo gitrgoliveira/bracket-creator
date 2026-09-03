@@ -70,6 +70,26 @@ describe('compMatchesForCompetition; recombines the split viewer detail payload'
       .toEqual(['Swiss-R1-0', 'Swiss-R1-1']);
   });
 
+  it('works on a ONE-ARGUMENT call with a flat competition (bc-cmfc)', () => {
+    // The aggregate shape carries pools/poolMatches/bracket at the TOP level, so
+    // `compMatchesForCompetition(comp)` is the natural call for anyone holding
+    // one. With `data` defaulting to `{}` those fields were overwritten with
+    // undefined and this returned [] — the same silent-empty the helper exists
+    // to abolish, reintroduced inside it, on a function published on window
+    // whose comment invites new callers.
+    const flat = { ...detail().config, poolMatches: detail().poolMatches, pools: [], bracket: null };
+    expect(compMatchesForCompetition(flat).map((m) => m.id))
+      .toEqual(['Swiss-R1-0', 'Swiss-R1-1']);
+  });
+
+  it('treats an EXPLICIT empty data object as "no match data", not as absent', () => {
+    // Only a MISSING argument falls back to config. A caller that deliberately
+    // passes {} is saying this competition has no matches, and must keep
+    // getting [] rather than silently picking them up off config.
+    const flat = { ...detail().config, poolMatches: detail().poolMatches, pools: [], bracket: null };
+    expect(compMatchesForCompetition(flat, {})).toEqual([]);
+  });
+
   it('returns [] rather than throwing when there is no competition', () => {
     expect(compMatchesForCompetition(null, detail())).toEqual([]);
     expect(compMatchesForCompetition(undefined, undefined)).toEqual([]);

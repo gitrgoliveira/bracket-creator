@@ -1,5 +1,9 @@
 // Shared UI primitives used by both admin and viewer modules.
 
+// Formats that run their matches through the pool pipeline but are not pools.
+// See the label note inside StatusBadge.
+const POOLS_PHASE_FORMAT_LABEL = { league: "League", swiss: "Swiss" };
+
 function StatusBadge({ status, showRunningDot, format }) {
   const map = {
     setup: ["badge--setup", "Pending"],
@@ -9,7 +13,18 @@ function StatusBadge({ status, showRunningDot, format }) {
     completed: ["badge--completed", "Completed"],
   };
   const [cls, rawLabel] = map[status || "setup"] || ["badge--setup", status];
-  const label = (status === "pools" && format === "league") ? "League" : rawLabel;
+  // The "pools" STATUS is the backend's name for "the pool-pipeline phase is
+  // running", and two formats borrow that pipeline without being pools: a
+  // league is one round-robin table spanning the whole roster, and Swiss is N
+  // paired rounds (it never even writes pools.csv). Calling either "Pools" in
+  // the badge misdescribes the competition on every surface that renders it —
+  // the viewer competition header and home list, the admin competition header
+  // and the competition list — so name the FORMAT instead. Any other format
+  // genuinely is in pools and keeps the raw label. Same terminology boundary
+  // as leagueAwareLabel (viewer_utils.jsx) and phaseLabel (display_helpers.jsx);
+  // a map rather than a ternary chain so the next format that borrows the pool
+  // pipeline is one entry, not another branch (mp-8rc9 league, mp-dej2 swiss).
+  const label = (status === "pools" && POOLS_PHASE_FORMAT_LABEL[format]) || rawLabel;
   const showRunning = showRunningDot && (status === "pools" || status === "playoffs");
   return (
     <span className={`badge ${cls}`}>

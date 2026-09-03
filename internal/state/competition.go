@@ -33,24 +33,6 @@ func (s *Store) LoadCompetition(id string) (*Competition, error) {
 		return nil, fmt.Errorf("invalid competition ID: %w", err)
 	}
 
-	// Before the read lock: legacy shapes convert on first read, under the
-	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
-	// This is now the load path's own enforcement of the format/status
-	// upgrade -- it does not rely on the startup sweep having already run
-	// (see EnsureLegacyUpgraded's doc comment): a competition whose sweep
-	// failed, or that raced a concurrent write, still cannot be served here
-	// with the retired "playoffs" wire values.
-	//
-	// EnsureLegacyUpgraded takes and releases the per-comp WRITE lock before
-	// returning; loadCached below takes its own RLock afterwards. The two
-	// acquisitions are sequential, never nested, so this cannot deadlock
-	// against loadCached's RLock the way calling it while already holding
-	// that lock would (e.g. from inside WithTransaction -- no such caller
-	// exists in this package).
-	if err := s.EnsureLegacyUpgraded(id); err != nil {
-		return nil, err
-	}
-
 	data, err := s.loadCached(id, "config.md", parseCompetitionFile)
 	if err != nil {
 		return nil, err
@@ -72,6 +54,20 @@ func parseCompetitionFile(path string) (any, error) {
 	var c Competition
 	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err
+	}
+	// Retired wire values (bc-terminology commit 1: playoffs -> knockout) fold
+	// onto their canonical equivalents here, in memory, on every read. This is
+	// the only place allowed to recognise the literal "playoffs" string for
+	// config.md. Un-forgettable (every reader parses through this function),
+	// cannot fail, needs no lock and no I/O; the on-disk file itself converges
+	// the next time anything saves this record, since only the canonical
+	// struct is ever serialised back out.
+	const legacyFormatValue = "playoffs"
+	if c.Format == legacyFormatValue {
+		c.Format = CompFormatKnockout
+	}
+	if c.Status == CompetitionStatus(legacyFormatValue) {
+		c.Status = CompStatusKnockout
 	}
 	// Single funnel for every competition read, so a config.md written before
 	// per-phase seconds existed is normalized exactly once, at the boundary,

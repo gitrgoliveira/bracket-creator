@@ -262,6 +262,23 @@ func TestApplyCompetitionDefaults_SecondsWinOverMinutes(t *testing.T) {
 	assert.Zero(t, c.PoolMatchDuration, "the retired field is cleared either way")
 }
 
+// TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverMinutes pins bug 3
+// from the deleted write-on-read migration (upgradeCompetitionFormatLocked):
+// its guard checked KnockoutMatchDurationSeconds == 0 AFTER the whole-minute
+// key had already back-filled it, so a competition carrying BOTH the retired
+// sub-minute seconds key (KnockoutMatchDurationSecondsLegacy, yaml tag
+// playoff_match_duration_seconds) and the whole-minute key
+// (KnockoutMatchDuration) resolved to the whole-minute value rounded up
+// instead of the more precise one. The fold order inside
+// ApplyCompetitionDefaults must check the retired seconds key first.
+func TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverMinutes(t *testing.T) {
+	c := &Competition{KnockoutMatchDuration: 5, KnockoutMatchDurationSecondsLegacy: 150}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 150, c.KnockoutMatchDurationSeconds, "the retired seconds key must win over the whole-minute key (300)")
+	assert.Zero(t, c.KnockoutMatchDuration, "the retired whole-minute field is cleared either way")
+	assert.Zero(t, c.KnockoutMatchDurationSecondsLegacy, "the retired seconds field is cleared either way")
+}
+
 // TestCompetitionSecondsRoundTrip verifies the *Seconds fields persist through
 // YAML with their snake_case tags.
 func TestCompetitionSecondsRoundTrip(t *testing.T) {

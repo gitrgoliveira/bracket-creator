@@ -107,22 +107,6 @@ func NewStore(folder string) (*Store, error) {
 		return nil, err
 	}
 
-	// Convert every competition's legacy on-disk shapes EAGERLY, here, rather
-	// than lazily on first touch; see legacy_upgrade.go for why. A failure is
-	// LOGGED rather than returned: the load path (LoadCompetition,
-	// loadParticipants) is the real defence against serving an unconverted
-	// competition, so one broken config.md must not stop every OTHER
-	// competition and court from starting. The broken competition itself
-	// still cannot be silently served -- it will keep refusing reads until
-	// whatever made the rewrite fail (e.g. a read-only competition
-	// directory) is fixed.
-	//
-	// Runs after init() releases s.mu: ListCompetitions takes its own RLock, so
-	// calling it while init() still held the write lock would deadlock.
-	if err := s.SweepLegacyUpgrades(); err != nil {
-		slog.Error("state: legacy upgrade sweep failed for one or more competitions; affected competitions will refuse reads until fixed", "err", err)
-	}
-
 	return s, nil
 }
 

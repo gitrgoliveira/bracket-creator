@@ -22,14 +22,14 @@ type ImportManifestComp struct {
 	ID   string `yaml:"id"`
 	Name string `yaml:"name"`
 	Kind string `yaml:"kind"` // "individual" or "team"
-	// Format: "mixed", "knockout", "league", or "swiss"; omit/empty for
-	// default (knockout). "playoffs" (the pre-rename wire value) is ALSO
+	// Format: "mixed", "knockout", "league", or "swiss"; omitted/empty is
+	// persisted unchanged. "playoffs" (the pre-rename wire value) is ALSO
 	// accepted here, permanently -- see normalizeImportFormat. Unlike
-	// config.md, which converges to the canonical value after one load
-	// (state.upgradeCompetitionFormatLocked), an exported manifest bundle is
-	// a static artifact that can be replayed at any point in the future, so
-	// this boundary cannot assume it will only ever see files written after
-	// the rename.
+	// config.md, which converges to the canonical value in memory on every
+	// read (parseCompetitionFile), an exported manifest bundle is a static
+	// artifact that can be replayed at any point in the future, so this
+	// boundary cannot assume it will only ever see files written after the
+	// rename.
 	Format         string   `yaml:"format"`
 	Courts         []string `yaml:"courts"`
 	PoolSize       int      `yaml:"pool_size"`
@@ -131,31 +131,27 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, el
 	})
 }
 
-// normalizeImportFormat maps a manifest's format value onto the canonical
-// wire value BEFORE it reaches validateCompetitionFormat, which (like every
-// other standing reader, bc-terminology commit 1 clean-break policy) only
-// recognises "knockout" -- not the pre-rename "playoffs". This is the one
-// place on the import door allowed to still recognise the retired value, and
-// unlike state.upgradeCompetitionFormatLocked's config.md conversion it is
-// PERMANENT, never removable: an exported manifest bundle is a static
-// artifact that can be replayed at any point in the future, so this boundary
-// cannot assume every file it ever sees was written after the rename.
+// normalizeImportFormat maps a manifest's retired "playoffs" format value
+// onto the canonical "knockout" one BEFORE it reaches
+// validateCompetitionFormat, which (like every other standing reader,
+// bc-terminology commit 1 clean-break policy) only recognises "knockout".
+// This is the one place on the import door allowed to still recognise the
+// retired value, and unlike config.md's in-memory conversion
+// (parseCompetitionFile) it is PERMANENT, never removable: an exported
+// manifest bundle is a static artifact that can be replayed at any point in
+// the future, so this boundary cannot assume every file it ever sees was
+// written after the rename.
 //
-// "" (omitted) is also mapped to the canonical value rather than left blank.
-// Historically an omitted format persisted as the literal empty string, and
-// happened to run the SAME code path as "playoffs" purely because
-// runDrawPipeline's format switch falls through to its default (knockout-
-// only) branch for any unrecognised value, empty string included. Made
-// explicit here instead: the persisted record now states outright what it
-// always behaved as, rather than relying on a caller elsewhere to know that
-// fallback exists.
+// "" (omitted) is passed through unchanged. Competition.IsKnockoutEnabled()
+// treats "" and "knockout" differently (it gates whether the Excel export
+// emits the Elimination Matches and Tree sheets), so coercing an omitted
+// format to "knockout" here would silently change what an imported
+// competition exports; that is not this function's job.
 func normalizeImportFormat(format string) string {
-	switch format {
-	case "", "playoffs":
+	if format == "playoffs" {
 		return state.CompFormatKnockout
-	default:
-		return format
 	}
+	return format
 }
 
 func importCompetition(store *state.Store, entry ImportManifestComp, files map[string][]byte) ImportResult {

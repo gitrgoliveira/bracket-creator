@@ -201,7 +201,7 @@ $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx go/generate $(GO_SOURCES) $
 
 examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."
-	rm -f pools-example-*.xlsx knockout-example-*.xlsx
+	rm -f pools-example-*.xlsx playoffs-example-*.xlsx knockout-example-*.xlsx
 	@echo "Building examples..."
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv -o ./pools-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_small_3_teams.csv -o ./pools-example-small-3-teams.xlsx

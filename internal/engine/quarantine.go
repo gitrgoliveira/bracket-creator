@@ -91,7 +91,7 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 
 	// Refuse whenever the draw builds a bracket that nothing else records.
 	// Derived from the same pair of questions the draw pipeline answers, rather
-	// than from a hand-written list: this used to read `Format == knockout ||
+	// than from a hand-written list: this used to read `Format == playoffs ||
 	// Format == ""`, which let every UNRECOGNISED format through -- a typo in a
 	// hand-edited config.md, exactly the class of edit this whole area exists
 	// for. Such a competition takes the pipeline's DEFAULT branch and gets a

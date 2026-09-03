@@ -171,7 +171,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         {statusFilter !== "complete" && allMatchesCompleted(filtered) && (
           <div className="alert alert--success" style={{ marginBottom: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>All matches scored</div>
-            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Open the competition to review standings, generate knockout, or start the next phase.</div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>Every visible match is complete. Open the competition to review standings, generate the knockout bracket, or start the next phase.</div>
           </div>
         )}
         {filtered.map((m) => {

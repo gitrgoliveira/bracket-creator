@@ -1,10 +1,7 @@
 package state
 
 import (
-	"errors"
-	"fmt"
 	"log"
-	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -35,129 +32,33 @@ import (
 //     caught it; do not reintroduce a read-side roster rewrite without an
 //     unambiguous discriminator.
 //
-//   - config.md's retired "playoffs" format/status values, and the retired
-//     playoff_match_duration_seconds key, convert ON READ (or rather, once
-//     per process, exactly like the seed-dojo case) via
-//     upgradeCompetitionFormatLocked below. EVERY standing reader of a
-//     competition record -- Store.LoadCompetition, loadParticipants, and
-//     ParticipantsFingerprint -- calls EnsureLegacyUpgraded first and
-//     refuses the read if it fails, which is what makes this shape safe to
-//     serve: a competition can never be handed out still carrying the
-//     retired values. This one is ALSO swept EAGERLY at store construction
-//     (see SweepLegacyUpgrades, called from NewStore) rather than waiting
-//     for the competition's first touch, so an operator gets an early,
-//     whole-folder warning instead of discovering the problem one
-//     competition at a time as each is later touched -- but the sweep is a
-//     best-effort head start, not the safety net; see the call site inside
-//     EnsureLegacyUpgraded below for why its failure policy also diverges
-//     from the log-and-continue default below.
+// EnsureLegacyUpgraded runs BEFORE loadParticipants takes its read lock, once
+// per competition per process: the conversion needs the per-comp WRITE lock,
+// and writing from under the reader's RLock would race the other readers
+// doing the same. Callers that FINGERPRINT files before their first load
+// (StartCompetition's drift guard, via ParticipantsFingerprint below) must run
+// this first, or the conversion lands between snapshot and re-check and reads
+// as operator drift.
 //
-// EnsureLegacyUpgraded runs BEFORE loadParticipants and Store.LoadCompetition
-// take their read lock, once per competition per process: the conversion
-// needs the per-comp WRITE lock, and writing from under the reader's RLock
-// would race the other readers doing the same. Both call sites acquire and
-// release this write lock fully before taking their own RLock afterwards --
-// sequential, never nested -- so this cannot deadlock the way calling it
-// while already holding that lock would. Callers that FINGERPRINT files
-// before their first load (StartCompetition's drift guard, via
-// ParticipantsFingerprint below) must run this first, or the conversion lands
-// between snapshot and re-check and reads as operator drift.
-//
-// Failure policy: a failed SEED-DOJO conversion is logged and NOT retried
-// until the next process start (the once-map is stamped regardless). The
-// file stays in its legacy shape, which every reader still parses, so
-// degradation is "the fallback keeps working", never a lost read; retrying
-// on every load would hammer a broken disk from the hot viewer path. The
-// format/status conversion below has a DIFFERENT, louder policy; see its own
-// call site comment.
-func (s *Store) EnsureLegacyUpgraded(compID string) error {
+// Failure policy: a failed conversion is logged and NOT retried until the
+// next process start (the once-map is stamped regardless). The file stays in
+// its legacy shape, which every reader still parses, so degradation is "the
+// fallback keeps working", never a lost read; retrying on every load would
+// hammer a broken disk from the hot viewer path.
+func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if _, done := s.legacyUpgraded.Load(compID); done {
-		return nil
+		return
 	}
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
 	if _, done := s.legacyUpgraded.Load(compID); done {
-		return nil // lost the race to a concurrent reader's upgrade
+		return // lost the race to a concurrent reader's upgrade
 	}
 	if err := s.upgradeSeedDojosLocked(compID); err != nil {
 		log.Printf("state: legacy seed-dojo upgrade for %s: %v", compID, err)
 	}
-	// Format/status/duration conversion (playoffs -> knockout; bc-terminology
-	// commit 1). UNLIKE the seed-dojo call above, this error is RETURNED
-	// rather than merely logged -- a deliberate divergence from this
-	// function's own default policy (operator ruling). The seed-dojo
-	// fallback is safe because a legacy (no-dojo) seed row still parses and
-	// functions; a legacy "playoffs" Format/Status value also still parses
-	// (both are bare strings with no load-time validator) but silently
-	// MISBEHAVES instead: IsKnockoutEnabled matches none of its switch arms
-	// and returns false, so the competition quietly forgets it has a
-	// knockout stage. Silent wrong behaviour is worse than a loud failure.
-	//
-	// The REAL defence is every standing load path refusing to hand out a
-	// competition it could not convert: Store.LoadCompetition and
-	// loadParticipants both call EnsureLegacyUpgraded before reading
-	// config.md, so a competition stuck in the legacy shape simply cannot be
-	// served, no matter how it got that way. That is what lets NewStore's
-	// eager SweepLegacyUpgrades call be non-fatal (see its call site in
-	// NewStore): the sweep is a best-effort head start that converts the
-	// whole folder up front and logs loudly if it can't, but the load paths
-	// are what actually enforce the invariant, so one broken config.md no
-	// longer needs to take down the process to stay safe.
-	//
-	// Reaching this branch here means the sweep either hasn't run yet for
-	// this competition (raced a concurrent write) or already tried and
-	// failed for it (logged at startup, not stamped in the once-map below,
-	// so every subsequent read -- lazy or via a later manual sweep --
-	// retries it here). Do not "fix" this back to a bare log.Printf-and-
-	// continue to match the seed-dojo policy above; that policy's safety
-	// argument does not hold for this conversion, because a load path that
-	// swallowed this error would silently serve a mis-classified
-	// competition, which is exactly what this whole mechanism exists to
-	// prevent.
-	if err := s.upgradeCompetitionFormatLocked(compID); err != nil {
-		// Do NOT stamp the once-map on this path. Stamping here is exactly the
-		// silent mis-classification this function exists to prevent: a later
-		// call would see `done`, return nil, and report success while
-		// config.md is still unconverted. Leaving it unstamped means every
-		// subsequent call retries the conversion and keeps failing loudly
-		// until the underlying problem (e.g. a read-only competition
-		// directory) is fixed. This is the opposite of the seed-dojo policy
-		// above on purpose; see the comment above this call for why.
-		return fmt.Errorf("legacy format/status upgrade for %s: %w", compID, err)
-	}
 	s.legacyUpgraded.Store(compID, struct{}{})
-	return nil
-}
-
-// SweepLegacyUpgrades converts every known competition's on-disk legacy
-// shapes EAGERLY, once, at store construction (see NewStore) rather than
-// waiting for each competition's first touch. It reuses EnsureLegacyUpgraded
-// -- the same per-competition entry point the lazy read paths call -- over
-// every id ListCompetitions reports, rather than a second conversion path.
-//
-// Why eagerly rather than lazily: see EnsureLegacyUpgraded's call-site comment.
-//
-// It returns a combined error naming every competition whose conversion failed
-// instead of stopping at the first, so the caller's one log line at startup
-// (NewStore logs rather than fails on this error; see its call site) tells
-// the operator the full extent of the problem across the whole folder,
-// rather than surfacing each broken competition one at a time as it is later
-// touched. The load paths (Store.LoadCompetition, loadParticipants), not
-// this sweep, are what actually refuse to serve a competition this call
-// failed to convert -- see EnsureLegacyUpgraded's doc comment.
-func (s *Store) SweepLegacyUpgrades() error {
-	ids, err := s.ListCompetitions()
-	if err != nil {
-		return fmt.Errorf("legacy upgrade sweep: list competitions: %w", err)
-	}
-	var errs []error
-	for _, id := range ids {
-		if err := s.EnsureLegacyUpgraded(id); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
 }
 
 // ParticipantsFingerprint stats participants.csv and seeds.csv for compID,
@@ -169,15 +70,9 @@ func (s *Store) SweepLegacyUpgrades() error {
 // ordering requirement in here means a future caller cannot forget it the
 // way engine.StartCompetition's hand-wired EnsureLegacyUpgraded call could
 // have been forgotten or reordered.
-//
-// Returns a non-nil error only when the format/status upgrade fails (see
-// EnsureLegacyUpgraded); callers must check it rather than fingerprinting a
-// competition whose on-disk shape may still be the unconverted legacy one.
-func (s *Store) ParticipantsFingerprint(compID string) (participantsMtime, seedsMtime int64, err error) {
-	if err := s.EnsureLegacyUpgraded(compID); err != nil {
-		return 0, 0, err
-	}
-	return s.FileMtime(compID, "participants.csv"), s.FileMtime(compID, "seeds.csv"), nil
+func (s *Store) ParticipantsFingerprint(compID string) (participantsMtime, seedsMtime int64) {
+	s.EnsureLegacyUpgraded(compID)
+	return s.FileMtime(compID, "participants.csv"), s.FileMtime(compID, "seeds.csv")
 }
 
 // upgradeSeedDojosLocked completes legacy (name-only) seeds.csv rows with the
@@ -241,90 +136,4 @@ func (s *Store) upgradeSeedDojosLocked(compID string) error {
 	// outright so a same-millisecond write cannot serve the pre-upgrade merge.
 	s.invalidateParticipantCaches(compID)
 	return nil
-}
-
-// legacyKnockoutDuration captures the pre-rename playoff_match_duration_seconds
-// YAML key on its own, minimal struct. This key predates bc-terminology
-// commit 1: the Competition field that used to carry it (PlayoffMatchDurationSeconds)
-// is now tagged knockout_match_duration_seconds, so a value written under the
-// old key is invisible to the ordinary parseCompetitionFile path once the
-// rename lands -- yaml.Unmarshal simply drops an unrecognised key. Without
-// this recovery, every competition configured since the seconds field was
-// introduced (but before this rename) would silently lose its configured
-// knockout match duration. The whole-MINUTE legacy field
-// (KnockoutMatchDuration) needs no such recovery: its yaml tag intentionally
-// did not change (see models.go), so ApplyCompetitionDefaults' existing fold
-// already picks it up on every ordinary load.
-type legacyKnockoutDuration struct {
-	PlayoffMatchDurationSeconds int `yaml:"playoff_match_duration_seconds"`
-}
-
-// upgradeCompetitionFormatLocked rewrites a competition's config.md off the
-// retired "playoffs" wire values onto their "knockout" equivalents (owner
-// ruling: clean break on the wire, no permanent dual-accept read path).
-// Caller holds the per-comp lock (EnsureLegacyUpgraded).
-//
-// This function, and no other standing reader, is allowed to recognise the
-// literal "playoffs" string -- that is what makes this a clean break instead
-// of a permanent dual-accept.
-//
-// Three independent legacy shapes, all folded in one pass so a competition
-// converges in a single rewrite rather than three:
-//  1. format: playoffs -> knockout
-//  2. status: playoffs -> knockout
-//  3. the retired playoff_match_duration_seconds key -> knockout_match_duration_seconds
-//     (see legacyKnockoutDuration above for why this one needs raw-YAML
-//     recovery while the whole-minute legacy field does not).
-func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
-	comp, err := s.loadCompetitionLocked(compID)
-	if err != nil || comp == nil {
-		return err // a missing config.md loads as nil: nothing to convert
-	}
-
-	const legacyPlayoffsValue = "playoffs"
-	changed := false
-	if comp.Format == legacyPlayoffsValue {
-		comp.Format = CompFormatKnockout
-		changed = true
-	}
-	if comp.Status == CompetitionStatus(legacyPlayoffsValue) {
-		comp.Status = CompStatusKnockout
-		changed = true
-	}
-	// Only a competition with no canonical duration can be carrying the retired
-	// seconds key, so the second read of config.md is skipped for every file
-	// that has already converged -- which, after the first sweep, is all of them.
-	if comp.KnockoutMatchDurationSeconds == 0 {
-		legacy, err := s.legacyDurationSeconds(compID)
-		if err != nil {
-			return err
-		}
-		if legacy > 0 {
-			comp.KnockoutMatchDurationSeconds = ClampMatchSeconds(legacy)
-			changed = true
-		}
-	}
-	if !changed {
-		return nil
-	}
-	return s.saveCompetitionLocked(comp, s.directWrite)
-}
-
-// legacyDurationSeconds re-reads config.md for the retired
-// playoff_match_duration_seconds key, which the renamed Competition field can
-// no longer see. Returns 0 when the file is gone or carries no such key.
-func (s *Store) legacyDurationSeconds(compID string) (int, error) {
-	path := s.compPath(compID, "config.md")
-	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath which calls filepath.Clean
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, nil
-		}
-		return 0, err
-	}
-	var legacy legacyKnockoutDuration
-	if err := parseFrontMatter(raw, &legacy); err != nil {
-		return 0, err
-	}
-	return legacy.PlayoffMatchDurationSeconds, nil
 }

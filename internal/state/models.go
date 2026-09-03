@@ -354,17 +354,19 @@ type Competition struct {
 	PoolMatchDuration     int `yaml:"pool_match_duration,omitempty" json:"-"`
 	KnockoutMatchDuration int `yaml:"playoff_match_duration,omitempty" json:"-"`
 
+	// KnockoutMatchDurationSecondsLegacy is the retired pre-rename SECONDS key
+	// (bc-terminology commit 1). Same shape as KnockoutMatchDuration above:
+	// the yaml tag deliberately stays "playoff_match_duration_seconds" because
+	// old config.md bytes on disk carry it forever; only the Go symbol is
+	// named for the current field it feeds. Read once by
+	// ApplyCompetitionDefaults to backfill KnockoutMatchDurationSeconds, then
+	// zeroed so omitempty drops the key on the next save.
+	KnockoutMatchDurationSecondsLegacy int `yaml:"playoff_match_duration_seconds,omitempty" json:"-"`
+
 	// PoolMatchDurationSeconds / KnockoutMatchDurationSeconds are THE per-phase
 	// clock durations, in SECONDS, allowing sub-minute granularity (e.g. 150 =
 	// 2m30s). This is the only duration representation on the wire and the only
 	// one written to new config.md files.
-	//
-	// KnockoutMatchDurationSeconds' yaml/json tags were renamed from
-	// playoff_match_duration_seconds / playoffMatchDurationSeconds
-	// (bc-terminology commit 1, clean break: no permanent dual-accept). A
-	// config.md written under the old key before this rename is folded onto
-	// this field by upgradeCompetitionFormatLocked (legacy_upgrade.go), which
-	// is the ONE place still allowed to recognise the retired key.
 	PoolMatchDurationSeconds     int `yaml:"pool_match_duration_seconds,omitempty" json:"poolMatchDurationSeconds,omitempty"`
 	KnockoutMatchDurationSeconds int `yaml:"knockout_match_duration_seconds,omitempty" json:"knockoutMatchDurationSeconds,omitempty"`
 
@@ -556,8 +558,9 @@ func ClampMatchSeconds(seconds int) int {
 }
 
 // ApplyCompetitionDefaults migrates a competition off the retired whole-minute
-// duration fields onto the canonical seconds fields. Idempotent; safe to call
-// repeatedly. Called from parseCompetitionFile, so every read is migrated.
+// duration fields, and the retired pre-rename knockout seconds key, onto the
+// canonical seconds fields. Idempotent; safe to call repeatedly. Called from
+// parseCompetitionFile, so every read is migrated.
 //
 // FR-054, NFR-025, R9: config.md files predating per-phase durations carry only
 // `match_duration`, and their schedule estimates MUST be preserved rather than
@@ -586,7 +589,13 @@ func ApplyCompetitionDefaults(c *Competition) {
 		}
 	}
 	if c.KnockoutMatchDurationSeconds == 0 {
-		if m := firstPositive(c.KnockoutMatchDuration, c.MatchDuration); m > 0 {
+		// The retired SECONDS key beats the whole-minute fields: it is the
+		// precise value an operator configured (e.g. 150 = 2m30s), whereas
+		// the whole-minute path can only reconstruct a rounded multiple of 60.
+		// A config.md carrying both must not let the coarser value win.
+		if c.KnockoutMatchDurationSecondsLegacy > 0 {
+			c.KnockoutMatchDurationSeconds = ClampMatchSeconds(c.KnockoutMatchDurationSecondsLegacy)
+		} else if m := firstPositive(c.KnockoutMatchDuration, c.MatchDuration); m > 0 {
 			c.KnockoutMatchDurationSeconds = ClampMatchSeconds(m * 60)
 		}
 	}
@@ -594,6 +603,7 @@ func ApplyCompetitionDefaults(c *Competition) {
 	// and the on-disk file converges on the seconds-only schema.
 	c.PoolMatchDuration = 0
 	c.KnockoutMatchDuration = 0
+	c.KnockoutMatchDurationSecondsLegacy = 0
 	c.MatchDuration = 0
 }
 

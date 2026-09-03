@@ -123,7 +123,7 @@ func TestQuarantineCorruptBracket_LeagueHasNothingToRebuild(t *testing.T) {
 // happily agree with a broken gate.
 //
 // This is the test that would have caught the hole it now guards: the refusal
-// used to be a hand-written `Format == knockout || Format == ""`, so an
+// used to be a hand-written `Format == playoffs || Format == ""`, so an
 // UNRECOGNISED format -- a typo in a hand-edited config.md -- passed it,
 // reached the quarantine, and had its bracket moved aside with nothing built to
 // replace it. That format takes the draw pipeline's default branch and gets a

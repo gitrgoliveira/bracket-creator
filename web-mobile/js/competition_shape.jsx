@@ -683,7 +683,7 @@ export function poolSettingsError(format, poolSize, winners) {
 // the operator ahead of Save, without needing to run early.
 //
 // - league / knockout: PoolSize and PoolWinners are zeroed (no pool phase
-//   to size; league's single implicit pool and knockout' bare bracket both
+//   to size; league's single implicit pool and knockout's bare bracket both
 //   ignore these at runtime, per normalizePoolConfig's comment).
 // - league / knockout / swiss: ExtraQualifiers is forced to the standard
 //   sentinel ("") -- the "Knockout qualifiers" radio only ever means

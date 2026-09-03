@@ -853,13 +853,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// convert between here and the re-check, which would then read our own
 	// one-time rewrite as a concurrent operator write. The upgrade ordering
 	// is folded into the store method itself so this call site cannot get
-	// it wrong by omission. It also runs the (louder, error-returning)
-	// format/status upgrade; propagate rather than fingerprint a competition
-	// that may still be in its unconverted legacy shape.
-	loadedParticipantsMtime, loadedSeedsMtime, err := e.store.ParticipantsFingerprint(id)
-	if err != nil {
-		return err
-	}
+	// it wrong by omission.
+	loadedParticipantsMtime, loadedSeedsMtime := e.store.ParticipantsFingerprint(id)
 
 	if comp.Kind == "team" && comp.TeamSize == 0 {
 		comp.TeamSize = 5 // Default for Kendo

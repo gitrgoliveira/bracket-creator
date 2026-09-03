@@ -26,14 +26,15 @@ import (
 // pools.csv column 7 is the only persisted home of Player.Number (BracketMatch
 // has no such field and participants.csv does not persist it), so rewriting the
 // pools file renumbers every surface. "No pools file" is not the same thing as
-// "playoffs-only": a playoffs competition never has one at all (its numbers
-// are re-derived from participant order on read, see
-// mobileapp.mergePoolNumbersIntoPlayers), but a mixed/league/Swiss
-// competition that simply hasn't been drawn YET has none either, for the
-// mundane reason that SavePools has never run -- transitionDrawToRunning
-// routes all three formats to the same state.CompStatusPools, so they share
-// this same file once a draw exists. Either way there is nothing on disk to
-// rewrite, so this returns without an error.
+// "playoffs-only": a playoffs competition never has one (its numbers are
+// composed from participant order on read, see
+// mobileapp.mergePoolNumbersIntoPlayers); a mixed or league competition that
+// has not been drawn YET has none either, because SavePools has not run; and a
+// Swiss competition NEVER has one (its draw writes rounds to pool-matches.csv
+// and never calls SavePools), so Swiss competitors carry no number on any
+// surface and this call is a permanent no-op for them, a pre-existing gap this
+// bead names rather than closes. In every case there is nothing on disk to
+// rewrite, so this returns (false, nil).
 //
 // The load and the save share one WithTransaction, so a concurrent score write
 // cannot interleave between reading the pools and writing them back.

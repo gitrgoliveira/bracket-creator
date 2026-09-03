@@ -24,9 +24,11 @@ import (
 // numberPrefix is empty or either slice is empty. Match by id first
 // (HasParticipantIDs case), fall back to name.
 //
-// For playoffs-only competitions (format == "playoffs") the engine assigns
-// numbers in-memory but has no pools.csv to persist them. In that case assign
-// numbers sequentially (1-N in participant order), matching generatePlayoffs.
+// For playoffs-only competitions (format == "playoffs") there is no pools.csv
+// and nothing else composes a number (generatePlayoffs builds its tree from
+// names alone), so the number is composed HERE, at read time: sequential in
+// participant order under the competition's current prefix, through the one
+// composition helper (G8).
 func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
 	if numberPrefix == "" || len(players) == 0 {
 		return
@@ -35,10 +37,11 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 		if format != state.CompFormatPlayoffs {
 			return
 		}
-		// Playoffs-only: numbers were assigned in memory by generatePlayoffs
-		// but never written to disk. Re-derive them from participant order,
-		// through the same helper generatePlayoffs itself calls so the two
-		// cannot drift (helper.Player is an alias of domain.Player).
+		// Playoffs-only: nothing on disk carries a number, so derive it from
+		// participant order under the current prefix, through the one
+		// composition helper (helper.Player is an alias of domain.Player). A
+		// prefix change is therefore reflected on the next read with no file
+		// write.
 		helper.AssignPlayerNumbers(players, numberPrefix, 1)
 		return
 	}

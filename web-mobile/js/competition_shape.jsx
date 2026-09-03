@@ -474,7 +474,7 @@ export const LABEL_NUMBER_PREFIX = "Player number prefix";
 // assignDefaultNumberPrefix / the inherit-before-derive step in the PUT
 // handler). Also states the 3-character cap the TextField's maxLength
 // enforces, which the old copy didn't mention at all.
-export const HINT_NUMBER_PREFIX = "Up to 3 letters for competitor numbers (e.g. K produces K1, K2…). Leave blank: on create, one is derived from the competition's name; in settings, the current prefix is kept.";
+export const HINT_NUMBER_PREFIX = "Up to 3 characters for competitor numbers (e.g. K produces K1, K2…). Leave blank: on create, one is derived from the competition's name; in settings, the current prefix is kept.";
 // HINT_KIND_ONLY_INDIVIDUAL: settings shows this in place of the zekken /
 // engi hint when the competition is a team one, standing in for the hint
 // rather than sitting beside it (see zekkenApplies above for why settings

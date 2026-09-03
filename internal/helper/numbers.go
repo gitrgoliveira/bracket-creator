@@ -111,8 +111,9 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	}
 	// Exhausted every candidate up to the length cap: every one of them is
 	// already taken. Return the last one tried rather than inventing a value
-	// beyond MaxNumberPrefixLen -- the caller (checkUniqueCompFields, on both
-	// the create and the settings-save path) re-validates uniqueness against
+	// beyond MaxNumberPrefixLen -- every caller (checkUniqueCompFields, on the
+	// create, settings-save, import and start/generate-draw paths)
+	// re-validates uniqueness against
 	// the SAME taken set and rejects the collision with its own "prefix
 	// already used by competition ..." error, which names the actual
 	// conflict. That is the right place for this to surface: this function's

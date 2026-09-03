@@ -439,96 +439,76 @@ func assignDefaultNumberPrefix(store *state.Store, comp *state.Competition, excl
 	return nil
 }
 
-// numberPrefixAction distinguishes the two ensureNumberPrefix callers, since
-// POST .../start and POST .../generate-draw accept different starting
-// statuses (see engine.StartCompetition / engine.GenerateDraw's own status
-// switches in engine/competition.go, which ensureNumberPrefix must mirror
-// rather than race ahead of).
-type numberPrefixAction int
-
-const (
-	// numberPrefixActionStart mirrors engine.StartCompetition's accepted
-	// statuses: state.CompStatusSetup (and legacy "") take the one-click
-	// draw-then-run path, state.CompStatusDrawReady just flips status over
-	// an already-generated draw. Both are pre-flight for a start.
-	numberPrefixActionStart numberPrefixAction = iota
-	// numberPrefixActionGenerateDraw mirrors engine.GenerateDraw's accepted
-	// statuses: only state.CompStatusSetup (and legacy ""). draw-ready and
-	// anything past it are rejected by the engine on its own terms.
-	numberPrefixActionGenerateDraw
-)
-
-// ensureNumberPrefix is the R7 guard for POST .../start and
+// ensureNumberPrefix is the R7 pre-flight for POST .../start and
 // POST .../generate-draw: either can be reached by a legacy competition that
 // predates this rule and still carries an empty NumberPrefix on disk (G7), and
-// G2 requires the app never draw one without a prefix. It loads the
-// competition, assigns the default only when the field is empty, saves only
-// when that assignment actually changed something, and renumbers pools.csv --
-// existing primitives (LoadCompetition, assignDefaultNumberPrefix,
-// SaveCompetition, engine.RenumberCompetitors), no new write path.
+// G2 requires the app never draw one without a prefix. It reuses the same
+// primitives the create/settings paths use (LoadCompetition,
+// assignDefaultNumberPrefix, checkUniqueCompFields, SaveCompetition,
+// engine.RenumberCompetitors); there is no new write path.
 //
-// (i) It only acts when the competition's status is one the requested action
-// would itself accept (see numberPrefixAction). Any other status is left
-// untouched, and the caller's own eng.StartCompetition/eng.GenerateDraw call,
-// immediately after, rejects it on the engine's own terms (e.g. "competition
-// already started"). Without this, a competition in a status the action
-// cannot use anyway would still have this function mint and PERSIST a new
-// prefix -- an app-side write with no corresponding engine action, and
-// outside G2's contract (G2 assigns a prefix ONLY at a boundary that
-// persists or DRAWS; a doomed pre-flight check is neither).
-// (ii) A missing competition is not an error here: it returns nil, and the
-// caller's own eng.StartCompetition/eng.GenerateDraw call, immediately after,
-// reports the 404 on its own terms (the engine maps not-found to 404).
-// (iii) After assigning and saving, it calls eng.RenumberCompetitors so a
-// draw-ready legacy competition (drawn before this rule existed, so its
-// pools.csv carries no Number column) gets numbered as part of start:
-// engine.StartCompetition's draw-ready branch (transitionDrawToRunning) only
-// flips status, it never re-runs the draw pipeline, so nothing else would
-// ever number that file. For the setup/not-yet-drawn case this call is a
-// cheap no-op (RenumberCompetitors returns immediately when there is no
-// pools.csv to rewrite): the draw pipeline eng.StartCompetition/
-// eng.GenerateDraw is about to run numbers fresh from the just-assigned
-// prefix on its own.
+// allowed is the engine's OWN precondition for the action (engine.CanStart or
+// engine.CanGenerateDraw), so the gate cannot drift from the switch it guards:
+// a competition in any other status is left untouched and the caller's engine
+// call, immediately after, rejects it on the engine's own terms. Without this
+// a doomed request would still mint and PERSIST a prefix, an app-side write
+// with no corresponding engine action, outside G2's contract (G2 assigns only
+// at a boundary that persists or DRAWS).
+//
+// A missing competition is not an error here (nil); the engine call reports
+// the 404 on its own terms.
+//
+// A competition that ALREADY has a prefix is left entirely alone: no save and
+// no renumber. The renumber exists for the one case this call introduces, an
+// assignment on a draw-ready legacy competition, whose pools.csv carries no
+// Number column and which engine.StartCompetition's draw-ready branch
+// (transitionDrawToRunning) would otherwise start unnumbered, since that
+// branch only flips status and never re-runs the draw. For a not-yet-drawn
+// competition the renumber is a no-op (no pools.csv) and the draw pipeline
+// numbers from the fresh prefix itself. Scoping the renumber to the assignment
+// is what keeps "a write answers for what it introduces" (G4c): a pre-existing
+// prefix over a pools.csv that will not parse is inherited damage and start
+// must not be refused for it (the next settings save heals it), while a
+// renumber that fails right after THIS assignment is this write's own and is
+// reported.
+//
+// checkUniqueCompFields runs here as on every other assignment path, so a
+// derived prefix that collides (DefaultNumberPrefix's exhaustion case) is
+// refused with the same validation error rather than persisted; it surfaces
+// as an engine.ValidationError so the caller's one error switch maps it to
+// 400 like the engine's own refusals.
 //
 // Takes the same rename lock checkUniqueCompFields and the POST/PUT handlers
 // use, for the same reason: SaveCompetition here must not race a concurrent
-// rename of this or another competition (see store.go "Lock ordering note" on
-// WithCompetitionRenameLock). Calling eng.RenumberCompetitors (which takes
-// its own per-competition lock via WithTransaction) from inside that closure
-// is safe by the same reasoning SaveCompetition already relies on here:
-// compRenameMu is a separate mutex from any per-competition lock, and nothing
-// that holds a per-competition lock ever acquires compRenameMu, so there is
-// no AB-BA cycle (store.go's "Lock ordering note").
-func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, action numberPrefixAction) error {
+// rename of this or another competition (store.go "Lock ordering note").
+// Calling eng.RenumberCompetitors (its own per-competition lock via
+// WithTransaction) inside that closure cannot form an AB-BA cycle:
+// compRenameMu is separate from every per-competition lock and nothing that
+// holds a per-competition lock ever acquires compRenameMu.
+func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, allowed func(state.CompetitionStatus) bool) error {
 	return store.WithCompetitionRenameLock(func() error {
 		comp, err := store.LoadCompetition(id)
 		if err != nil {
 			return fmt.Errorf("load competition %s: %w", id, err)
 		}
-		if comp == nil {
+		if comp == nil || !allowed(comp.Status) || strings.TrimSpace(comp.NumberPrefix) != "" {
 			return nil
 		}
-		var statusAllows bool
-		switch action {
-		case numberPrefixActionStart:
-			statusAllows = comp.Status == state.CompStatusSetup || comp.Status == "" || comp.Status == state.CompStatusDrawReady
-		case numberPrefixActionGenerateDraw:
-			statusAllows = comp.Status == state.CompStatusSetup || comp.Status == ""
-		}
-		if !statusAllows {
-			return nil
-		}
-		before := comp.NumberPrefix
 		if err := assignDefaultNumberPrefix(store, comp, id); err != nil {
 			return err
 		}
-		if comp.NumberPrefix != before {
-			if err := store.SaveCompetition(comp); err != nil {
-				return err
-			}
+		infraErr, validationErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)
+		if infraErr != nil {
+			return infraErr
+		}
+		if validationErr != nil {
+			return &engine.ValidationError{Msg: validationErr.Error()}
+		}
+		if err := store.SaveCompetition(comp); err != nil {
+			return err
 		}
 		if _, err := eng.RenumberCompetitors(id); err != nil {
-			return err
+			return fmt.Errorf("competition %s: prefix %q assigned but competitors could not be numbered: %w", id, comp.NumberPrefix, err)
 		}
 		return nil
 	})
@@ -2274,11 +2254,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		if err := ensureNumberPrefix(store, eng, id, numberPrefixActionStart); err != nil {
-			internalError(c, err)
-			return
+		// The pre-flight and the engine call share one error switch: a
+		// prefix-uniqueness refusal from the pre-flight is a validation error
+		// like any of the engine's own.
+		err := ensureNumberPrefix(store, eng, id, engine.CanStart)
+		if err == nil {
+			err = eng.StartCompetition(id)
 		}
-		if err := eng.StartCompetition(id); err != nil {
+		if err != nil {
 			var notFound *engine.NotFoundError
 			var validation *engine.ValidationError
 			switch {
@@ -2323,11 +2306,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		if err := ensureNumberPrefix(store, eng, id, numberPrefixActionGenerateDraw); err != nil {
-			internalError(c, err)
-			return
+		// Same shared error switch as POST .../start (see there).
+		err := ensureNumberPrefix(store, eng, id, engine.CanGenerateDraw)
+		if err == nil {
+			err = eng.GenerateDraw(id)
 		}
-		if err := eng.GenerateDraw(id); err != nil {
+		if err != nil {
 			var notFound *engine.NotFoundError
 			var validation *engine.ValidationError
 			switch {

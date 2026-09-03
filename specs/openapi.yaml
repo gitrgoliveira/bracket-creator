@@ -4023,7 +4023,7 @@ components:
         numberPrefix:
           type: string
           description: |
-            Letter prefix for competitor numbers (e.g. `"K"` produces `K1`,
+            Prefix (up to three characters) for competitor numbers (e.g. `"K"` produces `K1`,
             `K2`, ...). Never stored empty on a competition the app has saved
             or drawn: `POST /api/competitions`, a settings `PUT`, import,
             `POST .../start` and `POST .../generate-draw` all assign a

@@ -263,7 +263,7 @@ func PlayoffLeavesFromBracket(bracket *state.Bracket) []string {
 }
 
 // PlayoffFinalsFromParticipants seeds the competition's participants exactly as
-// generatePlayoffs does (ApplySeeds → optional numbering → StandardSeeding),
+// generatePlayoffs does (ApplySeeds → StandardSeeding),
 // returning the seeded names to feed the elimination-tree skeleton. This is the
 // PRE-START fallback only: once a bracket exists, PlayoffLeavesFromBracket is used
 // instead because it cannot desync from the frozen bracket. Since there is no

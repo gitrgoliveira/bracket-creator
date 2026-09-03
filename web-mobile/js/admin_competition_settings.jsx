@@ -1505,10 +1505,12 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           A change while a draw already exists is still consequential enough
           to call out inline, so the hint grows a warning (R10's reuse of
           this same append-to-hint pattern, without actually locking the
-          input) whenever the pending value differs from what's saved. */}
+          input) whenever the pending value differs from what's saved AND is
+          not blank: a blank is inherited as the stored prefix on save (G2a),
+          so it renumbers nothing and must not threaten a reprint. */}
       <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
         value={local.numberPrefix} onChange={(raw) => { numberPrefixTouchedRef.current = true; update("numberPrefix", raw.substring(0, 3)); }}
-        hint={lockedAfterDraw && (local.numberPrefix || "").trim() !== (c.numberPrefix || "").trim()
+        hint={lockedAfterDraw && (local.numberPrefix || "").trim() !== "" && (local.numberPrefix || "").trim() !== (c.numberPrefix || "").trim()
           ? `${HINT_NUMBER_PREFIX} Every competitor will be renumbered and any tags already printed must be reprinted.`
           : HINT_NUMBER_PREFIX}
         width={80} />

@@ -430,6 +430,23 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 	return false
 }
 
+// CanStart reports whether StartCompetition accepts a competition in status:
+// setup (and the legacy empty status) take the one-click draw-then-run path,
+// draw-ready only flips status over an already-generated draw. It is the ONE
+// statement of that precondition: StartCompetition gates on it, and so does
+// the mobileapp start handler's pre-flight (ensureNumberPrefix), which must
+// act on exactly the statuses the engine will then accept and on no other.
+func CanStart(status state.CompetitionStatus) bool {
+	return status == state.CompStatusDrawReady || CanGenerateDraw(status)
+}
+
+// CanGenerateDraw reports whether GenerateDraw accepts a competition in
+// status: only setup (and the legacy empty status). Shared with the mobileapp
+// generate-draw pre-flight for the same reason as CanStart.
+func CanGenerateDraw(status state.CompetitionStatus) bool {
+	return status == state.CompStatusSetup || status == ""
+}
+
 // StartCompetition starts a competition. When called on a draw-ready
 // competition it transitions directly to running (no regeneration).
 // When called on a setup competition it generates the draw first then
@@ -444,19 +461,18 @@ func (e *Engine) StartCompetition(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	switch comp.Status {
-	case state.CompStatusDrawReady:
-		// Draw already exists; only flip status.
-		return e.transitionDrawToRunning(id)
-	case state.CompStatusSetup, "":
-		// One-click path: generate draw then transition.
-		if err := e.runDrawPipeline(id); err != nil {
-			return err
-		}
-		return e.transitionDrawToRunning(id)
-	default:
+	if !CanStart(comp.Status) {
 		return validationErrorf("competition %s already started", id)
 	}
+	if comp.Status == state.CompStatusDrawReady {
+		// Draw already exists; only flip status.
+		return e.transitionDrawToRunning(id)
+	}
+	// One-click path: generate draw then transition.
+	if err := e.runDrawPipeline(id); err != nil {
+		return err
+	}
+	return e.transitionDrawToRunning(id)
 }
 
 // GenerateDraw generates pools/bracket/Swiss-r1 for a Setup competition
@@ -471,10 +487,10 @@ func (e *Engine) GenerateDraw(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	switch comp.Status {
-	case state.CompStatusSetup, "":
+	switch {
+	case CanGenerateDraw(comp.Status):
 		return e.runDrawPipeline(id)
-	case state.CompStatusDrawReady:
+	case comp.Status == state.CompStatusDrawReady:
 		return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
 	default:
 		return validationErrorf("competition %s cannot generate draw (status: %s)", id, comp.Status)
@@ -1028,7 +1044,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// generatePools / generatePlayoffs read:
 		//   - Format (decides which generator)
 		//   - PoolSize, PoolSizeMode, RoundRobin (pools structure)
-		//   - NumberPrefix (player numbering in both generators)
+		//   - NumberPrefix (player numbering in generatePools; generatePlayoffs
+		//     composes none, its tree is built from names alone)
 		//   - StartTime (initial ScheduledAt for generated matches)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)

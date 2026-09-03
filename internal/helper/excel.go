@@ -1729,10 +1729,6 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "B", 160))
 }
 
-type nameEntry struct {
-	player Player
-}
-
 // courtSheetName names the per-shiaijo "Names to Print" sheet after the shiaijo
 // the competition actually runs on, not after the band's position.
 func courtSheetName(courts []string, courtIdx int) string {
@@ -1797,16 +1793,11 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 			continue
 		}
 
-		entries := make([]nameEntry, len(courtPlayers))
-		for i, p := range courtPlayers {
-			entries[i] = nameEntry{player: p}
-		}
-
 		sheetName := courtSheetName(courts, c)
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entries, sanitized, pCoords)
+		printNameEntries(f, sheetName, courtPlayers, sanitized, pCoords)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1832,12 +1823,12 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	courts, poolsByCourt := PoolsByCourt(pools, courts, courtOfPool)
 	numCourts := len(courts)
 
-	entriesByCourt := make([][]nameEntry, numCourts)
+	entriesByCourt := make([][]Player, numCourts)
 	for court, poolIdxs := range poolsByCourt {
 		for _, poolIdx := range poolIdxs {
 			pool := pools[poolIdx]
 			for _, player := range pool.Players {
-				entriesByCourt[court] = append(entriesByCourt[court], nameEntry{player: player})
+				entriesByCourt[court] = append(entriesByCourt[court], player)
 			}
 		}
 	}
@@ -1858,12 +1849,12 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	}
 }
 
-func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, sanitized bool, pCoords map[string]playerCellCoord) {
+func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord) {
 	setupNamesToPrintLayout(f, sheetName)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
 
-	for i, entry := range entries {
+	for i, player := range players {
 		row := i + 1
 		positionCell := fmt.Sprintf("A%d", row)
 		nameCell := fmt.Sprintf("B%d", row)
@@ -1872,20 +1863,15 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 		// D1 (bc-pnum): no fallback. A player with no number cell (a
 		// competition that hasn't been numbered) gets an EMPTY position cell,
 		// never a substitute composed here -- the pool-letter tag this branch
-		// used to write (nameEntry.fallbackTag) has been removed outright, not
-		// just made unreachable, so it cannot silently come back.
-		// D1 (bc-pnum): no fallback. A player with no number cell (a
-		// competition that hasn't been numbered) gets an EMPTY position cell,
-		// never a substitute composed here -- the pool-letter tag this branch
-		// used to write (nameEntry.fallbackTag) has been removed outright, not
-		// just made unreachable, so it cannot silently come back.
-		coord := pCoords[playerCoordKey(entry.player)]
+		// used to write has been removed outright, not just made unreachable,
+		// so it cannot silently come back.
+		coord := pCoords[playerCoordKey(player)]
 		if coord.numberCell != "" {
 			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, sheetRef(coord.sheetName, coord.numberCell)))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(entry.player.Name, sanitized, coord)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(player.Name, sanitized, coord)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
 		if row%3 == 0 {
@@ -1893,8 +1879,8 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 		}
 	}
 
-	if len(entries) > 0 {
-		SetPrintArea(f, sheetName, 2, len(entries))
+	if len(players) > 0 {
+		SetPrintArea(f, sheetName, 2, len(players))
 	}
 }
 

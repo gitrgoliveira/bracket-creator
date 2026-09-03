@@ -37,6 +37,13 @@ type SkippedCompetition struct {
 // competition is reported in the second return value so both callers
 // (cmd/print.go, handlers_print.go) can warn the operator rather than
 // silently omitting it.
+// CONTRACT both callers rely on: this errors when there are no competitions
+// at all ("no competitions to export"), so a nil error with an EMPTY sources
+// slice means every competition that existed was skipped. Callers may treat
+// len(sources) == 0 as "all skipped" and report the returned list as the
+// reason. That invariant is stated here, at the producer, because
+// handlers_print.go and cmd/print.go both depend on it and neither can see
+// the other's assumption.
 func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]pdf.SourceWorkbook, []SkippedCompetition, error) {
 	ids := compIDs
 	if len(ids) == 0 {
@@ -78,7 +85,7 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 			// silently skipping a competition the exporter has learned to
 			// render. Every skip is returned to the caller, which warns the
 			// operator.
-			if isUnexportable(err) {
+			if IsUnexportable(err) {
 				skipped = append(skipped, SkippedCompetition{
 					ID:     id,
 					Name:   title,
@@ -103,11 +110,19 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 	return sources, skipped, nil
 }
 
-// isUnexportable reports whether err is one of the sentinels
+// IsUnexportable reports whether err is one of the sentinels
 // ExportCompetitionXlsx returns for a competition it cannot render at all --
 // as opposed to a real failure (I/O, corrupt state) that should abort the
-// whole batch. Centralised here so a third such sentinel has exactly one
-// place to be added, rather than a new errors.Is call at every skip site.
-func isUnexportable(err error) bool {
+// whole batch. This is the ONE place the set is spelled out, so a third such
+// sentinel has exactly one place to be added rather than a new errors.Is
+// call at every skip site.
+//
+// Exported because the skip sites are not all in this package: the print
+// booklet skips on it here, and mobileapp.respondUnexportableCompetitionError
+// maps the same set to HTTP 422. That responder used to re-list the pair
+// itself, which made this comment's "one place" claim untrue and meant a
+// third sentinel would have routed 500 on the HTTP paths while the booklet
+// skipped it -- a divergence only production would have shown.
+func IsUnexportable(err error) bool {
 	return errors.Is(err, ErrSwissExportUnsupported) || errors.Is(err, ErrBracketDrawMismatch)
 }

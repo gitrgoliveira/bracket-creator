@@ -55,11 +55,11 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 }
 
-// respondUnexportableCompetitionError checks err against the two sentinels a
-// workbook-export path can fail with -- engine.ErrSwissExportUnsupported
-// (Swiss has no static bracket to export) and engine.ErrBracketDrawMismatch
-// (the stored bracket no longer matches the competition's current settings)
-// -- and, if it matches either, writes {"error": err.Error()} as an HTTP 422
+// respondUnexportableCompetitionError asks engine.IsUnexportable whether err
+// is one of the sentinels a workbook-export path can fail with (today: Swiss
+// has no static bracket to export, or the stored bracket no longer matches
+// the competition's current settings) and, if so, writes
+// {"error": err.Error()} as an HTTP 422
 // and reports true; the caller must return immediately when this returns
 // true. Both are state conflicts the operator can resolve (regenerate the
 // draw, restore the settings, or use the live standings view), not server
@@ -71,11 +71,13 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 // does not drift into two hand-copied bodies -- mirrors
 // respondRosterWriteError's shape below for the same reason.
 //
-// export.ErrSwissExportUnsupported is a plain alias of
-// engine.ErrSwissExportUnsupported (see that var's doc comment), so checking
-// the engine sentinel here matches errors produced by either export path.
+// The set itself is NOT re-listed here: engine.IsUnexportable owns it, so a
+// third sentinel is added once rather than in two packages that fail to
+// compile-check each other. export.ErrSwissExportUnsupported is a plain alias
+// of engine.ErrSwissExportUnsupported (see that var's doc comment), so this
+// matches errors produced by either export path.
 func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
-	if !errors.Is(err, engine.ErrSwissExportUnsupported) && !errors.Is(err, engine.ErrBracketDrawMismatch) {
+	if !engine.IsUnexportable(err) {
 		return false
 	}
 	c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})

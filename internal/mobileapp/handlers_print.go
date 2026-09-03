@@ -98,11 +98,10 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		// Every competition was skipped (e.g. an all-Swiss tournament): there
 		// is nothing left to hand to the PDF generator, which would otherwise
 		// fail with "no source workbooks provided" and surface as a
-		// misleading 500. ExportTournamentWorkbooks already errors above with
-		// "no competitions to export" when there are none at all, so
-		// len(sources)==0 here means every competition that DID exist was
-		// skipped -- report why, per competition, as a 422 instead of
-		// falling through to PDF generation.
+		// misleading 500. len(sources)==0 means every competition that DID
+		// exist was skipped -- see ExportTournamentWorkbooks' documented
+		// contract, which owns that invariant -- so report why, per
+		// competition, as a 422 instead of falling through to generation.
 		if len(sources) == 0 {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{
 				"error":   "no competitions could be exported; every competition was skipped",

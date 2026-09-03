@@ -22,6 +22,7 @@ type printOptions struct {
 	output         string
 	outputDir      string
 	teamFiles      []string
+	failOnSkipAll  bool
 }
 
 // printTypeUsage is derived from pdf.Groups at init time so that the --type
@@ -74,6 +75,7 @@ exits with installation instructions.`,
 	cmd.Flags().StringVarP(&o.output, "output", "o", "", "output PDF path (single --type)")
 	cmd.Flags().StringVar(&o.outputDir, "output-dir", "", "output directory (--type=all, or to use default filenames)")
 	cmd.Flags().StringSliceVar(&o.teamFiles, "team-file", nil, "XLSX filename (basename) to treat as a team workbook; excluded from tags. Repeatable. Defaults to any filename containing 'team'.")
+	cmd.Flags().BoolVar(&o.failOnSkipAll, "fail-on-skip-all", false, "exit non-zero when every competition was skipped (nothing was printed), instead of the default clean exit; intended for scripted use")
 
 	if err := cmd.MarkFlagRequired("type"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking type flag as required: %v\n", err)
@@ -142,6 +144,9 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		// Exit cleanly with an informative note instead.
 		if len(sources) == 0 {
 			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no exportable competitions found; nothing to print")
+			if o.failOnSkipAll {
+				return fmt.Errorf("all %d competition(s) were skipped; nothing to print (--fail-on-skip-all)", len(skipped))
+			}
 			return nil
 		}
 	}

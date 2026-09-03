@@ -107,23 +107,23 @@ func RenderCompetitionWorkbook(
 	)
 
 	// hasBronze: a third-place bout exists only for a competition that cannot
-	// award a JOINT third place. Kendo's knockout gives both beaten
-	// semi-finalists an equal 3rd and plays no bronze match at all; naginata
-	// decides a single 3rd, so it needs one (docs/user-guide/organisers/
-	// naginata.md). comp.Naginata is how that rule is currently encoded for a
-	// knockout -- note the league path expresses the same question with its own
-	// explicit field, LeagueTwoThirdPlaces, so "can this competition award a
-	// joint third?" has two unrelated spellings in the tree today (see
-	// state.Competition.RequiresSingleThirdPlace, the named predicate for
-	// that question).
+	// award a JOINT third place. Kendo's knockout convention gives both beaten
+	// semi-finalists an equal 3rd and plays no bronze match at all; a
+	// competition that requires a single 3rd needs one instead. Before bc-3rdp
+	// this was encoded as comp.Naginata alone; state.Competition.
+	// RequiresSingleThirdPlace / EffectiveTwoThirdPlaces is now the ONE named
+	// predicate for "can this competition award a joint third?", answering it
+	// for every format (Naginata is one input among several it resolves, not
+	// the whole rule).
 	//
-	// bracket.ThirdPlaceMatch is only ever written when comp.Naginata was true
-	// at generation time (buildBracketFromDraw, gated on
-	// helper.NeedsBronzeBlock -- see bracket.go), and Naginata is
-	// locked once the competition starts (PUT /api/competitions/:id rejects
-	// a change while started; a bracket only exists once started). So a
-	// non-nil ThirdPlaceMatch here always implies Naginata, and testing it
-	// directly is equivalent to (comp.Naginata || isPurePlayoffs(comp,
+	// bracket.ThirdPlaceMatch is only ever written when comp.
+	// RequiresSingleThirdPlace() was true at generation time (buildBracketFromDraw,
+	// gated on helper.NeedsBronzeBlock -- see bracket.go), and TwoThirdPlaces/
+	// Naginata are both locked once the competition starts (PUT
+	// /api/competitions/:id rejects a change while started; a bracket only
+	// exists once started). So a non-nil ThirdPlaceMatch here always implies
+	// RequiresSingleThirdPlace() was true at draw time, and testing it directly
+	// is equivalent to (comp.RequiresSingleThirdPlace() || isPurePlayoffs(comp,
 	// pools)) && bracket != nil && bracket.ThirdPlaceMatch != nil, the
 	// formula the blank-template export used pre-extraction -- the extra
 	// disjunct was redundant against the writer (mp-yuy8 criterion 5). This

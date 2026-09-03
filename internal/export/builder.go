@@ -897,7 +897,9 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // sheet by scanning for "Round N - Match N" header cells and, when present, a
 // "3rd Place" header cell. For each completed match found, the score cells in
 // the row two rows below the header are overwritten with literal values.
-// thirdPlaceMatch is the bracket's bronze match (nil when absent/not naginata).
+// thirdPlaceMatch is the bracket's bronze match (nil when this competition
+// does not require a single 3rd place -- see
+// state.Competition.RequiresSingleThirdPlace, bc-3rdp).
 func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch) error {
 	if teamSize != 0 {
 		// Engi is individual-only; the team overlay renders ippon strings and

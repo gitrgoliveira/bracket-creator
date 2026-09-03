@@ -335,10 +335,11 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	assignBracketMatchNumbers(bracket)
 
 	// Bronze (3rd-place) playoff: only when this competition's format
-	// requires a single 3rd place (comp.RequiresSingleThirdPlace, currently
-	// Naginata's encoding of that rule -- see its doc comment), and only
-	// when a real semifinal round exists (len(Rounds) >= 2; a 2-player
-	// bracket has a single round and no semifinal, so no bronze). Modelled
+	// requires a single 3rd place (comp.RequiresSingleThirdPlace, the
+	// generalised per-format rule -- see its and EffectiveTwoThirdPlaces's
+	// doc comments, bc-3rdp), and only when a real semifinal round exists
+	// (len(Rounds) >= 2; a 2-player bracket has a single round and no
+	// semifinal, so no bronze). Modelled
 	// as a sibling field rather than a row in Rounds to preserve the
 	// power-of-two advancement geometry (see state.Bracket.ThirdPlaceMatch).
 	// Sides start empty and are filled from the two semifinal losers by

@@ -779,10 +779,12 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
   const [numberPrefix, setNumberPrefix] = useStateA(COMPETITION_DEFAULTS.numberPrefix);
   const [withZekken, setWithZekken] = useStateA(COMPETITION_DEFAULTS.withZekkenName);
   const [naginata, setNaginata] = useStateA(COMPETITION_DEFAULTS.naginata);
-  // League joint-3rd convention: kendo awards two joint 3rd places, naginata a
-  // single 3rd. Defaults by discipline (kendo on, naginata off) and re-syncs
-  // when the naginata toggle flips; the operator can still override per league.
-  const [leagueTwoThirdPlaces, setLeagueTwoThirdPlaces] = useStateA(COMPETITION_DEFAULTS.leagueTwoThirdPlaces);
+  // Joint-3rd convention (bc-3rdp), for every format that has a 3rd place to
+  // award: kendo awards two joint 3rd places, naginata a single 3rd. Defaults
+  // by discipline (kendo on, naginata off) and re-syncs when the naginata
+  // toggle flips (twoThirdPlacesForNaginata is a default-setter only, not a
+  // lock); the operator can still override it afterward.
+  const [twoThirdPlaces, setTwoThirdPlaces] = useStateA(COMPETITION_DEFAULTS.twoThirdPlaces);
   // bc-symm: league tie-break band, settings-only until now. 0 reads as
   // "Top 3" (state.Competition's own unset-means-3 default, see
   // LEAGUE_TIEBREAK_OPTIONS' comment in competition_shape.jsx); starting
@@ -1012,20 +1014,23 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     if (format === FORMAT_MIXED) {
       c.extraQualifiers = extraQualifiers;
     }
-    // League joint-3rd convention (kendo two joint 3rds vs naginata single 3rd).
-    // Sent for EVERY format, not just leagues, and for the same reason
-    // roundRobin above is: the settings screen can switch a competition INTO
-    // league, and a competition that carried no value for this field showed
-    // the checkbox unticked there -- the naginata convention -- while creating
-    // the same league from this form ticks it. Emitting it always means the
-    // value is explicit from creation, so the two routes agree.
+    // Joint-3rd convention (bc-3rdp: kendo two joint 3rds vs naginata single
+    // 3rd), now a per-format rule rather than a league-only one. Sent for
+    // EVERY format, for the same reason roundRobin above is: the settings
+    // screen can switch a competition's format after creation, and a
+    // competition that carried no value for this field would resolve
+    // through EffectiveTwoThirdPlaces's legacy fallback instead of the
+    // operator's actual choice on this screen. Emitting it always means the
+    // value is explicit from creation, so every later format switch agrees
+    // with what was chosen here.
     //
-    // The `omitempty` on the Go side is NOT what caused that and did not
-    // need changing: a bool with omitempty is value-lossless, since false
-    // marshals to an absent key and an absent key unmarshals back to
-    // false. The conditional SEND was the whole bug (see
-    // state.Competition's own comment on this field).
-    c.leagueTwoThirdPlaces = leagueTwoThirdPlaces;
+    // `omitempty` is not what would cause a mismatch and needs no special
+    // handling: TwoThirdPlaces is a *bool specifically so an explicit false
+    // and "never set" are distinguishable on the wire (see
+    // state.Competition's own comment on this field). The conditional SEND
+    // is what would be the bug, exactly as it was for this field's
+    // leagueTwoThirdPlaces predecessor.
+    c.twoThirdPlaces = twoThirdPlaces;
     // T190 (FR-050a): persist swissRounds when format=swiss. Same
     // post-construction pattern as poolFormat above: buildCompetition
     // doesn't know about this field; setting it on the result object
@@ -1052,7 +1057,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       c.playoffMatchDurationSeconds = playoffMatchDurationSeconds;
     }
     // League tie-break band. Same post-construction pattern as
-    // leagueTwoThirdPlaces above; gated on the same predicate the control
+    // twoThirdPlaces above; gated on the same predicate the control
     // itself is rendered under (leagueTiebreakVisible) rather than a bare
     // format check, since the server's validateLeagueTiebreakConfig keys
     // on Kind === "team" specifically. Passed effectiveTeamSize, NOT the
@@ -1321,7 +1326,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           {twoThirdPlacesVisible(format) && (
-            <CheckboxField label={LABEL_TWO_THIRD_PLACES} checked={leagueTwoThirdPlaces} onChange={setLeagueTwoThirdPlaces} hint={HINT_TWO_THIRD_PLACES} />
+            <CheckboxField label={LABEL_TWO_THIRD_PLACES} checked={twoThirdPlaces} onChange={setTwoThirdPlaces} hint={HINT_TWO_THIRD_PLACES} />
           )}
 
           <div className="field">
@@ -1398,7 +1403,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
             <CheckboxField label={LABEL_ENGI} checked={engi} onChange={setEngi} hint={HINT_ENGI} />
           )}
 
-          <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setLeagueTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
+          <CheckboxField label={LABEL_NAGINATA} checked={naginata} onChange={(on) => { setNaginata(on); setTwoThirdPlaces(twoThirdPlacesForNaginata(on)); }} hint={HINT_NAGINATA} />
 
           <CheckboxField label={LABEL_CHECK_IN} checked={checkInEnabled} onChange={setCheckInEnabled} hint={HINT_CHECK_IN} />
 

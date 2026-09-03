@@ -114,11 +114,13 @@ function compMatchStats(c) {
 }
 
 // True when a bracket exists and every real match in it -- including
-// bracket.thirdPlaceMatch, the naginata bronze match, which is a SIBLING
-// field of bracket.rounds, not a row inside it -- is completed. Deliberately
-// does NOT reuse compMatchStats's total/done counters: those never walk
+// bracket.thirdPlaceMatch, the single-3rd-place bronze match (bc-3rdp: any
+// format can require one now, not just naginata -- see
+// state.Competition.RequiresSingleThirdPlace), which is a SIBLING field of
+// bracket.rounds, not a row inside it -- is completed. Deliberately does NOT
+// reuse compMatchStats's total/done counters: those never walk
 // thirdPlaceMatch, so a completed bronze match would be silently ignored and
-// a naginata bracket could read as "fully done" one match early.
+// a bracket requiring a single 3rd could read as "fully done" one match early.
 //
 // Gates the "Complete competition" action (admin_competition.jsx): League
 // and pure-pools formats auto-complete server-side once every pool match is

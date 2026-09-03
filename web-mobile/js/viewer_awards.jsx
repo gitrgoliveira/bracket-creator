@@ -66,10 +66,12 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
         return r ? { place, ...r } : null;
       };
 
-      // Naginata / explicit bronze match path: only 1st, 2nd, 3rd get awards
-      // (Naginata convention: there is NO 4th-place award; the bronze match
-      // exists solely to decide which beaten semi-finalist takes the single
-      // 3rd place. The loser is 4th but is not part of the closing ceremony).
+      // Single-3rd / explicit bronze match path (bc-3rdp: any format can
+      // require a single 3rd now, not just naginata -- see
+      // state.Competition.RequiresSingleThirdPlace): only 1st, 2nd, 3rd get
+      // awards. There is NO 4th-place award; the bronze match exists solely
+      // to decide which beaten semi-finalist takes the single 3rd place. The
+      // loser is 4th but is not part of the closing ceremony.
       const bronze = bracket.thirdPlaceMatch;
       if (bronze) {
         if (bronze.winner) {
@@ -125,8 +127,9 @@ export function deriveAwards(bracket, standings, pools, nameToPlayer) {
     // before it can complete (individual: InjectTiebreakerMatches; team:
     // daihyosen/chusen; both block completion until decided), so ranks are
     // sequential (1/2/3 → a single 1st, 2nd, and 3rd, with NO 4th) EXCEPT the
-    // sanctioned kendo joint 3rd: when LeagueTwoThirdPlaces is enabled the
-    // backend legitimately shares rank 3 between two genuinely-tied finishers
+    // sanctioned kendo joint 3rd: when the joint-3rd-place setting is enabled
+    // (bc-3rdp; state.Competition.EffectiveTwoThirdPlaces) the backend
+    // legitimately shares rank 3 between two genuinely-tied finishers
     // (e.g. 3,3), and `place: rank` renders both as 3rd. This matches the
     // standings table and honors the tie-break outcome / naginata single-3rd
     // convention, instead of the old index-based logic that relabeled the

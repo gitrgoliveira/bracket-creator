@@ -478,7 +478,7 @@ function normalizeCompetitionDetail(data) {
             round.map(m => normalizeMatch(m, playerMap))
         )};
     }
-    // Normalize bronze/3rd-place match when present (naginata competitions)
+    // Normalize bronze/3rd-place match when present (any competition requiring a single 3rd; bc-3rdp)
     if (result.bracket && result.bracket.thirdPlaceMatch) {
         result.bracket = { ...result.bracket, thirdPlaceMatch: normalizeMatch(result.bracket.thirdPlaceMatch, playerMap) };
     }

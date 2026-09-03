@@ -32,7 +32,9 @@ Provide **exactly one**:
       the settings are restored.
 
     Each skipped competition is named in a warning on the console. Every
-    other competition still prints as usual.
+    other competition still prints as usual. By default the command still
+    exits successfully even if every competition was skipped; pass
+    `--fail-on-skip-all` to make a scripted run detect that case.
 
 ## Types
 
@@ -54,6 +56,7 @@ Provide **exactly one**:
 | `--output` | `-o` | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
 | `--output-dir` | | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
 | `--team-file` | | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable; defaults to any filename containing `team`. |
+| `--fail-on-skip-all` | | Exit with a non-zero status if every competition was skipped, so a scripted run can detect that no booklet was produced. Off by default; see [Some competitions can be left out of the booklet](#input-modes). |
 
 An output target is always required: for a single `--type`, provide exactly one of `--output` or `--output-dir`; `--type=all` requires `--output-dir` (and rejects `--output`).
 

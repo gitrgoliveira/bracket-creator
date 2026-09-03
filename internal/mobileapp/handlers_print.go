@@ -83,7 +83,7 @@ func RegisterPrintHandlers(r *gin.RouterGroup, eng *engine.Engine) {
 		defer func() { _ = os.RemoveAll(workDir) }()
 
 		// Export all competitions to XLSX workbooks. A Swiss competition (no
-		// static bracket; Swiss export is not yet implemented -- bc-swex) or
+		// static bracket; Swiss export is not yet implemented -- mp-4n9n) or
 		// one whose stored bracket no longer matches its current settings
 		// (engine.ErrBracketDrawMismatch) is skipped rather than aborting the
 		// whole booklet; skipped is reported to the operator below via both a

@@ -23,7 +23,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// rendering work, rather than emitting a workbook whose sheets are
 	// structurally present but hold no participant data. Matches the guard in
 	// internal/export.BuildResultsWorkbook. A dedicated Swiss sheet is tracked
-	// as follow-up work (bc-swex).
+	// as follow-up work (mp-4n9n).
 	if comp.Format == state.CompFormatSwiss {
 		return nil, ErrSwissExportUnsupported
 	}

@@ -98,7 +98,7 @@ func (e *DownstreamKnockoutScoredError) Is(target error) bool {
 // (the live standings view) rather than just naming what does not work.
 // Lives here (engine), not in internal/export, because internal/export
 // imports internal/engine and the reverse would be an import cycle. A
-// dedicated Swiss export sheet is tracked as follow-up work (bc-swex); do not
+// dedicated Swiss export sheet is tracked as follow-up work (mp-4n9n); do not
 // attempt to implement it here.
 var ErrSwissExportUnsupported = errors.New("not yet implemented: Swiss competitions have no static bracket to export; use the live standings view instead")
 

@@ -74,7 +74,7 @@ func (e *Engine) ExportTournamentWorkbooks(tmpDir string, compIDs ...string) ([]
 			// off the sentinel(s) rather than re-testing comp.Format or
 			// bracket state here, so ExportCompetitionXlsx stays the SINGLE
 			// owner of what is exportable -- a format gaining support
-			// (bc-swex) then changes one place, and cannot leave this loop
+			// (mp-4n9n) then changes one place, and cannot leave this loop
 			// silently skipping a competition the exporter has learned to
 			// render. Every skip is returned to the caller, which warns the
 			// operator.

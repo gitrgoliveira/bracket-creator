@@ -59,6 +59,17 @@ describe('compMatchesForCompetition; recombines the split viewer detail payload'
       .toEqual(['Swiss-R1-0', 'Swiss-R1-1']);
   });
 
+  it('is published on window, which two admin surfaces depend on', () => {
+    // admin_scoring_shared.jsx's withdrawal panel and admin_scoring_team.jsx's
+    // reopen-conflict panel both read this off window rather than importing it
+    // (the same way they already read window.compMatches), and the team one
+    // GUARDS on it: if the publish ever disappeared, that panel would silently
+    // return early and go back to naming a blocker by its raw match id.
+    expect(typeof window.compMatchesForCompetition).toBe('function');
+    expect(window.compMatchesForCompetition(detail().config, detail()).map((m) => m.id))
+      .toEqual(['Swiss-R1-0', 'Swiss-R1-1']);
+  });
+
   it('returns [] rather than throwing when there is no competition', () => {
     expect(compMatchesForCompetition(null, detail())).toEqual([]);
     expect(compMatchesForCompetition(undefined, undefined)).toEqual([]);

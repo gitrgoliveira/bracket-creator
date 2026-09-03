@@ -72,10 +72,14 @@ export const compareDmy = (a, b) => window.compareDmy(a, b);
 // and silently yields NOTHING: `detail.status` is undefined, which trips the
 // "setup" early return below before a single match is read.
 //
-// That is not hypothetical. admin_scoring_shared.jsx's withdrawal panel did
-// exactly this, so after a kiken it listed no remaining matches to award, for
-// every format, and nothing caught it because the panel's list has no test.
-// Route new callers through here rather than spreading by hand (mp-dej2).
+// That is not hypothetical, and it had already bitten twice by the time this
+// helper existed. admin_scoring_shared.jsx's withdrawal panel did exactly this,
+// so after a kiken it listed no remaining matches to award, on every format.
+// admin_scoring_team.jsx's reopen-conflict panel hit the same wall earlier and
+// worked around it with its own inline recombination, so the console named a
+// blocking match by its raw id until someone noticed. Two hand-rolled copies
+// and one silent omission is why the rule now has one home: route new callers
+// through here rather than spreading by hand (mp-dej2).
 //
 // `data` is the sibling half. It is a separate argument because the competition
 // page holds the two halves as separate PROPS rather than as one response, so a

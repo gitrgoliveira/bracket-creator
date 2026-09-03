@@ -144,6 +144,8 @@
   /* BCDA-FIXTURE-END */
 
   var PLAY_MS = 1700;
+  var PLAY_TITLE = "Place the competitors one after another";
+  var PAUSE_TITLE = "Pause the walk-through";
 
   // ---------------------------------------------------------------- helpers
 
@@ -549,7 +551,7 @@
       self.pause();
       self.goto(self.step - 1);
     });
-    this.playBtn = this.control(bar, "Play", "Place the competitors one after another", function () {
+    this.playBtn = this.control(bar, "Play", PLAY_TITLE, function () {
       if (self.timer) {
         self.pause();
       } else {
@@ -724,7 +726,7 @@
     var self = this;
     if (this.step >= this.result.steps.length) this.goto(0);
     this.playBtn.textContent = "Pause";
-    this.playBtn.title = "Pause the walk-through";
+    this.playBtn.title = PAUSE_TITLE;
     this.timer = window.setInterval(function () {
       if (self.step >= self.result.steps.length) {
         self.pause();
@@ -741,7 +743,7 @@
     }
     if (this.playBtn) {
       this.playBtn.textContent = "Play";
-      this.playBtn.title = "Place the competitors one after another";
+      this.playBtn.title = PLAY_TITLE;
     }
   };
 

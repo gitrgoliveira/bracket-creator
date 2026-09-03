@@ -184,7 +184,7 @@ So if the seeds hold, the semi-finals are **seed 1 against seed 3** and **seed 2
 
 Fewer than four seeds is a normal configuration, and so is none at all. The rule applies to whichever ranks you have set, in rank order, so with three seeds one quarter has no seed in it, and with no seeds the draw is built from crossing and block shape alone. A competition without seeds produces no warning.
 
-Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first, and the competition page shows a banner, **Seeding: the draw could not honour every rule**, describing what was relaxed. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
+Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first, and you are told what was relaxed: the competition page shows a banner, **Seeding: the draw could not honour every rule**, and the command line prints the same as a `Warning:` line. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
 
 Seeding also decides who receives a bye, as described in [Byes](#byes).
 

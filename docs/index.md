@@ -42,7 +42,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     ---
 
-    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the tournament app, with one device per shiai-jo. Some printed material is still needed for scoreboards and competitors.
+    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the tournament app. Some printed material is still needed for scoreboards and competitors.
 
     *Needs:* one device per shiai-jo.
 
@@ -54,7 +54,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     On-screen scoreboards and mobile result pages, updated in real time. Organisers still print player tags and numbers.
 
-    *Needs:* a device and monitor per court, plus network access for competitors.
+    *Needs:* a device and monitor per shiai-jo, plus network access for competitors.
 
     [Host it online](user-guide/install/hosting.md)
 

@@ -20,7 +20,7 @@ Both formats build a knockout bracket, so the number of courts must be 1, 2, 4, 
 
 ## Participant list
 
-After uploading a CSV the participant list is shown for review before generating the bracket. A banner under the list reads **Participant list format looks good** and gives the number of participants read. If the list has problems, the banner reads **Participant list needs attention** and lists them; fix the rows it names, and the buttons stay unavailable until it passes.
+After uploading a CSV the participant list is shown for review before generating the bracket. A banner under the list reads **Participant list format looks good** and gives the number of participants read. If the list has problems, the banner reads **Participant list needs attention** and lists them; seeding and creating the tournament both refuse until you fix the rows it names. Warnings alone give **Participant list looks usable, with a few caveats**, and you can carry on.
 
 ![Participant list](../../screenshots/webui-player-list.png)
 

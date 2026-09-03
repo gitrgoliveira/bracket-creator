@@ -12,7 +12,7 @@ bracket-creator create-playoffs [flags]
 |------|-------|---------|-------------|
 | `--file` | `-f` | (none) | CSV file with participants **(required)** |
 | `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
-| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across. Must be 1, 2, 4, 8 or 16, refer to [Shiai-jo count](#shiai-jo-count) |
+| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across. Must be 1, 2, 4, 8 or 16; refer to [Shiai-jo count](#shiai-jo-count) |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
 | `--seeds` | (none) | (none) | CSV file with seed rankings |

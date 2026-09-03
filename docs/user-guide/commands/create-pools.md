@@ -12,11 +12,11 @@ bracket-creator create-pools [flags]
 |------|-------|---------|-------------|
 | `--file` | `-f` | (none) | CSV file with participants **(required)** |
 | `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
-| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to distribute pools across. Must be 1, 2, 4, 8 or 16, refer to [Shiai-jo count](#shiai-jo-count) |
-| `--players` | `-p` | `3` | Minimum players per pool |
-| `--max-players` | `-m` | (none) | Maximum players per pool |
-| `--pool-winners` | `-w` | `2` | Players that qualify from each pool, refer to [Qualifiers per pool](#qualifiers-per-pool) |
-| `--extra-qualifiers` | (none) | `""` | Send extra qualifiers from oversized pools, or fit pool sizes exactly to the bracket, refer to [Extra qualifiers](#extra-qualifiers) |
+| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to distribute pools across. Must be 1, 2, 4, 8 or 16; refer to [Shiai-jo count](#shiai-jo-count) |
+| `--players` | `-p` | `3` | Minimum players per pool. Mutually exclusive with `--max-players`. |
+| `--max-players` | `-m` | (none) | Maximum players per pool. Mutually exclusive with `--players`. |
+| `--pool-winners` | `-w` | `2` | Players that qualify from each pool; refer to [Qualifiers per pool](#qualifiers-per-pool) |
+| `--extra-qualifiers` | (none) | `""` | Send extra qualifiers from oversized pools, or fit pool sizes exactly to the bracket; refer to [Extra qualifiers](#extra-qualifiers) |
 | `--round-robin` | `-r` | `false` | Force full round-robin in every pool |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
@@ -25,8 +25,6 @@ bracket-creator create-pools [flags]
 | `--single-tree` | (none) | `false` | Produce one tree sheet instead of one per court |
 | `--number-prefix` | `-n` | `""` | Assign consecutive numbers with this letter prefix (for example, `K` produces K1, K2, …) |
 | `--title-prefix` | (none) | `""` | Prefix added to sheet titles |
-
-`--players` and `--max-players` are mutually exclusive: pick one pool-sizing mode.
 
 ## Examples
 

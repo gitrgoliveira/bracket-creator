@@ -41,7 +41,7 @@ What Correct offers depends on the format:
 
 Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers you two ways forward: leave it running, or clear its score, send it back to the queue and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.
 
-If the correction changes who won a knockout match, the later rounds update to follow the new winner. If a later round has already been played, its competitor name changes but its recorded result does not, so open that match and correct it too. When you are done, use **Back to court** to return to the live match.
+If the correction changes who won a knockout match, the later rounds update to follow the new winner. If a later round has already been played, the app does not yet block the correction: that match keeps its recorded result under the new competitor's name, so the new pairing must fight and its result be entered before the bracket is right again. When you are done, use **Back to court** to return to the live match.
 
 ## Matches waiting on earlier results
 
@@ -74,8 +74,8 @@ Kachinuki team encounters are scored one bout at a time. Score the current bout,
 
 On a tied bout you also decide what the tie means, according to the [kachinuki mode](../organisers/team-tournaments.md#kachinuki-modes) in force:
 
-- **Record bout** retires both fighters.
-- **Encho** keeps the same pair fighting when the pairing must produce a result. It is available in any stage. Under the taisho rule a Taisho who draws stays on, and **Record bout** pairs them with the next opponent automatically.
+- **Record bout** retires both fighters. Under the taisho rule a Taisho who draws stays on, and **Record bout** pairs them with the next opponent automatically.
+- **Encho** keeps the same pair fighting when the pairing must produce a result. It is available in any stage.
 - **End match** records a drawn encounter in pools or leagues. In a knockout a tied last bout cannot end the match, so continue with **Record bout** or **Encho**.
 
 If you finish too early, open the completed match and use **Reopen match** to carry on. Reopening takes a single tap; you are asked for a reason when you end the match again. The bouts you have already fought stay on screen as read-only rows above the current bout, so the encounter reads like a regular team sheet and you can check the winner-stays-on order at a glance. **× Remove this bout** takes back an unscored pairing the app added by mistake without ending the encounter.

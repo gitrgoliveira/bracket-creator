@@ -1,6 +1,6 @@
 # hash-password
 
-Produces a bcrypt hash for use with the [`mobile-app`](mobile-app.md) command's locked-password mode. Operators set the resulting hash in the `TOURNAMENT_PASSWORD_HASH` environment variable so the running server can compare incoming `X-Tournament-Password` headers against it without storing the plaintext.
+Produces a bcrypt hash for use with the [`mobile-app`](mobile-app.md) command's locked mode. Operators set the resulting hash in the `TOURNAMENT_PASSWORD_HASH` environment variable so the running server can compare incoming `X-Tournament-Password` headers against it without storing the plaintext.
 
 ```
 bracket-creator hash-password [plaintext]
@@ -21,7 +21,7 @@ Single line on stdout: the bcrypt hash (for example, `$2a$10$tq9jkGYsf1ttx0ZM.UU
 
 ## Examples
 
-Pass the password as an argument. This is quick, and it leaves the password in your shell history:
+Pass the password as an argument:
 
 ```bash
 bracket-creator hash-password mysecret

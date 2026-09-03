@@ -195,7 +195,7 @@ flowchart LR
 
 This local hub needs no internet, no secure context, and no extra software, and it works in
 every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes
-above rather than replacing them: the operator's writes are still queued locally and synced to
+in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them: the operator's writes are still queued locally and synced to
 the server once the link returns, so the authoritative record stays correct. It is per machine
 and per court. Reloading the **display** tab during an outage is fine: it cold-starts from the
 operator tab's snapshot over the same channel, as long as an operator tab is still open on that
@@ -248,7 +248,7 @@ flowchart TB
 
 | Variable | Flag | Default | Purpose |
 |---|---|---|---|
-| `TOURNAMENT_DATA_DIR` | `-f/--folder` | `.` (the current directory; `make run-mobile` and the Compose file set `./tournament-data`) | where state is stored |
+| `TOURNAMENT_DATA_DIR` | `-f/--folder` | `.` | where state is stored; `make run-mobile` passes `./tournament-data`, and the container images and Compose file use `/tournament-data` inside the container |
 | `PORT` | `-p/--port` | 8080 | listen port |
 | `BIND_ADDRESS` | `-b/--bind` | localhost | listen address |
 | `LOCK_PASSWORD` | `--lock-password` | false | enable locked (bcrypt) auth; disables reset endpoint |

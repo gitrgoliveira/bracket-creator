@@ -171,7 +171,7 @@ fan-out. Scoring is ACID; a legitimate operator change is never dropped.
 flowchart LR
     start["POST /api/competitions/:id/start"] --> eng["engine.StartCompetition"]
     eng --> mode{"format?"}
-    mode -->|pools + playoffs| pools["helper: tree-aware pool descent<br/>(BuildPoolPhaseTreeAwareWithMode)<br/>seeds first, then dojo counts per node"]
+    mode -->|pools + playoffs| pools["helper: tree-aware pool descent<br/>(BuildPoolPhaseTreeAwareWithMode)<br/>seeds first, then dojo counts per node<br/>fill-bracket uses its own builder"]
     mode -->|playoffs only| tree["helper/tree.go<br/>binary tree (max 16/tree)<br/>StandardSeeding"]
     pools --> store[("state.Store")]
     tree --> store

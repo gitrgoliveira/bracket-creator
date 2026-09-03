@@ -12,10 +12,10 @@ Refer to the [Tournament app guide](../organisers/run-tournament.md) for a full 
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--folder` | `-f` | `.` | Folder containing `tournament.md` and `competitions/`. Created on first save. |
+| `--folder` | `-f` | `.` | Folder containing `tournament.md` and `competitions/`. Created at startup if it does not exist. |
 | `--port` | `-p` | `8080` (or `$PORT`) | Port to listen on |
 | `--bind` | `-b` | `localhost` (or `$BIND_ADDRESS`) | Address to bind to. Use `0.0.0.0` to reach the server from other devices on the LAN. |
-| `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked authentication mode. Requires `TOURNAMENT_PASSWORD_HASH`. Refer to [Authentication](#authentication). |
+| `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked mode. Requires `TOURNAMENT_PASSWORD_HASH`. Refer to [Authentication](#authentication). |
 
 ## Environment variables
 
@@ -41,7 +41,7 @@ The admin password is stored plaintext in `tournament-data/tournament.md` and co
 
 The on-disk password is ignored. Authentication compares the `X-Tournament-Password` header against a bcrypt hash from the `TOURNAMENT_PASSWORD_HASH` environment variable.
 
-Generate the hash. The command reads one line from standard input with no prompt and no echo-off, so pipe the secret in rather than typing it, and it never lands in shell history:
+Generate the hash, piping the secret in rather than typing it (refer to [hash-password](hash-password.md) for the input rules):
 
 ```bash
 printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
@@ -89,7 +89,7 @@ Bind to all interfaces on a custom port:
 bracket-creator mobile-app -f ./tournament-data -b 0.0.0.0 -p 8082
 ```
 
-Locked mode for a public deployment. `hash-password` reads one line from standard input without prompting or disabling terminal echo, so pipe the password in from a secrets manager or a here-doc rather than typing it, and it never lands in shell history or the scrollback:
+Locked mode for a public deployment, with the hash generated as shown under [Locked mode](#locked-mode-lock-password):
 
 ```bash
 HASH=$(printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password)

@@ -16,7 +16,7 @@ When the tournament is self-run, a public self-registration page is open for ind
 !!! note
     Self-registration is not available for team competitions; the organiser adds the team roster directly. It also closes once the draw is generated. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
 
-If the form says someone with your name is already registered, that is fine if it is you. If it is not, add your dojo so the two of you are told apart.
+If the form says someone with your name is already registered, your name and dojo are already on the list and you are done. A namesake from another dojo registers normally. If you are a different person with the same name at the same dojo, ask the organiser to add you.
 
 ## Check in on the day
 

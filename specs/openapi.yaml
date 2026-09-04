@@ -3051,8 +3051,13 @@ paths:
       summary: Remove unscored league tie-breaker matches for a group
       description: >
         Removes the unscored daihyosen matches for one tied group. Admin-gated.
-        `teamNames` must cover a complete tie-breaker group (no duplicates, no
-        partial selection).
+        `teamNames` must cover a complete tie-breaker group (no duplicates
+        unless `teamIds` is also present, no partial selection). Optional
+        `teamIds` selects and matches the group's daihyosen rows by
+        participant id instead of name, needed to remove a tied group holding
+        two same-named teams (the same namesake collision `POST` disambiguates
+        with `teamIds`) -- such a group can only ever be created via
+        `teamIds`, so this must accept it too.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4899,10 +4904,13 @@ components:
         duplicates rejected unless `teamIds` is also present -- a namesake
         pair legitimately repeats a name). `teamIds` is optional and, when
         present, must be the same length as `teamNames`; it is honoured by
-        `POST .../league-tiebreak` (both for matching the candidate group and
-        for resolving it), letting a namesake-holding group be selected where
-        `teamNames` alone is ambiguous. `DELETE .../league-tiebreak` does not
-        yet consult `teamIds` and continues to match by name only.
+        both `POST .../league-tiebreak` (matching the candidate group and
+        resolving it) and `DELETE .../league-tiebreak` (matching the group's
+        daihyosen rows by `SideAID`/`SideBID` instead of by name), letting a
+        namesake-holding group be selected, created, and removed where
+        `teamNames` alone is ambiguous. A namesake group can only be created
+        via `teamIds` in the first place, so `DELETE` must accept it too or
+        such a group could never be removed again.
       required: [teamNames]
       properties:
         teamNames:

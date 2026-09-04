@@ -97,16 +97,19 @@ type leagueTiebreakRequest struct {
 	TeamIDs []string `json:"teamIds,omitempty"`
 }
 
-// dedupedNameSet builds a presence set from names and reports whether the input
-// contained any duplicate. Handlers reject duplicates up front so downstream
-// group-size and pair-count comparisons (which use the deduped set) can't be
-// fooled by a repeated team name.
-func dedupedNameSet(names []string) (set map[string]bool, hadDuplicate bool) {
-	set = make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
+// dedupedStringSet builds a presence set from a string slice and reports
+// whether the input contained any duplicate. Generic over what the strings
+// ARE: callers below feed it both team names (dedup by display name) and
+// team ids (dedup by participant id) -- a single name-suffixed helper for
+// both would misdescribe the id call sites. Handlers reject duplicates up
+// front so downstream group-size and pair-count comparisons (which use the
+// deduped set) can't be fooled by a repeated entry.
+func dedupedStringSet(values []string) (set map[string]bool, hadDuplicate bool) {
+	set = make(map[string]bool, len(values))
+	for _, v := range values {
+		set[v] = true
 	}
-	return set, len(set) != len(names)
+	return set, len(set) != len(values)
 }
 
 // RegisterPublicLeagueTiebreakHandlers wires the unauthenticated league-tiebreak
@@ -254,7 +257,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
-		reqSet, hadDup := dedupedNameSet(req.TeamNames)
+		reqSet, hadDup := dedupedStringSet(req.TeamNames)
 		// A namesake collision (two tied teams sharing a display name across
 		// dojos) makes DUPLICATE names in teamNames the EXPECTED, legal shape
 		// once teamIds disambiguates them -- reqIDSet's own uniqueness check
@@ -267,7 +270,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		}
 		var reqIDSet map[string]bool
 		if useTeamIDs {
-			reqIDSet, hadDup = dedupedNameSet(req.TeamIDs) // generic string-set dedup, id or name alike
+			reqIDSet, hadDup = dedupedStringSet(req.TeamIDs)
 			if hadDup {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds contains duplicate entries"})
 				return
@@ -411,11 +414,37 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames must contain at least two teams"})
 			return
 		}
-
-		reqSet, hadDup := dedupedNameSet(req.TeamNames)
-		if hadDup {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames contains duplicate entries"})
+		// teamIds (bc-idfx) mirrors POST: a namesake group (two tied teams
+		// sharing a display name across dojos) can only be CREATED via
+		// teamIds -- generatePoolDaihyosenMatches stamps SideAID/SideBID on
+		// every DH row it writes -- so it must be deletable the same way, or
+		// such a group could never be removed at all once created (a
+		// name-only delete collapses the duplicate name in dedupedStringSet
+		// and is rejected below before it ever reaches the group match).
+		useTeamIDs := len(req.TeamIDs) > 0
+		if useTeamIDs && len(req.TeamIDs) != len(req.TeamNames) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds, when provided, must have the same length as teamNames"})
 			return
+		}
+
+		reqSet, hadDup := dedupedStringSet(req.TeamNames)
+		// Mirrors POST: a namesake pair legitimately collapses to one name in
+		// reqSet, so the name-based duplicate rejection only applies when
+		// there is no teamIds to disambiguate with. The message points the
+		// operator at teamIds instead of just refusing outright, since GET
+		// .../league-tiebreak/candidates already returns each team's id
+		// specifically for this case.
+		if !useTeamIDs && hadDup {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames contains duplicate entries; use teamIds to disambiguate teams that share a name"})
+			return
+		}
+		var dedupedIDSet map[string]bool
+		if useTeamIDs {
+			dedupedIDSet, hadDup = dedupedStringSet(req.TeamIDs)
+			if hadDup {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds contains duplicate entries"})
+				return
+			}
 		}
 
 		// The whole read-modify-write runs under the per-comp lock so a
@@ -453,14 +482,21 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 
 			// Identify DH matches belonging to the requested group, and reject a
 			// selection that splits a tie-breaker group: a DH match with exactly
-			// one side in reqSet means the operator named a partial group, which
-			// would orphan the remaining round-robin bouts.
+			// one side in the request set means the operator named a partial
+			// group, which would orphan the remaining round-robin bouts.
+			// Membership is by id (unambiguous) when teamIds was supplied, else
+			// by name -- same basis POST selects the candidate group by.
 			var groupDH []state.MatchResult
 			for _, m := range allMatches {
 				if !engine.IsPoolDaihyosenMatchID(m.ID) {
 					continue
 				}
-				inA, inB := reqSet[m.SideA], reqSet[m.SideB]
+				var inA, inB bool
+				if useTeamIDs {
+					inA, inB = dedupedIDSet[m.SideAID], dedupedIDSet[m.SideBID]
+				} else {
+					inA, inB = reqSet[m.SideA], reqSet[m.SideB]
+				}
 				if inA != inB {
 					partialGroup = true
 					return nil
@@ -513,7 +549,11 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
 			return
 		case partialGroup:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames does not cover a complete tie-breaker group"})
+			field := "teamNames"
+			if useTeamIDs {
+				field = "teamIds"
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": field + " does not cover a complete tie-breaker group"})
 			return
 		case noneFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "no_tiebreak_matches", "detail": "no tie-breaker matches found for this group"})

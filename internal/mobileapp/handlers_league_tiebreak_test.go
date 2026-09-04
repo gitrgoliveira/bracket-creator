@@ -592,6 +592,82 @@ func TestLeagueTiebreakDelete_TooFewTeams(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestLeagueTiebreakDelete_TeamIDsRemovesNamesakeGroup pins the bc-idfx
+// review's item 9 fix: a namesake tie-breaker group (two "Team X" from
+// different dojos) can only ever be CREATED via teamIds -- POST's own
+// teamNames-only path collapses the duplicate name and is rejected -- and
+// generatePoolDaihyosenMatches stamps SideAID/SideBID on the DH row it
+// writes for exactly that reason. Before the fix, DELETE had no teamIds
+// counterpart at all: a name-only delete request also collapses the
+// duplicate name in dedupedStringSet and is rejected before ever reaching the
+// group match, so such a group could be created but never removed.
+func TestLeagueTiebreakDelete_TeamIDsRemovesNamesakeGroup(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:    "Pool A-DH-0",
+			SideA: "Team X", SideAID: "id-team-x-a",
+			SideB: "Team X", SideBID: "id-team-x-b",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-b"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, float64(1), resp["deleted"])
+	assert.Empty(t, store.matches, "the namesake group's DH row must actually be removed")
+}
+
+// TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs is the
+// other half of item 9: deleting a namesake group by teamNames alone (no
+// teamIds) must still be rejected -- names can't disambiguate the pair -- but
+// the error message must point the operator at teamIds rather than just
+// refusing outright, since GET .../league-tiebreak/candidates already
+// returns each team's id specifically to unblock this case.
+func TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:    "Pool A-DH-0",
+			SideA: "Team X", SideAID: "id-team-x-a",
+			SideB: "Team X", SideBID: "id-team-x-b",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team X", "Team X"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "duplicate")
+	assert.Contains(t, w.Body.String(), "teamIds", "the message must point the operator at the disambiguating field")
+	assert.Len(t, store.matches, 1, "the rejected request must not remove anything")
+}
+
 // ---------------------------------------------------------------------------
 // POST /competitions/:id/league-tiebreak/finalize
 // ---------------------------------------------------------------------------

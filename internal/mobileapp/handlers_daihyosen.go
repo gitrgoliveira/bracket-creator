@@ -63,6 +63,28 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 	return true
 }
 
+// respondIfValidationError maps a transaction error that is
+// *engine.ValidationError onto HTTP 400 and reports that it handled it, so
+// the caller can return without falling through to its internalError (500)
+// arm. Both daihyosen endpoints share this the same way they already share
+// respondIfSuperseded: a write this handler forwards to the engine (e.g. via
+// RecordMatchResultWithIneligibilityTx) can fail a downstream engine
+// precondition -- backfillMatchIdentity's forward-write WinnerID check
+// (bc-idfx finding 10) being the motivating case, reachable when a stored
+// match this handler operates on carries an inherited/legacy identity
+// mismatch -- and without this branch that 400-shaped client/data error
+// surfaced as an opaque 500 the client's write-queue retries forever
+// (mp-q8c6 poisoned-queue pattern), exactly the class of bug the other
+// score-writing handlers already guard against.
+func respondIfValidationError(c *gin.Context, err error) bool {
+	var verr *engine.ValidationError
+	if !errors.As(err, &verr) {
+		return false
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+	return true
+}
+
 // DaihyosenEngine is the consumer-boundary view of *engine.Engine used
 // by the daihyosen handler. Mirrors engine.Engine.AddDaihyosen +
 // RecordMatchResultWithIneligibilityTx + MaybeAutoCompletePools.
@@ -172,8 +194,18 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// match returns to a clean running state. MatchResult.Decision has no
 			// omitempty, so leaving Decision/DecisionBy/DecisionReason/Encho set
 			// would let a removed daihyosen still present as decided-by-daihyosen
-			// (or carry stale overtime) while Status is back to running.
+			// (or carry stale overtime) while Status is back to running. WinnerID/
+			// WinnerSide are cleared alongside Winner (a match this handler
+			// reaches is, in the currently reachable case, always bracket-sourced
+			// and so already carries neither -- BracketMatch has no id fields --
+			// but a stored POOL match that has picked up a legacy/hand-edited
+			// Position=-1 sub CAN carry real SideAID/SideBID, and a stale
+			// WinnerID left over from an unrelated prior result would otherwise
+			// fail backfillMatchIdentity's forward-write validation (bc-idfx
+			// finding 10) as an inherited 500, not this handler's own fault).
 			u.Winner = ""
+			u.WinnerID = ""
+			u.WinnerSide = ""
 			// The judges'-decision mark travels IN the ippons: stripping it here
 			// clears the verdict on both store branches alike, each of which
 			// persists these slices natively (the bracket write copies them onto
@@ -193,6 +225,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		})
 		if txErr != nil {
 			if respondIfSuperseded(c, txErr) {
+				return
+			}
+			if respondIfValidationError(c, txErr) {
 				return
 			}
 			internalError(c, txErr)
@@ -313,6 +348,16 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// court slot was committed when the match was first started via the
 			// score endpoint, which holds WithCourtExclusivityLock.
 			u := *match
+			// AddDaihyosen only succeeds against ErrPoolMatch's rejection when
+			// engine.IsPoolMatchID(mid) is false, so `match` here is ALWAYS the
+			// bracket projection (daihyosenBracketResult), which never sets
+			// WinnerID/WinnerSide -- but clear them explicitly anyway, matching
+			// the DELETE handler's clean-slate rule above rather than relying on
+			// that being true today: the daihyosen encounter is being reopened
+			// (a fresh representative bout appended), so any prior verdict is
+			// stale by definition.
+			u.WinnerID = ""
+			u.WinnerSide = ""
 			u.SubResults = append(append([]state.SubMatchResult{}, match.SubResults...), *sub)
 			u.Status = state.MatchStatusRunning // daihyosen bout in progress
 			if _, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, &u); err != nil {
@@ -325,6 +370,9 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		})
 		if txErr != nil {
 			if respondIfSuperseded(c, txErr) {
+				return
+			}
+			if respondIfValidationError(c, txErr) {
 				return
 			}
 			internalError(c, txErr)

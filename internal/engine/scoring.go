@@ -1372,6 +1372,18 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		}
 	}
 
+	// Loaded ONCE for the whole competition, before the per-pool loop: a
+	// corrupt overrides.json must abort the whole standings computation (this
+	// function's callers already return errors), not silently drop every
+	// chusen for every pool with no signal to the operator, and there is no
+	// reason to re-read the same file once per pool -- overrides read-only in
+	// the scoring path (see this function's own doc comment above) makes a
+	// single load correct for every pool in one call.
+	overrides, err := e.store.LoadOverrides(compId)
+	if err != nil {
+		return nil, fmt.Errorf("computeStandingsFrom: load overrides for %s: %w", compId, err)
+	}
+
 	allStandings := make(map[string][]state.PlayerStanding)
 	for _, p := range pools {
 		matches := poolResults[p.PoolName]
@@ -1481,15 +1493,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// not bare name (bc-cse) -- lookupPoolRankOverride also honours a
 		// legacy bare-name key for an overrides.json written before this fix,
 		// see its doc comment for the read-only compatibility decision.
-		//
-		// Hoisted out of the per-pool loop's old `_` discard: a corrupt
-		// overrides.json must abort the whole standings computation (this
-		// function's callers already return errors), not silently drop every
-		// chusen for every pool with no signal to the operator.
-		overrides, err := e.store.LoadOverrides(compId)
-		if err != nil {
-			return nil, fmt.Errorf("computeStandingsFrom: load overrides for %s: %w", compId, err)
-		}
+		// `overrides` itself is loaded ONCE above this loop, not per pool.
 		var poolOverrides map[string]int
 		if overrides != nil {
 			poolOverrides = overrides.PoolRanks[p.PoolName]

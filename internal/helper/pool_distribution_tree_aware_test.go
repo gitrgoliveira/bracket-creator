@@ -488,7 +488,7 @@ func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, ba
 			seedPoolIdx[p.Seed] = poolIdx
 		}
 	}
-	mode := qualifierMode{ExtraQualifiers: qualifierModeStandard, SeedPoolIndex: seedPoolIdx}
+	mode := qualifierMode{ExtraQualifiers: QualifierModeStandard, SeedPoolIndex: seedPoolIdx}
 
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
 	require.NoError(t, assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots))

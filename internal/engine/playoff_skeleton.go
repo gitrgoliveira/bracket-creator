@@ -291,6 +291,17 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 	if comp.NumberPrefix != "" {
 		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 	}
+	// bc-drwx item 13 (noted, not changed): this re-runs the full
+	// StandardSeeding pass -- including delayDojoMeetings -- on every
+	// pre-draw export (an operator can preview/re-export the PDF skeleton
+	// repeatedly before the competition officially starts), with no
+	// caching of the result. That repeated cost is acceptable now that
+	// delayDojoMeetings' single-dojo/few-cross-dojo-partner case is an
+	// O(N) early-out and its general case is O(N^2 log N) per generation
+	// rather than O(N^4) (bc-drwx item 2) -- before that fix, a large or
+	// adversarial roster could have made repeated re-export noticeably
+	// slow; caching was not needed to close this once the underlying
+	// algorithm stopped being the bottleneck.
 	seeded := helper.StandardSeeding(players)
 	names := make([]string, len(seeded))
 	for i, p := range seeded {

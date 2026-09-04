@@ -577,79 +577,19 @@ func dojoSwapGain(result []Player, slots []int, x, y int) int {
 	return after - before
 }
 
-// PoolSeeding reorders players for pool distribution so that top seeds land
-// in pools that are appropriately spread across the given number of courts.
-//
-// It assigns each seed to a court by seedCourtOrder (D6) and uses a per-court
-// priority to ensure correct bracket placement (e.g., top and bottom of the
-// court's bracket) after the pools are deinterleaved by ReorderPoolsForCourts.
-//
-// Placement is keyed on each player's RANK, never on its position among the
-// seeded players, and the set handed in does NOT have to be contiguous: seeds
-// {1, 3, 4} place rank 3 in rank 3's quarter, leaving rank 2's empty. That is
-// the same promise StandardSeedingFull makes, and it is what engine.SeedWarnings
-// reports against, so a caller that renumbers a gapped set before calling would
-// silently move seeds. engine.dropSeedAssignments produces exactly such a set
-// when a seeded competitor does not check in.
-//
-// numCourts must be the count the DRAW will run on (helper.EffectiveDrawCourts),
-// not the operator's raw allocation: it is the modulus the spread is computed
-// against, and the pool deinterleave and pool-to-shiaijo allocation have to
-// agree with it.
-func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
-	if numPools <= 0 {
-		return players
-	}
-	// Both ends, through the one owner: numCourts is the spread modulus below.
-	numCourts = clampCourts(numCourts)
-
-	seeded, unseeded := partitionSeeded(players)
-	sortUnseededByDojoCluster(unseeded)
-
-	// We want to interleave players such that CreatePools (which fills linearly)
-	// puts them in the correct pools.
-	result, occupied := placeSeedsForPools(seeded, numPools, numCourts, len(players))
-
-	unIdx := 0
-	for i := 0; i < len(players); i++ {
-		if !occupied[i] {
-			if unIdx < len(unseeded) {
-				result[i] = unseeded[unIdx]
-				unIdx++
-			}
-		}
-	}
-
-	return result
-}
-
-// sortUnseededByDojoCluster sorts unseeded IN PLACE by dojo (largest groups
-// first, then dojo name) so that players from the same dojo occupy
-// consecutive result slots. Consecutive slots map to distinct start-pool
-// indices mod numPools, preventing the leastConflictedPool fallback from
-// landing same-dojo players in the same pool.
-//
-// PoolSeeding-private: PoolSeeding is its only caller. The tree-aware path
-// (assignUnseededByDojoTree, pool_distribution_tree_aware.go) deliberately
-// does NOT re-sort the unseeded roster -- it processes players in the
-// caller's own (pre-shuffled) order, since re-sorting there would fight
-// that upstream decision rather than help it.
-func sortUnseededByDojoCluster(unseeded []Player) {
-	dojoCount := make(map[string]int)
-	for _, p := range unseeded {
-		dojoCount[p.Dojo]++
-	}
-	sort.SliceStable(unseeded, func(i, j int) bool {
-		ci, cj := dojoCount[unseeded[i].Dojo], dojoCount[unseeded[j].Dojo]
-		if ci != cj {
-			return ci > cj
-		}
-		if unseeded[i].Dojo != unseeded[j].Dojo {
-			return unseeded[i].Dojo < unseeded[j].Dojo
-		}
-		return false
-	})
-}
+// PoolSeeding, its sortUnseededByDojoCluster helper and its
+// placeSeedsForPools helper were removed as dead code (bc-drwx item 11): no
+// production caller has reached them since bc-dojo Phase 4 made
+// BuildPoolPhase delegate to the tree-aware distributor
+// (buildPoolPhaseTreeAwareCore, pool_distribution_tree_aware.go) instead of
+// PoolSeeding -> CreatePools -> ReorderPoolsForCourts. placeSeedIndices
+// below is the one piece of that trio that IS still live -- it is what the
+// tree-aware distributor's own seed placement (buildPoolPhaseTreeAwareCore)
+// calls -- and was kept exactly as it was; the many pre-existing tests that
+// used to call PoolSeeding directly now call referencePoolSeeding
+// (pool_distribution_gate_test.go), a test-only reconstruction of
+// PoolSeeding's exact former body built from placeSeedIndices, so they keep
+// pinning the same properties under their new name.
 
 // placeSeedIndices computes, for each seeded player in `seeded` (already
 // sorted by Seed rank ascending, as partitionSeeded returns it), the index it
@@ -808,35 +748,6 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 	}
 
 	return indices
-}
-
-// placeSeedsForPools is PoolSeeding's seed-placement half. PoolSeeding-private:
-// PoolSeeding is its only caller. It wraps placeSeedIndices (this file),
-// which IS shared with BuildPoolPhaseTreeAware so the two pipelines can
-// never drift on the seedPoolRank/seedCourtOrder arithmetic; this function
-// just converts that shared index list into PoolSeeding's own
-// `result`/`occupied` pair: a dense slice of length totalLen with each
-// seeded player at its target index and every other index left zero, and
-// the set of indices a seed claims.
-//
-// Deriving the pool a seed ends up in from an index here is a SEPARATE step
-// (index i lands in pool i%numPools once CreatePools' straight fill runs
-// over the full permuted roster, absent a dojo conflict against an
-// already-placed unseeded dojo-mate) -- verified byte-identical against the
-// real fill across 24000+ seeded/dojo configurations during bc-dojo Phase 2
-// (see the seed-equality pin test), never assumed.
-func placeSeedsForPools(seeded []Player, numPools, numCourts, totalLen int) (result []Player, occupied map[int]bool) {
-	result = make([]Player, totalLen)
-	occupied = make(map[int]bool, len(seeded))
-	indices := placeSeedIndices(seeded, numPools, numCourts, totalLen)
-	for si, idx := range indices {
-		if idx < 0 {
-			continue
-		}
-		result[idx] = seeded[si]
-		occupied[idx] = true
-	}
-	return result, occupied
 }
 
 // generatePoolPriority returns an ordering of pool indices (0..n-1) designed

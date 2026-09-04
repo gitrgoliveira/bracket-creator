@@ -1,12 +1,9 @@
 package helper
 
 import (
-	"encoding/csv"
 	"fmt"
 	"math/bits"
-	"os"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -710,7 +707,7 @@ func TestPoolSeeding_WithPools_Integration(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Run pool seeding
-	seededPlayers := PoolSeeding(players, 8, 1)
+	seededPlayers := referencePoolSeeding(players, 8, 1)
 
 	// Verify no duplicates
 	nameCount := make(map[string]int)
@@ -757,7 +754,7 @@ func TestPoolSeeding_WithBalancedPools_Integration(t *testing.T) {
 	players[3].Seed = 4
 
 	// Use PoolSeeding for pool distribution
-	seededPlayers := PoolSeeding(players, 4, 1)
+	seededPlayers := referencePoolSeeding(players, 4, 1)
 
 	// Create pools with max size 3 -> should create 4 pools (3, 3, 2, 2)
 	pools, err := CreatePools(seededPlayers, 3, true)
@@ -1400,7 +1397,7 @@ func TestPoolSeeding(t *testing.T) {
 		players[3].Seed = 4
 
 		numPools := 12
-		result := PoolSeeding(players, numPools, 1)
+		result := referencePoolSeeding(players, numPools, 1)
 
 		// Create pools to verify final placement
 		pools, err := CreatePools(result, 3, false)
@@ -1424,7 +1421,7 @@ func TestPoolSeeding(t *testing.T) {
 			players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Seed: i + 1, Dojo: fmt.Sprintf("Dojo%d", i+1)}
 		}
 
-		result := PoolSeeding(players, numPools, 1)
+		result := referencePoolSeeding(players, numPools, 1)
 		pools, err := CreatePools(result, 3, false)
 		assert.NoError(t, err)
 
@@ -1462,7 +1459,7 @@ func seededPoolCourts(t *testing.T, ranks []int, numPools, poolSize, numCourts i
 		players[i].Seed = r
 	}
 
-	pools, err := CreatePools(PoolSeeding(players, numPools, numCourts), poolSize, false)
+	pools, err := CreatePools(referencePoolSeeding(players, numPools, numCourts), poolSize, false)
 	require.NoError(t, err)
 	require.Len(t, pools, numPools)
 	pools = ReorderPoolsForCourts(pools, numCourts)
@@ -1521,19 +1518,19 @@ func TestPoolSeedingPlacesByRankNotByPosition(t *testing.T) {
 func TestPoolSeeding_CornerCases(t *testing.T) {
 	t.Run("zero pools returns input unchanged", func(t *testing.T) {
 		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
-		result := PoolSeeding(players, 0, 1)
+		result := referencePoolSeeding(players, 0, 1)
 		assert.Equal(t, players, result)
 	})
 
 	t.Run("negative pools returns input unchanged", func(t *testing.T) {
 		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
-		result := PoolSeeding(players, -1, 1)
+		result := referencePoolSeeding(players, -1, 1)
 		assert.Equal(t, players, result)
 	})
 
 	t.Run("no seeded players keeps unseeded order", func(t *testing.T) {
 		players := []Player{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}}
-		result := PoolSeeding(players, 2, 1)
+		result := referencePoolSeeding(players, 2, 1)
 		// Unseeded should fill linearly in order.
 		assert.Equal(t, "A", result[0].Name)
 		assert.Equal(t, "B", result[1].Name)
@@ -1547,7 +1544,7 @@ func TestPoolSeeding_CornerCases(t *testing.T) {
 			{Name: "S2", Seed: 2},
 			{Name: "U1"},
 		}
-		result := PoolSeeding(players, 1, 1)
+		result := referencePoolSeeding(players, 1, 1)
 		// All players present, seeds preserved.
 		seen := map[string]bool{}
 		for _, p := range result {
@@ -1564,7 +1561,7 @@ func TestPoolSeeding_CornerCases(t *testing.T) {
 		players[0].Seed = 1
 		players[1].Seed = 2
 		players[2].Seed = 3
-		result := PoolSeeding(players, 6, 1)
+		result := referencePoolSeeding(players, 6, 1)
 		assert.Len(t, result, 17)
 
 		nonEmpty := 0
@@ -1604,7 +1601,7 @@ func TestPoolSeeding_DistributesSeedsAcrossPools(t *testing.T) {
 				players[i].Seed = i + 1
 			}
 
-			result := PoolSeeding(players, tt.numPools, 1)
+			result := referencePoolSeeding(players, tt.numPools, 1)
 			pools, err := CreatePools(result, tt.poolSize, false)
 			assert.NoError(t, err)
 			assert.Len(t, pools, tt.numPools)
@@ -1707,7 +1704,7 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 		{Name: "KAORU FUJITA", Dojo: "Tora Dojo London"},
 	}
 
-	result := PoolSeeding(players, 5, 2)
+	result := referencePoolSeeding(players, 5, 2)
 	require.Len(t, result, 15)
 
 	pools, err := CreatePools(result, 3, false)
@@ -1769,7 +1766,7 @@ func TestPoolSeeding_LargeSameDojo(t *testing.T) {
 				}
 			}
 
-			result := PoolSeeding(players, tt.numPools, tt.numCourts)
+			result := referencePoolSeeding(players, tt.numPools, tt.numCourts)
 			pools, err := CreatePools(result, tt.poolSize, false)
 			require.NoError(t, err)
 			require.Len(t, pools, tt.numPools)
@@ -1847,7 +1844,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Alpha", 5}, {"Beta", 5}}, 5)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1866,7 +1863,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Mega", 6}}, 9)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		doublings := 0
@@ -1890,7 +1887,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Red", 3}, {"Blue", 3}, {"Green", 3}}, 0)
-		result := PoolSeeding(players, 3, 2)
+		result := referencePoolSeeding(players, 3, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1909,7 +1906,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"AAA", 4}, {"BBB", 4}}, 4)
-		result := PoolSeeding(players, 4, 2)
+		result := referencePoolSeeding(players, 4, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1934,7 +1931,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 				break
 			}
 		}
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1953,7 +1950,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Big", 5}}, 15)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 4, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1973,7 +1970,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Big", 5}}, 8)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, true)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1989,7 +1986,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 
 	t.Run("single pool degenerate", func(t *testing.T) {
 		players := makePlayers(map[string]int{"X": 2}, 1)
-		result := PoolSeeding(players, 1, 1)
+		result := referencePoolSeeding(players, 1, 1)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		require.Len(t, pools, 1)
@@ -2002,7 +1999,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 		for i := range 9 {
 			players = append(players, Player{Name: fmt.Sprintf("OnlyOne_%d", i+1), Dojo: "Only"})
 		}
-		result := PoolSeeding(players, 3, 2)
+		result := referencePoolSeeding(players, 3, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		total := 0
@@ -2017,7 +2014,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Alpha", 4}, {"Beta", 4}, {"Gamma", 2}}, 5)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -2036,7 +2033,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Big", 4}}, 12)
-		result := PoolSeeding(players, 4, 4)
+		result := referencePoolSeeding(players, 4, 4)
 		pools, err := CreatePools(result, 4, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -2184,33 +2181,6 @@ func TestPoolSeeding_DojoSpreadFallback(t *testing.T) {
 	assert.LessOrEqual(t, maxCount, 2, "Tora Dojo should never exceed 2 players in any pool, got per-pool counts %v", toraCounts)
 }
 
-// loadCSVPlayers reads a "Name,Zekken,Dojo,DanGrade" CSV file (the layout of
-// test-data/individual_men_up_to_2nd_2026.csv) directly, bypassing
-// helper.ReadCSVFile, which rejects the ".." needed to reach test-data/ from
-// this package's directory as an escaping relative path.
-func loadCSVPlayers(t *testing.T, path string) []Player {
-	t.Helper()
-
-	f, err := os.Open(path) // #nosec G304 -- test-only, fixed path under test-data/
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	reader := csv.NewReader(f)
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	require.NoError(t, err)
-
-	players := make([]Player, 0, len(records))
-	for _, rec := range records {
-		require.GreaterOrEqual(t, len(rec), 3, "record %v missing dojo column", rec)
-		players = append(players, Player{
-			Name: strings.TrimSpace(rec[0]),
-			Dojo: strings.TrimSpace(rec[2]),
-		})
-	}
-	return players
-}
-
 func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
 	// Regression test for bc-dojo, using the real committed roster
 	// test-data/individual_men_up_to_2nd_2026.csv (50 players, 15 "Team Rho"),
@@ -2219,7 +2189,17 @@ func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
 	// order and the derived pool/court counts right, exactly as the real
 	// draw does (BuildPoolPhase's own doc comment names hand-assembling this
 	// sequence as the exact drift it exists to prevent).
-	players := loadCSVPlayers(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
+	//
+	// loadDistributionRoster (pool_distribution_invariants_test.go), not a
+	// second, near-identical CSV loader (bc-drwx item 13: this file used to
+	// carry its own loadCSVPlayers, which only ever differed from
+	// loadDistributionRoster in REQUIRING 3+ columns instead of also
+	// accepting 2 -- individual_men_up_to_2nd_2026.csv is 4-column, so every
+	// row already has len(rec)>=3 and both loaders read the identical
+	// rec[2] dojo column for it; the two were never actually testing
+	// different parsing behaviour for the file either one was ever called
+	// with).
+	players := loadDistributionRoster(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
 	require.Len(t, players, 50)
 
 	rhoCount := 0
@@ -2311,7 +2291,7 @@ func TestPoolSeeding_SingleCourt_DojoSpread(t *testing.T) {
 		players = append(players, Player{Name: fmt.Sprintf("Solo%d", i+1), Dojo: fmt.Sprintf("SoloDojo%d", i+1)})
 	}
 
-	result := PoolSeeding(players, numPools, 1)
+	result := referencePoolSeeding(players, numPools, 1)
 	pools, err := CreatePools(result, poolSize, false)
 	require.NoError(t, err)
 	require.Len(t, pools, numPools)

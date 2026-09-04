@@ -867,15 +867,21 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 // at all).
 func (c Competition) QualifiersForPool(pool helper.Pool) int {
 	base := c.EffectivePoolWinners()
-	// PoolSize <= 0 means there is no minimum to be over: without a baseline
-	// the oversized test would mark EVERY pool oversized, so degrade to the
-	// uniform count instead. Unreachable for a started competition (the
-	// engine rejects starting with an unset PoolSize) but cheap to make safe
-	// against drifted or hand-edited config.md data.
-	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
-		return base + 1
+	if c.ExtraQualifiers != ExtraQualifiersLargerPools {
+		return base
 	}
-	return base
+	// helper.QualifiersForOversizedPool (bc-drwx item 13) owns the
+	// "oversized pool sends one extra qualifier" rule itself, shared with
+	// extraQualifierOverridesFromSizes (internal/helper/
+	// pool_distribution_tree_aware.go), which used to be a second,
+	// independent implementation of the identical arithmetic. PoolSize <= 0
+	// means there is no minimum to be over -- without a baseline the
+	// oversized test would mark EVERY pool oversized, so
+	// QualifiersForOversizedPool degrades to the uniform count instead.
+	// Unreachable for a started competition (the engine rejects starting
+	// with an unset PoolSize) but cheap to make safe against drifted or
+	// hand-edited config.md data.
+	return helper.QualifiersForOversizedPool(len(pool.Players), c.PoolSize, base)
 }
 
 // MatchWinnerRanksNeeded returns the highest per-pool qualifier rank the

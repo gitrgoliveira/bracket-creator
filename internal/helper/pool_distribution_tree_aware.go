@@ -141,7 +141,7 @@ import (
 // front. BuildPoolPhase's signature and behaviour are untouched by this
 // function's existence.
 //
-// This is always STANDARD mode (qualifierModeStandard): a caller that knows
+// This is always STANDARD mode (QualifierModeStandard): a caller that knows
 // its competition's real extra-qualifiers setting must call
 // BuildPoolPhaseTreeAwareWithMode instead, or the distributor scores every
 // candidate against the wrong knockout tree whenever that setting is not
@@ -155,7 +155,7 @@ import (
 // (which BuildPoolPhaseTreeAware never computed at all) cannot change this
 // function's behaviour, only its implementation.
 func BuildPoolPhaseTreeAware(players []Player, poolSize int, isMax bool, numCourts int, poolWinners int) ([]Pool, int, error) {
-	return BuildPoolPhaseTreeAwareWithMode(players, poolSize, isMax, numCourts, poolWinners, qualifierModeStandard)
+	return BuildPoolPhaseTreeAwareWithMode(players, poolSize, isMax, numCourts, poolWinners, QualifierModeStandard)
 }
 
 // defaultPoolWinners is the pool-winners count BuildPoolPhase falls back to
@@ -200,11 +200,17 @@ type qualifierMode struct {
 
 // qualifierMode.ExtraQualifiers values, mirroring
 // state.Competition.ExtraQualifiers* -- see qualifierMode's own doc comment
-// for why the values are duplicated here rather than imported.
+// for why the values are duplicated here rather than imported. Exported
+// (bc-drwx item 13) so internal/state's own test suite -- which already
+// imports internal/helper in production code (Competition.QualifiersForPool
+// takes a helper.Pool) -- can pin state.ExtraQualifiers* equal to these by
+// direct reference (TestExtraQualifiersConstantsMatchHelper,
+// internal/state/extra_qualifiers_constants_test.go) instead of the two
+// sets of string literals only ever being checked by convention.
 const (
-	qualifierModeStandard    = ""
-	qualifierModeLargerPools = "larger-pools"
-	qualifierModeFillBracket = "fill-bracket"
+	QualifierModeStandard    = ""
+	QualifierModeLargerPools = "larger-pools"
+	QualifierModeFillBracket = "fill-bracket"
 )
 
 // BuildPoolPhaseTreeAwareWithMode is BuildPoolPhaseTreeAware's mode-aware
@@ -245,10 +251,23 @@ func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool,
 // see tournament.go's assignPlayersToPools doc comment, bc-drwx item 11),
 // fill-bracket's poolWinners is always 1
 // (state.ValidateExtraQualifiers' own gate), and the mode is
-// qualifierModeFillBracket throughout -- everything else (seed placement,
+// QualifierModeFillBracket throughout -- everything else (seed placement,
 // the remainder spread, the one-pass distribution, ReorderPoolsForCourts
 // last) is the shared core BuildPoolPhaseTreeAware itself now uses.
 func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
+	// bc-drwx item 13: the same upper guard poolTargetSizes applies to
+	// poolSize (its own doc comment: "the upper guard... is what keeps a
+	// DRAWN pool inside" MaxPoolSize), mirrored here for minSize -- this
+	// entry point built its base target-size row directly, without going
+	// through poolTargetSizes at all, so nothing bounded minSize against
+	// MaxPoolSize before it was used to size a []Player-backed skeleton pool
+	// (buildQualifierSkeleton allocates minSize placeholder seats per pool).
+	// Strict ">=" for the same reason poolTargetSizes uses it: leaves room
+	// for realTargetSizes' own +1 remainder spread to land exactly on
+	// MaxPoolSize without exceeding it.
+	if minSize >= MaxPoolSize {
+		return nil, 0, fmt.Errorf("cannot create pools: pool size must be less than %d, got %d", MaxPoolSize, minSize)
+	}
 	// Same rule 4 supply-side read as BuildPoolPhaseFillBracket's own
 	// pre-Phase-4 body: FillBracketPoolCount needs the roster's seed RANKS,
 	// not just a count, to know which pool counts a gapped seed set can
@@ -266,7 +285,7 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 	for i := range base {
 		base[i] = minSize
 	}
-	return buildPoolPhaseTreeAwareCore(players, numPools, base, numCourts, 1, qualifierMode{ExtraQualifiers: qualifierModeFillBracket, MinPoolSize: minSize})
+	return buildPoolPhaseTreeAwareCore(players, numPools, base, numCourts, 1, qualifierMode{ExtraQualifiers: QualifierModeFillBracket, MinPoolSize: minSize})
 }
 
 // ErrBlankDojoInDraw is the sentinel identifying a draw refused because the
@@ -670,6 +689,17 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
 		return total
 	}
 
+	// objective() itself calls earliestDojoMeeting directly rather than the
+	// cachedDojoMeeting wrapper (bc-drwx item 13, noted rather than changed:
+	// it runs at the TOP of each pass, before winnerMeetCache/allQualMeetCache
+	// are cleared a few lines below at the call site, so routing it through
+	// the cache would need the clear() calls moved AHEAD of this call instead
+	// of after it -- a real reordering, not the loop-invariant code motion
+	// applied to cAi/cAj above, and the measured cost here is one whole-roster
+	// pass per OUTER iteration of the climb (bounded by the number of accepted
+	// swaps, not by candidate count), a much smaller multiplier than the
+	// candidate-scan cost the wave-2 slotBest memo (seed.go) was written to
+	// fix. Left alone rather than restructured for a marginal win.
 	objective := func() (excess, roundOnes, negSum, allQualNegSum int) {
 		excess = totalExcess()
 		seen := map[string]bool{}
@@ -777,7 +807,14 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
 				beforeA := cachedDojoMeeting(pools, pairRound, a.Dojo, winnerMeetCache)
 				beforeAQA := cachedDojoMeeting(pools, allQualPairRound, a.Dojo, allQualMeetCache)
 				hasMeetingSignal := beforeA != math.MaxInt
-				hasExcessSignal := excessOf(a.Dojo, countDojoInPool(pools[i], a.Dojo)) > 0
+				// cAi (bc-drwx item 13: hoisted, same reasoning as beforeA/
+				// beforeAQA above -- it depends only on pools[i] and a.Dojo,
+				// both loop-invariant across the whole (j, bi) scan below,
+				// so recomputing it per candidate b bought nothing). Reused
+				// directly for hasExcessSignal rather than calling
+				// countDojoInPool a second time for the same answer.
+				cAi := countDojoInPool(pools[i], a.Dojo) // includes a
+				hasExcessSignal := excessOf(a.Dojo, cAi) > 0
 				if !hasMeetingSignal && !hasExcessSignal {
 					continue // nothing an exchange could ever improve for this dojo, from THIS pool
 				}
@@ -785,6 +822,11 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
 					if j == i {
 						continue
 					}
+					// cAj (bc-drwx item 13: hoisted to the j level -- it
+					// depends on pools[j] and a.Dojo, both loop-invariant
+					// across the bi scan below for this j, unlike cBj/cBi
+					// which depend on b.Dojo and must stay per-candidate).
+					cAj := countDojoInPool(pools[j], a.Dojo) // a not in j yet
 					for bi := 0; bi < len(pools[j].Players) && !improved; bi++ {
 						b := pools[j].Players[bi]
 						if b.Seed > 0 || dojoKey(b.Dojo) == dojoKey(a.Dojo) {
@@ -801,8 +843,6 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
 						// A swap is only ever rejected here for making
 						// TOTAL excess WORSE, never for a single pool's
 						// count in isolation.
-						cAi := countDojoInPool(pools[i], a.Dojo) // includes a
-						cAj := countDojoInPool(pools[j], a.Dojo) // a not in j yet
 						cBj := countDojoInPool(pools[j], b.Dojo) // includes b
 						cBi := countDojoInPool(pools[i], b.Dojo) // b not in i yet
 						beforeExc := excessOf(a.Dojo, cAi) + excessOf(a.Dojo, cAj) + excessOf(b.Dojo, cBi) + excessOf(b.Dojo, cBj)
@@ -961,10 +1001,10 @@ func treeAwareQualifierSlots(targetSizes []int, poolWinners, numCourts int, mode
 
 	var postSlots [][]int
 	switch mode.ExtraQualifiers {
-	case qualifierModeLargerPools:
+	case QualifierModeLargerPools:
 		overrides := extraQualifierOverridesFromSizes(postSizes, mode.MinPoolSize, poolWinners)
 		postSlots = poolQualifierPathsPerPool(postSizes, poolWinners, overrides, numCourts)
-	case qualifierModeFillBracket:
+	case QualifierModeFillBracket:
 		postSeedPoolIdx := make(map[int]int, len(mode.SeedPoolIndex))
 		for rank, preIdx := range mode.SeedPoolIndex {
 			if preIdx >= 0 && preIdx < numPools {
@@ -985,31 +1025,55 @@ func treeAwareQualifierSlots(targetSizes []int, poolWinners, numCourts int, mode
 	return preSlots
 }
 
-// extraQualifierOverridesFromSizes mirrors
-// state.Competition.QualifiersForPool's larger-pools rule (a pool sends
-// poolWinners+1 exactly when it is OVERSIZED, i.e. len(pool.Players) >
-// PoolSize) but pre-placement, from target SIZES alone: pool i is oversized
-// when sizes[i] > minPoolSize. This is exact, not an approximation --
+// QualifiersForOversizedPool is the larger-pools "oversized pool sends one
+// extra qualifier" rule (bc-qual): a pool sends poolWinners+1 qualifiers
+// exactly when it is OVERSIZED (size > minPoolSize), else poolWinners
+// unchanged. minPoolSize <= 0 means there is no minimum to be over, so no
+// pool is ever oversized (degrades to the uniform poolWinners count) rather
+// than marking every pool oversized.
+//
+// Shared (bc-drwx item 13) by state.Competition.QualifiersForPool
+// (internal/state/models.go, POST-placement, from a real pool's
+// participant count) and extraQualifierOverridesFromSizes below
+// (PRE-placement, from a target size alone) so the two -- previously two
+// independent implementations of the identical rule, one per package --
+// can never drift on what "oversized" means. internal/state already
+// imports internal/helper (Competition.QualifiersForPool's own helper.Pool
+// parameter), so this is the one direction sharing can go; helper cannot
+// import state back (see qualifierMode's own doc comment).
+func QualifiersForOversizedPool(size, minPoolSize, poolWinners int) int {
+	if minPoolSize > 0 && size > minPoolSize {
+		return poolWinners + 1
+	}
+	return poolWinners
+}
+
+// extraQualifierOverridesFromSizes applies QualifiersForOversizedPool
+// pre-placement, from target SIZES alone: pool i is oversized when
+// sizes[i] > minPoolSize. This is exact, not an approximation --
 // QualifiersForPool's own oversized test only ever reads a pool's
 // participant COUNT, which is exactly what sizes[i] already promises pool i
 // will end up holding once distribution finishes (both the old fill+repair
 // pipeline and this one guarantee every pool's FINAL size equals its target
 // size; nobody is ever short or over).
 //
-// minPoolSize <= 0 returns nil (no minimum to be over, matching
-// QualifiersForPool's own degrade-to-uniform behaviour for that case) rather
-// than marking every pool oversized.
+// minPoolSize <= 0 returns nil (no minimum to be over) rather than an
+// empty-but-present map: QualifiersForOversizedPool would never actually
+// populate one in that case either (every pool degrades to the uniform
+// poolWinners, so the `w != poolWinners` check below never fires), but the
+// early return states the "no minimum" case as itself rather than relying
+// on that being the loop's incidental behaviour.
 func extraQualifierOverridesFromSizes(sizes []int, minPoolSize, poolWinners int) map[int]int {
 	if minPoolSize <= 0 {
 		return nil
 	}
 	var overrides map[int]int
 	for i, sz := range sizes {
-		if sz > minPoolSize {
+		if w := QualifiersForOversizedPool(sz, minPoolSize, poolWinners); w != poolWinners {
 			if overrides == nil {
 				overrides = make(map[int]int, len(sizes))
 			}
-			overrides[i] = poolWinners + 1
+			overrides[i] = w
 		}
 	}
 	return overrides

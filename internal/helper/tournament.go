@@ -498,21 +498,39 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 	return assignPlayersToPools(players, targetSizes), nil
 }
 
-// poolPositionName is the "Pool A".."Pool Z", then "Pool AA", "Pool BB", ...
+// poolPositionName is the "Pool A".."Pool Z", then "Pool AA", "Pool AB", ...
 // naming assignPlayersToPools gives the pool at position i (0-based),
 // exposed as its own function so a caller that needs to name a pool by
 // position WITHOUT going through assignPlayersToPools -- Phase 1's
 // poolQualifierPaths seam builds placeholder pools before any player
 // exists -- uses the identical scheme rather than a second copy that could
-// drift from it. assignPlayersToPools is under a hard "do not modify"
-// constraint for bc-dojo, so its own naming loop is left as it is rather
-// than rewritten to call this; the two are pinned equal by test.
+// drift from it. assignPlayersToPools' own naming loop now calls this
+// function directly (bc-drwx item 6) rather than carrying its own copy of
+// the arithmetic, so the two can no longer drift; they used to be pinned
+// equal by test instead, which only proves two copies AGREE, never that
+// either is correct.
+//
+// This is Excel-style BIJECTIVE base-26 (A, B, ... Z, AA, AB, ... AZ, BA,
+// ...), not the doubled-letter scheme it used to be ('A'+i%26, with the
+// letter simply DOUBLED once i passed 25): that scheme collides every 26
+// pools past the first double-letter one -- i=26 and i=52 both reduce to
+// i%26==0 and both produced "Pool AA", so a 64-pool run silently gave two
+// DIFFERENT pools the identical name, and the dojo-tree skeleton (which
+// keys knockout leaves by pool name, qualifierSlotsFromLeaves) then dropped
+// one of them, reading the second "Pool AA" as a duplicate winner label for
+// the first.
 func poolPositionName(i int) string {
-	char := string(rune('A' + i%26))
-	if i > 25 {
-		char = char + char
+	// i is 0-based; bijective base-26 is naturally 1-based (there is no
+	// "digit zero" -- Z rolls over to AA the same way 9 rolls over to 10 in
+	// ordinary base-10, but the NEXT letter after Z is AA, not A0).
+	n := i + 1
+	var letters []byte
+	for n > 0 {
+		n--
+		letters = append([]byte{byte('A' + n%26)}, letters...)
+		n /= 26
 	}
-	return fmt.Sprintf("Pool %s", char)
+	return fmt.Sprintf("Pool %s", string(letters))
 }
 
 // CreatePoolsForCount is CreatePools with the pool COUNT supplied directly
@@ -610,11 +628,7 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	}
 
 	for i := 0; i < len(pools); i++ {
-		char := string(rune('A' + i%26))
-		if i > 25 {
-			char = char + char
-		}
-		pools[i].PoolName = fmt.Sprintf("Pool %s", char)
+		pools[i].PoolName = poolPositionName(i)
 	}
 
 	return pools

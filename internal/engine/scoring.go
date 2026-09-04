@@ -660,7 +660,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	}
 	// Preserve generation-time participant ids + resolve winner id across the
 	// overwrite: score requests carry side NAMES only. See backfillMatchIdentity.
-	if berr := backfillMatchIdentity(result, stored); berr != nil {
+	if berr := backfillMatchIdentity(result, stored, policy); berr != nil {
 		return false, false, berr
 	}
 	// Keep the stored stamp when this write is unstamped, so an un-stamped
@@ -976,8 +976,16 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 // always wins, so the operator can still change the rep player.
 // Returns an error when a client-supplied WinnerID names neither side once
 // the row's own ids are known (see the validation block below); callers must
-// treat that as a rejected write, never a silently-persisted one.
-func backfillMatchIdentity(result, stored *state.MatchResult) error {
+// treat that as a rejected write, never a silently-persisted one. That
+// rejection is gated on policy == matchWriteForward, exactly like
+// applyPoolWrite's sidesDisagree gate: matchWriteRestore replays a TRUSTED
+// stored snapshot (the K3 rollback undoing a rejected/partial forward
+// write), and rollbackMatchResultTx only LOGS a restore failure -- it never
+// retries -- so rejecting a restore whose OWN stored WinnerID happens not to
+// match its own side ids (legacy data predating this validation) would leave
+// the very forward write the rollback exists to undo sitting on disk
+// uncorrected.
+func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWritePolicy) error {
 	if result.RepPlayerA == "" {
 		result.RepPlayerA = stored.RepPlayerA
 	}
@@ -995,10 +1003,11 @@ func backfillMatchIdentity(result, stored *state.MatchResult) error {
 	// trusted it outright) and counted for nobody in standings -- a
 	// completed match with a winner nobody can find. Checked whenever the
 	// row has an id to check against (either side, gated the same way
-	// resolveWinnerSide gates its own id branch); a row with no ids at all
-	// has nothing to validate WinnerID against and is left to the
-	// name-based fallback below, unchanged.
-	if result.WinnerID != "" && (result.SideAID != "" || result.SideBID != "") &&
+	// resolveWinnerSide gates its own id branch) AND the write is a FORWARD
+	// (client) write -- a row with no ids at all has nothing to validate
+	// WinnerID against and is left to the name-based fallback below,
+	// unchanged, and a RESTORE never rejects (see the doc comment above).
+	if policy == matchWriteForward && result.WinnerID != "" && (result.SideAID != "" || result.SideBID != "") &&
 		result.WinnerID != result.SideAID && result.WinnerID != result.SideBID {
 		return validationErrorf("match %s: winnerId %q does not match sideAId %q or sideBId %q",
 			result.ID, result.WinnerID, result.SideAID, result.SideBID)

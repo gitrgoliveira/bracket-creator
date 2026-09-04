@@ -656,3 +656,52 @@ func TestPairKeyRemoved_UsesTiebreakerPairKey(t *testing.T) {
 	assert.Equal(t, tiebreakerPairKey("a", "b"), tiebreakerPairKey("b", "a"), "order-independent")
 	assert.Equal(t, "a|b", tiebreakerPairKey("a", "b"))
 }
+
+// --- Opus review round 2 ---
+
+// TestApplyPoolWrite_RestorePolicyIgnoresWinnerIDMismatch is finding 2 from
+// the round-2 review: backfillMatchIdentity's unattributable-WinnerID
+// rejection (finding 10, round 1) ran regardless of matchWritePolicy. The K3
+// rollback (AlreadyIneligibleError) replays a TRUSTED stored snapshot via
+// matchWriteRestore to undo a partial forward write; rollbackMatchResultTx
+// only LOGS a restore failure, it never retries or otherwise recovers, so a
+// prior snapshot whose own WinnerID happens not to match its own
+// SideAID/SideBID (legacy data written before this validation existed) would
+// have made the RESTORE itself fail, leaving the rejected forward write
+// sitting on disk uncorrected. The rejection must apply ONLY to a forward
+// (client) write, exactly like the sidesDisagree gate a few lines above it.
+func TestApplyPoolWrite_RestorePolicyIgnoresWinnerIDMismatch(t *testing.T) {
+	// `stored` holds whatever the rejected forward write left behind.
+	stored := &state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob",
+		Winner: "Alice", WinnerID: "id-alice", Status: state.MatchStatusCompleted,
+	}
+	// The snapshot to restore: legacy data whose own WinnerID does not match
+	// either of its own side ids.
+	prior := &state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob",
+		Winner: "Alice", WinnerID: "some-stale-id", Status: state.MatchStatusCompleted,
+	}
+
+	mismatch, superseded, err := applyPoolWrite(stored, prior, matchWriteRestore)
+	require.NoError(t, err, "a restore must never be rejected by the forward-only WinnerID check")
+	assert.False(t, mismatch)
+	assert.False(t, superseded)
+	assert.Equal(t, "some-stale-id", stored.WinnerID, "the restore must actually land, replaying the prior verbatim")
+}
+
+// TestApplyPoolWrite_ForwardPolicyStillRejectsWinnerIDMismatch is the
+// counterpart: a genuine client FORWARD write with an unattributable
+// WinnerID must still be rejected exactly as finding 10 (round 1) fixed.
+func TestApplyPoolWrite_ForwardPolicyStillRejectsWinnerIDMismatch(t *testing.T) {
+	stored := &state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob",
+		Status: state.MatchStatusScheduled,
+	}
+	forward := &state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob",
+		Winner: "Alice", WinnerID: "not-a-side-id", Status: state.MatchStatusCompleted,
+	}
+	_, _, err := applyPoolWrite(stored, forward, matchWriteForward)
+	require.Error(t, err, "a client forward write naming an unattributable winnerId must still be rejected")
+}

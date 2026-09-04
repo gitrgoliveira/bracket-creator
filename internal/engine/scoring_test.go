@@ -1818,7 +1818,7 @@ func TestBackfillMatchIdentity(t *testing.T) {
 			// `stored` carries the generation-time ids; `result` (the incoming
 			// score) starts without them, mirrors the real write path.
 			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
-			err := backfillMatchIdentity(&result, stored)
+			err := backfillMatchIdentity(&result, stored, matchWriteForward)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -1841,7 +1841,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("empty result preserves stored rep players", func(t *testing.T) {
 		result := state.MatchResult{} // a re-score that only re-sends the ippons
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		require.NoError(t, backfillMatchIdentity(&result, stored))
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Sato Ren", result.RepPlayerA, "preserved on empty")
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "preserved on empty")
 	})
@@ -1849,7 +1849,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("explicit rep players override stored", func(t *testing.T) {
 		result := state.MatchResult{RepPlayerA: "Ito Kenji", RepPlayerB: "Mori Aki"}
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		require.NoError(t, backfillMatchIdentity(&result, stored))
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA, "operator change wins")
 		assert.Equal(t, "Mori Aki", result.RepPlayerB, "operator change wins")
 	})
@@ -1857,7 +1857,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("one side set, other preserved", func(t *testing.T) {
 		result := state.MatchResult{RepPlayerA: "Ito Kenji"} // only Aka changed
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		require.NoError(t, backfillMatchIdentity(&result, stored))
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA)
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "untouched side preserved")
 	})

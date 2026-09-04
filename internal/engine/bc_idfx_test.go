@@ -617,6 +617,145 @@ func TestComputeStandingsFrom_League_IDlessNamesakeDoesNotSuppressUnrelatedTie(t
 	assert.True(t, tiedNames["D3"] && tiedNames["D4"], "both Suzuki and Yamada must be marked, not just one")
 }
 
+// TestComputeStandingsFrom_League_IDCarryingRosterIDlessMatchRowsResolveByRosterOrder
+// is the round-2 review's requested companion to the test above: an
+// ID-CARRYING roster (every participant has a real UUID) whose MATCH ROWS
+// still lack side ids (SideAID/SideBID empty on the wire -- legacy data
+// written before that stamping existed, or any other id-less-row shape). A
+// MatchResult side carries a bare NAME only, no dojo, so resolving an
+// id-less row still depends on which identity index performs the lookup,
+// exactly as it does for a fully id-less roster: roster order (which
+// computeStandingsFrom's own accrual used) and points order (what a locally
+// rebuilt index would produce) diverge the moment any match is played.
+// Unlike the id-less-roster case, an id-carrying mismatch here has no
+// coincidental save -- CompetitorKey is id-preferred, so crediting the WRONG
+// same-named competitor lands the completion count in a bucket keyed by her
+// own distinct real id, an unambiguous wrong answer. This is the test that
+// actually needs rosterIndex (mutation-verified: rebuilding a local
+// points-order index in its place turns this test red).
+func TestComputeStandingsFrom_League_IDCarryingRosterIDlessMatchRowsResolveByRosterOrder(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "league-idcarrying-idless-rows"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "ID-carrying Roster, ID-less Rows", Format: state.CompFormatLeague,
+		Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+
+	// Every participant has a real id; roster order still matters, because
+	// the MATCH ROWS below carry none.
+	tanakaGhostID := helper.NewUUID4()
+	tanakaRealID := helper.NewUUID4()
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: tanakaGhostID, Name: "Tanaka", Dojo: "D1"},
+			{ID: tanakaRealID, Name: "Tanaka", Dojo: "D2"},
+			{ID: helper.NewUUID4(), Name: "Suzuki", Dojo: "D3"},
+			{ID: helper.NewUUID4(), Name: "Yamada", Dojo: "D4"},
+			{ID: helper.NewUUID4(), Name: "Filler", Dojo: "D5"},
+		}},
+	}))
+
+	// No SideAID/SideBID on any row: id-less on the wire despite the roster
+	// carrying real ids.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka", SideB: "Filler", Winner: "Tanaka", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "Suzuki", SideB: "Filler", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-2", SideA: "Yamada", SideB: "Filler", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-3", SideA: "Suzuki", SideB: "Yamada", Winner: "", Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake)},
+	}))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	poolA := standings["Pool A"]
+	require.Len(t, poolA, 5)
+
+	byID := map[string]state.PlayerStanding{}
+	for _, s := range poolA {
+		byID[s.Player.ID] = s
+	}
+	require.Equal(t, 1, byID[tanakaRealID].Wins, "the id-less match row must still resolve to the roster-order Tanaka computeStandingsFrom itself credited")
+	require.Equal(t, 0, byID[tanakaGhostID].Wins)
+
+	tiedNames := map[string]bool{}
+	for _, s := range poolA {
+		if s.Tied {
+			tiedNames[s.Player.Dojo] = true
+		}
+	}
+	assert.True(t, tiedNames["D3"] && tiedNames["D4"], "both Suzuki and Yamada must be marked once the real Tanaka's own (id-less) fixture is correctly seen as complete")
+}
+
+// TestMarkTiedStandingsLeague_IDlessNamesakeBucketsStaySeparate is a
+// WHITE-BOX isolation test for the "re-key" half of the round-2 review's
+// finding 6 (the half the two tests above cannot reach): statusFor must
+// bucket completion counts by helper.CompetitorKey(ID, Name, Dojo), not
+// standingsPlayerKey(ID, Name), so two id-less namesakes from different
+// dojos never share one completion bucket.
+//
+// This CANNOT be reproduced by driving real match data through
+// computeStandingsFrom, and that is itself worth recording: id-less
+// resolution (lookupStandingsPlayer's name-only branch) is a SINGLE map
+// lookup keyed on the bare name, so every match naming that bare name
+// resolves to the SAME one roster entry, regardless of which index performs
+// the lookup or how many "Tanaka"-named matches exist. A second id-less
+// "Tanaka" can therefore never accrue independently-attributable match
+// activity through the realistic pipeline -- she is structurally always a
+// zero-activity ghost, and merging a zero-activity ghost's bucket into
+// another's changes nothing (the tests above prove rosterIndex is load-
+// bearing, but cannot tell CompetitorKey and standingsPlayerKey apart:
+// mutation-verified, reverting bucketing alone to standingsPlayerKey while
+// keeping rosterIndex leaves both green).
+//
+// This test instead calls markTiedStandingsLeague directly with a
+// HAND-BUILT rosterIndex carrying explicit id-keyed entries for both
+// Tanakas (simulating a resolution layer able to tell them apart, which is
+// what matters for isolating the BUCKET STORAGE question), so each can
+// carry her OWN genuine, independent, and different completion state:
+// Tanaka@DojoA's own fixture is complete; Tanaka@DojoB's is not. With
+// buckets correctly separated, Tanaka@DojoA (checked first, topN=1) fires
+// the trigger on her own genuinely complete fixture. With buckets merged
+// (the reverted standingsPlayerKey scheme), her bucket also carries
+// Tanaka@DojoB's incomplete fixture, so the merged total no longer equals
+// the merged completed count, and the trigger wrongly fails to fire.
+func TestMarkTiedStandingsLeague_IDlessNamesakeBucketsStaySeparate(t *testing.T) {
+	comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 1}
+
+	// Both Tanakas are id-less in the DISPLAY data (sorted), mirroring real
+	// legacy rosters; Player.ID is "" on both.
+	tanakaA := domain.Player{Name: "Tanaka", Dojo: "DojoA"}
+	tanakaB := domain.Player{Name: "Tanaka", Dojo: "DojoB"}
+	other := domain.Player{Name: "Other", Dojo: "DojoC"}
+	sorted := []state.PlayerStanding{
+		{Player: tanakaA, Points: 100},
+		{Player: tanakaB, Points: 100},
+		{Player: other, Points: 50},
+	}
+
+	// Hand-built rosterIndex: id-keyed entries let each match below resolve
+	// to a SPECIFIC Tanaka, bypassing the "one name, one slot" constraint
+	// that a real id-less roster is subject to -- this isolates the bucket
+	// storage question from the resolution question the other two tests
+	// already cover.
+	rosterIndex := map[string]*state.PlayerStanding{
+		"id:lookup-tanaka-a": &sorted[0],
+		"id:lookup-tanaka-b": &sorted[1],
+		"name:Other":         &sorted[2],
+	}
+
+	regularMatches := []state.MatchResult{
+		// Tanaka@DojoA's OWN fixture: complete.
+		{ID: "Pool A-0", SideAID: "lookup-tanaka-a", SideA: "Tanaka", SideB: "Other", Status: state.MatchStatusCompleted},
+		// Tanaka@DojoB's OWN fixture: still scheduled.
+		{ID: "Pool A-1", SideAID: "lookup-tanaka-b", SideA: "Tanaka", SideB: "Other", Status: state.MatchStatusScheduled},
+	}
+
+	markTiedStandingsLeague(comp, sorted, regularMatches, rosterIndex)
+
+	assert.True(t, sorted[0].Tied, "Tanaka@DojoA finished her own (and only her own) fixture; the trigger must fire on her genuinely complete bucket")
+	assert.True(t, sorted[1].Tied, "the whole tied group (both Tanakas, tied on Points) is marked once the trigger fires")
+}
+
 // --- Finding 9: LoadOverrides errors must propagate, not be silently swallowed ---
 
 // TestComputeStandingsFrom_CorruptOverrides_PropagatesError pins that a

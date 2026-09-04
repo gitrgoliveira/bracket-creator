@@ -76,7 +76,16 @@ func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 	total := 0
 	for numPools := 3; numPools <= 7; numPools++ {
 		for poolSize := 3; poolSize <= 5; poolSize++ {
-			for nSeeds := 2; nSeeds <= 4 && nSeeds <= numPools; nSeeds++ {
+			// bc-drwx item 4: the nSeeds <= numPools bound used to exclude
+			// every wrapped-seed config (nSeeds > numPools) entirely, so
+			// placeSeedIndices' wrapped-seed pool-avoidance passes had no
+			// old-vs-new coverage at all. Both sides call the identical
+			// shared placeSeedIndices, so this remains byte-identical by
+			// construction; the point of widening it is to catch a FUTURE
+			// divergence between the two entry points in that range, not
+			// to re-verify the fix itself (see
+			// TestPlaceSeedIndices_WrappedSeedAvoidsDojoMatePool for that).
+			for nSeeds := 2; nSeeds <= 4; nSeeds++ {
 				for dojoExtra := 0; dojoExtra <= 4; dojoExtra++ {
 					n := numPools * poolSize
 					if nSeeds+dojoExtra > n {
@@ -130,7 +139,15 @@ func TestSeedPlacementEquality_MultiDojo(t *testing.T) {
 			for _, isMax := range []bool{false, true} {
 				for nDojos := 2; nDojos <= 4; nDojos++ {
 					for dojoGroupSize := 2; dojoGroupSize <= numPools+2; dojoGroupSize++ {
-						for nSeeds := 1; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
+						// bc-drwx item 4: was `nSeeds < numPools`, which never
+						// reached a wrapped seed (nSeeds > numPools) at all.
+						// Both sides call the identical shared
+						// placeSeedIndices, so widening this stays
+						// byte-identical by construction; see
+						// TestSeedPlacementEquality_OldVsTreeAware's own
+						// comment for why the equality itself is not what
+						// verifies the fix.
+						for nSeeds := 1; nSeeds <= 4; nSeeds++ {
 							// nSeeds starts at 1: a seedless config has no
 							// placement to compare, and the seedless sweep
 							// burned most of this test's former 23-second

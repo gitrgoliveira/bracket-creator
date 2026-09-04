@@ -694,6 +694,21 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 
 	occupied := make(map[int]bool, len(seeded))
 
+	// poolSeedDojos tracks, per pool, the (normalized) dojos of every seed
+	// already placed there -- bc-drwx item 4. A WRAPPED seed (rankIdx >=
+	// numPools, i.e. beyond D6's own half/quarter structure) has no further
+	// halves/quarters to relax and seedPoolRank's out-of-range fallback
+	// (`rankIdx % numPools`) gives it the EXACT SAME remainder as the
+	// unwrapped rank it wraps onto (rank 5 and rank 1 both land on
+	// remainder 0 at numPools=4), so without this it silently doubles up on
+	// whichever pool that coincidence points at -- even when the doubled-up
+	// seed is a DOJO-MATE of the seed already there and a different,
+	// equally valid pool was available. See dojoNode/pass loop below.
+	poolSeedDojos := make([]map[string]bool, numPools)
+	for i := range poolSeedDojos {
+		poolSeedDojos[i] = map[string]bool{}
+	}
+
 	for si, p := range seeded {
 		// si is p's POSITION in `seeded` (this function's own output index);
 		// rankIdx is p's RANK minus one, which is what the placement
@@ -708,28 +723,74 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 		poolRank := seedPoolRank(rankIdx, numPools, numCourts)
 		posInPool := rankIdx / numPools // which slot within the pool
 
-		placed := false
-		for offset := 0; offset < numPools && !placed; offset++ {
-			// calculate the court and local pool index for (poolRank+offset)
+		// candidateGlobalPool is the natural arithmetic's own answer for a
+		// given offset (0..numPools-1) -- unchanged from before this fix,
+		// just factored out so both the new wrapped-seed passes below and
+		// the original single pass can share it.
+		candidateGlobalPool := func(offset int) int {
 			currentRank := (poolRank + offset) % numPools
 			courtIdx := currentRank % numCourts
 			posInCourt := currentRank / numCourts
-
-			var globalPoolIdx int
 			if courtPoolCounts[courtIdx] > 0 {
 				localPoolIdx := courtPriorities[courtIdx][posInCourt%courtPoolCounts[courtIdx]]
-				globalPoolIdx = localPoolIdx*numCourts + courtIdx
-			} else {
-				// Fallback if a court has 0 pools (shouldn't happen if numCourts <= numPools)
-				globalPoolIdx = currentRank
+				return localPoolIdx*numCourts + courtIdx
 			}
+			// Fallback if a court has 0 pools (shouldn't happen if numCourts <= numPools)
+			return currentRank
+		}
 
+		tryPlace := func(globalPoolIdx int) bool {
 			targetIdx := posInPool*numPools + globalPoolIdx
 			if targetIdx < totalLen && !occupied[targetIdx] {
 				indices[si] = targetIdx
 				occupied[targetIdx] = true
-				placed = true
+				if globalPoolIdx >= 0 && globalPoolIdx < numPools {
+					poolSeedDojos[globalPoolIdx][dojoKey(p.Dojo)] = true
+				}
+				return true
 			}
+			return false
+		}
+
+		placed := false
+		// Wrapped-seed preference passes (posInPool > 0 means rankIdx >=
+		// numPools, i.e. this seed is beyond the first full round and would
+		// otherwise land wherever the modulo fallback happens to point).
+		// Never taken for posInPool == 0 (every seed within the first
+		// numPools ranks), so this is a no-op for every roster the
+		// pre-existing seed-equality pins already covered.
+		if posInPool > 0 && p.Dojo != "" {
+			// Pass 0: the first candidate pool (scanned in the SAME
+			// rank-priority order the natural arithmetic already defines)
+			// that holds no seed at all.
+			for offset := 0; offset < numPools && !placed; offset++ {
+				gp := candidateGlobalPool(offset)
+				if gp < 0 || gp >= numPools || len(poolSeedDojos[gp]) > 0 {
+					continue
+				}
+				placed = tryPlace(gp)
+			}
+			// Pass 1: no seed-free pool existed (unavoidable once
+			// nSeeds > numPools -- every pool already holds exactly one).
+			// The first candidate whose existing seed(s) are not a
+			// dojo-mate of this one.
+			for offset := 0; offset < numPools && !placed; offset++ {
+				gp := candidateGlobalPool(offset)
+				if gp < 0 || gp >= numPools || poolSeedDojos[gp][dojoKey(p.Dojo)] {
+					continue
+				}
+				placed = tryPlace(gp)
+			}
+		}
+		// The original, unconditional pass: every seed within the first
+		// numPools ranks reaches this immediately (posInPool == 0, the two
+		// passes above never ran); a wrapped seed only reaches it when
+		// BOTH preference passes above found nothing (every pool has a
+		// seed AND every one of them is this seed's dojo-mate), the one
+		// case genuinely as constrained as this function's pre-fix
+		// behaviour always was.
+		for offset := 0; offset < numPools && !placed; offset++ {
+			placed = tryPlace(candidateGlobalPool(offset))
 		}
 		if !placed {
 			// Last resort: take the first available slot.
@@ -737,6 +798,9 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 				if !occupied[j] {
 					indices[si] = j
 					occupied[j] = true
+					if numPools > 0 {
+						poolSeedDojos[j%numPools][dojoKey(p.Dojo)] = true
+					}
 					break
 				}
 			}

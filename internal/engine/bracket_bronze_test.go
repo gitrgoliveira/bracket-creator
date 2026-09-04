@@ -43,6 +43,67 @@ func createBronzeTestCompetition(t *testing.T, store *state.Store, id string, na
 	require.NoError(t, store.SaveCompetition(comp))
 }
 
+// createBronzeTestCompetitionWithTwoThirdPlaces is createBronzeTestCompetition
+// plus an explicit TwoThirdPlaces override (bc-3rdp), so the operator's choice
+// can be exercised end to end through the real draw pipeline
+// (engine.StartCompetition -> buildBracketFromDraw ->
+// helper.NeedsBronzeBlock), not just unit-tested against the resolver method
+// in isolation.
+func createBronzeTestCompetitionWithTwoThirdPlaces(t *testing.T, store *state.Store, id string, naginata bool, twoThirdPlaces bool) {
+	t.Helper()
+	comp := &state.Competition{
+		ID:             id,
+		Name:           "Bronze Test",
+		Kind:           "individual",
+		Format:         state.CompFormatPlayoffs,
+		PoolSize:       3,
+		PoolSizeMode:   "min",
+		PoolWinners:    2,
+		Courts:         []string{"A"},
+		StartTime:      "09:00",
+		Status:         "setup",
+		Naginata:       naginata,
+		TwoThirdPlaces: &twoThirdPlaces,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+}
+
+// TestBronze_ExplicitTwoThirdPlacesOverridesNaginata (bc-3rdp) proves the
+// 3rd-place rule is now independent of Naginata: an operator can request a
+// single 3rd for a KENDO knockout (TwoThirdPlaces=false, Naginata=false), and
+// can request joint 3rds for a NAGINATA knockout (TwoThirdPlaces=true,
+// Naginata=true) -- the exact two combinations RequiresSingleThirdPlace could
+// not express before this field existed.
+func TestBronze_ExplicitTwoThirdPlacesOverridesNaginata(t *testing.T) {
+	t.Run("kendo knockout opted into a single 3rd gets a bronze match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "bronze-kendo-single-3rd"
+
+		createBronzeTestCompetitionWithTwoThirdPlaces(t, store, compID, false, false)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+		require.NoError(t, eng.StartCompetition(compID))
+
+		bracket, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		require.NotNil(t, bracket.ThirdPlaceMatch,
+			"a non-naginata knockout that explicitly turned off joint 3rds must still get a bronze match")
+	})
+
+	t.Run("naginata knockout opted into joint 3rds gets no bronze match", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "bronze-naginata-joint-3rd"
+
+		createBronzeTestCompetitionWithTwoThirdPlaces(t, store, compID, true, true)
+		saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+		require.NoError(t, eng.StartCompetition(compID))
+
+		bracket, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Nil(t, bracket.ThirdPlaceMatch,
+			"a naginata knockout that explicitly turned on joint 3rds must not get a bronze match")
+	})
+}
+
 // TestBronze_GeneratedForNaginataWithSemifinal verifies a bronze match exists
 // for a naginata bracket with ≥4 effective players (a real semifinal round).
 func TestBronze_GeneratedForNaginataWithSemifinal(t *testing.T) {

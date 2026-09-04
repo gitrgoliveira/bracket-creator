@@ -176,7 +176,7 @@ function recomputeBracketQueuePositions(bracket) {
             });
         });
     });
-    // The naginata bronze match (thirdPlaceMatch) is a SIBLING of bracket.rounds,
+    // The single-3rd bronze match (thirdPlaceMatch) is a SIBLING of bracket.rounds,
     // not a row in it, but it shares a court with the final and must take part in
     // that court's queue ordering. The bronze is conventionally played JUST
     // BEFORE the final (viewer_awards.jsx: "the bronze is normally played
@@ -454,7 +454,7 @@ function applyPatch(prev, event) {
             }
         }
 
-        // The naginata bronze match (thirdPlaceMatch) is a SIBLING of
+        // The single-3rd bronze match (thirdPlaceMatch) is a SIBLING of
         // bracket.rounds, not a row inside it, so the loop above never sees it.
         // Apply an SSE match_updated for the bronze here (same field-mapping as
         // a round match), else its score stays stale until the background

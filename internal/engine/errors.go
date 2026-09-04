@@ -85,3 +85,35 @@ func (e *DownstreamKnockoutScoredError) Error() string {
 func (e *DownstreamKnockoutScoredError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutScored
 }
+
+// ErrSwissExportUnsupported is returned by Engine.ExportCompetitionXlsx (and
+// therefore by ExportTournamentWorkbooks), and is aliased by
+// internal/export.ErrSwissExportUnsupported for BuildResultsWorkbook. Swiss
+// has no pools and no static bracket -- results are per-round pairings plus a
+// running standings table -- so NEITHER the blank-template bracket export nor
+// the results-workbook export has anything to render; the message below is
+// shared by both and deliberately does not call either path a "bracket
+// export". Handlers should return HTTP 422 with the sentinel's message,
+// which points operators at the one place Swiss results ARE available today
+// (the live standings view) rather than just naming what does not work.
+// Lives here (engine), not in internal/export, because internal/export
+// imports internal/engine and the reverse would be an import cycle. A
+// dedicated Swiss export sheet is tracked as follow-up work (mp-4n9n); do not
+// attempt to implement it here.
+var ErrSwissExportUnsupported = errors.New("not yet implemented: Swiss competitions have no static bracket to export; use the live standings view instead")
+
+// ErrBracketDrawMismatch is returned by RenderCompetitionWorkbook (and
+// therefore by Engine.ExportCompetitionXlsx, internal/export.
+// BuildResultsWorkbook, and ExportTournamentWorkbooks) when the persisted
+// bracket carries knockout content -- a third-place bout, or any real round
+// match (see bracketHasKnockoutContent, workbook.go) -- that cannot be
+// re-derived from the competition's CURRENT settings. This happens when a
+// setting the draw depends on (e.g. ExtraQualifiers) changes after the
+// bracket was built, so the stored bracket and a freshly-derived draw
+// disagree. Rendering anyway would produce a workbook with only the
+// disagreeing fragment (a lone 3rd-place block, or no knockout content at
+// all) and no way for the operator to tell the rest is missing, so this is
+// refused outright rather than rendered partially. Handlers should return
+// HTTP 422 with the sentinel's message, which tells the operator what to do
+// about it without naming any internal identifier.
+var ErrBracketDrawMismatch = errors.New("this competition's stored bracket does not match its current settings, so the knockout stage cannot be exported; discard and regenerate the draw, or restore the settings the bracket was originally built with")

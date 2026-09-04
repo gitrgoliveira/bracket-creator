@@ -23,8 +23,14 @@ import (
 // leaves must come from the stored bracket / participant seeding instead. Both
 // the bracket-load guard (export.go) and playoffLeaves gate on this exact
 // condition, so it lives in one predicate rather than two hand-copied literals.
+//
+// Goes through comp.EffectiveFormat() rather than comp.Format directly: an
+// unset Format ("") is standalone playoffs too (runDrawPipeline's generation
+// switch falls to its default case for it), and this predicate must agree
+// with generation or a bracket generated for an empty-Format competition
+// would have no leaf source at export time.
 func isPurePlayoffs(comp *state.Competition, pools []helper.Pool) bool {
-	return len(pools) == 0 && comp.Format == state.CompFormatPlayoffs
+	return len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatPlayoffs
 }
 
 // playoffLeaves returns the first-round leaf order for a competition with NO
@@ -300,21 +306,18 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 // POSITION printed "Shiaijo A"/"Shiaijo B" on sheets for courts that competition
 // never touches, so the names travel into the workbook rather than a count.
 //
-// It loads the tournament ITSELF rather than taking one. Resolution goes through
-// InheritedDrawCourts, where an empty list means "inherit the tournament's", so
-// a caller that forgot the load, or handed nil, would silently get the
-// positional answer back for exactly the legacy records that need the venue's.
-// A tournament that will not load is not fatal to an export: the resolution then
-// degrades to the competition's own list, which is what it was before.
-func CompetitionCourts(store *state.Store, comp *state.Competition) []string {
+// PURE: it takes an already-loaded tournament rather than loading one itself
+// (mp-yuy8). Resolution goes through InheritedDrawCourts, where an empty list
+// means "inherit the tournament's", so a nil tourn silently gets the positional
+// answer back for exactly the legacy records that need the venue's -- callers
+// that need the venue's courts must load the tournament themselves and are
+// responsible for deciding how a load failure is handled. This used to load the
+// tournament itself and swallow the error, degrading to the competition's own
+// list on any failure (including a corrupt tournament.md); every caller now
+// loads it once, strictly, and shares the result.
+func CompetitionCourts(comp *state.Competition, tourn *state.Tournament) []string {
 	if comp == nil {
 		return helper.CourtLabels(1)
-	}
-	var tourn *state.Tournament
-	if store != nil {
-		if t, err := store.LoadTournament(); err == nil {
-			tourn = t
-		}
 	}
 	return InheritedDrawCourts(comp.Courts, tourn)
 }

@@ -31,10 +31,12 @@ func RegisterExportResultsHandlers(r *gin.RouterGroup, store *state.Store, eng *
 
 		data, err := export.BuildResultsWorkbook(store, eng, id)
 		if err != nil {
-			// Swiss has no static bracket to export; surface a clear 422 rather
-			// than a generic 500 so the UI can explain it.
-			if errors.Is(err, export.ErrSwissExportUnsupported) {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+			// Swiss (no static bracket) and a stored bracket that no longer
+			// matches the competition's current settings both surface as a
+			// 422, not a 500 -- see respondUnexportableCompetitionError,
+			// shared with the blank-template /export route's handling of the
+			// same two sentinels (handlers_competition.go).
+			if respondUnexportableCompetitionError(c, err) {
 				return
 			}
 			// Unknown competition -> 404, matching every other competition endpoint.

@@ -50,7 +50,13 @@ func createTournamentHandler(c *gin.Context) {
 	singleTree := c.PostForm("singleTree") == "on"
 	withZekkenName := c.PostForm("withZekkenName") == "on"
 	engi := c.PostForm("engi") == "on"
-	naginata := c.PostForm("naginata") == "on"
+	// thirdPlaceMatch: adds a 3rd-place (bronze) match after elimination
+	// matches, deciding a single 3rd place instead of kendo's default of two
+	// joint 3rd places (bc-3rdp gap closure). "naginata" is accepted as a
+	// legacy alias so an older client that still posts naginata=on (the
+	// field's pre-bc-3rdp name, whose only effect on this path was ever the
+	// bronze block) keeps producing the same workbook.
+	thirdPlaceMatch := c.PostForm("thirdPlaceMatch") == "on" || c.PostForm("naginata") == "on"
 	determined := c.PostForm("determined") == "on"
 	titlePrefix := c.PostForm("titlePrefix")
 	numberPrefix := c.PostForm("numberPrefix")
@@ -154,20 +160,20 @@ func createTournamentHandler(c *gin.Context) {
 		}
 
 		o := &poolOptions{
-			singleTree:     singleTree,
-			withZekkenName: withZekkenName,
-			engi:           engi,
-			naginata:       naginata,
-			determined:     determined,
-			teamMatches:    teamMatches,
-			roundRobin:     roundRobin,
-			poolFormat:     poolFormat,
-			numPlayers:     numPlayers,
-			maxPlayers:     maxPlayers,
-			poolWinners:    winnersPerPool,
-			courts:         courts,
-			titlePrefix:    titlePrefix,
-			numberPrefix:   numberPrefix,
+			singleTree:      singleTree,
+			withZekkenName:  withZekkenName,
+			engi:            engi,
+			thirdPlaceMatch: thirdPlaceMatch,
+			determined:      determined,
+			teamMatches:     teamMatches,
+			roundRobin:      roundRobin,
+			poolFormat:      poolFormat,
+			numPlayers:      numPlayers,
+			maxPlayers:      maxPlayers,
+			poolWinners:     winnersPerPool,
+			courts:          courts,
+			titlePrefix:     titlePrefix,
+			numberPrefix:    numberPrefix,
 			// bc-qual: "" (standard, default), "larger-pools", or
 			// "fill-bracket" (bc-qual LP-4). Validated inside createPools via
 			// state.ValidateExtraQualifiers (the same rule the
@@ -196,7 +202,7 @@ func createTournamentHandler(c *gin.Context) {
 		o := &playoffOptions{
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
-			naginata:        naginata,
+			thirdPlaceMatch: thirdPlaceMatch,
 			engi:            engi,
 			determined:      determined,
 			teamMatches:     teamMatches,

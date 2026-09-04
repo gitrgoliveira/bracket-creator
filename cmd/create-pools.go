@@ -13,24 +13,24 @@ import (
 )
 
 type poolOptions struct {
-	numPlayers     int
-	maxPlayers     int
-	poolWinners    int
-	teamMatches    int
-	courts         int
-	filePath       string
-	outputPath     string
-	seedsPath      string
-	outputWriter   *bufio.Writer
-	roundRobin     bool
-	poolFormat     string // "" / "full" → legacy roundRobin switch; "partial" → path-graph
-	withZekkenName bool
-	singleTree     bool
-	determined     bool
-	engi           bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
-	naginata       bool // naginata: adds a 3rd-place bronze block after elimination matches. Web-handler-only, same as engi.
-	titlePrefix    string
-	numberPrefix   string
+	numPlayers      int
+	maxPlayers      int
+	poolWinners     int
+	teamMatches     int
+	courts          int
+	filePath        string
+	outputPath      string
+	seedsPath       string
+	outputWriter    *bufio.Writer
+	roundRobin      bool
+	poolFormat      string // "" / "full" → legacy roundRobin switch; "partial" → path-graph
+	withZekkenName  bool
+	singleTree      bool
+	determined      bool
+	engi            bool // engi (kata) competition: pair rosters + engi standings formulas. Set ONLY by the web /create handler (mobile-app blank-template download); deliberately NOT a CLI flag (owner decision: no new CLI options).
+	thirdPlaceMatch bool // thirdPlaceMatch: adds a 3rd-place (bronze) match after elimination matches, deciding a single 3rd place instead of kendo's default of two joint 3rd places. CLI flag --third-place-match (owner decision, bc-3rdp: the "no new CLI options" ban is lifted for this one); also settable by the web /create handler, which still accepts the legacy "naginata" form field as an alias (see create_handler.go).
+	titlePrefix     string
+	numberPrefix    string
 	// extraQualifiers selects how many finishers a pool sends to the
 	// knockout beyond poolWinners (bc-qual, --extra-qualifiers): "" (default,
 	// state.ExtraQualifiersNone), "larger-pools"
@@ -69,6 +69,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
 	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default), \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo), or \"fill-bracket\" (pools are cut so winners plus a handful of drafted 2nd places exactly fill the knockout with no byes); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
+	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
 	cmd.MarkFlagsMutuallyExclusive("players", "max-players")
 
@@ -417,7 +418,7 @@ func (o *poolOptions) createPools(entries []string) error {
 		totalPoolMatches += len(p.Matches)
 	}
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
 	helper.FillEstimations(f, int64(len(pools)), int64(totalPoolMatches), int64(o.teamMatches), int64(totalQualifiers-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

@@ -10,7 +10,7 @@
 //
 // pool_ids.jsx is a leaf module (no imports, no side effects), so importing it
 // here does not introduce a load-order dependency or a double-eval risk.
-import { isSupplementaryBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { isSupplementaryBout, teamMatchTypeFor, poolNameOf, swissRoundLabel } from './pool_ids.jsx';
 
 // TermV: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and viewer.jsx doesn't matter.
@@ -26,12 +26,19 @@ export function competitionKindLabel(c) {
   return c.kind === "team" ? "Teams" : "Individual";
 }
 
-// leagueAwareLabel: the single source of truth for the pool-vs-league heading.
-// A league is one round-robin table spanning the whole roster, so calling it
-// "Pool A" is wrong; show "League table" instead. Non-league formats fall back
-// to the pool name (or the given fallback when that's empty).
-export const leagueAwareLabel = (compFormat, poolName, fallback = "") =>
-  compFormat === "league" ? "League table" : (poolName || fallback);
+// leagueAwareLabel: the single source of truth for the pool-vs-league-vs-swiss
+// heading. A league is one round-robin table spanning the whole roster, so
+// calling it "Pool A" is wrong; show "League table" instead. A Swiss round
+// piggybacks pool-matches.csv under a synthetic "Swiss-R<N>" pool name, so it
+// is translated via swissRoundLabel (pool_ids.jsx, the one owner of that
+// parse) — an empty result (poolName not Swiss-shaped) still falls back to
+// `fallback`, same as any other format. Other formats fall back to the pool
+// name (or the given fallback when that's empty).
+export const leagueAwareLabel = (compFormat, poolName, fallback = "") => {
+  if (compFormat === "league") return "League table";
+  if (compFormat === "swiss") return swissRoundLabel(poolName) || fallback;
+  return poolName || fallback;
+};
 export const poolLabel = (m) => leagueAwareLabel(m.compFormat, m.poolName);
 // Publish to window so viewer_watchlist.js (and the admin scoring/shiaijo/pools
 // surfaces) can read these at RENDER time without an explicit import. Load order
@@ -40,6 +47,10 @@ export const poolLabel = (m) => leagueAwareLabel(m.compFormat, m.poolName);
 if (typeof window !== 'undefined') {
   window.poolLabel = poolLabel;
   window.leagueAwareLabel = leagueAwareLabel;
+  // admin_scoring_shared.jsx reads this off window (it already reads
+  // window.compMatches the same way) rather than adding an import edge from an
+  // admin module into the viewer graph.
+  window.compMatchesForCompetition = compMatchesForCompetition;
 }
 
 // Lazy window proxy for the shared DD-MM-YYYY date comparator. window.compareDmy
@@ -48,6 +59,46 @@ if (typeof window !== 'undefined') {
 // has executed). Kept here so both viewer_schedule.jsx and viewer_home.jsx import
 // a single source rather than re-declaring it.
 export const compareDmy = (a, b) => window.compareDmy(a, b);
+
+// compMatchesForCompetition: the ONE way to call compMatches from a
+// GET /api/viewer/competitions/:id response.
+//
+// compMatches takes a SINGLE object carrying both halves of a competition: its
+// identity (id/name/format/status/kind/teamSize) AND its match data
+// (pools/poolMatches/bracket). That endpoint splits those apart, answering
+// {config, pools, poolMatches, bracket, standings} with the identity fields
+// nested under `config`, so every holder of that response has to recombine them
+// before calling. Handing the raw response straight to compMatches looks right
+// and silently yields NOTHING: `detail.status` is undefined, which trips the
+// "setup" early return below before a single match is read.
+//
+// That is not hypothetical, and it had already bitten twice by the time this
+// helper existed. admin_scoring_shared.jsx's withdrawal panel did exactly this,
+// so after a kiken it listed no remaining matches to award, on every format.
+// admin_scoring_team.jsx's reopen-conflict panel hit the same wall earlier and
+// worked around it with its own inline recombination, so the console named a
+// blocking match by its raw id until someone noticed. Two hand-rolled copies
+// and one silent omission is why the rule now has one home: route new callers
+// through here rather than spreading by hand (mp-dej2).
+//
+// `data` is the sibling half. It is a separate argument because the competition
+// page holds the two halves as separate PROPS rather than as one response, so a
+// detail-shaped-only signature would not serve it. Callers holding the response
+// pass `(detail.config || detail, detail)`.
+//
+// `data` DEFAULTS TO `config`, so a one-argument call on a flat competition (the
+// aggregate shape, which carries pools/poolMatches/bracket at the top level)
+// reads those fields off the object it was given. Defaulting to `{}` instead
+// would overwrite them with undefined and return [] — reintroducing, in the
+// helper written to abolish it, the exact silent-empty this function exists to
+// prevent. It is published on `window` and its comment invites new callers, so
+// the wrong call has to be the one that cannot happen. An explicit `{}` still
+// means "no match data": only a missing argument falls back (bc-cmfc).
+export function compMatchesForCompetition(config, data) {
+  if (!config) return [];
+  const d = data || config;
+  return compMatches({ ...config, pools: d.pools, poolMatches: d.poolMatches, bracket: d.bracket });
+}
 
 export function compMatches(c) {
   const out = [];
@@ -59,7 +110,6 @@ export function compMatches(c) {
   if (!c.status || c.status === "setup") return out;
 
   const compTMT = teamMatchTypeFor(c);
-  const POOL_ID_RE = /^(.+?)(?:-DH-\d+|-TB-\d+|-\d+)$/;
   const rawPoolMatches = c.poolMatches || (c.pools ? c.pools.flatMap(p => (p.matches || []).map(m => ({ ...m, phase: "pool", poolName: p.poolName || p.name, phaseName: p.poolName || p.name }))) : []);
   // Pool supplementary bouts (daihyosen "Pool X-DH-N" and tiebreaker
   // "Pool X-TB-N") are representative bouts scored as individual matches even in
@@ -70,7 +120,7 @@ export function compMatches(c) {
   // from the match ID (e.g. "Pool A-0" → poolName "Pool A") when absent.
   rawPoolMatches.forEach(m => {
     const isRepBout = isSupplementaryBout(m.id || "");
-    const derivedPool = m.poolName || (POOL_ID_RE.exec(m.id || "") || [])[1] || "";
+    const derivedPool = m.poolName || poolNameOf(m.id || "");
     // Spread `...m` FIRST, then the derived fields: flat viewer-API poolMatches
     // omit (or null) phase/poolName/phaseName, so if `...m` came last it would
     // clobber the derived pool name with undefined. derivedPool already prefers

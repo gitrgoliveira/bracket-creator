@@ -42,9 +42,9 @@ func effectiveTopN(comp *state.Competition) int {
 //  1. The group's MinPosition is within the tie-break band [1..topN], meaning at
 //     least one of the tied positions determines a top-N place.
 //  2. The group is NOT fully covered by the two-joint-3rd-places exemption:
-//     when LeagueTwoThirdPlaces is true and ALL positions in the group are at
-//     position >= 3, there is no need to distinguish 3rd from 4th, both teams
-//     share 3rd. The group is therefore non-consequential.
+//     when EffectiveTwoThirdPlaces() is true and ALL positions in the group are
+//     at position >= 3, there is no need to distinguish 3rd from 4th, both
+//     teams share 3rd. The group is therefore non-consequential.
 //
 // Rule precision for the two-thirds exemption:
 //   - The exemption fires only when EVERY position in the group is >= 3
@@ -52,7 +52,11 @@ func effectiveTopN(comp *state.Competition) int {
 //     or higher, and a tie-breaker IS needed to decide who finishes 2nd.
 //   - The exemption is applied regardless of topN, even if topN==4, a
 //     group sitting entirely at positions [3,4] is just "two joint 3rds" and
-//     no tie-breaker is required when LeagueTwoThirdPlaces is true.
+//     no tie-breaker is required when EffectiveTwoThirdPlaces() is true. All
+//     callers of this function are league-only (see their own gating), so the
+//     league branch of EffectiveTwoThirdPlaces (bc-3rdp) is what actually
+//     resolves here; it still reads the legacy LeagueTwoThirdPlaces field for
+//     a record that predates the unified TwoThirdPlaces field.
 func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 	topN := effectiveTopN(comp)
 
@@ -66,7 +70,7 @@ func isConsequentialTie(g TiedGroup, comp *state.Competition) bool {
 	// at positions >= 3 (i.e. only 3rd-place-or-below slots) does not need a
 	// decider, all members share 3rd place. The minimum position of the group
 	// must be at least 3 for this exemption to apply.
-	if comp.LeagueTwoThirdPlaces && g.MinPosition >= 3 {
+	if comp.EffectiveTwoThirdPlaces() && g.MinPosition >= 3 {
 		return false
 	}
 

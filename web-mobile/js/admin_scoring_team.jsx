@@ -1699,7 +1699,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   useEffectA(() => {
     setBlockerLabel("");
     if (!reopenConflict?.matchId || !reopenConflict?.compId) return;
-    if (typeof window.compMatches !== "function" || typeof window.API?.fetchCompetitionDetails !== "function") return;
+    if (typeof window.compMatchesForCompetition !== "function" || typeof window.API?.fetchCompetitionDetails !== "function") return;
     let cancelled = false;
     (async () => {
       try {
@@ -1711,9 +1711,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         // "setup" guard, so passing `detail` straight in always returned [] and
         // every conflict panel fell back to naming the blocker by its raw id
         // ("Shiaijo A is running m-r1-1"), which tells an operator nothing.
-        // Detail's own keys stay authoritative for the match collections.
-        const listShaped = { ...detail.config, ...detail, status: detail.config?.status };
-        const hit = (window.compMatches(listShaped) || []).find(x => x.id === reopenConflict.matchId);
+        //
+        // compMatchesForCompetition (viewer_utils.jsx) owns that recombination
+        // now. This site had its own copy, and the withdrawal panel in
+        // admin_scoring_shared.jsx had none at all and silently listed nothing,
+        // which is why the rule was given one home (mp-dej2).
+        const hit = (window.compMatchesForCompetition(detail.config || detail, detail) || []).find(x => x.id === reopenConflict.matchId);
         if (!hit) return;
         const shiro = hit.sideB?.name || hit.sideB || "";
         const aka = hit.sideA?.name || hit.sideA || "";

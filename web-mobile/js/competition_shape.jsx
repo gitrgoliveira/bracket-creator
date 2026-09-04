@@ -349,19 +349,48 @@ export function knockoutDurationVisible(format) {
   return format === FORMAT_KNOCKOUT || format === FORMAT_MIXED;
 }
 
-// --- League joint-3rd-place convention -----------------------------------
+// --- Joint 3rd place convention (bc-3rdp) --------------------------------
 //
 // Present on BOTH surfaces (admin_setup.jsx:1081, admin_competition_
 // settings.jsx:1111) with IDENTICAL copy already -- checked verbatim,
 // nothing to unify.
+//
+// This used to be a league-only control backed by a league-only field
+// (LeagueTwoThirdPlaces). It is now the ONE control for "does this
+// competition award a joint (shared) 3rd place, or decide a single 3rd with
+// a bronze/decider match", for every format that has a 3rd place to award --
+// see state.Competition.EffectiveTwoThirdPlaces (Go). The copy already read
+// generically ("competitors genuinely tied for 3rd", not "league standings"),
+// so it needed no wording change to cover knockout/mixed too.
 export const LABEL_TWO_THIRD_PLACES = "Award two joint 3rd places";
-export const HINT_TWO_THIRD_PLACES = "When enabled, competitors genuinely tied for 3rd share bronze (standard kendo convention). Leave off for naginata, which awards a single 3rd place.";
+export const HINT_TWO_THIRD_PLACES = "When enabled, two beaten semi-finalists share 3rd place and no bronze match is played (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a bronze match, and a league awards one 3rd rather than a shared rank.";
 
-// twoThirdPlacesVisible: both surfaces gate this checkbox on format ===
-// "league" alone (not kind: an individual league can still award joint
-// bronze under the kendo convention).
+// twoThirdPlacesVisible: visible for every format that can produce a 3rd
+// place at all -- knockout/mixed decide it with a bronze match (or not) at
+// the end of the knockout, league decides it via shared standings ranks.
+// Hidden for Swiss: there is no bracket and no bronze match to suppress, and
+// Swiss standings are cumulative-score rankings with no "3rd place" bout to
+// share (bc-3rdp operator ruling).
 export function twoThirdPlacesVisible(format) {
-  return format === FORMAT_LEAGUE;
+  return format !== FORMAT_SWISS;
+}
+
+// effectiveTwoThirdPlaces: JS mirror of state.Competition.EffectiveTwoThirdPlaces
+// (internal/state/models.go). A record whose stored twoThirdPlaces is
+// undefined/null (every competition saved before bc-3rdp -- Go's omitempty
+// drops a nil pointer from the wire entirely) must still resolve to the SAME
+// answer the server would compute, not read as "off" by accident: the
+// settings screen renders this checkbox's initial state straight off the
+// fetched competition, before any save round-trips an explicit value back.
+// Resolution order mirrors the Go method exactly:
+//   1. comp.twoThirdPlaces is a real boolean -> that value.
+//   2. comp.format is league -> comp.leagueTwoThirdPlaces (legacy field).
+//   3. otherwise -> !comp.naginata.
+export function effectiveTwoThirdPlaces(comp) {
+  if (!comp) return true;
+  if (typeof comp.twoThirdPlaces === "boolean") return comp.twoThirdPlaces;
+  if (comp.format === FORMAT_LEAGUE) return !!comp.leagueTwoThirdPlaces;
+  return !comp.naginata;
 }
 
 // --- Kind-gated fields (team size, team match format, zekken, engi) -----
@@ -872,8 +901,12 @@ export function normalizeConfigForKind(cfg) {
 
 // twoThirdPlacesForNaginata: ticking "Naginata competition" clears "Award
 // two joint 3rd places", and unticking it restores them. Naginata awards a
-// single 3rd place where kendo awards two -- the two hints say exactly that,
-// and state.Competition's LeagueTwoThirdPlaces comment says it a third time.
+// single 3rd place where kendo awards two -- the two hints say exactly that.
+// This is a DEFAULT-SETTER only (bc-3rdp): the 3rd-place rule is its own
+// setting now (state.Competition.TwoThirdPlaces / EffectiveTwoThirdPlaces),
+// not derived from Naginata, so an operator can still tick Naginata back on
+// and re-tick "Award two joint 3rd places" afterward -- this coupling only
+// picks a sane starting point, it does not lock the two together.
 //
 // The create form has always applied this coupling, inline in the naginata
 // checkbox's onChange. The settings screen did not, so ticking Naginata
@@ -1109,14 +1142,14 @@ export const COMPETITION_DEFAULTS = {
   checkInEnabled: false,
   // Two joint 3rd places is the standard kendo convention; naginata is the
   // exception and turns it off (twoThirdPlacesForNaginata above). This
-  // default being TRUE while Go's zero value is false is precisely why the
-  // field must reach the wire explicitly on every format, rather than only
-  // when the league controls are on screen. The Go tag keeps its
-  // `omitempty` and always could: a bool with omitempty is value-lossless
-  // (false marshals to an absent key, an absent key unmarshals back to
-  // false), so the conditional send was the entire bug. See
-  // state.Competition's own comment on this field.
-  leagueTwoThirdPlaces: true,
+  // default being TRUE while Go's zero value (for a nil pointer) reads as
+  // "unset" is precisely why the field must reach the wire explicitly on
+  // every format, exactly as its LeagueTwoThirdPlaces predecessor did (see
+  // state.Competition.TwoThirdPlaces's own comment): the conditional send,
+  // not `omitempty`, was always the entire bug. bc-3rdp: renamed from
+  // leagueTwoThirdPlaces now that the rule applies to every format, not just
+  // leagues -- see state.Competition.EffectiveTwoThirdPlaces.
+  twoThirdPlaces: true,
   // 0, not LEAGUE_TIEBREAK_DEFAULT: the stored zero IS "not yet chosen" and
   // leagueTiebreakActive resolves it to Top 3 for display. Seeding the
   // resolved value instead would persist a choice the operator never made.

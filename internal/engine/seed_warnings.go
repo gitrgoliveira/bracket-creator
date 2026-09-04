@@ -73,7 +73,21 @@ func (e *Engine) SeedWarningsFor(comp *state.Competition) []string {
 	// Counting the distinct shiaijo the pool matches run on was tried and
 	// reverted: a match's court is data the operator reassigns constantly, so
 	// moving ONE bout rewrote warnings that describe placement in the draw.
-	numCourts := len(CompetitionCourts(e.store, comp))
+	// Deliberate exception to the "load the tournament once, strictly" rule
+	// (mp-yuy8 criterion 6): this is an admin-only advisory endpoint, not an
+	// exported workbook, so nothing decided here can print a sheet under the
+	// wrong shiaijo. Degrading rather than failing is this function's STATED
+	// contract, not a concession made for that rule -- see the header above: a
+	// warning channel, never an error one, because D7 holds that a rule which
+	// can refuse to draw is worse than one that degrades predictably. A corrupt
+	// tournament.md therefore leaves the warnings computed against the
+	// competition's own court list (CompetitionCourts' nil-tourn behaviour)
+	// rather than failing the admin read. Do not propagate this error.
+	var tourn *state.Tournament
+	if t, tErr := e.store.LoadTournament(); tErr == nil {
+		tourn = t
+	}
+	numCourts := len(CompetitionCourts(comp, tourn))
 	draw := poolDraw(comp, pools, numCourts)
 	if draw == nil {
 		return nil

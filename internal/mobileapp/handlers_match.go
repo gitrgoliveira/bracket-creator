@@ -138,7 +138,7 @@ func annotateBracketQueuePositions(b *state.Bracket) {
 			byCourt[m.Court] = append(byCourt[m.Court], entry{m: m, round: ri, position: mi})
 		}
 	}
-	// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds. The bronze is
+	// ThirdPlaceMatch (single-3rd bronze, bc-3rdp) is a sibling of Rounds. The bronze is
 	// conventionally played JUST BEFORE the final (viewer_awards.jsx: "the
 	// bronze is normally played first"), so slot it into the final's round with
 	// a position sentinel of -1: on their shared court, when scheduledAt is

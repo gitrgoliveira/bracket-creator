@@ -506,7 +506,17 @@ func TestIsConsequentialTie(t *testing.T) {
 				MinPosition: tc.minPos,
 				MaxPosition: tc.maxPos,
 			}
+			// Format: league (bc-3rdp) -- isConsequentialTie now reads the
+			// two-thirds rule via comp.EffectiveTwoThirdPlaces(), which only
+			// falls back to the legacy LeagueTwoThirdPlaces field for a
+			// league-format competition (step 2 of its resolution order; see
+			// state.Competition.EffectiveTwoThirdPlaces). Every real caller of
+			// isConsequentialTie already gates on Format == league before
+			// calling it (see this function's own doc comment), so a
+			// non-league comp here would exercise unreachable state, not a
+			// real gap.
 			comp := &state.Competition{
+				Format:               state.CompFormatLeague,
 				LeagueTiebreakTopN:   tc.topN,
 				LeagueTwoThirdPlaces: tc.twoThirds,
 			}
@@ -563,7 +573,9 @@ func TestIsConsequentialTie_BandBoundaryEdgeCases(t *testing.T) {
 				teams[i] = state.PlayerStanding{Player: domain.Player{Name: fmt.Sprintf("T%d", i)}}
 			}
 			g := TiedGroup{Teams: teams, MinPosition: tc.minPos, MaxPosition: tc.maxPos}
+			// Format: league -- see the identical note in TestIsConsequentialTie.
 			comp := &state.Competition{
+				Format:               state.CompFormatLeague,
 				LeagueTiebreakTopN:   tc.topN,
 				LeagueTwoThirdPlaces: tc.twoThirds,
 			}

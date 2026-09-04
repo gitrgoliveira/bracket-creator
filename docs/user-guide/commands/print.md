@@ -17,6 +17,25 @@ Provide **exactly one**:
 | `--input <dir>` | A directory of pre-existing bracket `.xlsx` files (for example, output from [`create-pools`](create-pools.md) or [`create-knockout`](create-knockout.md)). |
 | `--tournament-data <dir>` | A [tournament app](../organisers/run-tournament.md) data directory; the workbooks are generated on the fly from competition state. |
 
+!!! note "Some competitions can be left out of the booklet"
+
+    With `--tournament-data`, a competition is skipped, rather than aborting
+    the whole booklet, when it has nothing renderable:
+
+    - A Swiss competition has no pools and no fixed bracket, so there is
+      nothing to lay out on a printed sheet yet. To follow a Swiss
+      competition on the day, use the live standings view in the tournament
+      app instead.
+    - A competition whose stored bracket no longer matches its current
+      settings (for example, its qualifier count was changed after the
+      bracket was built) cannot be rendered until the draw is regenerated or
+      the settings are restored.
+
+    Each skipped competition is named in a warning on the console. Every
+    other competition still prints as usual. By default the command still
+    exits successfully even if every competition was skipped; pass
+    `--fail-on-skip-all` to make a scripted run detect that case.
+
 ## Types
 
 `--type` selects which sheets to render (required):
@@ -37,6 +56,7 @@ Provide **exactly one**:
 | `--output` | `-o` | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
 | `--output-dir` | | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
 | `--team-file` | | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable; defaults to any filename containing `team`. |
+| `--fail-on-skip-all` | | Exit with a non-zero status if every competition was skipped, so a scripted run can detect that no booklet was produced. Off by default; see [Some competitions can be left out of the booklet](#input-modes). |
 
 An output target is always required: for a single `--type`, provide exactly one of `--output` or `--output-dir`; `--type=all` requires `--output-dir` (and rejects `--output`).
 

@@ -123,7 +123,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 				}
 			}
 		}
-		// The Naginata 3rd-place (bronze) match is a sibling of bracket.Rounds,
+		// The single-3rd-place (bronze) match is a sibling of bracket.Rounds,
 		// not an element of it, so the loop above never reaches it. Rename the
 		// participant here too, mirroring the Rounds rename, so a replacement
 		// does not leave a stale name in ThirdPlaceMatch.SideA/SideB/Winner.

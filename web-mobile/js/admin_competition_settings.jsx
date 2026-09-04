@@ -44,7 +44,7 @@ import {
   CLEARED_FIELD_LABELS, optionLabel, poolFormatHint, resolvePoolFormat,
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX,
   LABEL_POOL_SIZE_MODE, POOL_SIZE_MODE_OPTIONS,
-  leagueTiebreakActive, twoThirdPlacesVisible, teamMatchTypeActive, twoThirdPlacesForNaginata,
+  leagueTiebreakActive, twoThirdPlacesVisible, teamMatchTypeActive, twoThirdPlacesForNaginata, effectiveTwoThirdPlaces,
   MIN_POOL_SIZE, MIN_POOL_WINNERS, MIN_SWISS_ROUNDS,
   HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
@@ -97,7 +97,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   const [saveErr, setSaveErr] = useStateA(null);
   const [deleting, setDeleting] = useStateA(false);
   const [invalidating, setInvalidating] = useStateA(false);
-  const [local, setLocal] = useStateA({ ...c });
+  // twoThirdPlaces (bc-3rdp) is seeded through effectiveTwoThirdPlaces, not a
+  // bare `c.twoThirdPlaces` copy: a competition saved before this field
+  // existed has no stored value at all (Go's omitempty drops a nil pointer
+  // from the wire), and a plain copy would read that as "off" -- wrong for
+  // e.g. a legacy non-naginata knockout, whose effective rule is "on". See
+  // effectiveTwoThirdPlaces's own comment for the full resolution order.
+  const [local, setLocal] = useStateA({ ...c, twoThirdPlaces: effectiveTwoThirdPlaces(c) });
   // Manual-save model (mp-3xn6): edits only persist when the operator clicks
   // "Save changes", matching the Tournament Edit-details page. isDirty drives
   // the unsaved indicator + the Save button's enabled state; saving disables
@@ -214,9 +220,22 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           next[k] = c[k];
         }
       });
+      // twoThirdPlaces (bc-3rdp): recomputed via effectiveTwoThirdPlaces
+      // rather than left to the generic copy above, for two reasons. A
+      // legacy record has no `twoThirdPlaces` KEY at all on the wire (Go's
+      // omitempty on a nil pointer), so it is never among Object.keys(c) and
+      // the generic loop would silently never touch `next.twoThirdPlaces` --
+      // it needs an explicit derive, not a copy, to ever be seeded past its
+      // useStateA initializer. And a competition whose format or naginata
+      // changed (locally or via a concurrent admin's SSE-pushed update)
+      // needs its EFFECTIVE joint-3rd default re-derived from those, not
+      // just whatever raw value happened to be stored.
+      if (!editedFieldsRef.current.has("twoThirdPlaces")) {
+        next.twoThirdPlaces = effectiveTwoThirdPlaces(c);
+      }
       return next;
     });
-  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.teamMatchType]);
+  }, [c.id, c.name, c.date, c.startTime, c.poolSize, c.poolWinners, c.poolSizeMode, c.courts, c.roundRobin, c.withZekkenName, c.teamSize, c.numberPrefix, c.format, c.kind, c.mirror, c.status, c.poolFormat, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.swissRounds, c.swissCurrentRound, c.naginata, c.engi, c.checkInEnabled, c.leagueTiebreakTopN, c.leagueTwoThirdPlaces, c.twoThirdPlaces, c.teamMatchType]);
 
   const saveNow = () => {
     // Build `effective` from the LATEST server-known state (cRef.current)
@@ -231,6 +250,18 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
     editedFieldsRef.current.forEach(k => {
       effective[k] = localSnap[k];
     });
+    // twoThirdPlaces (bc-3rdp): if the operator touched it this session, their
+    // choice wins (already staged as a real boolean in localSnap by the
+    // checkbox's onChange). Otherwise DERIVE it via effectiveTwoThirdPlaces
+    // rather than trusting latestC.twoThirdPlaces raw -- a legacy competition
+    // has no stored value at all, and sending `false` for one on every
+    // unrelated settings save (this field is round-tripped unconditionally
+    // below, like naginata/mirror/teamMatchType) would silently flip its
+    // effective rule from "on" (via the !naginata fallback) to an explicit
+    // "off" the operator never chose.
+    effective.twoThirdPlaces = editedFieldsRef.current.has("twoThirdPlaces")
+      ? !!localSnap.twoThirdPlaces
+      : effectiveTwoThirdPlaces(latestC);
 
     // Use the shared validator (admin_helpers.jsx). Returns the
     // canonical DD-MM-YYYY form on success, or an error message on
@@ -451,7 +482,13 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       // team-league competitions; safe to include for all formats because
       // the backend's PUT allowlist ignores unknown fields.
       leagueTiebreakTopN: safeInt(effective.leagueTiebreakTopN, latestC.leagueTiebreakTopN || 0),
-      leagueTwoThirdPlaces: !!effective.leagueTwoThirdPlaces,
+      // twoThirdPlaces (bc-3rdp): round-tripped unconditionally, like
+      // naginata/mirror/teamMatchType above, so an untouched control never
+      // clobbers the stored rule -- `effective.twoThirdPlaces` was already
+      // resolved to a real boolean above (the operator's edit, or the
+      // derived effective default), never the possibly-absent raw value.
+      // LeagueTwoThirdPlaces itself is legacy read-only and is never sent.
+      twoThirdPlaces: !!effective.twoThirdPlaces,
       // teamMatchType is edited via the Team match format pills above; the
       // merge is a full replace: omitting it would clobber a kachinuki
       // competition's value to "" (fixed) on any save. Round-trip it like
@@ -1310,9 +1347,10 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             hint={HINT_SWISS_ROUNDS} error={swissSettingsErr} width={120} />
         </>
       )}
-      {/* League standings settings. The joint-3rd convention applies to ALL
-          leagues (team + individual); the "Break ties for top" band is a
-          team-league tie-breaker knob and stays team-only. */}
+      {/* Joint-3rd-place setting (bc-3rdp): visible for every format that can
+          award a 3rd place (all but Swiss), not just leagues any more. The
+          "Break ties for top" band underneath stays a team-league-only
+          tie-breaker knob and keeps its own format/kind gate. */}
       {twoThirdPlacesVisible(local.format) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
           {/* leagueTiebreakVisible folds format === "league" into its own
@@ -1329,7 +1367,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           {/* `.field` provides margin-bottom spacing from whatever
               follows, matching admin_setup.jsx's wrapper around this same
               control. */}
-          <CheckboxField label={LABEL_TWO_THIRD_PLACES} checked={local.leagueTwoThirdPlaces} onChange={(on) => update("leagueTwoThirdPlaces", on)} disabled={lockedAfterDraw} hint={`${HINT_TWO_THIRD_PLACES}${lockedNote}`} />
+          <CheckboxField label={LABEL_TWO_THIRD_PLACES} checked={local.twoThirdPlaces} onChange={(on) => update("twoThirdPlaces", on)} disabled={lockedAfterDraw} hint={`${HINT_TWO_THIRD_PLACES}${lockedNote}`} />
         </div>
       )}
       <div className="field">
@@ -1479,9 +1517,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             remember configuring. */}
         <CheckboxField label={LABEL_ZEKKEN} checked={local.withZekkenName} onChange={(on) => update("withZekkenName", on)} disabled={isDrawReady || !zekkenApplies(local.kind)} hint={!zekkenApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : HINT_ZEKKEN} />
         <CheckboxField label={LABEL_ENGI} checked={!!local.engi} onChange={(on) => update("engi", on)} disabled={lockedAfterDraw || !engiApplies(local.kind)} hint={!engiApplies(local.kind) ? HINT_KIND_ONLY_INDIVIDUAL : `${HINT_ENGI}${lockedNote}`} />
-        {/* Naginata coupling: when naginata is enabled, also clear the two-thirds
-            places setting to match the create form's behavior. */}
-        <CheckboxField label={LABEL_NAGINATA} checked={!!local.naginata} disabled={lockedAfterDraw} onChange={(on) => { update("naginata", on); update("leagueTwoThirdPlaces", twoThirdPlacesForNaginata(on)); }} hint={`${HINT_NAGINATA}${lockedNote}`} />
+        {/* Naginata coupling: ticking naginata also RE-DEFAULTS (does not lock)
+            the joint-3rd setting to match the create form's behavior --
+            twoThirdPlacesForNaginata picks a sane starting point; the
+            operator can still re-tick "Award two joint 3rd places" after. */}
+        <CheckboxField label={LABEL_NAGINATA} checked={!!local.naginata} disabled={lockedAfterDraw} onChange={(on) => { update("naginata", on); update("twoThirdPlaces", twoThirdPlacesForNaginata(on)); }} hint={`${HINT_NAGINATA}${lockedNote}`} />
         <CheckboxField label={LABEL_CHECK_IN} checked={!!local.checkInEnabled} onChange={(on) => update("checkInEnabled", on)} hint={HINT_CHECK_IN} />
       </div>
       {/* Repeat Save at the foot of the long settings form so the operator

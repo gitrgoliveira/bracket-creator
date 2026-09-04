@@ -446,3 +446,78 @@ func TestCreateHandler_RetiredPlayoffsValueRejected(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	assert.Contains(t, response["error"], "Invalid tournament type")
 }
+
+// thirdPlaceMatchKnockoutForm builds the POST /create body for a knockout
+// competition using the CURRENT (bc-3rdp gap-closure) form field name, rather
+// than the legacy "naginata" alias.
+func thirdPlaceMatchKnockoutForm(playerList string) url.Values {
+	return url.Values{
+		"tournamentType":  {"knockout"},
+		"playerList":      {playerList},
+		"courts":          {"1"},
+		"teamMatches":     {"0"},
+		"determined":      {"on"},
+		"thirdPlaceMatch": {"on"},
+	}
+}
+
+// TestCreateHandler_ThirdPlaceMatchField_ThirdPlaceBlock is the direct
+// counterpart of TestCreateHandler_NaginataKnockout_ThirdPlaceBlock for the
+// new field name: POST /create with thirdPlaceMatch=on (no "naginata" field
+// at all) must still produce the "3rd Place" bronze block.
+func TestCreateHandler_ThirdPlaceMatchField_ThirdPlaceBlock(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+	f := postCreate(t, thirdPlaceMatchKnockoutForm(roster))
+
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	require.GreaterOrEqual(t, bctest.FindCellRow(rows, helper.ThirdPlaceLabel), 0,
+		"thirdPlaceMatch=on knockout with 4 players must have a '3rd Place' block on Elimination Matches")
+}
+
+// TestCreateHandler_LegacyNaginataField_SameResultAsThirdPlaceMatch is the
+// wire-compatibility guard (bc-3rdp gap closure): an older client that still
+// posts the legacy "naginata" field name, and a current client posting the
+// new "thirdPlaceMatch" name, must produce the identical bronze-block
+// decision. Neither form sends the other field.
+func TestCreateHandler_LegacyNaginataField_SameResultAsThirdPlaceMatch(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+
+	legacy := postCreate(t, naginataKnockoutForm(roster))
+	current := postCreate(t, thirdPlaceMatchKnockoutForm(roster))
+
+	legacyRows, err := legacy.GetRows("Elimination Matches")
+	require.NoError(t, err)
+	currentRows, err := current.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	legacyRow := bctest.FindCellRow(legacyRows, helper.ThirdPlaceLabel)
+	currentRow := bctest.FindCellRow(currentRows, helper.ThirdPlaceLabel)
+
+	require.GreaterOrEqual(t, legacyRow, 0, "legacy naginata=on must still produce a '3rd Place' block")
+	require.GreaterOrEqual(t, currentRow, 0, "thirdPlaceMatch=on must produce a '3rd Place' block")
+	assert.Equal(t, legacyRow, currentRow,
+		"the legacy naginata field and the current thirdPlaceMatch field must place the bronze block identically")
+}
+
+// TestCreateHandler_NeitherLegacyNorCurrentField_NoThirdPlaceBlock confirms
+// that with NEITHER form field present the bronze block stays absent (the
+// default this alias must not regress).
+func TestCreateHandler_NeitherLegacyNorCurrentField_NoThirdPlaceBlock(t *testing.T) {
+	const roster = "Alice, DA\nBob, DB\nCharlie, DC\nDave, DD"
+	v := url.Values{
+		"tournamentType": {"knockout"},
+		"playerList":     {roster},
+		"courts":         {"1"},
+		"teamMatches":    {"0"},
+		"determined":     {"on"},
+	}
+	f := postCreate(t, v)
+
+	rows, err := f.GetRows("Elimination Matches")
+	require.NoError(t, err)
+
+	require.Equal(t, -1, bctest.FindCellRow(rows, helper.ThirdPlaceLabel),
+		"a request with neither the legacy nor the current 3rd-place field must not produce a '3rd Place' block")
+}

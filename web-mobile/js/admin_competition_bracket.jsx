@@ -251,7 +251,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
         if (m && m.id === selected.matchId) return m;
       }
     }
-    // Also check the bronze/3rd-place match (naginata competitions).
+    // Also check the bronze/3rd-place match (any competition requiring a single 3rd; bc-3rdp).
     const bronze = bracket?.thirdPlaceMatch;
     if (bronze && bronze.id === selected.matchId) return bronze;
     return null;

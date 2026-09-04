@@ -334,14 +334,18 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// = Hidden or both-sides-empty in the web bracket).
 	assignBracketMatchNumbers(bracket)
 
-	// Bronze (3rd-place) knockout: naginata only, and only when a real semifinal
-	// round exists (len(Rounds) >= 2; a 2-player bracket has a single round and
-	// no semifinal, so no bronze). Modelled as a sibling field rather than a row
-	// in Rounds to preserve the power-of-two advancement geometry (see
-	// state.Bracket.ThirdPlaceMatch). Sides start empty and are filled from the
-	// two semifinal losers by propagateBracketWinner. DisplayRound -1 is a
-	// sentinel telling renderers to label this "3rd Place".
-	if helper.NeedsBronzeBlock(comp.Naginata, len(bracket.Rounds)) {
+	// Bronze (3rd-place) knockout: only when this competition's format
+	// requires a single 3rd place (comp.RequiresSingleThirdPlace, the
+	// generalised per-format rule -- see its and EffectiveTwoThirdPlaces's
+	// doc comments, bc-3rdp), and only when a real semifinal round exists
+	// (len(Rounds) >= 2; a 2-player bracket has a single round and no
+	// semifinal, so no bronze). Modelled
+	// as a sibling field rather than a row in Rounds to preserve the
+	// power-of-two advancement geometry (see state.Bracket.ThirdPlaceMatch).
+	// Sides start empty and are filled from the two semifinal losers by
+	// propagateBracketWinner. DisplayRound -1 is a sentinel telling
+	// renderers to label this "3rd Place".
+	if helper.NeedsBronzeBlock(comp.RequiresSingleThirdPlace(), len(bracket.Rounds)) {
 		// Default the bronze to the FINAL's court: the final and the 3rd-place
 		// knockout are conventionally run on the same shiaijo, so the bronze
 		// shows up in that court's queue out of the box. The final is the sole

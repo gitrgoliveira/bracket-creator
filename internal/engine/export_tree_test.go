@@ -416,7 +416,7 @@ func TestExportTournamentWorkbooks_MultiPageTree(t *testing.T) {
 	compID := startMixedComp(t, eng, store, "pdf-two-courts", []string{"A", "B"}, 4, 16)
 
 	tmpDir := t.TempDir()
-	sources, err := eng.ExportTournamentWorkbooks(tmpDir, compID)
+	sources, _, err := eng.ExportTournamentWorkbooks(tmpDir, compID)
 	require.NoError(t, err)
 	require.Len(t, sources, 1)
 

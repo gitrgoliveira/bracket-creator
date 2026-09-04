@@ -567,6 +567,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
         <ExportPdfModal
           tournament={t}
           password={password}
+          comps={comps}
           showToast={showToast}
           onClose={() => setExportPdfOpen(false)}
         />
@@ -644,18 +645,46 @@ const PDF_EXPORT_TYPES = [
   { type: "full-bracket", label: "Full bracket", hint: "Pools, matches and trees, page-numbered" },
 ];
 
+// skippedCompetitionNames resolves a parsed X-Skipped-Competitions list
+// ([{id, reason}, ...], see API.exportPDFs / parseSkippedCompetitionsHeader)
+// against `comps` (the tournament's competition list, in scope wherever this
+// modal is rendered) to get each skipped competition's DISPLAY NAME. The
+// header only ever carries the id (header values are latin-1 on the wire, so
+// a name with kanji/accents cannot ride it -- see the server's
+// skippedCompetitionsHeaderValue), so the id is a fallback only for a
+// competition this admin's `comps` doesn't know about, never the norm.
+function skippedCompetitionNames(skipped, comps) {
+  const byID = new Map((comps || []).map((c) => [c.id, c.name || c.id]));
+  return (skipped || []).map(({ id, reason }) => ({ id, reason, name: byID.get(id) || id }));
+}
+
 // ExportPdfModal lets an admin generate the print PDFs server-side (via
 // LibreOffice) and download them as a ZIP. Each row triggers one
 // POST /api/print/:type. Generation is slow (30–60s) so a per-row busy state
-// is shown; a 503 (LibreOffice absent) or 422 (no pages) surfaces as a toast.
-function ExportPdfModal({ tournament, password, onClose, showToast }) {
+// is shown; a 503 (LibreOffice absent) surfaces as a toast.
+//
+// The print endpoint SKIPS competitions it cannot export (Swiss, or a
+// bracket/settings mismatch) rather than aborting the whole booklet, and
+// reports them via the X-Skipped-Competitions response header (a partial
+// success) or, when EVERY competition was skipped, a 422 whose body carries
+// the same list. Both cases render a PERSISTENT warning inside the modal
+// (not just a toast, which disappears before the operator can read a list of
+// competition names) naming each skipped competition and why.
+function ExportPdfModal({ tournament, password, comps, onClose, showToast }) {
   const [busyType, setBusyType] = useStateA("");
+  // The most recent export attempt's skipped list, [] when nothing was
+  // skipped (or before any attempt). Replaced wholesale on every new
+  // download so the banner always reflects the LAST attempt, never a stale
+  // one from an earlier row.
+  const [skipped, setSkipped] = useStateA([]);
 
   const download = async (type) => {
     if (busyType) return;
     setBusyType(type);
+    setSkipped([]);
     try {
-      const blob = await window.API.exportPDFs(type, password);
+      const { blob, skipped: sk } = await window.API.exportPDFs(type, password);
+      setSkipped(sk);
       const dlUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = dlUrl;
@@ -672,12 +701,20 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
       setTimeout(() => { if (typeof window !== "undefined" && window.URL) window.URL.revokeObjectURL(dlUrl); }, 100);
       if (showToast) showToast("PDFs generated. Download started.");
     } catch (err) {
+      // The all-skipped 422 lands here (exportPDFs throws rather than
+      // returning a blob when the server refuses outright), and its
+      // `skipped` list is what the persistent banner below renders; every
+      // other failure (e.g. 503 LibreOffice-absent) carries an empty one, so
+      // the banner stays hidden and the toast is the only surface, unchanged.
+      setSkipped(err.skipped || []);
       if (showToast) showToast("PDF export failed: " + err.message, "error");
       else alert("PDF export failed: " + err.message);
     } finally {
       setBusyType("");
     }
   };
+
+  const skippedNamed = skippedCompetitionNames(skipped, comps);
 
   return (
     <Modal title="Export PDFs" onClose={onClose} dismissable={!busyType}
@@ -688,6 +725,16 @@ function ExportPdfModal({ tournament, password, onClose, showToast }) {
           Generates print-ready PDFs from the current tournament using LibreOffice.
           Each download is a ZIP. Generation can take up to a minute.
         </p>
+        {skippedNamed.length > 0 && (
+          <div className="alert alert--warn" data-testid="export-pdf-skipped-banner">
+            <strong>{skippedNamed.length === 1 ? "1 competition was" : `${skippedNamed.length} competitions were`} not included:</strong>
+            <ul style={{ margin: "6px 0 0", paddingInlineStart: 18 }}>
+              {skippedNamed.map(({ id, name, reason }) => (
+                <li key={id}><strong>{name}</strong>: {reason}</li>
+              ))}
+            </ul>
+          </div>
+        )}
         {PDF_EXPORT_TYPES.map(({ type, label, hint }) => (
           <div key={type} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid var(--line)" }}>
             <div>

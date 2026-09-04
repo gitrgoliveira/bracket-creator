@@ -1601,8 +1601,8 @@ func PrintBronzeBlockWithPrintArea(f *excelize.File, startRow, numTeamMatches in
 // includeBronze, the bronze (3rd-place) block immediately after the last
 // round, wiring its entrant slots to the semifinal losers. The bronze gate
 // stays with the caller because it is genuinely caller-specific (the CLI
-// derives it from the naginata flag and round count via NeedsBronzeBlock; the
-// exporters from the stored bracket's ThirdPlaceMatch).
+// derives it from its thirdPlaceMatch flag and round count via
+// NeedsBronzeBlock; the exporters from the stored bracket's ThirdPlaceMatch).
 func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchWinner, rounds [][]*Node, numTeamMatches int, plan CourtPlan, mirror, engi, includeBronze bool) {
 	// A shiaijo gets a band because a bout PRINTS under it. usedCourtBands folds
 	// in plan.Bronze unconditionally -- it has to, or a bronze moved to a
@@ -1611,8 +1611,8 @@ func PrintEliminationWithBronze(f *excelize.File, matchWinners map[string]MatchW
 	// not reach that fold. Otherwise a stored ThirdPlaceMatch on shiaijo D buys
 	// a "Shiaijo D" header, a page break and a print-area column with nothing
 	// underneath: the empty band PrintPoolMatches already refuses to produce.
-	// The bronze gate is the caller's (the CLI derives it from the naginata
-	// flag, the exporters from the stored bracket), but the plan carries the
+	// The bronze gate is the caller's (the CLI derives it from its
+	// thirdPlaceMatch flag, the exporters from the stored bracket), but the plan carries the
 	// court whether or not that gate passed, so the two facts are reconciled
 	// here once rather than at each call site.
 	if !includeBronze {

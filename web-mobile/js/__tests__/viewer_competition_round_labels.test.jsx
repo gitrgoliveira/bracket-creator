@@ -1,12 +1,14 @@
-// mp-u37s: the public competition page's own bracket-row stamping.
+// mp-u37s: the public competition page's bracket-row stamping.
 //
-// ViewerCompetition builds its OWN allMatches list (viewer_competition.jsx):
-// a second copy of the "flatten bracket.rounds and stamp round/phaseName" loop,
-// separate from viewer_utils.compMatches. compMatches is pinned by
-// bracket_round_label_agreement.test.jsx; this copy was not, yet the Overview
-// rows it feeds are the exact surface the round-label mismatch was reported on.
-// Reverting this file's window.bracketRoundLabel(...) call to
-// window.roundLabel(ri, …) left the whole suite green.
+// ViewerCompetition's allMatches (viewer_competition.jsx) is built by calling
+// the shared viewer_utils.compMatches (mp-dej2 collapsed a second hand-copied
+// "flatten bracket.rounds and stamp round/phaseName" loop onto it), which is
+// itself pinned by bracket_round_label_agreement.test.jsx. This file instead
+// pins the surface the round-label mismatch was originally reported on — the
+// Overview rows ViewerCompetition hands to ViewerOverview — so a future
+// regression on THIS component's wiring (not just compMatches in isolation)
+// still gets caught. Reverting this file's window.bracketRoundLabel(...) call
+// to window.roundLabel(ri, …) left the whole suite green.
 //
 // Separate file rather than an addition to viewer_competition_bye_results.jsx:
 // that file pins one specific regression (a structural bye must not appear as a

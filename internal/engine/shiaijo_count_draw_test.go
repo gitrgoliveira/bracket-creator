@@ -128,8 +128,7 @@ func TestDrawPipelineIgnoresShiaijoCountForNonBracketFormats(t *testing.T) {
 
 // TestCompetitionDrawsBracket pins which formats the rule binds. The unset
 // format matters: the draw pipeline's default branch builds a standalone
-// knockout bracket for it, so it must be in scope even though
-// state.Competition.IsKnockoutEnabled answers false for the same value.
+// knockout bracket for it, so it must be in scope.
 func TestCompetitionDrawsBracket(t *testing.T) {
 	t.Parallel()
 
@@ -150,10 +149,14 @@ func TestCompetitionDrawsBracket(t *testing.T) {
 		})
 	}
 
-	// The divergence from IsKnockoutEnabled is deliberate; pin it so a future
-	// "why are there two predicates?" cleanup has to read the reason first.
-	assert.False(t, (state.Competition{Format: ""}).IsKnockoutEnabled(),
-		"IsKnockoutEnabled is a UI-affordance predicate and excludes the unset format")
+	// mp-yuy8: IsKnockoutEnabled used to answer false for an unset format,
+	// diverging from CompetitionDrawsBracket -- a real gap (workbook.go's
+	// draw-mismatch guard silently rendered an empty Elimination Matches
+	// sheet instead of refusing it), not a deliberate design choice. It now
+	// goes through EffectiveFormat, which reads "" as knockout, matching the
+	// draw pipeline's own default branch and this predicate.
+	assert.True(t, (state.Competition{Format: ""}).IsKnockoutEnabled(),
+		"an unset format is standalone knockout, same as the draw pipeline treats it")
 	assert.True(t, CompetitionDrawsBracket(""),
 		"the draw pipeline still builds a bracket for an unset format")
 }

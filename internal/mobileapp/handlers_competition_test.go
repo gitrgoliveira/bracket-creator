@@ -1252,7 +1252,8 @@ func TestPUTCompetition_RetiredDurationKeyIsRefused(t *testing.T) {
 	}
 	require.NoError(t, store.SaveCompetition(&seed))
 
-	// The pre-rename bundle's body: it never names the current key.
+	// The pre-rename bundle's body: it never names the current key. The literal
+	// below is the POINT of the test -- do not "fix" it to the current spelling.
 	body := []byte(`{"id":"stale-tab","name":"Stale Tab","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"playoffMatchDurationSeconds":240}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/stale-tab", bytes.NewBuffer(body))
@@ -2744,10 +2745,17 @@ func TestPUTCompetition_LeaguePoolConfigNormalized(t *testing.T) {
 }
 
 // TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart verifies that the
-// league tie-breaker knobs (leagueTiebreakTopN / leagueTwoThirdPlaces) can be
-// changed before the competition starts but are rejected (400) once it has
-// progressed past setup, changing them mid-league would alter the
-// consequential-tie set and which ties already-played tie-breakers resolve.
+// league tie-breaker knob (leagueTiebreakTopN) can be changed before the
+// competition starts but is rejected (400) once it has progressed past
+// setup, changing it mid-league would alter the consequential-tie set and
+// which ties already-played tie-breakers resolve.
+//
+// twoThirdPlaces (bc-3rdp) is locked the same way, via its own guard right
+// next to this one in the handler; leagueTwoThirdPlaces itself is legacy
+// read-only (never written by this PUT any more, superseded by
+// twoThirdPlaces), so this test sends and asserts on twoThirdPlaces, not the
+// legacy field. See TestPUTCompetition_TwoThirdPlacesImmutableAfterStart for
+// the dedicated pre/post-start coverage of that field alone.
 func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -2762,9 +2770,10 @@ func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
 		Status:             state.CompStatusSetup,
 		LeagueTiebreakTopN: 3,
 	}))
+	twoThirdPlacesOn := true
 	body, _ := json.Marshal(state.Competition{
 		ID: "lp-setup", Name: "LP Setup", Format: state.CompFormatLeague,
-		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: true,
+		Kind: "team", TeamSize: 5, LeagueTiebreakTopN: 4, TwoThirdPlaces: &twoThirdPlacesOn,
 	})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/lp-setup", bytes.NewBuffer(body))
@@ -2774,7 +2783,9 @@ func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
 	stored, err := store.LoadCompetition("lp-setup")
 	require.NoError(t, err)
 	assert.Equal(t, 4, stored.LeagueTiebreakTopN, "pre-start change must persist")
-	assert.True(t, stored.LeagueTwoThirdPlaces)
+	require.NotNil(t, stored.TwoThirdPlaces)
+	assert.True(t, *stored.TwoThirdPlaces)
+	assert.False(t, stored.LeagueTwoThirdPlaces, "legacy field is never written by this PUT any more")
 
 	// Started (pools): a change is rejected with 400, on-disk value unchanged.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -2798,6 +2809,66 @@ func TestPUTCompetition_LeagueTiebreakConfigImmutableAfterStart(t *testing.T) {
 	stored, err = store.LoadCompetition("lp-started")
 	require.NoError(t, err)
 	assert.Equal(t, 3, stored.LeagueTiebreakTopN, "started league config must be unchanged")
+}
+
+// TestPUTCompetition_TwoThirdPlacesImmutableAfterStart (bc-3rdp) verifies
+// twoThirdPlaces can be changed before the competition starts but is
+// rejected (400) once it has progressed past setup, mirroring the sibling
+// Naginata/LeagueTiebreakTopN guards: the bronze match is built at draw
+// time, so flipping the rule afterward would add or remove a bronze match
+// while results may already be in flight.
+func TestPUTCompetition_TwoThirdPlacesImmutableAfterStart(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	trueVal := true
+	falseVal := false
+
+	// Pre-start (setup): a change is accepted.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:             "tp-setup",
+		Name:           "TP Setup",
+		Format:         state.CompFormatKnockout,
+		Kind:           "individual",
+		Status:         state.CompStatusSetup,
+		TwoThirdPlaces: &trueVal,
+	}))
+	body, _ := json.Marshal(state.Competition{
+		ID: "tp-setup", Name: "TP Setup", Format: state.CompFormatKnockout,
+		Kind: "individual", TwoThirdPlaces: &falseVal,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/tp-setup", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	stored, err := store.LoadCompetition("tp-setup")
+	require.NoError(t, err)
+	require.NotNil(t, stored.TwoThirdPlaces)
+	assert.False(t, *stored.TwoThirdPlaces, "pre-start change must persist")
+
+	// Started (pools): a change is rejected with 400, on-disk value unchanged.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:             "tp-started",
+		Name:           "TP Started",
+		Format:         state.CompFormatKnockout,
+		Kind:           "individual",
+		Status:         state.CompStatusPools,
+		TwoThirdPlaces: &trueVal,
+	}))
+	body, _ = json.Marshal(state.Competition{
+		ID: "tp-started", Name: "TP Started", Format: state.CompFormatKnockout,
+		Kind: "individual", TwoThirdPlaces: &falseVal,
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("PUT", "/api/competitions/tp-started", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	stored, err = store.LoadCompetition("tp-started")
+	require.NoError(t, err)
+	require.NotNil(t, stored.TwoThirdPlaces)
+	assert.True(t, *stored.TwoThirdPlaces, "started competition's twoThirdPlaces must be unchanged")
 }
 
 // TestPUTCompetition_MixedPoolConfigPreserved verifies that a mixed

@@ -12,7 +12,7 @@ import {
   LABEL_POOL_DURATION, HINT_POOL_DURATION, poolDurationLabel, poolDurationHint,
   LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
   poolDurationVisible, knockoutDurationVisible,
-  LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible,
+  LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible, effectiveTwoThirdPlaces,
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat,
   normalizeConfigForKind, DEFAULT_TEAM_SIZE, MIN_TEAM_SIZE, LABEL_TEAM_SIZE,
@@ -273,20 +273,48 @@ describe('per-phase match duration', () => {
   });
 });
 
-describe('two-thirds-places (league joint bronze)', () => {
+describe('two-thirds-places (joint bronze, bc-3rdp)', () => {
   it('copy matches verbatim between admin_setup.jsx and admin_competition_settings.jsx (no drift found)', () => {
     expect(LABEL_TWO_THIRD_PLACES).toBe('Award two joint 3rd places');
-    expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, competitors genuinely tied for 3rd share bronze (standard kendo convention). Leave off for naginata, which awards a single 3rd place.');
+    expect(HINT_TWO_THIRD_PLACES).toBe('When enabled, two beaten semi-finalists share 3rd place and no bronze match is played (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a bronze match, and a league awards one 3rd rather than a shared rank.');
   });
 
   // Gated on format alone (not kind): an individual league can still award
-  // joint bronze under the kendo convention.
+  // joint bronze under the kendo convention. Visible for every format that
+  // can produce a 3rd place at all; hidden only for Swiss (no bracket, no
+  // bronze match to suppress).
   const table = [];
   for (const format of ALL_FORMATS) {
-    table.push([format, format === FORMAT_LEAGUE]);
+    table.push([format, format !== FORMAT_SWISS]);
   }
   it.each(table)('twoThirdPlacesVisible(%j) -> %j', (format, expected) => {
     expect(twoThirdPlacesVisible(format)).toBe(expected);
+  });
+
+  // effectiveTwoThirdPlaces mirrors state.Competition.EffectiveTwoThirdPlaces
+  // (Go), pinned here with the same four behaviour-preservation cases plus
+  // the trap case bc-3rdp names, so the JS and Go resolvers cannot drift.
+  describe('effectiveTwoThirdPlaces (Go mirror)', () => {
+    it('naginata knockout resolves to false (single 3rd, bronze match)', () => {
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: true })).toBe(false);
+    });
+    it('non-naginata knockout resolves to true (joint 3rd, no bronze match)', () => {
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: false })).toBe(true);
+    });
+    it('league with the legacy flag on resolves to true', () => {
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_LEAGUE, leagueTwoThirdPlaces: true })).toBe(true);
+    });
+    it('league with the legacy flag off resolves to false', () => {
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_LEAGUE, leagueTwoThirdPlaces: false })).toBe(false);
+    });
+    it('trap case: a non-naginata knockout ignores a stray legacy leagueTwoThirdPlaces value', () => {
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: false, leagueTwoThirdPlaces: false })).toBe(true);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: false, leagueTwoThirdPlaces: true })).toBe(true);
+    });
+    it('an explicit twoThirdPlaces always wins over both legacy fallbacks', () => {
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: true, twoThirdPlaces: true })).toBe(true);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_LEAGUE, leagueTwoThirdPlaces: true, twoThirdPlaces: false })).toBe(false);
+    });
   });
 });
 

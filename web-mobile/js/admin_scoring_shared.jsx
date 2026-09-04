@@ -686,7 +686,14 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       try {
         const detail = await window.API.fetchCompetitionDetails(compID);
         if (cancelled) return;
-        const all = window.compMatches ? window.compMatches(detail) : [];
+        // compMatchesForCompetition, NOT compMatches(detail): the detail
+        // response keeps the competition's identity under `config` and its
+        // match data as siblings, and compMatches needs one object with both.
+        // Passing `detail` straight in returned [] on every format, so this
+        // panel listed no matches to award after a kiken (mp-dej2).
+        const all = window.compMatchesForCompetition
+          ? window.compMatchesForCompetition(detail.config || detail, detail)
+          : [];
         const wname = (withdrawnPlayer?.name || "").trim();
         const wid = withdrawnPlayer?.id || "";
         const matchesForPlayer = all.filter(m => {
@@ -773,7 +780,14 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
                 <div>
                   <span style={{ fontWeight: 600 }}>{opponent?.name || "?"}</span>
                   <span style={{ color: "var(--ink-3)", marginLeft: 6 }}>
-                    {m.phase === "pool" ? m.poolName : m.round}{m.court ? ` · Shiaijo ${m.court}` : ""}{m.scheduledAt ? ` · ${m.scheduledAt}` : ""}
+                    {/* window.poolLabel, not a raw m.poolName: these rows come
+                        straight off window.compMatches, so a Swiss match carries
+                        the synthetic "Swiss-R1" engine name and a league match
+                        carries a pool name it does not have. poolLabel is the one
+                        owner of that translation (mp-dej2); the sibling panels in
+                        admin_schedule_page / admin_scoring_engi / admin_scoring_team
+                        already use it. */}
+                    {m.phase === "pool" ? window.poolLabel(m) : m.round}{m.court ? ` · Shiaijo ${m.court}` : ""}{m.scheduledAt ? ` · ${m.scheduledAt}` : ""}
                   </span>
                 </div>
                 <button type="button"

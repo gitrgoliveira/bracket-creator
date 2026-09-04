@@ -87,7 +87,7 @@ describe('ExportPdfModal', () => {
     window.URL.createObjectURL = vi.fn(() => 'blob:mock');
     window.URL.revokeObjectURL = vi.fn();
     window.API = {
-      exportPDFs: vi.fn().mockResolvedValue(new Blob([], { type: 'application/zip' })),
+      exportPDFs: vi.fn().mockResolvedValue({ blob: new Blob([], { type: 'application/zip' }), skipped: [] }),
     };
   });
 
@@ -127,7 +127,7 @@ describe('ExportPdfModal', () => {
   });
 
   it('calls API.exportPDFs with the correct type and password', async () => {
-    const exportPDFs = vi.fn().mockResolvedValue(new Blob([], { type: 'application/zip' }));
+    const exportPDFs = vi.fn().mockResolvedValue({ blob: new Blob([], { type: 'application/zip' }), skipped: [] });
     window.API = { exportPDFs };
     const password = 'secret';
     const vnode = window.ExportPdfModal({
@@ -141,7 +141,7 @@ describe('ExportPdfModal', () => {
   });
 
   it('sets a stable download filename from tournament name and type', async () => {
-    const exportPDFs = vi.fn().mockResolvedValue(new Blob([], { type: 'application/zip' }));
+    const exportPDFs = vi.fn().mockResolvedValue({ blob: new Blob([], { type: 'application/zip' }), skipped: [] });
     window.API = { exportPDFs };
     const appendSpy = vi.spyOn(document.body, 'appendChild').mockImplementation(() => {});
     const vnode = window.ExportPdfModal({

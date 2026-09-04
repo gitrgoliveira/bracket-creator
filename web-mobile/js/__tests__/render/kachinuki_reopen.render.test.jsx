@@ -33,6 +33,10 @@ const STUBBED_GLOBALS = {
   API: {},
   AdminLineupHelpers: { rosterFor: vi.fn().mockReturnValue([]) },
   compMatches: () => [],
+  // The conflict panel resolves the blocker through compMatchesForCompetition
+  // (viewer_utils.jsx), which recombines the split detail payload. Stub both
+  // seams so this test pins the PANEL's behaviour, not which helper it picks.
+  compMatchesForCompetition: () => [],
   Term: ({ children }) => <span>{children}</span>,
   GlossaryHint: ({ name }) => <span title={name} />,
 };
@@ -58,6 +62,7 @@ afterAll(() => {
 
 beforeEach(() => {
   window.compMatches = () => [];
+  window.compMatchesForCompetition = () => [];
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1',
@@ -242,9 +247,11 @@ describe('kachinuki reopen: a busy court gets a remedy, not a dead end', () => {
   beforeEach(() => {
     // The blocking match, so the panel can name the competitors the operator
     // is about to wipe a score from.
-    window.compMatches = () => [
+    const blocking = [
       { id: 'm-r1-1', sideA: { name: 'Team C' }, sideB: { name: 'Team D' } },
     ];
+    window.compMatches = () => blocking;
+    window.compMatchesForCompetition = () => blocking;
   });
 
   it('names the blocking match and states the destructive consequence before the action', async () => {

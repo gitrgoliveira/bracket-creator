@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,7 +97,10 @@ func TestSwissRoundsFieldPersists(t *testing.T) {
 
 // TestLeagueFormatHidesKnockout verifies FR-050 / FR-051:
 // IsKnockoutEnabled() reports whether the competition's format includes a
-// knockout phase. League returns false; knockout and mixed return true.
+// knockout phase. League returns false; knockout and mixed return true. An
+// unset format ("") also returns true (mp-yuy8): it goes through
+// EffectiveFormat, which reads "" as standalone knockout, matching the draw
+// pipeline's own default-case generation behaviour.
 func TestLeagueFormatHidesKnockout(t *testing.T) {
 	cases := []struct {
 		format string
@@ -105,12 +109,38 @@ func TestLeagueFormatHidesKnockout(t *testing.T) {
 		{format: "league", want: false},
 		{format: "knockout", want: true},
 		{format: "mixed", want: true},
+		{format: "", want: true},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.format, func(t *testing.T) {
+		t.Run(fmt.Sprintf("format=%q", tc.format), func(t *testing.T) {
 			c := Competition{Format: tc.format}
 			assert.Equalf(t, tc.want, c.IsKnockoutEnabled(), "format=%q", tc.format)
+		})
+	}
+}
+
+// TestCompetition_EffectiveFormat pins EffectiveFormat's single rule: an
+// unset Format ("") reads as standalone knockout, matching what
+// runDrawPipeline's generation switch has always done for it; every other
+// stored value (including an invalid one -- EffectiveFormat does not
+// validate) passes through unchanged.
+func TestCompetition_EffectiveFormat(t *testing.T) {
+	cases := []struct {
+		format string
+		want   string
+	}{
+		{format: "", want: CompFormatKnockout},
+		{format: CompFormatKnockout, want: CompFormatKnockout},
+		{format: CompFormatMixed, want: CompFormatMixed},
+		{format: CompFormatLeague, want: CompFormatLeague},
+		{format: CompFormatSwiss, want: CompFormatSwiss},
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("format=%q", tc.format), func(t *testing.T) {
+			c := Competition{Format: tc.format}
+			assert.Equal(t, tc.want, c.EffectiveFormat())
 		})
 	}
 }

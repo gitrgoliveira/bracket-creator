@@ -176,7 +176,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // scored bracket otherwise sits in "pools"/"knockout" forever and the
   // public viewer's Awards tab (gated on status === "completed") never
   // becomes reachable. Only rendered (see canComplete below) once every real
-  // bracket match, including a naginata bronze/3rd-place match, is done.
+  // bracket match, including a single-3rd bronze match, is done.
   const completeCompetition = async () => {
     if (!(await window.confirmDialog({
       message: `Mark "${c.name}" as completed? This finalizes the results and reveals the Awards podium on the public viewer. There is no "reopen" action from here.`,
@@ -251,7 +251,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   const navBusy = generating || starting || discarding || completing;
   // canComplete: show "Complete competition" only once the competition is
   // actually running (not setup/draw-ready/completed/invalid) AND its
-  // bracket exists with every real match, including the naginata bronze
+  // bracket exists with every real match, including the single-3rd bronze
   // match, done. See bracketFullyComplete (admin_helpers.jsx) for why this
   // can't reuse compMatchStats' total/done counters. League and pure-pools
   // formats never produce a `bracket`, so this is false for them without a

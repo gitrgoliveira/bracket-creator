@@ -1,8 +1,11 @@
 // Unit tests for admin_schedule_export.jsx: buildXlsxBody pure-logic helper.
 //
 // Purpose: verify that the POST /create body is built correctly for engi and
-// naginata competitions (mp-wvba gap closure). Imports buildXlsxBody directly
-// so no component mounting or fetch mocking is required.
+// naginata competitions (mp-wvba gap closure), and that the 3rd-place field
+// it sends (thirdPlaceMatch, bc-3rdp gap closure) follows
+// effectiveTwoThirdPlaces rather than the raw naginata flag. Imports
+// buildXlsxBody directly so no component mounting or fetch mocking is
+// required.
 
 import { describe, it, expect } from 'vitest';
 import { buildXlsxBody } from '../admin_schedule_export.jsx';
@@ -48,21 +51,23 @@ describe('buildXlsxBody engi roster lines', () => {
     expect(body.get('withZekkenName')).toBeNull();
   });
 
-  it('does NOT send naginata when cfg.naginata is absent', () => {
+  it('does NOT send thirdPlaceMatch when cfg.naginata is absent (kendo default: joint 3rds)', () => {
     const body = buildXlsxBody(engiCfg, 'Test', pairs);
-    expect(body.get('naginata')).toBeNull();
+    expect(body.get('thirdPlaceMatch')).toBeNull();
   });
 });
 
-// ── naginata: 3rd-place param ─────────────────────────────────────────────────
+// ── thirdPlaceMatch: 3rd-place param, driven by effectiveTwoThirdPlaces ──────
+//
+// bc-3rdp gap closure: the exported blank workbook must carry a bronze
+// (3rd-place) match exactly when the competition does NOT award joint 3rd
+// places (RequiresSingleThirdPlace, the negation of effectiveTwoThirdPlaces),
+// not merely when cfg.naginata happens to be true. The two cross cases below
+// are the whole point: a NON-naginata competition that opted into a single
+// 3rd must still get the block, and a NAGINATA competition that opted INTO
+// joint 3rds must NOT get it.
 
-describe('buildXlsxBody naginata param', () => {
-  const nagCfg = {
-    format: 'knockout',
-    naginata: true,
-    courts: ['A'],
-  };
-
+describe('buildXlsxBody thirdPlaceMatch param', () => {
   const four = [
     player('Alice', 'DA'),
     player('Bob', 'DB'),
@@ -70,13 +75,34 @@ describe('buildXlsxBody naginata param', () => {
     player('Dave', 'DD'),
   ];
 
-  it('sends naginata=on in the POST body when cfg.naginata is true', () => {
-    const body = buildXlsxBody(nagCfg, 'Test', four);
-    expect(body.get('naginata')).toBe('on');
+  it('sends thirdPlaceMatch=on for a naginata competition with no explicit twoThirdPlaces (legacy fallback: !naginata)', () => {
+    const body = buildXlsxBody({ format: 'knockout', naginata: true, courts: ['A'] }, 'Test', four);
+    expect(body.get('thirdPlaceMatch')).toBe('on');
   });
 
-  it('does NOT send naginata when cfg.naginata is absent', () => {
+  it('does NOT send thirdPlaceMatch for a non-naginata competition with no explicit twoThirdPlaces (kendo default: joint 3rds)', () => {
     const body = buildXlsxBody({ format: 'knockout', courts: ['A'] }, 'Test', four);
+    expect(body.get('thirdPlaceMatch')).toBeNull();
+  });
+
+  // Cross case 1: a NON-naginata competition that explicitly opted into a
+  // single 3rd place (twoThirdPlaces: false) must still get the bronze
+  // block. The old cfg.naginata check would have missed this entirely.
+  it('sends thirdPlaceMatch=on for a NON-naginata competition that opted into a single 3rd place', () => {
+    const body = buildXlsxBody({ format: 'knockout', naginata: false, twoThirdPlaces: false, courts: ['A'] }, 'Test', four);
+    expect(body.get('thirdPlaceMatch')).toBe('on');
+  });
+
+  // Cross case 2: a NAGINATA competition that explicitly opted INTO joint
+  // 3rd places (twoThirdPlaces: true) must NOT get the bronze block. The old
+  // cfg.naginata check would have wrongly sent it.
+  it('does NOT send thirdPlaceMatch for a NAGINATA competition that opted into joint 3rd places', () => {
+    const body = buildXlsxBody({ format: 'knockout', naginata: true, twoThirdPlaces: true, courts: ['A'] }, 'Test', four);
+    expect(body.get('thirdPlaceMatch')).toBeNull();
+  });
+
+  it('never sends the legacy naginata field', () => {
+    const body = buildXlsxBody({ format: 'knockout', naginata: true, courts: ['A'] }, 'Test', four);
     expect(body.get('naginata')).toBeNull();
   });
 });

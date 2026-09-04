@@ -185,3 +185,32 @@ describe('gatherIndividualGroup; the rows under the heading are that round (mp-u
     expect(rows.map((m) => m.id)).toEqual(['m-r2-1', 'm-r1-0']); // completed first, current last
   });
 });
+
+// mp-dej2: the TV board and lobby translate the synthetic Swiss pool name
+// ("Swiss-R1") to "Round 1" instead of leaking it to spectators. The cases
+// that matter are the ones the DISPLAY surfaces actually produce: they build
+// their rows straight off c.poolMatches, whose wire shape (state.MatchResult)
+// carries no poolName/phaseName, so the id is the only carrier of the round.
+// A swiss branch that reads only phaseName/poolName returns "" here and blanks
+// the phase strip, which is worse than the leak it replaced.
+describe('phaseLabel; Swiss rounds read as "Round N" on the display surfaces (mp-dej2)', () => {
+  it('derives the round from the id alone, as the board payload provides it', () => {
+    expect(phaseLabel({ id: 'Swiss-R1-0' }, false, undefined, undefined, 'swiss')).toBe('Round 1');
+    expect(phaseLabel({ id: 'Swiss-R12-3' }, false, undefined, undefined, 'swiss')).toBe('Round 12');
+  });
+
+  it('prefers a stamped phaseName/poolName when a caller did enrich the row', () => {
+    expect(phaseLabel({ id: 'Swiss-R2-0', phaseName: 'Swiss-R2' }, false, undefined, undefined, 'swiss')).toBe('Round 2');
+    expect(phaseLabel({ id: 'Swiss-R2-0', poolName: 'Swiss-R2' }, false, undefined, undefined, 'swiss')).toBe('Round 2');
+  });
+
+  it('never renders an empty phase for a Swiss match', () => {
+    expect(phaseLabel({ id: 'Swiss-R1-0' }, false, undefined, undefined, 'swiss')).not.toBe('');
+  });
+
+  it('leaves a non-Swiss-shaped name alone rather than blanking it', () => {
+    // swissRoundLabel returns its input unchanged; the format flag alone must
+    // not swallow a label it cannot parse.
+    expect(phaseLabel({ id: 'Pool A-0', poolName: 'Pool A' }, false, undefined, undefined, 'swiss')).toBe('Pool A');
+  });
+});

@@ -409,10 +409,22 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     }
 
     if (isDrawReady) {
-      const drawSizeVal = c.format === "knockout" || (!poolCount && bracketRounds)
-        ? (bracketRounds ? `${Math.pow(2, bracketRounds - 1) * 2} max` : "n/a")
-        : (poolCount ? `${poolCount} pool${poolCount !== 1 ? "s" : ""}` : "n/a");
-      const drawSizeLabel = c.format === "knockout" ? "Bracket size" : c.format === "league" ? "League" : "Pools";
+      // Swiss has no pools at all (it borrows the pool pipeline but never
+      // writes pools.csv), so poolCount and bracketRounds are both null and the
+      // generic branches below would render "n/a" under a "Pools" heading. Its
+      // draw size is the round count the operator configured. Same "Swiss is
+      // not pools" boundary as StatusBadge and leagueAwareLabel (mp-dej2).
+      const isSwissDraw = c.format === "swiss";
+      const swissRoundCount = Number(c.swissRounds) || 0;
+      const drawSizeVal = isSwissDraw
+        ? (swissRoundCount ? `${swissRoundCount} round${swissRoundCount !== 1 ? "s" : ""}` : "n/a")
+        : (c.format === "knockout" || (!poolCount && bracketRounds)
+          ? (bracketRounds ? `${Math.pow(2, bracketRounds - 1) * 2} max` : "n/a")
+          : (poolCount ? `${poolCount} pool${poolCount !== 1 ? "s" : ""}` : "n/a"));
+      const drawSizeLabel = c.format === "knockout" ? "Bracket size"
+        : c.format === "league" ? "League"
+        : isSwissDraw ? "Swiss"
+        : "Pools";
       return (
         <div className="stats-strip">
           <div className="stat-box">

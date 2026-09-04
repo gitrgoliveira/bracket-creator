@@ -466,7 +466,11 @@ describe('AdminSettings.saveNow payload whitelist', () => {
     // team-league competitions; safe to include for all formats because
     // the backend PUT allowlist ignores unknown fields.
     'leagueTiebreakTopN',
-    'leagueTwoThirdPlaces',
+    // bc-3rdp: joint-3rd-place rule, generalised from leagueTwoThirdPlaces
+    // (now legacy read-only, see FORBIDDEN below) to every format that can
+    // award a 3rd place. Round-tripped for the same zero-value-clobber
+    // reason as naginata/mirror above.
+    'twoThirdPlaces',
     // Round-tripped (no UI control) to avoid clobbering a kachinuki
     // competition's value to "" on a settings save.
     'teamMatchType',
@@ -487,7 +491,10 @@ describe('AdminSettings.saveNow payload whitelist', () => {
   // only checks finalNext's keys are a SUBSET of ALLOWED, so a stale entry
   // there would let the regression pass unnoticed.
   const FORBIDDEN = ['status', 'players', 'hasParticipantIDs', 'poolMatches', 'pools', 'bracket', 'schedule',
-    'poolMatchDuration', 'knockoutMatchDuration', 'matchDuration'];
+    'poolMatchDuration', 'knockoutMatchDuration', 'playoffMatchDuration', 'matchDuration',
+    // bc-3rdp: leagueTwoThirdPlaces is legacy read-only (superseded by
+    // twoThirdPlaces above); this PUT must never write it again.
+    'leagueTwoThirdPlaces'];
 
   it('finalNext contains only allowlisted settings keys', () => {
     const src = readFileSync(

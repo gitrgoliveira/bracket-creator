@@ -28,6 +28,12 @@ import (
 // For knockout-only competitions (format == "knockout") the engine assigns
 // numbers in-memory but has no pools.csv to persist them. In that case assign
 // numbers sequentially (1-N in participant order), matching generateKnockout.
+//
+// format must be the competition's EFFECTIVE format (comp.EffectiveFormat()),
+// not comp.Format directly: an unset Format ("") is standalone knockout too
+// (generation's default case falls to generateKnockout for it identically),
+// so a caller passing the raw stored value would silently skip number
+// assignment for those entrants.
 func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
 	if numberPrefix == "" || len(players) == 0 {
 		return
@@ -79,7 +85,9 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.Format)
+	// comp.EffectiveFormat(): an unset Format ("") is standalone knockout too,
+	// see mergePoolNumbersIntoPlayersSlice's doc comment.
+	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.EffectiveFormat())
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the

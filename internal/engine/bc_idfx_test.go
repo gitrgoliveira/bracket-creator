@@ -705,3 +705,79 @@ func TestApplyPoolWrite_ForwardPolicyStillRejectsWinnerIDMismatch(t *testing.T) 
 	_, _, err := applyPoolWrite(stored, forward, matchWriteForward)
 	require.Error(t, err, "a client forward write naming an unattributable winnerId must still be rejected")
 }
+
+// TestCompletedPoolNames_CorruptOverrides_PropagatesError is finding 5 from
+// the round-2 review: knockout.go's completedPoolNames LoadOverrides
+// propagation had no dedicated regression test (reverting it stayed green).
+// A team competition's completedPoolNames unconditionally consults overrides
+// (to gate a pool whose daihyosen cycle isn't yet broken), and a corrupt
+// overrides.json there must surface as an error, not silently read as "no
+// overrides" and let a cyclic pool falsely read as complete.
+func TestCompletedPoolNames_CorruptOverrides_PropagatesError(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "completed-pool-corrupt-overrides"
+	// Engi=true so CalculatePoolStandings (called by InjectPoolDaihyosenMatches
+	// and directly below) dispatches to computeEngiStandings, which never
+	// touches overrides.json -- isolating THIS function's own LoadOverrides
+	// call from the one computeStandingsFrom already propagates (fixed and
+	// pinned separately), so a revert of THIS site alone is what turns this
+	// test red.
+	comp := &state.Competition{
+		ID: compID, Name: "Corrupt Overrides Team", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
+		Engi: true,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "TeamA", Dojo: "DojoA"}, {Name: "TeamB", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
+	}))
+
+	corruptOverridesFile(t, store, compID)
+
+	_, err := eng.completedPoolNames(compID, comp)
+	assert.Error(t, err, "a corrupt overrides.json must surface as an error from completedPoolNames, not be silently dropped")
+}
+
+// TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError is finding 5's
+// second site: competition.go's MaybeAutoCompletePools LoadOverrides
+// propagation, reached once a team competition's regular matches are all
+// complete and at least one pool daihyosen bout has been scored (the
+// dhCycleExists guard consults overrides to honour any already-recorded
+// chusen). Team-LEAGUE format is used because MIXED short-circuits to
+// advanceMixedPools before this code, and because LeagueTiebreakCandidates
+// (checked first for a team league) reports no candidates here -- the
+// regular match is a clean win, not a tie -- so execution falls through to
+// the target LoadOverrides call rather than returning early.
+func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "auto-complete-corrupt-overrides"
+	// Engi=true for the same isolation reason as TestCompletedPoolNames_CorruptOverrides_PropagatesError:
+	// CalculatePoolStandings (called by LeagueTiebreakCandidates and directly
+	// below) dispatches to computeEngiStandings, which never touches
+	// overrides.json, so only THIS function's own LoadOverrides call can turn
+	// this test red on a revert.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Corrupt Overrides Auto Complete", Format: state.CompFormatLeague,
+		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
+		Engi: true,
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "TeamA", Dojo: "DojoA"}, {Name: "TeamB", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-DH-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
+	}))
+
+	corruptOverridesFile(t, store, compID)
+
+	_, err := eng.MaybeAutoCompletePools(compID)
+	assert.Error(t, err, "a corrupt overrides.json must surface as an error from MaybeAutoCompletePools, not be silently dropped")
+}

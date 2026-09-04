@@ -1515,7 +1515,11 @@ paths:
     put:
       tags: [competitions]
       summary: Override pool rank
-      description: Manually set a player's rank within a pool, overriding the computed value.
+      description: >
+        Manually set a player's rank within a pool, overriding the computed
+        value. Used, among other callers, by the chusen (drawing-lots)
+        resolver (see `GET .../chusen-candidates`) to record a team's
+        finishing position once the operator has drawn lots.
       security:
         - TournamentPassword: []
       parameters:
@@ -1536,11 +1540,93 @@ paths:
                 playerName:
                   type: string
                   maxLength: 100
+                playerId:
+                  type: string
+                  description: >
+                    Optional. Pins the override to one competitor's stable id
+                    instead of resolving by name alone, so two pool members
+                    who share a display name from different dojos (competitor
+                    identity is (name, dojo), never bare name) can each be
+                    overridden individually. An older client that only ever
+                    sends playerName still works whenever the name is unique
+                    within this pool.
+                playerDojo:
+                  type: string
+                  description: >
+                    Optional. Narrows the playerName match to one dojo when
+                    playerId is not supplied and the name collides with
+                    another pool member's.
                 rank:
                   type: integer
+                  description: >
+                    1-based finishing rank within the pool; rejected if it
+                    exceeds the pool's player count.
       responses:
         '200':
           description: Rank override saved.
+        '400':
+          description: >
+            playerName is missing, blank, or exceeds the length cap; rank is
+            not a positive integer, exceeds the pool's player count, or
+            exceeds the absolute override cap; or playerName/playerId/
+            playerDojo could not be resolved to exactly one competitor in
+            this pool (e.g. two same-name, different-dojo members and no
+            playerId/playerDojo to tell them apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >
+            Competition not found, or poolId does not name a pool in this
+            competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Rank overrides are only accepted while the competition is in the pools stage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/chusen-candidates:
+    get:
+      tags: [competitions]
+      summary: List consequential team-pool ties needing chusen (drawing lots)
+      description: >
+        Returns the team-pool ties that the daihyosen (representative bout)
+        left undetermined; a true win/loss cycle, an all-drawn round, or any
+        other partial tie on daihyosen wins; and that therefore need the
+        operator to draw lots and record each team's finishing position via
+        `PUT .../pools/{poolId}/override-rank`. Only consequential ties (ones
+        that affect advancement/seeding) are returned. Admin-gated, unlike
+        the public league-tiebreak candidates endpoint. Empty (not an error)
+        for a non-team competition, a competition not in the pools stage, or
+        when no group currently needs chusen.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Still-tied groups needing an operator lots-draw.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChusenCandidateGroup'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Participants & Seeds (Admin, requires auth) ────────────────────────────
 
@@ -4955,6 +5041,54 @@ components:
           description: Per-court breakdown; reflects the average scenario.
         ceremonyMinutes:
           type: integer
+
+    ChusenCandidateGroup:
+      type: object
+      description: >
+        One consequential team-pool tie that the daihyosen (representative
+        bout) could not settle, so the operator must draw lots (chusen) and
+        record the finishing order via `PUT .../pools/{poolId}/override-rank`.
+      properties:
+        poolName:
+          type: string
+          description: Name of the pool this tied group belongs to.
+        teamNames:
+          type: array
+          description: >
+            Names of the still-tied teams, in current standings order. Kept
+            for older clients; teamNames[i] and teams[i] describe the same
+            team.
+          items:
+            type: string
+        teams:
+          type: array
+          description: >
+            Full identity of each still-tied team, positionally parallel to
+            teamNames. Present so the client can call
+            `PUT .../override-rank` with playerId (falling back to
+            playerDojo) rather than a bare name, which disambiguates two
+            teams that share a display name from different dojos (team names
+            are supposed to be unique even across dojos, but one documented
+            enforcement hole in that check can still let a collision reach
+            disk).
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                description: >
+                  Always present. The competitor's stable UUID, or "" (empty
+                  string, not omitted/null) for a competitor with no UUID
+                  (a legacy or mixed roster). A client must not treat "" as
+                  absent: fall back to the name/dojo pair for that entry
+                  specifically, rather than to id being unset in general.
+              name:
+                type: string
+              dojo:
+                type: string
+        minPosition:
+          type: integer
+          description: 1-based finishing position of the best-placed member of this tied group.
 
     LeagueTiebreakCandidateGroup:
       type: object

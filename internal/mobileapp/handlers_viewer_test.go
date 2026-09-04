@@ -419,6 +419,8 @@ func TestProvisionalCompetitorNumbers(t *testing.T) {
 		{"running", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusPools, NumberPrefix: "K", Players: roster}, nil},
 		{"no prefix", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusSetup, Players: roster}, nil},
 		{"swiss", &state.Competition{Format: state.CompFormatSwiss, Status: state.CompStatusSetup, NumberPrefix: "S", Players: roster}, nil},
+		{"playoffs-only: Number is already final", &state.Competition{Format: state.CompFormatPlayoffs, Status: state.CompStatusSetup, NumberPrefix: "P", Players: roster}, nil},
+		{"legacy unset format is playoffs-only too", &state.Competition{Format: "", Status: state.CompStatusSetup, NumberPrefix: "P", Players: roster}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := provisionalCompetitorNumbers(tc.comp)

@@ -97,9 +97,17 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 // parse, never carries them. Nor does a Swiss competition: its draw assigns
 // no number at all (it never writes pools.csv), so a "provisional" number
 // that nothing ever replaces would be a promise the format cannot keep; Swiss
-// numbering is its own open question (bc-swnm).
+// numbering is its own open question (bc-swnm). Nor does a playoffs-only
+// competition (by EFFECTIVE format, so a legacy unset Format counts): its
+// number IS participant order and the merge above already fills Player.Number
+// with it before and after the draw alike, so there is nothing provisional to
+// show beside it.
 func provisionalCompetitorNumbers(comp *state.Competition) []string {
-	if comp == nil || comp.NumberPrefix == "" || len(comp.Players) == 0 || !engine.CanGenerateDraw(comp.Status) || comp.Format == state.CompFormatSwiss {
+	if comp == nil || comp.NumberPrefix == "" || len(comp.Players) == 0 || !engine.CanGenerateDraw(comp.Status) {
+		return nil
+	}
+	switch comp.EffectiveFormat() {
+	case state.CompFormatSwiss, state.CompFormatPlayoffs:
 		return nil
 	}
 	numbered := make([]domain.Player, len(comp.Players))

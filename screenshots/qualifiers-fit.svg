@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" font-family="system-ui, sans-serif">
+  <rect width="760" height="250" fill="#ffffff"/>
+  <text x="20" y="28" font-size="15" font-weight="600" fill="#1a1d21">Fit the knockout: fewer, fatter pools; the bracket fills exactly, no byes</text>
+  <text x="20" y="48" font-size="12" fill="#5c6570">Same 16 entrants, cut as 4 pools of 4 instead of 5 pools</text>
+  <g>
+    <rect x="20" y="70" width="102" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="87" r="4" fill="#39424c"/><circle cx="56" cy="87" r="4" fill="#39424c"/><circle cx="72" cy="87" r="4" fill="#39424c"/><circle cx="88" cy="87" r="4" fill="#39424c"/>
+    <rect x="20" y="112" width="102" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="129" r="4" fill="#39424c"/><circle cx="56" cy="129" r="4" fill="#39424c"/><circle cx="72" cy="129" r="4" fill="#39424c"/><circle cx="88" cy="129" r="4" fill="#39424c"/>
+    <rect x="20" y="154" width="102" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="171" r="4" fill="#39424c"/><circle cx="56" cy="171" r="4" fill="#39424c"/><circle cx="72" cy="171" r="4" fill="#39424c"/><circle cx="88" cy="171" r="4" fill="#39424c"/>
+    <rect x="20" y="196" width="102" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="213" r="4" fill="#39424c"/><circle cx="56" cy="213" r="4" fill="#39424c"/><circle cx="72" cy="213" r="4" fill="#39424c"/><circle cx="88" cy="213" r="4" fill="#39424c"/>
+    <text x="20" y="246" font-size="11" fill="#5c6570">4 pools, each of 4</text>
+  </g>
+  <defs><marker id="c" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#1e7d46"/></marker></defs>
+  <g stroke="#1e7d46" stroke-width="2" fill="none">
+    <path d="M124 87 H286" marker-end="url(#c)"/>
+    <path d="M124 129 H286" marker-end="url(#c)"/>
+    <path d="M124 171 H286" marker-end="url(#c)"/>
+    <path d="M124 213 H286" marker-end="url(#c)"/>
+  </g>
+  <text x="180" y="74" font-size="12" fill="#1e7d46" font-weight="600">top 1 each</text>
+  <g font-size="11">
+    <text x="300" y="70" font-size="12" font-weight="600" fill="#1a1d21">4 qualifiers</text>
+    <rect x="300" y="78" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="92" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="120" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="134" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="162" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="176" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="204" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="218" fill="#1a1d21">qualifier</text>
+    <!-- 4-slot bracket lines -->
+    <g stroke="#8a94a0" fill="none">
+      <path d="M420 88 h22 v42 h-22 M442 109 h24"/>
+      <path d="M420 172 h22 v42 h-22 M442 193 h24"/>
+      <path d="M466 109 h14 v84 h-14 M480 151 h24"/>
+    </g>
+  </g>
+  <g font-size="13" fill="#1a1d21">
+    <text x="530" y="120" font-weight="600">4-slot knockout, no byes</text>
+    <text x="530" y="142">Winners exactly fill a power of</text>
+    <text x="530" y="162">two, so every qualifier fights in</text>
+    <text x="530" y="182">the first round. When the count</text>
+    <text x="530" y="202">falls just short, a few pools also</text>
+    <text x="530" y="222">send their 2nd place to fill it.</text>
+  </g>
+</svg>

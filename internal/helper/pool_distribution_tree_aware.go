@@ -398,7 +398,7 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// this loop is a no-op in both cases, which is what keeps the gate
 	// numbers and the unique-dojo identity contract exactly where they
 	// were.
-	improveDojoMeetings(pools, targetSizes, qualifierSlots, players)
+	improveDojoMeetings(pools, qualifierSlots)
 
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
 }
@@ -438,20 +438,23 @@ func earliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string) int {
 	return earliest
 }
 
-// cachedDojoMeeting is earliestDojoMeeting memoized by dojo name in cache.
-// Callers (improveDojoMeetings) hold cache valid only across a span of calls
-// during which pools' CONTENTS are known not to change -- see the call
-// site's own comment for why that span is exactly "one pass" there. Getting
-// that invariant wrong would silently serve a stale round for a dojo whose
-// pool membership already moved, so this stays a private helper rather than
-// something a new caller could reach for without re-deriving the same
-// guarantee.
+// cachedDojoMeeting is earliestDojoMeeting memoized by NORMALIZED dojo name
+// (dojoKey, bc-drwx item 3 -- two spellings of one dojo share the one cache
+// entry, matching earliestDojoMeeting's own countDojoInPool-derived answer,
+// which is already spelling-insensitive) in cache. Callers (improveDojoMeetings)
+// hold cache valid only across a span of calls during which pools' CONTENTS
+// are known not to change -- see the call site's own comment for why that
+// span is exactly "one pass" there. Getting that invariant wrong would
+// silently serve a stale round for a dojo whose pool membership already
+// moved, so this stays a private helper rather than something a new caller
+// could reach for without re-deriving the same guarantee.
 func cachedDojoMeeting(pools []Pool, pairRound [][]int, dojo string, cache map[string]int) int {
-	if v, ok := cache[dojo]; ok {
+	key := dojoKey(dojo)
+	if v, ok := cache[key]; ok {
 		return v
 	}
 	v := earliestDojoMeeting(pools, pairRound, dojo)
-	cache[dojo] = v
+	cache[key] = v
 	return v
 }
 
@@ -492,6 +495,46 @@ func earliestPairing(a, b []int) int {
 	return worst
 }
 
+// dojoFootprintOptimum returns a per-(normalized)-dojo optimum function:
+// ceil(totalMembers/numPools), the per-pool spread cap every dojo-count
+// comparison in this file is measured against (bc-drwx item 11: shared by
+// improveDojoMeetings' exchange pass and assignUnseededByDojoTree's forward
+// descent, which used to keep two independently-built footprint maps that
+// could drift on what "how many of this dojo, in total" means). totalMembers
+// is counted from `pools`' current occupants plus `extra` -- non-nil only
+// for assignUnseededByDojoTree, whose still-to-place unseeded slice has not
+// reached `pools` yet at the point it needs the optimum; improveDojoMeetings
+// runs after every player already has a pool, so its own call passes nil.
+//
+// The footprint is keyed by dojoKey (bc-drwx item 3), not the raw dojo
+// string: two rows spelling one dojo "Mumeishi" and "mumeishi" used to
+// build two separate, HALF-SIZED footprint entries, so neither ever reached
+// the real cap and the spread guard silently never fired for either
+// spelling. dojoOptimum below (the returned closure) normalizes its OWN
+// argument too, so a caller may pass either an already-normalized key or a
+// raw dojo string.
+func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int) func(dojo string) int {
+	footprint := make(map[string]int)
+	for i := range pools {
+		for _, pl := range pools[i].Players {
+			if pl.Dojo != "" {
+				footprint[dojoKey(pl.Dojo)]++
+			}
+		}
+	}
+	for _, p := range extra {
+		if p.Dojo != "" {
+			footprint[dojoKey(p.Dojo)]++
+		}
+	}
+	return func(dojo string) int {
+		if numPools <= 0 {
+			return 0
+		}
+		return (footprint[dojoKey(dojo)] + numPools - 1) / numPools
+	}
+}
+
 // improveDojoMeetings is the multi-dojo repair loop described at its call
 // site: a WINNER-PATH-ONLY pairwise exchange pass over the pools the
 // descent (assignUnseededByDojoTree) already placed. pairRound is built
@@ -514,7 +557,23 @@ func earliestPairing(a, b []int) int {
 // stops the loop (see the file-level doc comment for the measured
 // dominance this simplification still achieves over the old
 // pairwise+rotation repair it replaces).
-func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int, roster []Player) {
+//
+// Takes only `pools` and `qualifierSlots` (bc-drwx item 11): the
+// `targetSizes` parameter this function used to also take was never read in
+// its body, and the `roster []Player` parameter it used to build its own
+// footprint map from is redundant with `pools` -- by the time this runs
+// (buildPoolPhaseTreeAwareCore, AFTER assignUnseededByDojoTree has placed
+// every player), `pools`' membership already IS the whole roster.
+// dojoFootprintOptimum derives the same optimum from `pools` alone.
+func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
+	// rosterSize replaces the old `roster []Player` parameter's len() for
+	// map pre-allocation sizing and the pass-count cap below; both are
+	// sizing hints only, so summing pool membership (rather than a real
+	// player list) is exactly as good.
+	rosterSize := 0
+	for i := range pools {
+		rosterSize += len(pools[i].Players)
+	}
 	winnerSlots := make([][]int, len(qualifierSlots))
 	for i, s := range qualifierSlots {
 		if len(s) > 0 {
@@ -528,14 +587,8 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// effort when there are 2 qualifiers from the pool?": yes, as a final
 	// tie-break, never a trade against the winner-path tiers ahead of it.
 	allQualPairRound := poolPairRounds(qualifierSlots)
-	footprint := make(map[string]int, len(roster))
-	for _, p := range roster {
-		footprint[p.Dojo]++
-	}
 	numPools := len(pools)
-	optimum := func(dojo string) int {
-		return (footprint[dojo] + numPools - 1) / numPools
-	}
+	optimum := dojoFootprintOptimum(pools, nil, numPools)
 
 	// excessOf is dojo's contribution to tier (a) from a single pool
 	// holding `count` of it: how far over its per-pool optimum that one
@@ -563,7 +616,7 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 				delete(counts, k)
 			}
 			for _, pl := range pools[i].Players {
-				counts[pl.Dojo]++
+				counts[dojoKey(pl.Dojo)]++
 			}
 			for d, c := range counts {
 				total += excessOf(d, c)
@@ -577,10 +630,10 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 		seen := map[string]bool{}
 		for i := range pools {
 			for _, pl := range pools[i].Players {
-				if seen[pl.Dojo] {
+				if seen[dojoKey(pl.Dojo)] {
 					continue
 				}
-				seen[pl.Dojo] = true
+				seen[dojoKey(pl.Dojo)] = true
 				if m := earliestDojoMeeting(pools, pairRound, pl.Dojo); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
@@ -630,8 +683,8 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// Per-pass memoization for earliestDojoMeeting, keyed by dojo name --
 	// see the cache-clearing comment inside the pass loop for why a single
 	// map reused (and cleared) across passes is safe here.
-	winnerMeetCache := make(map[string]int, len(roster))
-	allQualMeetCache := make(map[string]int, len(roster))
+	winnerMeetCache := make(map[string]int, rosterSize)
+	allQualMeetCache := make(map[string]int, rosterSize)
 
 	// Bounded belt-and-braces cap; the lexicographic strict improvement is
 	// the real termination argument. Runs to a FULL fixpoint of the
@@ -648,7 +701,7 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// could still buy it; tier (a) is what returns
 	// dojo/deep-oversubscription (draw_shapes_golden_test.go) to
 	// MaxSameDojoCount 2.
-	for pass := 0; pass < len(roster)*numPools+1; pass++ {
+	for pass := 0; pass < rosterSize*numPools+1; pass++ {
 		curExc, curR1, curNS, curAQ := objective()
 		// winnerMeetCache/allQualMeetCache memoize earliestDojoMeeting by
 		// dojo name for the duration of THIS pass: pools are only ever
@@ -689,7 +742,7 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 					}
 					for bi := 0; bi < len(pools[j].Players) && !improved; bi++ {
 						b := pools[j].Players[bi]
-						if b.Seed > 0 || b.Dojo == a.Dojo {
+						if b.Seed > 0 || dojoKey(b.Dojo) == dojoKey(a.Dojo) {
 							continue
 						}
 						// Tier (a) delta, re-derived from the four (pool,
@@ -1093,10 +1146,16 @@ func buildDojoTreeRec(poolAtSlot map[int]int, targetSizes, placed []int, bitsLef
 // decremented all the way back up to the root too (see dojoNode's own doc
 // comment on why roomPools is tracked separately from capacity/poolCount).
 func recordDojoOccupancy(root *dojoNode, dojo string, winnerSlot, totalBits, capacityDelta int) {
+	// Normalized ONCE (bc-drwx item 3): every dojoNode.dojoCount map in this
+	// tree is keyed by dojoKey, not the raw string, so two spellings of one
+	// dojo ("Mumeishi"/"mumeishi") accumulate into the SAME node count
+	// instead of two separate, half-sized ones. chooseDojoTreePool and
+	// pickDojoTreeAwarePool normalize the same way when reading it back.
+	key := dojoKey(dojo)
 	node := root
 	bitsLeft := totalBits
 	for {
-		node.dojoCount[dojo]++
+		node.dojoCount[key]++
 		node.capacity += capacityDelta
 		if bitsLeft == 0 {
 			break
@@ -1188,6 +1247,9 @@ func allQualifierWorstMeeting(candidatePools []int, qualifierSlots [][]int, dojo
 // threaded through unchanged for the whole descent, since it does not
 // change mid-walk.
 func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, dojoPoolIndices []int) int {
+	// bc-drwx item 3: dojoNode.dojoCount is keyed by dojoKey, so the read
+	// must normalize the same way recordDojoOccupancy normalized the write.
+	dojo = dojoKey(dojo)
 	node := root
 	for node.left != nil {
 		l, r := node.left, node.right
@@ -1257,7 +1319,9 @@ func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, doj
 // of that dojo genuinely does have a branch to avoid, so the tree descent
 // takes over from there.
 func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, qualifierSlots [][]int) int {
-	if root == nil || dojo == "" || root.dojoCount[dojo] == 0 {
+	// bc-drwx item 3: dojoNode.dojoCount is keyed by dojoKey (see
+	// recordDojoOccupancy), so this read must normalize too.
+	if root == nil || dojo == "" || root.dojoCount[dojoKey(dojo)] == 0 {
 		return leastConflictedPool(pools, targetSizes, dojo)
 	}
 	dojoPoolIndices := make([]int, 0, 4)
@@ -1334,26 +1398,12 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 	}
 
 	numPools := len(pools)
-	footprint := make(map[string]int, len(unseeded))
-	for i := range pools {
-		for _, pl := range pools[i].Players {
-			if pl.Dojo != "" {
-				footprint[pl.Dojo]++
-			}
-		}
-	}
-	for _, p := range unseeded {
-		if p.Dojo != "" {
-			footprint[p.Dojo]++
-		}
-	}
-	dojoOptimum := func(dojo string) int {
-		if numPools <= 0 {
-			return 0
-		}
-		f := footprint[dojo]
-		return (f + numPools - 1) / numPools
-	}
+	// dojoFootprintOptimum (bc-drwx items 3 and 11): shared with
+	// improveDojoMeetings so the two can never independently drift on what
+	// "how many of this dojo, in total" means, and keyed by dojoKey so two
+	// spellings of one dojo count toward the SAME cap. `unseeded` is the
+	// extra slice: at this point those players are not in `pools` yet.
+	dojoOptimum := dojoFootprintOptimum(pools, unseeded, numPools)
 
 	for _, p := range unseeded {
 		best := pickDojoTreeAwarePool(pools, targetSizes, root, p.Dojo, qualifierSlots)

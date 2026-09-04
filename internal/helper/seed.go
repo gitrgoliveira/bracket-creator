@@ -281,7 +281,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	movableDojos := map[string]bool{}
 	for i := range result {
 		if movable(i) {
-			movableDojos[result[i].Dojo] = true
+			movableDojos[dojoKey(result[i].Dojo)] = true
 			if len(movableDojos) >= 2 {
 				break
 			}
@@ -363,7 +363,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 			gain, y = 0, -1
 			if movable(x) {
 				for cand := range result {
-					if cand == x || !movable(cand) || result[cand].Dojo == result[x].Dojo {
+					if cand == x || !movable(cand) || dojoKey(result[cand].Dojo) == dojoKey(result[x].Dojo) {
 						continue
 					}
 					if g := dojoSwapGain(result, slots, x, cand); g > gain {
@@ -433,7 +433,7 @@ func sortedSameDojoPairs(result []Player, slots []int) []dojoMeetPair {
 			continue
 		}
 		for j := i + 1; j < len(result); j++ {
-			if result[j].Name == "" || result[i].Dojo != result[j].Dojo {
+			if result[j].Name == "" || dojoKey(result[i].Dojo) != dojoKey(result[j].Dojo) {
 				continue
 			}
 			pairs = append(pairs, dojoMeetPair{i, j, dojoMeetRound(slots[i], slots[j])})
@@ -539,7 +539,7 @@ func dojoSumMeetRounds(result []Player, slots []int, x, y int) int {
 		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 			return 0
 		}
-		if result[i].Dojo != result[j].Dojo {
+		if dojoKey(result[i].Dojo) != dojoKey(result[j].Dojo) {
 			return 0
 		}
 		return dojoMeetRound(slots[i], slots[j])

@@ -147,7 +147,7 @@ func TestPoolDrawDocWalkthroughMatchesTheDraw(t *testing.T) {
 					Players:  append([]Player(nil), descended[i].Players...),
 				}
 			}
-			improveDojoMeetings(exchanged, sizes, slots, players)
+			improveDojoMeetings(exchanged, slots)
 			assert.Equal(t, docDrawSwaps(preset, descended, exchanged), preset.Exchanges,
 				"recorded exchanges")
 

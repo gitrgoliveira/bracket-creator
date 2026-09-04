@@ -596,7 +596,7 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 		}
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
-		dojoSets[poolN][player.Dojo] = true
+		dojoSets[poolN][dojoKey(player.Dojo)] = true
 	}
 
 	for i := 0; i < len(pools); i++ {
@@ -639,7 +639,7 @@ func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targe
 		}
 
 		// O(1): reject if this dojo is already present in the pool
-		if dojoSets[curr][player.Dojo] {
+		if dojoSets[curr][dojoKey(player.Dojo)] {
 			continue
 		}
 
@@ -650,15 +650,41 @@ func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targe
 	return -1
 }
 
+// dojoKey is the ONE normalized projection every draw comparison and map key
+// built from a dojo string must go through (bc-drwx item 3). Identity
+// already normalizes the dojo the same way as the name
+// (helper.NormalizeParticipantName, applied to both halves of a dedup key --
+// dedup.go's newDupKey, and to CompetitorKey's own dojo half, identity.go)
+// before comparing two participants, but the draw's own placement logic
+// (countDojoInPool and every raw ".Dojo ==" / ".Dojo !=" / map-keyed-by-dojo
+// site in pool_distribution_tree_aware.go and seed.go) used to compare the
+// raw, as-typed string instead: two rows spelling one dojo "Mumeishi" and
+// "mumeishi" landed in the SAME pool, because identical spelling is what
+// every one of those raw comparisons required to treat them as one dojo.
+// Routing every such comparison and map key through this function instead
+// is what makes countDojoInPool's own "one place" doc comment true: dojo
+// comparison needing to normalize is now a one-line change, here.
+//
+// This is a comparison-time projection ONLY -- it must never be written back
+// onto a Player.Dojo field or into rendered output, which keeps the
+// operator's original spelling on the sheet exactly as typed. A roster
+// whose dojo spellings are already byte-identical is unaffected: dojoKey is
+// the identity function on ASCII/already-normalized input, so every
+// existing golden with consistent spelling holds unchanged.
+func dojoKey(dojo string) string {
+	return NormalizeParticipantName(dojo)
+}
+
 // countDojoInPool returns how many of pool's competitors are from dojo. Shared
 // by the fallback that chooses where an unplaceable competitor goes and by the
 // repair pass that swaps competitors afterwards, so the two can never disagree
-// about what "how many of this dojo are here" means -- if dojo comparison ever
-// needs normalizing, this is the one place it changes.
+// about what "how many of this dojo are here" means -- dojo comparison is
+// normalized (dojoKey) here, in the one place it changes.
 func countDojoInPool(pool Pool, dojo string) int {
+	key := dojoKey(dojo)
 	n := 0
 	for _, pl := range pool.Players {
-		if pl.Dojo == dojo {
+		if dojoKey(pl.Dojo) == key {
 			n++
 		}
 	}

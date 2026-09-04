@@ -508,13 +508,16 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 	}
 	pairRound := poolPairRounds(winnerSlots)
 	allQualPairRound := poolPairRounds(qualifierSlots)
+	// Normalized via dojoKey (bc-drwx item 3), matching the real function,
+	// so this reference's only remaining difference from it is the caching
+	// this test exists to isolate (see this function's own doc comment).
 	footprint := make(map[string]int, len(roster))
 	for _, p := range roster {
-		footprint[p.Dojo]++
+		footprint[dojoKey(p.Dojo)]++
 	}
 	numPools := len(pools)
 	optimum := func(dojo string) int {
-		return (footprint[dojo] + numPools - 1) / numPools
+		return (footprint[dojoKey(dojo)] + numPools - 1) / numPools
 	}
 	excessOf := func(dojo string, count int) int {
 		if over := count - optimum(dojo); over > 0 {
@@ -530,7 +533,7 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 				delete(counts, k)
 			}
 			for _, pl := range pools[i].Players {
-				counts[pl.Dojo]++
+				counts[dojoKey(pl.Dojo)]++
 			}
 			for d, c := range counts {
 				total += excessOf(d, c)
@@ -543,10 +546,10 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 		seen := map[string]bool{}
 		for i := range pools {
 			for _, pl := range pools[i].Players {
-				if seen[pl.Dojo] {
+				if seen[dojoKey(pl.Dojo)] {
 					continue
 				}
-				seen[pl.Dojo] = true
+				seen[dojoKey(pl.Dojo)] = true
 				if m := earliestDojoMeeting(pools, pairRound, pl.Dojo); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
@@ -593,7 +596,7 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 					}
 					for bi := 0; bi < len(pools[j].Players) && !improved; bi++ {
 						b := pools[j].Players[bi]
-						if b.Seed > 0 || b.Dojo == a.Dojo {
+						if b.Seed > 0 || dojoKey(b.Dojo) == dojoKey(a.Dojo) {
 							continue
 						}
 						cAi := countDojoInPool(pools[i], a.Dojo)
@@ -727,7 +730,7 @@ func TestImproveDojoMeetings_MatchesUncachedReference(t *testing.T) {
 		poolsCached := clonePools(pools)
 		poolsRef := clonePools(pools)
 
-		improveDojoMeetings(poolsCached, targetSizes, qualifierSlots, players)
+		improveDojoMeetings(poolsCached, qualifierSlots)
 		referenceImproveDojoMeetings(poolsRef, targetSizes, qualifierSlots, players)
 
 		require.Len(t, poolsCached, len(poolsRef))

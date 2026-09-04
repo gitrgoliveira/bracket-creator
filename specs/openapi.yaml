@@ -4965,6 +4965,12 @@ components:
             properties:
               id:
                 type: string
+                description: >
+                  Always present. The competitor's stable UUID, or "" (empty
+                  string, not omitted/null) for a competitor with no UUID
+                  (a legacy or mixed roster). A client must not treat "" as
+                  absent: fall back to the name/dojo pair for that entry
+                  specifically, rather than to id being unset in general.
               name:
                 type: string
               dojo:

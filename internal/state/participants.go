@@ -315,14 +315,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// Skip records that are empty after UUID stripping (e.g. a
 		// UUID-only row); CreatePlayersFromRecords would skip these
 		// too, and the metadata slices must stay aligned.
-		allEmpty := true
-		for _, f := range dataFields {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
+		if helper.IsBlankRecord(dataFields) {
 			continue
 		}
 

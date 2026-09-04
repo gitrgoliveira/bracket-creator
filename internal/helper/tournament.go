@@ -70,29 +70,35 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		records = append(records, fields)
 	}
 
-	// Blank-name rejection is enabled here, not in CreatePlayersFromRecords:
-	// this is the entry point for the CLI, the legacy web UI's parse endpoint
-	// and archive import, all of which take raw string entries. The roster
-	// loader in internal/state calls CreatePlayersFromRecords directly and
-	// stays tolerant of a blank name on purpose, so a hand-edited
-	// participants.csv can still be loaded and repaired.
+	// Selects createPlayersFromRecords' strict mode (requireName=true); see
+	// that function for why.
 	return createPlayersFromRecords(records, withZekkenName, true)
 }
 
 // CreatePlayersFromRecords builds players from pre-parsed CSV records
 // (each record is a slice of fields). Use this when the CSV has already
 // been parsed by encoding/csv so that quoted commas are handled correctly.
-//
-// The roster loader in internal/state calls this directly and stays
-// tolerant of a blank name on purpose, so a hand-edited participants.csv
-// can still be loaded and repaired.
+// Selects createPlayersFromRecords' tolerant mode (requireName=false); see
+// that function for why.
 func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player, error) {
 	return createPlayersFromRecords(records, withZekkenName, false)
 }
 
-// createPlayersFromRecords is the shared body behind CreatePlayers (which
-// requires a name on every row) and CreatePlayersFromRecords (which does
-// not, so callers repairing a hand-edited roster can still load it).
+// rowError formats a validation error for row i (0-based) of a CSV import as
+// "entry N: missing <field> in <row>". The row is quoted because callers may
+// have shuffled or dropped blank lines before this runs, so the entry number
+// alone does not identify a line in the file.
+func rowError(i int, line []string, field string) string {
+	return fmt.Sprintf("entry %d: missing %s in %q", i+1, field, strings.Join(line, ","))
+}
+
+// createPlayersFromRecords is the shared body behind CreatePlayers (strict:
+// requireName=true, for the CLI, the legacy web UI's parse endpoint, and
+// archive import, all of which take raw string entries and should reject a
+// blank name) and CreatePlayersFromRecords (tolerant: requireName=false; the
+// roster loader in internal/state calls this directly and stays tolerant of
+// a blank name on purpose, so a hand-edited participants.csv can still be
+// loaded and repaired).
 func createPlayersFromRecords(records [][]string, withZekkenName, requireName bool) ([]Player, error) {
 	players := make([]Player, 0, len(records))
 	var errors []string
@@ -100,7 +106,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireName bo
 	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, line := range records {
-		if isBlankRecord(line) {
+		if IsBlankRecord(line) {
 			continue
 		}
 		for j := range line {
@@ -108,10 +114,7 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireName bo
 		}
 
 		if requireName && line[0] == "" {
-			// Quote the row: callers may have shuffled or dropped blank lines
-			// before this runs, so the entry number alone does not identify a
-			// line in the file.
-			errors = append(errors, fmt.Sprintf("entry %d: missing name in %q", i+1, strings.Join(line, ",")))
+			errors = append(errors, rowError(i, line, "name"))
 			continue
 		}
 
@@ -129,12 +132,12 @@ func createPlayersFromRecords(records [][]string, withZekkenName, requireName bo
 				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
 				if player.Dojo == "" {
-					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					errors = append(errors, rowError(i, line, "dojo"))
 					continue
 				}
 			} else {
 				if line[2] == "" {
-					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					errors = append(errors, rowError(i, line, "dojo"))
 					continue
 				}
 				player.DisplayName = line[1]

@@ -241,7 +241,7 @@ docker/build: ## Build Docker image
 docker/run: docker/build ## Run the application in Docker
 	docker run -p 8080:8080 $(IMAGE_NAME):latest
 
-pre-commit: go/test go/security docs/prose ## Run pre-commit checks
+pre-commit: docs/prose go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
 # Documentation (MkDocs Material): pinned toolchain.

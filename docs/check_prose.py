@@ -38,12 +38,18 @@ SKIP_FILES = {
     os.path.join("dev-guide", "code_of_conduct.md"),
 }
 
-EM_DASH = "—"
-
 SEE_LINK_RE = re.compile(r"\b[Ss]ee (the |also )?\[")
 INTERNAL_ID_RE = re.compile(r"\b(mp|bc)-[a-z0-9]{3,4}\b")
 MAT_RE = re.compile(r"\bmats?\b", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+# (rule name, pattern) pairs checked against each prose line, in report order.
+RULES: list[tuple[str, re.Pattern[str]]] = [
+    ("em-dash", re.compile("—")),  # U+2014; house style writes short sentences instead
+    ("see-link", SEE_LINK_RE),
+    ("internal-id", INTERNAL_ID_RE),
+    ("mat", MAT_RE),
+]
 
 # Inline code spans (single-backtick delimited) and complete HTML comments,
 # stripped before prose rules run so code samples and commented-out text
@@ -57,17 +63,9 @@ def check_line(line: str) -> list[str]:
     text = HTML_TAG_RE.sub(" ", line)
     rules: list[str] = []
 
-    if EM_DASH in text:
-        rules.append("em-dash")
-
-    if SEE_LINK_RE.search(text):
-        rules.append("see-link")
-
-    if INTERNAL_ID_RE.search(text):
-        rules.append("internal-id")
-
-    if MAT_RE.search(text):
-        rules.append("mat")
+    for name, pattern in RULES:
+        if pattern.search(text):
+            rules.append(name)
 
     return rules
 

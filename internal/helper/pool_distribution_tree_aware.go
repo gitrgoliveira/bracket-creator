@@ -293,23 +293,15 @@ var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must ha
 
 // ErrBlankNameInDraw is the sentinel identifying a draw refused because the
 // roster contains at least one player with an empty Name. Match it with
-// errors.Is; the returned error names the offending row by POSITION, not by
-// name (the name is what's blank), so the operator knows exactly which row
-// of the loaded roster to repair.
-//
-// DISTINCT from state.ErrBlankName (internal/state/participants.go), the
-// participant-WRITE floor: different packages, different sentinel values,
-// on purpose -- errors.Is(drawErr, state.ErrBlankName) would silently never
-// match this one despite the shared concept, which is exactly why this one
-// carries the "InDraw" suffix rather than the same bare name.
-//
-// Participant LOADING stays blank-tolerant on purpose (state.LoadParticipants
-// and its CSV parser accept a blank name, so a legacy or hand-edited roster
-// can still be loaded and the offending row repaired in the UI/CSV) -- only
-// the DRAW itself refuses, at this one shared pre-flight.
+// errors.Is; the returned error names the offending row by POSITION rather
+// than by name (the name is what's blank), and, like ErrBlankDojoInDraw, is
+// a distinct sentinel from state.ErrBlankName (internal/state/participants.go)
+// rather than sharing its value -- see ErrBlankDojoInDraw's doc comment for
+// the shared rationale (why draw vs. load are treated differently, and why a
+// distinct sentinel per package).
 var ErrBlankNameInDraw = errors.New("cannot draw pools: every competitor must have a name")
 
-// validateNoBlankDojo is the one pre-flight check shared by
+// validateNoBlankIdentity is the one pre-flight check shared by
 // BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
 // BuildPoolPhaseFillBracketTreeAware (all three funnel through
 // buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
@@ -320,18 +312,17 @@ var ErrBlankNameInDraw = errors.New("cannot draw pools: every competitor must ha
 // whitespace-only field without going through that floor first cannot slip
 // "   " past this guard too.
 //
-// The name check runs first and returns on the first offending row: a blank
-// name has no name to report, so identifying every offending row by name
-// (the way the dojo check below does) is not available here.
-func validateNoBlankDojo(players []Player) error {
+// Walks the roster once: the name check runs first for each row and returns
+// at once with ErrBlankNameInDraw (a blank name has no name to report, so
+// identifying every offending row by name, the way the dojo check does, is
+// not available here); dojo blanks are instead collected into a list and
+// reported together as ErrBlankDojoInDraw once the walk completes.
+func validateNoBlankIdentity(players []Player) error {
+	var names []string
 	for idx, p := range players {
 		if strings.TrimSpace(p.Name) == "" {
 			return fmt.Errorf("%w: row %d", ErrBlankNameInDraw, idx+1)
 		}
-	}
-
-	var names []string
-	for _, p := range players {
 		if strings.TrimSpace(p.Dojo) == "" {
 			names = append(names, p.Name)
 		}
@@ -351,11 +342,12 @@ func validateNoBlankDojo(players []Player) error {
 // exercised before this was added), distributes the unseeded in one pass
 // against the mode's own knockout skeleton, and reorders for courts.
 func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes []int, numCourts int, poolWinners int, mode qualifierMode) ([]Pool, int, error) {
-	// FIX 1 (bc-dojo-least-conflicted-pool): refuse a blank-dojo roster up
-	// front, before any seed/pool arithmetic runs, rather than let one
-	// silently corrupt the tree-aware capacity accounting below. See
-	// ErrBlankDojoInDraw's own doc comment for the two mechanisms this closes.
-	if err := validateNoBlankDojo(players); err != nil {
+	// FIX 1 (bc-dojo-least-conflicted-pool): refuse a blank-name or
+	// blank-dojo roster up front, before any seed/pool arithmetic runs,
+	// rather than let a blank dojo silently corrupt the tree-aware capacity
+	// accounting below. See ErrBlankDojoInDraw's own doc comment for the two
+	// mechanisms a blank dojo closes.
+	if err := validateNoBlankIdentity(players); err != nil {
 		return nil, 0, err
 	}
 

@@ -976,19 +976,19 @@ paths:
         actually assign (the same derivation `POST /api/competitions` and a
         settings `PUT` apply server-side): initials of `name`'s words,
         disambiguated against every OTHER competition's stored
-        `numberPrefix` (case-insensitive), falling back to `"K"` when `name`
-        yields no ASCII letters. `"Kendo Open"` derives `"K"`; if `"K"` is
-        already taken, `"KO"`; if that collides too, a numeric suffix
-        (`"KO2"`, `"KO3"`, ...). Always within the 3-character prefix cap.
+        `numberPrefix` (case-insensitive AND against a stem+digits shape that
+        would collide once counters are appended, e.g. `"K"` and `"K2"`
+        would both eventually produce `"K21"`), falling back to `"K"` when
+        `name` yields no ASCII letters. `"Kendo Open"` derives `"K"`; if
+        `"K"` is already taken, `"KO"`; if that collides too, a numeric
+        suffix on the shortest available stem, preferring one that avoids
+        the ambiguity above (`"K02"`, `"K03"`, ...). Always within the
+        3-character prefix cap.
 
         Read-only and side-effect free: it previews a value, it does not
-        assign or store one. The create form calls it as the operator types
-        the name, with `exclude` omitted (the competition doesn't exist yet,
-        so nothing to exclude from the taken set). `exclude` names a
-        competition whose own prefix must not count as taken; no client uses
-        it today, because competitions saved by an earlier version without a
-        prefix are migrated when the app starts, so the settings form never
-        has an empty value to preview for.
+        assign or store one. The CREATE form is the only caller, calling it
+        as the operator types the name: the competition doesn't exist yet,
+        so nothing needs excluding from the taken set.
       security:
         - TournamentPassword: []
       parameters:
@@ -997,11 +997,6 @@ paths:
           schema:
             type: string
           description: Competition name to derive from. Empty is valid; resolves via the fallback.
-        - name: exclude
-          in: query
-          schema:
-            type: string
-          description: Competition id whose own stored prefix is excluded from the taken set.
       responses:
         '200':
           description: The prefix a save would assign.
@@ -1084,13 +1079,17 @@ paths:
         before this rule existed, see below) does the server assign a derived
         default instead of inheriting nothing (see `GET
         /api/competitions/number-prefix-default` for the same derivation).
-        Every successful settings save then re-derives every competitor's
-        number from that EFFECTIVE `numberPrefix` and rewrites `pools.csv` in
-        place whenever a number actually differs from what is stored; a save
-        whose effective prefix matches the stored one makes no write to
-        `pools.csv` at all. The same default assignment happens the first
-        time `POST .../start` or `POST .../generate-draw` reaches a
-        competition that still has no prefix.
+        EVERY successful save then re-derives every competitor's number from
+        the EFFECTIVE `numberPrefix`, unconditionally, whether or not that
+        save changed the prefix or was a roster-only save with the settings
+        fields untouched -- this is what heals a legacy `pools.csv` whose
+        Number column was never populated, on the very next save, with no
+        extra client action. It rewrites `pools.csv` only when at least one
+        re-derived number actually differs from what is stored; a save under
+        which every re-derived number already matches the stored one makes no
+        write at all. The same default assignment happens the first time
+        `POST .../start` or `POST .../generate-draw` reaches a competition
+        that still has no prefix.
 
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
@@ -1217,7 +1216,27 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: |
+            Internal error. Includes the partial-success renumber case: the
+            settings save itself landed (config.md already holds the new
+            `numberPrefix`, and a `tournament_updated` event was broadcast
+            so open clients refetch it) but the subsequent renumber of
+            `pools.csv` failed -- "settings were saved but competitors could
+            not be renumbered; save again once pools.csv is repaired".
+            Re-issuing the same PUT is the remedy once pools.csv is fixed:
+            the renumber is idempotent and unconditional (see the
+            settings-update description above), so the retry is what heals
+            it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            The ROSTER-save path (non-null `players`) requires
+            `X-Admin-Password` when the destructive-ops gate is active (see
+            the "Elevated password" note above); returned when locked mode
+            is active without `TOURNAMENT_ADMIN_PASSWORD_HASH` configured.
     delete:
       tags: [competitions]
       summary: Delete competition
@@ -1288,6 +1307,20 @@ paths:
         transitions the competition to `draw-ready` status without starting it.
         The operator can inspect the draw, discard it, and regenerate before calling
         `/start`. Participant edits are blocked while a draw is pending.
+
+        **Number-prefix pre-flight.** Before generating, a pre-flight ensures the
+        competition has a number prefix: a legacy competition saved before the
+        never-empty-prefix rule (empty `numberPrefix`) has one derived and
+        PERSISTED to `config.md` (the same derivation `GET
+        /api/competitions/number-prefix-default` previews), and `pools.csv` is
+        renumbered under it whenever a draw already exists on disk. A competition
+        that already has a prefix is left untouched by this step. A derived
+        prefix that collides with another competition's is refused with 400,
+        naming the conflict, and NOTHING is persisted. If the prefix IS assigned
+        and saved but the subsequent renumber then fails, 500 is returned (see
+        below); `config.md` already carries the new prefix in that case and a
+        `tournament_updated` event is broadcast even though this request failed,
+        so open clients refetch it rather than show stale state until reload.
       security:
         - TournamentPassword: []
       parameters:
@@ -1305,11 +1338,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Competition'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Validation error, including the number-prefix pre-flight's own
+            collision refusal (a derived prefix already used by another
+            competition) and the underlying draw generator's own refusals
+            (e.g. an empty roster, an invalid court allocation).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: |
+            Internal error, including the pre-flight's own partial-success
+            case: a number prefix was assigned and saved but competitors
+            could not be renumbered -- "a number prefix was assigned but
+            competitors could not be renumbered; retry once pools.csv is
+            repaired". Retrying is the remedy once pools.csv is fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/draw-warnings:
     get:
@@ -1388,6 +1438,23 @@ paths:
         seeded into the (already-scheduled) knockout bracket automatically, and a
         knockout match becomes scoreable as soon as both its feeder pools are done.
         The competition moves to `playoffs` once the final pool has been seeded.
+
+        **Number-prefix pre-flight.** Before starting, a pre-flight ensures the
+        competition has a number prefix: a legacy competition saved before the
+        never-empty-prefix rule (empty `numberPrefix`) has one derived and
+        PERSISTED to `config.md` (the same derivation `GET
+        /api/competitions/number-prefix-default` previews), and `pools.csv` is
+        renumbered under it whenever a draw already exists on disk -- this is
+        what numbers a `draw-ready` legacy competition's existing draw when it is
+        finally started under this rule. A competition that already has a
+        prefix is left untouched by this step. A derived prefix that collides
+        with another competition's is refused with 400, naming the conflict, and
+        NOTHING is persisted. If the prefix IS assigned and saved but the
+        subsequent renumber then fails, 500 is returned (see below);
+        `config.md` already carries the new prefix in that case and a
+        `tournament_updated` event is broadcast even though this request
+        failed, so open clients refetch it rather than show stale state until
+        reload.
       security:
         - TournamentPassword: []
       parameters:
@@ -1396,11 +1463,30 @@ paths:
         '200':
           description: Competition started.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Validation error, including the number-prefix pre-flight's own
+            collision refusal (a derived prefix already used by another
+            competition), the status guard ("competition ... already
+            started"), and the underlying draw generator's own refusals
+            (e.g. an empty roster, an invalid court allocation) for a
+            competition started directly from `setup`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: |
+            Internal error, including the pre-flight's own partial-success
+            case: a number prefix was assigned and saved but competitors
+            could not be renumbered -- "a number prefix was assigned but
+            competitors could not be renumbered; retry once pools.csv is
+            repaired". Retrying is the remedy once pools.csv is fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/complete:
     post:
@@ -4183,20 +4269,28 @@ components:
         players:
           type: array
           description: >
-            Player list. Populated only in viewer responses (`GET /api/viewer/competitions` and
-            `GET /api/viewer/competitions/{id}`). Always empty in admin competition responses.
+            Player list. Populated on the viewer responses (`GET /api/viewer/competitions` and
+            `GET /api/viewer/competitions/{id}`) and on a roster-save `PUT /api/competitions/{id}`
+            response (the fresh roster it just wrote, see that endpoint's Roster-save
+            description). Empty on every OTHER admin competition response (`GET
+            /api/competitions`, `GET /api/competitions/{id}`, a settings-only PUT).
           items:
             $ref: '#/components/schemas/Player'
         provisionalNumbers:
           type: array
           description: >
-            Only on the viewer responses of a competition still in setup that has a
-            number prefix: one entry per `players`, in the same order, holding the
-            registration-order number the check-in desk calls before the draw. A
-            different fact from `Player.number` (which the draw assigns), carried
-            separately so public surfaces show only assigned numbers; the operator's
-            roster shows these as provisional until the draw replaces them. Absent in
-            every other status.
+            One entry per `players`, in the same order, holding the registration-order
+            number the check-in desk calls before the draw. A different fact from
+            `Player.number` (which the draw assigns), carried separately so public
+            surfaces show only assigned numbers; the operator's roster shows these as
+            provisional until the draw replaces them. Carried on the SAME responses as
+            `players` above (viewer responses and a roster-save PUT response), and only
+            for a competition a draw can still be generated from (status `setup` or the
+            legacy empty status) that has a number prefix. Absent for a Swiss
+            competition (its draw never writes pools.csv, so it carries no number at
+            all) and for an effective-playoffs competition (its number is already
+            final -- participant order -- so there is nothing "provisional" about it,
+            see `Player.number`). Absent in every other status.
           items:
             type: string
 
@@ -4251,12 +4345,18 @@ components:
           type: string
           description: |
             The competitor's ASSIGNED number: prefix + sequence (e.g. "K1").
-            Present only on the viewer and display payloads, and only once the
-            draw has assigned it: from pools.csv (draw order) when one exists,
-            or from participant order for a playoffs-only competition, whose
-            draw never writes pools.csv. Absent before the draw (see the
-            competition's `provisionalNumbers`), absent on the participants
-            endpoint, and absent when the draw on disk cannot be read.
+            Present only on the viewer and display payloads. For a POOLED
+            format (mixed/league) it appears once the draw has assigned it,
+            from pools.csv (draw order); before that draw, it is absent and
+            the competition's `provisionalNumbers` carries the check-in
+            desk's registration-order number instead. For an
+            EFFECTIVE-PLAYOFFS competition it is different: the number IS
+            participant order, composed on every read (that draw never
+            writes pools.csv), so it is present from `setup` onward, not
+            only after a draw -- there is nothing "provisional" about it and
+            `provisionalNumbers` is correspondingly absent for this format
+            (see that field). Also absent on the participants endpoint, and
+            absent when the draw on disk cannot be read.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.

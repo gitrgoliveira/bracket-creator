@@ -1806,7 +1806,12 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 }
 
 // CreateNamesWithPoolToPrint writes one "Names to Print <Shiaijo>" sheet per
-// court, holding that court's competitors tagged "<pool letter><position>".
+// court, holding that court's competitors. Column A holds the competitor
+// number, formula-linked to the Data sheet cell AddPoolDataToSheet wrote
+// (via pCoords); it is empty for a competitor with no number cell (D1: no
+// pool-letter/position fallback is composed here). The "<pool
+// letter><position>" tag this doc used to describe was removed outright,
+// not just superseded, so it must not be reintroduced.
 //
 // numCourts is clamped to the count the pool phase actually runs on
 // (EffectiveDrawCourts), for the same reason PrintPoolMatches clamps: a sheet

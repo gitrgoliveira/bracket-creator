@@ -37,13 +37,25 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 		Top:    &margin,
 	}))
 
-	// Column width to fill A4 portrait content width (~205 mm)
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 110))
+	// Column width to fill A4 portrait content width (~205 mm). bc-pnum A9:
+	// 110 units renders to ~691pt, wider than the ~580.9pt A4-portrait
+	// printable width (narrow margins from above), so a 4-character tag
+	// (e.g. "KOR19", now reachable since a prefix can be up to 3 characters
+	// everywhere) was sheared at the page edge -- rendered LibreOffice PDFs
+	// showed "KOR1(" indistinguishable from "KOR1", and the excess spilled
+	// into blank overflow pages. 88 units fits the printable width.
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 88))
 
 	style, err := f.NewStyle(&excelize.Style{
 		Alignment: &excelize.Alignment{
 			Horizontal: "center",
 			Vertical:   "center",
+			// ShrinkToFit is the second half of the same fix: even at 88
+			// units, a 5-character tag ("KOR19") at 250pt bold can still
+			// overflow the column, and shrinking the font to fit rather than
+			// clipping is what actually keeps every character of a long tag
+			// visible and readable at the desk.
+			ShrinkToFit: true,
 		},
 		Font: &excelize.Font{Family: "Calibri",
 			Bold: true,
@@ -116,6 +128,13 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row)))
 		}
 	}
+
+	// bc-pnum A9: without an explicit print area, LibreOffice's rendering of
+	// this sheet's used range (which excelize's own column-width/row-height
+	// bookkeeping can make wider than the actual A column) spilled 82 blank
+	// overflow pages in the reproduction that surfaced this. row-1 is the
+	// last row actually written (the loop above leaves row one past it).
+	SetPrintArea(f, sheetName, 1, row-1)
 
 	f.SetActiveSheet(index)
 	return nil

@@ -108,15 +108,28 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	return poolCoords, playerCoords
 }
 
+// AddPlayerDataToSheet is the playoffs-only (no pools) counterpart of
+// AddPoolDataToSheet, used by a pure-playoffs draw's Data sheet.
+//
+// Column A (bc-pnum A11) is headed "Draw order", 1-based: CreatePlayers
+// (tournament.go) stamps each entrant's PoolPosition 0-based (len(players)
+// BEFORE the append), a value pool distribution overwrites 1-based for every
+// pooled competition but nothing ever touches for a playoffs-only one, so
+// this sheet showed row 3 (the first entrant) as "0" beside a "Player
+// Number" column already reading "K1" -- two different counting
+// conventions on the same row. Nothing reads this cell by formula reference
+// anywhere downstream (unlike the "Player Number" column, which
+// CreateNamesToPrint links to); it is display-only, which is what makes a
+// pure rename-and-reindex here safe.
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) map[string]playerCellCoord {
 	hasNumber := len(players) > 0 && players[0].Number != ""
-	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Number")
+	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Draw order")
 
 	playerCoords := make(map[string]playerCellCoord, len(players))
 
 	row := 3
 	for i := range players {
-		handleExcelError("SetCellInt", f.SetCellInt(SheetData, fmt.Sprintf("A%d", row), players[i].PoolPosition))
+		handleExcelError("SetCellInt", f.SetCellInt(SheetData, fmt.Sprintf("A%d", row), players[i].PoolPosition+1))
 		layout.writePlayer(f, row, &players[i], sanitize, playerCoords)
 		row++
 	}

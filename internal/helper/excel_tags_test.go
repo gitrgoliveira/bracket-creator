@@ -106,6 +106,60 @@ func TestCreateTagsSheet(t *testing.T) {
 	}
 }
 
+// TestCreateTagsSheet_ClippingFix pins bc-pnum A9: rendered with LibreOffice,
+// a 4+ character tag (now reachable everywhere the prefix can be up to 3
+// characters) used to be sheared at the page edge and spilled blank overflow
+// pages. A unit test cannot rasterise a PDF, so this pins the three things a
+// unit test CAN see directly: the narrowed column width, the ShrinkToFit
+// flag on the tag style, and a print area confining the sheet to what was
+// actually written (see the orchestrator's browser/LibreOffice render check
+// for the rasterised confirmation).
+func TestCreateTagsSheet_ClippingFix(t *testing.T) {
+	f := excelize.NewFile()
+	pools := []Pool{
+		{PoolName: "Pool A", Players: []Player{
+			{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1", Number: "KOR19"},
+		}},
+	}
+	if err := CreateTagsSheet(f, pools, ""); err != nil {
+		t.Fatalf("CreateTagsSheet failed: %v", err)
+	}
+
+	width, err := f.GetColWidth(SheetTags, "A")
+	if err != nil {
+		t.Fatalf("GetColWidth: %v", err)
+	}
+	if width != 88 {
+		t.Errorf("expected column A width 88 (fits the A4-portrait printable width), got %v", width)
+	}
+
+	styleID, err := f.GetCellStyle(SheetTags, "A1")
+	if err != nil {
+		t.Fatalf("GetCellStyle: %v", err)
+	}
+	style, err := f.GetStyle(styleID)
+	if err != nil {
+		t.Fatalf("GetStyle: %v", err)
+	}
+	if style.Alignment == nil || !style.Alignment.ShrinkToFit {
+		t.Errorf("expected the tag style to set ShrinkToFit, got %+v", style.Alignment)
+	}
+
+	dn := f.GetDefinedName()
+	found := false
+	for _, d := range dn {
+		if d.Name == "_xlnm.Print_Area" && d.Scope == SheetTags {
+			found = true
+			if d.RefersTo != "'Tags'!$A$1:$A$2" {
+				t.Errorf("expected print area 'Tags'!$A$1:$A$2 (one player -> 2 rows), got %q", d.RefersTo)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected a _xlnm.Print_Area defined name scoped to the Tags sheet")
+	}
+}
+
 // TestCreateTagsSheet_EmptyNumber pins D1 (bc-pnum): a player with no Number
 // gets an EMPTY tag, never the pool-letter substitute ("A1", "A2", ...)
 // CreateTagsSheet used to compose when Number was blank. That fallback has

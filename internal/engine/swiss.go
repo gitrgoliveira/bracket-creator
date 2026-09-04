@@ -341,6 +341,18 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		if _, ok := parseSwissMatchRound(m.ID); !ok {
 			continue
 		}
+		// The winner tally must not depend on whether the OTHER side
+		// resolves: a hand-edited roster that drops one competitor (e.g. a
+		// round-1 loser removed after the round) must not silently drop the
+		// round-1 WINNER's win credit just because their now-vanished
+		// opponent's identity no longer resolves against the current roster.
+		// This runs BEFORE (independently of) the side-A resolution below,
+		// which the bye/prior-pairing tracking still needs both sides for.
+		if m.Status == state.MatchStatusCompleted && m.Winner != "" {
+			if winnerKey, ok := resolveSwissRosterKey(rosterByID, rosterByName, m.WinnerID, m.Winner); ok {
+				wins[winnerKey]++
+			}
+		}
 		keyA, okA := resolveSwissRosterKey(rosterByID, rosterByName, m.SideAID, m.SideA)
 		if !okA {
 			continue
@@ -348,12 +360,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		if m.SideB == "" {
 			hadBye[keyA] = true
 		} else if keyB, okB := resolveSwissRosterKey(rosterByID, rosterByName, m.SideBID, m.SideB); okB {
-			priorPair[pairKey(keyA, keyB)] = true
-		}
-		if m.Status == state.MatchStatusCompleted && m.Winner != "" {
-			if winnerKey, ok := resolveSwissRosterKey(rosterByID, rosterByName, m.WinnerID, m.Winner); ok {
-				wins[winnerKey]++
-			}
+			priorPair[tiebreakerPairKey(keyA, keyB)] = true
 		}
 	}
 
@@ -388,17 +395,6 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	matches, _ = assignPoolMatchSlots(matches, comp, tournament)
 
 	return matches, nil
-}
-
-// pairKey returns a canonical (order-independent) key for the pair (a, b).
-// Generic over any ordered string token: the Swiss pipeline passes
-// competitor identity keys (CompetitorKey), not names, but the
-// order-independence rule is the same either way.
-func pairKey(a, b string) string {
-	if a < b {
-		return a + "|" + b
-	}
-	return b + "|" + a
 }
 
 // buildRankByKey computes a 1-based rank for each player suitable for
@@ -674,7 +670,7 @@ func pairWithinWinGroups(ordered []string, priorPair map[string]bool) [][2]strin
 		// scan naturally falls through to lower-win opponents.
 		partnerIdx := -1
 		for j := 1; j < len(remaining); j++ {
-			if !priorPair[pairKey(head, remaining[j])] {
+			if !priorPair[tiebreakerPairKey(head, remaining[j])] {
 				partnerIdx = j
 				break
 			}

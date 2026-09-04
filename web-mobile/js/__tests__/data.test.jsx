@@ -148,4 +148,22 @@ describe('provisionalNumberMap', () => {
     expect(Object.keys(provisionalNumberMap(undefined, ['K1']))).toEqual([]);
     expect(Object.keys(provisionalNumberMap([], []))).toEqual([]);
   });
+
+  // bc-pnum D10: checkinPid is USER-CONTROLLED (a participant's own id or
+  // name|dojo), so the returned map must be prototype-pollution-safe: a
+  // participant legitimately (or maliciously) named/id'd "__proto__" must
+  // land as an OWN key holding its own number, never leak through the
+  // prototype chain, and never collide with an inherited Object method name.
+  it('is prototype-pollution-safe: a null-prototype map, "__proto__" as a plain own key', () => {
+    expect(Object.getPrototypeOf(provisionalNumberMap([], []))).toBeNull();
+
+    const map = provisionalNumberMap([{ id: '__proto__' }, { id: 'plain' }], ['K1', 'K2']);
+    expect(map['__proto__']).toBe('K1');
+    expect(map.plain).toBe('K2');
+
+    // "toString" is an inherited Object.prototype member on a plain {}; on
+    // this null-prototype map it must be undefined until the entry it
+    // legitimately names does not exist here, never inherited.
+    expect(provisionalNumberMap([{ id: 'p-1' }], ['K1'])['toString']).toBeUndefined();
+  });
 });

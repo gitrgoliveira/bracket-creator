@@ -542,6 +542,20 @@ export function engiApplies(kind) {
   return resolveKind(kind) === KIND_INDIVIDUAL;
 }
 
+// competitorsCarryNumbers (bc-pnum A7): every format except Swiss has
+// competitors that carry a number at all (its draw never writes pools.csv,
+// engine.RenumberCompetitors's Go doc calls this a "permanent no-op" for it,
+// see engine/numbering.go). This is the ONE place that answers "does this
+// competition have numbers to renumber", so it flips the moment Swiss gets
+// numbers of its own (bc-swnm) without a second copy of the rule drifting.
+// The settings screen's number-prefix reprint warning is the first caller:
+// warning a Swiss operator that changing the prefix "renumbers every
+// competitor and any tags already printed must be reprinted" describes a
+// renumber that can never happen.
+export function competitorsCarryNumbers(format) {
+  return format !== FORMAT_SWISS;
+}
+
 // --- Pool sizing field labels (mixed format only) -----------------------
 //
 // LABEL_POOL_SIZE / LABEL_POOL_WINNERS / LABEL_EXTRA_QUALIFIERS: verbatim

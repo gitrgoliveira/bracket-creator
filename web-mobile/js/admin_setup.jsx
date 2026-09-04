@@ -884,7 +884,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     // typist or an unmount never leaves a stray request racing to call
     // setNumberPrefix after the component has moved on.
     const timer = setTimeout(() => {
-      window.API.getNumberPrefixDefault(deriveCompetitionName(name, kind), "", password, controller.signal)
+      window.API.getNumberPrefixDefault(deriveCompetitionName(name, kind), password, controller.signal)
         .then((res) => {
           if (!controller.signal.aborted && !numberPrefixTouchedRef.current) {
             setNumberPrefix(res && res.numberPrefix || "");
@@ -1012,7 +1012,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       // decision anywhere on the form.
       courts: selectedCourts,
       poolMode, poolSize, winnersPerPool: winners,
-      numberPrefix: numberPrefix.trim().substring(0, 3),
+      // bc-pnum A6: the field is a SERVER-DERIVED PREVIEW until the operator
+      // actually types into it (numberPrefixTouchedRef), so an untouched
+      // value is not this request's to send: the debounced pre-fill effect's
+      // deps ([name, kind, password]) never re-run when tournament.competitions
+      // moves, so a prefix another device or an import claimed in the
+      // meantime could sit stale in the preview and get submitted as a REAL
+      // value here, refusing this save 400 over a field the operator never
+      // touched. "" defers to the server's own derivation
+      // (WithCompetitionRenameLock, the same one this preview echoes), which
+      // reads the taken set at save time instead of at the moment this form
+      // last fetched a preview.
+      numberPrefix: numberPrefixTouchedRef.current ? numberPrefix.trim().substring(0, 3) : "",
       // zekkenApplies, not a `kind === "individual"` literal: the rule has
       // one owner (competition_shape.jsx) and the render gate below already
       // reads it, so a payload line spelling it out by hand is the half that

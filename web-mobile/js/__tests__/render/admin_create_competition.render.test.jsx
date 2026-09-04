@@ -419,6 +419,53 @@ describe('AdminCreateCompetition number-prefix pre-fill latch (bc-pnum F5c)', ()
   });
 });
 
+// bc-pnum A6: the field is a server-derived PREVIEW until the operator
+// actually types into it. Submitting it untouched used to send it as a REAL
+// value: the pre-fill effect's deps ([name, kind, password]) never re-run
+// when tournament.competitions moves, so a prefix claimed meanwhile by
+// another device or an import sat stale in the preview and was refused 400
+// at submit time over a field the operator never touched, whereas "" is
+// derived server-side inside WithCompetitionRenameLock (the same lock the
+// preview's own derivation reads under).
+describe('AdminCreateCompetition number-prefix payload (bc-pnum A6)', () => {
+  const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');
+
+  it('sends "" when the pre-filled prefix is submitted untouched', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'K' });
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    try {
+      const { container } = await mountForm({ onCreate });
+      await waitFor(() => expect(prefixInput(container).value).toBe('K'));
+
+      await act(async () => { fireEvent.click(submitButton(container)); });
+
+      expect(onCreate).toHaveBeenCalledTimes(1);
+      expect(onCreate.mock.calls[0][0].numberPrefix).toBe('');
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+
+  it('sends the typed value once the operator touches the field', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'K' });
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    try {
+      const { container } = await mountForm({ onCreate });
+      await waitFor(() => expect(prefixInput(container).value).toBe('K'));
+
+      await act(async () => { fireEvent.change(prefixInput(container), { target: { value: 'Z' } }); });
+      await act(async () => { fireEvent.click(submitButton(container)); });
+
+      expect(onCreate).toHaveBeenCalledTimes(1);
+      expect(onCreate.mock.calls[0][0].numberPrefix).toBe('Z');
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+});
+
 // bc-draw R9 UAT gap 3, operator-facing half. The chosen mechanism is to
 // REFUSE a tournament court reduction while a live competition still holds a
 // removed shiaijo, so the refusal has to actually land: it names which

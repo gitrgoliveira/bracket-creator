@@ -685,18 +685,30 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 // The losing player is resolved by ID FIRST, straight from result's own
 // SideAID/SideBID (loserPlayerID, mirroring resolveWinnerSide), and only
 // falls back to a name-based roster scan (lookupPlayerID) when the row
-// carries no side ids at all. A name-only resolution silently picks the
-// FIRST namesake registered in the roster -- a DIFFERENT competitor whenever
-// the actual loser shares a display name with someone else (repro: roster
-// Tanaka@DojoB registered before Tanaka@DojoA; Tanaka@DojoA withdraws, but
-// the old name-only resolution wrote Eligible:false for Tanaka@DojoB
-// instead, and her own next match then incorrectly 409'd).
+// carries NO side ids at all -- loserPlayerID's rowHasIDs=false case. A
+// name-only resolution silently picks the FIRST namesake registered in the
+// roster -- a DIFFERENT competitor whenever the actual loser shares a
+// display name with someone else (repro: roster Tanaka@DojoB registered
+// before Tanaka@DojoA; Tanaka@DojoA withdraws, but the old name-only
+// resolution wrote Eligible:false for Tanaka@DojoB instead, and her own next
+// match then incorrectly 409'd).
+//
+// A row that DOES carry side ids but whose loser is still ambiguous
+// (loserPlayerID's rowHasIDs=true, id="" case -- reachable via bulk-score,
+// which writes a decision directly and never runs RecordDecisionTx's
+// decisionBy-based resolution, so a same-name pairing can reach here with no
+// WinnerID stamped) is REJECTED with a *ValidationError rather than falling
+// back to the same first-namesake guess: the row's own ids already prove
+// there is more than one candidate, so guessing from a name-only scan would
+// silently mark the wrong one exactly as in the no-ids repro above, just
+// reached through a different gap.
 //
 // Returns the persisted CompetitorStatus when a status was written
 // (so the handler layer can broadcast the corresponding
-// `competitor-status-updated` SSE event), or (nil, nil) when no
-// status change applies (non-kiken/fusenpai decision, unresolvable
-// loser, or unknown player).
+// `competitor-status-updated` SSE event), (nil, nil) when no status change
+// applies (non-kiken/fusenpai decision, unresolvable loser, or unknown
+// player), or a non-nil error when the row's own ids prove the loser
+// ambiguous.
 //
 // FR-036, contracts/match-decisions.md §side-effects.
 func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
@@ -710,7 +722,17 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	if loser == "" {
 		return nil, nil
 	}
-	playerID := loserPlayerID(result)
+	playerID, rowHasIDs := loserPlayerID(result)
+	if playerID == "" && rowHasIDs {
+		// The row DOES carry side ids, but resolveWinnerSide could not tell
+		// which one lost (e.g. a same-name pairing decided via bulk-score,
+		// which never runs RecordDecisionTx's decisionBy-based resolution
+		// and so never stamps a disambiguating WinnerID). Falling back to a
+		// name-only roster scan here would silently pick the FIRST namesake
+		// registered -- a DIFFERENT competitor whenever the actual loser is
+		// not that one -- so this is rejected outright rather than guessed.
+		return nil, validationErrorf("match %s: cannot resolve the losing side's identity for a %s decision (side ids present but ambiguous, e.g. a same-name pairing with no winnerId)", matchID, result.Decision)
+	}
 	if playerID == "" {
 		comp, err := h.LoadCompetition(compID)
 		if err != nil {
@@ -821,22 +843,34 @@ func loserSideName(result *state.MatchResult) string {
 // the FIRST namesake registered, which names a DIFFERENT person whenever the
 // actual loser is not that one.
 //
-// Returns "" when the row carries no side ids at all (resolveWinnerSide's id
-// branch needs at least one of SideAID/SideBID non-empty -- e.g. a bracket
-// match, which persists none), so callers fall back to their own name-based
-// resolution exactly as before this existed.
-func loserPlayerID(result *state.MatchResult) string {
+// Returns ("", false) -- rowHasIDs false -- ONLY when the row carries no
+// side ids at all (resolveWinnerSide's id branch needs at least one of
+// SideAID/SideBID non-empty -- e.g. a bracket match, which persists none);
+// that is the ONE shape a caller may safely fall back to a name-based
+// resolution for, because there is genuinely no identity data to prefer over
+// it.
+//
+// Returns ("", true) -- rowHasIDs true, id empty -- when the row DOES carry
+// side ids but resolveWinnerSide could not determine which one lost (e.g. a
+// same-name pairing with no WinnerID stamped, reachable via bulk-score,
+// which never runs RecordDecisionTx's decisionBy-based resolution). This is
+// a DIFFERENT case from "no data": the row's own ids say the answer is
+// ambiguous, not absent, and a caller must NOT fall back to a name-only scan
+// here -- lookupPlayerID's first-namesake pick would silently mark the WRONG
+// competitor ineligible using data the row itself already proved
+// insufficient to trust. Callers must reject rather than guess.
+func loserPlayerID(result *state.MatchResult) (id string, rowHasIDs bool) {
 	if result.SideAID == "" && result.SideBID == "" {
-		return ""
+		return "", false
 	}
 	winnerIsA, winnerIsB := resolveWinnerSide(*result)
 	switch {
 	case winnerIsA:
-		return result.SideBID
+		return result.SideBID, true
 	case winnerIsB:
-		return result.SideAID
+		return result.SideAID, true
 	}
-	return ""
+	return "", true
 }
 
 // ReinstateCompetitor restores eligibility for a competitor who was

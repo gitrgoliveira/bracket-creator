@@ -705,9 +705,17 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	priorLoser := ""
 	priorLoserID := ""
+	priorAmbiguous := false
 	if domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai) {
 		priorLoser = loserSideName(prior)
-		priorLoserID = loserPlayerID(prior)
+		var priorRowHasIDs bool
+		priorLoserID, priorRowHasIDs = loserPlayerID(prior)
+		// The prior row carries side ids but resolveWinnerSide could not
+		// tell which one lost (e.g. a same-name pairing with a mixed
+		// id-carrying/id-less side and no WinnerID) -- see loserPlayerID's
+		// doc comment. Recorded for the restore gate below; never silently
+		// fall back to priorLoser (name) as if it were a trustworthy id.
+		priorAmbiguous = priorRowHasIDs && priorLoserID == ""
 	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been
@@ -774,15 +782,28 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// (the same same-name-collision reasoning as above), else by name.
 	if priorLoser != "" || priorLoserID != "" {
 		newLoser := loserSideName(result)
-		newLoserID := loserPlayerID(result)
-		same := priorLoser == newLoser
-		if priorLoserID != "" && newLoserID != "" {
-			same = priorLoserID == newLoserID
-		}
-		if !same {
-			restored, rerr := e.restoreCompetitorEligibility(tx, compID, priorLoserID, priorLoser, matchID)
-			if rerr == nil && restored != nil {
-				status = restored
+		newLoserID, newRowHasIDs := loserPlayerID(result)
+		newAmbiguous := newRowHasIDs && newLoserID == ""
+		if priorAmbiguous || newAmbiguous {
+			// Either the prior or the current loser's identity is ambiguous
+			// (side ids present but inconclusive) -- do not fall back to a
+			// name-only "same competitor" comparison or restore, which could
+			// restore the WRONG namesake's eligibility using data this same
+			// row already proved insufficient to trust (the same principle
+			// recordIneligibilityFromDecision applies to the primary write).
+			// The write above already landed; only the eligibility-restore
+			// side effect is skipped, logged for operator visibility.
+			log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: prior or new loser identity ambiguous (side ids present but inconclusive); skipping eligibility restore", compID, matchID)
+		} else {
+			same := priorLoser == newLoser
+			if priorLoserID != "" && newLoserID != "" {
+				same = priorLoserID == newLoserID
+			}
+			if !same {
+				restored, rerr := e.restoreCompetitorEligibility(tx, compID, priorLoserID, priorLoser, matchID)
+				if rerr == nil && restored != nil {
+					status = restored
+				}
 			}
 		}
 	}

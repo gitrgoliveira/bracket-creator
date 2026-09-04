@@ -197,6 +197,106 @@ func TestRecordDecision_KikenResolvesLoserByID_NotFirstRegisteredNamesake(t *tes
 	require.NoError(t, eng.StartMatch(compID, "Pool A-1"))
 }
 
+// TestRecordDecision_PartiallyStampedRow_StillRecordsIneligibility is the
+// second-Opus-pass repro for item 1: loserPlayerID's second return used to
+// conflate "the SIDE is unresolved" with "the resolved side's own id field
+// happens to be empty" (a partially-stamped row: SideAID unset, SideBID
+// set). decisionBy="aka" names SideA (Tanaka) as the loser; the WINNER
+// (Sato, SideB) carries a real id, which is enough for resolveWinnerSide to
+// resolve winnerIsB via the id branch -- so the losing SIDE (SideA) is not
+// remotely ambiguous, only her own id field on THIS row was never stamped.
+// Before the fix this was indistinguishable from a genuinely unresolved
+// side and was rejected outright, logging "cannot resolve" and recording no
+// ineligibility at all -- so Tanaka's own next match would incorrectly
+// start unblocked and the withdrawal would go unenforced. The name fallback
+// (loserSideName, already computed independently) must still resolve her.
+func TestRecordDecision_PartiallyStampedRow_StillRecordsIneligibility(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "elig-partial-stamp"
+	createTestCompetition(t, store, compID, "league", 4)
+
+	tanakaID := helper.NewUUID4()
+	satoID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: tanakaID, Name: "Tanaka", Dojo: "DojoA"},
+		{ID: satoID, Name: "Sato", Dojo: "DojoS"},
+	}))
+	// Tanaka's own id was never stamped on this row (SideAID ""), even
+	// though she has a real participant id in the roster -- the shape a row
+	// generated before ids existed, or written by an older client, takes.
+	// Sato's id IS stamped.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka", SideAID: "", SideB: "Sato", SideBID: satoID, Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	// decisionBy "aka" => SideA (Tanaka) is the withdrawing/losing side.
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, status, "a CompetitorStatus must be written -- the losing SIDE is known even though her id field on this row is empty")
+	assert.Equal(t, tanakaID, status.PlayerID, "the ineligibility must land on Tanaka, resolved by name fallback for the known losing side")
+	assert.False(t, status.Eligible)
+}
+
+// --- Second Opus pass, item 3: RecordDecisionTx's restore-on-rescore must
+// key on the competitor-status RECORD (MatchID + Eligible), not re-derive
+// identity from the match's side names/ids ---
+
+// TestRecordDecisionTx_SameNamePairing_RescoreAsFoughtRestoresEligibility is
+// the item 3 repro: two "Tanaka" from different dojos meet directly (a
+// same-name pairing). Recording a kiken correctly marks the specific
+// withdrawing side ineligible (item 2/round-2's own fix), but the OLD
+// restore-on-rescore logic re-derived "was the prior loser resolved
+// unambiguously" via loserPlayerID on the SAME same-name row -- which is
+// ALWAYS ambiguous for a same-name pairing with no WinnerID stamped on the
+// rescore -- and skipped the restore outright, logging and leaving Tanaka@A
+// ineligible FOREVER (kiken-voluntary is not Reinstateable, so
+// ReinstateCompetitor refuses too; only this restore path could ever clear
+// it). The fix restores by matching the competitor-status record's own
+// MatchID against a matchID key ONLY the engine itself ever wrote (exact
+// regardless of any name collision), so a same-name pairing restores exactly
+// like any other rescore.
+func TestRecordDecisionTx_SameNamePairing_RescoreAsFoughtRestoresEligibility(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "same-name-restore"
+	createTestCompetition(t, store, compID, "league", 3)
+
+	tanakaAID := helper.NewUUID4()
+	tanakaBID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: tanakaAID, Name: "Tanaka", Dojo: "DojoA"},
+		{ID: tanakaBID, Name: "Tanaka", Dojo: "DojoB"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka", SideAID: tanakaAID, SideB: "Tanaka", SideBID: tanakaBID, Status: state.MatchStatusScheduled, Court: "A"},
+	}))
+
+	// decisionBy "aka" => SideA (Tanaka@DojoA) withdraws.
+	_, status, err := eng.RecordDecision(compID, "Pool A-0", "kiken", "aka", "injury", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, tanakaAID, status.PlayerID)
+	assert.False(t, status.Eligible)
+
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.False(t, statuses[tanakaAID].Eligible, "precondition: Tanaka@DojoA must be ineligible before the rescore")
+
+	// Rescore the SAME match as a normal fought result: decision no longer
+	// kiken/fusenpai, so recordIneligibilityFromDecision writes nothing new
+	// for this match -- the stale Pool A-0 ineligibility entry must be
+	// restored by the record itself, not re-derived from the row's (still
+	// same-name, still id-less-on-WinnerID) sides.
+	_, restoredStatus, err := eng.RecordDecision(compID, "Pool A-0", "fought", "aka", "", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, restoredStatus, "the stale ineligibility for THIS match must be restored, not silently skipped as ambiguous")
+	assert.Equal(t, tanakaAID, restoredStatus.PlayerID)
+	assert.True(t, restoredStatus.Eligible)
+
+	statuses, err = store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	assert.True(t, statuses[tanakaAID].Eligible, "Tanaka@DojoA must be eligible again after the rescore")
+}
+
 // --- Finding 3: ReplaceParticipantInDraw must match by participant id when available ---
 
 // TestReplaceParticipantInDraw_MatchesByID_NotBareName is the bead's repro:
@@ -986,62 +1086,131 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 
 // --- Finding 8 / nit 16: ReplaceParticipantInDraw's bracket-ambiguity check ---
 
-// TestReplaceParticipantInDraw_NamesakeExcludedFromDrawCascadesWithoutWarning
-// pins the bc-idfx review's item 8 fix: bracketNameAmbiguous used to scan the
-// FULL roster for a namesake, including a participant who was never placed in
-// the bracket at all (excluded by GenerateDraw's own filterCheckedIn opt-in
-// check-in filter). A namesake who only ever existed in participants.csv can
-// never occupy a bracket row, so counting her toward ambiguity produced a
-// false "ambiguous across dojos" warning and silently skipped a rename that
-// was actually perfectly safe. The fix scopes the candidate pool to
-// filterCheckedIn(participants) -- the same roster GenerateDraw itself built
-// the bracket from.
-func TestReplaceParticipantInDraw_NamesakeExcludedFromDrawCascadesWithoutWarning(t *testing.T) {
+// TestReplaceParticipantInDraw_NamesakeAbsentFromBracketCascadesWithoutWarning
+// pins the second-Opus-pass fix for item 2: the ambiguity check now collects
+// every name actually appearing in bracket.json FIRST, and only loads
+// participants (and scans for a namesake) when oldName is one of them. Alice
+// (being renamed) sits only in pools.csv here; the crafted bracket names two
+// entirely unrelated players (Bob, Charlie), so oldName ("Alice") is not one
+// of the bracket's own names at all.
+//
+// The warnings-empty assertion below does NOT by itself distinguish the fix
+// from the pre-fix code: bracketNameAmbiguous is gated on bracketFound too
+// (a match must actually SAY "Alice" for the warning to fire), and neither
+// crafted row does, so even the old always-scan-when-non-empty code produces
+// no warning here (verified by mutation). What the fix actually changes is
+// whether the SCAN runs at all: a corrupted (permission-stripped)
+// participants.csv is used as the discriminator, mirroring
+// corruptParticipantsFile's technique below -- the old code loaded
+// participants unconditionally whenever the bracket was non-empty and would
+// have surfaced that I/O error; the fix's pass-1 bracketNames check must
+// skip the load entirely when oldName isn't a bracket name, so the rename
+// still succeeds even with participants.csv unreadable.
+func TestReplaceParticipantInDraw_NamesakeAbsentFromBracketCascadesWithoutWarning(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "replace-checkin-excluded-namesake"
-	comp := &state.Competition{
-		ID: compID, Name: "Checkin Namesake", Kind: "individual",
-		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
-		StartTime: "09:00", Status: "setup",
-	}
-	require.NoError(t, store.SaveCompetition(comp))
+	compID := "replace-namesake-absent-from-bracket"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Absent From Bracket", Kind: "individual",
+		Format: state.CompFormatMixed, Courts: []string{"A"},
+		StartTime: "09:00", Status: state.CompStatusDrawReady,
+	}))
 
-	players := []domain.Player{
-		{Name: "Alice", Dojo: "Dojo0", CheckedIn: true},
-		{Name: "Bob", Dojo: "Dojo1", CheckedIn: true},
-		{Name: "Charlie", Dojo: "Dojo2", CheckedIn: true},
-		{Name: "Dave", Dojo: "Dojo3", CheckedIn: true},
-		// Same display name as the drawn Alice, different dojo, NOT checked
-		// in. filterCheckedIn's opt-in semantics (at least one participant
-		// above IS checked in) excludes her from GenerateDraw entirely, so
-		// she can never appear as a bracket row.
-		{Name: "Alice", Dojo: "DojoExcluded", CheckedIn: false},
-	}
-	require.NoError(t, store.SaveParticipants(compID, players))
-	require.NoError(t, eng.GenerateDraw(compID))
+	aliceID := helper.NewUUID4()
+	namesakeID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo0"},
+		{ID: namesakeID, Name: "Alice", Dojo: "DojoOther"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "Dojo0"},
+			{ID: namesakeID, Name: "Alice", Dojo: "DojoOther"},
+		}},
+	}))
+	// Neither Alice's name is anywhere in this bracket -- it names two
+	// completely unrelated players who advanced from a different pool.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "R1-0", SideA: "Bob", SideB: "Charlie", Winner: "Bob", Status: state.MatchStatusCompleted}},
+		},
+	}))
 
-	bracketBefore, err := store.LoadBracket(compID)
+	// participants.csv is unreadable: the fix must never attempt to load it
+	// for this rename, since oldName is not a candidate bracket name.
+	corruptParticipantsFile(t, store, compID)
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	require.NoError(t, err, "the pass-1 bracketNames check must skip the participants.csv load entirely for a name the bracket never uses")
+	assert.Empty(t, warnings)
+
+	poolsAfter, err := store.LoadPools(compID)
 	require.NoError(t, err)
-	require.True(t, findNameInBracket(bracketBefore, "Alice"), "the checked-in Alice must be in the bracket before the rename")
-
-	all, err := store.LoadParticipants(compID, false)
-	require.NoError(t, err)
-	var drawnAliceID string
-	for _, p := range all {
-		if p.Name == "Alice" && p.Dojo == "Dojo0" {
-			drawnAliceID = p.ID
-		}
+	require.Len(t, poolsAfter, 1)
+	byID := map[string]helper.Player{}
+	for _, p := range poolsAfter[0].Players {
+		byID[p.ID] = p
 	}
-	require.NotEmpty(t, drawnAliceID, "the checked-in Alice must have a minted id")
-
-	warnings, err := eng.ReplaceParticipantInDraw(compID, drawnAliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
-	require.NoError(t, err)
-	assert.Empty(t, warnings, "the checked-in-out namesake must not trigger a false bracket-ambiguity warning")
+	assert.Equal(t, "Alicia", byID[aliceID].Name, "the renamed participant's own pools row must cascade")
+	assert.Equal(t, "Alice", byID[namesakeID].Name, "the namesake's pools row must be untouched")
 
 	bracketAfter, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.False(t, findNameInBracket(bracketAfter, "Alice"), "old name must be cascaded away, not left ambiguous")
-	assert.True(t, findNameInBracket(bracketAfter, "Alicia"), "new name must appear in the bracket after the rename")
+	assert.False(t, findNameInBracket(bracketAfter, "Alicia"), "the bracket never named Alice at all, so nothing there should change")
+	assert.True(t, findNameInBracket(bracketAfter, "Bob"), "the crafted bracket must be untouched")
+}
+
+// TestReplaceParticipantInDraw_CheckedOutNamesakeBlocksRewrite is the
+// second-Opus-pass repro: a namesake who WAS placed in the bracket at draw
+// time (her name is one of the two "Alice" rows below, indistinguishable
+// from the renamed Alice's own row since bracket.json carries no per-side
+// id) has since been checked OUT -- legal while draw-ready. The OLD
+// filterCheckedIn-scoped ambiguity check would have excluded her from the
+// candidate pool at rename time (she is no longer in today's checked-in
+// snapshot) and silently rewritten BOTH "Alice" rows to "Alicia" -- the
+// exact corruption this guard exists to prevent, striking the namesake's
+// own match history along with the rename. The fix scans the FULL current
+// roster (unfiltered by check-in) once bracket.json is known to contain
+// oldName at all, so a checked-out namesake is found just as reliably as a
+// checked-in one, and the rewrite is correctly blocked with a warning
+// instead.
+func TestReplaceParticipantInDraw_CheckedOutNamesakeBlocksRewrite(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-checked-out-namesake"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Checked Out Namesake", Kind: "individual",
+		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		StartTime: "09:00", Status: state.CompStatusDrawReady,
+	}))
+
+	aliceID := helper.NewUUID4()
+	namesakeID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo0", CheckedIn: true},
+		// Was checked in and drawn at draw time; checked OUT since (legal in
+		// draw-ready). She still exists in the roster and her bracket row
+		// (from when she WAS drawn) is still sitting in bracket.json below.
+		{ID: namesakeID, Name: "Alice", Dojo: "DojoOther", CheckedIn: false},
+	}))
+	// Both "Alice" rows were real at draw time; there is no id on either to
+	// tell them apart now.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "R1-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted},
+				{ID: "R1-1", SideA: "Alice", SideB: "Charlie", Winner: "Charlie", Status: state.MatchStatusCompleted},
+			},
+		},
+	}))
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	require.NoError(t, err)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "ambiguous across dojos", "a checked-out namesake must still be found and block the rewrite")
+
+	bracketAfter, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.False(t, findNameInBracket(bracketAfter, "Alicia"), "neither row may be rewritten while the namesake makes both ambiguous")
+	assert.True(t, findNameInBracket(bracketAfter, "Alice"), "both original rows must survive untouched, including the checked-out namesake's own match history")
 }
 
 // corruptParticipantsFile forces LoadParticipants to error on compID's

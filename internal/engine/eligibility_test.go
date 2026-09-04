@@ -555,29 +555,6 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	assert.NoError(t, err, "unknown player should return nil without error")
 }
 
-// TestRestoreCompetitorEligibility_EmptyPriorLoser covers the priorLoser==""
-// fast path in restoreCompetitorEligibility.
-func TestRestoreCompetitorEligibility_EmptyPriorLoser(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "restore-empty"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "", "", "M1")
-	assert.NoError(t, err)
-	assert.Nil(t, status)
-}
-
-// TestRestoreCompetitorEligibility_PlayerNotInParticipants covers the
-// playerID=="" path when the prior loser is not a registered participant.
-func TestRestoreCompetitorEligibility_PlayerNotInParticipants(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "restore-unknown"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// No participants → lookupPlayerID returns ""
-	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "", "Ghost Player", "M1")
-	assert.NoError(t, err)
-	assert.Nil(t, status)
-}
-
 // TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides
 // error path in resolveMatchParticipantIDs.
 func TestResolveMatchParticipantIDs_UnknownMatch(t *testing.T) {
@@ -1373,12 +1350,6 @@ func TestCheckCrossCompCourtBusy(t *testing.T) {
 func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
 	const missing = "no-such-competition"
-
-	t.Run("restoreCompetitorEligibility no-ops on missing config", func(t *testing.T) {
-		status, err := eng.restoreCompetitorEligibility(eng.store, missing, "", "Bob", "m1")
-		assert.NoError(t, err)
-		assert.Nil(t, status)
-	})
 
 	t.Run("recordIneligibilityFromDecision no-ops on missing config", func(t *testing.T) {
 		result := &state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice", Decision: string(domain.DecisionKikenVoluntary)}

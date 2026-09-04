@@ -137,24 +137,73 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// misfire), but nothing is rewritten and the operator is warned
 		// instead of a guess being made.
 		//
-		// The candidate pool is deliberately NOT the full roster: a namesake
-		// who was excluded from the draw (filterCheckedIn's opt-in check-in
-		// semantics, the same mechanism the "not found in draw artifacts"
-		// warning below already names) can never physically occupy a bracket
-		// row, so counting her toward ambiguity produces a false warning and
-		// blocks a perfectly safe rename cascade. filterCheckedIn is the same
-		// function GenerateDraw itself runs, so "would this participant have
-		// been placed in the draw" is answered identically here and there.
-		// Skipped entirely when the bracket is empty (no rounds, no bronze
-		// match): there is nothing to rename or warn about, so the
-		// participants.csv read is avoided outright.
+		// The candidate pool is the FULL current roster, NOT filterCheckedIn's
+		// narrower one (second-Opus-pass finding: an earlier version of this
+		// scoped to filterCheckedIn(participants), which is wrong in BOTH
+		// directions here). check-in PUT/DELETE and POST /participants are all
+		// legal while a competition sits in draw-ready -- the bracket was
+		// drawn from whatever check-in state held AT THAT TIME, which is not
+		// necessarily today's. filterCheckedIn(participants) answers "would
+		// today's roster be placed in a FRESH draw", not "who is actually
+		// sitting in THIS bracket" -- the two diverge the moment check-in
+		// state changes after the draw, and diverging the wrong way silently
+		// corrupts data: a namesake who WAS placed in the bracket and has
+		// since been checked OUT drops out of filterCheckedIn's pool, so
+		// bracketNameAmbiguous goes false and her bracket rows get silently
+		// rewritten too -- exactly the corruption this guard exists to stop.
+		// The full roster has no such blind spot: checking a participant out
+		// doesn't remove her from participants.csv, only from the check-in
+		// snapshot.
+		//
+		// Pass 1 below collects every name actually appearing in a bracket
+		// row (SideA/SideB/Winner, Rounds + ThirdPlaceMatch) BEFORE loading
+		// participants at all, so the participants.csv read (and the full
+		// roster scan) only runs when oldName is a name this bracket could
+		// possibly need rewritten -- the empty-bracket case folds into this
+		// naturally, since an empty bracket contributes no names. A namesake
+		// who exists in the full roster but was never placed in ANY bracket
+		// row still triggers bracketNameAmbiguous once oldName itself does
+		// appear in the bracket (the pass-1 check does not, and cannot,
+		// verify that the SPECIFIC bracket occurrence naming oldName belongs
+		// to oldName's own participant rather than the namesake's -- that is
+		// exactly the ambiguity bracket.json's lack of ids makes
+		// unresolvable). Over-warning in that shape -- refusing a safe rename
+		// because an uninvolved namesake merely exists -- is the accepted
+		// safe direction: a stale warning costs the operator a manual check,
+		// while the silent-corruption direction costs someone else's match
+		// history.
+		bracketNames := make(map[string]bool)
+		for _, round := range bracket.Rounds {
+			for _, match := range round {
+				if match.SideA != "" {
+					bracketNames[match.SideA] = true
+				}
+				if match.SideB != "" {
+					bracketNames[match.SideB] = true
+				}
+				if match.Winner != "" {
+					bracketNames[match.Winner] = true
+				}
+			}
+		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil {
+			if bm.SideA != "" {
+				bracketNames[bm.SideA] = true
+			}
+			if bm.SideB != "" {
+				bracketNames[bm.SideB] = true
+			}
+			if bm.Winner != "" {
+				bracketNames[bm.Winner] = true
+			}
+		}
 		bracketNameAmbiguous := false
-		if len(bracket.Rounds) > 0 || bracket.ThirdPlaceMatch != nil {
+		if bracketNames[oldName] {
 			participants, perr := tx.LoadParticipants(compID, current.EffectiveWithZekkenName())
 			if perr != nil {
 				return fmt.Errorf("loading participants for bracket ambiguity check: %w", perr)
 			}
-			for _, p := range filterCheckedIn(participants) {
+			for _, p := range participants {
 				if p.Name != oldName {
 					continue
 				}

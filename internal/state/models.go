@@ -429,38 +429,54 @@ type Competition struct {
 	// && Kind == "team") at draw time.
 	LeagueTiebreakTopN int `yaml:"league_tiebreak_top_n,omitempty" json:"leagueTiebreakTopN,omitempty"`
 
-	// LeagueTwoThirdPlaces controls whether two (or more) joint 3rd places are
-	// awarded when competitors tie at the 3rd-position boundary. Applies to ALL
-	// leagues (team AND individual); the standard kendo convention enables it,
-	// naginata leaves it off (single 3rd).
+	// LeagueTwoThirdPlaces is LEGACY READ-ONLY (bc-3rdp): no writer sets it any
+	// longer (mirrors how BracketMatch.ScoreA/ScoreB were retired in the same
+	// branch). It is superseded by TwoThirdPlaces / EffectiveTwoThirdPlaces,
+	// which answer the same question for EVERY format, not just leagues. This
+	// field is kept, unmodified, purely so EffectiveTwoThirdPlaces can resolve
+	// a league record that predates TwoThirdPlaces to its ORIGINAL value --
+	// see that method's doc comment for the exact fallback order. Do not read
+	// it directly anywhere else; do not write it anywhere.
 	//
-	// Two effects:
+	// What it used to mean (still true of the value already on disk): two (or
+	// more) joint 3rd places awarded when competitors tie at the 3rd-position
+	// boundary, applying to ALL leagues (team AND individual) -- the standard
+	// kendo convention enables it, naginata leaves it off (single 3rd). Two
+	// effects, both still driven by this stored value via EffectiveTwoThirdPlaces:
 	//   - Standings rank (all leagues): a genuine tied group whose best position
 	//     is 3rd or lower is given a SHARED rank (e.g. 3,3) rather than arbitrary
 	//     sequential ranks, so the standings table and the closing-ceremony podium
 	//     show joint 3rd places instead of relabeling the 4th finisher. See
-	//     CalculatePoolStandings (engine/scoring.go).
+	//     applyJointThirdRanks (engine/scoring.go).
 	//   - Team-league tie-breaker gating: a tied group whose ENTIRE position range
 	//     falls at position ≥ 3 is treated as non-consequential (both receive 3rd
 	//     place, no bronze decider). See isConsequentialTie (engine).
-	//
-	// When false (default), all ties within [1..LeagueTiebreakTopN] are
-	// consequential and may require a tie-breaker, and the podium shows a
-	// single 3rd place.
-	//
-	// The create form's default for this control is TRUE (the kendo convention
-	// above), which is NOT this field's Go zero value -- so the form has to
-	// send it for EVERY format, not just leagues, or a competition that was
-	// never a league carries no value, reads back false, and the settings
-	// screen's Format editor turns it into a league running the naginata
-	// convention. It does now (admin_setup.jsx, alongside roundRobin, which
-	// defaults to true for the same reason).
-	//
-	// `omitempty` is fine here and is NOT what caused that: a bool with
-	// omitempty is value-lossless, since false marshals to an absent key and
-	// an absent key unmarshals back to false. The bug was only ever the
-	// conditional send.
 	LeagueTwoThirdPlaces bool `yaml:"league_two_third_places,omitempty" json:"leagueTwoThirdPlaces,omitempty"`
+
+	// TwoThirdPlaces is the ONE named rule for "does this competition award a
+	// joint (shared) 3rd place instead of deciding a single 3rd with a
+	// bronze/decider match", for EVERY format (bc-3rdp). It replaces two
+	// separate spellings of the same question: the knockout side used to infer
+	// it from Naginata (RequiresSingleThirdPlace, helper.NeedsBronzeBlock), and
+	// leagues had their own explicit field (LeagueTwoThirdPlaces, above). See
+	// EffectiveTwoThirdPlaces for the resolution order and RequiresSingleThirdPlace
+	// for the knockout-facing predicate that reads it.
+	//
+	// A *bool, not a bool: "operator explicitly chose false" must be
+	// distinguishable from "never set". A knockout competition saved before
+	// this field existed must keep resolving via its ORIGINAL rule (!Naginata),
+	// not silently gain a bronze match because an absent value reads as Go's
+	// bool zero value -- see EffectiveTwoThirdPlaces. `omitempty` on a pointer
+	// omits the key only when the pointer itself is nil; an explicit *false is
+	// always written, so the "never set" vs "explicitly off" distinction
+	// survives a save/load round trip.
+	//
+	// New competitions default this to true (the kendo joint-3rd convention);
+	// the create form sends it explicitly for every format, the same pattern
+	// LeagueTwoThirdPlaces used and for the same reason: the Go zero value
+	// (false, i.e. "unset" would misread as "off") must never be the value a
+	// fresh competition is judged by.
+	TwoThirdPlaces *bool `yaml:"two_third_places,omitempty" json:"twoThirdPlaces,omitempty"`
 
 	// LeagueTiebreakFinalized is set to true by the operator via
 	// POST /api/competitions/:id/league-tiebreak/finalize to accept the
@@ -497,6 +513,31 @@ func (c *Competition) ParticipantIDsHint() *bool {
 // so any future layout modifier has a single seam.
 func (c *Competition) EffectiveWithZekkenName() bool {
 	return c.WithZekkenName
+}
+
+// EffectiveFormat returns CompFormatPlayoffs when Format is unset ("") and
+// Format unchanged otherwise. Every reader that asks "what format does this
+// competition run" must go through this rather than comparing c.Format
+// directly, for two reasons that both point the same way:
+//
+//   - Generation has always treated "" as standalone playoffs: runDrawPipeline's
+//     generation switch (internal/engine/competition.go) falls to its `default:`
+//     case for "", which calls generatePlayoffs, exactly as it does for the
+//     literal "playoffs" value. A predicate that reads Format literally and
+//     disagrees with that is answering a different question than the one
+//     generation already answered.
+//   - "" is a legitimate STORED value, not a hand-edited corner case:
+//     validateCompetitionFormat (internal/mobileapp/handlers_competition.go)
+//     explicitly accepts it, so a real competition can persist it indefinitely.
+//
+// Introduced to close the gap where IsPlayoffEnabled and isPurePlayoffs
+// (internal/engine/playoff_skeleton.go) compared Format literally and were
+// blind to "", while generation was not -- see IsPlayoffEnabled's doc comment.
+func (c Competition) EffectiveFormat() string {
+	if c.Format == "" {
+		return CompFormatPlayoffs
+	}
+	return c.Format
 }
 
 // IsKachinuki reports whether c is a kachinuki (winner-stays-on) team
@@ -624,17 +665,66 @@ func firstPositive(vals ...int) int {
 }
 
 // IsPlayoffEnabled reports whether this competition runs a knockout/playoff
-// phase. League and pure-pools formats do not; mixed and playoffs do.
+// phase. League and pure-pools formats do not; mixed and playoffs do. An
+// unset Format ("") counts as playoffs, via EffectiveFormat -- generation
+// has always treated it that way, so this predicate must agree.
 //
 // FR-050, FR-051: when Format == "league", the UI must hide playoff-bracket
 // affordances and present pool standings as final.
 func (c Competition) IsPlayoffEnabled() bool {
-	switch c.Format {
+	switch c.EffectiveFormat() {
 	case CompFormatPlayoffs, CompFormatMixed:
 		return true
 	default:
 		return false
 	}
+}
+
+// EffectiveTwoThirdPlaces reports whether c awards a joint (shared) 3rd place
+// rather than deciding a single 3rd with a bronze/decider match, for ANY
+// format (bc-3rdp). This is the ONE named rule the whole codebase asks that
+// question through. Resolution order:
+//
+//  1. TwoThirdPlaces != nil  -> *TwoThirdPlaces: the operator's explicit
+//     choice, via the unified "Award two joint 3rd places" control.
+//  2. EffectiveFormat() is league -> LeagueTwoThirdPlaces: the legacy
+//     league-only field (see its own doc comment; it is read-only here,
+//     never written).
+//  3. otherwise -> !Naginata: the knockout side's ORIGINAL encoding
+//     (RequiresSingleThirdPlace used to just return c.Naginata).
+//
+// The format-dependent fallback is not elegance, it is correctness: it
+// reproduces TODAY's behaviour EXACTLY, on both sides, for every competition
+// record written before this field existed -- a stored knockout with no
+// TwoThirdPlaces value keeps resolving through Naginata precisely as it
+// always did, and a stored league keeps resolving through LeagueTwoThirdPlaces
+// precisely as it always did. A record with TwoThirdPlaces set skips both
+// legacy branches regardless of format.
+func (c Competition) EffectiveTwoThirdPlaces() bool {
+	if c.TwoThirdPlaces != nil {
+		return *c.TwoThirdPlaces
+	}
+	if c.EffectiveFormat() == CompFormatLeague {
+		return c.LeagueTwoThirdPlaces
+	}
+	return !c.Naginata
+}
+
+// RequiresSingleThirdPlace reports whether this competition's knockout stage
+// must decide a SINGLE 3rd place, via a bronze/decider match, rather than
+// kendo's standard convention of awarding JOINT 3rd to both beaten
+// semi-finalists with no decider played at all. The sole caller is
+// buildBracketFromDraw (internal/engine/bracket.go), gating
+// helper.NeedsBronzeBlock.
+//
+// It is the exact negation of EffectiveTwoThirdPlaces: a joint 3rd being
+// awarded is precisely a single 3rd NOT being required. Before bc-3rdp this
+// method just returned c.Naginata (naginata was the only knockout-side
+// encoding of the rule); EffectiveTwoThirdPlaces's fallback chain reproduces
+// that exact behaviour for every record that predates the unified field, so
+// this remains a rename for existing data, not a behaviour change.
+func (c Competition) RequiresSingleThirdPlace() bool {
+	return !c.EffectiveTwoThirdPlaces()
 }
 
 // EffectivePoolWinners returns the number of finishers each pool promotes to the

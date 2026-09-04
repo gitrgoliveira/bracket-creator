@@ -116,7 +116,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					return
 				}
 			}
-			// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds, not
+			// ThirdPlaceMatch (single-3rd bronze, bc-3rdp) is a sibling of Rounds, not
 			// inside it. A running bronze bout must appear as "current" on its
 			// court so the OBS/vMix overlay stays live (Finding 1).
 			if bm := bracket.ThirdPlaceMatch; bm != nil &&
@@ -279,7 +279,7 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 				}
 			}
 		}
-		// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds; a
+		// ThirdPlaceMatch (single-3rd bronze, bc-3rdp) is a sibling of Rounds; a
 		// bronze-only court must not be excluded from the court feed (Finding 4).
 		if bm := bracket.ThirdPlaceMatch; bm != nil &&
 			strings.EqualFold(bm.Court, court) &&
@@ -301,7 +301,10 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if comp.NumberPrefix != "" {
 		pools, _ := store.LoadPools(comp.ID)
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.Format)
+		// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs
+		// too, and mergePoolNumbersIntoPlayersSlice's playoffs-only branch must
+		// see that or it silently skips number assignment for those entrants.
+		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.EffectiveFormat())
 	}
 	return players
 }

@@ -22,6 +22,7 @@ type printOptions struct {
 	output         string
 	outputDir      string
 	teamFiles      []string
+	failOnSkipAll  bool
 }
 
 // printTypeUsage is derived from pdf.Groups at init time so that the --type
@@ -74,6 +75,7 @@ exits with installation instructions.`,
 	cmd.Flags().StringVarP(&o.output, "output", "o", "", "output PDF path (single --type)")
 	cmd.Flags().StringVar(&o.outputDir, "output-dir", "", "output directory (--type=all, or to use default filenames)")
 	cmd.Flags().StringSliceVar(&o.teamFiles, "team-file", nil, "XLSX filename (basename) to treat as a team workbook; excluded from tags. Repeatable. Defaults to any filename containing 'team'.")
+	cmd.Flags().BoolVar(&o.failOnSkipAll, "fail-on-skip-all", false, "exit non-zero when every competition was skipped (nothing was printed), instead of the default clean exit; intended for scripted use")
 
 	if err := cmd.MarkFlagRequired("type"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking type flag as required: %v\n", err)
@@ -125,11 +127,28 @@ func (o *printOptions) run(cmd *cobra.Command, args []string) error {
 		}
 		defer func() { _ = os.RemoveAll(tempDir) }()
 
-		sources, err = eng.ExportTournamentWorkbooks(tempDir)
+		var skipped []engine.SkippedCompetition
+		sources, skipped, err = eng.ExportTournamentWorkbooks(tempDir)
 		if err != nil {
 			return fmt.Errorf("export tournament workbooks: %w", err)
 		}
+		reportSkippedCompetitions(cmd, skipped)
 		sourcesLabel = o.tournamentData
+
+		// Every competition was skipped (e.g. an all-Swiss tournament): there
+		// is nothing left to generate PDFs from, and o.generatePDFs would
+		// otherwise fail with pdf's "no source workbooks provided". That
+		// would misreport a correct outcome as an error -- nothing actually
+		// failed, every competition was legitimately unexportable, and each
+		// was already named in a warning above via reportSkippedCompetitions.
+		// Exit cleanly with an informative note instead.
+		if len(sources) == 0 {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "no exportable competitions found; nothing to print")
+			if o.failOnSkipAll {
+				return fmt.Errorf("all %d competition(s) were skipped; nothing to print (--fail-on-skip-all)", len(skipped))
+			}
+			return nil
+		}
 	}
 
 	gen, err := pdf.NewGenerator()
@@ -237,6 +256,21 @@ func collectWorkbooks(dir string, teamFiles []string) ([]pdf.SourceWorkbook, err
 	}
 	sort.Slice(sources, func(i, j int) bool { return sources[i].Path < sources[j].Path })
 	return sources, nil
+}
+
+// reportSkippedCompetitions warns the operator, one line per competition,
+// about every competition ExportTournamentWorkbooks left out of the booklet
+// -- a Swiss competition (no static bracket to export; Swiss export is not
+// yet implemented -- mp-4n9n) or one whose stored bracket no longer matches
+// its current settings (engine.ErrBracketDrawMismatch). Printed to stderr,
+// since it is a warning about an incomplete result rather than the command's
+// normal output. A silent omission would leave the operator believing the
+// printed booklet covers every competition when it does not.
+func reportSkippedCompetitions(cmd *cobra.Command, skipped []engine.SkippedCompetition) {
+	for _, s := range skipped {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"warning: skipped competition %q (%s): %s\n", s.Name, s.ID, s.Reason)
+	}
 }
 
 func reportOutputs(cmd *cobra.Command, out map[string]string) {

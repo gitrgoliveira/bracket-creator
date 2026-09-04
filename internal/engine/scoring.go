@@ -1476,21 +1476,24 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 }
 
 // applyJointThirdRanks implements the kendo joint-3rd convention. When a league
-// has LeagueTwoThirdPlaces enabled, a genuine Points-tie whose best finishing
-// position is 3rd or lower is given a SHARED rank (the group's best 1-based
-// position) so both the standings table and the closing-ceremony podium show two
-// (or more) equal 3rd places instead of relabeling the 4th finisher. Ranks 1 and
-// 2 are always kept distinct: a top-two tie is decided by a tie-breaker, never
-// shared. It is a no-op for non-leagues, when the setting is off, or when the
-// pool carries manual rank overrides (the operator's explicit order wins).
-// Scoping to leagues keeps mixed/playoffs knockout seeding strictly sequential;
-// naginata leagues leave the setting off and so keep a single 3rd.
+// has the joint-3rd rule enabled (state.Competition.EffectiveTwoThirdPlaces,
+// bc-3rdp), a genuine Points-tie whose best finishing position is 3rd or lower
+// is given a SHARED rank (the group's best 1-based position) so both the
+// standings table and the closing-ceremony podium show two (or more) equal
+// 3rd places instead of relabeling the 4th finisher. Ranks 1 and 2 are always
+// kept distinct: a top-two tie is decided by a tie-breaker, never shared. It
+// is a no-op for non-leagues, when the setting is off, or when the pool
+// carries manual rank overrides (the operator's explicit order wins).
+// Scoping to leagues keeps mixed/playoffs knockout seeding strictly sequential
+// -- those formats decide a single/joint 3rd with a bronze match instead, via
+// RequiresSingleThirdPlace; naginata leagues leave the setting off and so keep
+// a single 3rd.
 //
 // Mutates sorted in place. Callers pass a Points-sorted slice that already has
 // sequential ranks assigned, so detectPoolTies groups by adjacent Points
 // equality exactly as it does for the amber-tie highlight.
 func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding, poolHasOverrides bool) {
-	if comp == nil || comp.Format != state.CompFormatLeague || !comp.LeagueTwoThirdPlaces || poolHasOverrides {
+	if comp == nil || comp.Format != state.CompFormatLeague || !comp.EffectiveTwoThirdPlaces() || poolHasOverrides {
 		return
 	}
 	for _, positions := range detectPoolTies(sorted) {

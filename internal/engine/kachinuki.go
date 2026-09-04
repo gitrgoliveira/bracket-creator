@@ -1540,7 +1540,7 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 				}
 			}
 		}
-		// The Naginata 3rd-place (bronze) match is a sibling of
+		// The single-3rd-place (bronze) match is a sibling of
 		// bracket.Rounds, not an element of it; look it up here. Its
 		// effective round index is len(Rounds) (one past the final round),
 		// mirroring the client's derivedBracket.rounds.length so a

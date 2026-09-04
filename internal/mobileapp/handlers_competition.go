@@ -342,10 +342,12 @@ func validateSwissConfig(comp *state.Competition) error {
 	return nil
 }
 
-// validateLeagueTiebreakConfig validates the league-tiebreak configuration knobs
-// (LeagueTiebreakTopN, LeagueTwoThirdPlaces). These fields are only meaningful
-// for team-league competitions; they are silently ignored for other formats/kinds
-// and must not cause errors there. Returns nil for non-league or non-team comps.
+// validateLeagueTiebreakConfig validates the league-tiebreak configuration knob
+// LeagueTiebreakTopN (the joint-3rd rule is now TwoThirdPlaces/EffectiveTwoThirdPlaces,
+// bc-3rdp, and being a plain bool has nothing to validate). This field is only
+// meaningful for team-league competitions; it is silently ignored for other
+// formats/kinds and must not cause errors there. Returns nil for non-league or
+// non-team comps.
 //
 // Kind == "team" is the canonical team marker: ValidateCompetitionTeamSize (run
 // on every create/edit) enforces Kind == "team" ⟺ TeamSize >= 2, so a comp with
@@ -1743,19 +1745,37 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// League tie-breaker config (Phase 3b) is only settable pre-start.
 				// Once the competition has started (status past setup) the
 				// consequential-tie set is in play, so changing leagueTiebreakTopN
-				// or leagueTwoThirdPlaces could re-block or unblock completion and
-				// change which ties already-played tie-breakers were meant to resolve.
-				// Reject a change rather than silently ignoring it. The draw-ready
-				// state already returned early above; the PUT validator enforces
+				// could re-block or unblock completion and change which ties
+				// already-played tie-breakers were meant to resolve. Reject a
+				// change rather than silently ignoring it. The draw-ready state
+				// already returned early above; the PUT validator enforces
 				// LeagueTiebreakTopN ∈ {0,3,4}. LeagueTiebreakFinalized is managed by
 				// the finalize endpoint, never here.
-				if started && (comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN ||
-					comp.LeagueTwoThirdPlaces != current.LeagueTwoThirdPlaces) {
-					validationErr = fmt.Errorf("leagueTiebreakTopN and leagueTwoThirdPlaces can only be changed before the competition starts")
+				//
+				// LeagueTwoThirdPlaces itself is NOT compared or written here any
+				// more (bc-3rdp): it is legacy read-only (see its doc comment on
+				// state.Competition), superseded by TwoThirdPlaces below, which
+				// carries its own started-guard.
+				if started && comp.LeagueTiebreakTopN != current.LeagueTiebreakTopN {
+					validationErr = fmt.Errorf("leagueTiebreakTopN can only be changed before the competition starts")
 					return nil, nil
 				}
 				current.LeagueTiebreakTopN = comp.LeagueTiebreakTopN
-				current.LeagueTwoThirdPlaces = comp.LeagueTwoThirdPlaces
+				// TwoThirdPlaces (bc-3rdp) decides whether the knockout stage plays
+				// a bronze/decider match and (for leagues) whether standings show a
+				// shared 3rd rank; both are built/computed at draw/scoring time, the
+				// same point Naginata is locked at above (Naginata used to be this
+				// rule's only knockout-side encoding), so it is locked the same way
+				// with the same wording pattern. Pointer identity can't be compared
+				// directly: nil and non-nil pointers to equal values must compare
+				// equal, so this dereferences before comparing.
+				sameTwoThirdPlaces := (comp.TwoThirdPlaces == nil) == (current.TwoThirdPlaces == nil) &&
+					(comp.TwoThirdPlaces == nil || *comp.TwoThirdPlaces == *current.TwoThirdPlaces)
+				if started && !sameTwoThirdPlaces {
+					validationErr = fmt.Errorf("twoThirdPlaces can only be changed before the competition starts")
+					return nil, nil
+				}
+				current.TwoThirdPlaces = comp.TwoThirdPlaces
 				return current, nil
 			})
 			return updateErr
@@ -2160,7 +2180,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// Full-bracket-completion gate + atomic status transition, all under ONE
 		// per-comp write lock via WithTransaction. A bracket-format competition
 		// (playoffs, or a mixed comp's knockout) must have EVERY must-play match
-		// completed -- all rounds plus the naginata bronze (ThirdPlaceMatch, a
+		// completed -- all rounds plus the single-3rd bronze (ThirdPlaceMatch, a
 		// sibling of Rounds) -- before it can be sealed, else the Awards podium
 		// would show an unplayed final/bronze. The JS "Complete competition"
 		// button enforces this (bracketFullyComplete), but a direct API call
@@ -2236,6 +2256,14 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		data, err := eng.ExportCompetitionXlsx(id)
 		if err != nil {
+			// Swiss (no static bracket) and a stored bracket that no longer
+			// matches the competition's current settings both surface as a
+			// 422, not a 500 -- see respondUnexportableCompetitionError,
+			// shared with RegisterExportResultsHandlers' handling of the
+			// same two sentinels for the results-workbook path.
+			if respondUnexportableCompetitionError(c, err) {
+				return
+			}
 			internalError(c, err)
 			return
 		}
@@ -2518,7 +2546,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 }
 
 // bracketFullyComplete reports whether every must-play match in the bracket --
-// all round matches plus the naginata bronze (ThirdPlaceMatch, a sibling of
+// all round matches plus the single-3rd bronze (ThirdPlaceMatch, a sibling of
 // Rounds) -- is completed. It mirrors the JS bracketFullyComplete /
 // isRequiredBracketMatch gate (web-mobile/js/admin_helpers.jsx) so the server is
 // the authority for POST /complete: a direct API call can't seal a competition

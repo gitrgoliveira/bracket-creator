@@ -1,5 +1,12 @@
 // AdminExport card extracted from admin_schedule.jsx (mp-d7tl).
 
+// effectiveTwoThirdPlaces (bc-3rdp): the ONE rule for "does this competition
+// award a joint (shared) 3rd place, or decide a single 3rd with a
+// bronze/decider match", reused here rather than re-derived so the exported
+// blank template's bronze block agrees with the same predicate every other
+// surface (settings screen, awards page) already uses.
+import { effectiveTwoThirdPlaces } from './competition_shape.jsx';
+
 const { useState: useStateA } = React;
 
 // Prepare a roster CSV field: coerce nullish to "" (String(undefined) would
@@ -17,7 +24,8 @@ const csvField = (s) => {
 // competition config object (cfg) and a player list. Extracted for testing.
 // cfg fields used: format, poolSize, poolWinners, poolSizeMode, courts,
 //   teamSize, name, numberPrefix, roundRobin, poolFormat, withZekkenName,
-//   engi, naginata.
+//   engi, and (via effectiveTwoThirdPlaces) twoThirdPlaces, naginata,
+//   leagueTwoThirdPlaces.
 // cName is the display name for the competition (used as titlePrefix).
 export function buildXlsxBody(cfg, cName, players) {
   const isPlayoffs = cfg.format === "playoffs";
@@ -70,7 +78,15 @@ export function buildXlsxBody(cfg, cName, players) {
   if (cfg.poolFormat === "partial") body.set("poolFormat", "partial");
   if (effectiveZekken) body.set("withZekkenName", "on");
   if (cfg.engi) body.set("engi", "on");
-  if (cfg.naginata) body.set("naginata", "on");
+  // thirdPlaceMatch: the blank workbook needs a bronze (3rd-place) block
+  // exactly when this competition does NOT award joint 3rd places -- i.e.
+  // RequiresSingleThirdPlace, the exact negation of effectiveTwoThirdPlaces
+  // (state.Competition.EffectiveTwoThirdPlaces's JS mirror). This covers
+  // naginata AND any other format that opted into a single 3rd via
+  // twoThirdPlaces=false, and correctly omits it for a naginata competition
+  // that opted INTO joint 3rds -- cfg.naginata alone (the old check) got
+  // both of those cross cases wrong.
+  if (!effectiveTwoThirdPlaces(cfg)) body.set("thirdPlaceMatch", "on");
   if (seeded.length) body.set("seeds", JSON.stringify(seeded));
   return body;
 }

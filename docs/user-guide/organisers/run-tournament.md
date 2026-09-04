@@ -230,15 +230,17 @@ For naginata and Engi-kyogi divisions, see [Naginata](naginata.md).
 
 ## Results and awards
 
-The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress:
+The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress.
 
-- **Kendo knockout** (default): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
-- **Naginata**: a single 3rd place is decided by a bronze match. See [Naginata](naginata.md) for naginata-specific configuration.
+Whether a competition awards two joint 3rd places or decides a single one with a bronze match is controlled by the **Award two joint 3rd places** setting, on the competition's Settings tab. It is on by default (the standard kendo convention) and applies to knockout, pools-then-knockout, and league competitions; it is not shown for Swiss, which has no bracket and no bronze match. Naginata competitions default the setting off (a single 3rd, decided by a bronze match), but you can turn it back on for a naginata competition too, and you can turn it off for a kendo competition that needs a single 3rd, for example a selection event with one bronze medal. See [Naginata](naginata.md#third-place-match) for the bronze match itself.
+
+- **Knockout** (default: joint 3rds on): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
+- **Knockout with joint 3rds off**: a single 3rd place is decided by a bronze match.
 - **Pools + Knockout** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
 Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).
 
-**League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (see [Naginata](naginata.md#standings)). The one exception is 3rd place: with the **Award two joint 3rd places** option enabled (the default for kendo), competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
+**League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (see [Naginata](naginata.md#standings)). The one exception is 3rd place: with **Award two joint 3rd places** enabled, competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
 
 Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 

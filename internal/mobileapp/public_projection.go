@@ -91,7 +91,7 @@ func stripBracketAudit(b *state.Bracket) {
 			b.Rounds[ri][j].DecisionReason = ""
 		}
 	}
-	// ThirdPlaceMatch (Naginata bronze) is a sibling of Rounds; its audit
+	// ThirdPlaceMatch (single-3rd bronze, bc-3rdp) is a sibling of Rounds; its audit
 	// fields must also be stripped from the public viewer projection (Finding 2).
 	if b.ThirdPlaceMatch != nil {
 		b.ThirdPlaceMatch.CorrectionReason = ""

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -161,6 +162,193 @@ func setupTestTournamentData(t *testing.T) string {
 	require.NoError(t, eng.StartCompetition("test-comp"))
 
 	return dir
+}
+
+// TestPrintAllSkippedExitsCleanly covers a tournament-data directory whose
+// only competition is Swiss (no static bracket to export -- Swiss export is
+// not yet implemented). ExportTournamentWorkbooks skips it, leaving
+// len(sources)==0 with err==nil; before the fix o.generatePDFs ran anyway
+// and failed with pdf's "no source workbooks provided", a confusing error
+// even though the warning above already explained the omission correctly.
+// The command must instead print an informative line to stderr and exit
+// nil: nothing failed, every competition was legitimately unexportable.
+// Requires soffice: pdf.NewGenerator() is called after the export/skip step
+// in run(), so soffice must be present to reach it.
+func TestPrintAllSkippedExitsCleanly(t *testing.T) {
+	if _, err := pdf.NewGenerator(); err != nil {
+		t.Skipf("skipping: LibreOffice not available (%v)", err)
+	}
+
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      "setup",
+	}))
+
+	cmd := newPrintCmd()
+	stderr := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+	cmd.SetOut(stdout)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"--type=all",
+		"--tournament-data=" + dir,
+		"--output-dir=" + t.TempDir(),
+	})
+
+	err = cmd.Execute()
+	require.NoError(t, err, "an all-skipped tournament must exit cleanly, not error; stderr=%s", stderr.String())
+	assert.Contains(t, stderr.String(), "no exportable competitions found")
+	assert.Contains(t, stderr.String(), "swiss-only")
+	assert.NotContains(t, stderr.String(), "no source workbooks provided",
+		"must not leak the internal pdf-generator error string")
+}
+
+// TestPrintAllSkippedFlagNotSet pins today's default behaviour explicitly:
+// when --fail-on-skip-all is not set (the zero value), an all-skipped
+// tournament-data directory returns nil, with the per-competition warning
+// still printed to stderr. The flag must never change this default. Does not
+// require soffice: len(sources)==0 returns before pdf.NewGenerator() is
+// reached in run().
+func TestPrintAllSkippedFlagNotSet(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      "setup",
+	}))
+
+	cmd := newPrintCmd()
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"--type=all",
+		"--tournament-data=" + dir,
+		"--output-dir=" + t.TempDir(),
+	})
+
+	err = cmd.Execute()
+	require.NoError(t, err, "flag not set: all-skipped must still exit cleanly; stderr=%s", stderr.String())
+	assert.Contains(t, stderr.String(), "no exportable competitions found")
+	assert.Contains(t, stderr.String(), "swiss-only")
+}
+
+// TestPrintAllSkippedWithFailOnSkipAll covers the opt-in: with
+// --fail-on-skip-all set, an all-skipped tournament-data directory must
+// return a non-nil error naming the skip count, while still printing the
+// per-competition warnings to stderr -- the flag changes only the exit
+// status, never the reporting. Does not require soffice, for the same reason
+// as TestPrintAllSkippedFlagNotSet.
+func TestPrintAllSkippedWithFailOnSkipAll(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      "setup",
+	}))
+
+	cmd := newPrintCmd()
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"--type=all",
+		"--tournament-data=" + dir,
+		"--output-dir=" + t.TempDir(),
+		"--fail-on-skip-all",
+	})
+
+	err = cmd.Execute()
+	require.Error(t, err, "flag set: all-skipped must return an error; stderr=%s", stderr.String())
+	assert.Contains(t, err.Error(), "skipped")
+	assert.Contains(t, stderr.String(), "no exportable competitions found",
+		"the flag changes only the exit status, never the reporting")
+	assert.Contains(t, stderr.String(), "swiss-only")
+}
+
+// TestPrintPartialSkipWithFailOnSkipAll is the case most likely to be got
+// wrong: --fail-on-skip-all must NOT trip when only SOME competitions were
+// skipped, because a booklet was still produced from the rest. Combines a
+// Swiss competition (always skipped -- no static bracket to export) with a
+// League competition (exportable) in the same tournament-data directory.
+// Requires soffice to reach full PDF generation, since sources is non-empty
+// and run() proceeds past the early return.
+func TestPrintPartialSkipWithFailOnSkipAll(t *testing.T) {
+	if _, err := pdf.NewGenerator(); err != nil {
+		t.Skipf("skipping: LibreOffice not available (%v)", err)
+	}
+
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      "setup",
+	}))
+
+	comp := &state.Competition{
+		ID:           "league-comp",
+		Name:         "League Competition",
+		Kind:         "individual",
+		Format:       state.CompFormatLeague,
+		PoolSize:     3,
+		PoolSizeMode: "min",
+		PoolWinners:  2,
+		RoundRobin:   true,
+		Courts:       []string{"A"},
+		StartTime:    "09:00",
+		Status:       "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "Carol", Dojo: "DojoC"},
+		{Name: "Dave", Dojo: "DojoD"},
+	}
+	require.NoError(t, store.SaveParticipants("league-comp", players))
+	eng := engine.New(store)
+	require.NoError(t, eng.StartCompetition("league-comp"))
+
+	cmd := newPrintCmd()
+	stderr := &bytes.Buffer{}
+	cmd.SetErr(stderr)
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{
+		"--type=all",
+		"--tournament-data=" + dir,
+		"--output-dir=" + t.TempDir(),
+		"--fail-on-skip-all",
+	})
+
+	err = cmd.Execute()
+	require.NoError(t, err, "partial skip must still succeed even with --fail-on-skip-all; stderr=%s", stderr.String())
+	assert.Contains(t, stderr.String(), "swiss-only", "the skipped competition is still warned about")
 }
 
 // TestPrintTournamentDataStoreConstruction verifies that --tournament-data builds

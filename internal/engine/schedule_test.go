@@ -487,15 +487,15 @@ func TestEstimateSchedule_NonKachinukiCollapses(t *testing.T) {
 // Tests for EstimateForCounts (Step 2)
 // ---------------------------------------------------------------------------
 
-// poolDur / playoffDur are in MINUTES for the callers' readability; the
+// poolDur / knockoutDur are in MINUTES for the callers' readability; the
 // competition stores seconds, the only representation that survives a load.
-func newIndivComp(courts []string, poolDur, playoffDur int, startTime string) *state.Competition {
+func newIndivComp(courts []string, poolDur, knockoutDur int, startTime string) *state.Competition {
 	return &state.Competition{
-		Kind:                        "individual",
-		Courts:                      courts,
-		PoolMatchDurationSeconds:    poolDur * 60,
-		PlayoffMatchDurationSeconds: playoffDur * 60,
-		StartTime:                   startTime,
+		Kind:                         "individual",
+		Courts:                       courts,
+		PoolMatchDurationSeconds:     poolDur * 60,
+		KnockoutMatchDurationSeconds: knockoutDur * 60,
+		StartTime:                    startTime,
 	}
 }
 
@@ -509,51 +509,51 @@ func newTournament(multiplier float64, bufferPct int, opening, lunch, closing st
 	}
 }
 
-// TestEstimateForCounts_PerPhaseSplit verifies that pool and playoff matches
+// TestEstimateForCounts_PerPhaseSplit verifies that pool and knockout matches
 // each contribute their own per-phase duration to the total.
 // SlowestCourtBufferPct=0 triggers the default (10%), which is applied by
 // EstimateForCounts. Expected: 4*3 + 3*5 = 27 min * 1.10 = 29.7 → 30.
 func TestEstimateForCounts_PerPhaseSplit(t *testing.T) {
-	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*playoff clock*/, "09:00")
+	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*knockout clock*/, "09:00")
 	tourn := newTournament(1.0, 0, "", "", "")
-	// pool: 4 matches * 3min = 12min; playoff: 3 matches * 5min = 15min = 27min
+	// pool: 4 matches * 3min = 12min; knockout: 3 matches * 5min = 15min = 27min
 	// Default 10% buffer: 27 * 1.1 = 29.7 → 30.
 	est := EstimateForCounts(4, 3, comp, tourn)
 	assert.Equal(t, 30, est.TotalDurationMinutes)
 	assert.Len(t, est.PerCourtMinutes, 1)
 	assert.Equal(t, 30, est.PerCourtMinutes[0])
-	// Verify playoff phase contributed more than pool phase by checking
-	// a pool-only estimate is less than a playoff-only estimate of the same count.
+	// Verify knockout phase contributed more than pool phase by checking
+	// a pool-only estimate is less than a knockout-only estimate of the same count.
 	poolOnly := EstimateForCounts(4, 0, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 0, "", "", ""))
-	playoffOnly := EstimateForCounts(0, 4, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 0, "", "", ""))
-	assert.Less(t, poolOnly.TotalDurationMinutes, playoffOnly.TotalDurationMinutes,
-		"playoff matches (5min clock) should produce a higher estimate than pool matches (3min clock) for equal count")
+	knockoutOnly := EstimateForCounts(0, 4, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 0, "", "", ""))
+	assert.Less(t, poolOnly.TotalDurationMinutes, knockoutOnly.TotalDurationMinutes,
+		"knockout matches (5min clock) should produce a higher estimate than pool matches (3min clock) for equal count")
 }
 
-// TestEstimateForCounts_PoolThenPlayoffSequential pins the intentional
-// pools-then-playoffs sequencing: a court runs its pool matches AND its playoff
+// TestEstimateForCounts_PoolThenKnockoutSequential pins the intentional
+// pools-then-knockout sequencing: a court runs its pool matches AND its knockout
 // matches on the same advancing cursor, so the combined estimate is the SUM of
 // the two phases, not the max() of them. This is the contract a post-draw
 // estimate (mp-zoh) must reproduce by summing the two slot-assigner cursors
 // rather than maxing them. See the EstimateForCounts doc comment.
-func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
-	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*playoff clock*/, "09:00")
+func TestEstimateForCounts_PoolThenKnockoutSequential(t *testing.T) {
+	comp := newIndivComp([]string{"A"}, 3 /*pool clock*/, 5 /*knockout clock*/, "09:00")
 	tourn := newTournament(1.0, 10, "", "", "") // 1.0x, explicit 10% buffer
 
-	// pool: 2*3=6; playoff: 2*5=10; sequential sum = 16; *1.10 = 17.6 → 18.
+	// pool: 2*3=6; knockout: 2*5=10; sequential sum = 16; *1.10 = 17.6 → 18.
 	combined := EstimateForCounts(2, 2, comp, tourn)
 	poolOnly := EstimateForCounts(2, 0, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
-	playoffOnly := EstimateForCounts(0, 2, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
+	knockoutOnly := EstimateForCounts(0, 2, newIndivComp([]string{"A"}, 3, 5, "09:00"), newTournament(1.0, 10, "", "", ""))
 
 	assert.Equal(t, 18, combined.TotalDurationMinutes)
 	// The defining anti-max assertion: combined must exceed the larger single
-	// phase. max() semantics would yield only playoffOnly (11).
-	assert.Greater(t, combined.TotalDurationMinutes, playoffOnly.TotalDurationMinutes,
-		"combined estimate must SUM the phases, not max them (combined=%d playoffOnly=%d)",
-		combined.TotalDurationMinutes, playoffOnly.TotalDurationMinutes)
-	assert.Equal(t, poolOnly.TotalDurationMinutes+playoffOnly.TotalDurationMinutes,
+	// phase. max() semantics would yield only knockoutOnly (11).
+	assert.Greater(t, combined.TotalDurationMinutes, knockoutOnly.TotalDurationMinutes,
+		"combined estimate must SUM the phases, not max them (combined=%d knockoutOnly=%d)",
+		combined.TotalDurationMinutes, knockoutOnly.TotalDurationMinutes)
+	assert.Equal(t, poolOnly.TotalDurationMinutes+knockoutOnly.TotalDurationMinutes,
 		combined.TotalDurationMinutes,
-		"with no opening/lunch blocks the buffer is linear, so combined == poolOnly + playoffOnly")
+		"with no opening/lunch blocks the buffer is linear, so combined == poolOnly + knockoutOnly")
 }
 
 // TestEstimateForCounts_TeamComp exercises the comp.Kind == "team" branch of
@@ -562,12 +562,12 @@ func TestEstimateForCounts_PoolThenPlayoffSequential(t *testing.T) {
 // tests use individual comps, so this guards the team code path.
 func TestEstimateForCounts_TeamComp(t *testing.T) {
 	team := &state.Competition{
-		Kind:                        "team",
-		TeamSize:                    3,
-		Courts:                      []string{"A"},
-		PoolMatchDurationSeconds:    120,
-		PlayoffMatchDurationSeconds: 120,
-		StartTime:                   "09:00",
+		Kind:                         "team",
+		TeamSize:                     3,
+		Courts:                       []string{"A"},
+		PoolMatchDurationSeconds:     120,
+		KnockoutMatchDurationSeconds: 120,
+		StartTime:                    "09:00",
 	}
 	tourn := newTournament(1.5, 10, "", "", "")
 	// Per team match (3 bouts): 3*2*1.5 + (3-1)*1 = 11. 2 matches on 1 court = 22.
@@ -589,12 +589,12 @@ func TestEstimateForCounts_TeamComp(t *testing.T) {
 func TestEstimateForCounts_TeamDefaultsTeamSize(t *testing.T) {
 	base := func(teamSize int) *state.Competition {
 		return &state.Competition{
-			Kind:                        "team",
-			TeamSize:                    teamSize,
-			Courts:                      []string{"A"},
-			PoolMatchDurationSeconds:    120,
-			PlayoffMatchDurationSeconds: 120,
-			StartTime:                   "09:00",
+			Kind:                         "team",
+			TeamSize:                     teamSize,
+			Courts:                       []string{"A"},
+			PoolMatchDurationSeconds:     120,
+			KnockoutMatchDurationSeconds: 120,
+			StartTime:                    "09:00",
 		}
 	}
 	tourn := func() *state.Tournament { return newTournament(1.5, 10, "", "", "") }
@@ -629,13 +629,13 @@ func TestEstimateForCounts_TeamDefaultsTeamSize(t *testing.T) {
 func TestEstimateForCounts_KachinukiRange(t *testing.T) {
 	kachiComp := func() *state.Competition {
 		return &state.Competition{
-			Kind:                        "team",
-			TeamSize:                    3,
-			TeamMatchType:               state.TeamMatchTypeKachinuki,
-			Courts:                      []string{"A"},
-			PoolMatchDurationSeconds:    120,
-			PlayoffMatchDurationSeconds: 120,
-			StartTime:                   "09:00",
+			Kind:                         "team",
+			TeamSize:                     3,
+			TeamMatchType:                state.TeamMatchTypeKachinuki,
+			Courts:                       []string{"A"},
+			PoolMatchDurationSeconds:     120,
+			KnockoutMatchDurationSeconds: 120,
+			StartTime:                    "09:00",
 		}
 	}
 	tourn := func() *state.Tournament { return newTournament(1.5, 10, "", "", "") }
@@ -669,13 +669,13 @@ func TestEstimateForCounts_NonKachinukiCollapses(t *testing.T) {
 		{
 			name: "fixed-format team",
 			comp: &state.Competition{
-				Kind:                        "team",
-				TeamSize:                    3,
-				TeamMatchType:               state.TeamMatchTypeFixed,
-				Courts:                      []string{"A"},
-				PoolMatchDurationSeconds:    120,
-				PlayoffMatchDurationSeconds: 120,
-				StartTime:                   "09:00",
+				Kind:                         "team",
+				TeamSize:                     3,
+				TeamMatchType:                state.TeamMatchTypeFixed,
+				Courts:                       []string{"A"},
+				PoolMatchDurationSeconds:     120,
+				KnockoutMatchDurationSeconds: 120,
+				StartTime:                    "09:00",
 			},
 		},
 		{

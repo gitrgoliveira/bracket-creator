@@ -152,7 +152,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   // fetchCompetitions in the same try/catch. So a transient refresh
   // failure (server slow, network blip) surfaced as a mutation failure,
   // even though the action was already persisted on disk. That misled
-  // operators into retrying score saves / start-competition / create-playoff
+  // operators into retrying score saves / start-competition / create-knockout
   // ops that had already succeeded, sometimes producing "already started"
   // or duplicate-ID errors on the second attempt. Separating the refresh
   // into this helper makes the contract explicit: mutation errors throw,
@@ -592,7 +592,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
           }
           // Any of these may change the topbar running-strip (matches becoming
           // running/done in *other* competitions, a comp starting, a dependent
-          // playoff unblocking, …). Coalesced so a burst is one fetch.
+          // knockout unblocking, …). Coalesced so a burst is one fetch.
           // tournament_updated also needs the tournament config itself.
           if (event.type === "match_updated"
               || event.type === "competition_started"

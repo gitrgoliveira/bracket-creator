@@ -316,7 +316,7 @@ func TestRegistration_POST_CompNotInSetup_Returns409(t *testing.T) {
 		label  string
 	}{
 		{state.CompStatusPools, "pools"},
-		{state.CompStatusPlayoffs, "playoffs"},
+		{state.CompStatusKnockout, "knockout"},
 		{state.CompStatusComplete, "complete"},
 	} {
 		t.Run(tc.label, func(t *testing.T) {

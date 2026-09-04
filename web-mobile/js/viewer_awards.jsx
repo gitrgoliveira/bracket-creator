@@ -162,10 +162,10 @@ export function bracketHasDecidedFinal(bracket) {
 // Returns { state, podium } where state is one of:
 //   'final'       : podium is the final result
 //   'in-progress': knockout not yet decided (podium [])
-//   'skip'        : linked-playoffs shell (sourceCompID set); caller excludes from results
+//   'skip'        : linked-knockout shell (sourceCompID set); caller excludes from results
 // fetchers = { fetchCompetitionDetails(id), swissStandings(id)|null }
 export async function resolveCompetitionAwards(comp, fetchers) {
-  // A linked-playoffs shell (legacy split-comp layout carrying sourceCompID)
+  // A linked-knockout shell (legacy split-comp layout carrying sourceCompID)
   // derives its podium from its source comp, never standalone: drop it so it
   // doesn't appear twice in the results summary. buildAllWinnersPublic filters
   // state==="skip". (The current data model no longer emits sourceCompID, so
@@ -179,10 +179,10 @@ export async function resolveCompetitionAwards(comp, fetchers) {
     (players || []).forEach((p) => { if (p && p.name) m.set(p.name, p); });
     return m;
   };
-  if (fmt === "mixed" || fmt === "playoffs") {
+  if (fmt === "mixed" || fmt === "knockout") {
     // Mixed is now a SINGLE competition: its knockout bracket fills in place as
-    // pools finish (no separate "- Playoffs" comp). Both mixed and standalone
-    // playoffs derive their podium from their OWN bracket once the final is
+    // pools finish (no separate "- Knockout" comp). Both mixed and standalone
+    // knockout derive their podium from their OWN bracket once the final is
     // decided; until then the knockout is still in progress.
     const d = await fetchers.fetchCompetitionDetails(comp.id);
     if (bracketHasDecidedFinal(d.bracket)) {
@@ -521,7 +521,7 @@ export function FightingSpiritSection({ fsAwards, isFs }) {
 // ---------------------------------------------------------------------------
 // buildAllWinnersPublic: public-viewer equivalent of admin_shell's
 // buildAllWinners. Thin orchestrator: filter completed comps (excluding linked
-// playoffs shells whose sourceCompID marks them as driven by a parent mixed
+// knockout shells whose sourceCompID marks them as driven by a parent mixed
 // competition), resolve each through resolveCompetitionAwards.
 // Exported to window so AllWinnersView and tests can reach it.
 // ---------------------------------------------------------------------------

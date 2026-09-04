@@ -18,7 +18,7 @@ const EmptyState = window.EmptyState;
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
 // bracketRoundsContain: is this match id drawn INSIDE BracketTree? The bronze
-// (3rd-place) playoff is a sibling of bracket.rounds and is rendered below the
+// (3rd-place) knockout is a sibling of bracket.rounds and is rendered below the
 // tree, so it is not, and the tree holds no ref by which to scroll to it.
 const bracketRoundsContain = (bracket, id) =>
   !!id && !!bracket && Array.isArray(bracket.rounds)
@@ -53,7 +53,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // home/watchlist/schedule/find-my-matches, which call compMatches directly.
   //
   // The collapse is NOT Swiss-only in what it adds. compMatches also emits the
-  // bronze (3rd-place) playoff, a sibling of bracket.rounds that the loop this
+  // bronze (3rd-place) knockout, a sibling of bracket.rounds that the loop this
   // replaced never walked, so that bout now reaches Up next / Recent results
   // here as it always has on every other surface. That is the fix working, not
   // a side effect: the page was dropping a real bout. It does have one
@@ -316,7 +316,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
           </div>
           {/* Suppress the "League" badge during pools: the active tab already
               reads "League", so the badge is pure redundancy. Other statuses
-              (Playoffs / Completed) still carry information, so keep those. */}
+              (Knockout / Completed) still carry information, so keep those. */}
           {!(c.status === "pools" && c.format === "league") && (
             <StatusBadge status={c.status} showRunningDot format={c.format} />
           )}
@@ -568,7 +568,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
       ) : null}
 
       {/* League standings summary (mp-ldnr) */}
-      {isLeague && leagueStandings.length > 0 && (c.status === "pools" || c.status === "playoffs" || c.status === "completed") && (
+      {isLeague && leagueStandings.length > 0 && (c.status === "pools" || c.status === "knockout" || c.status === "completed") && (
         <div className="pool pool--overview-summary" data-testid="league-overview-standings">
           {leagueWinner && <WinnerBadge name={leagueWinner.player?.name || ""} testId="league-overview-winner" marginBottom={12} />}
           <div className="pool__head">

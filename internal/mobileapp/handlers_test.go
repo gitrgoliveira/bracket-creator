@@ -2169,7 +2169,7 @@ func TestViewerHandlers(t *testing.T) {
 }
 
 // TestStartCompetition_BroadcastContract verifies the exact events emitted by
-// POST /competitions/:id/start in the common case (playoffs format, or pools
+// POST /competitions/:id/start in the common case (knockout format, or pools
 // with at least one un-completed match): only EventCompetitionStarted is sent.
 // The competition_started handler in app.js already calls load() so a separate
 // EventTournamentUpdated would cause a redundant second reload per viewer.
@@ -2183,7 +2183,7 @@ func TestStartCompetition_BroadcastContract(t *testing.T) {
 	r, store, _, hub, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Format omitted → playoffs path; MaybeAutoCompletePools is a no-op.
+	// Format omitted → knockout path; MaybeAutoCompletePools is a no-op.
 	comp := state.Competition{ID: "c1", Status: "setup", Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "P1", Dojo: "Dojo P1"}, {Name: "P2", Dojo: "Dojo P2"}}))
@@ -2434,7 +2434,7 @@ func TestCompleteHandler_NaginataBronzeGate(t *testing.T) {
 
 	compID := "nag-complete-gate"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Nag Complete Gate", Status: state.CompStatusPlayoffs, Naginata: true,
+		ID: compID, Name: "Nag Complete Gate", Status: state.CompStatusKnockout, Naginata: true,
 	}))
 
 	post := func() *httptest.ResponseRecorder {
@@ -2538,7 +2538,7 @@ func TestCompleteHandler_BracketLoadErrorFailsClosed(t *testing.T) {
 
 	compID := "complete-bracket-io-fail"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "IO Fail", Status: state.CompStatusPlayoffs,
+		ID: compID, Name: "IO Fail", Status: state.CompStatusKnockout,
 	}))
 	// Corrupt bracket.json so LoadBracket returns a parse error (distinct from
 	// os.IsNotExist, which maps to an empty bracket).

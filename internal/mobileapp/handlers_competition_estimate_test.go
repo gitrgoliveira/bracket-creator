@@ -43,7 +43,7 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 		comp := state.Competition{
 			ID:     "estimate-comp",
 			Name:   "Estimate Competition",
-			Format: state.CompFormatPlayoffs,
+			Format: state.CompFormatKnockout,
 			Status: state.CompStatusSetup,
 		}
 		require.NoError(t, store.SaveCompetition(&comp))
@@ -62,7 +62,7 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 	})
 
 	t.Run("200 with non-zero totalDurationMinutes when competition has participants", func(t *testing.T) {
-		// Use a mixed format so both pool and playoff matches are estimated.
+		// Use a mixed format so both pool and knockout matches are estimated.
 		comp := state.Competition{
 			ID:       "estimate-with-players",
 			Name:     "With Players",
@@ -108,7 +108,7 @@ func TestGETCompetitionScheduleEstimate(t *testing.T) {
 		comp := state.Competition{
 			ID:     "main-auth-estimate",
 			Name:   "Main Auth Estimate",
-			Format: state.CompFormatPlayoffs,
+			Format: state.CompFormatKnockout,
 			Status: state.CompStatusSetup,
 		}
 		require.NoError(t, store.SaveCompetition(&comp))

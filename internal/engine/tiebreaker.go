@@ -194,7 +194,7 @@ func tieAffectsAdvancement(positions []int, poolWinners int) bool {
 // tieNeedsIndividualBreak decides whether InjectTiebreakerMatches should hold an
 // ippon-shobu bout for a tied group in an INDIVIDUAL competition.
 //
-//   - League: a final placement must be EARNED, exactly like a bracket/playoff,
+//   - League: a final placement must be EARNED, exactly like a bracket/knockout,
 //     so every tie inside the tie-break band [1..effectiveTopN] is broken. The
 //     one sanctioned exception is the kendo joint-3rd convention: when
 //     LeagueTwoThirdPlaces is enabled and the group sits entirely at 3rd or

@@ -32,7 +32,7 @@ func breakTournament(t *testing.T, dir string) {
 // TestExportCompetitionXlsx_CorruptBracket_FailsForEveryFormat pins mp-yuy8
 // criterion 4: ExportCompetitionXlsx now loads the stored bracket
 // unconditionally and strictly, for every format -- not just naginata and
-// pure-playoffs competitions, which already loaded it strictly before this
+// pure-knockout competitions, which already loaded it strictly before this
 // change. Before this fix, a Mixed (pool-fed, non-naginata) competition's
 // corrupt bracket.json was swallowed by the best-effort `else` branch and the
 // export silently continued with a nil bracket, banding sheets by the draw's

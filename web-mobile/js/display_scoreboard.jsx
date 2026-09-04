@@ -668,7 +668,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     // Headline uses var(--ink-1) (~10:1 on white) instead of the prior
     // #9ca3af (2.5:1) which failed WCAG AA: critical for wall screens in
     // bright halls.
-    // The completed check-badge colours mirror the playoffs/completed status
+    // The completed check-badge colours mirror the knockout/completed status
     // palette used across the app: #ecfdf5 bg / #065f46 ink / #a7f3d0 border.
     // Active-courts wayfinding strip shows sibling courts with running or
     // scheduled matches so operators can redirect spectators.
@@ -706,7 +706,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                         /* Drawn SVG checkmark: NOT the raw ✓ Unicode glyph */
                         <div style={{
                             width: "8vh", height: "8vh", borderRadius: "50%",
-                            /* completed-status palette: mirrors playoffs/completed used across the app */
+                            /* completed-status palette: mirrors knockout/completed used across the app */
                             background: "#ecfdf5", border: "2px solid #a7f3d0",
                             display: "flex", alignItems: "center", justifyContent: "center",
                             flexShrink: 0,

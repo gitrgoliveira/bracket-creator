@@ -125,7 +125,7 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "ko", Name: "Knockout", Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+		ID: "ko", Name: "Knockout", Status: state.CompStatusKnockout, Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SaveParticipants("ko", []domain.Player{
 		{Name: "Aoi Mori", DisplayName: "Aoi Mori", Dojo: "North"},
@@ -186,7 +186,7 @@ func TestCourtCurrentEmptyIpponsAreArraysNotNull(t *testing.T) {
 		Name: "T", Password: "secret", Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "ko", Name: "Knockout", Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+		ID: "ko", Name: "Knockout", Status: state.CompStatusKnockout, Courts: []string{"A"},
 	}))
 	require.NoError(t, store.SaveBracket("ko", &state.Bracket{
 		Rounds: [][]state.BracketMatch{{
@@ -547,7 +547,7 @@ func TestCourtMatches_IncludesBracketMatch(t *testing.T) {
 	require.NoError(t, store.SaveTournament(&state.Tournament{
 		Name: "T", Password: "", Courts: []string{"A"},
 	}))
-	comp := state.Competition{ID: "ko", Name: "Knockout", Status: state.CompStatusPlayoffs, Courts: []string{"A"}}
+	comp := state.Competition{ID: "ko", Name: "Knockout", Status: state.CompStatusKnockout, Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&comp))
 	require.NoError(t, store.SaveBracket("ko", &state.Bracket{
 		Rounds: [][]state.BracketMatch{
@@ -573,7 +573,7 @@ func TestCourtMatches_ExcludesPlaceholderOnlyAndPreviewAndSetup(t *testing.T) {
 		Name: "T", Password: "", Courts: []string{"A"},
 	}))
 
-	ph := state.Competition{ID: "ph", Name: "Placeholder", Status: state.CompStatusPlayoffs, Courts: []string{"A"}}
+	ph := state.Competition{ID: "ph", Name: "Placeholder", Status: state.CompStatusKnockout, Courts: []string{"A"}}
 	require.NoError(t, store.SaveCompetition(&ph))
 	require.NoError(t, store.SaveBracket("ph", &state.Bracket{
 		Rounds: [][]state.BracketMatch{
@@ -636,7 +636,7 @@ func TestCourtCurrent_ThirdPlaceMatchShownAsCurrent(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:       "nagi",
 		Name:     "Naginata",
-		Status:   state.CompStatusPlayoffs,
+		Status:   state.CompStatusKnockout,
 		Courts:   []string{"A"},
 		Naginata: true,
 	}))
@@ -685,7 +685,7 @@ func TestCourtCurrent_ThirdPlaceMatchOnlyOnCourt(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:       "nagi2",
 		Name:     "Naginata2",
-		Status:   state.CompStatusPlayoffs,
+		Status:   state.CompStatusKnockout,
 		Courts:   []string{"A"},
 		Naginata: true,
 	}))

@@ -242,12 +242,12 @@ func SemifinalMatchNumbers(rounds [][]*Node) (semiA, semiB int) {
 	return semiA, semiB
 }
 
-// NeedsBronzeBlock reports whether a playoffs bracket should carry a bronze
+// NeedsBronzeBlock reports whether a knockout bracket should carry a bronze
 // (3rd-place) block: only when the caller says a single 3rd is required, and
 // only when a real semifinal round exists (a 2-player bracket is a single
 // round with no semifinal, so no bronze). This is the single source of truth
 // for the rule expressed at every render/build site (cmd
-// create-pools/playoffs, internal/engine/bracket.go).
+// create-pools/knockout, internal/engine/bracket.go).
 //
 // helper cannot import internal/state, so this takes a bare bool rather than
 // a state.Competition: the CLI (cmd/shared.go) passes its own thirdPlaceMatch

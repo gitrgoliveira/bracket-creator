@@ -8,10 +8,10 @@
     "console's, via shiaijoCountErrorFor).",
     "",
     "THE CONTRACT: the answer follows the DRAW PIPELINE's format switch, not the",
-    "UI's idea of which formats are 'playoff-ish'. League and Swiss produce pools",
-    "or rounds and never a bracket; mixed builds one after its pools; playoffs and",
+    "UI's idea of which formats are 'knockout-ish'. League and Swiss produce pools",
+    "or rounds and never a bracket; mixed builds one after its pools; knockout and",
     "any UNRECOGNISED value (including a legacy record carrying no format at all)",
-    "fall to the pipeline's default branch, which builds a standalone playoffs",
+    "fall to the pipeline's default branch, which builds a standalone knockout",
     "bracket. That default is why the unknown-format cases below are true rather",
     "than false, and it is the half a hand-written mirror gets wrong.",
     "",
@@ -39,9 +39,9 @@
     "    the same builder and the finished pools re-seeded into it.",
     "  drawsBracket && !rebuildableFromPools  REFUSE. bracket.json is the ONLY",
     "    record of the draw, so rebuilding would invent a different set of",
-    "    pairings rather than restore this one. Covers playoffs AND every value",
+    "    pairings rather than restore this one. Covers knockout AND every value",
     "    that reaches the pipeline's default branch, which is the half a",
-    "    hand-written `format == playoffs || format == \"\"` check gets wrong.",
+    "    hand-written `format == knockout || format == \"\"` check gets wrong.",
     "  !drawsBracket                          DISCARD. League and Swiss never draw",
     "    a bracket, so any bracket.json they have is vestigial and moving it",
     "    aside is the whole repair. Nothing is rebuilt and nothing is lost.",
@@ -52,8 +52,8 @@
   ],
   "cases": [
     {
-      "why": "playoffs is a bracket from the first bout",
-      "format": "playoffs",
+      "why": "knockout is a bracket from the first bout",
+      "format": "knockout",
       "drawsBracket": true,
       "rebuildableFromPools": false
     },
@@ -89,7 +89,7 @@
     },
     {
       "why": "the match is exact: a format is not league merely by containing it",
-      "format": "league-playoffs",
+      "format": "league-knockout",
       "drawsBracket": true,
       "rebuildableFromPools": false
     },

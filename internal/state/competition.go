@@ -55,6 +55,29 @@ func parseCompetitionFile(path string) (any, error) {
 	if err := parseFrontMatter(raw, &c); err != nil {
 		return nil, err
 	}
+	// Retired wire values (bc-terminology commit 1: playoffs -> knockout) fold
+	// onto their canonical equivalents here, in memory, on every read. This is
+	// the only place allowed to recognise the literal "playoffs" string for
+	// config.md. It cannot fail and needs no lock and no I/O; the on-disk file
+	// converges the next time anything saves this record, since only the
+	// canonical struct is ever serialised back out.
+	//
+	// Every reader of config.md ON DISK funnels through here -- LoadCompetition,
+	// loadCompetitionLocked and UpdateCompetitionChanged all call this function.
+	// The one exception is storeTx.LoadCompetition's read-your-own-writes
+	// branch, which parses bytes STAGED EARLIER IN THE SAME TRANSACTION with
+	// parseFrontMatter directly (transactions.go). That is safe rather than a
+	// hole: those bytes were serialised from an already-folded struct, so they
+	// cannot carry a retired value. Do not restate it as "every reader" -- if
+	// that branch ever starts parsing bytes it did not write, it needs this
+	// fold too.
+	const legacyFormatValue = "playoffs"
+	if c.Format == legacyFormatValue {
+		c.Format = CompFormatKnockout
+	}
+	if c.Status == CompetitionStatus(legacyFormatValue) {
+		c.Status = CompStatusKnockout
+	}
 	// Single funnel for every competition read, so a config.md written before
 	// per-phase seconds existed is normalized exactly once, at the boundary,
 	// and an out-of-band value hand-edited into the file is pinned rather than

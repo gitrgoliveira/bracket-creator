@@ -34,11 +34,11 @@
 
 A kendo tournament has a fixed set of **shiaijo** (courts) and one or more **competitions**. Competitions can run in parallel, though this is uncommon. Each competition is assigned a subset of shiaijo.
 
-For competitions with pool matches, all pool rounds across every shiaijo must complete before advancing to the playoffs (knockout) rounds.
+For competitions with pool matches, all pool rounds across every shiaijo must complete before advancing to the knockout rounds.
 
 ## Tournament Timings
 
-The FIK standard match duration is **5 minutes** with **3-minute encho** (FIK Article 6). However, tournaments routinely modify this, for example, the EKC uses 4-minute pools and 5-minute knockout for seniors, with unlimited encho in senior knockout (EKC Rules Section 6.1.5.2, 6.2.5.2). Match duration may differ between phases within a competition, for example, 2 minutes in pools and 3 minutes in playoffs. If the tournament organiser provides these timings, the match schedule can be estimated automatically.
+The FIK standard match duration is **5 minutes** with **3-minute encho** (FIK Article 6). However, tournaments routinely modify this, for example, the EKC uses 4-minute pools and 5-minute knockout for seniors, with unlimited encho in senior knockout (EKC Rules Section 6.1.5.2, 6.2.5.2). Match duration may differ between phases within a competition, for example, 2 minutes in pools and 3 minutes in knockout. If the tournament organiser provides these timings, the match schedule can be estimated automatically.
 
 ### Schedule Estimation
 
@@ -478,7 +478,7 @@ In practice, courts rarely finish at the same time, one court may have faster ma
 When the number of competitors is not a power of 2 (e.g. 13 players in a 16-bracket), some first-round positions are left empty. These are **byes**, the competitor paired against an empty slot advances automatically without fighting.
 
 - Byes are placed so that **seeded players receive them first**, giving top seeds the advantage of skipping the first round.
-- In pools-to-playoffs formats, the bracket is sized to the next power of 2 above the number of qualifiers. First-place pool finishers are positioned to receive byes ahead of second-place finishers.
+- In pools-to-knockout formats, the bracket is sized to the next power of 2 above the number of qualifiers. First-place pool finishers are positioned to receive byes ahead of second-place finishers.
 - A match where both sides are empty (double bye) is simply marked as completed with no winner, this can happen in sparsely populated brackets.
 
 ## Awards
@@ -513,13 +513,13 @@ The **Shinpan-cho** (chief referee coordinator) allocates referee groups to cour
 
 ## Competition Formats
 
-### Pools & Playoffs (Round-Robin then Knockout)
+### Pools & Knockout (Round-Robin then Knockout)
 
 The most common format for larger competitions. Competitors are divided into pools of 3–5 players (sometimes with 8 players each) and play round-robin within their pool. After all pool matches complete, the top-ranked from each pool advance to a single-elimination knockout bracket. Pool matches typically use shorter match times (e.g. 3–4 minutes) while knockout matches use longer times (e.g. 4–5 minutes).
 
 In tournaments with large pools, a **partial round-robin** may be used instead of a full one, each competitor or team only fights their adjacent neighbours in the pool list (e.g. position 1 vs 2, 2 vs 3, 3 vs 4, etc.) rather than every possible pairing. This significantly reduces the number of matches while still producing enough data for ranking. The same pool ranking criteria apply.
 
-### Playoffs Only (Direct Elimination)
+### Knockout Only (Direct Elimination)
 
 A single-elimination bracket from the start, with no pool stage. Often used when time is limited or the number of entries is small. Seeding may be applied to separate strong competitors in the draw. Every match has a decisive result, draws go to encho/hantei.
 

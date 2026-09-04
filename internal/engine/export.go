@@ -68,7 +68,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}()
 
 	// Load the stored bracket ONCE, unconditionally, strictly (mp-yuy8 criterion
-	// 4). It used to load only for naginata/pure-playoffs and otherwise fall
+	// 4). It used to load only for naginata/pure-knockout and otherwise fall
 	// through best-effort on a load error, silently continuing with a nil
 	// bracket -- but the bracket carries the LIVE court of every bout (the
 	// operator reassigns matches between shiaijo as the day runs), which is the
@@ -86,7 +86,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// Elimination leaves for the knockout phase, shared with the results workbook
 	// (EliminationDraw) so both exports of one competition render the identical
 	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
-	// a pure playoffs competition (mp-ndfu, mp-0yd8). RenderCompetitionWorkbook's
+	// a pure knockout competition (mp-ndfu, mp-0yd8). RenderCompetitionWorkbook's
 	// own gate then drops the phantom bracket a league's placeholder finals imply.
 	draw := EliminationDraw(e.store, comp, pools, bracket, numCourts)
 

@@ -190,7 +190,7 @@ describe('AdminCompetition section render-smoke (mp-hpe3 split characterization)
 });
 
 // mp-gy6g: "Complete competition" is the only trigger for a bracket-based
-// (playoffs, or mixed-after-knockout) competition to ever reach status
+// (knockout, or mixed-after-knockout) competition to ever reach status
 // "completed" — MaybeAutoCompletePools only auto-transitions League on its
 // last pool match. Gated on canComplete (admin_competition.jsx), which
 // delegates to bracketFullyComplete (admin_helpers.jsx, exercised for real
@@ -205,14 +205,14 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === text);
 
   it('is hidden while a bracket match is still unfinished', async () => {
-    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs' });
+    const comp = makeCompetition({ format: 'knockout', status: 'knockout' });
     const bracket = { rounds: [[realMatch('completed')], [realMatch('running')]] };
     const { container } = await mountSection('overview', { comp, bracket });
     expect(findButton(container, 'Complete competition →')).toBeUndefined();
   });
 
   it('stays hidden once every round match is done but the bronze match is not (thirdPlaceMatch is a sibling of rounds)', async () => {
-    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs', naginata: true });
+    const comp = makeCompetition({ format: 'knockout', status: 'knockout', naginata: true });
     const bracket = {
       rounds: [[realMatch('completed')], [realMatch('completed')]],
       thirdPlaceMatch: realMatch('running'),
@@ -222,7 +222,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
   });
 
   it('appears once every bracket match, including the bronze match, is completed', async () => {
-    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs', naginata: true });
+    const comp = makeCompetition({ format: 'knockout', status: 'knockout', naginata: true });
     const bracket = {
       rounds: [[realMatch('completed')], [realMatch('completed')]],
       thirdPlaceMatch: realMatch('completed'),
@@ -232,7 +232,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
   });
 
   it('is hidden once the competition is already completed', async () => {
-    const comp = makeCompetition({ format: 'playoffs', status: 'completed' });
+    const comp = makeCompetition({ format: 'knockout', status: 'completed' });
     const bracket = { rounds: [[realMatch('completed')], [realMatch('completed')]] };
     const { container } = await mountSection('overview', { comp, bracket });
     expect(findButton(container, 'Complete competition →')).toBeUndefined();
@@ -241,7 +241,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
   it('is hidden while setup/draw-ready, even if a stale bracket looks complete', async () => {
     const bracket = { rounds: [[realMatch('completed')]] };
     for (const status of ['setup', 'draw-ready']) {
-      const comp = makeCompetition({ format: 'playoffs', status });
+      const comp = makeCompetition({ format: 'knockout', status });
       const { container } = await mountSection('overview', { comp, bracket });
       expect(findButton(container, 'Complete competition →')).toBeUndefined();
     }
@@ -255,7 +255,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
     window.API.completeCompetition.mockClear();
     const onRefreshCompetition = vi.fn();
     const showToast = vi.fn();
-    const comp = makeCompetition({ id: 'nagi-1', format: 'playoffs', status: 'playoffs' });
+    const comp = makeCompetition({ id: 'nagi-1', format: 'knockout', status: 'knockout' });
     const bracket = { rounds: [[realMatch('completed')], [realMatch('completed')]] };
     const t = makeTournament(comp);
     let container;
@@ -297,7 +297,7 @@ describe('AdminCompetition "Complete competition" action (mp-gy6g)', () => {
   it('does not call the API when the operator cancels the confirm dialog', async () => {
     window.confirmDialog.mockResolvedValueOnce(false);
     window.API.completeCompetition.mockClear();
-    const comp = makeCompetition({ format: 'playoffs', status: 'playoffs' });
+    const comp = makeCompetition({ format: 'knockout', status: 'knockout' });
     const bracket = { rounds: [[realMatch('completed')]] };
     const { container } = await mountSection('overview', { comp, bracket });
 
@@ -334,7 +334,7 @@ describe('AdminSettings Save buttons (bc-draw R9 gap 1)', () => {
   it('enables BOTH Save buttons after a valid court change', async () => {
     // Guards the fix from over-correcting into "footer always disabled":
     // A + B is a pairable allocation, so both buttons must go live.
-    const comp = makeCompetition({ courts: ['A'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A'], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     await clickPill(container, 'Shiaijo (court) B');
     const saves = saveButtons(container);
@@ -343,7 +343,7 @@ describe('AdminSettings Save buttons (bc-draw R9 gap 1)', () => {
   });
 
   it('disables BOTH Save buttons on an unpairable shiaijo count', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     await clickPill(container, 'Shiaijo (court) C'); // → A, B, C: 3 shiaijo
     expect(container.querySelector('[data-testid="shiaijo-count-error"]')).not.toBeNull();
@@ -365,7 +365,7 @@ describe('AdminSettings orphaned shiaijo (bc-draw R9 gap 3)', () => {
       .map((b) => b.textContent.trim())
       .filter((t) => t.startsWith('Shiaijo'));
 
-  const orphanComp = () => makeCompetition({ courts: ['A', 'B', 'C', 'D'], format: 'playoffs' });
+  const orphanComp = () => makeCompetition({ courts: ['A', 'B', 'C', 'D'], format: 'knockout' });
   const threeCourtVenue = { courts: ['A', 'B', 'C'] };
 
   it('renders a flagged pill for a court the tournament no longer has', async () => {
@@ -395,7 +395,7 @@ describe('AdminSettings orphaned shiaijo (bc-draw R9 gap 3)', () => {
   });
 
   it('says nothing when every assigned shiaijo still exists', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
     expect(container.querySelector('[data-testid="orphan-shiaijo-hint"]')).toBeNull();
     expect(pillLabels(container)).toHaveLength(3);
@@ -433,7 +433,7 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
   };
 
   it('shows on a VALID allocation, stating the counts and the reason', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
     expect(container.querySelector('[data-testid="shiaijo-count-error"]')).toBeNull();
     const hint = hintText(container);
@@ -445,7 +445,7 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
   });
 
   it('names every valid count a bigger venue allows', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('settings', {
       comp, tournament: { courts: ['A', 'B', 'C', 'D', 'E'] },
     });
@@ -453,7 +453,7 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
   });
 
   it('survives the selection going invalid, without restating the mechanism', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
     await clickPill(container, 'Shiaijo (court) C'); // → A, B, C
     expect(container.querySelector('[data-testid="shiaijo-count-error"]')).not.toBeNull();
@@ -469,7 +469,7 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
   //
   // Both formats, because the emptiness rule applies whatever the format,
   // unlike the count rule.
-  it.each(['playoffs', 'league'])('refuses a selection the operator has emptied, and blocks Save (%s)', async (format) => {
+  it.each(['knockout', 'league'])('refuses a selection the operator has emptied, and blocks Save (%s)', async (format) => {
     const comp = makeCompetition({ courts: ['A', 'B'], format });
     const { container } = await mountSection('settings', { comp, tournament: threeCourtVenue });
     await clickPill(container, 'Shiaijo (court) A');
@@ -489,7 +489,7 @@ describe('AdminSettings standing shiaijo hint (spec 007 R9)', () => {
   // out of every unrelated edit on this screen, which is the one outcome this
   // rule must not cause.
   it('does not block Save on a record that merely arrived with no shiaijo', async () => {
-    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const comp = makeCompetition({ courts: [], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B'] } });
     // Inheriting 2 of 2 is a legal allocation, so no banner...
     expect(container.querySelector('[data-testid="shiaijo-count-banner"]')).toBeNull();
@@ -520,7 +520,7 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
     // Exactly the tolerated case: a record written by a pre-rule binary must
     // keep loading and rendering, with the banner explaining the block.
     const courts = ['A', 'B', 'C', 'D', 'E', 'F'];
-    const comp = makeCompetition({ courts, format: 'playoffs' });
+    const comp = makeCompetition({ courts, format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: { courts } });
     const banner = container.querySelector('[data-testid="shiaijo-count-banner"]');
     expect(banner).not.toBeNull();
@@ -539,7 +539,7 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
   // shiaijoCountError(0) is null, so this screen showed nothing at all while
   // the dashboard refused the draw and sent the operator here to fix it.
   it('warns about an INHERITED allocation the competition never chose', async () => {
-    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const comp = makeCompetition({ courts: [], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     const banner = container.querySelector('[data-testid="shiaijo-count-banner"]');
     expect(banner).not.toBeNull();
@@ -554,7 +554,7 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
   });
 
   it('stays silent when the inherited count is legal', async () => {
-    const comp = makeCompetition({ courts: [], format: 'playoffs' });
+    const comp = makeCompetition({ courts: [], format: 'knockout' });
     const { container } = await mountSection('settings', { comp, tournament: { courts: ['A', 'B'] } });
     expect(container.querySelector('[data-testid="shiaijo-count-banner"]')).toBeNull();
   });
@@ -563,7 +563,7 @@ describe('AdminSettings stored-allocation banner (spec 007 R9)', () => {
     const courts = ['A', 'B', 'C', 'D', 'E', 'F'];
     // Date set on purpose: an invalid one disables the same button, so without
     // it this would pass even with the shiaijo blocker gone.
-    const comp = makeCompetition({ courts, format: 'playoffs', date: '01-06-2026' });
+    const comp = makeCompetition({ courts, format: 'knockout', date: '01-06-2026' });
     const { container } = await mountSection('overview', { comp, tournament: { courts } });
     const start = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Start competition →');
     expect(start).not.toBeUndefined();
@@ -585,7 +585,7 @@ describe('Header start blocked by an incomplete seeding', () => {
   // whether or not the seeding blocker exists.
   const halfSeeded = () => makeCompetition({
     courts: ['A', 'B'],
-    format: 'playoffs',
+    format: 'knockout',
     date: '01-06-2026',
     players: [
       { id: 'p1', name: 'Yamada' },
@@ -625,7 +625,7 @@ describe('Header start blocked by an incomplete seeding', () => {
   it('leaves the buttons live once the seeding is complete', async () => {
     const comp = makeCompetition({
       courts: ['A', 'B'],
-      format: 'playoffs',
+      format: 'knockout',
       date: '01-06-2026',
       players: [
         { id: 'p1', name: 'Yamada', seed: 1 },
@@ -649,13 +649,13 @@ describe('AdminCompOverview next steps under a court block (spec 007 R9)', () =>
   };
 
   it('points at the Generate draw button when nothing blocks it', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     expect(stepText(container, 'generate')).toContain('Use the "Generate draw" button in the header above');
   });
 
   it('points at Settings instead when the shiaijo count blocks the draw', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     const text = stepText(container, 'generate');
     expect(text).not.toContain('Use the "Generate draw" button in the header above');
@@ -836,7 +836,7 @@ describe('Competition header + checklist name only reachable counts (U2)', () =>
   const threeCourtVenue = { courts: ['A', 'B', 'C'] };
 
   it('does not offer a 4th shiaijo to a 3-shiaijo venue in the header block', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
     const block = container.querySelector('[data-testid="draw-block"]');
     expect(block).not.toBeNull();
@@ -845,7 +845,7 @@ describe('Competition header + checklist name only reachable counts (U2)', () =>
   });
 
   it('does not offer a 4th shiaijo in the next-steps checklist either', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: threeCourtVenue });
     const step = container.querySelector('[data-testid="step-generate"]');
     expect(step.textContent).toContain('This tournament has 3, so this competition can use 1 or 2');
@@ -859,7 +859,7 @@ describe('Competition header + checklist name only reachable counts (U2)', () =>
 describe('AdminCompOverview blocked-draw CTA is reachable (U5)', () => {
   it('renders the Reassign shiaijo button and navigates to Settings', async () => {
     const onSection = vi.fn();
-    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'knockout' });
     const t = makeTournament(comp, { courts: ['A', 'B', 'C'] });
     let container;
     await act(async () => {
@@ -881,14 +881,14 @@ describe('AdminCompOverview blocked-draw CTA is reachable (U5)', () => {
   });
 
   it('shows exactly one Settings call to action, not two', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B', 'C'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     expect(container.querySelector('[data-testid="step-settings-cta"]')).toBeNull();
     expect(container.querySelector('[data-testid="step-generate-cta"]')).not.toBeNull();
   });
 
   it('leaves the ordinary checklist CTA alone when nothing blocks the draw', async () => {
-    const comp = makeCompetition({ courts: ['A', 'B'], format: 'playoffs' });
+    const comp = makeCompetition({ courts: ['A', 'B'], format: 'knockout' });
     const { container } = await mountSection('overview', { comp, tournament: { courts: ['A', 'B', 'C'] } });
     expect(container.querySelector('[data-testid="step-settings-cta"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="step-generate-cta"]')).toBeNull();

@@ -68,7 +68,7 @@ func TestAPI_CreateWithSeeds(t *testing.T) {
 
 	form := url.Values{}
 	form.Add("playerList", "Jane Doe, Dojo1\nJohn Smith, Dojo2")
-	form.Add("tournamentType", "playoffs")
+	form.Add("tournamentType", "knockout")
 	form.Add("seeds", `[{"Name": "Jane Doe", "SeedRank": 1}]`)
 
 	req, err := http.NewRequest("POST", "/create", strings.NewReader(form.Encode()))
@@ -91,7 +91,7 @@ func TestAPI_CreateWithMissingSeed(t *testing.T) {
 
 	form := url.Values{}
 	form.Add("playerList", "Jane Doe, Dojo1")
-	form.Add("tournamentType", "playoffs")
+	form.Add("tournamentType", "knockout")
 	form.Add("seeds", `[{"Name": "John Smith", "SeedRank": 1}]`)
 
 	req, err := http.NewRequest("POST", "/create", strings.NewReader(form.Encode()))

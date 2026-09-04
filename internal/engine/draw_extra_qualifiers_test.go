@@ -16,7 +16,7 @@ import (
 
 // bc-qual LP-3c: engine wiring for the "larger-pools" ExtraQualifiers mode.
 //
-// buildPoolFedDraw (playoff_skeleton.go) is the shared boundary poolDraw
+// buildPoolFedDraw (knockout_skeleton.go) is the shared boundary poolDraw
 // (export re-derivation) and generatePoolPreviewBracket (bracket.go,
 // generate-draw persist) both call. Two things must hold for every
 // competition:

@@ -26,14 +26,14 @@ func blankWorkbookCourtPlan(draw *helper.KnockoutDraw, courtNames []string) help
 // printEliminationWithBronze renders the team elimination sheet and, for a
 // bracket that requires a single 3rd place (thirdPlaceMatch) with a real
 // semifinal round, the bronze (3rd-place) block with its print area. Shared by
-// create-pools and create-playoffs, which both run the bronze on the same
+// create-pools and create-knockout, which both run the bronze on the same
 // court set with mirror=true.
 func printEliminationWithBronze(f *excelize.File, matchWinners map[string]helper.MatchWinner, rounds [][]*helper.Node, teamMatches int, plan helper.CourtPlan, engi, thirdPlaceMatch bool) {
 	helper.PrintEliminationWithBronze(f, matchWinners, rounds, teamMatches, plan, true, engi, helper.NeedsBronzeBlock(thirdPlaceMatch, len(rounds)))
 }
 
 // finishKnockoutPages runs the CLI epilogue shared by create-pools and
-// create-playoffs after RenderKnockoutPages: log the page spread, delete the
+// create-knockout after RenderKnockoutPages: log the page spread, delete the
 // consumed tree template (deletion is caller-owned, see RenderTreePages), and
 // log the per-round elimination match counts (round numbers count down toward
 // the final, the last entry in rounds).

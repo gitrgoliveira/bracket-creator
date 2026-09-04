@@ -138,7 +138,7 @@ export function bracketIssue(issues) {
 //              competition and costs nothing, because nothing was in it.
 //   "none"     Everything else, INCLUDING an unrecognised or missing format.
 //              Those take the draw pipeline's default branch and get a
-//              standalone playoffs bracket, so the file IS the draw. Rebuilding
+//              standalone knockout bracket, so the file IS the draw. Rebuilding
 //              it from today's roster would not restore the tournament, it would
 //              invent a different one that disagrees with the bracket already
 //              printed and posted on the wall. The server refuses this; the

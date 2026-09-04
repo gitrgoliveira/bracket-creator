@@ -1,6 +1,6 @@
 # Bracket Creator: Workspace Instructions
 
-A Go CLI tool for generating kendo tournament brackets with pool stages and playoff knockouts. Outputs Excel files with formula-linked cells for bracket visualization. Includes a web UI (Gin) for interactive tournament creation.
+A Go CLI tool for generating kendo tournament brackets with pool stages and knockout stages. Outputs Excel files with formula-linked cells for bracket visualization. Includes a web UI (Gin) for interactive tournament creation.
 
 ## Architecture
 
@@ -12,7 +12,7 @@ A Go CLI tool for generating kendo tournament brackets with pool stages and play
 ### Excel-Centric Design
 - Business logic is tightly coupled to Excel generation
 - Players, pools, matches carry Excel sheet references for formula outputs
-- Binary tree structures (`internal/helper/tree.go`) build playoff brackets recursively
+- Binary tree structures (`internal/helper/tree.go`) build knockout brackets recursively
 - `excel.Client` manages file lifecycle, `excel.SheetManager` handles sheet operations
 
 ### Key Packages
@@ -106,7 +106,7 @@ make docker/run
 ### Excel Formulas
 - Brackets use Excel formulas to link cells across sheets
 - When modifying match generation, verify formula references are correct
-- The tree structure (`Node` in tree.go) drives playoff bracket layout
+- The tree structure (`Node` in tree.go) drives knockout bracket layout
 
 ### Seeding Edge Cases
 - Seed assignments must exactly match participant names (case-sensitive)

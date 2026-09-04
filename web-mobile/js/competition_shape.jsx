@@ -42,7 +42,7 @@
 export const KIND_INDIVIDUAL = "individual";
 export const KIND_TEAM = "team";
 
-export const FORMAT_PLAYOFFS = "playoffs";
+export const FORMAT_KNOCKOUT = "knockout";
 export const FORMAT_MIXED = "mixed";
 export const FORMAT_LEAGUE = "league";
 export const FORMAT_SWISS = "swiss";
@@ -80,7 +80,7 @@ export const KIND_OPTIONS = [
 // the four format names and their hints.
 export const LABEL_FORMAT = "Format";
 export const FORMAT_OPTIONS = [
-  { value: FORMAT_PLAYOFFS, label: "Knockout only", hint: "Direct single-elimination knockout." },
+  { value: FORMAT_KNOCKOUT, label: "Knockout only", hint: "Direct single-elimination knockout." },
   { value: FORMAT_MIXED, label: "Pools + Knockout", hint: "Round-robin pools first, then top finishers advance to a knockout bracket." },
   { value: FORMAT_LEAGUE, label: "League", hint: "Single round-robin across all participants; final standings determine the winner (no knockout)." },
   { value: FORMAT_SWISS, label: "Swiss", hint: "Swiss-system: fixed number of rounds, pairing players with equal win counts; cumulative standings decide the winner." },
@@ -333,20 +333,20 @@ export function poolDurationHint(format) {
   return format === FORMAT_SWISS ? HINT_ROUND_DURATION : HINT_POOL_DURATION;
 }
 
-export const LABEL_PLAYOFF_DURATION = "Playoff match duration";
-export const HINT_PLAYOFF_DURATION = "Estimated time per playoff/knockout match, as m:ss (e.g. 2:30).";
+export const LABEL_KNOCKOUT_DURATION = "Knockout match duration";
+export const HINT_KNOCKOUT_DURATION = "Estimated time per knockout match, as m:ss (e.g. 2:30).";
 
-// poolDurationVisible / playoffDurationVisible: mirror
+// poolDurationVisible / knockoutDurationVisible: mirror
 // admin_competition_settings.jsx:972-985's two independent format gates
-// (the row itself renders for mixed/league/playoffs/swiss; within it, the
-// pool/round field renders for mixed/league/swiss and the playoff field
-// for playoffs/mixed -- "mixed" runs both phases and shows both fields).
+// (the row itself renders for mixed/league/knockout/swiss; within it, the
+// pool/round field renders for mixed/league/swiss and the knockout field
+// for knockout/mixed -- "mixed" runs both phases and shows both fields).
 export function poolDurationVisible(format) {
   return format === FORMAT_MIXED || format === FORMAT_LEAGUE || format === FORMAT_SWISS;
 }
 
-export function playoffDurationVisible(format) {
-  return format === FORMAT_PLAYOFFS || format === FORMAT_MIXED;
+export function knockoutDurationVisible(format) {
+  return format === FORMAT_KNOCKOUT || format === FORMAT_MIXED;
 }
 
 // --- Joint 3rd place convention (bc-3rdp) --------------------------------
@@ -366,7 +366,7 @@ export const LABEL_TWO_THIRD_PLACES = "Award two joint 3rd places";
 export const HINT_TWO_THIRD_PLACES = "When enabled, two beaten semi-finalists share 3rd place and no bronze match is played (standard kendo convention). Leave it off to decide a single 3rd place: a knockout plays a bronze match, and a league awards one 3rd rather than a shared rank.";
 
 // twoThirdPlacesVisible: visible for every format that can produce a 3rd
-// place at all -- playoffs/mixed decide it with a bronze match (or not) at
+// place at all -- knockout/mixed decide it with a bronze match (or not) at
 // the end of the knockout, league decides it via shared standings ranks.
 // Hidden for Swiss: there is no bracket and no bronze match to suppress, and
 // Swiss standings are cumulative-score rankings with no "3rd place" bout to
@@ -617,7 +617,7 @@ export function resolvePoolSizeMode(poolSizeMode) {
 // The ONE owner of the mixed-format pool-settings rule (poolSize >= 3,
 // poolWinners >= 1, both whole numbers), taken verbatim from the create
 // form's admin_setup.jsx `validatePoolSettings` so the two thresholds
-// cannot drift apart. Knockout ("playoffs") has no pools and league runs a
+// cannot drift apart. Knockout has no pools and league runs a
 // single round-robin without a user-configured size, so both are exempt;
 // non-"mixed" always returns null.
 //
@@ -630,10 +630,10 @@ export function resolvePoolSizeMode(poolSizeMode) {
 //
 // Why settings needs this too, and not just create: normalizePoolConfig
 // (internal/mobileapp/handlers_competition.go) zeroes poolSize/poolWinners
-// on every stored league/playoffs competition, so ANY such competition sits
+// on every stored league/knockout competition, so ANY such competition sits
 // on disk with poolSize: 0. normalizeConfigForFormat above only clears
 // those fields on the way OUT of "mixed" -- flipping back INTO "mixed" is a
-// no-op for them -- so an operator who switches a stored playoffs
+// no-op for them -- so an operator who switches a stored knockout
 // competition to "mixed" on the Settings screen lands here with poolSize
 // still 0 and poolWinners still 0, staged nowhere else. Without this check
 // the "Players per pool" field renders "0", Save stays enabled, and the PUT
@@ -702,7 +702,7 @@ export function poolSettingsError(format, poolSize, winners) {
 // reproduced on a stored mixed competition (poolSize: 4, poolWinners: 2)
 // by tapping "Knockout only" (stages poolSize/poolWinners: 0) and then
 // tapping "Pools + Knockout" to go straight back -- a NO-OP for those
-// fields going back INTO mixed, per this function's own "league / playoffs"
+// fields going back INTO mixed, per this function's own "league / knockout"
 // bullet below, which only clears them on the way OUT -- so two taps that
 // cancelled out on `format` left poolSize/poolWinners at 0 with no control
 // on screen able to recover them, and Save blocked by poolSettingsError.
@@ -711,10 +711,10 @@ export function poolSettingsError(format, poolSize, winners) {
 // specifically so normalization can stay at the boundary and still warn
 // the operator ahead of Save, without needing to run early.
 //
-// - league / playoffs: PoolSize and PoolWinners are zeroed (no pool phase
-//   to size; league's single implicit pool and playoffs' bare bracket both
+// - league / knockout: PoolSize and PoolWinners are zeroed (no pool phase
+//   to size; league's single implicit pool and knockout's bare bracket both
 //   ignore these at runtime, per normalizePoolConfig's comment).
-// - league / playoffs / swiss: ExtraQualifiers is forced to the standard
+// - league / knockout / swiss: ExtraQualifiers is forced to the standard
 //   sentinel ("") -- the "Knockout qualifiers" radio only ever means
 //   something on a pools-then-knockout ("mixed") competition.
 //
@@ -734,11 +734,11 @@ export function poolSettingsError(format, poolSize, winners) {
 // the control working.
 export function normalizeConfigForFormat(cfg) {
   const next = { ...cfg };
-  if (next.format === FORMAT_LEAGUE || next.format === FORMAT_PLAYOFFS) {
+  if (next.format === FORMAT_LEAGUE || next.format === FORMAT_KNOCKOUT) {
     next.poolSize = 0;
     next.poolWinners = 0;
   }
-  if (next.format === FORMAT_LEAGUE || next.format === FORMAT_PLAYOFFS || next.format === FORMAT_SWISS) {
+  if (next.format === FORMAT_LEAGUE || next.format === FORMAT_KNOCKOUT || next.format === FORMAT_SWISS) {
     // Inline "" rather than importing qualifier_preview.jsx's
     // EXTRA_QUALIFIERS_STANDARD: that constant IS "", this module has no
     // other reason to depend on qualifier_preview.jsx, and the "no
@@ -1127,7 +1127,7 @@ export const CLEARED_FIELD_LABELS = {
 // defaults TO cannot disagree either.
 export const COMPETITION_DEFAULTS = {
   kind: KIND_INDIVIDUAL,
-  format: FORMAT_PLAYOFFS,
+  format: FORMAT_KNOCKOUT,
   poolFormat: POOL_FORMAT_FULL,
   roundRobin: true,
   poolSizeMode: POOL_SIZE_MODE_MAX,
@@ -1157,7 +1157,7 @@ export const COMPETITION_DEFAULTS = {
   numberPrefix: "",
   // 0 means "unset, use the scheduler default" for both durations (T047).
   poolMatchDurationSeconds: 0,
-  playoffMatchDurationSeconds: 0,
+  knockoutMatchDurationSeconds: 0,
   mirror: true,
   startTime: "09:00",
 };

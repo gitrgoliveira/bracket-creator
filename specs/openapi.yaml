@@ -118,7 +118,7 @@ paths:
                   type: string
                 tournamentType:
                   type: string
-                  enum: [pools, playoffs]
+                  enum: [pools, knockout]
                 singleTree:
                   type: string
                   enum: ["on", "off"]
@@ -990,7 +990,7 @@ paths:
         `poolWinners`, `poolSizeMode`, `poolFormat`, `extraQualifiers`,
         `courts`, `roundRobin`, `withZekkenName`, `teamSize`,
         `numberPrefix`, `format`, `kind`, `mirror`,
-        `poolMatchDurationSeconds`, `playoffMatchDurationSeconds`,
+        `poolMatchDurationSeconds`, `knockoutMatchDurationSeconds`,
         `swissRounds`, `naginata`, `engi`, `teamMatchType`,
         `checkInEnabled`, `leagueTiebreakTopN`, `leagueTwoThirdPlaces`.
         String fields are trimmed server-side.
@@ -1007,7 +1007,7 @@ paths:
         before the competition starts`, `leagueTiebreakTopN and
         leagueTwoThirdPlaces can only be changed before the competition
         starts`, respectively). Every other field in the list above
-        (including `poolMatchDurationSeconds` / `playoffMatchDurationSeconds`,
+        (including `poolMatchDurationSeconds` / `knockoutMatchDurationSeconds`,
         `checkInEnabled`, and `swissRounds`) is editable regardless of
         status through this endpoint; `poolSize`, `poolWinners`,
         `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
@@ -1016,6 +1016,13 @@ paths:
         output-affecting 409 (see below) while status is exactly
         `draw-ready`, but are not blocked once the competition has moved
         past it.
+
+
+        The pre-rename key `playoffMatchDurationSeconds` is REFUSED with 400
+        rather than ignored. An unrecognised key would otherwise be dropped by
+        the decoder while the transform still assigned the current field, so a
+        client sending the old name would silently reset the stored knockout
+        duration. Send `knockoutMatchDurationSeconds`.
 
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
@@ -1146,7 +1153,7 @@ paths:
       description: |
         Idempotent; returns 204 even when the competition does not exist.
         Allowed in any non-in-progress state (`setup`, `completed`,
-        `invalid`, or unset). In-progress competitions (`pools`/`playoffs`)
+        `invalid`, or unset). In-progress competitions (`pools`/`knockout`)
         must first be invalidated via `POST /api/competitions/{id}/invalidate`.
 
         Also requires `X-Admin-Password` when the destructive-ops gate is active
@@ -1174,7 +1181,7 @@ paths:
       tags: [competitions]
       summary: Mark in-progress competition as invalid
       description: |
-        Transitions a competition from `pools` or `playoffs` to `invalid`,
+        Transitions a competition from `pools` or `knockout` to `invalid`,
         which is the prerequisite for deletion of an already-started
         competition. Returns 400 if the competition is not in an in-progress
         state.
@@ -1301,7 +1308,7 @@ paths:
       summary: Start competition
       description: |
         Starts the competition. When in `draw-ready` status the existing draw is reused
-        and the competition transitions directly to `pools` or `playoffs`. When in
+        and the competition transitions directly to `pools` or `knockout`. When in
         `setup` status the draw is generated first then the competition transitions
         (backward-compatible one-click path).
 
@@ -1309,7 +1316,7 @@ paths:
         separate "start knockout" step: as each pool finishes, its finishers are
         seeded into the (already-scheduled) knockout bracket automatically, and a
         knockout match becomes scoreable as soon as both its feeder pools are done.
-        The competition moves to `playoffs` once the final pool has been seeded.
+        The competition moves to `knockout` once the final pool has been seeded.
       security:
         - TournamentPassword: []
       parameters:
@@ -1329,7 +1336,7 @@ paths:
       tags: [competitions]
       summary: Complete competition
       description: |
-        Transitions a competition from `pools` or `playoffs` status to `completed`.
+        Transitions a competition from `pools` or `knockout` status to `completed`.
         Returns 400 if the competition is not in a completable state.
       security:
         - TournamentPassword: []
@@ -3823,8 +3830,8 @@ components:
           enum: [individual, team]
         format:
           type: string
-          description: "playoffs, mixed, league, or swiss"
-          enum: [playoffs, mixed, league, swiss]
+          description: "knockout, mixed, league, or swiss"
+          enum: [knockout, mixed, league, swiss]
         teamSize:
           type: integer
           minimum: 0
@@ -3934,11 +3941,11 @@ components:
             for preview, not yet started; `pools` → pools phase active (for a
             mixed competition the knockout bracket is already filling in
             incrementally as pools finish; knockout matches with both sides
-            resolved are scoreable even in this state); `playoffs` → knockout
+            resolved are scoreable even in this state); `knockout` → knockout
             phase active (for mixed: every pool has been seeded into the bracket);
             `completed` → finished; `invalid` → operator-declared invalid,
             prerequisite for deleting an already-started competition.
-          enum: [setup, draw-ready, pools, playoffs, completed, invalid, ""]
+          enum: [setup, draw-ready, pools, knockout, completed, invalid, ""]
         mirror:
           type: boolean
         withZekkenName:
@@ -3975,12 +3982,12 @@ components:
             reaches this API. The retired fields hold whole minutes, so the
             smallest value they can express already sits on the 60s floor and the
             clamp only fires on an absurd stored value (say 90 minutes).
-        playoffMatchDurationSeconds:
+        knockoutMatchDurationSeconds:
           type: integer
           minimum: 0
           maximum: 3600
           description: >
-            Estimated on-clock duration of a single playoff/knockout match, in
+            Estimated on-clock duration of a single knockout match, in
             SECONDS (e.g. 150 = 2m30s). Same semantics, band, and legacy-migration
             behaviour as `poolMatchDurationSeconds`.
         checkInEnabled:
@@ -4620,7 +4627,7 @@ components:
             for a mixed (pools then knockout) competition. Written once when the
             bracket is drawn and never rewritten, unlike `sideA`, which is replaced
             with the real competitor as that pool finishes. Absent on a standalone
-            playoffs bracket (its leaves are real competitors) and on a bracket
+            knockout bracket (its leaves are real competitors) and on a bracket
             drawn before this field existed.
         placeholderB:
           type: string
@@ -4669,14 +4676,14 @@ components:
             True for a read-only placeholder bracket generated at draw time for
             a mixed (pools then knockout) competition, whose leaves are
             pool-origin placeholders rather than resolved players. The actual
-            knockout is played in a separate playoffs competition created from
+            bracket is played in a separate knockout competition created from
             this source.
         thirdPlaceMatch:
           readOnly: true
           allOf:
             - $ref: '#/components/schemas/BracketMatch'
           description: >
-            The optional 3rd-place (bronze) playoff match. A SIBLING of
+            The optional 3rd-place (bronze) knockout match. A SIBLING of
             `rounds`, not a row in it: `rounds` is power-of-two,
             position-encoded for winner advancement, so splicing a bronze
             match into that geometry would corrupt it. Absent unless a

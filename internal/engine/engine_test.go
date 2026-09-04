@@ -339,12 +339,12 @@ func TestStartCompetition_MixedFormat_NonRoundRobin(t *testing.T) {
 // TestStartCompetition_LeagueFormat verifies that a league-format competition
 // generates pool matches (not a bracket) and reaches CompStatusPools, and
 // that all matches complete transitions it to CompStatusComplete without
-// requiring a separate playoff phase.
+// requiring a separate knockout phase.
 func TestStartCompetition_LeagueFormat(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "league-test"
 
-	// League: single pool, full round-robin, no playoffs.
+	// League: single pool, full round-robin, no knockout.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:         compID,
 		Name:       "League Test",
@@ -388,16 +388,16 @@ func TestStartCompetition_LeagueFormat(t *testing.T) {
 
 	comp, err = store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusComplete, comp.Status, "league must complete after all pool matches done, without a playoff phase")
+	assert.Equal(t, state.CompStatusComplete, comp.Status, "league must complete after all pool matches done, without a knockout phase")
 }
 
-// --- Bracket/Playoffs Generation Tests ---
+// --- Bracket/Knockout Generation Tests ---
 
-func TestStartCompetition_PlayoffsFormat_Basic(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_Basic(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs"
+	compID := "knockout"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave",
 	})
@@ -407,7 +407,7 @@ func TestStartCompetition_PlayoffsFormat_Basic(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+	assert.Equal(t, state.CompStatusKnockout, comp.Status)
 
 	bracket, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -419,11 +419,11 @@ func TestStartCompetition_PlayoffsFormat_Basic(t *testing.T) {
 	assert.Len(t, bracket.Rounds[1], 1) // 1 final
 }
 
-func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_WithByes(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs-byes"
+	compID := "knockout-byes"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve",
 	})
@@ -464,11 +464,11 @@ func TestStartCompetition_PlayoffsFormat_WithByes(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_PlayoffsFormat_PowerOf2(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_PowerOf2(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs-8"
+	compID := "knockout-8"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
 	})
@@ -494,11 +494,11 @@ func TestStartCompetition_PlayoffsFormat_PowerOf2(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_PlayoffsFormat_WithSeeds(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_WithSeeds(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs-seeded"
+	compID := "knockout-seeded"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8",
 	})
@@ -534,11 +534,11 @@ func TestStartCompetition_PlayoffsFormat_WithSeeds(t *testing.T) {
 	assert.NotEqual(t, p1Half, p2Half, "Seed 1 and 2 should be in opposite halves")
 }
 
-func TestStartCompetition_PlayoffsFormat_SinglePlayer(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_SinglePlayer(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "single"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice"})
 
 	err := eng.StartCompetition(compID)
@@ -552,11 +552,11 @@ func TestStartCompetition_PlayoffsFormat_SinglePlayer(t *testing.T) {
 	assert.Empty(t, bracket.Rounds)
 }
 
-func TestStartCompetition_PlayoffsFormat_TwoPlayers(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_TwoPlayers(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "two"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
 
 	err := eng.StartCompetition(compID)
@@ -639,7 +639,7 @@ func TestRecordBracketMatchResult_PropagatesWinner(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-score"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 
 	require.NoError(t, eng.StartCompetition(compID))
@@ -684,7 +684,7 @@ func TestRecordBracketMatchResult_Hantei_RoundTrips(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-hantei"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -763,7 +763,7 @@ func TestRecordBracketMatchResult_SubResults_RoundTrips(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-subresults"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -813,7 +813,7 @@ func TestRecordBracketMatchResult_SecondMatch_PropagatesAsSideB(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-sideb"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 
 	require.NoError(t, eng.StartCompetition(compID))
@@ -838,7 +838,7 @@ func TestRecordBracketMatchResult_FullTournament(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "full-tourney"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 
 	require.NoError(t, eng.StartCompetition(compID))
@@ -877,7 +877,7 @@ func TestRecordBracketMatchResult_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "not-found-match"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -938,10 +938,10 @@ func TestRecordPoolMatchResult_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pool-not-found"
 
-	// Use playoffs format: no preview bracket is generated, so an unknown
+	// Use knockout format: no preview bracket is generated, so an unknown
 	// match ID returns a clean "not found" error without the "read-only
 	// preview" guard that fires for mixed-format competitions (mp-9dz).
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1291,11 +1291,11 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 
 // --- Bracket with Larger Player Counts ---
 
-func TestStartCompetition_PlayoffsFormat_16Players(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_16Players(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs-16"
+	compID := "knockout-16"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	names := make([]string, 16)
 	for i := range names {
 		names[i] = "Player" + string(rune('A'+i))
@@ -1315,11 +1315,11 @@ func TestStartCompetition_PlayoffsFormat_16Players(t *testing.T) {
 	assert.Len(t, bracket.Rounds[3], 1) // Final
 }
 
-func TestStartCompetition_PlayoffsFormat_LargeWithByes(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_LargeWithByes(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs-12"
+	compID := "knockout-12"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	names := make([]string, 12)
 	for i := range names {
 		names[i] = "Player" + string(rune('A'+i))
@@ -1370,7 +1370,7 @@ func TestBracketMatchIDs_AreUnique(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "unique-ids"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{
 		"A", "B", "C", "D", "E", "F", "G", "H",
 	})
@@ -1465,7 +1465,7 @@ func TestUpdateMatchCourt_Bracket(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-bracket"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1499,7 +1499,7 @@ func TestOverrideBracketWinner(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-bracket"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1531,7 +1531,7 @@ func TestOverrideBracketWinner_TimestampLWW(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-ts"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1590,7 +1590,7 @@ func TestRecordBracketResult_StaleCorrectionIsDroppedAndReported(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "correction-ts"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1635,7 +1635,7 @@ func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-auto"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	// 4 players, Alice vs Bob (M1), Charlie vs Dave (M2). Winner M1 vs Winner M2 (Final).
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
@@ -1663,7 +1663,7 @@ func TestOverrideBracketWinner_AutoPropagation(t *testing.T) {
 func TestOverrideBracketWinner_NotFound(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-not-found"
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1713,7 +1713,7 @@ func TestOverrideBracketWinner_SideB(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-sideb"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"A", "B", "C", "D"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1731,7 +1731,7 @@ func TestOverrideBracketWinner_DeepPropagation(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-deep"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	// 8 players → a full 3-round bracket with no byes, so every first-round match
 	// has two real players. (With non-power-of-2 rosters the byes are distributed
 	// to the top seeds, mp-sess, and those top seeds play no first-round match.)
@@ -1777,7 +1777,7 @@ func TestOverrideBracketWinner_LWWAppliedBool(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-lww-bool"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -1885,12 +1885,12 @@ func TestStartCompetition_NumberPrefix_Pools(t *testing.T) {
 	}
 }
 
-func TestStartCompetition_NumberPrefix_Playoffs(t *testing.T) {
+func TestStartCompetition_NumberPrefix_Knockout(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "prefix-playoffs"
+	compID := "prefix-knockout"
 
 	comp := &state.Competition{
-		ID: compID, Name: "Prefix Playoffs", Kind: "individual", Format: "playoffs",
+		ID: compID, Name: "Prefix Knockout", Kind: "individual", Format: "knockout",
 		Courts: []string{"A"}, StartTime: "09:00", Status: "setup",
 		NumberPrefix: "A",
 	}
@@ -1902,7 +1902,7 @@ func TestStartCompetition_NumberPrefix_Playoffs(t *testing.T) {
 	// Confirm competition started (bracket generated) and NumberPrefix persisted.
 	updated, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.CompStatusPlayoffs, updated.Status)
+	assert.Equal(t, state.CompStatusKnockout, updated.Status)
 	assert.Equal(t, "A", updated.NumberPrefix)
 
 	bracket, err := store.LoadBracket(compID)
@@ -1943,7 +1943,7 @@ func TestUpdateMatchTime_Bracket(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "time-bracket"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -2090,10 +2090,10 @@ func TestStartCompetition_BracketCourtDistribution(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "court-dist-bracket"
 
-	// 2 courts with playoffs and 8 players, bracket court distribution.
+	// 2 courts with knockout and 8 players, bracket court distribution.
 	comp := &state.Competition{
 		ID: compID, Name: "Court Dist Bracket", Kind: "individual",
-		Format: "playoffs", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
+		Format: "knockout", PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
 		RoundRobin: true, Courts: []string{"A", "B"},
 		StartTime: "09:00", Status: "setup",
 	}

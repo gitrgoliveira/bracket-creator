@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   KIND_INDIVIDUAL, KIND_TEAM,
-  FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS,
+  FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS,
   POOL_FORMAT_FULL, POOL_FORMAT_PARTIAL,
   LABEL_KIND, KIND_OPTIONS,
   LABEL_FORMAT, FORMAT_OPTIONS, formatHint,
@@ -10,8 +10,8 @@ import {
   LABEL_ROUND_ROBIN, roundRobinVisible,
   LABEL_LEAGUE_TIEBREAK, HINT_LEAGUE_TIEBREAK, LEAGUE_TIEBREAK_OPTIONS, leagueTiebreakVisible,
   LABEL_POOL_DURATION, HINT_POOL_DURATION, poolDurationLabel, poolDurationHint,
-  LABEL_PLAYOFF_DURATION, HINT_PLAYOFF_DURATION,
-  poolDurationVisible, playoffDurationVisible,
+  LABEL_KNOCKOUT_DURATION, HINT_KNOCKOUT_DURATION,
+  poolDurationVisible, knockoutDurationVisible,
   LABEL_TWO_THIRD_PLACES, HINT_TWO_THIRD_PLACES, twoThirdPlacesVisible, effectiveTwoThirdPlaces,
   teamFieldsVisible, zekkenApplies, engiApplies,
   normalizeConfigForFormat,
@@ -29,14 +29,14 @@ import {
 // visibility predicate across every format so a new format added to one
 // surface but not this module's predicates shows up as a table gap rather
 // than being silently treated as "not visible".
-const ALL_FORMATS = [FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined];
+const ALL_FORMATS = [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined];
 const ALL_KINDS = [KIND_INDIVIDUAL, KIND_TEAM, '', undefined];
 
 describe('wire-value constants', () => {
   it('mirror state.Competition Kind/Format/PoolFormat values byte-for-byte', () => {
     expect(KIND_INDIVIDUAL).toBe('individual');
     expect(KIND_TEAM).toBe('team');
-    expect(FORMAT_PLAYOFFS).toBe('playoffs');
+    expect(FORMAT_KNOCKOUT).toBe('knockout');
     expect(FORMAT_MIXED).toBe('mixed');
     expect(FORMAT_LEAGUE).toBe('league');
     expect(FORMAT_SWISS).toBe('swiss');
@@ -58,12 +58,12 @@ describe('KIND_OPTIONS', () => {
 describe('FORMAT_OPTIONS / formatHint', () => {
   it('has exactly the four formats with verbatim create-form copy', () => {
     expect(LABEL_FORMAT).toBe('Format');
-    expect(FORMAT_OPTIONS.map((o) => o.value)).toEqual([FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS]);
+    expect(FORMAT_OPTIONS.map((o) => o.value)).toEqual([FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS]);
     expect(FORMAT_OPTIONS.map((o) => o.label)).toEqual(['Knockout only', 'Pools + Knockout', 'League', 'Swiss']);
   });
 
   const cases = [
-    [FORMAT_PLAYOFFS, 'Direct single-elimination knockout.'],
+    [FORMAT_KNOCKOUT, 'Direct single-elimination knockout.'],
     [FORMAT_MIXED, 'Round-robin pools first, then top finishers advance to a knockout bracket.'],
     [FORMAT_LEAGUE, 'Single round-robin across all participants; final standings determine the winner (no knockout).'],
     [FORMAT_SWISS, 'Swiss-system: fixed number of rounds, pairing players with equal win counts; cumulative standings decide the winner.'],
@@ -94,7 +94,7 @@ describe('POOL_FORMAT_OPTIONS / poolFormatVisible', () => {
   // hand-editing config.md; the FORMAT_MIXED row below is the one that
   // pins the fix.
   const table = [
-    [FORMAT_PLAYOFFS, false],
+    [FORMAT_KNOCKOUT, false],
     [FORMAT_MIXED, true],
     [FORMAT_LEAGUE, true],
     [FORMAT_SWISS, false],
@@ -115,7 +115,7 @@ describe('Swiss rounds label/hint/visibility', () => {
   });
 
   const table = [
-    [FORMAT_PLAYOFFS, false],
+    [FORMAT_KNOCKOUT, false],
     [FORMAT_MIXED, false],
     [FORMAT_LEAGUE, false],
     [FORMAT_SWISS, true],
@@ -169,8 +169,8 @@ describe('LABEL_ROUND_ROBIN / roundRobinVisible', () => {
     expect(roundRobinVisible(FORMAT_LEAGUE, POOL_FORMAT_PARTIAL)).toBe(false);
   });
 
-  it('is never visible for playoffs or swiss: neither runs the PoolFormat switch\'s default branch', () => {
-    expect(roundRobinVisible(FORMAT_PLAYOFFS, POOL_FORMAT_FULL)).toBe(false);
+  it('is never visible for knockout or swiss: neither runs the PoolFormat switch\'s default branch', () => {
+    expect(roundRobinVisible(FORMAT_KNOCKOUT, POOL_FORMAT_FULL)).toBe(false);
     expect(roundRobinVisible(FORMAT_SWISS, POOL_FORMAT_FULL)).toBe(false);
   });
 });
@@ -214,15 +214,15 @@ describe('per-phase match duration', () => {
   it('base (mixed/league) copy is verbatim from admin_competition_settings.jsx', () => {
     expect(LABEL_POOL_DURATION).toBe('Pool match duration');
     expect(HINT_POOL_DURATION).toBe('Estimated time per pool match, as m:ss (e.g. 2:30).');
-    expect(LABEL_PLAYOFF_DURATION).toBe('Playoff match duration');
-    expect(HINT_PLAYOFF_DURATION).toBe('Estimated time per playoff/knockout match, as m:ss (e.g. 2:30).');
+    expect(LABEL_KNOCKOUT_DURATION).toBe('Knockout match duration');
+    expect(HINT_KNOCKOUT_DURATION).toBe('Estimated time per knockout match, as m:ss (e.g. 2:30).');
   });
 
   const labelTable = [
     [FORMAT_MIXED, 'Pool match duration'],
     [FORMAT_LEAGUE, 'Pool match duration'],
     [FORMAT_SWISS, 'Round match duration'],
-    [FORMAT_PLAYOFFS, 'Pool match duration'],
+    [FORMAT_KNOCKOUT, 'Pool match duration'],
     ['', 'Pool match duration'],
   ];
   it.each(labelTable)('poolDurationLabel(%j) -> %j', (format, expected) => {
@@ -233,14 +233,14 @@ describe('per-phase match duration', () => {
     [FORMAT_MIXED, 'Estimated time per pool match, as m:ss (e.g. 2:30).'],
     [FORMAT_LEAGUE, 'Estimated time per pool match, as m:ss (e.g. 2:30).'],
     [FORMAT_SWISS, 'Estimated time per Swiss-round match, as m:ss (e.g. 2:30).'],
-    [FORMAT_PLAYOFFS, 'Estimated time per pool match, as m:ss (e.g. 2:30).'],
+    [FORMAT_KNOCKOUT, 'Estimated time per pool match, as m:ss (e.g. 2:30).'],
   ];
   it.each(hintTable)('poolDurationHint(%j) -> %j', (format, expected) => {
     expect(poolDurationHint(format)).toBe(expected);
   });
 
   const poolVisTable = [
-    [FORMAT_PLAYOFFS, false],
+    [FORMAT_KNOCKOUT, false],
     [FORMAT_MIXED, true],
     [FORMAT_LEAGUE, true],
     [FORMAT_SWISS, true],
@@ -251,24 +251,24 @@ describe('per-phase match duration', () => {
     expect(poolDurationVisible(format)).toBe(expected);
   });
 
-  const playoffVisTable = [
-    [FORMAT_PLAYOFFS, true],
+  const knockoutVisTable = [
+    [FORMAT_KNOCKOUT, true],
     [FORMAT_MIXED, true],
     [FORMAT_LEAGUE, false],
     [FORMAT_SWISS, false],
     ['', false],
     [undefined, false],
   ];
-  it.each(playoffVisTable)('playoffDurationVisible(%j) -> %j', (format, expected) => {
-    expect(playoffDurationVisible(format)).toBe(expected);
+  it.each(knockoutVisTable)('knockoutDurationVisible(%j) -> %j', (format, expected) => {
+    expect(knockoutDurationVisible(format)).toBe(expected);
   });
 
   // mixed is the one format where BOTH duration fields render together
   // (it runs both a pool phase and a knockout phase).
   it('both duration fields are visible together only for "mixed"', () => {
-    expect(poolDurationVisible(FORMAT_MIXED) && playoffDurationVisible(FORMAT_MIXED)).toBe(true);
-    for (const format of [FORMAT_PLAYOFFS, FORMAT_LEAGUE, FORMAT_SWISS]) {
-      expect(poolDurationVisible(format) && playoffDurationVisible(format)).toBe(false);
+    expect(poolDurationVisible(FORMAT_MIXED) && knockoutDurationVisible(FORMAT_MIXED)).toBe(true);
+    for (const format of [FORMAT_KNOCKOUT, FORMAT_LEAGUE, FORMAT_SWISS]) {
+      expect(poolDurationVisible(format) && knockoutDurationVisible(format)).toBe(false);
     }
   });
 });
@@ -296,10 +296,10 @@ describe('two-thirds-places (joint bronze, bc-3rdp)', () => {
   // the trap case bc-3rdp names, so the JS and Go resolvers cannot drift.
   describe('effectiveTwoThirdPlaces (Go mirror)', () => {
     it('naginata knockout resolves to false (single 3rd, bronze match)', () => {
-      expect(effectiveTwoThirdPlaces({ format: FORMAT_PLAYOFFS, naginata: true })).toBe(false);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: true })).toBe(false);
     });
     it('non-naginata knockout resolves to true (joint 3rd, no bronze match)', () => {
-      expect(effectiveTwoThirdPlaces({ format: FORMAT_PLAYOFFS, naginata: false })).toBe(true);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: false })).toBe(true);
     });
     it('league with the legacy flag on resolves to true', () => {
       expect(effectiveTwoThirdPlaces({ format: FORMAT_LEAGUE, leagueTwoThirdPlaces: true })).toBe(true);
@@ -308,11 +308,11 @@ describe('two-thirds-places (joint bronze, bc-3rdp)', () => {
       expect(effectiveTwoThirdPlaces({ format: FORMAT_LEAGUE, leagueTwoThirdPlaces: false })).toBe(false);
     });
     it('trap case: a non-naginata knockout ignores a stray legacy leagueTwoThirdPlaces value', () => {
-      expect(effectiveTwoThirdPlaces({ format: FORMAT_PLAYOFFS, naginata: false, leagueTwoThirdPlaces: false })).toBe(true);
-      expect(effectiveTwoThirdPlaces({ format: FORMAT_PLAYOFFS, naginata: false, leagueTwoThirdPlaces: true })).toBe(true);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: false, leagueTwoThirdPlaces: false })).toBe(true);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: false, leagueTwoThirdPlaces: true })).toBe(true);
     });
     it('an explicit twoThirdPlaces always wins over both legacy fallbacks', () => {
-      expect(effectiveTwoThirdPlaces({ format: FORMAT_PLAYOFFS, naginata: true, twoThirdPlaces: true })).toBe(true);
+      expect(effectiveTwoThirdPlaces({ format: FORMAT_KNOCKOUT, naginata: true, twoThirdPlaces: true })).toBe(true);
       expect(effectiveTwoThirdPlaces({ format: FORMAT_LEAGUE, leagueTwoThirdPlaces: true, twoThirdPlaces: false })).toBe(false);
     });
   });
@@ -385,9 +385,9 @@ describe('normalizeConfigForFormat', () => {
     expect(normalizeConfigForFormat(cfg)).toEqual({ format: FORMAT_LEAGUE, poolSize: 0, poolWinners: 0, extraQualifiers: '' });
   });
 
-  it('playoffs zeroes poolSize/poolWinners and clears extraQualifiers', () => {
-    const cfg = { format: FORMAT_PLAYOFFS, poolSize: 3, poolWinners: 1, extraQualifiers: 'larger-pools' };
-    expect(normalizeConfigForFormat(cfg)).toEqual({ format: FORMAT_PLAYOFFS, poolSize: 0, poolWinners: 0, extraQualifiers: '' });
+  it('knockout zeroes poolSize/poolWinners and clears extraQualifiers', () => {
+    const cfg = { format: FORMAT_KNOCKOUT, poolSize: 3, poolWinners: 1, extraQualifiers: 'larger-pools' };
+    expect(normalizeConfigForFormat(cfg)).toEqual({ format: FORMAT_KNOCKOUT, poolSize: 0, poolWinners: 0, extraQualifiers: '' });
   });
 
   it('swiss clears extraQualifiers but leaves poolSize/poolWinners untouched', () => {
@@ -528,7 +528,7 @@ describe('normalizeConfigForKind', () => {
 // not just truthiness, because the Settings screen renders this string
 // directly to the operator.
 describe('poolSettingsError', () => {
-  it.each([FORMAT_PLAYOFFS, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined])(
+  it.each([FORMAT_KNOCKOUT, FORMAT_LEAGUE, FORMAT_SWISS, '', undefined])(
     'is always null for a non-mixed format (%j), even with a 0/NaN pool size',
     (format) => {
       expect(poolSettingsError(format, 0, 0)).toBeNull();
@@ -538,10 +538,10 @@ describe('poolSettingsError', () => {
   );
 
   // The reproduced bug: normalizePoolConfig zeroes poolSize/poolWinners on
-  // every stored league/playoffs competition, and flipping such a
+  // every stored league/knockout competition, and flipping such a
   // competition to "mixed" on the Settings screen leaves that 0/0 staged
   // with nothing else touched.
-  it('flags the stored-league/playoffs 0/0 combination once format is mixed', () => {
+  it('flags the stored-league/knockout 0/0 combination once format is mixed', () => {
     expect(poolSettingsError(FORMAT_MIXED, 0, 0)).toBe('Players per pool must be a whole number ≥ 3.');
   });
 
@@ -597,10 +597,10 @@ describe('pendingConfigClears', () => {
     const stores = [
       { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: 'larger-pools', teamSize: 0, teamMatchType: 'fixed', engi: true, withZekkenName: true },
       { format: FORMAT_MIXED, kind: KIND_TEAM, poolSize: 4, poolWinners: 2, extraQualifiers: '', teamSize: 3, teamMatchType: 'kachinuki', engi: false, withZekkenName: true },
-      { format: FORMAT_PLAYOFFS, kind: KIND_INDIVIDUAL, poolSize: 0, poolWinners: 0, extraQualifiers: '', teamSize: 3, teamMatchType: 'fixed', engi: false, withZekkenName: false },
+      { format: FORMAT_KNOCKOUT, kind: KIND_INDIVIDUAL, poolSize: 0, poolWinners: 0, extraQualifiers: '', teamSize: 3, teamMatchType: 'fixed', engi: false, withZekkenName: false },
     ];
     for (const stored of stores) {
-      for (const format of [FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS]) {
+      for (const format of [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, FORMAT_SWISS]) {
         for (const kind of [KIND_INDIVIDUAL, KIND_TEAM]) {
           const staged = { ...stored, format, kind };
           const sent = shapeConfigForSave(stored, staged);
@@ -620,9 +620,9 @@ describe('pendingConfigClears', () => {
     }
   });
 
-  it('mixed(poolSize 4, poolWinners 2) -> playoffs reports both keys with their "from" values', () => {
+  it('mixed(poolSize 4, poolWinners 2) -> knockout reports both keys with their "from" values', () => {
     const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: '' };
-    const staged = { ...stored, format: FORMAT_PLAYOFFS };
+    const staged = { ...stored, format: FORMAT_KNOCKOUT };
     expect(pendingConfigClears(stored, staged)).toEqual([
       { key: 'poolSize', from: 4 },
       { key: 'poolWinners', from: 2 },
@@ -631,7 +631,7 @@ describe('pendingConfigClears', () => {
 
   it('a field already 0/""/false is NOT reported: it had nothing in it to lose', () => {
     const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 0, poolWinners: 0, extraQualifiers: '' };
-    const staged = { ...stored, format: FORMAT_PLAYOFFS };
+    const staged = { ...stored, format: FORMAT_KNOCKOUT };
     expect(pendingConfigClears(stored, staged)).toEqual([]);
   });
 
@@ -759,7 +759,7 @@ describe('resolveTeamSize', () => {
 // competition whose swissRounds is 0, and nothing there blocked the save.
 describe('swissSettingsError', () => {
   it('is null for every non-swiss format, whatever the round count', () => {
-    for (const format of [FORMAT_PLAYOFFS, FORMAT_MIXED, FORMAT_LEAGUE, '', undefined]) {
+    for (const format of [FORMAT_KNOCKOUT, FORMAT_MIXED, FORMAT_LEAGUE, '', undefined]) {
       for (const rounds of [NaN, 0, -1, 4]) {
         expect(swissSettingsError(format, rounds)).toBeNull();
       }
@@ -843,7 +843,7 @@ describe('shapeConfigForSave', () => {
 
   it('still normalizes when a format change IS staged', () => {
     const stored = { format: FORMAT_MIXED, kind: KIND_INDIVIDUAL, poolSize: 4, poolWinners: 2, extraQualifiers: 'larger-pools' };
-    const sent = shapeConfigForSave(stored, { ...stored, format: FORMAT_PLAYOFFS });
+    const sent = shapeConfigForSave(stored, { ...stored, format: FORMAT_KNOCKOUT });
     expect(sent.poolSize).toBe(0);
     expect(sent.poolWinners).toBe(0);
     expect(sent.extraQualifiers).toBe('');

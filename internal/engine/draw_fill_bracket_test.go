@@ -16,7 +16,7 @@ import (
 
 // bc-qual LP-4: engine wiring for the "fill-bracket" ExtraQualifiers mode.
 //
-// buildPoolFedDraw (playoff_skeleton.go) gains a fill-bracket branch beside
+// buildPoolFedDraw (knockout_skeleton.go) gains a fill-bracket branch beside
 // larger-pools' (bc-qual LP-3c): it resolves the draft selection via
 // helper.SelectFillBracketDraftIndices and calls
 // helper.BuildKnockoutDrawFillBracket. The

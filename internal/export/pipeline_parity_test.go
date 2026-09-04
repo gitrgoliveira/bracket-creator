@@ -118,7 +118,7 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			// read straight off disk, independent of pool/elimination-sheet
 			// rendering.
 			//
-			// Format is Playoffs, not Mixed (mp-yuy8 task 1): a Mixed
+			// Format is Knockout, not Mixed (mp-yuy8 task 1): a Mixed
 			// competition with an EMPTY pools list but a bracket that
 			// already carries real round content is not a shape any real
 			// write path produces (Mixed always populates pools.csv before
@@ -127,8 +127,8 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			// that this workbook cannot re-derive a draw for,
 			// EliminationDraw's pool-fed branch returning nil for an empty
 			// pools list (not a genuine re-derivation failure) would
-			// otherwise trip that refusal here. Playoffs with no pools is
-			// the shape this fixture actually needs: PlayoffLeavesFromBracket
+			// otherwise trip that refusal here. Knockout with no pools is
+			// the shape this fixture actually needs: KnockoutLeavesFromBracket
 			// reads the leaf order straight off the same hand-crafted
 			// bracket, so the draw derives cleanly and the Kachinuki Detail
 			// sheet assertion below still exercises the same "independent of
@@ -138,7 +138,7 @@ func TestExportPipelineSheetParity(t *testing.T) {
 				t.Helper()
 				comp, err := store.LoadCompetition(compID)
 				require.NoError(t, err)
-				comp.Format = state.CompFormatPlayoffs
+				comp.Format = state.CompFormatKnockout
 				comp.TeamMatchType = state.TeamMatchTypeKachinuki
 				comp.TeamSize = 3
 				require.NoError(t, store.SaveCompetition(comp))
@@ -164,20 +164,20 @@ func TestExportPipelineSheetParity(t *testing.T) {
 			mustAppearInBoth: []string{helper.SheetKachinukiDetail},
 		},
 		{
-			// A pure playoffs competition (no pools) drives a different
-			// leaf-order path (isPurePlayoffs / playoffLeaves /
-			// PlayoffLeavesFromBracket) than the pool-fed draw the first
-			// case exercises. Fixture mirrors enginePlayoffsLeaves
+			// A pure knockout competition (no pools) drives a different
+			// leaf-order path (isPureKnockout / knockoutLeaves /
+			// KnockoutLeavesFromBracket) than the pool-fed draw the first
+			// case exercises. Fixture mirrors engineKnockoutLeaves
 			// (internal/engine/bracket_identity_test.go): save participants,
 			// then run the real engine start path so a genuine bracket lands
 			// on disk for both builders to render.
-			name: "pure_playoffs_no_pools",
+			name: "pure_knockout_no_pools",
 			configure: func(t *testing.T, store *state.Store, eng *engine.Engine, compID string) {
 				t.Helper()
 				comp, err := store.LoadCompetition(compID)
 				require.NoError(t, err)
 				comp.Kind = "individual"
-				comp.Format = state.CompFormatPlayoffs
+				comp.Format = state.CompFormatKnockout
 				comp.Status = state.CompStatusSetup
 				comp.Courts = []string{"A"}
 				comp.StartTime = "09:00"
@@ -281,8 +281,8 @@ func TestExportPipelineSheetParity(t *testing.T) {
 // shape directly (no pools, no participants, a bracket with an empty first
 // round and a ThirdPlaceMatch) rather than replaying the PUT handler:
 // EliminationDraw's re-derivation returns nil (poolDraw: no pools;
-// playoffLeaves: PlayoffLeavesFromBracket finds no rounds and
-// PlayoffFinalsFromParticipants finds no participants) while
+// knockoutLeaves: KnockoutLeavesFromBracket finds no rounds and
+// KnockoutFinalsFromParticipants finds no participants) while
 // bracket.ThirdPlaceMatch is still on disk from the original draw -- the
 // exact "draw == nil, hasBronze == true" state that now errors.
 func TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders(t *testing.T) {
@@ -300,7 +300,7 @@ func TestExportPipeline_BronzeOnlyMismatchErrorsInBothBuilders(t *testing.T) {
 		ID:       compID,
 		Name:     "Bronze Mismatch Comp",
 		Kind:     "individual",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Courts:   []string{"A"},
 	}))

@@ -36,7 +36,7 @@ func TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch(t *testing.T) {
 		ID:       compID,
 		Name:     "Bronze Mismatch Comp",
 		Kind:     "individual",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Courts:   []string{"A"},
 	}))
@@ -76,7 +76,7 @@ func TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch(t *testing.T) {
 // bracket was already built. This fixture hand-constructs the resulting
 // shape directly, the same simplification the bronze-only fixture uses:
 // empty pools so EliminationDraw's re-derivation comes back nil (poolDraw:
-// no pools; playoffLeaves: not pure playoffs since Format is Mixed, so nil)
+// no pools; knockoutLeaves: not pure knockout since Format is Mixed, so nil)
 // while the bracket's Rounds are still on disk from the original draw.
 func TestExportCompetitionXlsx_RejectsRoundsOnlyDrawMismatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
@@ -124,7 +124,7 @@ func TestExportTournamentWorkbooks_SkipsBracketDrawMismatchAndReportsIt(t *testi
 		ID:       mismatchID,
 		Name:     "Bronze Mismatch Comp",
 		Kind:     "individual",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Courts:   []string{"A"},
 	}))
@@ -159,13 +159,13 @@ func TestExportTournamentWorkbooks_SkipsBracketDrawMismatchAndReportsIt(t *testi
 
 // TestExportCompetitionXlsx_EmptyFormatRendersKnockout pins mp-yuy8's
 // state.Competition.EffectiveFormat fix: a competition whose Format was
-// never set is standalone playoffs (runDrawPipeline's generation switch has
-// always built a real bracket via generatePlayoffs for "" in its `default:`
-// case, identically to the literal "playoffs" value), so its export must
+// never set is standalone knockout (runDrawPipeline's generation switch has
+// always built a real bracket via generateKnockout for "" in its `default:`
+// case, identically to the literal "knockout" value), so its export must
 // render a proper knockout rather than the empty Elimination Matches sheet
 // the workbook.go KNOWN GAP used to produce. Before EffectiveFormat existed,
-// IsPlayoffEnabled() and isPurePlayoffs() both compared Format literally and
-// answered false for "", so EliminationDraw's leaf source (playoffLeaves)
+// IsKnockoutEnabled() and isPureKnockout() both compared Format literally and
+// answered false for "", so EliminationDraw's leaf source (knockoutLeaves)
 // was never reached and step 4 rendered nothing -- with no error, so the
 // gap was silent.
 func TestExportCompetitionXlsx_EmptyFormatRendersKnockout(t *testing.T) {
@@ -180,19 +180,19 @@ func TestExportCompetitionXlsx_EmptyFormatRendersKnockout(t *testing.T) {
 	elim, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 	assert.Equal(t, 3, countEliminationMatchBlocks(elim),
-		"a 4-entrant standalone playoffs bracket must render 3 match blocks (F-1) even though Format was never set")
+		"a 4-entrant standalone knockout bracket must render 3 match blocks (F-1) even though Format was never set")
 }
 
 // TestExportCompetitionXlsx_EmptyFormatRejectsDrawMismatch is the empty-Format
 // twin of TestExportCompetitionXlsx_RejectsBronzeOnlyDrawMismatch: the same
 // bronze-only mismatch shape (a stored bracket carrying a third-place bout
 // but no re-derivable Rounds content), constructed for a competition whose
-// Format is "" rather than the literal "playoffs" value. It must be refused
+// Format is "" rather than the literal "knockout" value. It must be refused
 // with ErrBracketDrawMismatch, not rendered as a silently-partial workbook.
 //
 // Before EffectiveFormat, this shape was NOT refused for an empty-Format
-// competition: IsPlayoffEnabled() answered false for Format == "", so the
-// guard's own `comp.IsPlayoffEnabled() && bracketHasKnockoutContent(bracket)`
+// competition: IsKnockoutEnabled() answered false for Format == "", so the
+// guard's own `comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket)`
 // condition never fired, and step 4 silently rendered an empty Elimination
 // Matches sheet instead of erroring -- the reachable half of the KNOWN GAP
 // workbook.go used to document.

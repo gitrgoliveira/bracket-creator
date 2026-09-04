@@ -26,14 +26,14 @@ func winnerOfPlaceholder(depth, matchIdx int) string {
 	return fmt.Sprintf(winnerOfFormat, depth, matchIdx)
 }
 
-// generatePlayoffs builds and saves an elimination bracket for a standalone
-// (direct-elimination) playoffs competition. StandardSeeding → CreateBalancedTree
-// → TreeToLeafArray mirrors the Excel create-playoffs path exactly (mp-5ng7);
+// generateKnockout builds and saves an elimination bracket for a standalone
+// (direct-elimination) knockout competition. StandardSeeding → CreateBalancedTree
+// → TreeToLeafArray mirrors the Excel create-knockout path exactly (mp-5ng7);
 // the unbalanced tree's structural byes are embedded as "" slots in the pow2
 // array. (A mixed competition's pool-fed knockout is NOT built here, it is the
 // preview bracket from generatePoolPreviewBracket, filled in by
 // ResolveQualifiedPools as each pool finishes.)
-func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
+func (e *Engine) generateKnockout(comp *state.Competition, players []domain.Player, seeds []domain.SeedAssignment) error {
 	// helper.Player is a type alias for domain.Player (NFR-007); the
 	// Excel-coupled helpers accept domain values directly.
 	if len(seeds) > 0 {
@@ -53,10 +53,10 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	}
 	tree := helper.CreateBalancedTree(names)
 
-	// R2-R7 leave a playoffs bracket alone, but its matches still need courts,
+	// R2-R7 leave a knockout bracket alone, but its matches still need courts,
 	// so the seeded tree is cut into one region per shiaijo exactly as the Excel
-	// pagination cuts it (helper.NewPlayoffDraw).
-	draw := helper.NewPlayoffDraw(tree, len(comp.Courts))
+	// pagination cuts it (helper.NewKnockoutDraw).
+	draw := helper.NewKnockoutDraw(tree, len(comp.Courts))
 	bracket, err := e.buildBracketFromDraw(comp, draw)
 	if err != nil {
 		return err
@@ -84,7 +84,7 @@ func bracketMatchLeafSlot(roundIdx, matchIdx int) int {
 // (helper.BuildKnockoutDraw), the same labels the Excel Tree sheet uses, and the bracket is
 // scheduled here so knockout matches have court/time slots from the start. As
 // each pool finishes, ResolveQualifiedPools replaces that pool's placeholders
-// with the real finishers IN PLACE (no separate playoffs competition, no manual
+// with the real finishers IN PLACE (no separate knockout competition, no manual
 // start step); a knockout match becomes scoreable once both its sides resolve.
 // The Preview flag is set here and cleared by ResolveQualifiedPools on the first
 // seeding; scoring playability is per-match (bracketMatchPlayable), not gated on
@@ -103,7 +103,7 @@ func bracketMatchLeafSlot(roundIdx, matchIdx int) int {
 // become a clean, operator-facing error rather than silently writing no
 // bracket at all (a mixed competition would otherwise reach CompStatusPools
 // with pools.csv on disk and no knockout to score into). Draw building goes
-// through buildPoolFedDraw (playoff_skeleton.go), shared with the export
+// through buildPoolFedDraw (knockout_skeleton.go), shared with the export
 // path's poolDraw, so both agree on which builder a given competition uses.
 func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 	pools, err := e.store.LoadPools(comp.ID)
@@ -154,7 +154,7 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 }
 
 // buildBracketFromDraw builds a balanced single-elimination bracket from a
-// built draw. Labels may be resolved player names (live playoffs) or
+// built draw. Labels may be resolved player names (live knockout) or
 // pool-origin placeholders (preview bracket); the tree shape, court
 // assignment, bye resolution and scheduling are identical either way. The
 // caller persists the result (and sets Preview when appropriate).
@@ -334,7 +334,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// = Hidden or both-sides-empty in the web bracket).
 	assignBracketMatchNumbers(bracket)
 
-	// Bronze (3rd-place) playoff: only when this competition's format
+	// Bronze (3rd-place) knockout: only when this competition's format
 	// requires a single 3rd place (comp.RequiresSingleThirdPlace, the
 	// generalised per-format rule -- see its and EffectiveTwoThirdPlaces's
 	// doc comments, bc-3rdp), and only when a real semifinal round exists
@@ -347,7 +347,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	// renderers to label this "3rd Place".
 	if helper.NeedsBronzeBlock(comp.RequiresSingleThirdPlace(), len(bracket.Rounds)) {
 		// Default the bronze to the FINAL's court: the final and the 3rd-place
-		// playoff are conventionally run on the same shiaijo, so the bronze
+		// knockout are conventionally run on the same shiaijo, so the bronze
 		// shows up in that court's queue out of the box. The final is the sole
 		// match in the last round. Operators can still reassign it via
 		// UpdateMatchCourt like any other bracket match.
@@ -382,7 +382,7 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 // on state.BracketMatch, and legacy_template_v1.go for why that recompute was a
 // live-event hazard).
 //
-// Only for a pool-fed knockout: a standalone playoffs bracket's leaves are real
+// Only for a pool-fed knockout: a standalone knockout bracket's leaves are real
 // competitors, nothing ever "resolves" into it, and recording player names under
 // a field called "placeholder" would both mislead and double the size of every
 // bracket.json for no reader. Sniffing the leaves rather than taking a flag keeps
@@ -477,7 +477,7 @@ func bronzeDefaultCourt(finalCourt string, courts []string) string {
 //
 // The printed Excel sheet is authoritative. The contract is enforced by
 // TestMatchNumberingParity_ExcelVsWeb (match_numbering_parity_test.go) for
-// playoffs brackets and by TestExcelWorkbookMatchesEngineBracket_Mixed
+// knockout brackets and by TestExcelWorkbookMatchesEngineBracket_Mixed
 // (excel_draw_parity_test.go) for pool-fed ones, the latter by reading the numbers
 // back out of a rendered workbook. If they ever diverge, fix THIS path to match
 // the Excel one — and the JS buildDisplayModel matchNumById ordering with it

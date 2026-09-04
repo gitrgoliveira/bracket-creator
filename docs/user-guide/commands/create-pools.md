@@ -1,6 +1,6 @@
 # create-pools
 
-Generates a **Pools & Playoffs** bracket: round-robin pools followed by a knockout elimination tree.
+Generates a **Pools & Knockout** bracket: round-robin pools followed by a knockout elimination tree.
 
 ```
 bracket-creator create-pools [flags]

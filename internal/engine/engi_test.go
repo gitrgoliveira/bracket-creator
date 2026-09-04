@@ -140,7 +140,7 @@ func TestRecordEngiMatchResult_BracketAdvances(t *testing.T) {
 
 	comp := &state.Competition{
 		ID: compID, Name: "Engi Knockout", Kind: "individual",
-		Format: state.CompFormatPlayoffs, PoolSize: 3, PoolWinners: 2,
+		Format: state.CompFormatKnockout, PoolSize: 3, PoolWinners: 2,
 		Courts: []string{"A"}, StartTime: "09:00", Status: "setup", Engi: true,
 	}
 	require.NoError(t, store.SaveCompetition(comp))
@@ -461,7 +461,7 @@ func TestRecordMatchResultWithIneligibility_LoadCompetitionErrorPropagates(t *te
 		ID:     compID,
 		Name:   "Engi Load Error",
 		Kind:   "individual",
-		Format: state.CompFormatPlayoffs,
+		Format: state.CompFormatKnockout,
 		Status: "setup",
 	}))
 	corruptCompetitionConfig(t, store, compID)
@@ -492,7 +492,7 @@ func TestRecordMatchResultWithIneligibilityTx_LoadCompetitionErrorPropagates(t *
 		ID:     compID,
 		Name:   "Engi Load Error Tx",
 		Kind:   "individual",
-		Format: state.CompFormatPlayoffs,
+		Format: state.CompFormatKnockout,
 		Status: "setup",
 	}))
 	// SavePoolMatches so the tx has something to open.
@@ -531,7 +531,7 @@ func TestRecordEngiMatchResult_BronzeMatchReachable(t *testing.T) {
 		ID:       compID,
 		Name:     "Engi Bronze",
 		Kind:     "individual",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
 		Courts:    []string{"A"},
 		StartTime: "09:00",
@@ -596,7 +596,7 @@ func TestRecordMatchResultWithIneligibility_EngiBronzeDispatch(t *testing.T) {
 		ID:       compID,
 		Name:     "Engi Bronze Dispatch",
 		Kind:     "individual",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		PoolSize: 3, PoolSizeMode: "min", PoolWinners: 2,
 		Courts:    []string{"A"},
 		StartTime: "09:00",

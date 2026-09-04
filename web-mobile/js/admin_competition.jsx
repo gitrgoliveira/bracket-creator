@@ -104,7 +104,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   // is the client's one owner of the engine's check-in opt-in rule
   // (filterCheckedIn, internal/engine/competition.go); counting off it keeps
   // this confirm, the settings preview and the draw itself on the same
-  // roster. Empty roster (e.g. a playoffs-from-source competition resolved
+  // roster. Empty roster (e.g. a knockout-from-source competition resolved
   // server-side) yields 0.
   const drawPlayers = c.players || [];
   const excludedFromDraw = drawPlayers.length - effectiveDrawPlayers(drawPlayers, c.checkInEnabled).length;
@@ -133,7 +133,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
       // waiting for SSE (which may be slow or temporarily disconnected).
       onRefreshCompetition?.();
       showToast(`Draw generated for ${c.name}`);
-      onSection(c.format === "playoffs" ? "bracket" : c.format === "swiss" ? "overview" : "pools");
+      onSection(c.format === "knockout" ? "bracket" : c.format === "swiss" ? "overview" : "pools");
     } catch (e) {
       console.error("Generate draw failed:", e);
       if (mountedRef.current) showToast(e.message, "error");
@@ -170,10 +170,10 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
   };
 
   // completeCompetition: the only trigger for a bracket-based competition
-  // (playoffs, or mixed once its knockout is running) to reach status
+  // (knockout, or mixed once its knockout is running) to reach status
   // "completed". MaybeAutoCompletePools (internal/engine/competition.go) only
   // auto-transitions the League format on its last pool match, so a fully
-  // scored bracket otherwise sits in "pools"/"playoffs" forever and the
+  // scored bracket otherwise sits in "pools"/"knockout" forever and the
   // public viewer's Awards tab (gated on status === "completed") never
   // becomes reachable. Only rendered (see canComplete below) once every real
   // bracket match, including a single-3rd bronze match, is done.
@@ -322,11 +322,11 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
         // Show pools/bracket in nav when draw is ready (preview) or running.
         // Use .length checks: the state store returns [] / {rounds:[]} (never null)
         // when files are absent, so plain truthiness would always show the items.
-        (pools?.length || (isDrawReady && c.format !== "playoffs" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + (isDrawReady ? " (preview)" : "") } : null,
+        (pools?.length || (isDrawReady && c.format !== "knockout" && c.format !== "swiss")) ? { id: "pools", label: (c.format === "league" ? "League" : "Pools") + (isDrawReady ? " (preview)" : "") } : null,
         // T191 (FR-050d): Swiss competitions surface a dedicated round
         // management panel for the "Generate next round" workflow.
         c.format === "swiss" && !isDrawReady ? { id: "swiss", label: "Swiss rounds" } : null,
-        (bracket?.rounds?.length || (isDrawReady && c.format === "playoffs")) ? { id: "bracket", label: isDrawReady ? "Bracket (preview)" : "Bracket" } : null,
+        (bracket?.rounds?.length || (isDrawReady && c.format === "knockout")) ? { id: "bracket", label: isDrawReady ? "Bracket (preview)" : "Bracket" } : null,
         !isDrawReady ? { id: "scores", label: "Scores" } : null,
       ].filter(Boolean)
     },

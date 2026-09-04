@@ -142,7 +142,7 @@ func assignLeagueSlotTimes(matches []state.MatchResult, slots []int, comp *state
 		return matches, dayStart.Add(time.Duration(openingMin) * time.Minute)
 	}
 
-	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isPlayoff*/)
+	perMatchMin := perMatchElapsedMinutes(comp, tournament, false /*isKnockout*/)
 
 	// Build a map from slot index to start time by walking slot 0..maxSlot
 	// with a single cursor, skipping ceremony blocks.

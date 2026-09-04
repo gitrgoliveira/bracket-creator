@@ -23,7 +23,7 @@ func TestStaleSeedsBug(t *testing.T) {
 	compWithSeeds := state.Competition{
 		ID:     compID,
 		Name:   "Seeded Competition",
-		Format: "playoffs",
+		Format: "knockout",
 		Courts: []string{"A"},
 		Players: []domain.Player{
 			{Name: "Alice", Seed: 1, Dojo: "Dojo A"},
@@ -46,7 +46,7 @@ func TestStaleSeedsBug(t *testing.T) {
 	compNoSeeds := state.Competition{
 		ID:     compID,
 		Name:   "Seeded Competition",
-		Format: "playoffs",
+		Format: "knockout",
 		Courts: []string{"A"},
 		Players: []domain.Player{
 			{Name: "Alice", Seed: 0, Dojo: "Dojo A"},

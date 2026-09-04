@@ -42,7 +42,7 @@ describe('overviewResultsSection: results routing', () => {
   });
 
   it('routes to "bracket" when a bracket exists (non-swiss)', () => {
-    expect(overviewResultsSection('playoffs', true)).toBe('bracket');
+    expect(overviewResultsSection('knockout', true)).toBe('bracket');
     expect(overviewResultsSection('mixed', true)).toBe('bracket');
   });
 
@@ -55,7 +55,7 @@ describe('overviewResultsSection: results routing', () => {
 // ---------------------------------------------------------------------------
 // overviewViewMode: status → render-mode mapping
 // ---------------------------------------------------------------------------
-// Regression guard (mp-a5d6): the active phases are "pools" and "playoffs",
+// Regression guard (mp-a5d6): the active phases are "pools" and "knockout",
 // NOT a literal "running". An earlier version checked `status === "running"`,
 // which is never true in production, so a running competition mis-rendered the
 // "completed" card. These assertions lock the mapping against that drift.
@@ -71,9 +71,9 @@ describe('overviewViewMode: status mapping', () => {
     expect(overviewViewMode('draw-ready')).toBe('draw-ready');
   });
 
-  it('maps the running PHASES ("pools", "playoffs") to "running"', () => {
+  it('maps the running PHASES ("pools", "knockout") to "running"', () => {
     expect(overviewViewMode('pools')).toBe('running');
-    expect(overviewViewMode('playoffs')).toBe('running');
+    expect(overviewViewMode('knockout')).toBe('running');
   });
 
   it('maps "completed" to "completed"', () => {
@@ -87,7 +87,7 @@ describe('overviewViewMode: status mapping', () => {
 
   it('never returns "completed" for an active phase (the original bug)', () => {
     expect(overviewViewMode('pools')).not.toBe('completed');
-    expect(overviewViewMode('playoffs')).not.toBe('completed');
+    expect(overviewViewMode('knockout')).not.toBe('completed');
   });
 });
 

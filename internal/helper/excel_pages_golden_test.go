@@ -32,7 +32,7 @@ import (
 //
 // Everything recorded is READ BACK OUT OF A RENDERED WORKBOOK, not recomputed
 // from the tree: the generator drives the real helper.RenderKnockoutPages (the
-// single funnel behind cmd/create-pools.go, cmd/create-playoffs.go,
+// single funnel behind cmd/create-pools.go, cmd/create-knockout.go,
 // internal/export/builder.go and internal/engine/export.go) into an in-memory
 // excelize file and then scans each "Tree N" sheet. That is deliberate. A
 // re-implementation of the render loop would track the refactor instead of

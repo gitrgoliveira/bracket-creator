@@ -633,7 +633,7 @@ func scheduledPoolShiaijo(t *testing.T, store *state.Store, compID string) []str
 }
 
 // assertPoolBandsMatchSchedule is parity check 6, split out because the pure
-// playoffs path has no pool phase to band.
+// knockout path has no pool phase to band.
 //
 // The Pool Matches sheet is banded by shiaijo, and those bands must be the
 // shiaijo the app actually SCHEDULED the pool phase on: the count clamped by
@@ -648,7 +648,7 @@ func assertPoolBandsMatchSchedule(t *testing.T, store *state.Store, compID strin
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	if len(pools) == 0 {
-		return // a standalone playoffs draw has no pool phase to band
+		return // a standalone knockout draw has no pool phase to band
 	}
 
 	f, err := excelize.OpenReader(bytes.NewReader(raw))
@@ -695,10 +695,10 @@ func mixedParityRoster(numPools int) []domain.Player {
 	return players
 }
 
-// playoffsParityRoster builds n unseeded competitors for a standalone playoffs
+// knockoutParityRoster builds n unseeded competitors for a standalone knockout
 // draw. Unique dojos are irrelevant here (there are no pools to keep apart) but
 // are kept so the roster is the same shape as the mixed one.
-func playoffsParityRoster(n int) []domain.Player {
+func knockoutParityRoster(n int) []domain.Player {
 	players := make([]domain.Player, n)
 	for i := range players {
 		players[i] = domain.Player{
@@ -709,9 +709,9 @@ func playoffsParityRoster(n int) []domain.Player {
 	return players
 }
 
-// TestExcelWorkbookMatchesEngineBracket_Playoffs is the same parity check on the
-// STANDALONE playoffs path, which derives its tree from the persisted bracket
-// (EliminationDraw -> PlayoffLeavesFromBracket) rather than from pools.
+// TestExcelWorkbookMatchesEngineBracket_Knockout is the same parity check on the
+// STANDALONE knockout path, which derives its tree from the persisted bracket
+// (EliminationDraw -> KnockoutLeavesFromBracket) rather than from pools.
 //
 // The ragged sizes are the point. A non-power-of-two roster's leaf array carries
 // "" bye slots, and a tree builder that does not collapse an all-empty half
@@ -720,7 +720,7 @@ func playoffsParityRoster(n int) []domain.Player {
 // empty slots and every printed number shifted off the bracket's own. 8 and 16
 // are in as controls - they have no byes, so they pass either way and pin that
 // the sweep is measuring the bye handling and not the whole path.
-func TestExcelWorkbookMatchesEngineBracket_Playoffs(t *testing.T) {
+func TestExcelWorkbookMatchesEngineBracket_Knockout(t *testing.T) {
 	rosterSizes := []int{5, 6, 7, 8, 12, 16, 24}
 	courtCounts := []int{1, 2, 4}
 
@@ -729,20 +729,20 @@ func TestExcelWorkbookMatchesEngineBracket_Playoffs(t *testing.T) {
 			name := fmt.Sprintf("%dplayers_%dshiaijo", size, numCourts)
 			t.Run(name, func(t *testing.T) {
 				eng, store, _ := setupTestEngine(t)
-				compID := fmt.Sprintf("parity-playoffs-%d-%d", size, numCourts)
+				compID := fmt.Sprintf("parity-knockout-%d-%d", size, numCourts)
 
 				courts := courtLabels(numCourts)
 
 				require.NoError(t, store.SaveCompetition(&state.Competition{
 					ID:        compID,
 					Name:      "Parity",
-					Format:    state.CompFormatPlayoffs,
+					Format:    state.CompFormatKnockout,
 					Kind:      "individual",
 					Courts:    courts,
 					StartTime: "09:00",
 					Status:    state.CompStatusSetup,
 				}))
-				require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(size)))
+				require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(size)))
 				require.NoError(t, eng.StartCompetition(compID))
 
 				assertWorkbookMatchesBracket(t, eng, store, compID)
@@ -802,7 +802,7 @@ func TestExcelExportBandsClampedShiaijo(t *testing.T) {
 	})
 	// Unique dojos per competitor keep CreatePools' conflict avoidance out of
 	// the picture, so the pool composition is deterministic.
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(numParticipants)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(numParticipants)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	pools, err := store.LoadPools(compID)
@@ -944,7 +944,7 @@ func TestEliminationSheetBandsMatchBracketCourts(t *testing.T) {
 				c.PoolWinners = tc.poolWinners
 				c.Courts = courtLabels(tc.courts)
 			})
-			require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(tc.participants)))
+			require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(tc.participants)))
 			require.NoError(t, eng.StartCompetition(compID))
 
 			bracket, err := store.LoadBracket(compID)
@@ -1026,7 +1026,7 @@ func TestEliminationSheetNamesTheCompetitionsOwnShiaijo(t *testing.T) {
 		c.PoolWinners = 2
 		c.Courts = []string{"C", "D"}
 	})
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(16)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	raw, err := eng.ExportCompetitionXlsx(compID)
@@ -1091,7 +1091,7 @@ func TestEliminationSheetFollowsOperatorCourtReassignment(t *testing.T) {
 		c.PoolWinners = 2
 		c.Courts = courtLabels(4)
 	})
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(16)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	before, err := store.LoadBracket(compID)
@@ -1149,7 +1149,7 @@ func TestPoolSheetFollowsPoolCourtReassignment(t *testing.T) {
 		c.PoolWinners = 2
 		c.Courts = courtLabels(2)
 	})
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(16)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	matches, err := store.LoadPoolMatches(compID)
@@ -1232,7 +1232,7 @@ func TestPoolSheetKeepsASplitPoolOnItsDrawnShiaijo(t *testing.T) {
 		c.PoolWinners = 2
 		c.Courts = courtLabels(2)
 	})
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(16)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	matches, err := store.LoadPoolMatches(compID)
@@ -1290,7 +1290,7 @@ func TestEliminationPrintAreaCoversEveryBand(t *testing.T) {
 		c.Courts = courtLabels(2)
 		c.Naginata = true // gives the sheet a bronze block, hence the second print-area write
 	})
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(16)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	// Move a bout onto a shiaijo the draw never used, so the sheet must print a
@@ -1358,7 +1358,7 @@ func TestEliminationSheetPrintsTheBronzeOnItsOwnShiaijo(t *testing.T) {
 		c.Courts = courtLabels(2)
 		c.Naginata = true // a naginata bracket carries the 3rd-place bout
 	})
-	require.NoError(t, store.SaveParticipants(compID, playoffsParityRoster(16)))
+	require.NoError(t, store.SaveParticipants(compID, knockoutParityRoster(16)))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	bracket, err := store.LoadBracket(compID)

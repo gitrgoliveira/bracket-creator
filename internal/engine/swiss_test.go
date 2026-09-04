@@ -60,7 +60,7 @@ func setupSwissCompetition(t *testing.T, names []string, seeds map[string]int, r
 	require.NoError(t, store.SaveParticipants(compID, players))
 
 	// Persist seed assignments so resolveSeedsForSwiss can find them
-	// (matches the same shape pools/playoffs use). Engine.Generate
+	// (matches the same shape pools/knockout use). Engine.Generate
 	// reads the seeds field on each player which SaveParticipants
 	// preserves, but ApplySeeds defensively re-applies from seeds.csv.
 	var seedAssignments []domain.SeedAssignment

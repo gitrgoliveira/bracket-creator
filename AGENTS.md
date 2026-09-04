@@ -26,9 +26,9 @@ Before implementing features or making architectural decisions, read the project
 - **Team Match Winning Criteria:**
     1. Highest number of individual winners.
     2. Highest number of points scored.
-    3. If tied: draw in pools, play-off in playoffs.
+    3. If tied: draw in pools, play-off in elimination matches.
 - **Team Elimination Labels:** In team elimination match summaries, "V" is labeled as **"IV"** (Individual Victories) and "P" as **"PW"** (Points Won).
-- **Match Colors:** On tree/playoff brackets, the player on the top is Red (Aka) and the bottom is White (Shiro).
+- **Match Colors:** On tree/knockout brackets, the player on the top is Red (Aka) and the bottom is White (Shiro).
 - **Tie-marking Rule:** A match is only considered a tie (hikiwake) if an **'X'** is entered in the "vs" column. This column is unlocked on all sheets.
 - **Automated Pool Ranking:** Pool standings are calculated using weighted composite formulas in Excel/Google Sheets. The "Rank" column in the Results table is the source of truth for the "Ranking" section, which uses reactive `INDEX/MATCH` lookups. Operators can manually override rankings by typing over the formula in the "Rank" column.
 
@@ -43,7 +43,7 @@ Before implementing features or making architectural decisions, read the project
 - **Team Matches:** `team-matches=0` is the default for individual tournaments.
 - **Shiaijo (Courts):** `--courts` defaults to 2. It controls both pool distribution and tree labeling.
 - **The docs walk-through is pinned to the draw:** `docs/assets/javascripts/pool-draw-animation.js` replays the pool descent in JS and carries its example rosters' drawn pools as a fixture in the same file, which `TestPoolDrawDocWalkthroughMatchesTheDraw` re-runs through the real distributor. Change the draw and that test goes red pointing at a docs file; update the fixture and re-check the JS in a browser.
-- **Dojo Conflicts:** The `Dojo` field drives the draw's separation everywhere: pool distribution descends the knockout tree by recorded per-branch dojo counts so dojo-mates meet as late as possible, and playoffs-only draws separate dojo-mates too (first round guaranteed where avoidable, later rounds best-effort; acceptance is sum-driven by operator ruling — a swap may pull an already-deep dojo one round earlier to push the earliest meetings later, and no per-dojo never-earlier veto is to be added there).
+- **Dojo Conflicts:** The `Dojo` field drives the draw's separation everywhere: pool distribution descends the knockout tree by recorded per-branch dojo counts so dojo-mates meet as late as possible, and knockout-only draws separate dojo-mates too (first round guaranteed where avoidable, later rounds best-effort; acceptance is sum-driven by operator ruling — a swap may pull an already-deep dojo one round earlier to push the earliest meetings later, and no per-dojo never-earlier veto is to be added there).
 - **Workbook construction:** All sheets/styles are emitted by `internal/excel/template.go` and `internal/helper/excel_styles.go`. To change global appearance, edit these: there is no template binary.
 - **Duplicates:** Competitor identity is (name, dojo). Two competitors sharing a name from different dojos are different people and are allowed; only same-name AND same-dojo is a duplicate. Participant CSVs are checked for duplicate rows and both CLI and Web UI return an error before generating output. Team names must be unique even across dojos, because a team name is its identity in results. A blank dojo has two floors with two distinct sentinels: `state.ErrBlankDojo` refuses every roster save (loading stays tolerant so the roster can be repaired) and `helper.ErrBlankDojoInDraw` refuses the tree-aware draw over a loaded legacy roster; they are different errors in different packages, and neither refusal is a bug to relax.
 

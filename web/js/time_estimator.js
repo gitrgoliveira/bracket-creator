@@ -30,7 +30,7 @@ export function formatTime(totalMinutes) {
 //
 // Inputs:
 //   totalPlayers        , number
-//   isPools             , bool (true = "Pools and Playoffs", false = "Playoffs")
+//   isPools             , bool (true = "Pools + Knockout", false = "Knockout")
 //   courts              , int >= 1
 //   teamSize            , int >= 1
 //   poolMatchMins       , minutes per pool match (per bout)
@@ -57,7 +57,7 @@ export function estimateSchedule(opts) {
     const isPools = !!opts.isPools;
 
     let totalPoolMinutes = 0;
-    let playoffParticipants = totalPlayers;
+    let knockoutParticipants = totalPlayers;
     let numPoolMatches = 0;
 
     if (isPools) {
@@ -90,10 +90,10 @@ export function estimateSchedule(opts) {
             + (numPoolMatches * rotationSecs / 60)
             + breakMins;
 
-        playoffParticipants = numPools * winnersPerPool;
+        knockoutParticipants = numPools * winnersPerPool;
     }
 
-    const numElimMatches = Math.max(playoffParticipants - 1, 0);
+    const numElimMatches = Math.max(knockoutParticipants - 1, 0);
     const totalElimMinutes = (numElimMatches * teamSize * elimMatchMins)
         + (numElimMatches * rotationSecs / 60)
         + breakMins;
@@ -115,7 +115,7 @@ export function estimateSchedule(opts) {
         totalSequentialMinutes,
         totalParallelMinutes,
         finishTotalMins,
-        playoffParticipants,
+        knockoutParticipants,
         numPoolMatches,
         numElimMatches
     };

@@ -70,10 +70,10 @@ describe('bracketRecoveryKind: what a lost bracket can be recovered with', () =>
   });
 
   it('offers nothing where the file IS the draw, including an unknown format', () => {
-    expect(bracketRecoveryKind({ format: 'playoffs' })).toBe(BRACKET_RECOVERY_NONE);
+    expect(bracketRecoveryKind({ format: 'knockout' })).toBe(BRACKET_RECOVERY_NONE);
     // A typo in a hand-edited config.md takes the draw pipeline's default
-    // branch and gets a standalone playoffs bracket, so it must be refused for
-    // the same reason playoffs is. The first version of this predicate offered
+    // branch and gets a standalone knockout bracket, so it must be refused for
+    // the same reason knockout is. The first version of this predicate offered
     // it a rebuild.
     expect(bracketRecoveryKind({ format: 'not-a-format' })).toBe(BRACKET_RECOVERY_NONE);
     expect(bracketRecoveryKind({})).toBe(BRACKET_RECOVERY_NONE);

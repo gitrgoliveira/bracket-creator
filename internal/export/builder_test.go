@@ -59,7 +59,7 @@ func testSetup(t *testing.T) (dir string, store *state.Store, eng *engine.Engine
 
 // setCompFormat loads the competition, sets its Format, and saves it. Bracket
 // tests that build pools + a knockout must use a knockout-enabled format (Mixed),
-// since the export only emits Elimination/Tree sheets when comp.IsPlayoffEnabled().
+// since the export only emits Elimination/Tree sheets when comp.IsKnockoutEnabled().
 func setCompFormat(t *testing.T, store *state.Store, compID, format string) {
 	t.Helper()
 	comp, err := store.LoadCompetition(compID)
@@ -865,7 +865,7 @@ func columnContains(rows [][]string, col int, want string) bool {
 // TestBuildResultsWorkbook_LeagueNoPhantomBracket is the regression test for the
 // phantom-bracket bug: the draw returns placeholder "Pool A-1st" finalist
 // labels even for a League (which has no knockout phase), so without the
-// IsPlayoffEnabled() gate the export emitted an Elimination Matches sheet full of
+// IsKnockoutEnabled() gate the export emitted an Elimination Matches sheet full of
 // "Round N - Match N" headers and finalist placeholders, plus "Tree 1" pages,
 // implying a knockout that does not exist.
 func TestBuildResultsWorkbook_LeagueNoPhantomBracket(t *testing.T) {
@@ -1322,15 +1322,15 @@ func TestBuildResultsWorkbook_EndToEndEngineScored(t *testing.T) {
 	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
 }
 
-// TestBuildResultsWorkbook_PlayoffsBracket covers the pure-knockout format, which
+// TestBuildResultsWorkbook_KnockoutBracket covers the pure-knockout format, which
 // has NO pools: the elimination skeleton must be seeded from the participants (as
-// engine.generatePlayoffs does) so the stored bracket renders and its scores overlay.
-// TestPlayoffLeavesFromBracket unit-tests the leaf-order reconstruction: each
+// engine.generateKnockout does) so the stored bracket renders and its scores overlay.
+// TestKnockoutLeavesFromBracket unit-tests the leaf-order reconstruction: each
 // round-1 match contributes SideA then SideB in order, byes included as "".
-func TestPlayoffLeavesFromBracket(t *testing.T) {
+func TestKnockoutLeavesFromBracket(t *testing.T) {
 	t.Parallel()
-	assert.Nil(t, engine.PlayoffLeavesFromBracket(nil))
-	assert.Nil(t, engine.PlayoffLeavesFromBracket(&state.Bracket{}))
+	assert.Nil(t, engine.KnockoutLeavesFromBracket(nil))
+	assert.Nil(t, engine.KnockoutLeavesFromBracket(&state.Bracket{}))
 
 	br := &state.Bracket{Rounds: [][]state.BracketMatch{
 		{
@@ -1339,14 +1339,14 @@ func TestPlayoffLeavesFromBracket(t *testing.T) {
 		},
 		{{SideA: "Winner of r1-m0", SideB: "Winner of r1-m1"}},
 	}}
-	assert.Equal(t, []string{"Alice", "Dave", "Carol", ""}, engine.PlayoffLeavesFromBracket(br))
+	assert.Equal(t, []string{"Alice", "Dave", "Carol", ""}, engine.KnockoutLeavesFromBracket(br))
 }
 
-// TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket is the regression
+// TestBuildResultsWorkbook_KnockoutNonPow2TopologyMatchesBracket is the regression
 // test proving the export skeleton is derived from the FROZEN bracket, not
 // recomputed from participants. For a non-power-of-two roster the engine pads the
 // bracket to the next pow2 with byes (buildBracketFromDraw), so a 6-entry
-// playoffs is STORED as an 8-leaf, 7-node tree in which two nodes are structural
+// knockout is STORED as an 8-leaf, 7-node tree in which two nodes are structural
 // byes and one is an empty-vs-empty phantom.
 //
 // The printed sheet must carry a block per REAL bout and no more. A 6-entrant
@@ -1370,7 +1370,7 @@ func TestPlayoffLeavesFromBracket(t *testing.T) {
 // for is carried by the two assertions below it instead: the printed NUMBERS
 // must be the stored bracket's own, and a bracket carrying an entrant name that
 // participants.csv does not have must still be what the pages print.
-func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T) {
+func TestBuildResultsWorkbook_KnockoutNonPow2TopologyMatchesBracket(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -1378,7 +1378,7 @@ func TestBuildResultsWorkbook_PlayoffsNonPow2TopologyMatchesBracket(t *testing.T
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	players := make([]domain.Player, 6) // non-power-of-two -> 2 byes when padded to 8
@@ -1492,8 +1492,8 @@ func treeNodeRowSpan(col, row int) (lo, hi int, ok bool) {
 	return first + i*span + 1, first + (i+1)*span, true
 }
 
-// TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks is the
-// corruption test for bc-cse. overlayBracketScores and overlayPlayoffBracketNames
+// TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks is the
+// corruption test for bc-cse. overlayBracketScores and overlayKnockoutBracketNames
 // both find a match's score block BY ITS PRINTED NUMBER, so the printed numbering
 // is the only thing tying a result to a bout. If the Tree page numbers a
 // different bout N than the bracket does, the delivered workbook is silently
@@ -1510,7 +1510,7 @@ func treeNodeRowSpan(col, row int) (lo, hi int, ok bool) {
 // The check is made on the ARTIFACT, both sheets of the one workbook: every
 // score block must name competitors that the tree's junction of the same number
 // actually sits above, and must carry that bracket match's scores.
-func TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks(t *testing.T) {
+func TestBuildResultsWorkbook_RaggedKnockoutScoresLandInTheRightBlocks(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -1518,7 +1518,7 @@ func TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks(t *testin
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 
@@ -1640,7 +1640,7 @@ func TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks(t *testin
 	// (2) Read the score blocks back and check each against the bout the TREE
 	//     says carries that number. Individual layout, one court: the header at
 	//     row H puts entrant names in columns A and G of row H+2, with their
-	//     scores in B and F (overlayPlayoffBracketNames / writeScoreRowCells).
+	//     scores in B and F (overlayKnockoutBracketNames / writeScoreRowCells).
 	elimRows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 	cellAt := func(row, col int) string {
@@ -1691,7 +1691,7 @@ func TestBuildResultsWorkbook_RaggedPlayoffsScoresLandInTheRightBlocks(t *testin
 	assert.Equal(t, len(byNumber), checked, "every bout must have exactly one score block")
 }
 
-func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
+func TestBuildResultsWorkbook_KnockoutBracket(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -1699,7 +1699,7 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -1733,21 +1733,21 @@ func TestBuildResultsWorkbook_PlayoffsBracket(t *testing.T) {
 	rows, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 	assert.True(t, sheetContainsCell(rows, "MK"),
-		"playoffs (no pools) must render the bracket with its literal score 'MK'")
+		"knockout (no pools) must render the bracket with its literal score 'MK'")
 	assert.True(t, sheetContainsCell(rows, "Alice"),
-		"playoffs bracket must render literal entrant names (no pool data to reference)")
+		"knockout bracket must render literal entrant names (no pool data to reference)")
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 }
 
-// TestBuildResultsWorkbook_PlayoffsCellRefLikeNames is a regression test for
+// TestBuildResultsWorkbook_KnockoutCellRefLikeNames is a regression test for
 // mp-uagg: internal/helper.printSingleEliminationMatch used to decide leaf- vs
 // match-feeder nodes by asking whether Node.LeafVal parsed as an Excel cell
-// reference (excelize.SplitCellName). A no-pools playoffs bracket renders raw
-// participant names as leaves (engine.PlayoffFinalsFromParticipants), so a competitor
+// reference (excelize.SplitCellName). A no-pools knockout bracket renders raw
+// participant names as leaves (engine.KnockoutFinalsFromParticipants), so a competitor
 // named like a cell coordinate ("P1" = column P row 1, "M3", "A4") was
 // misclassified as a match-feeder, producing a broken CONCATENATE(...,”!)
 // formula. The fix checks the structural Node.LeafNode flag instead.
-func TestBuildResultsWorkbook_PlayoffsCellRefLikeNames(t *testing.T) {
+func TestBuildResultsWorkbook_KnockoutCellRefLikeNames(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -1755,7 +1755,7 @@ func TestBuildResultsWorkbook_PlayoffsCellRefLikeNames(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -1918,7 +1918,7 @@ func TestBuildResultsWorkbook_IncompleteAllFormats(t *testing.T) {
 	}{
 		{"league incomplete", state.CompFormatLeague, 4, 4, 1, false},
 		{"mixed incomplete", state.CompFormatMixed, 6, 3, 1, false},
-		{"playoffs incomplete", state.CompFormatPlayoffs, 4, 0, 0, false},
+		{"knockout incomplete", state.CompFormatKnockout, 4, 0, 0, false},
 		{"swiss incomplete", state.CompFormatSwiss, 4, 0, 0, true},
 	}
 	for _, tc := range cases {
@@ -2027,10 +2027,10 @@ func TestBuildResultsWorkbook_PartialPoolScoring(t *testing.T) {
 	assertNoBrokenFormulas(t, f, helper.SheetPoolMatches)
 }
 
-// TestBuildResultsWorkbook_PlayoffsPartialBracket scores only the first bracket
+// TestBuildResultsWorkbook_KnockoutPartialBracket scores only the first bracket
 // round (e.g. semifinals) and leaves later rounds unplayed. The export must render
 // the played scores and leave the rest blank, without error.
-func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
+func TestBuildResultsWorkbook_KnockoutPartialBracket(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -2038,7 +2038,7 @@ func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -2075,14 +2075,14 @@ func TestBuildResultsWorkbook_PlayoffsPartialBracket(t *testing.T) {
 	assertNoBrokenFormulas(t, f, helper.SheetEliminationMatches)
 }
 
-// TestBuildResultsWorkbook_TeamPlayoffsNames is the regression test for the team-
-// playoffs summary-name off-by-one in overlayPlayoffBracketNames. A no-pools team
-// playoffs repeats the entrant-name formulas on the summary row at
+// TestBuildResultsWorkbook_TeamKnockoutNames is the regression test for the team-
+// knockout summary-name off-by-one in overlayKnockoutBracketNames. A no-pools team
+// knockout repeats the entrant-name formulas on the summary row at
 // header+4+teamSize; the overlay must overwrite THAT row (clearing the broken ”!
 // formula) and leave the "Victories / Points" label at header+5+teamSize intact.
 // Before the fix it targeted header+5+teamSize, leaving a broken formula behind and
-// clobbering the label. This path (Playoffs + TeamSize>0, no pools) had no coverage.
-func TestBuildResultsWorkbook_TeamPlayoffsNames(t *testing.T) {
+// clobbering the label. This path (Knockout + TeamSize>0, no pools) had no coverage.
+func TestBuildResultsWorkbook_TeamKnockoutNames(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -2091,7 +2091,7 @@ func TestBuildResultsWorkbook_TeamPlayoffsNames(t *testing.T) {
 	require.NoError(t, err)
 	comp.Kind = "team"
 	comp.TeamSize = 3
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -2320,7 +2320,7 @@ func formulaCellCount(t *testing.T, f *excelize.File, sheet string) int {
 // finalists spans multiple Tree pages. The previous implementation created
 // "Tree 2"+ as empty sheets and only rendered "Tree 1"; the fix copies the
 // styled template into every page and renders each subtree's leaves. A 32-entry
-// playoffs bracket needs 2 pages, so both must be populated and the bare "Tree"
+// knockout bracket needs 2 pages, so both must be populated and the bare "Tree"
 // template must be gone.
 func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 	t.Parallel()
@@ -2330,7 +2330,7 @@ func TestBuildResultsWorkbook_MultiPageTreePopulated(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 
@@ -3321,13 +3321,13 @@ func assertBronzeEntrantsPopulated(t *testing.T, rows [][]string) {
 	assert.NotEmpty(t, r[6], "bronze score row: right name cell (col G) must be populated")
 }
 
-// setNaginataPlayoffs configures the loaded competition as a naginata playoffs
+// setNaginataKnockout configures the loaded competition as a naginata knockout
 // competition (individual, 4 players, single court).
-func setNaginataPlayoffs(t *testing.T, store *state.Store, compID string, engi bool) {
+func setNaginataKnockout(t *testing.T, store *state.Store, compID string, engi bool) {
 	t.Helper()
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Naginata = true
 	comp.Engi = engi
 	comp.Kind = "individual"
@@ -3339,7 +3339,7 @@ func setNaginataPlayoffs(t *testing.T, store *state.Store, compID string, engi b
 }
 
 // startNaginataWith4Players saves 4 participants, starts the competition, and
-// returns the bracket. The caller must have called setNaginataPlayoffs first.
+// returns the bracket. The caller must have called setNaginataKnockout first.
 func startNaginataWith4Players(t *testing.T, store *state.Store, eng *engine.Engine, compID string, engi bool) *state.Bracket {
 	t.Helper()
 	var players []domain.Player
@@ -3375,7 +3375,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceRendered(t *testing.T) {
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	setNaginataPlayoffs(t, store, compID, false)
+	setNaginataKnockout(t, store, compID, false)
 	bracket := startNaginataWith4Players(t, store, eng, compID, false)
 
 	sfIdx := len(bracket.Rounds) - 2
@@ -3433,7 +3433,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceNamesBeforeBronze(t *testing.T) 
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	setNaginataPlayoffs(t, store, compID, false)
+	setNaginataKnockout(t, store, compID, false)
 	bracket := startNaginataWith4Players(t, store, eng, compID, false)
 
 	sfIdx := len(bracket.Rounds) - 2
@@ -3494,7 +3494,7 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	setNaginataPlayoffs(t, store, compID, true)
+	setNaginataKnockout(t, store, compID, true)
 	bracket := startNaginataWith4Players(t, store, eng, compID, true)
 
 	sfIdx := len(bracket.Rounds) - 2
@@ -3543,17 +3543,17 @@ func TestBuildResultsWorkbook_EngiNaginataThirdPlaceFlags(t *testing.T) {
 }
 
 // TestBuildResultsWorkbook_NonNaginataNoThirdPlace verifies that a standard
-// kendo (non-naginata) playoffs export does NOT emit a "3rd Place" block,
+// kendo (non-naginata) knockout export does NOT emit a "3rd Place" block,
 // preserving byte-identical output for non-naginata competitions.
 func TestBuildResultsWorkbook_NonNaginataNoThirdPlace(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	// Kendo playoffs (Naginata=false).
+	// Kendo knockout (Naginata=false).
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Naginata = false
 	comp.Kind = "individual"
 	comp.PoolSize = 3
@@ -3595,7 +3595,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlaceEntrantFormulas(t *testing.T) {
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	setNaginataPlayoffs(t, store, compID, false)
+	setNaginataKnockout(t, store, compID, false)
 	// startNaginataWith4Players starts the competition without scoring any matches.
 	// ThirdPlaceMatch exists but SideA/SideB are empty, so overlayBracketScores
 	// writes no literal names and the skeleton formulas remain visible.
@@ -3749,7 +3749,7 @@ func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	setNaginataPlayoffs(t, store, compID, false)
+	setNaginataKnockout(t, store, compID, false)
 	startNaginataWith4Players(t, store, eng, compID, false)
 
 	data, err := BuildResultsWorkbook(store, eng, compID)
@@ -3775,10 +3775,10 @@ func TestBuildResultsWorkbook_NaginataThirdPlacePrintAreaCoversBlock(t *testing.
 		printAreaLastRow, thirdPlaceExcelRow)
 }
 
-// TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters verifies that for a
-// pure Playoffs competition (no pool phase), the tree pages do NOT receive pool
+// TestBuildResultsWorkbook_KnockoutTreePageNoPoolRosters verifies that for a
+// pure Knockout competition (no pool phase), the tree pages do NOT receive pool
 // roster entries in column A (there are no pools to list).
-func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
+func TestBuildResultsWorkbook_KnockoutTreePageNoPoolRosters(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
@@ -3786,7 +3786,7 @@ func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	comp.Kind = "individual"
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.Status = "setup"
 	require.NoError(t, store.SaveCompetition(comp))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -3809,7 +3809,7 @@ func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
 		formulaA4, err := f.GetCellFormula(sheet, "A4")
 		require.NoError(t, err)
 		assert.Empty(t, formulaA4,
-			"playoffs tree page %s must not have a pool roster formula in A4", sheet)
+			"knockout tree page %s must not have a pool roster formula in A4", sheet)
 	}
 }
 
@@ -3817,16 +3817,16 @@ func TestBuildResultsWorkbook_PlayoffsTreePageNoPoolRosters(t *testing.T) {
 // bracket entrant name cells render the full pair as "Member1 - Member2".
 // Under the combined-name model the bracket match SideA/SideB fields hold the
 // full "Pair1A - Pair1B" string (both members are joined in Player.Name at
-// registration). overlayPlayoffBracketNames writes these directly into the
+// registration). overlayKnockoutBracketNames writes these directly into the
 // entrant cells; no DisplayName or roster lookup occurs. Covers both the
-// playoffs entrant overwrite (overlayPlayoffBracketNames) and the 3rd Place
+// knockout entrant overwrite (overlayKnockoutBracketNames) and the 3rd Place
 // block entrant writes (overlayBracketScores).
 func TestBuildResultsWorkbook_EngiPairLabelsInBracketEntrants(t *testing.T) {
 	t.Parallel()
 	dir, store, eng, compID := testSetup(t)
 	defer os.RemoveAll(dir)
 
-	setNaginataPlayoffs(t, store, compID, true)
+	setNaginataKnockout(t, store, compID, true)
 	bracket := startNaginataWith4Players(t, store, eng, compID, true)
 
 	sfIdx := len(bracket.Rounds) - 2
@@ -3882,18 +3882,18 @@ func TestBuildResultsWorkbook_KachinukiDetailSheet(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	// Format is Playoffs, not Mixed (mp-yuy8 task 1): a Mixed competition
+	// Format is Knockout, not Mixed (mp-yuy8 task 1): a Mixed competition
 	// with an EMPTY pools list but a bracket that already carries real
 	// round content is not a shape any real write path produces (Mixed
 	// always populates pools.csv before it ever builds a bracket) -- it is
 	// exactly the bracket/settings mismatch ErrBracketDrawMismatch refuses.
-	// Playoffs with no pools is the shape this fixture actually needs:
-	// PlayoffLeavesFromBracket reads the leaf order straight off the same
+	// Knockout with no pools is the shape this fixture actually needs:
+	// KnockoutLeavesFromBracket reads the leaf order straight off the same
 	// hand-crafted bracket below, so the draw derives cleanly and the
 	// Kachinuki Detail sheet assertion further down still exercises the
 	// same bracket-bout-log data path, independent of pool/elimination
 	// rendering.
-	comp.Format = state.CompFormatPlayoffs
+	comp.Format = state.CompFormatKnockout
 	comp.TeamMatchType = state.TeamMatchTypeKachinuki
 	comp.TeamSize = 3
 	require.NoError(t, store.SaveCompetition(comp))

@@ -48,7 +48,7 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 
    These two are mutually exclusive by hue so they can coexist on screen without ambiguity (navy = "watch this", amber = "do this next"). Do **not** add a third pulse meaning, and do **not** use red for either (red stays Aka/danger). A next-action pulse must clear itself the moment the action is no longer expected.
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)`, see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
-5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → playoffs → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
+5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → knockout → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row`: readability wins.
 
 ## 3. Design tokens
@@ -71,7 +71,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 | `--warn-soft` | `#fffbeb` | Warning fill (amber-50): `.alert--warn`, `.tag-badge--warn`, offline pill background |
 | `--warn-border` | `#fde68a` | Warning hairline border (amber-200) |
 | `--warn-ink` | `#78350f` | Strongest warning text (amber-900, ~8:1 on `--warn-soft`) |
-| `--ok` | `#16a34a` | **Success / present** green: check-in fills, win accents, progress-done. The "this succeeded / is checked-in / advancing / won" signal. Mirrors the `--warn` ramp; **never** for Aka/danger (use `--danger`) or running (use `--accent`). Distinct from the **status-pipeline playoffs** green (`#ecfdf5`/`#065f46`/`#a7f3d0`, badge-only carve-out). |
+| `--ok` | `#16a34a` | **Success / present** green: check-in fills, win accents, progress-done. The "this succeeded / is checked-in / advancing / won" signal. Mirrors the `--warn` ramp; **never** for Aka/danger (use `--danger`) or running (use `--accent`). Distinct from the **status-pipeline knockout** green (`#ecfdf5`/`#065f46`/`#a7f3d0`, badge-only carve-out). |
 | `--ok-strong` | `#15803d` | Stronger success text/border on `--ok-soft` (green-700) |
 | `--ok-soft` | `#f0fdf4` | Success fill: checked-in rows, success alerts, hand-over callout (green-50) |
 | `--ok-border` | `#dcfce7` | Success hairline border (green-100) |
@@ -99,7 +99,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 |---|---|---|---|
 | `setup` (Pending) | `#f3f4f6` | `--ink-2` | (none) |
 | `pools` | `#fff7ed` | `#9a3412` | `#fed7aa` |
-| `playoffs` | `#ecfdf5` | `#065f46` | `#a7f3d0` |
+| `knockout` | `#ecfdf5` | `#065f46` | `#a7f3d0` |
 | `completed` | `--accent-soft` | `--accent` | `--accent-soft` |
 | `archive` | `#f8fafc` | `--ink-3` | `--line` |
 
@@ -237,7 +237,7 @@ Quick lookup: scan, then `Ctrl+F` the class name to jump to its subsection.
 | Cards | `.card`, `.tcard` | Generic + tournament-list containers |
 | Form fields | `.field`, `.input` | Labeled inputs (debounced via `StableInput` when in SSE trees) |
 | Tables | `.table`, `.pool__table` | Generic + pool tabular data |
-| Badges | `.badge--{status}` | Status pills (setup / pools / playoffs / completed / archive) |
+| Badges | `.badge--{status}` | Status pills (setup / pools / knockout / completed / archive) |
 | Match cards | `.bc-match` | Bracket-tree card with two sides (Aka top / Shiro bottom) |
 | Aka/Shiro side treatment | (cross-cutting) | How Red vs White stays distinguishable on every matchup surface |
 | Pools | `.pool`, `.pools-grid` | Pool standings + matchups |
@@ -280,7 +280,7 @@ States: `:hover` brightens border to `--ink-4`; `:disabled` drops to 0.5 opacity
 
 ### Tables: `.table`, `.pool__table`
 
-Uppercase 12px column headers, 13px body, `--line-2` row separators, hover row tint. Numeric columns get `font-family: var(--font-mono)`. Pool tables add `tr.advancing` (light-green bg + `▲` marker) to mark players progressing to the playoffs.
+Uppercase 12px column headers, 13px body, `--line-2` row separators, hover row tint. Numeric columns get `font-family: var(--font-mono)`. Pool tables add `tr.advancing` (light-green bg + `▲` marker) to mark players progressing to the knockout.
 
 ### Badges: `.badge`
 
@@ -345,7 +345,7 @@ The hatch on Shiro is load-bearing: pure white on a white card is invisible, and
 Auto-fill grid (320px min). Each pool is a card with `.pool__table` inside. `.pool--done` recolors the wrapper to `--accent-soft`.
 
 Row modifiers on `<tr>` inside `.pool__table`:
-- `tr.advancing`: light-green background + `▲` marker: player progressing to playoffs.
+- `tr.advancing`: light-green background + `▲` marker: player progressing to knockout.
 - `tr.pool__row--me`: translucent navy tint (`rgba(29,53,87,0.07)`): the followed player (viewer).
 - `tr.pool__row--tied`: amber fill (`--warn-soft`), background-only (same row-tint idiom as `pool__row--me`): two or more competitors tied on all ranking criteria. Scoped as `.pool__table tr.pool__row--tied` so the amber wins over `.advancing` (green) and `.pool__row--me` (navy). Appears only once the tie is observable (pool all-complete for pools format; emerging-tie trigger for league format). Clears automatically when the tie resolves. Uses amber tokens only: never `--red` (Aka/danger) or `--accent` (running state).
 
@@ -359,7 +359,7 @@ Mount via the `<Toast>` primitive. Self-dismiss at 2.7s. The host component (see
 
 ### Mode tabs: `.mode-tabs`
 
-[styles.css#L1560](web-mobile/css/styles.css#L1560). Pill-group tab control used for view switches (e.g., pools vs. playoffs in the admin schedule). `.mode-tabs button.is-active` lifts to `--surface` background + `--shadow-sm`: the active button is a tile on a tinted track. Use this rather than inventing a new tab pattern.
+[styles.css#L1560](web-mobile/css/styles.css#L1560). Pill-group tab control used for view switches (e.g., pools vs. knockout in the admin schedule). `.mode-tabs button.is-active` lifts to `--surface` background + `--shadow-sm`: the active button is a tile on a tinted track. Use this rather than inventing a new tab pattern.
 
 ### Viewer head & tabs: `.viewer__head`, `.viewer__tabs`
 

@@ -68,7 +68,7 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 // at their standard positions: a bracket of N players in a 2^k draw gives the top
 // 2^k, N seeds a first-round bye, and because every bye rank pairs with a
 // distinct low (top-seed) rank in round 1, the draw never contains an
-// empty-vs-empty match. Used by the live-playoffs leaf builder so the knockout
+// empty-vs-empty match. Used by the live-knockout leaf builder so the knockout
 // tree matches conventional seeding instead of clustering all byes at the bottom.
 func StandardSeedingFull(players []Player) []Player {
 	if len(players) == 0 {

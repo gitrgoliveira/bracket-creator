@@ -28,7 +28,7 @@ const csvField = (s) => {
 //   leagueTwoThirdPlaces.
 // cName is the display name for the competition (used as titlePrefix).
 export function buildXlsxBody(cfg, cName, players) {
-  const isPlayoffs = cfg.format === "playoffs";
+  const isKnockout = cfg.format === "knockout";
   const singlePool = cfg.format === "league";
   const playersPerPool = singlePool ? players.length : (cfg.poolSize || players.length);
 
@@ -60,7 +60,7 @@ export function buildXlsxBody(cfg, cName, players) {
 
   const courtsCount = Array.isArray(cfg.courts) ? cfg.courts.length : 0;
   const body = new URLSearchParams({
-    tournamentType: isPlayoffs ? "playoffs" : "pools",
+    tournamentType: isKnockout ? "knockout" : "pools",
     playerList,
     courts: String(courtsCount || 1),
     winnersPerPool: String(winnersPerPool),

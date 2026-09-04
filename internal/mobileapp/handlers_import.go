@@ -19,10 +19,18 @@ import (
 
 // ImportManifestComp describes one competition entry in manifest.yaml.
 type ImportManifestComp struct {
-	ID             string   `yaml:"id"`
-	Name           string   `yaml:"name"`
-	Kind           string   `yaml:"kind"`   // "individual" or "team"
-	Format         string   `yaml:"format"` // "mixed", "playoffs", "league", or "swiss"; omit/empty for default (playoffs)
+	ID   string `yaml:"id"`
+	Name string `yaml:"name"`
+	Kind string `yaml:"kind"` // "individual" or "team"
+	// Format: "mixed", "knockout", "league", or "swiss"; omitted/empty is
+	// persisted unchanged. "playoffs" (the pre-rename wire value) is ALSO
+	// accepted here, permanently -- see normalizeImportFormat. Unlike
+	// config.md, which converges to the canonical value in memory on every
+	// read (parseCompetitionFile), an exported manifest bundle is a static
+	// artifact that can be replayed at any point in the future, so this
+	// boundary cannot assume it will only ever see files written after the
+	// rename.
+	Format         string   `yaml:"format"`
 	Courts         []string `yaml:"courts"`
 	PoolSize       int      `yaml:"pool_size"`
 	PoolSizeMode   string   `yaml:"pool_size_mode"` // "max" or "min"
@@ -123,6 +131,29 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, el
 	})
 }
 
+// normalizeImportFormat maps a manifest's retired "playoffs" format value
+// onto the canonical "knockout" one BEFORE it reaches
+// validateCompetitionFormat, which (like every other standing reader,
+// bc-terminology commit 1 clean-break policy) only recognises "knockout".
+// This is the one place on the import door allowed to still recognise the
+// retired value, and unlike config.md's in-memory conversion
+// (parseCompetitionFile) it is PERMANENT, never removable: an exported
+// manifest bundle is a static artifact that can be replayed at any point in
+// the future, so this boundary cannot assume every file it ever sees was
+// written after the rename.
+//
+// "" (omitted) is passed through unchanged. Competition.IsKnockoutEnabled()
+// treats "" and "knockout" differently (it gates whether the Excel export
+// emits the Elimination Matches and Tree sheets), so coercing an omitted
+// format to "knockout" here would silently change what an imported
+// competition exports; that is not this function's job.
+func normalizeImportFormat(format string) string {
+	if format == "playoffs" {
+		return state.CompFormatKnockout
+	}
+	return format
+}
+
 func importCompetition(store *state.Store, entry ImportManifestComp, files map[string][]byte) ImportResult {
 	// Pre-trim Name so the ImportResult returned to the client matches
 	// the canonical record we save. Pre-fix: res.Name = entry.Name kept
@@ -161,7 +192,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 		ID:             entry.ID,
 		Name:           trimmedName,
 		Kind:           strings.TrimSpace(entry.Kind),
-		Format:         strings.TrimSpace(entry.Format),
+		Format:         normalizeImportFormat(strings.TrimSpace(entry.Format)),
 		Courts:         entry.Courts,
 		PoolSize:       entry.PoolSize,
 		PoolSizeMode:   strings.TrimSpace(entry.PoolSizeMode),
@@ -434,7 +465,7 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// existing missing-id / invalid-id / save-error patterns.
 	if err := store.WithCompetitionRenameLock(func() error {
 		// ID-collision check (cross-file guard symmetry with the POST
-		// /competitions handler and CreatePlayoff path). Without this,
+		// /competitions handler and CreateKnockout path). Without this,
 		// a manifest row with an existing comp.ID but a different
 		// comp.Name passes the name-uniqueness check (its name IS
 		// unique) and then SaveCompetition silently overwrites the

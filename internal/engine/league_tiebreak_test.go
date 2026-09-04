@@ -156,7 +156,7 @@ func teamLeagueMatchSet(results []teamLeagueResult) []state.MatchResult {
 // --- LeagueTiebreakCandidates tests ---
 
 // TestLeagueTiebreakCandidates_NonLeague verifies that non-league formats return
-// no candidates (the function is a no-op for mixed/playoffs/swiss).
+// no candidates (the function is a no-op for mixed/knockout/swiss).
 func TestLeagueTiebreakCandidates_NonLeague(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -172,7 +172,7 @@ func TestLeagueTiebreakCandidates_NonLeague(t *testing.T) {
 }
 
 // TestLeagueTiebreakCandidates_IndividualLeague verifies that an individual-format
-// league (TeamSize==0) returns no candidates, league playoff is team-only.
+// league (TeamSize==0) returns no candidates, league knockout is team-only.
 func TestLeagueTiebreakCandidates_IndividualLeague(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -347,20 +347,20 @@ func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
 
 // --- MaybeAutoCompletePools team-league tests ---
 
-// TestMaybeAutoCompletePools_TeamLeague_TopTie_AwaitingPlayoff verifies that a
+// TestMaybeAutoCompletePools_TeamLeague_TopTie_AwaitingKnockout verifies that a
 // team-league competition with a consequential top-position tie (e.g. 1st/2nd)
 // returns AutoCompleteAwaitingLeagueTiebreak and does NOT auto-inject any DH
 // matches and does NOT transition to completed.
-func TestMaybeAutoCompletePools_TeamLeague_TopTie_AwaitingPlayoff(t *testing.T) {
-	eng, store := setupTeamLeagueComp(t, "league-await-playoff", "topTie")
+func TestMaybeAutoCompletePools_TeamLeague_TopTie_AwaitingKnockout(t *testing.T) {
+	eng, store := setupTeamLeagueComp(t, "league-await-knockout", "topTie")
 
-	outcome, err := eng.MaybeAutoCompletePools("league-await-playoff")
+	outcome, err := eng.MaybeAutoCompletePools("league-await-knockout")
 	require.NoError(t, err)
 	assert.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome,
 		"top-position tie should block with AwaitingLeagueTiebreak")
 
 	// Verify no DH matches were auto-injected.
-	allMatches, err := store.LoadPoolMatches("league-await-playoff")
+	allMatches, err := store.LoadPoolMatches("league-await-knockout")
 	require.NoError(t, err)
 	for _, m := range allMatches {
 		assert.False(t, IsPoolDaihyosenMatchID(m.ID),
@@ -368,10 +368,10 @@ func TestMaybeAutoCompletePools_TeamLeague_TopTie_AwaitingPlayoff(t *testing.T) 
 	}
 
 	// Competition must not have transitioned to completed.
-	comp, err := store.LoadCompetition("league-await-playoff")
+	comp, err := store.LoadCompetition("league-await-knockout")
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusPools, comp.Status,
-		"competition must remain in pools status when awaiting playoff")
+		"competition must remain in pools status when awaiting knockout")
 }
 
 // TestMaybeAutoCompletePools_TeamLeague_NoTie_Completes verifies that a team-league
@@ -401,10 +401,10 @@ func TestMaybeAutoCompletePools_TeamLeague_BelowBand_Completes(t *testing.T) {
 		"3rd/4th tie with TwoThirdPlaces=true should complete (shared 3rd, no tie-breaker)")
 }
 
-// TestMaybeAutoCompletePools_TeamLeague_ThreeWayTie_AwaitingPlayoff verifies that
+// TestMaybeAutoCompletePools_TeamLeague_ThreeWayTie_AwaitingKnockout verifies that
 // three teams tied at the top (positions 1–3) return AwaitingLeagueTiebreak and
 // no DH is auto-injected.
-func TestMaybeAutoCompletePools_TeamLeague_ThreeWayTie_AwaitingPlayoff(t *testing.T) {
+func TestMaybeAutoCompletePools_TeamLeague_ThreeWayTie_AwaitingKnockout(t *testing.T) {
 	eng, store := setupTeamLeagueComp(t, "league-threeway-await", "threeWay")
 
 	outcome, err := eng.MaybeAutoCompletePools("league-threeway-await")

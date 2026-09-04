@@ -64,7 +64,7 @@ describe('DataIssueBanner', () => {
   it('does NOT offer the reset for direct elimination, and explains why', () => {
     // An action that can only fail is worse than an explanation: the server
     // refuses this case, so the button must not be offered at all.
-    render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'playoffs' }} onReset={vi.fn()} />);
+    render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'knockout' }} onReset={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /Reset the knockout stage/ })).toBeNull();
     expect(screen.getByRole('alert').textContent)
       .toMatch(/only record of who was drawn against whom/);

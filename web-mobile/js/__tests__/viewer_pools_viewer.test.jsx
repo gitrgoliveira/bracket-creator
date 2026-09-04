@@ -811,8 +811,8 @@ describe('poolLabel: format-aware phase label (mp-8rc9)', () => {
     expect(poolLabel(m)).toBe('Pool B');
   });
 
-  it('returns poolName for a playoffs-format match', () => {
-    const m = { compFormat: 'playoffs', poolName: 'Pool A', compName: 'Open Cup' };
+  it('returns poolName for a knockout-format match', () => {
+    const m = { compFormat: 'knockout', poolName: 'Pool A', compName: 'Open Cup' };
     expect(poolLabel(m)).toBe('Pool A');
   });
 
@@ -838,7 +838,7 @@ describe('poolLabel: format-aware phase label (mp-8rc9)', () => {
 
   it('pool/mixed poolLabel DOES surface the pool name (the word "Pool" is correct here)', () => {
     expect(poolLabel({ compFormat: 'mixed', poolName: 'Pool B' })).toMatch(/pool/i);
-    expect(poolLabel({ compFormat: 'playoffs', poolName: 'Pool A' })).toMatch(/pool/i);
+    expect(poolLabel({ compFormat: 'knockout', poolName: 'Pool A' })).toMatch(/pool/i);
   });
 });
 
@@ -877,7 +877,7 @@ describe('leagueAwareLabel: league/pool terminology boundary (mp-8rc9)', () => {
 
   it('mixed/pools → the pool name (the word "Pool" belongs here)', () => {
     expect(leagueAwareLabel('mixed', 'Pool A')).toBe('Pool A');
-    expect(leagueAwareLabel('playoffs', 'Pool B')).toBe('Pool B');
+    expect(leagueAwareLabel('knockout', 'Pool B')).toBe('Pool B');
     expect(leagueAwareLabel('swiss', 'Pool C')).toBe('Pool C');
   });
 

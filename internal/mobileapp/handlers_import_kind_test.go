@@ -41,7 +41,7 @@ competitions:
   - id: "kind-unknown"
     name: "Unknown Kind"
     kind: "banana"
-    format: "playoffs"
+    format: "knockout"
     courts: ["A"]
     participants: "players.csv"
 `)
@@ -74,7 +74,7 @@ func TestImport_AcceptsTheKindsTheServerRecognises(t *testing.T) {
 competitions:
   - id: "`+tc.id+`"
     name: "Kind `+tc.name+`"
-`+tc.kindLine+tc.teamLine+`    format: "playoffs"
+`+tc.kindLine+tc.teamLine+`    format: "knockout"
     courts: ["A"]
     participants: "players.csv"
 `)
@@ -114,7 +114,7 @@ competitions:
     name: "Team size `+tc.name+`"
     kind: "`+tc.kind+`"
     team_size: `+strconv.Itoa(tc.size)+`
-    format: "playoffs"
+    format: "knockout"
     courts: ["A"]
     participants: "players.csv"
 `)
@@ -160,7 +160,7 @@ competitions:
   - id: "ts-omitted"
     name: "Team, no size"
     kind: "team"
-    format: "playoffs"
+    format: "knockout"
     courts: ["A"]
     participants: "players.csv"
 `)

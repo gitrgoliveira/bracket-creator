@@ -9,7 +9,7 @@ function StatusBadge({ status, showRunningDot, format }) {
     setup: ["badge--setup", "Pending"],
     "draw-ready": ["badge--draw-ready", "Draw ready"],
     pools: ["badge--pools", "Pools"],
-    playoffs: ["badge--playoffs", "Playoffs"],
+    knockout: ["badge--knockout", "Knockout"],
     completed: ["badge--completed", "Completed"],
   };
   const [cls, rawLabel] = map[status || "setup"] || ["badge--setup", status];
@@ -25,7 +25,7 @@ function StatusBadge({ status, showRunningDot, format }) {
   // a map rather than a ternary chain so the next format that borrows the pool
   // pipeline is one entry, not another branch (mp-8rc9 league, mp-dej2 swiss).
   const label = (status === "pools" && POOLS_PHASE_FORMAT_LABEL[format]) || rawLabel;
-  const showRunning = showRunningDot && (status === "pools" || status === "playoffs");
+  const showRunning = showRunningDot && (status === "pools" || status === "knockout");
   return (
     <span className={`badge ${cls}`}>
       {showRunning && <span className="dot dot--running" style={{ marginRight: 4 }}></span>}

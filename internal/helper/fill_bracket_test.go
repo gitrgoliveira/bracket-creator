@@ -187,7 +187,7 @@ func poolsWithOversizedAt(n, size int, oversizedIdx map[int]bool, seeds map[int]
 
 // selectFillBracketDraftsForCourts is a test-only convenience chaining
 // FillBracketDraftCapacity -> SelectFillBracketDrafts, mirroring exactly
-// what a real caller (cmd/create-pools.go, internal/engine/playoff_skeleton.go)
+// what a real caller (cmd/create-pools.go, internal/engine/knockout_skeleton.go)
 // does. It fails the test outright (via require) if capacity computation
 // itself is not achievable -- every test using this helper is constructing
 // a shape expected to be IN SCOPE at the target-arithmetic level.

@@ -349,14 +349,14 @@ func TestResolveQualifiedPools_LegacyBracketGeometryMismatch(t *testing.T) {
 	assert.Equal(t, "B1", b.Rounds[0][0].SideB)
 }
 
-// TestDrawPlaceholdersAreNotWrittenForPlayoffs pins the write gate: a standalone
-// playoffs bracket's leaves are real competitors, nothing resolves into it, and
+// TestDrawPlaceholdersAreNotWrittenForKnockout pins the write gate: a standalone
+// knockout bracket's leaves are real competitors, nothing resolves into it, and
 // recording player names under a "placeholder" field would mislead and bloat
 // every bracket.json for no reader.
-func TestDrawPlaceholdersAreNotWrittenForPlayoffs(t *testing.T) {
+func TestDrawPlaceholdersAreNotWrittenForKnockout(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
-	compID := "playoffs-no-placeholders"
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 4)
+	compID := "knockout-no-placeholders"
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 4)
 	require.NoError(t, store.SaveParticipants(compID, makePlayers(8)))
 	require.NoError(t, eng.GenerateDraw(compID))
 

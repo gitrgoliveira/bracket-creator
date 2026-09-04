@@ -263,7 +263,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		validBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
 		for _, status := range []state.CompetitionStatus{
 			state.CompStatusSetup,
-			state.CompStatusPlayoffs,
+			state.CompStatusKnockout,
 			state.CompStatusComplete,
 			state.CompStatusInvalid,
 		} {
@@ -597,7 +597,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 
 		update := state.Competition{
 			ID: "trim-fields-update", Name: "Trim Fields Update",
-			Kind: "  team  ", Format: "  playoffs  ",
+			Kind: "  team  ", Format: "  knockout  ",
 			PoolSizeMode: "  exact  ", StartTime: "  10:30  ", Date: "  15-06-2026  ",
 			TeamSize: 2,
 		}
@@ -611,7 +611,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Equal(t, "team", stored.Kind, "Kind should be trimmed on PUT")
-		assert.Equal(t, "playoffs", stored.Format, "Format should be trimmed on PUT")
+		assert.Equal(t, "knockout", stored.Format, "Format should be trimmed on PUT")
 		assert.Equal(t, "exact", stored.PoolSizeMode, "PoolSizeMode should be trimmed on PUT")
 		assert.Equal(t, "10:30", stored.StartTime, "StartTime should be trimmed on PUT")
 		assert.Equal(t, "15-06-2026", stored.Date, "Date should be trimmed on PUT")
@@ -1236,6 +1236,39 @@ func TestPUTCompetition_RosterPUTBypassesSettingsValidation(t *testing.T) {
 // PUT settings path persists the canonical *Seconds fields to disk, and the
 // GET read handlers normalize legacy whole-minute / single-field durations
 // into *Seconds so the SPA always receives resolved values.
+// A console left open across an upgrade still posts the pre-rename key. The
+// decoder drops an unrecognised key, and the settings transform assigns
+// KnockoutMatchDurationSeconds unconditionally, so before this guard the
+// operator's stored duration was silently reset to unset. The retired FORMAT
+// value in the same body already 400s, so the two retired inputs behaved in
+// opposite ways: one loud, one destructive. Both are loud now.
+func TestPUTCompetition_RetiredDurationKeyIsRefused(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	seed := state.Competition{
+		ID: "stale-tab", Name: "Stale Tab", Date: "12-05-2026", Format: "mixed",
+		PoolMatchDurationSeconds: 150, KnockoutMatchDurationSeconds: 240,
+	}
+	require.NoError(t, store.SaveCompetition(&seed))
+
+	// The pre-rename bundle's body: it never names the current key. The literal
+	// below is the POINT of the test -- do not "fix" it to the current spelling.
+	body := []byte(`{"id":"stale-tab","name":"Stale Tab","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"playoffMatchDurationSeconds":240}`)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/stale-tab", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "the retired key must be refused, not silently dropped")
+	assert.Contains(t, w.Body.String(), "knockoutMatchDurationSeconds", "the error must name the current key")
+
+	stored, err := store.LoadCompetition("stale-tab")
+	require.NoError(t, err)
+	assert.Equal(t, 240, stored.KnockoutMatchDurationSeconds,
+		"the operator's stored duration must survive the refused write")
+}
+
 func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -1243,7 +1276,7 @@ func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
 	// 1. PUT with a sub-minute seconds value persists it verbatim to disk.
 	seed := state.Competition{ID: "sec-comp", Name: "Sec Comp", Date: "12-05-2026", Format: "mixed"}
 	require.NoError(t, store.SaveCompetition(&seed))
-	body := []byte(`{"id":"sec-comp","name":"Sec Comp","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"playoffMatchDurationSeconds":210}`)
+	body := []byte(`{"id":"sec-comp","name":"Sec Comp","date":"12-05-2026","format":"mixed","poolMatchDurationSeconds":150,"knockoutMatchDurationSeconds":210}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/sec-comp", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1252,12 +1285,12 @@ func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
 	stored, err := store.LoadCompetition("sec-comp")
 	require.NoError(t, err)
 	assert.Equal(t, 150, stored.PoolMatchDurationSeconds, "2m30s must persist to disk")
-	assert.Equal(t, 210, stored.PlayoffMatchDurationSeconds)
+	assert.Equal(t, 210, stored.KnockoutMatchDurationSeconds)
 
 	// 2. A legacy per-phase MINUTE competition is normalized to *Seconds on the
 	//    single-GET read path (x60).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "legacy-min", Name: "Legacy Min", PoolMatchDurationSeconds: 180, PlayoffMatchDurationSeconds: 300,
+		ID: "legacy-min", Name: "Legacy Min", PoolMatchDurationSeconds: 180, KnockoutMatchDurationSeconds: 300,
 	}))
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("GET", "/api/competitions/legacy-min", nil)
@@ -1266,7 +1299,7 @@ func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
 	var got state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, 180, got.PoolMatchDurationSeconds, "GET must back-fill 3 min -> 180s")
-	assert.Equal(t, 300, got.PlayoffMatchDurationSeconds, "GET must back-fill 5 min -> 300s")
+	assert.Equal(t, 300, got.KnockoutMatchDurationSeconds, "GET must back-fill 5 min -> 300s")
 
 	// 3. A legacy SINGLE-field competition (only match_duration) is normalized
 	//    to both per-phase *Seconds on the LIST read path, so the SPA's
@@ -1288,7 +1321,7 @@ func TestCompetitionDurationSeconds_PersistAndNormalize(t *testing.T) {
 	}
 	require.NotNil(t, single, "legacy-single must appear in the list")
 	assert.Equal(t, 300, single.PoolMatchDurationSeconds, "list GET must normalize match_duration 5 -> 300s")
-	assert.Equal(t, 300, single.PlayoffMatchDurationSeconds)
+	assert.Equal(t, 300, single.KnockoutMatchDurationSeconds)
 }
 
 func TestPUTCompetition_SettingsOnlyResponseIncludesPlayers(t *testing.T) {
@@ -1359,11 +1392,11 @@ func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
 	cid := "comp-ndw"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: cid, Name: "NDW", Date: "12-05-2026",
-		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"},
 	}))
 
 	// Perfect (name,dojo) duplicate → 409.
-	dup := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+	dup := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"knockout","kind":"individual","courts":["A"],
 		"players":[{"name":"John Smith","dojo":"Wakaba"},{"name":"john  smith","dojo":"wakaba"}]}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(dup))
@@ -1372,7 +1405,7 @@ func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
 	require.Equalf(t, http.StatusConflict, w.Code, "perfect (name,dojo) dup on roster PUT must 409: %s", w.Body.String())
 
 	// Near-duplicate (token-subset) → 200 with a warnings entry.
-	near := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+	near := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"knockout","kind":"individual","courts":["A"],
 		"players":[{"name":"Ana Maria Rossi","dojo":"Tora"},{"name":"Ana Rossi","dojo":"Wakaba"}]}`)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(near))
@@ -1388,7 +1421,7 @@ func TestPUTCompetition_RosterPUT_NearDupWarningsAndTier1(t *testing.T) {
 	assert.Equal(t, "token-subset", resp.Warnings[0].Score)
 
 	// Clean roster → warnings present as an empty array (consistent shape).
-	clean := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"playoffs","kind":"individual","courts":["A"],
+	clean := []byte(`{"id":"comp-ndw","name":"NDW","date":"12-05-2026","format":"knockout","kind":"individual","courts":["A"],
 		"players":[{"name":"Shudokan A","dojo":"X"},{"name":"Shudokan B","dojo":"Y"}]}`)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(clean))
@@ -1406,12 +1439,12 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: cid, Name: "Asddasd", Date: "12-05-2026",
 		WithZekkenName: false, HasParticipantIDs: true,
-		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"},
 	}))
 
 	body := []byte(`{
 		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
-		"format":"playoffs","kind":"individual","courts":["A"],
+		"format":"knockout","kind":"individual","courts":["A"],
 		"withZekkenName":false,
 		"players":[
 			{"id":"asddasd-p1","name":"Aaron Adams","dojo":"Team Alpha"},
@@ -1444,7 +1477,7 @@ func TestPUTCompetition_RosterPUTPreservesIDsAndAlignsColumns(t *testing.T) {
 	// Idempotent second PUT, ids stay stable.
 	body2 := fmt.Appendf(nil, `{
 		"id":"asddasd","name":"Asddasd","date":"12-05-2026",
-		"format":"playoffs","kind":"individual","courts":["A"],
+		"format":"knockout","kind":"individual","courts":["A"],
 		"withZekkenName":false,
 		"players":[
 			{"id":%q,"name":"Aaron Adams","dojo":"Team Alpha"},
@@ -1473,13 +1506,13 @@ func TestPUTCompetition_RosterPUTPreservesUppercaseUUID(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: cid, Name: "Upper UUID", Date: "12-05-2026",
 		WithZekkenName: false, HasParticipantIDs: true,
-		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"},
 	}))
 
 	upperUUID := "85CDEB35-C066-4667-B7FD-43EBAE8A9F13"
 	body := fmt.Appendf(nil, `{
 		"id":"upper-uuid","name":"Upper UUID","date":"12-05-2026",
-		"format":"playoffs","kind":"individual","courts":["A"],
+		"format":"knockout","kind":"individual","courts":["A"],
 		"withZekkenName":false,
 		"players":[{"id":%q,"name":"Aaron Adams","dojo":"Team Alpha"}]
 	}`, upperUUID)
@@ -1525,12 +1558,12 @@ func TestPUTCompetition_RosterPUT_FlagFlipFailureReturns500(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
 		HasParticipantIDs: false,
-		Format:            state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Format:            state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"},
 	}))
 
 	body, _ := json.Marshal(state.Competition{
 		ID: cid, Name: "Flip Fails", Date: "12-05-2026",
-		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"},
 		Players: []domain.Player{
 			{ID: "flip-fails-p1", Name: "Aaron Adams", Dojo: "Team Alpha"},
 		},
@@ -1588,12 +1621,12 @@ func TestPUTCompetition_RosterPUTResponseHardenedAgainstStaleFlag(t *testing.T) 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: cid, Name: "Stale Flag", Date: "12-05-2026",
 		WithZekkenName: false, HasParticipantIDs: false,
-		Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"},
 	}))
 
 	body := []byte(`{
 		"id":"stale-flag","name":"Stale Flag","date":"12-05-2026",
-		"format":"playoffs","kind":"individual","courts":["A"],
+		"format":"knockout","kind":"individual","courts":["A"],
 		"withZekkenName":false,
 		"players":[
 			{"id":"stale-flag-p1","name":"Aaron Adams","dojo":"Team Alpha"},
@@ -1712,8 +1745,8 @@ func TestRecordBracketMatchResult_PreservesRunningStatus(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     cid,
 		Name:   "Bracket",
-		Format: state.CompFormatPlayoffs,
-		Status: state.CompStatusPlayoffs,
+		Format: state.CompFormatKnockout,
+		Status: state.CompStatusKnockout,
 	}))
 	// Seed a single bracket match.
 	require.NoError(t, store.SaveBracket(cid, &state.Bracket{
@@ -1763,9 +1796,9 @@ func TestValidateCompetitionDurations(t *testing.T) {
 		wantErr bool
 	}{
 		{"pool below floor", state.Competition{PoolMatchDurationSeconds: 3}, true},
-		{"playoff below floor", state.Competition{PlayoffMatchDurationSeconds: state.MinMatchDurationSeconds - 1}, true},
+		{"knockout below floor", state.Competition{KnockoutMatchDurationSeconds: state.MinMatchDurationSeconds - 1}, true},
 		{"pool at floor", state.Competition{PoolMatchDurationSeconds: state.MinMatchDurationSeconds}, false},
-		{"playoff at ceiling", state.Competition{PlayoffMatchDurationSeconds: state.MaxMatchDurationSeconds}, false},
+		{"knockout at ceiling", state.Competition{KnockoutMatchDurationSeconds: state.MaxMatchDurationSeconds}, false},
 		{"pool above ceiling", state.Competition{PoolMatchDurationSeconds: state.MaxMatchDurationSeconds + 1}, true},
 		{"a valid sub-minute value passes", state.Competition{PoolMatchDurationSeconds: 150}, false},
 		{"negative is rejected", state.Competition{PoolMatchDurationSeconds: -1}, true},
@@ -1857,13 +1890,13 @@ func TestPUTCompetition_NaginataStartedGuard(t *testing.T) {
 		ID:       cid,
 		Name:     "Naginata Guard",
 		Date:     "12-05-2026",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		Naginata: true,
-		Status:   state.CompStatusPlayoffs, // past setup
+		Status:   state.CompStatusKnockout, // past setup
 	}))
 
 	// Attempt to toggle Naginata=false on a started competition.
-	body := []byte(`{"id":"naginata-guard","name":"Naginata Guard","date":"12-05-2026","format":"playoffs","naginata":false}`)
+	body := []byte(`{"id":"naginata-guard","name":"Naginata Guard","date":"12-05-2026","format":"knockout","naginata":false}`)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1883,11 +1916,11 @@ func TestPUTCompetition_NaginataStartedGuard(t *testing.T) {
 		ID:       cid,
 		Name:     "Naginata Guard",
 		Date:     "12-05-2026",
-		Format:   state.CompFormatPlayoffs,
+		Format:   state.CompFormatKnockout,
 		Naginata: true,
 		Status:   state.CompStatusSetup,
 	}))
-	body = []byte(`{"id":"naginata-guard","name":"Naginata Guard","date":"12-05-2026","format":"playoffs","naginata":false}`)
+	body = []byte(`{"id":"naginata-guard","name":"Naginata Guard","date":"12-05-2026","format":"knockout","naginata":false}`)
 	w = httptest.NewRecorder()
 	req, _ = http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -1904,7 +1937,7 @@ func TestGenerateDrawHandler(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	// Seed 8 players in a playoffs competition so GenerateDraw can succeed.
+	// Seed 8 players in a knockout competition so GenerateDraw can succeed.
 	players := make([]domain.Player, 8)
 	for i := range players {
 		players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "Dojo"}
@@ -1913,7 +1946,7 @@ func TestGenerateDrawHandler(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     cid,
 		Name:   "Gen Draw",
-		Format: state.CompFormatPlayoffs,
+		Format: state.CompFormatKnockout,
 		Courts: []string{"A"},
 		Status: state.CompStatusSetup,
 	}))
@@ -1966,7 +1999,7 @@ func TestCreateCompetitionEngiTeamExclusion(t *testing.T) {
 	})
 
 	t.Run("POST individual + engi=true is accepted (not rejected by the exclusion)", func(t *testing.T) {
-		comp := state.Competition{Name: "Indiv Engi", Kind: "individual", Engi: true, Format: "playoffs", Date: "12-07-2026", StartTime: "09:00"}
+		comp := state.Competition{Name: "Indiv Engi", Kind: "individual", Engi: true, Format: "knockout", Date: "12-07-2026", StartTime: "09:00"}
 		body, _ := json.Marshal(comp)
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
@@ -2362,7 +2395,7 @@ func TestDiscardDrawHandler(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:     cid,
 		Name:   "Discard Draw",
-		Format: state.CompFormatPlayoffs,
+		Format: state.CompFormatKnockout,
 		Courts: []string{"A"},
 		Status: state.CompStatusDrawReady,
 	}))
@@ -2580,9 +2613,9 @@ func TestNumberPrefixUniquenessHandlers(t *testing.T) {
 	})
 }
 
-// TestNormalizePoolConfig_LeagueAndPlayoffs verifies the normalizePoolConfig
+// TestNormalizePoolConfig_LeagueAndKnockout verifies the normalizePoolConfig
 // pure function directly (no HTTP round-trip needed for the unit assertion).
-func TestNormalizePoolConfig_LeagueAndPlayoffs(t *testing.T) {
+func TestNormalizePoolConfig_LeagueAndKnockout(t *testing.T) {
 	cases := []struct {
 		name          string
 		format        string
@@ -2600,8 +2633,8 @@ func TestNormalizePoolConfig_LeagueAndPlayoffs(t *testing.T) {
 			wantWinners:   0,
 		},
 		{
-			name:          "playoffs zeroes poolSize and poolWinners",
-			format:        state.CompFormatPlayoffs,
+			name:          "knockout zeroes poolSize and poolWinners",
+			format:        state.CompFormatKnockout,
 			inPoolSize:    8,
 			inPoolWinners: 3,
 			wantPoolSize:  0,
@@ -2795,13 +2828,13 @@ func TestPUTCompetition_TwoThirdPlacesImmutableAfterStart(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:             "tp-setup",
 		Name:           "TP Setup",
-		Format:         state.CompFormatPlayoffs,
+		Format:         state.CompFormatKnockout,
 		Kind:           "individual",
 		Status:         state.CompStatusSetup,
 		TwoThirdPlaces: &trueVal,
 	}))
 	body, _ := json.Marshal(state.Competition{
-		ID: "tp-setup", Name: "TP Setup", Format: state.CompFormatPlayoffs,
+		ID: "tp-setup", Name: "TP Setup", Format: state.CompFormatKnockout,
 		Kind: "individual", TwoThirdPlaces: &falseVal,
 	})
 	w := httptest.NewRecorder()
@@ -2818,13 +2851,13 @@ func TestPUTCompetition_TwoThirdPlacesImmutableAfterStart(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:             "tp-started",
 		Name:           "TP Started",
-		Format:         state.CompFormatPlayoffs,
+		Format:         state.CompFormatKnockout,
 		Kind:           "individual",
 		Status:         state.CompStatusPools,
 		TwoThirdPlaces: &trueVal,
 	}))
 	body, _ = json.Marshal(state.Competition{
-		ID: "tp-started", Name: "TP Started", Format: state.CompFormatPlayoffs,
+		ID: "tp-started", Name: "TP Started", Format: state.CompFormatKnockout,
 		Kind: "individual", TwoThirdPlaces: &falseVal,
 	})
 	w = httptest.NewRecorder()
@@ -3331,7 +3364,7 @@ func TestChusenCandidates_IncludesTeamIdentity(t *testing.T) {
 }
 
 // TestUpdateCompetition_TeamMatchTypeLockedWhenStarted verifies that changing
-// teamMatchType on a STARTED competition (status past setup, e.g. playoffs)
+// teamMatchType on a STARTED competition (status past setup, e.g. knockout)
 // returns 409. Flipping fixed <-> kachinuki mid-tournament would desync the
 // recorded bout structure from the scoring/advancement paradigm. Sibling of
 // the Naginata/Engi started-guards; the draw-ready lock alone left started
@@ -3350,7 +3383,7 @@ func TestUpdateCompetition_TeamMatchTypeLockedWhenStarted(t *testing.T) {
 		Courts:        []string{"A"},
 		PoolSize:      4,
 		PoolWinners:   2,
-		Status:        state.CompStatusPlayoffs,
+		Status:        state.CompStatusKnockout,
 	}))
 
 	basePayload := func(tmt state.TeamMatchType) map[string]any {
@@ -3751,7 +3784,7 @@ func TestCompetitionPutWritesCanonicalSeedIdentity(t *testing.T) {
 // paths), so flipping either after results already exist must be refused.
 //
 // Pre-fix, ONLY the draw-ready 409 protected these two fields; a competition
-// that had progressed past draw-ready (pools/playoffs/completed) accepted a
+// that had progressed past draw-ready (pools/knockout/completed) accepted a
 // format or kind change with a plain 200.
 //
 // The third subtest is the regression that matters most: the SPA has never
@@ -3770,7 +3803,7 @@ func TestUpdateCompetition_FormatKindLockedWhenStarted(t *testing.T) {
 		Courts:      []string{"A"},
 		PoolSize:    4,
 		PoolWinners: 2,
-		Status:      state.CompStatusPlayoffs, // started
+		Status:      state.CompStatusKnockout, // started
 	}))
 
 	basePayload := func(overrides map[string]any) map[string]any {
@@ -3953,8 +3986,8 @@ func TestUpdateCompetition_InheritedIllegalTeamMatchTypeIsRepairedNotRejected(t 
 // TestUpdateCompetition_MixedFormatRequiresUsablePoolSize verifies bc-symm's
 // fix for a settings PUT that flips format to mixed without a usable pool
 // size. normalizePoolConfig zeroes PoolSize/PoolWinners on the way TO
-// league/playoffs, but pre-fix nothing required a pool size on the way BACK
-// to mixed, so a league/playoffs -> mixed switch with an omitted/zero
+// league/knockout, but pre-fix nothing required a pool size on the way BACK
+// to mixed, so a league/knockout -> mixed switch with an omitted/zero
 // poolSize stored PoolSize 0 and the failure only surfaced much later at
 // draw time (engine/pools.go: "pool size must be at least 1").
 func TestUpdateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
@@ -4075,13 +4108,13 @@ func TestCreateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 	})
 
 	// The default is scoped to "mixed" on this door: normalizePoolConfig
-	// runs first and zeroes PoolSize for league/playoffs, and it must stay
+	// runs first and zeroes PoolSize for league/knockout, and it must stay
 	// zeroed -- a bare bracket has no pool phase to size.
 	t.Run("does not default a pool size for a format that has no pool phase", func(t *testing.T) {
 		body, _ := json.Marshal(map[string]any{
-			"id":     "create-playoffs-no-poolsize",
-			"name":   "Create Playoffs No PoolSize",
-			"format": state.CompFormatPlayoffs,
+			"id":     "create-knockout-no-poolsize",
+			"name":   "Create Knockout No PoolSize",
+			"format": state.CompFormatKnockout,
 			"courts": []string{"A"},
 		})
 		w := httptest.NewRecorder()
@@ -4090,7 +4123,7 @@ func TestCreateCompetition_MixedFormatRequiresUsablePoolSize(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-		stored, err := store.LoadCompetition("create-playoffs-no-poolsize")
+		stored, err := store.LoadCompetition("create-knockout-no-poolsize")
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Equal(t, 0, stored.PoolSize, "normalizePoolConfig zeroed this; the default must not undo it")

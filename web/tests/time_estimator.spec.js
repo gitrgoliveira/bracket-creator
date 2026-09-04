@@ -84,7 +84,7 @@ describe("estimateSchedule", () => {
         expect(estimateSchedule({ totalPlayers: 1, isPools: false, courts: 1, teamSize: 1 })).toBeNull();
     });
 
-    it("computes a basic playoffs-only estimate", () => {
+    it("computes a basic knockout-only estimate", () => {
         // 8 players → 7 elimination matches; teamSize=1; 4-min match; 0 rotation,
         // 0 break, 1 court ⇒ totalElimMinutes = 7*1*4 = 28.
         const e = estimateSchedule({
@@ -121,12 +121,12 @@ describe("estimateSchedule", () => {
         expect(e.totalParallelMinutes).toBe(14);
     });
 
-    it("computes a pools+playoffs estimate with round-robin", () => {
+    it("computes a pools+knockout estimate with round-robin", () => {
         // 12 players, 4-per-pool min mode, 3-min pool, 4-min elim, 1 court,
         // 0 rotation/break, round-robin on, 2 winners per pool.
         // numPools = floor(12/4) = 3; matches per pool = 4*3/2 = 6;
         // totalPoolMatches = 18; totalPoolMinutes = 18*1*3 = 54.
-        // playoffParticipants = 3*2 = 6; numElimMatches = 5;
+        // knockoutParticipants = 3*2 = 6; numElimMatches = 5;
         // totalElimMinutes = 5*1*4 = 20.
         const e = estimateSchedule({
             totalPlayers: 12,
@@ -146,7 +146,7 @@ describe("estimateSchedule", () => {
         expect(e.totalPoolMinutes).toBe(54);
         expect(e.totalElimMinutes).toBe(20);
         expect(e.totalSequentialMinutes).toBe(74);
-        expect(e.playoffParticipants).toBe(6);
+        expect(e.knockoutParticipants).toBe(6);
         expect(e.numElimMatches).toBe(5);
     });
 

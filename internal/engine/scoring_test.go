@@ -368,10 +368,10 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		assert.Equal(t, AutoCompleteNoChange, outcome)
 	})
 
-	t.Run("ignored for playoffs-format competitions", func(t *testing.T) {
+	t.Run("ignored for knockout-format competitions", func(t *testing.T) {
 		koID := "auto-complete-ko"
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID: koID, Name: "KO", Format: state.CompFormatPlayoffs, Status: state.CompStatusPlayoffs,
+			ID: koID, Name: "KO", Format: state.CompFormatKnockout, Status: state.CompStatusKnockout,
 		}))
 		require.NoError(t, store.SavePoolMatches(koID, []state.MatchResult{
 			{ID: "M1", Status: state.MatchStatusCompleted, Winner: "X", SideA: "X", SideB: "Y"},
@@ -380,7 +380,7 @@ func TestMaybeAutoCompletePools(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, AutoCompleteNoChange, outcome)
 		comp, _ := store.LoadCompetition(koID)
-		assert.Equal(t, state.CompStatusPlayoffs, comp.Status)
+		assert.Equal(t, state.CompStatusKnockout, comp.Status)
 	})
 
 	// (Mixed-format MaybeAutoCompletePools behavior is covered in
@@ -827,7 +827,7 @@ func TestMaybeAutoCompletePools_ConcurrentInvalidateNotLost(t *testing.T) {
 			// Admin invalidate: simulate via direct UpdateCompetitionChanged
 			// (mirrors what the POST /invalidate handler does).
 			c, err := store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
-				if current == nil || (current.Status != state.CompStatusPools && current.Status != state.CompStatusPlayoffs) {
+				if current == nil || (current.Status != state.CompStatusPools && current.Status != state.CompStatusKnockout) {
 					return nil, nil
 				}
 				current.Status = state.CompStatusInvalid
@@ -1626,8 +1626,8 @@ func TestRecordBracketMatchResult_DaihyosenWinnerDerived(t *testing.T) {
 	compID := "dh-bracket-winner"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "DH Bracket", Format: state.CompFormatPlayoffs,
-		Status: state.CompStatusPlayoffs, TeamSize: 3,
+		ID: compID, Name: "DH Bracket", Format: state.CompFormatKnockout,
+		Status: state.CompStatusKnockout, TeamSize: 3,
 	}))
 
 	// Two-round bracket: r0m0 feeds winner into r1m0.
@@ -2020,7 +2020,7 @@ func TestRevertBracketMatch_StaleWriteFenced(t *testing.T) {
 	compID := "revert-fence"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Revert Fence Test", Status: state.CompStatusPlayoffs,
+		ID: compID, Name: "Revert Fence Test", Status: state.CompStatusKnockout,
 	}))
 
 	tStart := time.Now().UnixMilli() - 10_000 // 10s ago

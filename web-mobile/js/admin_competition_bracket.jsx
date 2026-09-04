@@ -239,7 +239,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   }
   const select = (m, ri, mi) => setSelected({ matchId: m.id, ri, mi });
   // Look up the selected match by ID rather than [ri][mi] index. The
-  // index can go stale if an SSE-driven bracket rebuild (playoff
+  // index can go stale if an SSE-driven bracket rebuild (knockout
   // regeneration, source-comp promotion) reorders entries between the
   // user's click and the next render/action; the ID is the only stable
   // handle we set in `selected`. Returns null when the match has been
@@ -291,7 +291,7 @@ function AdminBracket({ c, t, bracket, onMoveCourt, onEditScore, tweaks, passwor
   // fill-in model where pool finishers seed into the knockout as each pool completes.
   // Show the "filling in" banner ONLY when pool-origin placeholders remain (a
   // mixed comp whose feeder pools haven't all finished): NOT for ordinary
-  // "Winner of rX-mY" feeders or structural byes, which standalone playoffs and
+  // "Winner of rX-mY" feeders or structural byes, which standalone knockout and
   // bye-containing brackets legitimately have.
   const hasUnseededPools = bracket.rounds.some(r => (r || []).some(m => hasPoolOriginPlaceholder(m)));
   return (

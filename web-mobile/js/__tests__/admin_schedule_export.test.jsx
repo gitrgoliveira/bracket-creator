@@ -76,12 +76,12 @@ describe('buildXlsxBody thirdPlaceMatch param', () => {
   ];
 
   it('sends thirdPlaceMatch=on for a naginata competition with no explicit twoThirdPlaces (legacy fallback: !naginata)', () => {
-    const body = buildXlsxBody({ format: 'playoffs', naginata: true, courts: ['A'] }, 'Test', four);
+    const body = buildXlsxBody({ format: 'knockout', naginata: true, courts: ['A'] }, 'Test', four);
     expect(body.get('thirdPlaceMatch')).toBe('on');
   });
 
   it('does NOT send thirdPlaceMatch for a non-naginata competition with no explicit twoThirdPlaces (kendo default: joint 3rds)', () => {
-    const body = buildXlsxBody({ format: 'playoffs', courts: ['A'] }, 'Test', four);
+    const body = buildXlsxBody({ format: 'knockout', courts: ['A'] }, 'Test', four);
     expect(body.get('thirdPlaceMatch')).toBeNull();
   });
 
@@ -89,7 +89,7 @@ describe('buildXlsxBody thirdPlaceMatch param', () => {
   // single 3rd place (twoThirdPlaces: false) must still get the bronze
   // block. The old cfg.naginata check would have missed this entirely.
   it('sends thirdPlaceMatch=on for a NON-naginata competition that opted into a single 3rd place', () => {
-    const body = buildXlsxBody({ format: 'playoffs', naginata: false, twoThirdPlaces: false, courts: ['A'] }, 'Test', four);
+    const body = buildXlsxBody({ format: 'knockout', naginata: false, twoThirdPlaces: false, courts: ['A'] }, 'Test', four);
     expect(body.get('thirdPlaceMatch')).toBe('on');
   });
 
@@ -97,12 +97,12 @@ describe('buildXlsxBody thirdPlaceMatch param', () => {
   // 3rd places (twoThirdPlaces: true) must NOT get the bronze block. The old
   // cfg.naginata check would have wrongly sent it.
   it('does NOT send thirdPlaceMatch for a NAGINATA competition that opted into joint 3rd places', () => {
-    const body = buildXlsxBody({ format: 'playoffs', naginata: true, twoThirdPlaces: true, courts: ['A'] }, 'Test', four);
+    const body = buildXlsxBody({ format: 'knockout', naginata: true, twoThirdPlaces: true, courts: ['A'] }, 'Test', four);
     expect(body.get('thirdPlaceMatch')).toBeNull();
   });
 
   it('never sends the legacy naginata field', () => {
-    const body = buildXlsxBody({ format: 'playoffs', naginata: true, courts: ['A'] }, 'Test', four);
+    const body = buildXlsxBody({ format: 'knockout', naginata: true, courts: ['A'] }, 'Test', four);
     expect(body.get('naginata')).toBeNull();
   });
 });
@@ -149,7 +149,7 @@ describe('buildXlsxBody non-engi roster lines', () => {
 
 describe('buildXlsxBody courts guard', () => {
   const baseCfg = {
-    format: 'playoffs',
+    format: 'knockout',
   };
 
   const four = [

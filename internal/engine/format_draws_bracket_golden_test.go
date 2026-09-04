@@ -100,7 +100,7 @@ func TestCompetitionDrawsBracket_TableCoversEveryFormat(t *testing.T) {
 	}
 
 	for _, format := range []string{
-		state.CompFormatPlayoffs,
+		state.CompFormatKnockout,
 		state.CompFormatMixed,
 		state.CompFormatLeague,
 		state.CompFormatSwiss,

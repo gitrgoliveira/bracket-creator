@@ -24,28 +24,28 @@ func TestEstimateScheduleForCompetition_UnknownComp(t *testing.T) {
 	assert.ErrorAs(t, err, &nfe, "unknown compID must return NotFoundError")
 }
 
-// TestEstimateScheduleForCompetition_PlayoffsOnly verifies a playoffs-only
+// TestEstimateScheduleForCompetition_KnockoutOnly verifies a knockout-only
 // competition: no pool matches, bracket over all players.
-func TestEstimateScheduleForCompetition_PlayoffsOnly(t *testing.T) {
+func TestEstimateScheduleForCompetition_KnockoutOnly(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "est-playoffs"
+	compID := "est-knockout"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                          compID,
-		Format:                      state.CompFormatPlayoffs,
-		Kind:                        "individual",
-		Courts:                      []string{"A"},
-		StartTime:                   "09:00",
-		PoolMatchDurationSeconds:    180,
-		PlayoffMatchDurationSeconds: 300,
-		Status:                      state.CompStatusSetup,
+		ID:                           compID,
+		Format:                       state.CompFormatKnockout,
+		Kind:                         "individual",
+		Courts:                       []string{"A"},
+		StartTime:                    "09:00",
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
 	}))
 	// 8 players → NextPow2(8)=8, bracket matches = 8-1 = 7.
 	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"})
 
 	est, err := eng.EstimateScheduleForCompetition(compID)
 	require.NoError(t, err)
-	// Must be non-zero (7 playoff matches × some duration > 0).
+	// Must be non-zero (7 knockout matches × some duration > 0).
 	assert.Greater(t, est.TotalDurationMinutes, 0)
 	assert.Len(t, est.PerCourtMinutes, 1)
 
@@ -58,7 +58,7 @@ func TestEstimateScheduleForCompetition_PlayoffsOnly(t *testing.T) {
 }
 
 // TestEstimateScheduleForCompetition_Mixed verifies a mixed (Pools + Knockout)
-// competition: pool AND playoff matches contribute.
+// competition: pool AND knockout matches contribute.
 func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "est-mixed"
@@ -67,18 +67,18 @@ func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 	// pool matches = 3*C(3,2)=9, bracket = bracketMatchCount(6)=5
 	// (pow2=8, byes=2 distributed to top seeds, mp-sess, so real=N-1=5).
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                          compID,
-		Format:                      state.CompFormatMixed,
-		Kind:                        "individual",
-		PoolSize:                    3,
-		PoolSizeMode:                "min",
-		PoolWinners:                 2,
-		RoundRobin:                  true,
-		Courts:                      []string{"A"},
-		StartTime:                   "09:00",
-		PoolMatchDurationSeconds:    180,
-		PlayoffMatchDurationSeconds: 300,
-		Status:                      state.CompStatusSetup,
+		ID:                           compID,
+		Format:                       state.CompFormatMixed,
+		Kind:                         "individual",
+		PoolSize:                     3,
+		PoolSizeMode:                 "min",
+		PoolWinners:                  2,
+		RoundRobin:                   true,
+		Courts:                       []string{"A"},
+		StartTime:                    "09:00",
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
 	}))
 	saveTestParticipants(t, store, compID, []string{
 		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank", "Grace", "Hank", "Ivy",
@@ -99,12 +99,12 @@ func TestEstimateScheduleForCompetition_Mixed(t *testing.T) {
 }
 
 // TestEstimateScheduleForCompetition_League verifies a league-format
-// competition: all participants in one pool, no playoffs.
+// competition: all participants in one pool, no knockout.
 func TestEstimateScheduleForCompetition_League(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "est-league"
 
-	// 5 players → C(5,2)=10 pool matches, 0 playoff.
+	// 5 players → C(5,2)=10 pool matches, 0 knockout.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:                       compID,
 		Format:                   state.CompFormatLeague,
@@ -128,7 +128,7 @@ func TestEstimateScheduleForCompetition_League(t *testing.T) {
 }
 
 // TestEstimateScheduleForCompetition_Swiss verifies a Swiss-format competition:
-// swissRounds * ceil(n/2) pool matches, no playoffs.
+// swissRounds * ceil(n/2) pool matches, no knockout.
 func TestEstimateScheduleForCompetition_Swiss(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "est-swiss"
@@ -197,14 +197,14 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		compID := "est-checkin-some"
 
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:                          compID,
-			Format:                      state.CompFormatPlayoffs,
-			Kind:                        "individual",
-			Courts:                      []string{"A"},
-			StartTime:                   "09:00",
-			PlayoffMatchDurationSeconds: 300,
-			Status:                      state.CompStatusSetup,
-			CheckInEnabled:              true,
+			ID:                           compID,
+			Format:                       state.CompFormatKnockout,
+			Kind:                         "individual",
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+			CheckInEnabled:               true,
 		}))
 		// 8 registered, only 4 checked in.
 		// 4 → bracketMatchCount(4) = 3 (power-of-2, same under any formula).
@@ -234,14 +234,14 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		compID := "est-checkin-none"
 
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:                          compID,
-			Format:                      state.CompFormatPlayoffs,
-			Kind:                        "individual",
-			Courts:                      []string{"A"},
-			StartTime:                   "09:00",
-			PlayoffMatchDurationSeconds: 300,
-			Status:                      state.CompStatusSetup,
-			CheckInEnabled:              true,
+			ID:                           compID,
+			Format:                       state.CompFormatKnockout,
+			Kind:                         "individual",
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+			CheckInEnabled:               true,
 		}))
 		// 8 players, none checked in → opt-in fallback returns all 8.
 		// bracketMatchCount(8)=7 under any formula (power-of-2).
@@ -253,7 +253,7 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		est, err := eng.EstimateScheduleForCompetition(compID)
 		require.NoError(t, err)
 
-		// 8 players playoffs: bracketMatchCount(8) = 7 (power-of-2, any formula).
+		// 8 players knockout: bracketMatchCount(8) = 7 (power-of-2, any formula).
 		comp, _ := store.LoadCompetition(compID)
 		tourn, _ := store.LoadTournament()
 		direct := EstimateForCounts(0, 7, comp, tourn)
@@ -266,14 +266,14 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 		compID := "est-checkin-disabled"
 
 		require.NoError(t, store.SaveCompetition(&state.Competition{
-			ID:                          compID,
-			Format:                      state.CompFormatPlayoffs,
-			Kind:                        "individual",
-			Courts:                      []string{"A"},
-			StartTime:                   "09:00",
-			PlayoffMatchDurationSeconds: 300,
-			Status:                      state.CompStatusSetup,
-			CheckInEnabled:              false, // disabled
+			ID:                           compID,
+			Format:                       state.CompFormatKnockout,
+			Kind:                         "individual",
+			Courts:                       []string{"A"},
+			StartTime:                    "09:00",
+			KnockoutMatchDurationSeconds: 300,
+			Status:                       state.CompStatusSetup,
+			CheckInEnabled:               false, // disabled
 		}))
 		// 4 checked in of 8, but CheckInEnabled=false → all 8 used.
 		saveParticipantsWithCheckIn(t, store, compID,
@@ -297,9 +297,9 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 // Integration cross-check: bracket count vs real draw pipeline
 // ---------------------------------------------------------------------------
 
-// TestEstimateMatchCounts_vs_RealPlayoffsDraw validates that
+// TestEstimateMatchCounts_vs_RealKnockoutDraw validates that
 // helper.EstimateMatchCounts' bracket count equals the number of REAL (non-bye)
-// bracket matches generated by generatePlayoffs (the real draw engine).
+// bracket matches generated by generateKnockout (the real draw engine).
 //
 // bracketMatchCount returns the count of court-time-consuming bracket matches
 // (those NOT auto-marked Completed at generation time), not NextPow2(players)-1
@@ -312,7 +312,7 @@ func TestEstimateParticipantCount_CheckInFilter(t *testing.T) {
 // The test runs the REAL draw pipeline via eng.StartCompetition, counts the
 // non-auto-resolved matches (Status != Completed at generation time), and
 // asserts it equals the estimator's count.
-func TestEstimateMatchCounts_vs_RealPlayoffsDraw(t *testing.T) {
+func TestEstimateMatchCounts_vs_RealKnockoutDraw(t *testing.T) {
 	tests := []struct {
 		name        string
 		compID      string // alphanumeric/hyphen only, no spaces or parens
@@ -320,15 +320,15 @@ func TestEstimateMatchCounts_vs_RealPlayoffsDraw(t *testing.T) {
 		wantBracket int // real court-time matches = N-1 (distributed byes)
 	}{
 		// Power-of-2: no byes → all N-1 slots are real.
-		{"4 players (power-of-2, no byes)", "playoffs-4p", 4, 3},
-		{"8 players (power-of-2, no byes)", "playoffs-8p", 8, 7},
-		{"16 players (power-of-2)", "playoffs-16p", 16, 15},
+		{"4 players (power-of-2, no byes)", "knockout-4p", 4, 3},
+		{"8 players (power-of-2, no byes)", "knockout-8p", 8, 7},
+		{"16 players (power-of-2)", "knockout-16p", 16, 15},
 		// Non-power-of-2: byes are distributed to top seeds, never paired, so the
 		// court-time count is N-1.
 		// N=5: pow2=8, byes=3 distributed → real=N-1=4.
-		{"5 players (byes to top seeds, 4 real)", "playoffs-5p", 5, 4},
+		{"5 players (byes to top seeds, 4 real)", "knockout-5p", 5, 4},
 		// N=12: pow2=16, byes=4 distributed → real=N-1=11.
-		{"12 players (needs byes, pads to 16)", "playoffs-12p", 12, 11},
+		{"12 players (needs byes, pads to 16)", "knockout-12p", 12, 11},
 	}
 
 	for _, tc := range tests {
@@ -338,7 +338,7 @@ func TestEstimateMatchCounts_vs_RealPlayoffsDraw(t *testing.T) {
 
 			require.NoError(t, store.SaveCompetition(&state.Competition{
 				ID:        compID,
-				Format:    state.CompFormatPlayoffs,
+				Format:    state.CompFormatKnockout,
 				Kind:      "individual",
 				Courts:    []string{"A"},
 				StartTime: "09:00",
@@ -376,13 +376,13 @@ func TestEstimateMatchCounts_vs_RealPlayoffsDraw(t *testing.T) {
 				tc.playerCount, tc.wantBracket)
 
 			// Verify EstimateMatchCounts agrees with real playable count.
-			poolCount, playoffCount, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
-				Format:      state.CompFormatPlayoffs,
+			poolCount, knockoutCount, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
+				Format:      state.CompFormatKnockout,
 				PlayerCount: tc.playerCount,
 			})
 			require.NoError(t, err)
-			assert.Equal(t, 0, poolCount, "playoffs-only must have 0 pool matches")
-			assert.Equal(t, realPlayableCount, playoffCount,
+			assert.Equal(t, 0, poolCount, "knockout-only must have 0 pool matches")
+			assert.Equal(t, realPlayableCount, knockoutCount,
 				"EstimateMatchCounts bracket count must match real non-bye match count for %d players", tc.playerCount)
 		})
 	}
@@ -465,7 +465,7 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 			require.NoError(t, err)
 			realPoolCount := len(poolMatches)
 
-			poolCount, playoffCount, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
+			poolCount, knockoutCount, err := helper.EstimateMatchCounts(helper.EstimateMatchCountsInput{
 				Format:       state.CompFormatMixed,
 				PlayerCount:  tc.playerCount,
 				PoolSize:     tc.poolSize,
@@ -479,10 +479,10 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 				"estimator pool count must match pool-matches.csv length for %s", tc.name)
 			assert.Equal(t, tc.wantPools, poolCount,
 				"pool count should be %d for %s", tc.wantPools, tc.name)
-			assert.Equal(t, tc.wantBracket, playoffCount,
+			assert.Equal(t, tc.wantBracket, knockoutCount,
 				"bracket count should be %d for %s", tc.wantBracket, tc.name)
 
-			// Complete all pool matches and start the playoffs to validate the
+			// Complete all pool matches and start the knockout to validate the
 			// bracket count against the real bracket.
 			for i := range poolMatches {
 				poolMatches[i].Status = state.MatchStatusCompleted
@@ -502,7 +502,7 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 			bracketCompID := "bracket-" + tc.compID
 			require.NoError(t, store2.SaveCompetition(&state.Competition{
 				ID:        bracketCompID,
-				Format:    state.CompFormatPlayoffs,
+				Format:    state.CompFormatKnockout,
 				Kind:      "individual",
 				Courts:    []string{"A"},
 				StartTime: "09:00",
@@ -520,7 +520,7 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 			require.NotNil(t, bracket)
 
 			// Count only non-auto-resolved (real) matches, same as
-			// TestEstimateMatchCounts_vs_RealPlayoffsDraw (Finding 3).
+			// TestEstimateMatchCounts_vs_RealKnockoutDraw (Finding 3).
 			realPlayableCount := 0
 			for _, round := range bracket.Rounds {
 				for _, m := range round {
@@ -533,7 +533,7 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 			assert.Equal(t, tc.wantBracket, realPlayableCount,
 				"real non-bye bracket match count for %d finalists should be %d (case %s)",
 				finalists, tc.wantBracket, tc.name)
-			assert.Equal(t, playoffCount, realPlayableCount,
+			assert.Equal(t, knockoutCount, realPlayableCount,
 				"EstimateMatchCounts bracket count must match real non-bye match count for %d finalists",
 				finalists)
 		})
@@ -546,16 +546,16 @@ func TestEstimateMatchCounts_vs_RealMixedDraw(t *testing.T) {
 // three-separate-walks implementation and must not move (mp-gmcg review F7).
 func TestEstimateForCounts_KachinukiRange_Golden(t *testing.T) {
 	comp := &state.Competition{
-		ID:                          "est-kachinuki",
-		Format:                      state.CompFormatMixed,
-		Kind:                        "team",
-		TeamMatchType:               state.TeamMatchTypeKachinuki,
-		TeamSize:                    5,
-		Courts:                      []string{"A", "B"},
-		StartTime:                   "09:00",
-		PoolMatchDurationSeconds:    180,
-		PlayoffMatchDurationSeconds: 300,
-		Status:                      state.CompStatusSetup,
+		ID:                           "est-kachinuki",
+		Format:                       state.CompFormatMixed,
+		Kind:                         "team",
+		TeamMatchType:                state.TeamMatchTypeKachinuki,
+		TeamSize:                     5,
+		Courts:                       []string{"A", "B"},
+		StartTime:                    "09:00",
+		PoolMatchDurationSeconds:     180,
+		KnockoutMatchDurationSeconds: 300,
+		Status:                       state.CompStatusSetup,
 	}
 	tourn := &state.Tournament{}
 	state.ApplyTournamentDefaults(tourn)

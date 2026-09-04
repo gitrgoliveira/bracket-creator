@@ -580,7 +580,7 @@ competitions:
 	// existing comp.ID but a different comp.Name would silently
 	// overwrite the existing competition (its name was unique, but
 	// SaveCompetition writes by ID). Mirrors the ID-collision guard
-	// already in POST /competitions and CreatePlayoff.
+	// already in POST /competitions and CreateKnockout.
 	t.Run("Duplicate ID Across Import And Existing Comp Rejected", func(t *testing.T) {
 		// Pre-existing competition with a known name.
 		require.NoError(t, store.SaveCompetition(&state.Competition{

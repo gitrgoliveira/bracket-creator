@@ -417,7 +417,7 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": compID})
 		hub.Broadcast(EventScheduleUpdated, nil)
 	case engine.AutoCompleteKnockoutStarted:
-		// The LAST pool was just seeded → status moved pools → playoffs (only
+		// The LAST pool was just seeded → status moved pools → knockout (only
 		// knockout matches remain). Tell clients to reload the now-fully-live
 		// competition.
 		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": compID})

@@ -131,7 +131,7 @@ func TestPOSTCompetition_ExtraQualifiers_Validation(t *testing.T) {
 
 // TestPOSTCompetition_ExtraQualifiers_ZeroedForNonPoolFormats verifies
 // normalizePoolConfig zeroes ExtraQualifiers for every non-pool-fed format
-// (league, playoffs, swiss; TestPUTCompetition_Swiss_StaleExtraQualifiers
+// (league, knockout, swiss; TestPUTCompetition_Swiss_StaleExtraQualifiers
 // covers the swiss settings path) BEFORE ValidateExtraQualifiers runs, so a stray
 // non-standard value sent for a format with no pool phase is silently
 // dropped rather than rejected or persisted: ExtraQualifiers only has
@@ -141,11 +141,11 @@ func TestPOSTCompetition_ExtraQualifiers_ZeroedForNonPoolFormats(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 
 	comp := state.Competition{
-		ID:              "playoffs-eq-zeroed",
-		Name:            "Playoffs EQ Zeroed",
+		ID:              "knockout-eq-zeroed",
+		Name:            "Knockout EQ Zeroed",
 		Kind:            "individual",
-		Format:          state.CompFormatPlayoffs,
-		ExtraQualifiers: state.ExtraQualifiersLargerPools, // meaningless for playoffs; must not survive
+		Format:          state.CompFormatKnockout,
+		ExtraQualifiers: state.ExtraQualifiersLargerPools, // meaningless for knockout; must not survive
 	}
 	body, err := json.Marshal(comp)
 	require.NoError(t, err)
@@ -354,7 +354,7 @@ func TestPUTCompetition_Swiss_StaleExtraQualifiers(t *testing.T) {
 	saved, err := store.LoadCompetition(cid)
 	require.NoError(t, err)
 	assert.Equal(t, state.ExtraQualifiersNone, saved.ExtraQualifiers,
-		"the stale value must be zeroed, exactly as league/playoffs are")
+		"the stale value must be zeroed, exactly as league/knockout are")
 }
 
 // TestPUTCompetition_ExtraQualifiers_SettingsOnlyRoundTrip verifies the

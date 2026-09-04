@@ -910,7 +910,7 @@ func individualScoreSummary(s *state.PlayerStanding) string {
 
 // deriveDaihyosenWinner fills result.Winner from a completed daihyosen
 // sub-result (Position == -1) when the caller has not set it explicitly.
-// Playoff team matches end in daihyosen when IV and PW are tied; the
+// Knockout team matches end in daihyosen when IV and PW are tied; the
 // operator scores a single representative bout whose winner becomes the
 // team match winner. The sub-result Winner may be the representative
 // player's name or the team name; this function maps it back to the
@@ -1484,7 +1484,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 // kept distinct: a top-two tie is decided by a tie-breaker, never shared. It
 // is a no-op for non-leagues, when the setting is off, or when the pool
 // carries manual rank overrides (the operator's explicit order wins).
-// Scoping to leagues keeps mixed/playoffs knockout seeding strictly sequential
+// Scoping to leagues keeps mixed and knockout seeding strictly sequential
 // -- those formats decide a single/joint 3rd with a bronze match instead, via
 // RequiresSingleThirdPlace; naginata leagues leave the setting off and so keep
 // a single 3rd.
@@ -1797,7 +1797,7 @@ func validateBracketCompletion(matchID string, status state.MatchStatus, winner 
 }
 
 // applyBracketMatchResult writes result into a single bracket match — a round
-// match or the bronze (3rd-place) playoff, which are the same shape and take
+// match or the bronze (3rd-place) knockout, which are the same shape and take
 // the same rules. It reports whether the write APPLIED: false with a nil error
 // means the timestamp guard dropped it as stale, and the caller must then skip
 // anything downstream (propagation).
@@ -1995,7 +1995,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			return nil
 		}
 	}
-	// The bronze (3rd-place) playoff lives in Bracket.ThirdPlaceMatch, NOT in
+	// The bronze (3rd-place) knockout lives in Bracket.ThirdPlaceMatch, NOT in
 	// Rounds, so the scan above never finds it. There is no propagation out of
 	// bronze: it has no downstream match.
 	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
@@ -2028,7 +2028,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 		nextM.SideB = m.Winner
 	}
 
-	// Feed the loser of a SEMIFINAL into the bronze (3rd-place) playoff match.
+	// Feed the loser of a SEMIFINAL into the bronze (3rd-place) knockout match.
 	// The semifinal round index is len(Rounds)-2 (the round that feeds the
 	// final). This is a pure advancement step: it moves a name only, never
 	// computes a score, so it keeps propagateBracketWinner a pure helper.
@@ -2180,7 +2180,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 				}
 			}
 		}
-		// The bronze (3rd-place) playoff lives outside Rounds; handle it
+		// The bronze (3rd-place) knockout lives outside Rounds; handle it
 		// here. Bronze has no downstream match, so no propagation is needed.
 		if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchId {
 			bm := bracket.ThirdPlaceMatch

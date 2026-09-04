@@ -201,24 +201,24 @@ $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx go/generate $(GO_SOURCES) $
 
 examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."
-	rm -f pools-example-*.xlsx playoffs-example-*.xlsx
+	rm -f pools-example-*.xlsx playoffs-example-*.xlsx knockout-example-*.xlsx
 	@echo "Building examples..."
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv -o ./pools-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_small_3_teams.csv -o ./pools-example-small-3-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8-round-robin.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_teams_of_3_pool_3.csv -o ./pools-example-teams-of-3-round-robin.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -t 5 -f ./test-data/mock_data_small.csv -o ./playoffs-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -t 5 -f ./test-data/mock_data_small.csv -o ./knockout-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./knockout-example-medium.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./knockout-example-large.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./knockout-example-medium-seeded.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./knockout-example-large-seeded.xlsx
 # 5 pools sending ONE qualifier each, seeded, on two shiaijo. Every other
 # example uses -w 2, and no 2-qualifier draw changed shape in the pool-to-
 # knockout rework, so without this the workbooks exercise none of it. Here

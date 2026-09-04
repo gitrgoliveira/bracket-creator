@@ -454,13 +454,13 @@ func TestStartCompetition_CheckInDisabled_IgnoresStaleMarkers(t *testing.T) {
 		"check-in disabled: stale markers must be ignored and all participants drawn")
 }
 
-// TestStartCompetition_PlayoffsFormat_ExcludesNonCheckedIn verifies the filter
+// TestStartCompetition_KnockoutFormat_ExcludesNonCheckedIn verifies the filter
 // reaches the elimination-bracket path too.
-func TestStartCompetition_PlayoffsFormat_ExcludesNonCheckedIn(t *testing.T) {
+func TestStartCompetition_KnockoutFormat_ExcludesNonCheckedIn(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "checkin-playoffs"
+	compID := "checkin-knockout"
 
-	createTestCompetition(t, store, compID, "playoffs", 0)
+	createTestCompetition(t, store, compID, "knockout", 0)
 	enableCheckIn(t, store, compID)
 	saveParticipantsWithCheckIn(t, store, compID,
 		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve"},

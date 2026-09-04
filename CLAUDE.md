@@ -20,7 +20,7 @@ Before implementing features or making architectural decisions, read the project
 
 ## Project Overview
 
-A Go CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Supports multiple competition formats: **Playoffs** (direct elimination), **Mixed** (round-robin pools then knockout), **League** (full round-robin), and **Swiss** (Swiss-system across N rounds). Input is CSV, output is Excel with formula-linked cells for bracket visualization. The web API is documented via an OpenAPI specification in `specs/openapi.yaml`.
+A Go CLI and web application for generating kendo tournament brackets as Excel spreadsheets. Supports multiple competition formats: **Knockout** (direct elimination), **Mixed** (round-robin pools then knockout), **League** (full round-robin), and **Swiss** (Swiss-system across N rounds). Input is CSV, output is Excel with formula-linked cells for bracket visualization. The web API is documented via an OpenAPI specification in `specs/openapi.yaml`.
 
 ## Build & Test Commands
 
@@ -62,7 +62,7 @@ go test -cover ./internal/helper/...
 
 ### Package Responsibilities
 
-- **`cmd/`**: Cobra CLI commands. Each uses an options struct with a `run()` method. `create-pools` and `create-playoffs` share significant logic. Shared helpers (`processEntries`, `openOutputFile`, `assignPlayerNumbers`) live in `cmd/shared.go`.
+- **`cmd/`**: Cobra CLI commands. Each uses an options struct with a `run()` method. `create-pools` and `create-knockout` share significant logic. Shared helpers (`processEntries`, `openOutputFile`, `assignPlayerNumbers`) live in `cmd/shared.go`.
 - **`internal/helper/`**: Core business logic: CSV parsing, pool/match generation, tree building, seeding algorithms, and all Excel rendering. This is the largest package.
 - **`internal/excel/`**: Excel file lifecycle (`Client`), sheet operations (`SheetManager`), style definitions.
 - **`internal/service/`**: Service layer abstraction over helper logic.

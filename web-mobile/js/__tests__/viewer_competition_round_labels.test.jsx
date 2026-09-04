@@ -106,8 +106,8 @@ describe('ViewerCompetition stamps bracket rows with the EFFECTIVE round (mp-u37
     name: 'Knockout5',
     kind: 'individual',
     teamSize: 0,
-    format: 'playoffs',
-    status: 'playoffs',
+    format: 'knockout',
+    status: 'knockout',
     startTime: '09:00',
     courts: ['A'],
     config: {

@@ -15,13 +15,15 @@ import (
 
 // TestCompetitionLoadsPerPhaseDurations verifies FR-053 / NFR-025:
 // the Competition struct round-trips per-phase match durations
-// (pool_match_duration and playoff_match_duration) through YAML.
+// (the retired keys pool_match_duration and playoff_match_duration -- the
+// latter's yaml tag is intentionally unchanged by the knockout rename, see
+// KnockoutMatchDuration's doc comment) through YAML.
 func TestCompetitionLoadsPerPhaseDurations(t *testing.T) {
 	original := Competition{
-		ID:                   "test-comp",
-		Name:                 "Per-Phase Durations",
-		PoolMatchDuration:    2,
-		PlayoffMatchDuration: 3,
+		ID:                    "test-comp",
+		Name:                  "Per-Phase Durations",
+		PoolMatchDuration:     2,
+		KnockoutMatchDuration: 3,
 	}
 
 	data, err := yaml.Marshal(&original)
@@ -32,7 +34,7 @@ func TestCompetitionLoadsPerPhaseDurations(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, 2, loaded.PoolMatchDuration, "PoolMatchDuration should round-trip")
-	assert.Equal(t, 3, loaded.PlayoffMatchDuration, "PlayoffMatchDuration should round-trip")
+	assert.Equal(t, 3, loaded.KnockoutMatchDuration, "KnockoutMatchDuration should round-trip")
 }
 
 // TestCompetitionLegacyMatchDurationMigration verifies FR-054 / NFR-025 / R9:
@@ -53,12 +55,12 @@ match_duration: 5
 	ApplyCompetitionDefaults(&c)
 
 	assert.Equal(t, 300, c.PoolMatchDurationSeconds, "5 min must migrate to 300s for the pool phase")
-	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min must migrate to 300s for the playoff phase")
+	assert.Equal(t, 300, c.KnockoutMatchDurationSeconds, "5 min must migrate to 300s for the knockout phase")
 	// The retired keys are cleared so omitempty drops them on the next save and
 	// the file converges on the seconds-only schema.
 	assert.Zero(t, c.MatchDuration)
 	assert.Zero(t, c.PoolMatchDuration)
-	assert.Zero(t, c.PlayoffMatchDuration)
+	assert.Zero(t, c.KnockoutMatchDuration)
 }
 
 // TestSwissRoundsFieldPersists verifies FR-050a / NFR-025:
@@ -93,19 +95,19 @@ func TestSwissRoundsFieldPersists(t *testing.T) {
 	assert.Equal(t, CompFormatSwiss, loaded.Format, "Format should round-trip")
 }
 
-// TestLeagueFormatHidesPlayoffs verifies FR-050 / FR-051:
-// IsPlayoffEnabled() reports whether the competition's format includes a
-// playoff phase. League returns false; playoffs and mixed return true. An
+// TestLeagueFormatHidesKnockout verifies FR-050 / FR-051:
+// IsKnockoutEnabled() reports whether the competition's format includes a
+// knockout phase. League returns false; knockout and mixed return true. An
 // unset format ("") also returns true (mp-yuy8): it goes through
-// EffectiveFormat, which reads "" as standalone playoffs, matching the draw
+// EffectiveFormat, which reads "" as standalone knockout, matching the draw
 // pipeline's own default-case generation behaviour.
-func TestLeagueFormatHidesPlayoffs(t *testing.T) {
+func TestLeagueFormatHidesKnockout(t *testing.T) {
 	cases := []struct {
 		format string
 		want   bool
 	}{
 		{format: "league", want: false},
-		{format: "playoffs", want: true},
+		{format: "knockout", want: true},
 		{format: "mixed", want: true},
 		{format: "", want: true},
 	}
@@ -113,13 +115,13 @@ func TestLeagueFormatHidesPlayoffs(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("format=%q", tc.format), func(t *testing.T) {
 			c := Competition{Format: tc.format}
-			assert.Equalf(t, tc.want, c.IsPlayoffEnabled(), "format=%q", tc.format)
+			assert.Equalf(t, tc.want, c.IsKnockoutEnabled(), "format=%q", tc.format)
 		})
 	}
 }
 
 // TestCompetition_EffectiveFormat pins EffectiveFormat's single rule: an
-// unset Format ("") reads as standalone playoffs, matching what
+// unset Format ("") reads as standalone knockout, matching what
 // runDrawPipeline's generation switch has always done for it; every other
 // stored value (including an invalid one -- EffectiveFormat does not
 // validate) passes through unchanged.
@@ -128,8 +130,8 @@ func TestCompetition_EffectiveFormat(t *testing.T) {
 		format string
 		want   string
 	}{
-		{format: "", want: CompFormatPlayoffs},
-		{format: CompFormatPlayoffs, want: CompFormatPlayoffs},
+		{format: "", want: CompFormatKnockout},
+		{format: CompFormatKnockout, want: CompFormatKnockout},
 		{format: CompFormatMixed, want: CompFormatMixed},
 		{format: CompFormatLeague, want: CompFormatLeague},
 		{format: CompFormatSwiss, want: CompFormatSwiss},
@@ -218,17 +220,17 @@ func TestApplyCompetitionDefaults_MatchDurationPromotion(t *testing.T) {
 	c := &Competition{MatchDuration: 5}
 	ApplyCompetitionDefaults(c)
 	assert.Equal(t, 300, c.PoolMatchDurationSeconds, "MatchDuration should migrate to pool seconds")
-	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "MatchDuration should migrate to playoff seconds")
+	assert.Equal(t, 300, c.KnockoutMatchDurationSeconds, "MatchDuration should migrate to knockout seconds")
 }
 
 // TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField verifies that the
 // per-phase retired field takes precedence over the single-field one when both
 // are present in an old config.md.
 func TestApplyCompetitionDefaults_PerPhaseWinsOverSingleField(t *testing.T) {
-	c := &Competition{PoolMatchDuration: 4, PlayoffMatchDuration: 6, MatchDuration: 5}
+	c := &Competition{PoolMatchDuration: 4, KnockoutMatchDuration: 6, MatchDuration: 5}
 	ApplyCompetitionDefaults(c)
 	assert.Equal(t, 240, c.PoolMatchDurationSeconds)
-	assert.Equal(t, 360, c.PlayoffMatchDurationSeconds)
+	assert.Equal(t, 360, c.KnockoutMatchDurationSeconds)
 }
 
 // TestApplyCompetitionDefaults_ClampsIntoBand pins the clamp that makes every
@@ -245,7 +247,7 @@ func TestApplyCompetitionDefaults_ClampsIntoBand(t *testing.T) {
 	tooLong := &Competition{MatchDuration: 90} // 5400s, above the 3600s ceiling
 	ApplyCompetitionDefaults(tooLong)
 	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PoolMatchDurationSeconds)
-	assert.Equal(t, MaxMatchDurationSeconds, tooLong.PlayoffMatchDurationSeconds)
+	assert.Equal(t, MaxMatchDurationSeconds, tooLong.KnockoutMatchDurationSeconds)
 
 	// The floor is 60s and the retired fields are whole MINUTES, so the smallest
 	// value they can express already sits exactly on it. Only a direct sub-band
@@ -264,7 +266,7 @@ func TestApplyCompetitionDefaults_Idempotent(t *testing.T) {
 	first := *c
 	ApplyCompetitionDefaults(c)
 	assert.Equal(t, first.PoolMatchDurationSeconds, c.PoolMatchDurationSeconds)
-	assert.Equal(t, first.PlayoffMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+	assert.Equal(t, first.KnockoutMatchDurationSeconds, c.KnockoutMatchDurationSeconds)
 }
 
 // mp-m5kf: sub-minute (seconds) per-match durations.
@@ -274,10 +276,10 @@ func TestApplyCompetitionDefaults_Idempotent(t *testing.T) {
 // *Seconds fields back-filled (minutes*60) so the scheduler and UI read a
 // single source of truth.
 func TestApplyCompetitionDefaults_SecondsBackfillFromMinutes(t *testing.T) {
-	c := &Competition{PoolMatchDuration: 3, PlayoffMatchDuration: 5}
+	c := &Competition{PoolMatchDuration: 3, KnockoutMatchDuration: 5}
 	ApplyCompetitionDefaults(c)
 	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "3 min should migrate to 180s")
-	assert.Equal(t, 300, c.PlayoffMatchDurationSeconds, "5 min should migrate to 300s")
+	assert.Equal(t, 300, c.KnockoutMatchDurationSeconds, "5 min should migrate to 300s")
 }
 
 // TestApplyCompetitionDefaults_SecondsWinOverMinutes verifies that an explicit
@@ -290,24 +292,54 @@ func TestApplyCompetitionDefaults_SecondsWinOverMinutes(t *testing.T) {
 	assert.Zero(t, c.PoolMatchDuration, "the retired field is cleared either way")
 }
 
+// TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverMinutes pins bug 3
+// from the deleted write-on-read migration (upgradeCompetitionFormatLocked):
+// its guard checked KnockoutMatchDurationSeconds == 0 AFTER the whole-minute
+// key had already back-filled it, so a competition carrying BOTH the retired
+// sub-minute seconds key (KnockoutMatchDurationSecondsLegacy, yaml tag
+// playoff_match_duration_seconds) and the whole-minute key
+// (KnockoutMatchDuration) resolved to the whole-minute value rounded up
+// instead of the more precise one. The fold order inside
+// ApplyCompetitionDefaults must check the retired seconds key first.
+func TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverMinutes(t *testing.T) {
+	c := &Competition{KnockoutMatchDuration: 5, KnockoutMatchDurationSecondsLegacy: 150}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 150, c.KnockoutMatchDurationSeconds, "the retired seconds key must win over the whole-minute key (300)")
+	assert.Zero(t, c.KnockoutMatchDuration, "the retired whole-minute field is cleared either way")
+	assert.Zero(t, c.KnockoutMatchDurationSecondsLegacy, "the retired seconds field is cleared either way")
+}
+
+// The GLOBAL match_duration key is a separate fallback from the knockout-specific
+// one, and it is the shape real legacy files actually carry: the review of #413
+// named `match_duration: 3` alongside a custom playoff_match_duration_seconds as
+// the case that silently lost the operator's value. Pinning it separately because
+// the sibling test above would still pass if the fold only outranked
+// KnockoutMatchDuration and not MatchDuration.
+func TestApplyCompetitionDefaults_KnockoutSecondsLegacyWinsOverGlobalMinutes(t *testing.T) {
+	c := &Competition{MatchDuration: 3, KnockoutMatchDurationSecondsLegacy: 240}
+	ApplyCompetitionDefaults(c)
+	assert.Equal(t, 240, c.KnockoutMatchDurationSeconds, "the retired seconds key must win over the global match_duration (180)")
+	assert.Equal(t, 180, c.PoolMatchDurationSeconds, "the pool phase still takes the global fallback")
+}
+
 // TestCompetitionSecondsRoundTrip verifies the *Seconds fields persist through
 // YAML with their snake_case tags.
 func TestCompetitionSecondsRoundTrip(t *testing.T) {
 	original := Competition{
-		ID:                          "sec-comp",
-		Name:                        "Seconds",
-		PoolMatchDurationSeconds:    150,
-		PlayoffMatchDurationSeconds: 210,
+		ID:                           "sec-comp",
+		Name:                         "Seconds",
+		PoolMatchDurationSeconds:     150,
+		KnockoutMatchDurationSeconds: 210,
 	}
 	data, err := yaml.Marshal(&original)
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "pool_match_duration_seconds: 150")
-	assert.Contains(t, string(data), "playoff_match_duration_seconds: 210")
+	assert.Contains(t, string(data), "knockout_match_duration_seconds: 210")
 
 	var loaded Competition
 	require.NoError(t, yaml.Unmarshal(data, &loaded))
 	assert.Equal(t, 150, loaded.PoolMatchDurationSeconds)
-	assert.Equal(t, 210, loaded.PlayoffMatchDurationSeconds)
+	assert.Equal(t, 210, loaded.KnockoutMatchDurationSeconds)
 }
 
 // TestLoadCompetitionLocked_InvalidCompID covers the ValidateCompetitionID
@@ -540,24 +572,24 @@ func TestFightingSpiritAwardsRoundTrip(t *testing.T) {
 // subsequent settings save with 400, making the competition uneditable.
 func TestNormalizeStoredDurations_ClampsAlreadyPopulatedValue(t *testing.T) {
 	t.Run("above the ceiling", func(t *testing.T) {
-		c := &Competition{PoolMatchDurationSeconds: 99999, PlayoffMatchDurationSeconds: 99999}
+		c := &Competition{PoolMatchDurationSeconds: 99999, KnockoutMatchDurationSeconds: 99999}
 		normalizeStoredDurations(c)
 		assert.Equal(t, MaxMatchDurationSeconds, c.PoolMatchDurationSeconds)
-		assert.Equal(t, MaxMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+		assert.Equal(t, MaxMatchDurationSeconds, c.KnockoutMatchDurationSeconds)
 	})
 
 	t.Run("below the floor", func(t *testing.T) {
-		c := &Competition{PoolMatchDurationSeconds: 3, PlayoffMatchDurationSeconds: 59}
+		c := &Competition{PoolMatchDurationSeconds: 3, KnockoutMatchDurationSeconds: 59}
 		normalizeStoredDurations(c)
 		assert.Equal(t, MinMatchDurationSeconds, c.PoolMatchDurationSeconds)
-		assert.Equal(t, MinMatchDurationSeconds, c.PlayoffMatchDurationSeconds)
+		assert.Equal(t, MinMatchDurationSeconds, c.KnockoutMatchDurationSeconds)
 	})
 
 	t.Run("an in-band value and an unset value are untouched", func(t *testing.T) {
 		c := &Competition{PoolMatchDurationSeconds: 150}
 		normalizeStoredDurations(c)
 		assert.Equal(t, 150, c.PoolMatchDurationSeconds)
-		assert.Zero(t, c.PlayoffMatchDurationSeconds, "0 stays 0: unset means use the default")
+		assert.Zero(t, c.KnockoutMatchDurationSeconds, "0 stays 0: unset means use the default")
 	})
 
 	t.Run("nil is safe", func(t *testing.T) {

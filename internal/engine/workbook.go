@@ -25,7 +25,7 @@ import (
 //  2. Pool Draw sheet (helper.AddPoolsToSheet)
 //  3. Pool Matches sheet (helper.PrintPoolMatches)
 //  4. Knockout: Tree pages + Elimination Matches, when the competition has a
-//     playoff phase AND a derivable draw (helper.RenderKnockoutPages ->
+//     knockout phase AND a derivable draw (helper.RenderKnockoutPages ->
 //     helper.PrintEliminationWithBronze), else ErrBracketDrawMismatch when
 //     the persisted bracket already carries knockout content (see
 //     bracketHasKnockoutContent) that this call's draw cannot re-derive --
@@ -53,8 +53,8 @@ import (
 // derivation that this function does not repeat:
 //
 //   - draw is the caller's own EliminationDraw(...) result. EliminationDraw
-//     itself needs a *state.Store (for the pure-playoffs participant-seeding
-//     fallback, PlayoffFinalsFromParticipants), so it cannot move into this
+//     itself needs a *state.Store (for the pure-knockout participant-seeding
+//     fallback, KnockoutFinalsFromParticipants), so it cannot move into this
 //     store-free function; both callers already compute it before their call
 //     here (they need numCourts, courts derived from comp, for it too).
 //   - kachinukiMatches is the caller's own bout-log read: the two callers use
@@ -123,7 +123,7 @@ func RenderCompetitionWorkbook(
 	// /api/competitions/:id rejects a change while started; a bracket only
 	// exists once started). So a non-nil ThirdPlaceMatch here always implies
 	// RequiresSingleThirdPlace() was true at draw time, and testing it directly
-	// is equivalent to (comp.RequiresSingleThirdPlace() || isPurePlayoffs(comp,
+	// is equivalent to (comp.RequiresSingleThirdPlace() || isPureKnockout(comp,
 	// pools)) && bracket != nil && bracket.ThirdPlaceMatch != nil, the
 	// formula the blank-template export used pre-extraction -- the extra
 	// disjunct was redundant against the writer (mp-yuy8 criterion 5). This
@@ -135,12 +135,12 @@ func RenderCompetitionWorkbook(
 
 	// 4. Knockout: Tree pages + Elimination Matches, in the one mandatory
 	//    order RenderKnockoutPages enforces, for a competition with a
-	//    playoff phase and a derivable draw. Band each bout by the shiaijo it
+	//    knockout phase and a derivable draw. Band each bout by the shiaijo it
 	//    is CURRENTLY on, read off the stored bracket, falling back to the
 	//    draw's regions where there is none -- the operator reassigns
 	//    matches between courts while the competition runs, and these sheets
 	//    are what their shiaijo runs off.
-	if draw != nil && comp.IsPlayoffEnabled() {
+	if draw != nil && comp.IsKnockoutEnabled() {
 		plan := LiveCourtPlan(draw, courts, bracket)
 		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
@@ -148,7 +148,7 @@ func RenderCompetitionWorkbook(
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
 			plan, comp.Mirror, comp.Engi, hasBronze)
-	} else if comp.IsPlayoffEnabled() && bracketHasKnockoutContent(bracket) {
+	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
 		// third-place bout, or at least one round-1-or-later match -- but
 		// this call's draw came back empty: the bracket and the
@@ -179,17 +179,17 @@ func RenderCompetitionWorkbook(
 		// and regenerate the draw, or restore the settings the bracket was
 		// built with.
 		//
-		// comp.IsPlayoffEnabled() is required here, and is a NARROWER gate
+		// comp.IsKnockoutEnabled() is required here, and is a NARROWER gate
 		// than "this competition has a knockout": it excludes league and
 		// swiss, which never have a bracket to mismatch in the first place.
 		//
-		// Format == "" is IN scope here, not an exclusion: IsPlayoffEnabled
-		// and isPurePlayoffs (playoff_skeleton.go) both go through
+		// Format == "" is IN scope here, not an exclusion: IsKnockoutEnabled
+		// and isPureKnockout (knockout_skeleton.go) both go through
 		// state.Competition.EffectiveFormat(), which reads an unset Format as
-		// standalone playoffs -- matching runDrawPipeline's generation switch,
+		// standalone knockout -- matching runDrawPipeline's generation switch,
 		// whose `default:` case has always built a real bracket via
-		// generatePlayoffs for "" exactly as it does for the literal
-		// "playoffs" value. Before EffectiveFormat existed, both predicates
+		// generateKnockout for "" exactly as it does for the literal
+		// "knockout" value. Before EffectiveFormat existed, both predicates
 		// compared Format literally and were blind to "", so a stored bracket
 		// with real Rounds content but no re-derivable draw for an
 		// empty-Format competition fell through this guard unrefused and step

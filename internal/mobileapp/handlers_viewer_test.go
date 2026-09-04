@@ -29,7 +29,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
-	t.Run("no-op when pools is empty and format is not playoffs", func(t *testing.T) {
+	t.Run("no-op when pools is empty and format is not knockout", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
@@ -39,10 +39,10 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 
-	t.Run("assigns sequential numbers for playoffs-only with no pools", func(t *testing.T) {
+	t.Run("assigns sequential numbers for knockout-only with no pools", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Players: []domain.Player{
 				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
 				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
@@ -55,10 +55,10 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "D3", comp.Players[2].Number)
 	})
 
-	t.Run("assigns sequential numbers for unset (empty) Format with no pools, same as playoffs", func(t *testing.T) {
-		// mp-yuy8: an unset Format ("") is standalone playoffs too (the draw
-		// pipeline's default branch calls generatePlayoffs for it exactly as
-		// it does for the literal "playoffs" value), so this call must go
+	t.Run("assigns sequential numbers for unset (empty) Format with no pools, same as knockout", func(t *testing.T) {
+		// mp-yuy8: an unset Format ("") is standalone knockout too (the draw
+		// pipeline's default branch calls generateKnockout for it exactly as
+		// it does for the literal "knockout" value), so this call must go
 		// through comp.EffectiveFormat(), not comp.Format, or a competition
 		// that never had Format set silently never gets its numbers merged.
 		comp := &state.Competition{
@@ -74,10 +74,10 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "D2", comp.Players[1].Number)
 	})
 
-	t.Run("playoffs-only: preserves existing non-empty Number", func(t *testing.T) {
+	t.Run("knockout-only: preserves existing non-empty Number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		mergePoolNumbersIntoPlayers(comp, nil)

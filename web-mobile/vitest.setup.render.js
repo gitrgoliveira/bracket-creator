@@ -28,6 +28,13 @@ await import('./js/admin_helpers.jsx');
 // mounted admin components have those globals, mirroring the admin_helpers load.
 await import('./js/viewer_utils.jsx');
 
+// data.jsx publishes window.checkinPid (and other data helpers), which admin
+// surfaces call at render time to key participant/team identity (e.g. the
+// chusen rank inputs in admin_pools.jsx, bc-appx item 2). index.html loads
+// data.jsx well before any admin_*.js bundle; import it here so mounted admin
+// components see the same global, mirroring that browser load order.
+await import('./js/data.jsx');
+
 // ui.jsx publishes window.EmptyState (and other shared UI primitives) that
 // consumer components alias at module-eval time. Load it so render tests see
 // the real component, mirroring the browser's index.html load order.

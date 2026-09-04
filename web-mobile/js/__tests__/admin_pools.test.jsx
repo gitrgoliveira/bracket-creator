@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { enrichPoolMatchWithComp, poolMatchesForPool } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey } from '../admin_pools.jsx';
+// Imported for its side effect: data.jsx's module body sets
+// window.checkinPid, which chusenMemberKey delegates to. AdminPools itself
+// pulls in EmptyState/ScoreEditorModal/window.API and is not practical to
+// mount in this render harness, so the chusen key derivation is tested
+// directly against the real checkinPid (bc-appx item 2).
+import '../data.jsx';
 
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
@@ -310,5 +316,78 @@ describe('poolMatchesForPool', () => {
     const result = poolMatchesForPool(mixed, 'Pool A');
     expect(result[0].status).toBe('completed');
     expect(result[1].status).toBe('scheduled');
+  });
+});
+
+// chusenMemberKey pins the FIX 2 contract (bc-appx item 2): chusen rank
+// inputs must be keyed by a team member's stable IDENTITY, never by that
+// member's position in the candidates array. The GET .../chusen-candidates
+// `teams` order is the server's live standings order, which reorders after
+// ANY partial write (a member carrying a rank override sorts ahead of one
+// without, regardless of the override's value -- engine/scoring.go), so an
+// index-keyed input map re-attaches the operator's typed value to the WRONG
+// team on a retry after a mid-loop failure.
+describe('chusenMemberKey', () => {
+  it('keys by the member id when present, matching window.checkinPid', () => {
+    const member = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
+    expect(chusenMemberKey(member)).toBe('p-alpha');
+    expect(chusenMemberKey(member)).toBe(window.checkinPid(member));
+  });
+
+  it('falls back to the "name|dojo" composite when id is absent (legacy roster)', () => {
+    const member = { name: 'Team Beta', dojo: 'Gyokusen' };
+    expect(chusenMemberKey(member)).toBe('Team Beta|Gyokusen');
+  });
+
+  it('gives two different teams distinct keys even when their names collide', () => {
+    // Team names are supposed to be unique even across dojos, but
+    // checkNewTeamNameCollisions has one documented enforcement hole (an
+    // unreadable config.md write), so a same-name pair can exist on disk.
+    // The id-preferred key must still tell them apart.
+    const a = { id: 'p-1', name: 'Shudokan', dojo: 'HQ' };
+    const b = { id: 'p-2', name: 'Shudokan', dojo: 'HQ' };
+    expect(chusenMemberKey(a)).not.toBe(chusenMemberKey(b));
+  });
+
+  it('is a pure function of member identity: independent of array position', () => {
+    // Simulates the exact bug report: the candidates payload reorders a
+    // still-tied group from [Alpha,Beta,Gamma] to [Beta,Alpha,Gamma] after
+    // two of three sequential writes land (a member with ANY override sorts
+    // ahead of one without). An index-keyed input map (chusenInputs keyed by
+    // `${groupKey}::${idx}`, the pre-fix scheme) would read the operator's
+    // Alpha-typed value back for Beta after this reorder. A key derived from
+    // chusenMemberKey does not, because it never depends on idx.
+    const alpha = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
+    const beta = { id: 'p-beta', name: 'Team Beta', dojo: 'Gyokusen' };
+    const gamma = { id: 'p-gamma', name: 'Team Gamma', dojo: 'Suigetsu' };
+
+    const before = [alpha, beta, gamma];
+    const after = [beta, alpha, gamma]; // reordered by the server, same members
+
+    // Build the input map the way admin_pools.jsx now does: by identity.
+    const inputs = {};
+    before.forEach((member) => { inputs[chusenMemberKey(member)] = '2'; }); // operator typed "2" for Alpha, Beta, Gamma alike in this contrived case
+
+    // Regardless of the array's new order, each member's own typed value is
+    // still reachable under its own identity key.
+    after.forEach((member) => {
+      expect(inputs[chusenMemberKey(member)]).toBe('2');
+    });
+
+    // Sharper check: give each member a DISTINCT typed value, then confirm
+    // the reordered array still resolves each member back to ITS OWN value,
+    // not the value typed for whichever member used to sit at that index.
+    const distinct = {};
+    distinct[chusenMemberKey(alpha)] = 'alpha-value';
+    distinct[chusenMemberKey(beta)] = 'beta-value';
+    distinct[chusenMemberKey(gamma)] = 'gamma-value';
+
+    // after[0] is Beta (was at index 1 pre-reorder); an index-keyed map built
+    // from `before` at index 0 would have stored Alpha's value there, so a
+    // naive `distinctByIndex[0]` lookup after reordering would wrongly
+    // return Alpha's value for Beta. The identity-keyed lookup does not:
+    expect(distinct[chusenMemberKey(after[0])]).toBe('beta-value');
+    expect(distinct[chusenMemberKey(after[1])]).toBe('alpha-value');
+    expect(distinct[chusenMemberKey(after[2])]).toBe('gamma-value');
   });
 });

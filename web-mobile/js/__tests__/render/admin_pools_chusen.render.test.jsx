@@ -12,9 +12,19 @@
 //     tripped on the second same-name row), blocking pool completion, and
 //   * would have sent the SAME playerId twice had validation ever passed.
 //
-// This file pins the fix -- keying every one of those things by the member's
-// INDEX in the group instead -- through the real component, driving the
-// actual chusen fetch effect and the actual override-rank submit.
+// bc-cse keyed every one of those things by the member's INDEX in the group
+// instead. bc-appx item 2 replaced index-keying with keying by the member's
+// stable IDENTITY (chusenMemberKey, delegating to window.checkinPid): the
+// `teams` array is "the still-tied members in current standings order"
+// (engine.ChusenCandidates), and that order reorders after ANY partial write
+// (a member carrying a rank override sorts ahead of one without, regardless
+// of the override's value), so an index-keyed input silently re-attached the
+// operator's typed value to the WRONG team on a retry after a mid-loop
+// failure. This file pins the CURRENT (identity-keyed) fix through the real
+// component, driving the actual chusen fetch effect and the actual
+// override-rank submit; identity-keying still gives the same-name pair (and
+// each group's members) distinct keys, so the assertions below hold either
+// way and continue to guard the same end-to-end behaviour.
 
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -224,12 +234,12 @@ describe('AdminPools chusen banner: unique-name group regression guard', () => {
 describe('AdminPools chusen banner: two tied groups in the same pool stay independent', () => {
   // A pool can hold more than one unresolved tied group at once (e.g. a
   // cycle at 1st/2nd AND a separate cycle at 3rd/4th -- PoolWinners has no
-  // upper bound), and every group's members start at idx 0. The fix keys
-  // chusenInputs / effRank / the post-submit clear on groupKey
-  // ("${poolName}::${minPosition}"), not bare poolName: a poolName-only key
-  // makes two same-pool groups share idx 0's (and idx 1's, ...) entry, so
-  // typing in one leaks into the other and submitting one wipes the other's
-  // still-open edits.
+  // upper bound). Each input is keyed on `${groupKey}::${identity}`
+  // (groupKey = "${poolName}::${minPosition}", identity = chusenMemberKey,
+  // bc-appx item 2), so two same-pool groups never collide: their members
+  // carry distinct identities, and groupKey additionally scopes the
+  // busy/error state and the post-submit clear to exactly the group that
+  // was submitted.
   const groupOne = {
     poolName: 'Pool A',
     teamNames: ['Alpha', 'Beta'],
@@ -266,9 +276,9 @@ describe('AdminPools chusen banner: two tied groups in the same pool stay indepe
     fireEvent.change(g1a, { target: { value: '99' } });
     fireEvent.change(g1b, { target: { value: '98' } });
 
-    // A poolName-only key (dropping minPosition) makes group 1's idx-0/1
-    // rows share group 2's idx-0/1 chusenInputs entries, so this edit would
-    // leak straight into group 2's still-untouched rows.
+    // Group 1's and group 2's members carry different identities
+    // (chusenMemberKey), so this edit cannot leak into group 2's
+    // still-untouched rows regardless of groupKey scoping.
     expect(g2a.value).toBe('3');
     expect(g2b.value).toBe('4');
   });
@@ -301,9 +311,10 @@ describe('AdminPools chusen banner: two tied groups in the same pool stay indepe
 
     // Group 1's row is now gone (optimistically removed on success); only
     // group 2's row remains. Its inputs must still show the operator's
-    // unsaved (4, 3) edit, not a reset to (3, 4): a poolName-only clear key
-    // deletes exactly the entries group 2 also reads (idx 0 and 1, same
-    // group size), discarding an edit the operator never saved or undid.
+    // unsaved (4, 3) edit, not a reset to (3, 4): the post-submit clear
+    // deletes `${groupKey}::${identity}` for exactly group 1's own members
+    // (chusenMemberKey), never group 2's -- their identities differ, so
+    // nothing group 2 reads is touched.
     const remaining = screen.getAllByRole('spinbutton');
     expect(remaining.length).toBe(2);
     expect(remaining[0].value).toBe('4');

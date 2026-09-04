@@ -106,6 +106,31 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
 }
 
+// chusenMemberKey derives the stable identity string used to key a chusen
+// (drawing-lots) rank input to a specific team member, rather than to that
+// member's position in the `members` array (bc-appx item 2). The
+// chusen-candidates payload's `teams` array is "the still-tied members in
+// current standings order" (engine.ChusenCandidates), and standings order
+// depends on which members already carry a rank override: a member with ANY
+// recorded override sorts ahead of one without, regardless of the override's
+// actual value (engine/scoring.go), so completing 2 of 3 sequential writes
+// and then re-fetching after a mid-loop failure can return the SAME group
+// with its members in a DIFFERENT order (reproduced:
+// [Alpha,Beta,Gamma] -> [Beta,Alpha,Gamma] after two of three writes). An
+// index-keyed input map then reads the operator's typed value for the WRONG
+// team on retry, silently inverting the recorded draw. Delegating to the
+// shared window.checkinPid (data.jsx) keys this the same way the rest of the
+// admin UI already keys check-in/roster state: server id when present, else
+// the "name|dojo" composite -- competitor identity is (name, dojo), never
+// bare name.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx: AdminPools itself
+// pulls in EmptyState/ScoreEditorModal/window.API and is not practical to
+// mount in the render harness, so the key derivation is tested directly.
+function chusenMemberKey(member) {
+  return window.checkinPid(member);
+}
+
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
@@ -301,18 +326,25 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const isBusy = !!chusenBusy[groupKey];
         const groupErrMsg = chusenGroupErr[groupKey] || null;
 
-        // Effective value for a member's input, by its INDEX in the group:
-        // the operator's edit if present, else the displayed default
-        // (minPosition + index). Both validation and submit read this so
-        // accepting the shown defaults (already a valid permutation) records
-        // without forcing a manual edit. Keyed on groupKey (pool + minPosition),
-        // not bare poolName: a pool can hold more than one unresolved tied
-        // group (see the groupKey comment above), and PoolWinners has no
-        // upper bound, so e.g. a cycle at 1st/2nd and another at 3rd/4th in
-        // the SAME pool both start their members at idx 0 -- a poolName-only
-        // key collapses them onto one shared input and one shared clear.
-        const effRank = (idx) => {
-          const raw = chusenInputs[`${groupKey}::${idx}`];
+        // Effective value for a member's input, by the member's IDENTITY
+        // (chusenMemberKey), never its position in `members`: the group order
+        // comes from the server's live standings sort, which reorders after
+        // ANY partial write (see chusenMemberKey's doc comment for the
+        // mechanism and the reproduced [Alpha,Beta,Gamma] ->
+        // [Beta,Alpha,Gamma] case), so an index-keyed lookup can read back a
+        // DIFFERENT team's typed value after a mid-loop failure. The operator's
+        // edit if present, else the displayed default (minPosition + index --
+        // idx is still used here only to pick a distinct default rank per
+        // position, not to key the input). Both validation and submit read
+        // this so accepting the shown defaults (already a valid permutation)
+        // records without forcing a manual edit. Keyed on groupKey (pool +
+        // minPosition) as well as identity, not bare poolName: a pool can hold
+        // more than one unresolved tied group (see the groupKey comment
+        // above), and PoolWinners has no upper bound, so e.g. a cycle at
+        // 1st/2nd and another at 3rd/4th in the SAME pool must not share one
+        // input/clear per member.
+        const effRank = (member, idx) => {
+          const raw = chusenInputs[`${groupKey}::${chusenMemberKey(member)}`];
           return parseInt(raw !== undefined ? raw : String(minPosition + idx), 10);
         };
 
@@ -324,7 +356,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           const entered = new Set();
           let valid = true;
           for (let i = 0; i < members.length; i++) {
-            const val = effRank(i);
+            const val = effRank(members[i], i);
             if (isNaN(val) || !expected.has(val) || entered.has(val)) { valid = false; break; }
             entered.add(val);
           }
@@ -339,17 +371,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           try {
             for (let i = 0; i < members.length; i++) {
               const member = members[i];
-              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(i), password, member.id, member.dojo);
+              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(member, i), password, member.id, member.dojo);
             }
             // Optimistically hide THIS group only (a pool can hold several) - the
             // effect re-fetches on the next update to reconcile.
             setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
-            // Clear inputs for this group only (groupKey, not bare poolName --
-            // see the effRank comment: a sibling tied group in the same pool
-            // shares idx 0..N and must not have its inputs wiped here too).
+            // Clear inputs for this group only (groupKey + identity, not bare
+            // poolName -- see the effRank comment: a sibling tied group in the
+            // same pool must not have its inputs wiped here too).
             setChusenInputs(prev => {
               const next = { ...prev };
-              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${i}`];
+              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${chusenMemberKey(members[i])}`];
               return next;
             });
           } catch (e) {
@@ -380,14 +412,16 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               Assign positions {minPosition} to {minPosition + members.length - 1} (one per team):
             </div>
             {members.map((member, idx) => {
-              // groupKey, not bare poolName: see the effRank comment above --
-              // a pool can hold more than one unresolved tied group, and
-              // without minPosition in the key two groups in the same pool
-              // collide on the same idx.
-              const inputKey = `${groupKey}::${idx}`;
+              // groupKey + member IDENTITY, not index: see the effRank/
+              // chusenMemberKey comments above -- the member array order is
+              // not stable across a re-fetch, so an index-keyed input can
+              // silently attach to the WRONG team after a mid-loop failure.
+              const memberKey = chusenMemberKey(member);
+              const inputKey = `${groupKey}::${memberKey}`;
               const defaultVal = minPosition + idx;
-              // Stable DOM id so the label is programmatically tied to its input.
-              const inputId = `chusen-${groupKey}-${idx}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+              // Stable DOM id so the label is programmatically tied to its
+              // input; identity-based (not idx) for the same reason as inputKey.
+              const inputId = `chusen-${groupKey}-${memberKey}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
               return (
                 <div key={inputKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <label htmlFor={inputId} style={{ flex: 1 }}>{member.name}</label>
@@ -603,4 +637,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool };
+export { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey };

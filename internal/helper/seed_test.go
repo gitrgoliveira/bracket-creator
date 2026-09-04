@@ -2658,14 +2658,18 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 
 // referenceDojoSumMeetRoundsTouching is a full O(N^2) scan over EVERY pair in
 // the draw, kept only for TestDojoSumMeetRounds_MatchesFullScan: it is the
-// pre-P1 semantics of dojoSumMeetRounds(result, x, y) restated independently
-// -- sum dojoMeetRound(i, j) for every same-dojo pair where i or j is x or y,
-// counting the {x, y} pair itself exactly once -- rather than derived from
-// the two-loop-over-x-and-y shape the real function now uses. A bug that
-// double-counts or drops the {x, y} pair, or that mis-scopes "touching",
-// would still pass a test built from the same two-loop shape; this does not
-// share that shape.
-func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
+// pre-P1 semantics of dojoSumMeetRounds(result, slots, x, y) restated
+// independently -- sum dojoMeetRound(slots[i], slots[j]) for every same-dojo
+// pair where i or j is x or y, counting the {x, y} pair itself exactly once
+// -- rather than derived from the two-loop-over-x-and-y shape the real
+// function now uses. A bug that double-counts or drops the {x, y} pair, or
+// that mis-scopes "touching", would still pass a test built from the same
+// two-loop shape; this does not share that shape. slots is
+// denseSlotMap(len(result)), matching what the real function is now handed
+// (bc-drwx item 1): both the reference and the function under test must read
+// the same (correct) tree geometry, or this test would only ever pin the two
+// implementations agreeing with EACH OTHER, not with the real tree.
+func referenceDojoSumMeetRoundsTouching(result []Player, slots []int, x, y int) int {
 	sum := 0
 	for i := range result {
 		for j := i + 1; j < len(result); j++ {
@@ -2678,7 +2682,7 @@ func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
 			if result[i].Dojo != result[j].Dojo {
 				continue
 			}
-			sum += dojoMeetRound(i, j)
+			sum += dojoMeetRound(slots[i], slots[j])
 		}
 	}
 	return sum
@@ -2687,8 +2691,10 @@ func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
 // referenceFullDrawDojoSum is a full whole-draw meeting-round total,
 // independent of both dojoSumMeetRounds and dojoSwapGain, used by
 // TestDojoSwapGain_MatchesFullDrawDelta as the "recompute from scratch"
-// oracle for a swap's gain.
-func referenceFullDrawDojoSum(result []Player) int {
+// oracle for a swap's gain. slots is denseSlotMap(len(result)) -- see
+// referenceDojoSumMeetRoundsTouching's own doc comment for why this must
+// match what the real function is handed.
+func referenceFullDrawDojoSum(result []Player, slots []int) int {
 	sum := 0
 	for i := range result {
 		for j := i + 1; j < len(result); j++ {
@@ -2698,7 +2704,7 @@ func referenceFullDrawDojoSum(result []Player) int {
 			if result[i].Dojo != result[j].Dojo {
 				continue
 			}
-			sum += dojoMeetRound(i, j)
+			sum += dojoMeetRound(slots[i], slots[j])
 		}
 	}
 	return sum
@@ -2760,13 +2766,14 @@ func dojoSumTestRosters() map[string][]Player {
 func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
+			slots := denseSlotMap(len(roster))
 			for x := range roster {
 				for y := range roster {
 					if x == y {
 						continue
 					}
-					want := referenceDojoSumMeetRoundsTouching(roster, x, y)
-					got := dojoSumMeetRounds(roster, x, y)
+					want := referenceDojoSumMeetRoundsTouching(roster, slots, x, y)
+					got := dojoSumMeetRounds(roster, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2784,18 +2791,19 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
+			slots := denseSlotMap(len(roster))
 			for x := range roster {
 				for y := range roster {
 					if x == y {
 						continue
 					}
-					before := referenceFullDrawDojoSum(roster)
+					before := referenceFullDrawDojoSum(roster, slots)
 					roster[x], roster[y] = roster[y], roster[x]
-					after := referenceFullDrawDojoSum(roster)
+					after := referenceFullDrawDojoSum(roster, slots)
 					roster[x], roster[y] = roster[y], roster[x]
 					want := after - before
 
-					got := dojoSwapGain(roster, x, y)
+					got := dojoSwapGain(roster, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2812,6 +2820,12 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 // and accept condition are copied unchanged, so any drift from the real
 // (memoized) function can only be attributed to the memo itself.
 func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool) {
+	// slots mirrors delayDojoMeetings' own denseSlotMap call (bc-drwx item
+	// 1): this reference must use the SAME real-tree geometry the memoized
+	// function now uses, or a drift here would be misattributed to the
+	// memo when it is really the dense/slot translation.
+	slots := denseSlotMap(len(result))
+
 	movable := func(i int) bool {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
@@ -2832,7 +2846,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				if excluded[pairKey{i, j}] {
 					continue
 				}
-				if r := dojoMeetRound(i, j); r < worstRound {
+				if r := dojoMeetRound(slots[i], slots[j]); r < worstRound {
 					worstA, worstB, worstRound = i, j, r
 				}
 			}
@@ -2850,7 +2864,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
 					continue
 				}
-				if gain := dojoSwapGain(result, x, y); gain > bestGain {
+				if gain := dojoSwapGain(result, slots, x, y); gain > bestGain {
 					bestGain, bestX, bestY = gain, x, y
 				}
 			}

@@ -57,25 +57,81 @@ func NumberPools(pools []Pool, prefix string) {
 	}
 }
 
+// NumberPrefixesAmbiguous reports whether two number prefixes can produce an
+// identical competitor tag once AssignPlayerNumbers appends a counter to
+// each: compared case-insensitively, one is ambiguous with the other when it
+// equals the other followed by a run of digits whose first digit is not '0'.
+// "K" and "K2" are ambiguous because K's own counter reaches "K21" (its 21st
+// entrant) at the same string K2's 1st entrant gets ("K2"+"1"). A leading
+// zero breaks the ambiguity on purpose: AssignPlayerNumbers's
+// fmt.Sprintf("%s%d", ...) never left-pads its counter, so a prefix like
+// "K02" can never coincide with "K"'s own sequence (which only ever produces
+// "K1".."K9","K10",... -- never "K02"). Two genuinely equal prefixes are NOT
+// reported here: that collision is the pre-existing exact-match check
+// (checkUniqueCompFields, DefaultNumberPrefix's own `used` set); this
+// function covers only the stem+digits shape those checks miss.
+func NumberPrefixesAmbiguous(a, b string) bool {
+	a = strings.ToUpper(strings.TrimSpace(a))
+	b = strings.ToUpper(strings.TrimSpace(b))
+	if a == "" || b == "" || a == b {
+		return false
+	}
+	return isDigitExtension(a, b) || isDigitExtension(b, a)
+}
+
+// isDigitExtension reports whether long equals short followed by a
+// non-empty, non-zero-leading run of ASCII digits. Both arguments are assumed
+// already upper-cased/trimmed by the caller.
+func isDigitExtension(long, short string) bool {
+	if !strings.HasPrefix(long, short) {
+		return false
+	}
+	rest := long[len(short):]
+	if rest == "" || rest[0] == '0' {
+		return false
+	}
+	for _, r := range rest {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // DefaultNumberPrefix derives a competition's default number prefix from its
 // name, avoiding every prefix in taken (compared case-insensitively, as
-// checkUniqueCompFields compares them).
+// checkUniqueCompFields compares them) and every prefix ambiguous with one
+// (NumberPrefixesAmbiguous).
 //
 // The derivation walks the name's words and takes their initials, so "Kendo
 // Open" gives "K" and, if "K" is taken, "KO". When initials are exhausted or
-// still collide, a numeric suffix is appended ("K2", "K3", ...). Every
-// candidate is capped at MaxNumberPrefixLen so the value can never be one the
-// length validator would reject.
+// still collide or are ambiguous, a numeric suffix is appended to the
+// shortest stem that leaves room for it: see the width-grouped suffix loop
+// below. Every candidate is capped at MaxNumberPrefixLen so the value can
+// never be one the length validator would reject.
 //
 // The result is deterministic: the same name and the same taken set always
 // produce the same prefix, which is what lets the create form show the operator
 // the value the server would pick.
 func DefaultNumberPrefix(name string, taken []string) string {
 	used := make(map[string]bool, len(taken))
+	normalized := make([]string, 0, len(taken))
 	for _, t := range taken {
 		if t = strings.TrimSpace(t); t != "" {
 			used[strings.ToUpper(t)] = true
+			normalized = append(normalized, t)
 		}
+	}
+	ambiguousWithTaken := func(candidate string) bool {
+		for _, t := range normalized {
+			if NumberPrefixesAmbiguous(candidate, t) {
+				return true
+			}
+		}
+		return false
+	}
+	acceptable := func(candidate string) bool {
+		return !used[candidate] && !ambiguousWithTaken(candidate)
 	}
 
 	initials := nameInitials(name)
@@ -85,48 +141,61 @@ func DefaultNumberPrefix(name string, taken []string) string {
 
 	// Prefer a bare initial, then progressively more of them: "K", then "KO".
 	for n := 1; n <= len(initials); n++ {
-		if candidate := initials[:n]; !used[candidate] {
+		if candidate := initials[:n]; acceptable(candidate) {
 			return candidate
 		}
 	}
 
-	// Every initial-based candidate collides, so fall to a numeric suffix on
-	// the shortest stem that still leaves room for the digits. Bounded at 999
-	// (three digits): MaxNumberPrefixLen is 3, so a four-digit suffix ("1000")
-	// would demand a negative trim (MaxNumberPrefixLen-len(digits) < 0) and
-	// panic on the slice below. Reaching this bound needs ~1000 competitions
-	// sharing the same derived initials on one tournament day -- this repo's
-	// tests cannot construct that scenario honestly, but bounding the loop
-	// rather than looping forever (or panicking) is cheap insurance.
+	// Every initial-based candidate collides or is ambiguous, so fall to a
+	// numeric suffix. Candidates are grouped by digit WIDTH rather than by a
+	// single counter, because a plain (non-zero-leading) digit suffix on a
+	// taken stem is UNAVOIDABLY ambiguous with that stem for every value --
+	// "KO2".."KO99" are all ambiguous with a taken "KO", with no plain digit
+	// escaping it. Width bounds the ambiguity itself: a candidate at width W
+	// is tried first without padding (n formatted plainly) so short, natural-
+	// looking values like "K2" are still preferred when they are actually
+	// available; once a width is exhausted, growing it to W+1 tries the SAME
+	// values zero-padded ("02" instead of "2"), which is unambiguous with any
+	// stem by construction (see NumberPrefixesAmbiguous) and therefore the
+	// escape once a stem's plain suffixes are all taken or ambiguous. Width
+	// is bounded at MaxNumberPrefixLen-1 so the stem is never trimmed to zero
+	// characters -- a bare-digit candidate ("100") is never emitted, it is
+	// indistinguishable from a desk-called number.
 	stem := initials
 	lastCandidate := stem
-	for suffix := 2; suffix <= 999; suffix++ {
-		digits := fmt.Sprintf("%d", suffix)
+	for width := 1; width <= MaxNumberPrefixLen-1; width++ {
 		trimmed := stem
-		if len(trimmed)+len(digits) > MaxNumberPrefixLen {
-			trimmed = trimmed[:MaxNumberPrefixLen-len(digits)]
+		if len(trimmed)+width > MaxNumberPrefixLen {
+			trimmed = trimmed[:MaxNumberPrefixLen-width]
 		}
-		candidate := trimmed + digits
-		lastCandidate = candidate
-		if !used[candidate] {
-			return candidate
+		max := 1
+		for i := 0; i < width; i++ {
+			max *= 10
+		}
+		max--
+		for n := 2; n <= max; n++ {
+			candidate := trimmed + fmt.Sprintf("%0*d", width, n)
+			lastCandidate = candidate
+			if acceptable(candidate) {
+				return candidate
+			}
 		}
 	}
 	// Exhausted every candidate up to the length cap: every one of them is
-	// already taken. Return the last one tried rather than inventing a value
-	// beyond MaxNumberPrefixLen -- every request-driven caller
-	// (checkUniqueCompFields, on the create, settings-save, import and
-	// start/generate-draw paths) re-validates uniqueness against
-	// the SAME taken set and rejects the collision with its own "prefix
-	// already used by competition ..." error, which names the actual
-	// conflict. That is the right place for this to surface: this function's
-	// contract is a best-effort SUGGESTION, not a uniqueness guarantee. The
-	// one caller that does not re-validate, the load-time migration
-	// (engine.MigrateNumberPrefixes), derives over the taken set of every
-	// competition it could READ, including its own in-pass assignments; a
-	// competition it had to skip keeps a prefix that set does not know, so a
-	// collision with it is possible and surfaces as that competition's next
-	// settings save being refused, which names the conflict.
+	// already taken or ambiguous. Return the last one tried rather than
+	// inventing a value beyond MaxNumberPrefixLen -- every request-driven
+	// caller (checkUniqueCompFields, on the create, settings-save, import and
+	// start/generate-draw paths) re-validates uniqueness (and, per this same
+	// bead, ambiguity) against the SAME taken set and rejects the collision
+	// with its own error naming the actual conflict. That is the right place
+	// for this to surface: this function's contract is a best-effort
+	// SUGGESTION, not a uniqueness guarantee. The one caller that does not
+	// re-validate, the load-time migration (engine.MigrateNumberPrefixes),
+	// derives over the taken set of every competition it could READ,
+	// including its own in-pass assignments; a competition it had to skip
+	// keeps a prefix that set does not know, so a collision with it is
+	// possible and surfaces as that competition's next settings save being
+	// refused, which names the conflict.
 	return lastCandidate
 }
 

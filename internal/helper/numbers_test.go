@@ -115,16 +115,23 @@ func TestDefaultNumberPrefix(t *testing.T) {
 			want:     "KO",
 		},
 		{
-			name:     "escalates to a numeric suffix once initials are exhausted",
+			// A plain digit suffix on "KO" ("KO2".."KO99") is ambiguous with
+			// "KO" itself for every value (bc-pnum A1), so once both
+			// initials-based candidates are taken, the derivation skips the
+			// whole plain-suffix band on "KO" and falls to the zero-padded
+			// escape on the shorter stem "K": "K02".
+			name:     "escalates to a zero-padded numeric suffix once initials are exhausted",
 			compName: "Kendo Open",
 			taken:    []string{"K", "KO"},
-			want:     "KO2",
+			want:     "K02",
 		},
 		{
-			name:     "numeric suffix climbs past a taken KO2",
+			// Climbing within the zero-padded band: "K02" is taken, so the
+			// next untaken, unambiguous candidate is "K03".
+			name:     "numeric suffix climbs past a taken K02",
 			compName: "Kendo Open",
-			taken:    []string{"K", "KO", "KO2"},
-			want:     "KO3",
+			taken:    []string{"K", "KO", "K02"},
+			want:     "K03",
 		},
 		{
 			name:     "initials cap at MaxNumberPrefixLen (3)",
@@ -133,10 +140,13 @@ func TestDefaultNumberPrefix(t *testing.T) {
 			want:     "K",
 		},
 		{
+			// "KOR" (the full initials) is also taken, so the plain suffix on
+			// its 2-char trim "KO" is ambiguous with "KO" itself, same as
+			// above: the derivation falls to "K02".
 			name:     "a 3-letter initials stem trims to fit a numeric suffix under the cap",
 			compName: "Kendo Open Regional",
 			taken:    []string{"K", "KO", "KOR"},
-			want:     "KO2",
+			want:     "K02",
 		},
 		{
 			name:     "taken comparison is case-insensitive",
@@ -173,30 +183,23 @@ func TestDefaultNumberPrefix(t *testing.T) {
 }
 
 // TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics pins F8 (bc-pnum
-// review): the numeric-suffix fallback loop is bounded at 999 (three digits,
-// matching MaxNumberPrefixLen). Before the bound, a taken set covering EVERY
-// candidate up to the cap (~1000 entries: "KO2".."KO9", "K10".."K99",
-// "100".."999") ran the loop past suffix 999 into a four-digit suffix, where
-// MaxNumberPrefixLen-len(digits) goes negative and the trim
-// (stem[:negative]) panics. Reaching this needs ~1000 same-initial
-// competitions on one tournament day, a scenario this repo's own tests
-// cannot honestly construct any other way, but the function must degrade to
-// "return its best guess" rather than crash the request.
+// review) as extended by A1: the numeric-suffix fallback groups candidates by
+// digit WIDTH (plain, then zero-padded), bounded at MaxNumberPrefixLen-1 so
+// the stem is never trimmed to zero characters -- a candidate with no stem
+// letter at all ("100") is never emitted, and the loop cannot run past the
+// length cap into a negative trim. A taken set covering EVERY candidate the
+// derivation could try (the two initials, the whole plain-suffix band that
+// "KO" makes unavoidably ambiguous, and every zero-padded width-2 candidate)
+// exhausts the derivation entirely; it must degrade to "return its best
+// guess" rather than loop forever, panic, or grow past the length cap.
 func TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics(t *testing.T) {
 	taken := []string{"K", "KO"}
-	// 1-digit suffix (2-9): leaves 2 chars for the stem, so the full "KO"
-	// stem fits untrimmed.
-	for n := 2; n <= 9; n++ {
-		taken = append(taken, fmt.Sprintf("KO%d", n))
-	}
-	// 2-digit suffix (10-99): leaves 1 char, so the stem trims to "K".
-	for n := 10; n <= 99; n++ {
-		taken = append(taken, fmt.Sprintf("K%d", n))
-	}
-	// 3-digit suffix (100-999): leaves 0 chars, so the stem trims to "",
-	// leaving the bare digits as the candidate.
-	for n := 100; n <= 999; n++ {
-		taken = append(taken, fmt.Sprintf("%d", n))
+	// Width-2 zero-padded candidates ("K02".."K99"): these are NOT ambiguous
+	// with "K" (leading zero) or "KO" (no prefix relation), so they must be
+	// blocked explicitly, by exact match, to close off the escape this bead
+	// adds.
+	for n := 2; n <= 99; n++ {
+		taken = append(taken, fmt.Sprintf("K%02d", n))
 	}
 
 	var got string
@@ -204,13 +207,55 @@ func TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics(t *testing.T) {
 		got = DefaultNumberPrefix("Kendo Open", taken)
 	}, "every candidate up to the length cap is taken; the derivation must degrade gracefully, not panic")
 
-	// Every candidate through the bound (999) is taken, so the function
-	// returns the LAST one it tried rather than looping forever or growing
-	// past the length cap. checkUniqueCompFields is what actually rejects
-	// this collision at save time, with its own "already used by
-	// competition ..." error naming the real conflict.
-	assert.Equal(t, "999", got)
+	// Every candidate is now taken or ambiguous, so the function returns the
+	// LAST one it tried (the top of the width-2 zero-padded band) rather than
+	// looping forever or growing past the length cap. checkUniqueCompFields
+	// is what actually rejects this collision at save time, with its own
+	// "already used by competition ..." error naming the real conflict.
+	assert.Equal(t, "K99", got)
 	assert.LessOrEqual(t, len(got), MaxNumberPrefixLen)
+}
+
+// TestNumberPrefixesAmbiguous pins the primitive bc-pnum A1 adds: a stem
+// prefix is ambiguous with any non-zero-leading digit extension of itself
+// (because AssignPlayerNumbers's counter reaches that string), but not with a
+// zero-leading one (the counter never left-pads) and not with a
+// letter-suffixed extension (only digit runs collide with a counter).
+func TestNumberPrefixesAmbiguous(t *testing.T) {
+	tests := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"stem vs its own non-zero-leading extension", "K", "K2", true},
+		{"stem vs a two-digit non-zero-leading extension", "K", "K21", true},
+		{"order does not matter", "K2", "K", true},
+		{"case-insensitive", "k", "K2", true},
+		{"zero-leading extension is exempt", "K", "K02", false},
+		{"letter-suffixed extension is not a digit run", "K", "KO", false},
+		{"exactly equal prefixes are not reported here", "K", "K", false},
+		{"unrelated prefixes", "K", "S2", false},
+		{"empty inputs never ambiguous", "", "K2", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, NumberPrefixesAmbiguous(tc.a, tc.b))
+		})
+	}
+}
+
+// TestDefaultNumberPrefix_KendoWithKTakenDerivesSomethingUnambiguous is the
+// bc-pnum A1 repro made concrete: a SINGLE-WORD name's initials-derived stem
+// is exactly one character (nameInitials never contributes more than one
+// initial per word), so when that bare stem is already taken, EVERY plain
+// digit suffix on it ("K2".."K99") is unavoidably ambiguous with it -- there
+// is no letter-based escalation available for a one-word name. The
+// zero-padded width-2 band is the only way out, and the result must be
+// verified unambiguous with the taken set, not just present in it.
+func TestDefaultNumberPrefix_KendoWithKTakenDerivesSomethingUnambiguous(t *testing.T) {
+	got := DefaultNumberPrefix("Kendo", []string{"K"})
+	assert.Equal(t, "K02", got)
+	assert.False(t, NumberPrefixesAmbiguous(got, "K"), "the derived prefix must not be ambiguous with the taken one")
 }
 
 // TestNameInitials_AccentedAndOtherScripts pins the word-initial rule: a Latin

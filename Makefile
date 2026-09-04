@@ -138,6 +138,14 @@ js/lint: js/deps ## Run Javascript linters
 	@# with no -c, oxlint does not discover .oxlintrc.json upward from
 	@# web-mobile/, so the react/unicorn/oxc plugins and project rules it
 	@# configures never applied and this line silently exited 0 (bc-appx item 4).
+	@# web-mobile/.oxlintrc.json's `overrides` entry for docs/assets/javascripts/**
+	@# turns off react/no-this-in-sfc there ONLY: that directory is plain
+	@# ES5-constructor JS with no React/Preact runtime in scope (see
+	@# pool-draw-animation.js's own header), so `this` inside a PascalCase-named
+	@# constructor function is a false positive for the rule's real target
+	@# (an actual React/Preact stateless functional component). JSON has no
+	@# comment syntax, hence the rationale living here (bc-appx item 9) rather
+	@# than beside the override itself.
 	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci + npm audit)

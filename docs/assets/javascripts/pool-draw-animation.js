@@ -517,8 +517,9 @@
   // any PascalCase-named function as a stateless-functional-component
   // mistake, which is the correct rule for actual React/Preact SFCs but a
   // false positive here: `this` is exactly right for a constructor's
-  // per-instance state.
-  /* oxlint-disable react/no-this-in-sfc */
+  // per-instance state. The exemption lives in web-mobile/.oxlintrc.json's
+  // `overrides` (scoped to docs/assets/javascripts/**), not an inline
+  // disable/enable block here -- see that file for the rationale.
   function Widget(host) {
     this.host = host;
     this.presetIdx = 0;
@@ -527,7 +528,6 @@
     this.build();
     this.load(0);
   }
-  /* oxlint-enable react/no-this-in-sfc */
 
   Widget.prototype.build = function () {
     var self = this;

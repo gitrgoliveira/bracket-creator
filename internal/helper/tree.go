@@ -242,13 +242,22 @@ func SemifinalMatchNumbers(rounds [][]*Node) (semiA, semiB int) {
 	return semiA, semiB
 }
 
-// NeedsBronzeBlock reports whether a naginata playoffs bracket should carry a
-// bronze (3rd-place) block: naginata only, and only when a real semifinal round
-// exists (a 2-player bracket is a single round with no semifinal, so no bronze).
-// This is the single source of truth for the rule expressed at every render/build
-// site (cmd create-pools/playoffs, internal/engine/bracket.go).
-func NeedsBronzeBlock(naginata bool, numRounds int) bool {
-	return naginata && numRounds >= 2
+// NeedsBronzeBlock reports whether a playoffs bracket should carry a bronze
+// (3rd-place) block: only when the caller says a single 3rd is required, and
+// only when a real semifinal round exists (a 2-player bracket is a single
+// round with no semifinal, so no bronze). This is the single source of truth
+// for the rule expressed at every render/build site (cmd
+// create-pools/playoffs, internal/engine/bracket.go).
+//
+// helper cannot import internal/state, so this takes a bare bool rather than
+// a state.Competition: the CLI (cmd/shared.go) passes its own thirdPlaceMatch
+// flag literally, while the mobile app (internal/engine/bracket.go) passes
+// state.Competition.RequiresSingleThirdPlace() -- the generalised, per-format
+// rule (bc-3rdp), of which naginata is only one input among several. The
+// parameter name reflects what it now means to EVERY caller, not just the
+// CLI's.
+func NeedsBronzeBlock(requiresSingleThirdPlace bool, numRounds int) bool {
+	return requiresSingleThirdPlace && numRounds >= 2
 }
 
 // SubdivideRegions cuts a draw's shiaijo regions into Excel tree pages: each

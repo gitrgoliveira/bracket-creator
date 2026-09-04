@@ -60,6 +60,25 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "D3", comp.Players[2].Number)
 	})
 
+	t.Run("assigns sequential numbers for unset (empty) Format with no pools, same as playoffs", func(t *testing.T) {
+		// mp-yuy8: an unset Format ("") is standalone playoffs too (the draw
+		// pipeline's default branch calls generatePlayoffs for it exactly as
+		// it does for the literal "playoffs" value), so this call must go
+		// through comp.EffectiveFormat(), not comp.Format, or a competition
+		// that never had Format set silently never gets its numbers merged.
+		comp := &state.Competition{
+			NumberPrefix: "D",
+			Format:       "",
+			Players: []domain.Player{
+				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
+				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
+			},
+		}
+		mergePoolNumbersIntoPlayers(comp, nil)
+		assert.Equal(t, "D1", comp.Players[0].Number)
+		assert.Equal(t, "D2", comp.Players[1].Number)
+	})
+
 	// bc-pnum G8: this subtest used to assert the opposite -- that an
 	// existing non-empty Number survived the merge untouched. That guard
 	// (the playoffs-only branch's own `if players[i].Number == ""`) was

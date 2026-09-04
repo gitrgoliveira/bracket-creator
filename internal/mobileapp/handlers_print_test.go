@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -201,5 +202,186 @@ func TestPrintHandler_SofficeAbsent(t *testing.T) {
 			// OS-agnostic actionable guidance (no platform-specific install cmd).
 			assert.Contains(t, w.Body.String(), "$LIBREOFFICE_PATH")
 		})
+	}
+}
+
+// TestPrintHandler_SwissSkippedAndWarned covers a mixed batch: a Swiss
+// competition alongside a renderable one. The Swiss competition has no
+// static bracket to print (Engine.ExportCompetitionXlsx's
+// ErrSwissExportUnsupported), so ExportTournamentWorkbooks skips it rather
+// than aborting the whole booklet -- but the operator must be TOLD, since a
+// silent omission would leave them believing the ZIP covers every
+// competition. Uses type=registration (fastest group: a single "data" sheet
+// per workbook, no bracket/pool rendering needed) to keep the real soffice
+// round-trip quick.
+func TestPrintHandler_SwissSkippedAndWarned(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soffice-dependent test in short mode")
+	}
+	if !sofficeAvailable() {
+		t.Skip("soffice not available in this environment")
+	}
+
+	r, store, _, _ := setupPrintTestRouter(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     "renderable-comp",
+		Name:   "Renderable Comp",
+		Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-comp",
+		Name:        "Swiss Comp",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      state.CompStatusSetup,
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/print/registration", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"the renderable competition alone must still produce a booklet; got %d: %s", w.Code, w.Body.String())
+
+	// (a) response header names the skipped competition by ID, not by Name:
+	// header values are decoded as latin-1 by clients, so a non-ASCII Name
+	// would mangle here (see TestSkippedCompetitionsHeaderValue_ASCIIOnly).
+	// The ID is guaranteed ASCII, so it is what the header carries.
+	skippedHeader := w.Header().Get("X-Skipped-Competitions")
+	assert.Contains(t, skippedHeader, "swiss-comp")
+	assert.NotContains(t, skippedHeader, "Swiss Comp")
+
+	// (b) the ZIP itself carries a plain-text entry -- the one an operator
+	// actually sees when they open the archive, since a streamed
+	// application/zip response has no JSON body to carry a warning in.
+	body := w.Body.Bytes()
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	require.NoError(t, err, "response must be a valid ZIP archive")
+
+	var skippedEntry *zip.File
+	for _, f := range zr.File {
+		if f.Name == "SKIPPED-COMPETITIONS.txt" {
+			skippedEntry = f
+			break
+		}
+	}
+	require.NotNil(t, skippedEntry, "ZIP must contain SKIPPED-COMPETITIONS.txt when a Swiss competition was skipped")
+
+	rc, err := skippedEntry.Open()
+	require.NoError(t, err)
+	defer rc.Close()
+	content, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "Swiss Comp")
+	assert.Contains(t, string(content), "swiss-comp")
+	assert.Contains(t, string(content), "not yet implemented")
+
+	// The renderable competition's own PDF must still be present alongside
+	// the warning entry -- the skip must not have swallowed the whole batch.
+	var hasPDF bool
+	for _, f := range zr.File {
+		if strings.HasSuffix(f.Name, ".pdf") {
+			hasPDF = true
+			break
+		}
+	}
+	assert.True(t, hasPDF, "the renderable competition's PDF must still be produced")
+}
+
+// TestPrintHandler_AllSkippedReturns422 covers a tournament that is entirely
+// Swiss: ExportTournamentWorkbooks skips every competition, so len(sources)
+// is 0 with err == nil. Before the fix this fell through to
+// gen.GenerateAll/GenerateGroups, which fail with "no source workbooks
+// provided" and surface as a misleading HTTP 500 -- the operator never sees
+// the skipped-competition detail that exists to explain the omission. The
+// handler must instead recognise the all-skipped case itself and return 422
+// naming the skipped competition and its reason, without ever reaching the
+// PDF generator. The handler calls pdf.NewGenerator() (LibreOffice
+// detection) before the export/skip step, so soffice must be present to
+// reach this code path at all; skip cleanly when it is absent.
+func TestPrintHandler_AllSkippedReturns422(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soffice-dependent test in short mode")
+	}
+	if !sofficeAvailable() {
+		t.Skip("soffice not available in this environment")
+	}
+
+	r, store, _, _ := setupPrintTestRouter(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          "swiss-only",
+		Name:        "Swiss Only Comp",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 2,
+		Status:      state.CompStatusSetup,
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/print/registration", nil)
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code,
+		"an all-skipped tournament must return 422, not 500; body=%s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "Swiss Only Comp")
+	assert.Contains(t, w.Body.String(), "swiss-only")
+	assert.NotContains(t, w.Body.String(), "no source workbooks provided",
+		"the response must not leak the internal pdf-generator error string")
+}
+
+// TestSkippedCompetitionsHeaderValue_ASCIIOnly pins the fix for the
+// mojibake finding: a competition Name containing non-ASCII characters
+// (kanji, here) must never reach the X-Skipped-Competitions header, since
+// HTTP clients decode header values as latin-1 and would mangle it. The ZIP
+// entry (writeSkippedCompetitionsEntry), which has no such constraint,
+// still carries the full name.
+func TestSkippedCompetitionsHeaderValue_ASCIIOnly(t *testing.T) {
+	skipped := []engine.SkippedCompetition{
+		{ID: "kanji-comp", Name: "剣道大会", Reason: "Swiss export is not yet implemented"},
+	}
+
+	header := skippedCompetitionsHeaderValue(skipped)
+	for i, r := range header {
+		assert.Lessf(t, r, rune(0x80), "header value must be pure ASCII, found %q at byte %d in %q", r, i, header)
+	}
+	assert.Contains(t, header, "kanji-comp")
+	assert.NotContains(t, header, "剣道大会")
+
+	// The ZIP entry, by contrast, is expected to carry the full UTF-8 name.
+	buf := &bytes.Buffer{}
+	zw := zip.NewWriter(buf)
+	require.NoError(t, writeSkippedCompetitionsEntry(zw, skipped))
+	require.NoError(t, zw.Close())
+
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	require.NoError(t, err)
+	require.Len(t, zr.File, 1)
+	rc, err := zr.File[0].Open()
+	require.NoError(t, err)
+	defer rc.Close()
+	content, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "剣道大会")
+}
+
+// TestSentinelReasonsContainNoDelimiterPipe is a tripwire, not a regression
+// pin: skippedCompetitionsHeaderValue joins entries with " | "
+// (deliberately not "; ", since our own sentinel reasons contain
+// semicolons -- see that function's doc comment and mp-yuy8). If a future
+// sentinel reason is ever written to contain a "|" byte, it would silently
+// split into two header entries the same way the semicolon delimiter once
+// did. This test fails loudly the moment that happens, for every sentinel
+// reason the export paths can hand to skippedCompetitionsHeaderValue.
+func TestSentinelReasonsContainNoDelimiterPipe(t *testing.T) {
+	sentinels := []error{
+		engine.ErrSwissExportUnsupported,
+		engine.ErrBracketDrawMismatch,
+	}
+	for _, sentinel := range sentinels {
+		assert.NotContainsf(t, sentinel.Error(), "|",
+			"sentinel reason must not contain the header delimiter '|': %q", sentinel.Error())
 	}
 }

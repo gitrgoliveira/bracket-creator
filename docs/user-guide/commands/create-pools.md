@@ -25,6 +25,7 @@ bracket-creator create-pools [flags]
 | `--single-tree` | (none) | `false` | Produce one tree sheet instead of one per court |
 | `--number-prefix` | `-n` | (none) | Letter prefix for competitor numbers (for example, `K` produces K1, K2, …). When omitted, one is derived from `--title-prefix`; if `--title-prefix` is also omitted, the prefix is `K` |
 | `--title-prefix` | (none) | `""` | Prefix added to sheet titles |
+| `--third-place-match` | (none) | `false` | Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match |
 
 ## Examples
 

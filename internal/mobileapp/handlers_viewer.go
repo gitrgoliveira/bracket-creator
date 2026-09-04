@@ -28,6 +28,12 @@ import (
 //     its number IS participant order under the prefix, composed through the
 //     same helper the draw uses.
 //
+// format must be the competition's EFFECTIVE format (comp.EffectiveFormat()),
+// not comp.Format directly: an unset Format ("") is standalone playoffs too
+// (generation's default case falls to generatePlayoffs for it identically),
+// so a caller passing the raw stored value would silently skip number
+// assignment for those entrants.
+//
 // Any other format with no pools is left WITHOUT numbers: before the draw the
 // operator's roster shows the separate ProvisionalNumbers instead (see
 // provisionalCompetitorNumbers), and a public surface never shows a number
@@ -113,7 +119,9 @@ func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.Format)
+	// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs too,
+	// see mergePoolNumbersIntoPlayersSlice's doc comment.
+	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.EffectiveFormat())
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the

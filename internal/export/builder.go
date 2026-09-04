@@ -17,10 +17,19 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// ErrSwissExportUnsupported is returned by BuildResultsWorkbook for Swiss-format
-// competitions, which have no static bracket to render. Callers should surface a
-// clear message and point operators at the live Swiss standings instead.
-var ErrSwissExportUnsupported = errors.New("results export is not supported for Swiss competitions; use the live standings view")
+// ErrSwissExportUnsupported is returned by BuildResultsWorkbook for
+// Swiss-format competitions, which have no pool results or static bracket to
+// archive as literal values.
+//
+// This is a plain alias of engine.ErrSwissExportUnsupported -- see that
+// sentinel's doc comment for the message text and the full rationale, so
+// this comment can't drift out of sync with what the error actually says.
+// The sentinel must live in internal/engine, since internal/export imports
+// internal/engine and the reverse direction would be an import cycle; the
+// alias is what keeps errors.Is matching whichever export path -- this
+// results-workbook builder or Engine.ExportCompetitionXlsx -- produced the
+// error.
+var ErrSwissExportUnsupported = engine.ErrSwissExportUnsupported
 
 // ErrCompetitionNotFound is returned by BuildResultsWorkbook when the competition
 // ID does not exist, so the handler can map it to HTTP 404 (matching every other
@@ -81,10 +90,50 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: load bracket: %w", err)
 	}
 
+	// The tournament, loaded ONCE and strictly (mp-yuy8 criterion 6), matching
+	// the blank-template export (Engine.ExportCompetitionXlsx): a corrupt
+	// tournament.md now aborts this export instead of CompetitionCourts
+	// silently degrading to the competition's own court list -- which prints
+	// the WRONG shiaijo names on every sheet for exactly the legacy records
+	// that need the venue's. A MISSING tournament.md is not an error --
+	// LoadTournament returns (nil, nil) for that (state/tournament.go) -- so a
+	// competition with no tournament record yet still exports.
+	tourn, err := store.LoadTournament()
+	if err != nil {
+		return nil, fmt.Errorf("export: load tournament: %w", err)
+	}
+
 	// Index match results by ID for O(1) lookup.
 	matchResultByID := make(map[string]state.MatchResult, len(matchResults))
 	for _, mr := range matchResults {
 		matchResultByID[mr.ID] = mr
+	}
+
+	// The shiaijo BY NAME, mirroring the blank-template export: a competition
+	// allocated C and D must not have its sheets titled A and B. The count is
+	// read off the same list rather than derived a second time.
+	courts := engine.CompetitionCourts(comp, tourn)
+	numCourts := len(courts)
+	// Where each pool is actually being fought, so the archived workbook bands a
+	// pool under the shiaijo it was scored on.
+	courtOfPool := engine.PoolCourtByName(matchResults)
+
+	// EliminationDraw owns the leaf order -- pool winners, or the frozen
+	// bracket's own leaves for a pure playoffs competition -- and is shared
+	// with the blank-template export so the two exports of one competition
+	// render the identical bracket, with numbering that matches the stored
+	// bracket overlayBracketScores fills in (mp-ndfu).
+	draw := engine.EliminationDraw(store, comp, pools, bracket, numCourts)
+
+	// Kachinuki Detail sheet's bout log (GAP 6): bout-by-bout log for
+	// kachinuki team competitions. Same opt-in semantics as the blank-
+	// template export (Engine.ExportCompetitionXlsx): the renderer is a
+	// no-op for empty input, so fixed-format and individual comps are
+	// unaffected. Without this, the admin "Download results" workbook
+	// (which builds HERE, not via ExportCompetitionXlsx) had no bout log.
+	kachinukiMatches, err := eng.KachinukiDetailMatches(compID)
+	if err != nil {
+		return nil, fmt.Errorf("export: collect kachinuki detail: %w", err)
 	}
 
 	f, err := excel.NewFileFromScratch()
@@ -95,43 +144,28 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		_ = f.Close()
 	}()
 
-	// 1. Data sheet + coordinate maps. Helper formula references in other
-	//    sheets that point here (player names, etc.) still resolve correctly.
-	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.EffectiveWithZekkenName(), comp.Name)
-
-	// 2. Pool Draw sheet (formula refs to data sheet survive store round-trips).
-	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
-		return nil, fmt.Errorf("export: add pools to sheet: %w", err)
+	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
+	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
+	// steps and order to Engine.ExportCompetitionXlsx. poolsByCourt is the one
+	// artifact the overlays below need (PrintPoolMatches's pool-index grouping
+	// per shiaijo band); everything else PrintPoolMatches/AddPoolDataToSheet
+	// return is consumed entirely inside the shared pipeline.
+	poolsByCourt, err := engine.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	if err != nil {
+		return nil, fmt.Errorf("export: %w", err)
 	}
 
-	// 3. Pool Matches sheet: lay skeleton, then overlay literal scores and standings.
-	//    W/L/T/RANK formula cells collapse to 0 after a store round-trip
-	//    (documented at cmd/create_handler.go:25), so we overwrite them with
-	//    literal values from the engine.
-	// The shiaijo BY NAME, mirroring the blank-template export: a competition
-	// allocated C and D must not have its sheets titled A and B. The count is
-	// read off the same list rather than derived a second time.
-	courts := engine.CompetitionCourts(store, comp)
-	numCourts := len(courts)
-	// Where each pool is actually being fought, so the archived workbook bands a
-	// pool under the shiaijo it was scored on.
-	courtOfPool := engine.PoolCourtByName(matchResults)
-	// numCourts is the operator's ALLOCATION; the pool-banded sheet clamps it
-	// itself to the count the pool phase actually runs on. The grouping the
-	// skeleton LAID OUT comes back with the winners and is what both overlays
-	// write against -- taken from the skeleton rather than recomputed here, so
-	// "computed ONCE and handed to every overlay" is enforced by the call shape
-	// instead of by two calls happening to be given the same arguments.
-	// MatchWinnerRanksNeeded (not EffectivePoolWinners() directly): mirrors
-	// the blank-template export (internal/engine/export.go) so the two
-	// exports of one competition register the SAME matchWinners ranks --
-	// under bc-qual larger-pools, an oversized pool's crossed 2nd needs a
-	// matchWinners["<pool>-2nd"] entry too, or its cell renders as inert
-	// literal text (or a broken CONCATENATE formula) instead of a live link.
-	matchWinners, poolsByCourt := helper.PrintPoolMatches(
-		f, pools, comp.TeamSize, comp.MatchWinnerRanksNeeded(),
-		courts, courtOfPool, comp.Mirror, poolCoords, playerCoords, comp.Engi,
-	)
+	// ---- Results-only overlays: literal values over the skeleton the shared
+	// pipeline just rendered. These run AFTER the whole pipeline rather than
+	// interleaved with it (as they used to be, immediately after the Pool
+	// Matches / Elimination Matches skeleton steps): nothing the shared
+	// pipeline does past those two steps (deleting the Tree template, Names
+	// to Print, Kachinuki Detail) touches either sheet again, so the order
+	// shift changes nothing about what ends up in either cell. ----
+
+	// Pool Matches: W/L/T/RANK formula cells collapse to 0 after a store
+	// round-trip (documented at cmd/create_handler.go:25), so overwrite them
+	// with literal values from the engine.
 	if err := overlayPoolScores(f, pools, matchResultByID, poolOrdinals, comp.TeamSize, comp.Mirror, poolsByCourt, comp.Engi); err != nil {
 		return nil, fmt.Errorf("export: overlay pool scores: %w", err)
 	}
@@ -139,81 +173,39 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: overlay standings: %w", err)
 	}
 
-	// 4. Elimination Matches + Tree sheets. Only for formats with a knockout
-	//    phase: the IsPlayoffEnabled gate below drops the phantom bracket a
-	//    league's placeholder finals would otherwise imply. EliminationDraw owns
-	//    the leaf order -- pool winners, or the frozen bracket's own leaves for a
-	//    pure playoffs competition -- and is shared with the blank-template export
-	//    so the two exports of one competition render the identical bracket, with
-	//    numbering that matches the stored bracket overlayBracketScores fills in
-	//    (mp-ndfu).
-	draw := engine.EliminationDraw(store, comp, pools, bracket, numCourts)
-	if draw != nil && comp.IsPlayoffEnabled() {
-		// Tree sheets FIRST, then the Elimination Matches skeleton, in the one
-		// mandatory order RenderKnockoutPages enforces (also behind the CLI and
-		// the blank-template export). The skeleton's "Round N - Match N" headers
-		// are what overlayBracketScores below scans. Bronze gates on the stored
-		// bracket's ThirdPlaceMatch: the bracket is authoritative here, unlike
-		// the CLI's flag-derived NeedsBronzeBlock.
-		// Band each bout by the shiaijo it is CURRENTLY on, read off the stored
-		// bracket the overlay below fills in, so the archived workbook records
-		// where each bout was actually fought rather than where the draw first
-		// put it. ONE plan for the tree pages and the elimination sheet: they
-		// describe the same bouts, so resolving their shiaijo separately is how
-		// a wall chart headed "Shiaijo D" ends up filed with score sheets banded
-		// "Shiaijo A".
-		plan := engine.LiveCourtPlan(draw, courts, bracket)
-		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
-		if err != nil {
-			return nil, fmt.Errorf("export: %w", err)
+	// Elimination Matches: literal scores from the live bracket state.
+	// Gated on `bracket != nil` alone (not also `draw != nil &&
+	// comp.IsPlayoffEnabled()`, the condition RenderCompetitionWorkbook's own
+	// knockout step gates on): both overlayBracketScores and
+	// overlayPlayoffBracketNames work by SCANNING the sheet the shared
+	// pipeline just produced for header cells ("Round N - Match N" / "3rd
+	// Place"), so when the pipeline rendered nothing there (no derivable
+	// draw, and no stored knockout content to disagree about it --
+	// bracketHasKnockoutContent false, so the draw-mismatch case above
+	// ERRORS OUT of RenderCompetitionWorkbook before this function ever
+	// reaches here) they find nothing and are a no-op -- identical to
+	// skipping the call outright. Keeping the broader gate rather than
+	// nesting inside `draw != nil && IsPlayoffEnabled()` is therefore just
+	// avoiding a redundant condition, not covering a reachable divergence.
+	if bracket != nil {
+		bracketByNum := buildBracketMatchIndex(bracket)
+		thirdPlaceMatch := bracket.ThirdPlaceMatch
+		if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch); err != nil {
+			return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 		}
-		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
-			plan, comp.Mirror, comp.Engi,
-			bracket != nil && bracket.ThirdPlaceMatch != nil)
-
-		// Overlay literal scores from the live bracket state.
-		if bracket != nil {
-			bracketByNum := buildBracketMatchIndex(bracket)
-			thirdPlaceMatch := bracket.ThirdPlaceMatch
-			if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch); err != nil {
-				return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
-			}
-			// Playoffs have no pool data sheet, so the pool-oriented renderer emits
-			// broken ''! references for the entrant name cells. Overwrite them with
-			// the stored bracket's literal names (empty for unresolved slots) so the
-			// sheet is a valid literal snapshot with no broken formulas.
-			if len(pools) == 0 && comp.Format == state.CompFormatPlayoffs {
-				if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
-					return nil, fmt.Errorf("export: overlay playoff names: %w", err)
-				}
+		// Playoffs have no pool data sheet, so the pool-oriented renderer emits
+		// broken ''! references for the entrant name cells. Overwrite them with
+		// the stored bracket's literal names (empty for unresolved slots) so the
+		// sheet is a valid literal snapshot with no broken formulas.
+		//
+		// comp.EffectiveFormat(), not comp.Format directly: an unset Format ("")
+		// is standalone playoffs too (generation's default case), so it has the
+		// identical no-pool-data-sheet shape and needs the identical overlay.
+		if len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatPlayoffs {
+			if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
+				return nil, fmt.Errorf("export: overlay playoff names: %w", err)
 			}
 		}
-	}
-	// The bare "Tree" sheet is a styled scaffold that every page is copied from,
-	// never output itself. Delete it whether it was consumed above or left unused
-	// by a format with no knockout phase, so no blank tree page reaches the
-	// workbook or the printed booklet.
-	if derr := f.DeleteSheet(helper.SheetTree); derr != nil {
-		return nil, fmt.Errorf("export: delete tree template sheet: %w", derr)
-	}
-
-	// 5. Names to Print sheet (identical to blank-template export). Clamps the
-	//    allocation to the pool phase's own shiaijo count internally, as step 3
-	//    does.
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
-
-	// 6. Kachinuki Detail sheet: bout-by-bout log for kachinuki team
-	//    competitions (GAP 6). Same opt-in semantics as the blank-template
-	//    export (Engine.ExportCompetitionXlsx step 7): the renderer is a
-	//    no-op for empty input, so fixed-format and individual comps are
-	//    unaffected. Without this, the admin "Download results" workbook
-	//    (which builds HERE, not via ExportCompetitionXlsx) had no bout log.
-	kachinukiMatches, err := eng.KachinukiDetailMatches(compID)
-	if err != nil {
-		return nil, fmt.Errorf("export: collect kachinuki detail: %w", err)
-	}
-	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
-		return nil, fmt.Errorf("export: write kachinuki detail sheet: %w", err)
 	}
 
 	var buf bytes.Buffer
@@ -905,7 +897,9 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 // sheet by scanning for "Round N - Match N" header cells and, when present, a
 // "3rd Place" header cell. For each completed match found, the score cells in
 // the row two rows below the header are overwritten with literal values.
-// thirdPlaceMatch is the bracket's bronze match (nil when absent/not naginata).
+// thirdPlaceMatch is the bracket's bronze match (nil when this competition
+// does not require a single 3rd place -- see
+// state.Competition.RequiresSingleThirdPlace, bc-3rdp).
 func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool, engi bool, thirdPlaceMatch *state.BracketMatch) error {
 	if teamSize != 0 {
 		// Engi is individual-only; the team overlay renders ippon strings and

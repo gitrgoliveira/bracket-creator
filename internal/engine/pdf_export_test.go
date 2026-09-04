@@ -41,7 +41,7 @@ func TestExportTournamentWorkbooks_ExplicitIDs(t *testing.T) {
 	require.NoError(t, eng.StartCompetition("comp-b"))
 
 	tmpDir := t.TempDir()
-	sources, err := eng.ExportTournamentWorkbooks(tmpDir, "comp-a", "comp-b")
+	sources, _, err := eng.ExportTournamentWorkbooks(tmpDir, "comp-a", "comp-b")
 	require.NoError(t, err)
 	require.Len(t, sources, 2)
 
@@ -74,7 +74,7 @@ func TestExportTournamentWorkbooks_AllCompetitions(t *testing.T) {
 	require.NoError(t, eng.StartCompetition("comp-y"))
 
 	tmpDir := t.TempDir()
-	sources, err := eng.ExportTournamentWorkbooks(tmpDir)
+	sources, _, err := eng.ExportTournamentWorkbooks(tmpDir)
 	require.NoError(t, err)
 	require.Len(t, sources, 2, "empty compIDs must export ALL competitions")
 
@@ -96,7 +96,7 @@ func TestExportTournamentWorkbooks_NoCompetitions(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
 
 	tmpDir := t.TempDir()
-	sources, err := eng.ExportTournamentWorkbooks(tmpDir)
+	sources, _, err := eng.ExportTournamentWorkbooks(tmpDir)
 	require.Error(t, err)
 	assert.Nil(t, sources)
 	assert.Contains(t, err.Error(), "no competitions to export")
@@ -108,7 +108,7 @@ func TestExportTournamentWorkbooks_UnknownCompID(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
 
 	tmpDir := t.TempDir()
-	sources, err := eng.ExportTournamentWorkbooks(tmpDir, "does-not-exist")
+	sources, _, err := eng.ExportTournamentWorkbooks(tmpDir, "does-not-exist")
 	require.Error(t, err)
 	assert.Nil(t, sources)
 	var nfe *NotFoundError
@@ -155,7 +155,7 @@ func TestExportTournamentWorkbooks_IsTeamFlag(t *testing.T) {
 			require.NoError(t, eng.StartCompetition(tc.compID))
 
 			tmpDir := t.TempDir()
-			sources, err := eng.ExportTournamentWorkbooks(tmpDir, tc.compID)
+			sources, _, err := eng.ExportTournamentWorkbooks(tmpDir, tc.compID)
 			require.NoError(t, err)
 			require.Len(t, sources, 1)
 			assert.Equal(t, tc.wantTeam, sources[0].IsTeam)

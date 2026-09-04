@@ -1603,6 +1603,29 @@ function adminHdr(adminPassword) {
     return adminPassword ? { 'X-Admin-Password': adminPassword } : {};
 }
 
+// parseSkippedCompetitionsHeader parses the server's X-Skipped-Competitions
+// header value into [{id, reason}, ...]. The wire format is
+// "<id>: <reason> | <id>: <reason>" (internal/mobileapp/handlers_print.go,
+// skippedCompetitionsHeaderValue) -- entries joined by " | ", each split on
+// the FIRST ": " so a reason that itself happens to contain ": " is not
+// truncated. The delimiter is deliberately NOT "; ": the server's own
+// sentinel reason strings contain semicolons (e.g. "...no static bracket to
+// export; use the live standings view instead"), so splitting on "; " would
+// tear a single entry's reason in two and silently drop the second half.
+// The header carries the competition ID rather than its name (header values
+// are latin-1 on the wire and a kendo competition name routinely holds
+// non-ASCII characters), so callers resolve id -> display name themselves.
+// Returns [] for an absent/empty header.
+function parseSkippedCompetitionsHeader(headerValue) {
+    if (!headerValue) return [];
+    return headerValue.split(' | ').reduce((out, entry) => {
+        const sep = entry.indexOf(': ');
+        if (sep === -1) return out;
+        out.push({ id: entry.slice(0, sep), reason: entry.slice(sep + 2) });
+        return out;
+    }, []);
+}
+
 const API = {
     async fetchTournament() {
         const res = await fetch('/api/viewer/tournament');
@@ -1835,11 +1858,17 @@ const API = {
         }
         return res.json();
     },
-    // exportPDFs POSTs to /api/print/:type (admin-gated) and returns the
-    // response as a Blob (a ZIP of the produced PDFs). `type` is one of
-    // registration|names|tags|pools-trees|full-bracket|all. Throws with the
-    // server's error message on non-2xx (e.g. 503 when LibreOffice is absent,
-    // 422 when no pages were produced). Generation runs LibreOffice and can
+    // exportPDFs POSTs to /api/print/:type (admin-gated) and returns
+    // { blob, skipped }: `blob` is a ZIP of the produced PDFs, `skipped` is
+    // the parsed X-Skipped-Competitions header as [{id, reason}, ...] (empty
+    // array when the header is absent, i.e. nothing was skipped). `type` is
+    // one of registration|names|tags|pools-trees|full-bracket|all.
+    //
+    // Throws with the server's error message on non-2xx (e.g. 503 when
+    // LibreOffice is absent, 422 when every competition was skipped or no
+    // pages were produced); the thrown Error also carries a `skipped` array
+    // (from the JSON body's `skipped` field, e.g. the all-skipped 422 case),
+    // empty when the body carries none. Generation runs LibreOffice and can
     // take 30–60s, so callers should show a busy state.
     async exportPDFs(type, password) {
         const res = await fetch(`/api/print/${type}`, {
@@ -1848,9 +1877,13 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to generate PDFs");
+            const e = new Error(err.error || "Failed to generate PDFs");
+            e.skipped = Array.isArray(err.skipped) ? err.skipped : [];
+            throw e;
         }
-        return res.blob();
+        const skipped = parseSkippedCompetitionsHeader(res.headers.get('X-Skipped-Competitions'));
+        const blob = await res.blob();
+        return { blob, skipped };
     },
     // exportResults GETs the RESULTS-populated workbook (played scores,
     // standings, winners, and decision suffixes written as literal values)

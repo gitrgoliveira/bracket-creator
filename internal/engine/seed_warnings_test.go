@@ -125,3 +125,34 @@ func TestSeedWarningsReportsSurplusSeedRanks(t *testing.T) {
 		assert.NotEmpty(t, w, "an empty warning string tells the operator nothing")
 	}
 }
+
+// TestSeedWarningsSurviveACorruptTournament pins mp-yuy8 criterion 6's
+// deliberate exception: SeedWarningsFor is an admin-only advisory channel
+// (D7 -- "never abort, report what happened"), so unlike the two export
+// paths it must NOT propagate a tournament load failure. A corrupt
+// tournament.md must neither panic nor turn this into an error return (the
+// function has no error return at all), and the warnings it can still
+// compute from comp.Courts must be unaffected.
+func TestSeedWarningsSurviveACorruptTournament(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "warnings-corrupt-tournament"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 3)
+	saveTestParticipants(t, store, compID,
+		[]string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank", "Grace", "Heidi", "Ivan"})
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice", SeedRank: 1},
+		{Name: "Bob", SeedRank: 2},
+		{Name: "Charlie", SeedRank: 3},
+		{Name: "Dave", SeedRank: 4},
+	}))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	breakTournament(t, dir)
+
+	assert.NotPanics(t, func() {
+		warnings := seedWarningsByID(t, eng, compID)
+		assert.NotEmpty(t, warnings,
+			"a corrupt tournament.md must degrade to comp.Courts, not silence the surplus-seed warning")
+	})
+}

@@ -46,11 +46,19 @@ func ValidateCourtCount(numPlayers, numCourts int) error {
 // legacy record carrying no format at all, falls to that switch's default
 // branch and generates a standalone playoffs bracket.
 //
-// Deliberately NOT state.Competition.IsPlayoffEnabled: that predicate asks
-// whether the UI should offer playoff affordances and answers false for an
-// unset format, whereas the draw pipeline's default branch DOES build a
-// playoffs bracket for one. This check has to follow the pipeline, not the
-// UI. Mirrored client-side as formatDrawsBracket in
+// Not state.Competition.IsPlayoffEnabled, even though the two now agree on
+// every format value validateCompetitionFormat accepts (mp-yuy8:
+// IsPlayoffEnabled goes through EffectiveFormat, which reads an unset format
+// as playoffs too, closing what used to be a real divergence here). They
+// stay separate predicates because they answer different questions -- this
+// one follows the draw pipeline's format switch by construction (its
+// `default:` case is "everything not explicitly league/mixed/swiss builds a
+// bracket"), so it also returns true for a stray value the pipeline would
+// still fall through to `default:` for, which IsPlayoffEnabled's own
+// explicit-case switch would reject. That gap is a non-issue in practice --
+// validateCompetitionFormat never lets such a value reach storage -- but it
+// is why this stays its own function rather than a thin call to
+// IsPlayoffEnabled. Mirrored client-side as formatDrawsBracket in
 // web-mobile/js/admin_helpers.jsx.
 func CompetitionDrawsBracket(format string) bool {
 	switch format {

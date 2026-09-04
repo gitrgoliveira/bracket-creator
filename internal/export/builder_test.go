@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -396,6 +397,53 @@ func TestBuildResultsWorkbook_NoPools(t *testing.T) {
 	data, err := BuildResultsWorkbook(store, eng, compID)
 	require.NoError(t, err)
 	require.NotEmpty(t, data)
+}
+
+// TestBuildResultsWorkbook_MissingTournament_Succeeds guards against
+// over-strictness for mp-yuy8 criterion 6: a competition folder with no
+// tournament.md at all (the bootstrap window before POST /tournament) must
+// still build a results workbook. LoadTournament treats "does not exist" as
+// (nil, nil), never an error (internal/state/tournament.go).
+func TestBuildResultsWorkbook_MissingTournament_Succeeds(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	require.NoFileExists(t, filepath.Join(dir, "tournament.md"))
+
+	require.NoError(t, store.SavePools(compID, makePools()))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+}
+
+// TestBuildResultsWorkbook_CorruptTournament_Fails pins mp-yuy8 criterion 6: a
+// corrupt (unreadable) tournament.md now aborts BuildResultsWorkbook rather
+// than engine.CompetitionCourts silently degrading to the competition's own
+// court list. A malformed YAML front matter does NOT make LoadTournament
+// error (it falls back to a default Tournament{} -- see
+// internal/state/tournament.go's parseFrontMatter branch), so "corrupt" here
+// is reproduced the same way as the engine-side test
+// (TestExportCompetitionXlsx_CorruptTournament_Fails): tournament.md
+// replaced by a directory, forcing a real os.ReadFile error.
+func TestBuildResultsWorkbook_CorruptTournament_Fails(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Cup", Courts: []string{"A"}}))
+	require.NoError(t, store.SavePools(compID, makePools()))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	tournPath := filepath.Join(dir, "tournament.md")
+	require.NoError(t, os.RemoveAll(tournPath))
+	require.NoError(t, os.Mkdir(tournPath, 0o755))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.Error(t, err, "a corrupt tournament.md must abort the export rather than silently printing positional court labels")
+	assert.Nil(t, data)
 }
 
 func TestBuildResultsWorkbook_CompetitionNotFound(t *testing.T) {
@@ -3834,7 +3882,18 @@ func TestBuildResultsWorkbook_KachinukiDetailSheet(t *testing.T) {
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	comp.Format = state.CompFormatMixed
+	// Format is Playoffs, not Mixed (mp-yuy8 task 1): a Mixed competition
+	// with an EMPTY pools list but a bracket that already carries real
+	// round content is not a shape any real write path produces (Mixed
+	// always populates pools.csv before it ever builds a bracket) -- it is
+	// exactly the bracket/settings mismatch ErrBracketDrawMismatch refuses.
+	// Playoffs with no pools is the shape this fixture actually needs:
+	// PlayoffLeavesFromBracket reads the leaf order straight off the same
+	// hand-crafted bracket below, so the draw derives cleanly and the
+	// Kachinuki Detail sheet assertion further down still exercises the
+	// same bracket-bout-log data path, independent of pool/elimination
+	// rendering.
+	comp.Format = state.CompFormatPlayoffs
 	comp.TeamMatchType = state.TeamMatchTypeKachinuki
 	comp.TeamSize = 3
 	require.NoError(t, store.SaveCompetition(comp))

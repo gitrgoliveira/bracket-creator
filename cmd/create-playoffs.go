@@ -21,7 +21,7 @@ type playoffOptions struct {
 	withZekkenName  bool
 	singleTree      bool
 	determined      bool
-	naginata        bool // naginata: adds a 3rd-place bronze block after elimination matches. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
+	thirdPlaceMatch bool // thirdPlaceMatch: adds a 3rd-place (bronze) match after elimination matches, deciding a single 3rd place instead of kendo's default of two joint 3rd places. CLI flag --third-place-match (owner decision, bc-3rdp: the "no new CLI options" ban is lifted for this one); also settable by the web /create handler, which still accepts the legacy "naginata" form field as an alias (see create_handler.go).
 	engi            bool // engi: flag-count scoring captions on elimination blocks. Set ONLY by the web /create handler; deliberately NOT a CLI flag (owner decision: no new CLI options).
 	titlePrefix     string
 	numberPrefix    string
@@ -50,6 +50,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Letter prefix for competitor numbers (e.g. 'K' produces K1, K2, ...); derived from --title-prefix when omitted")
+	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
 		fmt.Fprintf(os.Stderr, "Error marking file flag as required: %v\n", err)
@@ -207,7 +208,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
 	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords)
 
-	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.naginata)
+	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)
 
 	// Apply sheet protection to all sheets except data and Time Estimator

@@ -802,12 +802,22 @@ func forcePoolSize(pools []Pool, targetSizes []int) int {
 // the correct [7,7]).
 func forcePoolSizeFromCounts(counts, targetSizes []int) int {
 	best := -1
+	// bestExcess tracks the champion's own excess value directly, rather
+	// than re-deriving it via counts[best]-targetSizes[best]: gosec (G602)
+	// cannot see that the `best == -1 ||` short circuit makes that
+	// re-derivation unreachable while best is still -1, and flags it as a
+	// possible out-of-range index. Indexing counts/targetSizes only at the
+	// loop-bound-safe i/j keeps every access provably in range to both the
+	// reader and the linter.
+	bestExcess := 0
 	for i, j := 0, len(counts)-1; i <= j; i, j = i+1, j-1 {
-		if best == -1 || counts[i]-targetSizes[i] < counts[best]-targetSizes[best] {
-			best = i
+		if e := counts[i] - targetSizes[i]; best == -1 || e < bestExcess {
+			best, bestExcess = i, e
 		}
-		if i != j && (counts[j]-targetSizes[j] < counts[best]-targetSizes[best]) {
-			best = j
+		if i != j {
+			if e := counts[j] - targetSizes[j]; e < bestExcess {
+				best, bestExcess = j, e
+			}
 		}
 	}
 	if best == -1 {

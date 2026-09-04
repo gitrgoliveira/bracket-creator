@@ -48,6 +48,13 @@ type Match struct {
 	Round int     `json:"round"`
 }
 
+// CreatePlayers is the CLI/web-facing entry point: create-pools,
+// create-playoffs, the /api/parse-participants preview and the mobile app's
+// tournament-import path all build a NEW roster from raw pasted/uploaded
+// text through this function, so it enforces the dojo requirement
+// (CreatePlayersFromRecords' requireDojo=true) -- see that parameter's own
+// doc comment for why this is NOT the same as state.LoadParticipants'
+// tolerant read of an EXISTING roster from disk.
 func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 	records := make([][]string, 0, len(entries))
 	for _, entry := range entries {
@@ -69,13 +76,41 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		}
 		records = append(records, fields)
 	}
-	return CreatePlayersFromRecords(records, withZekkenName)
+	return CreatePlayersFromRecords(records, withZekkenName, true)
 }
 
 // CreatePlayersFromRecords builds players from pre-parsed CSV records
 // (each record is a slice of fields). Use this when the CSV has already
 // been parsed by encoding/csv so that quoted commas are handled correctly.
-func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player, error) {
+//
+// requireDojo (bc-drwx item 10) controls whether the NON-ZEKKEN branch
+// below rejects a missing/blank dojo column (true, "entry N: missing
+// dojo", matching the zekken branch's own long-standing behaviour a few
+// lines down -- that branch is UNCONDITIONAL and always rejects,
+// regardless of this parameter) or defaults it to the literal string "NA"
+// (false, this function's own pre-bc-drwx behaviour for every caller).
+//
+//   - CreatePlayers (this file) -- the CLI/web-preview/import entry point,
+//     building a roster fresh from raw text -- always passes true: docs/
+//     user-guide/organisers/input-format.md promises "a row with no dojo
+//     is rejected" and "importing a saved tournament is refused the same
+//     way", and until this fix the non-zekken branch broke that promise.
+//   - state.LoadParticipants (internal/state/participants.go) passes
+//     false: it reads an EXISTING roster back off disk, and
+//     state.ErrBlankDojo's own doc comment states the deliberate,
+//     documented architecture this preserves -- "READ is deliberately NOT
+//     gated. A roster written before this rule (or hand edited) still
+//     loads, so an operator can see it and repair the dojo through the
+//     edit UI." Passing true here would make LoadParticipants itself
+//     refuse to load a legacy blank-dojo roster at all, breaking that
+//     repair path and the two-floor design (state.ErrBlankDojo at WRITE,
+//     helper.ErrBlankDojoInDraw at DRAW) documented in CLAUDE.md's Common
+//     Pitfalls section -- confirmed by fault injection: setting this true
+//     unconditionally reddened TestGenerateDraw_RefusesBlankDojoRoster
+//     (which specifically depends on a blank-dojo roster still LOADING so
+//     the draw-time refusal, not a load-time one, is what fires) and
+//     TestCheckIn_BlankDojoElsewhereInRoster_Returns400.
+func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDojo bool) ([]Player, error) {
 	players := make([]Player, 0, len(records))
 	var errors []string
 	seenNames := make(map[string]int)
@@ -141,9 +176,40 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool) ([]Player
 		} else {
 			player.Name = c.String(line[0])
 			player.DisplayName = SanitizeName(line[0])
-			player.Dojo = "NA"
-			if len(line) >= 2 {
+			// bc-drwx item 10, gated on requireDojo (see this function's own
+			// doc comment for the full rationale and the two callers'
+			// opposite needs): a missing or blank dojo is refused with the
+			// SAME "entry N: missing dojo" error the zekken branch above
+			// uses, matching docs/user-guide/organisers/input-format.md's
+			// promise ("a row with no dojo is rejected") -- this branch used
+			// to default a missing column to the literal string "NA"
+			// unconditionally, which docs never described and which
+			// silently defeated the dojo-based separation rules downstream
+			// (a roster of several "NA"-dojo players reads as one giant
+			// dojo to the pool/knockout distributor).
+			//
+			// The tolerant (requireDojo=false) path preserves this
+			// function's exact pre-bc-drwx behaviour, INCLUDING the
+			// asymmetry between the two ways a dojo can be missing: no
+			// dojo COLUMN at all (len(line) < 2) defaults to the literal
+			// "NA", but an EMPTY dojo COLUMN (line[1] == "") is left
+			// BLANK, not defaulted -- state.LoadParticipants relies on
+			// exactly that blank surviving so a legacy/hand-edited roster's
+			// blank-dojo row still loads AS blank (visible and repairable
+			// in the edit UI, per state.ErrBlankDojo's own doc comment),
+			// rather than being masked behind the "NA" sentinel.
+			if len(line) < 2 {
+				if requireDojo {
+					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					continue
+				}
+				player.Dojo = "NA"
+			} else {
 				player.Dojo = line[1]
+				if requireDojo && player.Dojo == "" {
+					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					continue
+				}
 			}
 			if len(line) > 2 {
 				meta := line[2:]

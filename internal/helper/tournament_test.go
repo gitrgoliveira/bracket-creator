@@ -57,7 +57,6 @@ func TestCreatePlayersWithZekkenNameFallback(t *testing.T) {
 func TestCreatePlayersWithoutZekkenName(t *testing.T) {
 	entries := []string{
 		"John Smith, Tokyo Kendo Club",
-		"Yuki Tanaka",
 	}
 
 	players, err := CreatePlayers(entries, false)
@@ -65,7 +64,23 @@ func TestCreatePlayersWithoutZekkenName(t *testing.T) {
 
 	assert.Equal(t, "Tokyo Kendo Club", players[0].Dojo)
 	assert.Equal(t, "J. SMITH", players[0].DisplayName)
-	assert.Equal(t, "NA", players[1].Dojo)
+}
+
+// TestCreatePlayersWithoutZekkenName_MissingDojoRejected pins bc-drwx item
+// 10: a row with no dojo column is REFUSED, not silently defaulted to the
+// literal string "NA" (the pre-fix behaviour this test used to pin), per
+// docs/user-guide/organisers/input-format.md's promise that "a row with no
+// dojo is rejected" -- a promise this non-zekken branch did not keep before
+// this fix, even though the zekken branch already did.
+func TestCreatePlayersWithoutZekkenName_MissingDojoRejected(t *testing.T) {
+	entries := []string{
+		"John Smith, Tokyo Kendo Club",
+		"Yuki Tanaka",
+	}
+
+	_, err := CreatePlayers(entries, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "entry 2: missing dojo")
 }
 
 func TestCreatePlayersZekkenTwoColumnFallback(t *testing.T) {
@@ -954,21 +969,17 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			errContains: "missing dojo",
 		},
 		{
-			name:       "non-zekken mode with single column",
-			entries:    []string{"John Doe"},
-			withZekken: false,
-			wantErr:    false,
-			validate: func(t *testing.T, players []Player) {
-				if len(players) != 1 {
-					t.Fatalf("Expected 1 player, got %d", len(players))
-				}
-				if players[0].Name != "John Doe" {
-					t.Errorf("Expected name 'John Doe', got %s", players[0].Name)
-				}
-				if players[0].Dojo != "NA" {
-					t.Errorf("Expected dojo 'NA', got %s", players[0].Dojo)
-				}
-			},
+			// bc-drwx item 10: a single-column, non-zekken row used to
+			// default its missing dojo to the literal string "NA"; it is
+			// now refused with the same "entry N: missing dojo" error the
+			// zekken branch already used, matching
+			// docs/user-guide/organisers/input-format.md's promise that a
+			// row with no dojo is rejected.
+			name:        "non-zekken mode with single column is refused",
+			entries:     []string{"John Doe"},
+			withZekken:  false,
+			wantErr:     true,
+			errContains: "entry 1: missing dojo",
 		},
 		{
 			name:       "unicode names and dojos",

@@ -447,14 +447,24 @@ func poolTargetSizes(numPlayers, poolSize int, isMax bool) (totalPools int, targ
 // equals numPlayers (max-mode, or a min-mode roster with no remainder) this
 // is a no-op.
 //
-// Otherwise the shortfall (always < len(base) for every caller in this
-// package: CreatePoolsForCount's own precondition bounds it directly, and
-// poolTargetSizes' uniform row bounds it to < poolSize, which callers here
-// only ever combine with a pool count derived so poolSize <= numPools) is
-// spread by SIMULATING assignPlayersToPools' own forcePoolSize fallback over
-// pool COUNTS -- forcePoolSizeFromCounts, the very walk CreatePools/
-// CreatePoolsForCount reach through forcePoolSize, rather than re-deriving its
-// outer-to-inner order a second time. This is safe to precompute, before any
+// Otherwise the shortfall (< poolSize for a poolTargetSizes-derived uniform
+// row -- CreatePoolsForCount's own precondition bounds its own shortfall
+// directly instead) is spread by SIMULATING assignPlayersToPools' own
+// forcePoolSize fallback over pool COUNTS -- forcePoolSizeFromCounts, the
+// very walk CreatePools/CreatePoolsForCount reach through forcePoolSize,
+// rather than re-deriving its outer-to-inner order a second time.
+//
+// CORRECTION (bc-drwx item 5): this doc used to claim the shortfall is
+// "always < len(base)", reasoning that poolSize is never bigger than the
+// pool count in practice. That is not a real invariant -- 14 entrants at
+// minimum pool size 5 forms only 2 pools (poolSize=5 > totalPools=2), and
+// the shortfall (14 - 2*5 = 4) then EXCEEDS len(base). forcePoolSizeFromCounts
+// itself now handles any shortfall size (see its own doc comment for the
+// fix); this function's precompute never assumed a bound on the loop count
+// in the first place, only on what a single forcePoolSizeFromCounts call
+// does, so no change was needed here beyond correcting the claim.
+//
+// This is safe to precompute, before any
 // real player exists, because that walk never reads a player's identity,
 // only pool LENGTHS against targetSizes, and every pool is providably at
 // its base size before assignPlayersToPools' normal fill (discoverPool /
@@ -737,16 +747,40 @@ func forcePoolSize(pools []Pool, targetSizes []int) int {
 // scaled with the entry count for no reason, and read to CodeQL as an
 // allocation sized by request-derived input (go/uncontrolled-allocation-size).
 // One walk, two entry points, so the two cannot drift.
+//
+// Picks the pool with the LEAST excess over its own target
+// (counts[i]-targetSizes[i]), tie-broken outer-to-inner -- not "the first
+// pool still at or under target", which is only the SAME thing for the
+// first pass around every pool (bc-drwx item 5). A remainder can exceed
+// len(counts): poolTargetSizes' own uniform min-mode row bounds the
+// dynamic shortfall to < poolSize, and poolSize is NOT guaranteed <=
+// len(counts) for every caller (14 entrants at minimum pool size 5 forms
+// only 2 pools, poolSize > totalPools) -- realTargetSizes' old doc comment
+// claimed otherwise and was wrong. The excess-based comparison is what
+// makes a SECOND (or further) full outer-to-inner round fall out for
+// free instead of needing a repeated-rounds loop bolted on: once every
+// pool has received its first extra seat (excess 1 everywhere), the same
+// scan order finds the next one still on excess 1 rather than falling
+// through to an unconditional "return 0" that piled every remaining seat
+// onto pool 0 (repro: 14 entrants at min size 5 -> pools [8,6] instead of
+// the correct [7,7]).
 func forcePoolSizeFromCounts(counts, targetSizes []int) int {
+	best := -1
 	for i, j := 0, len(counts)-1; i <= j; i, j = i+1, j-1 {
-		if counts[i] < targetSizes[i]+1 {
-			return i
+		if best == -1 || counts[i]-targetSizes[i] < counts[best]-targetSizes[best] {
+			best = i
 		}
-		if i != j && counts[j] < targetSizes[j]+1 {
-			return j
+		if i != j && (counts[j]-targetSizes[j] < counts[best]-targetSizes[best]) {
+			best = j
 		}
 	}
-	return 0
+	if best == -1 {
+		// Unreachable for a non-empty counts (the loop body always sets
+		// best on its very first iteration); kept as a defensive fallback
+		// rather than an index-out-of-range panic for an empty slice.
+		return 0
+	}
+	return best
 }
 
 func CreatePoolMatches(pools []Pool) {

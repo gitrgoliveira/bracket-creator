@@ -1,10 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey } from '../admin_pools.jsx';
-// Imported for its side effect: data.jsx's module body sets
-// window.checkinPid, which chusenMemberKey delegates to. AdminPools itself
-// pulls in EmptyState/ScoreEditorModal/window.API and is not practical to
-// mount in this render harness, so the chusen key derivation is tested
-// directly against the real checkinPid (bc-appx item 2).
+// Imported so the tests below can assert chusenMemberKey's behaviour
+// against the REAL window.checkinPid, not to satisfy a chusenMemberKey
+// dependency: chusenMemberKey is deliberately self-contained (bc-appx item
+// 1) rather than delegating to checkinPid, precisely because checkinPid's
+// `p.id ?? fallback` does not treat an empty-string id (what the
+// chusen-candidates wire payload sends for a legacy/UUID-less competitor)
+// as absent. This unit-tests the derivation directly, in addition to (not
+// instead of) the full-mount coverage in
+// __tests__/render/admin_pools_chusen.render.test.jsx, which does mount
+// AdminPools.
 import '../data.jsx';
 
 describe('enrichPoolMatchWithComp', () => {
@@ -319,19 +324,47 @@ describe('poolMatchesForPool', () => {
   });
 });
 
-// chusenMemberKey pins the FIX 2 contract (bc-appx item 2): chusen rank
-// inputs must be keyed by a team member's stable IDENTITY, never by that
-// member's position in the candidates array. The GET .../chusen-candidates
-// `teams` order is the server's live standings order, which reorders after
-// ANY partial write (a member carrying a rank override sorts ahead of one
-// without, regardless of the override's value -- engine/scoring.go), so an
-// index-keyed input map re-attaches the operator's typed value to the WRONG
-// team on a retry after a mid-loop failure.
+// chusenMemberKey pins two contracts:
+//   * bc-appx item 2/3: chusen rank inputs must be keyed by a team member's
+//     stable IDENTITY, never by that member's position in the candidates
+//     array. The GET .../chusen-candidates `teams` order is the server's
+//     live standings order, which reorders after ANY partial write (a
+//     member carrying a rank override sorts ahead of one without,
+//     regardless of the override's value -- engine/scoring.go), so an
+//     index-keyed input map re-attaches the operator's typed value to the
+//     WRONG team on a retry after a mid-loop failure.
+//   * bc-appx item 1 (blocker): that identity must be the member's id when
+//     NON-EMPTY, else "name|dojo" -- checked with a truthy test, not `??`.
+//     The chusen-candidates handler always emits an "id" key
+//     (handlers_competition.go: `gin.H{"id": t.Player.ID, ...}`), which is
+//     "" -- not null/undefined -- for a competitor with no UUID, so a `??`
+//     fallback (window.checkinPid's own rule) never triggers and every
+//     legacy member in a group collapses onto the SAME key "".
 describe('chusenMemberKey', () => {
-  it('keys by the member id when present, matching window.checkinPid', () => {
+  it('keys by the member id when present (the same value window.checkinPid would give for a non-empty id)', () => {
+    // chusenMemberKey does NOT delegate to checkinPid (see the empty-id
+    // test below for why); this only asserts the two happen to agree once
+    // id is non-empty, which is the common, non-legacy case.
     const member = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
     expect(chusenMemberKey(member)).toBe('p-alpha');
     expect(chusenMemberKey(member)).toBe(window.checkinPid(member));
+  });
+
+  it('does NOT collapse two legacy members onto id "" the way window.checkinPid would (bc-appx item 1 blocker)', () => {
+    // Both members carry id: "" -- exactly what the chusen-candidates wire
+    // payload sends for a competitor with no UUID. window.checkinPid's
+    // `p.id ?? fallback` returns "" for both (empty string is not
+    // nullish), so it CANNOT tell them apart; chusenMemberKey must.
+    const alpha = { id: '', name: 'Team Alpha', dojo: 'Raizan' };
+    const beta = { id: '', name: 'Team Beta', dojo: 'Gyokusen' };
+
+    expect(window.checkinPid(alpha)).toBe('');
+    expect(window.checkinPid(beta)).toBe('');
+    expect(window.checkinPid(alpha)).toBe(window.checkinPid(beta)); // the bug, in checkinPid's own terms
+
+    expect(chusenMemberKey(alpha)).toBe('Team Alpha|Raizan');
+    expect(chusenMemberKey(beta)).toBe('Team Beta|Gyokusen');
+    expect(chusenMemberKey(alpha)).not.toBe(chusenMemberKey(beta));
   });
 
   it('falls back to the "name|dojo" composite when id is absent (legacy roster)', () => {

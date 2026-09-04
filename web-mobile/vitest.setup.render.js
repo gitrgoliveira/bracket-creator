@@ -29,10 +29,15 @@ await import('./js/admin_helpers.jsx');
 await import('./js/viewer_utils.jsx');
 
 // data.jsx publishes window.checkinPid (and other data helpers), which admin
-// surfaces call at render time to key participant/team identity (e.g. the
-// chusen rank inputs in admin_pools.jsx, bc-appx item 2). index.html loads
-// data.jsx well before any admin_*.js bundle; import it here so mounted admin
-// components see the same global, mirroring that browser load order.
+// surfaces call at render time to key participant/roster identity (e.g.
+// admin_participants.jsx's row keys and check-in handlers). index.html loads
+// data.jsx well before any admin_*.js bundle; import it here so a mounted
+// admin component sees the same global, mirroring that browser load order.
+// (admin_pools.jsx's chusen rank inputs do NOT need this: chusenMemberKey is
+// deliberately self-contained rather than delegating to checkinPid --
+// bc-appx item 1 -- so this import is not load-bearing for that suite, but
+// is still correct general-purpose setup for any admin surface that does
+// call checkinPid at render time.)
 await import('./js/data.jsx');
 
 // ui.jsx publishes window.EmptyState (and other shared UI primitives) that

@@ -357,9 +357,14 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 //     steps the count down to what the pools can carry. It is the modulus for
 //     the seed spread, the deinterleave AND the caller's pool-to-shiaijo
 //     allocation, and all three must agree.
-//  3. PoolSeeding runs BEFORE CreatePools: it reorders the roster so that
-//     CreatePools' straight fill lands seeds and dojo-mates where they belong.
-//     It runs whether or not anyone is seeded, because it also clusters by dojo.
+//  3. Seeds are placed BEFORE the unseeded: placeSeedIndices lands each
+//     seed on its D6 half/quarter first, then assignUnseededByDojoTree
+//     descends the knockout skeleton for every unseeded player so dojo-mates
+//     land apart where the tree allows. This is a CORRECTION (bc-drwx item
+//  11. of an older version of this constraint, which named PoolSeeding
+//     and CreatePools -- the pre-bc-dojo-Phase-4 pipeline this function's
+//     own body describes below as already replaced; PoolSeeding and its
+//     private helpers no longer have any production caller at all.
 //  4. ReorderPoolsForCourts runs AFTER CreatePools and before anything reads
 //     pool order or pool names.
 //
@@ -407,13 +412,7 @@ func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) (
 // it: the pool COUNT comes from FillBracketPoolCount's formation objective
 // instead of PoolCount's floor(n/minSize) -- the two can and do diverge (45
 // entrants at minimum pool size 3 forms 14 pools here, not floor(45/3)=15;
-// see FillBracketPoolCount's doc comment) -- and pool CUTTING goes through
-// CreatePoolsForCount (an explicit pool count, min-size targets) instead of
-// CreatePools. Every other step mirrors BuildPoolPhase's, in the same order
-// and for the same reasons (see its doc comment): PoolSeeding runs first so
-// seeds land in the pools they belong in, ReorderPoolsForCourts runs after
-// so oversized pools spread across shiaijo instead of clustering on the
-// first (bc-draw Phase 2a).
+// see FillBracketPoolCount's doc comment).
 //
 // numCourts is the RAW requested shiaijo allocation; the returned int is
 // EffectiveDrawCourts(pools, numCourts), exactly as BuildPoolPhase's is --
@@ -424,17 +423,19 @@ func BuildPoolPhase(players []Player, poolSize int, isMax bool, numCourts int) (
 // minimum-players-per-pool sizing), so unlike BuildPoolPhase there is no
 // isMax parameter here at all.
 //
-// Until bc-dojo Phase 4 this function's own body ran
-// PoolSeeding -> CreatePoolsForCount -> ReorderPoolsForCourts, the same
-// fill-then-repair shape BuildPoolPhase's pre-Phase-4 body had. It now
-// delegates to BuildPoolPhaseFillBracketTreeAware
+// Until bc-dojo Phase 4 this function's own body ran its own
+// fill-then-repair pipeline (pool CUTTING through a since-removed
+// CreatePoolsForCount, the fill-bracket counterpart of CreatePools). It
+// now delegates to BuildPoolPhaseFillBracketTreeAware
 // (pool_distribution_tree_aware.go): the same region-aware one-pass
 // distributor BuildPoolPhase itself now uses, cutting via this function's
-// own FillBracketPoolCount formation objective and CreatePoolsForCount's
-// min-size-plus-outer-to-inner-remainder target sizes (realTargetSizes,
-// reused rather than re-derived), and scoring every unseeded placement
-// against the tree fill-bracket mode actually builds
-// (BuildKnockoutDrawFillBracket) rather than the standard uniform one.
+// own FillBracketPoolCount formation objective and a uniform min-size
+// target-size row spread by realTargetSizes (bc-drwx item 11: the
+// remainder-spread arithmetic that used to live inside CreatePoolsForCount
+// is realTargetSizes' own now, not a second copy to stay in sync with),
+// and scoring every unseeded placement against the tree fill-bracket mode
+// actually builds (BuildKnockoutDrawFillBracket) rather than the standard
+// uniform one.
 func BuildPoolPhaseFillBracket(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
 	return BuildPoolPhaseFillBracketTreeAware(players, minSize, numCourts)
 }
@@ -517,11 +518,10 @@ func poolTargetSizes(numPlayers, poolSize int, isMax bool) (totalPools int, targ
 // is a no-op.
 //
 // Otherwise the shortfall (< poolSize for a poolTargetSizes-derived uniform
-// row -- CreatePoolsForCount's own precondition bounds its own shortfall
-// directly instead) is spread by SIMULATING assignPlayersToPools' own
-// forcePoolSize fallback over pool COUNTS -- forcePoolSizeFromCounts, the
-// very walk CreatePools/CreatePoolsForCount reach through forcePoolSize,
-// rather than re-deriving its outer-to-inner order a second time.
+// row) is spread by SIMULATING assignPlayersToPools' own forcePoolSize
+// fallback over pool COUNTS -- forcePoolSizeFromCounts, the very walk
+// CreatePools reaches through forcePoolSize, rather than re-deriving its
+// outer-to-inner order a second time.
 //
 // CORRECTION (bc-drwx item 5): this doc used to claim the shortfall is
 // "always < len(base)", reasoning that poolSize is never bigger than the
@@ -602,61 +602,15 @@ func poolPositionName(i int) string {
 	return fmt.Sprintf("Pool %s", string(letters))
 }
 
-// CreatePoolsForCount is CreatePools with the pool COUNT supplied directly
-// instead of derived from poolSize+isMax via PoolCount. It always sizes
-// pools the MIN-MODE way: every pool's target is poolSize, and the
-// len(players) - poolSize*totalPools remainder players force one extra into
-// `totalPools`'s outer-to-inner pools exactly as CreatePools' own min-mode
-// branch does (assignPlayersToPools' forcePoolSize fallback) -- the two
-// share that one code path, so a caller of either gets the identical
-// remainder-spread behaviour.
-//
-// It exists for the "fill-bracket" qualifier formation (bc-qual LP-4,
-// FillBracketPoolCount), whose pool count is deliberately NOT
-// floor(n/poolSize): FillBracketPoolCount can (and for 45 entrants at
-// minimum pool size 3 does) choose FEWER, partly-oversized pools than the
-// naive division, so the oversized remainder can supply drafted 2nd-place
-// qualifiers that exactly fill a power-of-two knockout bracket (see
-// BuildKnockoutDrawFillBracket). This function does the CUTTING half of
-// that; it has no opinion on how totalPools was chosen.
-//
-// Preconditions, enforced below rather than trusted: poolSize >= 1,
-// totalPools >= 1, and poolSize*totalPools <= len(players) <=
-// (poolSize+1)*totalPools -- every pool must reach the minimum and no pool
-// would need to grow by more than one over it. FillBracketPoolCount's own
-// search only ever proposes a totalPools satisfying this, but a caller
-// reaching this function some other way gets a clean error rather than a
-// silently short-filled pool or a forcePoolSize fallback with nowhere
-// correct to put the overflow.
-func CreatePoolsForCount(players []Player, poolSize, totalPools int) ([]Pool, error) {
-	if poolSize <= 0 {
-		return nil, fmt.Errorf("cannot create pools: pool size must be at least 1, got %d", poolSize)
-	}
-	if totalPools <= 0 {
-		return nil, fmt.Errorf("cannot create pools: pool count must be at least 1, got %d", totalPools)
-	}
-	if len(players) < poolSize*totalPools {
-		return nil, fmt.Errorf("cannot create %d pool(s) of minimum size %d: only %d player(s) available (need at least %d)", totalPools, poolSize, len(players), poolSize*totalPools)
-	}
-	if len(players) > (poolSize+1)*totalPools {
-		return nil, fmt.Errorf("cannot create %d pool(s) of minimum size %d: %d player(s) would need at least one pool larger than %d+1", totalPools, poolSize, len(players), poolSize)
-	}
-
-	targetSizes := make([]int, totalPools)
-	for i := range targetSizes {
-		targetSizes[i] = poolSize
-	}
-	return assignPlayersToPools(players, targetSizes), nil
-}
-
-// assignPlayersToPools is CreatePools' and CreatePoolsForCount's shared
-// assignment body: given the target size for each of len(targetSizes)
-// pools, distribute players into them avoiding dojo/name conflicts where
-// possible, falling back to leastConflictedPool then forcePoolSize when a
-// conflict-free placement does not exist, and name the pools alphabetically
-// in the order they end up in. Extracted so the two callers cannot drift on
-// how a remainder is spread; only what pool COUNT and target sizes they hand
-// in differs.
+// assignPlayersToPools is CreatePools' assignment body (bc-drwx item 11:
+// CreatePoolsForCount, a second caller supplying the pool COUNT directly
+// instead of deriving it from poolSize+isMax via PoolCount, was removed --
+// it had no production caller of its own, only its own dedicated test):
+// given the target size for each of len(targetSizes) pools, distribute
+// players into them avoiding dojo/name conflicts where possible, falling
+// back to leastConflictedPool then forcePoolSize when a conflict-free
+// placement does not exist, and name the pools alphabetically in the order
+// they end up in.
 //
 // This used to end with a dojo-rebalancing repair pass (since deleted):
 // swapping unseeded competitors afterwards to break up same-dojo pairings
@@ -785,16 +739,15 @@ func countDojoInPool(pool Pool, dojo string) int {
 }
 
 // leastConflictedPool is assignPlayersToPools' first fallback, reached when
-// discoverPool finds no conflict-free pool for a player (a dojo conflict OR
-// a name conflict against every pool with room). Among the pools that still
-// have room, it picks the one holding the FEWEST players already sharing the
-// incoming player's dojo, tie-broken by fewest players overall, then by
-// lowest index. The strict "<" comparisons (rather than "<=") keep the
-// lowest-index pool on a tie, which is what makes the output deterministic.
-//
-// It is deliberately name-conflict-blind: it only ranks by dojo count, so a
-// name collision alone does not influence which pool is chosen. Returns -1
-// if no pool has room.
+// discoverPool finds no dojo-conflict-free pool with room for a player (bc-drwx
+// item 11: discoverPool has never checked names -- see its own doc comment,
+// "sharing a NAME is deliberately not a conflict" -- so this is a dojo
+// conflict only, never a name one). Among the pools that still have room, it
+// picks the one holding the FEWEST players already sharing the incoming
+// player's dojo, tie-broken by fewest players overall, then by lowest index.
+// The strict "<" comparisons (rather than "<=") keep the lowest-index pool on
+// a tie, which is what makes the output deterministic. Returns -1 if no pool
+// has room.
 func leastConflictedPool(pools []Pool, targetSizes []int, dojo string) int {
 	best := -1
 	bestDojo, bestSize := 0, 0

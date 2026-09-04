@@ -145,16 +145,17 @@ import (
 // its competition's real extra-qualifiers setting must call
 // BuildPoolPhaseTreeAwareWithMode instead, or the distributor scores every
 // candidate against the wrong knockout tree whenever that setting is not
-// the default. Kept as its own entry point (rather than folded into the
-// mode-aware one with a fixed argument) because every one of this file's
-// and pool_distribution_gate_test.go's existing tests call it by this exact
-// 5-argument signature, pinned before mode-awareness existed.
+// the default. Kept as its own entry point, for the many existing tests
+// (this file's and pool_distribution_gate_test.go's) that call it by this
+// exact 5-argument signature, pinned before mode-awareness existed -- but
+// FOLDED into BuildPoolPhaseTreeAwareWithMode (bc-drwx item 11) rather than
+// carrying its own duplicate poolTargetSizes+buildPoolPhaseTreeAwareCore
+// call pair: qualifierMode.MinPoolSize is documented as unused in standard
+// mode, so BuildPoolPhaseTreeAwareWithMode's own MinPoolSize derivation
+// (which BuildPoolPhaseTreeAware never computed at all) cannot change this
+// function's behaviour, only its implementation.
 func BuildPoolPhaseTreeAware(players []Player, poolSize int, isMax bool, numCourts int, poolWinners int) ([]Pool, int, error) {
-	numPools, targetSizes, err := poolTargetSizes(len(players), poolSize, isMax)
-	if err != nil {
-		return nil, 0, err
-	}
-	return buildPoolPhaseTreeAwareCore(players, numPools, targetSizes, numCourts, poolWinners, qualifierMode{ExtraQualifiers: qualifierModeStandard})
+	return BuildPoolPhaseTreeAwareWithMode(players, poolSize, isMax, numCourts, poolWinners, qualifierModeStandard)
 }
 
 // defaultPoolWinners is the pool-winners count BuildPoolPhase falls back to
@@ -240,8 +241,9 @@ func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool,
 // region-aware body (bc-dojo Phase 4), mirroring BuildPoolPhaseTreeAware's
 // relationship to BuildPoolPhase: the pool COUNT and BASE target sizes come
 // from this function's own FillBracketPoolCount formation objective (a
-// uniform minSize row, exactly what CreatePoolsForCount cuts to before its
-// own remainder spreads), fill-bracket's poolWinners is always 1
+// uniform minSize row, spread by realTargetSizes' own remainder walk --
+// see tournament.go's assignPlayersToPools doc comment, bc-drwx item 11),
+// fill-bracket's poolWinners is always 1
 // (state.ValidateExtraQualifiers' own gate), and the mode is
 // qualifierModeFillBracket throughout -- everything else (seed placement,
 // the remainder spread, the one-pass distribution, ReorderPoolsForCourts
@@ -280,15 +282,24 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // carries the "InDraw" suffix rather than the same bare name.
 //
 // Every downstream signal in this file is defined only for non-blank
-// dojos: recordDojoOccupancy is guarded on `p.Dojo != ""` (so a blank-dojo
-// player consumes a real pool seat via the leastConflictedPool bypass
-// without ever updating the tree's capacity accounting -- the descent's
-// ONLY fullness signal -- which lets a later descent overfill a pool past
-// its target size) and improveDojoMeetings' footprint/spread/meeting
-// objective would otherwise count Dojo=="" as a phantom dojo that drives
-// and vetoes real swaps. Per the operator's absolute "dojo must never be
-// empty" rule (NO FALLBACKS), a blank-dojo roster is refused outright
-// rather than tolerated by a new blank-skipping accounting path.
+// dojos: without this pre-flight, a blank-dojo player would consume a real
+// pool seat via the leastConflictedPool bypass without ever updating the
+// tree's capacity accounting -- the descent's ONLY fullness signal, which
+// lets a later descent overfill a pool past its target size -- and
+// improveDojoMeetings' footprint/spread/meeting objective would count
+// Dojo=="" as a phantom dojo that drives and vetoes real swaps. Per the
+// operator's absolute "dojo must never be empty" rule (NO FALLBACKS), a
+// blank-dojo roster is refused outright rather than tolerated by a
+// blank-skipping accounting path.
+//
+// This is why every call site downstream (recordDojoOccupancy's callers,
+// dojoFootprintOptimum's footprint builders, pickDojoTreeAwarePool) used to
+// carry its OWN `dojo != ""` guard: this pre-flight did not always run
+// first. Now that it does -- the ONE gate every entry point funnels
+// through, before any of those call sites are ever reached -- those guards
+// are unreachable, not merely redundant, and were removed (bc-drwx item
+// 11) rather than kept as a second, silent floor a future change could
+// drift from this one.
 //
 // Participant LOADING stays blank-tolerant on purpose (state.LoadParticipants
 // and its CSV parser accept a blank dojo, so a legacy or hand-edited roster
@@ -535,19 +546,20 @@ func earliestPairing(a, b []int) int {
 // spelling. dojoOptimum below (the returned closure) normalizes its OWN
 // argument too, so a caller may pass either an already-normalized key or a
 // raw dojo string.
+//
+// No blank-dojo guard (bc-drwx item 11): every caller of this function is
+// reached only after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo
+// pre-flight has already refused the whole roster if any player's Dojo is
+// blank, so a blank entry here is unreachable, not merely rare.
 func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int) func(dojo string) int {
 	footprint := make(map[string]int)
 	for i := range pools {
 		for _, pl := range pools[i].Players {
-			if pl.Dojo != "" {
-				footprint[dojoKey(pl.Dojo)]++
-			}
+			footprint[dojoKey(pl.Dojo)]++
 		}
 	}
 	for _, p := range extra {
-		if p.Dojo != "" {
-			footprint[dojoKey(p.Dojo)]++
-		}
+		footprint[dojoKey(p.Dojo)]++
 	}
 	return func(dojo string) int {
 		if numPools <= 0 {
@@ -1350,7 +1362,7 @@ func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, doj
 // descent (chooseDojoTreePool) when the tree has something to say, plain
 // leastConflictedPool otherwise.
 //
-// A dojo with NOBODY placed anywhere yet (root == nil, dojo == "", or
+// A dojo with NOBODY placed anywhere yet (root == nil, or
 // root.dojoCount[dojo] == 0 -- no seed and no earlier unseeded member of
 // this dojo) has no tree signal to route on at all: every branch would tie
 // 0-vs-0 at every level, all the way down, and the decision would then rest
@@ -1371,7 +1383,12 @@ func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, doj
 func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, qualifierSlots [][]int) int {
 	// bc-drwx item 3: dojoNode.dojoCount is keyed by dojoKey (see
 	// recordDojoOccupancy), so this read must normalize too.
-	if root == nil || dojo == "" || root.dojoCount[dojoKey(dojo)] == 0 {
+	//
+	// No `dojo == ""` guard (bc-drwx item 11): every caller is reached only
+	// after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has
+	// already refused a roster with any blank dojo, so a blank dojo here is
+	// unreachable -- see ErrBlankDojoInDraw's own doc comment.
+	if root == nil || root.dojoCount[dojoKey(dojo)] == 0 {
 		return leastConflictedPool(pools, targetSizes, dojo)
 	}
 	dojoPoolIndices := make([]int, 0, 4)
@@ -1427,6 +1444,13 @@ func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo
 // forward-only, no-repair pass can route around that, since nothing short
 // of a different EARLIER placement (requiring foresight this pass does not
 // have) could have left a different pool as the last one standing.
+// No blank-dojo guards (bc-drwx item 11: this function used to carry three
+// -- around the seed-occupancy recording loop, the per-player cap check,
+// and the live-placement recordDojoOccupancy call -- one per p.Dojo/pl.Dojo
+// read below). Every caller is reached only after
+// buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has already
+// refused a roster with any blank dojo, so a blank dojo anywhere in `pools`
+// or `unseeded` is unreachable -- see ErrBlankDojoInDraw's own doc comment.
 func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player, qualifierSlots [][]int) error {
 	placed := make([]int, len(pools))
 	for i := range pools {
@@ -1439,9 +1463,6 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 				continue
 			}
 			for _, pl := range pools[i].Players {
-				if pl.Dojo == "" {
-					continue
-				}
 				recordDojoOccupancy(root, pl.Dojo, qualifierSlots[i][0], totalBits, 0)
 			}
 		}
@@ -1463,14 +1484,14 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 			// than a panic or a silently dropped player.
 			return fmt.Errorf("cannot place player %s: no pool has room", p.Name)
 		}
-		if p.Dojo != "" && countDojoInPool(pools[best], p.Dojo) >= dojoOptimum(p.Dojo) {
+		if countDojoInPool(pools[best], p.Dojo) >= dojoOptimum(p.Dojo) {
 			if alt := poolUnderDojoCap(pools, targetSizes, p.Dojo, dojoOptimum(p.Dojo)); alt >= 0 {
 				best = alt
 			}
 		}
 		p.PoolPosition = int64(len(pools[best].Players) + 1)
 		pools[best].Players = append(pools[best].Players, p)
-		if root != nil && p.Dojo != "" && best < len(qualifierSlots) && len(qualifierSlots[best]) > 0 {
+		if root != nil && best < len(qualifierSlots) && len(qualifierSlots[best]) > 0 {
 			recordDojoOccupancy(root, p.Dojo, qualifierSlots[best][0], totalBits, -1)
 		}
 	}

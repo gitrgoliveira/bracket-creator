@@ -406,6 +406,76 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 		"an 8-entrant playoffs knockout must render 7 elimination match blocks")
 }
 
+// TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint pins
+// bc-pnum A8: a playoffs-only competition never has a pools.csv, so
+// ExportCompetitionXlsx used to feed CreateTagsSheet and (inside
+// RenderCompetitionWorkbook) CreateNamesWithPoolToPrint the EMPTY pools
+// slice, which produced a Tags sheet with zero rows and no Names-to-Print
+// sheet at all -- despite the competition having numbered competitors on
+// every other surface. The fix feeds those two sheets the numbered
+// participant list (NumberedParticipantsFor, the same
+// helper.AssignPlayerNumbers composition the public viewer merge uses), so
+// the numbers on the printed tags must equal what the app already shows.
+func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-tags"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	names := make([]string, 4)
+	for i := range names {
+		names[i] = fmt.Sprintf("Player%02d", i+1)
+	}
+	saveTestParticipants(t, store, compID, names)
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	wantNumbered, err := eng.NumberedParticipantsFor(comp)
+	require.NoError(t, err)
+	wantNumbers := make(map[string]string, len(wantNumbered))
+	for _, p := range wantNumbered {
+		wantNumbers[p.Name] = p.Number
+	}
+	require.Len(t, wantNumbers, 4, "premise: every entrant carries a K-prefixed number")
+
+	f := openExportedWorkbook(t, eng, compID)
+
+	// Tags sheet: one row (two cells, A and G columns of one row -- see
+	// CreateTagsSheet) per entrant, and the printed number must equal the
+	// one the rest of the app already shows for that entrant.
+	tagRows, err := f.GetRows(helper.SheetTags)
+	require.NoError(t, err)
+	gotTagNumbers := map[string]bool{}
+	for _, row := range tagRows {
+		for _, cell := range row {
+			cell = strings.TrimSpace(cell)
+			if cell != "" {
+				gotTagNumbers[cell] = true
+			}
+		}
+	}
+	for name, number := range wantNumbers {
+		assert.Truef(t, gotTagNumbers[number], "Tags sheet must print %q's number %q; got cells %v", name, number, gotTagNumbers)
+	}
+
+	// Names to Print: a sheet must now exist (deleted-with-nothing-created was
+	// the bug) and carry an entry per entrant.
+	sheetList := f.GetSheetList()
+	var namesSheet string
+	for _, s := range sheetList {
+		if strings.HasPrefix(s, "Names to Print") {
+			namesSheet = s
+			break
+		}
+	}
+	require.NotEmpty(t, namesSheet, "a playoffs-only competition must still get a Names to Print sheet")
+	nameRows, err := f.GetRows(namesSheet)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(nameRows), 4, "Names to Print must carry one row per entrant")
+}
+
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:
 // the workbooks written for pdf.Generator come from ExportCompetitionXlsx, so
 // the printed "Pool Draw + Trees" booklet inherited the blank-page bug. The

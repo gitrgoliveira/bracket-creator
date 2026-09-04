@@ -84,16 +84,17 @@ func TestRenumberCompetitors_Idempotent_SecondCallDoesNotRewriteTheFile(t *testi
 	require.NoError(t, err)
 
 	// Byte-equality alone can't distinguish "skipped the write" from "wrote
-	// the exact same content" (both leave identical bytes), and pools.csv
-	// carries no version counter to check either (R5: nothing caches
-	// pools.csv keyed by version, only pool-matches.csv bumps one). So this
-	// makes any REAL write observably fail instead: atomicWrite creates a
-	// sibling temp file before renaming it over pools.csv, which needs write
-	// permission on the DIRECTORY, not the file itself, so a read-only
-	// competition directory turns "attempted a write" into an error. A
-	// genuine no-op (nothing differs) never touches the directory at all, so
-	// it still succeeds. Same technique atomic_write_test.go uses for the
-	// same reason.
+	// the exact same content" (both leave identical bytes). pools.csv does
+	// carry a version counter now (bc-pnum A2: engine.standingsTokens keys on
+	// it too, so a real writer must bump it), but this test asserts the
+	// stronger claim -- no write attempt at all, not merely one that left the
+	// counter alone -- by making any REAL write observably fail: atomicWrite
+	// creates a sibling temp file before renaming it over pools.csv, which
+	// needs write permission on the DIRECTORY, not the file itself, so a
+	// read-only competition directory turns "attempted a write" into an
+	// error. A genuine no-op (nothing differs) never touches the directory at
+	// all, so it still succeeds. Same technique atomic_write_test.go uses for
+	// the same reason.
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod 0500 isn't enforced on Windows the same way")
 	}
@@ -171,6 +172,39 @@ func TestRenumberCompetitors_NoPools_IsANoOp(t *testing.T) {
 
 	_, err = os.Stat(dir + "/competitions/" + compID + "/pools.csv")
 	assert.True(t, os.IsNotExist(err), "no pools.csv should be created for a competition with none")
+}
+
+// TestRenumberCompetitors_EmptyPrefix_Refused pins bc-pnum A3's second line
+// of defense: even though every app caller is supposed to assign a default
+// prefix before calling this (G2), a stored blank prefix (a bug state
+// upstream, e.g. an inherit step that was skipped) must never reach
+// helper.NumberPools, which would compose bare "1","2","3" -- no letters at
+// all -- into pools.csv. This must error and leave pools.csv untouched
+// rather than silently write bare digits.
+func TestRenumberCompetitors_EmptyPrefix_Refused(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "renumber-empty-prefix"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Renumber Empty Prefix", Kind: "individual", Format: "mixed",
+		Status: "pools", NumberPrefix: "",
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "p1", Name: "Alice", Dojo: "Dojo Alice", PoolPosition: 1},
+			{ID: "p2", Name: "Bob", Dojo: "Dojo Bob", PoolPosition: 2},
+		}},
+	}))
+
+	changed, err := eng.RenumberCompetitors(compID)
+	require.Error(t, err, "a blank stored prefix must refuse rather than write bare digits")
+	assert.False(t, changed)
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	for _, p := range pools[0].Players {
+		assert.Empty(t, p.Number, "the refusal must leave pools.csv untouched, not write bare digit numbers")
+	}
 }
 
 // TestRenumberCompetitors_NotFound pins the 404 sentinel for an unknown
@@ -288,6 +322,62 @@ func TestMigrateNumberPrefixes_ResumesNumberingOnTheNextStart(t *testing.T) {
 	assert.Equal(t, []string{"H1", "H2"}, []string{pools[0].Players[0].Number, pools[0].Players[1].Number})
 }
 
+// TestRenumberCompetitors_InvalidatesStandingsCache pins bc-pnum A2:
+// RenumberCompetitors is a pools.csv writer, and CalculatePoolStandings's
+// result carries each player's Number (Player.Number rides inside
+// state.PlayerStanding.Player), so a cache keyed only on pool-matches.csv and
+// overrides.json served the OLD numbers after a prefix change for the rest of
+// the process's life once standings had been computed once. Warm the cache
+// under the old prefix first -- that is what makes this a real regression
+// guard rather than a coincidence of never having read standings before the
+// renumber.
+func TestRenumberCompetitors_InvalidatesStandingsCache(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "renumber-standings-cache"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Renumber Standings Cache", Kind: "individual", Format: "mixed",
+		Status: "pools", NumberPrefix: "Z",
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "p1", Name: "Alice", Dojo: "Dojo Alice", PoolPosition: 1, Number: "Z1"},
+			{ID: "p2", Name: "Bob", Dojo: "Dojo Bob", PoolPosition: 2, Number: "Z2"},
+		}},
+	}))
+
+	before, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	beforeNumbers := map[string]string{}
+	for _, ps := range before["Pool A"] {
+		beforeNumbers[ps.Player.Name] = ps.Player.Number
+	}
+	require.Equal(t, "Z1", beforeNumbers["Alice"])
+	require.Equal(t, "Z2", beforeNumbers["Bob"])
+	versionBeforeRenumber := store.FileVersion(compID, "pools.csv")
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.NumberPrefix = "Y"
+	require.NoError(t, store.SaveCompetition(comp))
+
+	changed, err := eng.RenumberCompetitors(compID)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assert.Greater(t, store.FileVersion(compID, "pools.csv"), versionBeforeRenumber,
+		"RenumberCompetitors's SavePools call must bump the pools.csv version")
+
+	after, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	afterNumbers := map[string]string{}
+	for _, ps := range after["Pool A"] {
+		afterNumbers[ps.Player.Name] = ps.Player.Number
+	}
+	assert.Equal(t, "Y1", afterNumbers["Alice"],
+		"standings must reflect the renumber, not the cached pre-renumber tokens")
+	assert.Equal(t, "Y2", afterNumbers["Bob"])
+}
+
 // TestTakenNumberPrefixesAndDefaultFor pins the engine's one derivation: the
 // taken set excludes the named competition and the default avoids the rest.
 func TestTakenNumberPrefixesAndDefaultFor(t *testing.T) {
@@ -297,13 +387,16 @@ func TestTakenNumberPrefixesAndDefaultFor(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "a", Name: "Kendo", Format: state.CompFormatMixed, NumberPrefix: "K"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "b", Name: "Kendo Open", Format: state.CompFormatMixed, NumberPrefix: "KO"}))
 
-	taken, err := eng.TakenNumberPrefixes("b")
+	taken, err := eng.takenNumberPrefixes("b")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"K"}, taken, "excludeID's own prefix is not taken")
 
+	// K and KO are both taken, so every plain digit suffix on "KO" ("KO2"..)
+	// is ambiguous with "KO" itself (bc-pnum A1); the derivation falls to the
+	// zero-padded escape on the shorter stem, "K02".
 	prefix, err := eng.DefaultNumberPrefixFor("Kendo Open", "")
 	require.NoError(t, err)
-	assert.Equal(t, "KO2", prefix, "K and KO are both taken")
+	assert.Equal(t, "K02", prefix, "K and KO are both taken")
 	prefix, err = eng.DefaultNumberPrefixFor("Kendo Open", "b")
 	require.NoError(t, err)
 	assert.Equal(t, "KO", prefix, "re-deriving for b may reuse b's own prefix")

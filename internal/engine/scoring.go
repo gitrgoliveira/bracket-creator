@@ -1256,8 +1256,10 @@ func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
 	return standingsTokens{
 		poolMatchesMtime:   e.store.FileMtime(compId, "pool-matches.csv"),
 		overridesMtime:     e.store.FileMtime(compId, "overrides.json"),
+		poolsMtime:         e.store.FileMtime(compId, "pools.csv"),
 		poolMatchesVersion: e.store.FileVersion(compId, "pool-matches.csv"),
 		overridesVersion:   e.store.FileVersion(compId, "overrides.json"),
+		poolsVersion:       e.store.FileVersion(compId, "pools.csv"),
 	}
 }
 

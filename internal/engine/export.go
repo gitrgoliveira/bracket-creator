@@ -104,6 +104,31 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// bc-pnum A8: a playoffs-only competition never has a pools.csv (its
+	// numbers are participant order under the prefix, composed on read, see
+	// NumberedParticipantsFor), so the pipeline above fed CreateNamesWithPoolToPrint
+	// (its step 6) an empty pools slice, which is a no-op that deletes the
+	// template Names-to-Print sheet and creates nothing. Below feeds the SAME
+	// two auxiliary sheets (Names to Print and, further down, Tags) the
+	// numbered roster instead, so a knockout-only competition's printed
+	// materials are not silently blank. The Data sheet also needs real rows
+	// for these players FIRST, because CreateNamesToPrint links its position
+	// cell to one by FORMULA (the same mechanism the pooled path uses); the
+	// pipeline's own step 1 (AddPoolDataToSheet) wrote only the column
+	// headers for this competition, since pools was empty, so there is
+	// nothing here to conflict with re-populating it via the CLI's own
+	// flat-roster writer.
+	var namesToPrintPlayers []helper.Player
+	if comp.EffectiveFormat() == state.CompFormatPlayoffs && len(pools) == 0 && comp.NumberPrefix != "" {
+		numbered, npErr := e.NumberedParticipantsFor(comp)
+		if npErr != nil {
+			return nil, npErr
+		}
+		namesToPrintPlayers = numbered
+		playerCoords := helper.AddPlayerDataToSheet(f, numbered, comp.EffectiveWithZekkenName(), comp.Name)
+		helper.CreateNamesToPrint(f, numbered, comp.EffectiveWithZekkenName(), courts, playerCoords)
+	}
+
 	// Tags sheet, blank-template-export-only extra: pass publicURL so numbered
 	// tags get an embedded QR code. tourn (loaded once, strictly, above) may
 	// legitimately be nil for a competition with no tournament record yet,
@@ -113,7 +138,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	if tourn != nil {
 		publicURL = tourn.PublicURL
 	}
-	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
+	tagsPools := pools
+	if namesToPrintPlayers != nil {
+		// Same numbered roster as the Names-to-Print sheet above (bc-pnum A8):
+		// CreateTagsSheet only reads player.Number as a literal value, so a
+		// single synthetic pool wrapping the roster is enough; PoolName is
+		// never read by this sheet.
+		tagsPools = []helper.Pool{{Players: namesToPrintPlayers}}
+	}
+	if err := helper.CreateTagsSheet(f, tagsPools, publicURL); err != nil {
 		return nil, err
 	}
 

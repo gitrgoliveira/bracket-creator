@@ -5,9 +5,34 @@ import (
 	"log"
 	"strings"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// NumberedParticipantsFor returns comp's roster with Number composed exactly
+// the way mobileapp.mergePoolNumbersIntoPlayersSlice's playoffs-only branch
+// derives it for the public viewer (bc-pnum A8, G8): participant order under
+// NumberPrefix, through helper.AssignPlayerNumbers, the ONE composition both
+// surfaces route through (R1). It exists so a second caller (the blank-
+// template export, which has no pools.csv to read a Number from for a
+// playoffs-only competition, see RenumberCompetitors's own doc comment on why
+// "no pools file" happens for playoffs) cannot silently derive the number a
+// different way and disagree with what the app already shows.
+//
+// Returns the roster with Number left as loaded (empty, since
+// participants.csv never persists it) when the competition has no prefix,
+// so a caller does not have to special-case that itself.
+func (e *Engine) NumberedParticipantsFor(comp *state.Competition) ([]domain.Player, error) {
+	players, err := e.store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
+	if err != nil {
+		return nil, err
+	}
+	if comp.NumberPrefix != "" {
+		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+	}
+	return players, nil
+}
 
 // RenumberCompetitors rewrites every competitor's Number from the competition's
 // CURRENT NumberPrefix, so changing that prefix in Settings does not require
@@ -64,6 +89,18 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 			return nil
 		}
 
+		// bc-pnum A3: a blank prefix must never reach helper.NumberPools, which
+		// documents (and relies on) the app never handing it an empty one --
+		// NumberPools/AssignPlayerNumbers would happily compose bare "1","2","3"
+		// (no letters at all) into pools.csv. Every caller of this function is
+		// supposed to have already assigned a default (G2), but this refuses
+		// outright rather than trusting that invariant silently: a bug state
+		// upstream (a stored blank prefix an inherit step missed) must never
+		// WRITE, it must surface.
+		if strings.TrimSpace(comp.NumberPrefix) == "" {
+			return fmt.Errorf("renumber %s: competition has no number prefix", compID)
+		}
+
 		total := 0
 		for _, pool := range pools {
 			total += len(pool.Players)
@@ -98,14 +135,27 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 	return changed, err
 }
 
-// TakenNumberPrefixes returns the number prefix of every competition except
-// excludeID, the set helper.DefaultNumberPrefix avoids. It takes no lock of
-// its own: callers that must not race a concurrent create hold
-// Store.WithCompetitionRenameLock around it, as the mobileapp handlers do.
-// (MigrateNumberPrefixes does not call it: it derives over a taken set it
-// builds itself, because that set must also grow with the prefixes it
-// assigns during its own pass.)
-func (e *Engine) TakenNumberPrefixes(excludeID string) ([]string, error) {
+// takenNumberPrefixes returns the number prefix of every competition except
+// excludeID, the set helper.DefaultNumberPrefix avoids. Unexported (bc-pnum
+// C6): its only caller is DefaultNumberPrefixFor in this same file, the ONE
+// exported door onto this derivation (R6) -- callers that must not race a
+// concurrent create hold Store.WithCompetitionRenameLock around THAT call,
+// as the mobileapp handlers do, so there is no reason for this helper to be
+// reachable on its own. (MigrateNumberPrefixes does not call it either: it
+// derives over a taken set it builds itself, because that set must also grow
+// with the prefixes it assigns during its own pass.)
+//
+// An unreadable sibling (a stray folder, an unparseable config.md) is logged
+// and SKIPPED rather than returned as an error (bc-pnum A5(d)): this feeds
+// DefaultNumberPrefix, a best-effort SUGGESTION (see its own doc comment),
+// never the uniqueness guarantee -- that is checkUniqueCompFields's job, and
+// it still refuses a genuine collision. Propagating the first sibling's load
+// error here used to turn ONE unrelated competition's bad file into a 500 for
+// every OTHER competition trying to derive a prefix, including the
+// start/generate-draw pre-flight, which cannot defer the way create/import
+// can. GET /competitions and MigrateNumberPrefixes already apply the same
+// "one bad cell cannot stop a tournament" rule; this matches it.
+func (e *Engine) takenNumberPrefixes(excludeID string) ([]string, error) {
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
 		return nil, fmt.Errorf("list competitions: %w", err)
@@ -117,7 +167,8 @@ func (e *Engine) TakenNumberPrefixes(excludeID string) ([]string, error) {
 		}
 		comp, err := e.store.LoadCompetition(id)
 		if err != nil {
-			return nil, fmt.Errorf("load competition %s: %w", id, err)
+			log.Printf("engine: takenNumberPrefixes: skipping unreadable competition %s: %v", id, err)
+			continue
 		}
 		if comp != nil {
 			taken = append(taken, comp.NumberPrefix)
@@ -134,7 +185,7 @@ func (e *Engine) TakenNumberPrefixes(excludeID string) ([]string, error) {
 // load-time migration applies the same helper over its own in-pass set (see
 // MigrateNumberPrefixes).
 func (e *Engine) DefaultNumberPrefixFor(name, excludeID string) (string, error) {
-	taken, err := e.TakenNumberPrefixes(excludeID)
+	taken, err := e.takenNumberPrefixes(excludeID)
 	if err != nil {
 		return "", err
 	}

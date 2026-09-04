@@ -153,6 +153,28 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
 	})
 
+	// bc-pnum A4: two legal namesakes from DIFFERENT dojos (allowed everywhere
+	// per this repo's (name, dojo) identity rule) used to collide in a
+	// name-only fallback map, so the SECOND one written into the map silently
+	// won for BOTH entrants. Neither player carries an ID here (legacy
+	// roster), forcing the name/dojo fallback tier.
+	t.Run("falls back to (name, dojo), not bare name: two namesakes from different dojos", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players: []domain.Player{
+				{Name: "Taro", Dojo: "Dojo Kyoto"},
+				{Name: "Taro", Dojo: "Dojo Osaka"},
+			},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{
+			{Name: "Taro", Dojo: "Dojo Kyoto", Number: "K3"},
+			{Name: "Taro", Dojo: "Dojo Osaka", Number: "K11"},
+		}}}
+		mergePoolNumbersIntoPlayers(comp, pools)
+		assert.Equal(t, "K3", comp.Players[0].Number, "the Kyoto Taro must get his own number, not the Osaka Taro's")
+		assert.Equal(t, "K11", comp.Players[1].Number, "the Osaka Taro must get his own number, not the Kyoto Taro's")
+	})
+
 	t.Run("skips pool players with empty Number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",

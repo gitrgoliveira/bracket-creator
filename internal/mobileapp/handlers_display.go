@@ -306,10 +306,7 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 			// MISSING numbers on the overlay, never as composed ones (D1).
 			log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
 		} else {
-			// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs
-			// too, and mergePoolNumbersIntoPlayersSlice's playoffs-only branch must
-			// see that or it silently skips number assignment for those entrants.
-			mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.EffectiveFormat())
+			mergePoolNumbersIntoPlayersSlice(comp, players, pools)
 		}
 	}
 	return players

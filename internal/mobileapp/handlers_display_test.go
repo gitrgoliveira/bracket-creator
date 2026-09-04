@@ -112,6 +112,54 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
 }
 
+// TestCourtCurrentUnreadablePoolsShowsNoNumbers pins bc-pnum D3: the same
+// corrupt-pools scenario TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers
+// pins for the aggregate viewer payload, exercised here through
+// currentMatchPlayers (handlers_display.go), the court-overlay read path.
+// pools.csv unreadable must show as MISSING numbers, never as composed ones
+// (D1): the else guard around mergePoolNumbersIntoPlayersSlice is what stops
+// a LoadPools error from being silently treated as "no pools = derive fresh
+// participant-order numbers" for an effective-playoffs competition.
+func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "corrupt-pools-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Corrupt Pools Current", Format: state.CompFormatPlayoffs, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K",
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"},
+		{Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+	// A running MATCH on court A, shaped as a pool match (MatchResult), so the
+	// handler takes the pool-match branch (currentMatchPlayers) rather than
+	// falling through to the bracket branch. Nothing about the endpoint cares
+	// whether the competition's OWN format normally has pool matches; this
+	// pins the merge's read-error handling, not the format/match-type pairing.
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Emptyf(t, resp.SideA.Number, "sideA must show NO number over an unreadable pools.csv, got %q", resp.SideA.Number)
+	assert.Emptyf(t, resp.SideB.Number, "sideB must show NO number over an unreadable pools.csv, got %q", resp.SideB.Number)
+}
+
 // TestCourtCurrentReturnsRunningBracketMatch, mp-9h1f follow-up. A running
 // KNOCKOUT (bracket) bout must surface as the court's current match; the prior
 // handler scanned only poolMatches, so an elimination bout read as idle. The

@@ -22,17 +22,21 @@ import (
 //
 // Two sources, both "assigned by the draw":
 //   - a pools.csv exists: the number is the one it holds, matched by id first
-//     (HasParticipantIDs case) and by name as the legacy fallback for rosters
-//     drawn before ids existed;
+//     (HasParticipantIDs case) and by (name, dojo) -- the identity rule this
+//     whole codebase uses, never bare name -- as the legacy fallback for
+//     rosters drawn before ids existed;
 //   - the competition is playoffs-only: its draw never writes pools.csv and
 //     its number IS participant order under the prefix, composed through the
 //     same helper the draw uses.
 //
-// format must be the competition's EFFECTIVE format (comp.EffectiveFormat()),
-// not comp.Format directly: an unset Format ("") is standalone playoffs too
-// (generation's default case falls to generatePlayoffs for it identically),
-// so a caller passing the raw stored value would silently skip number
-// assignment for those entrants.
+// comp supplies both NumberPrefix and the EFFECTIVE format
+// (comp.EffectiveFormat(), never comp.Format directly: an unset Format ("")
+// is standalone playoffs too, generation's default case falls to
+// generatePlayoffs for it identically), so every caller derives the same
+// answer from the same source instead of restating the caveat locally.
+// players is still explicit -- separate from comp.Players -- because the
+// court-overlay caller (currentMatchPlayers) loads its OWN roster slice
+// rather than mutating the competition's.
 //
 // Any other format with no pools is left WITHOUT numbers: before the draw the
 // operator's roster shows the separate ProvisionalNumbers instead (see
@@ -40,13 +44,14 @@ import (
 // the draw has not assigned. Callers pass pools only from a SUCCESSFUL read:
 // an unreadable pools.csv is reported, not treated as "no draw yet", so a
 // corrupt file cannot make this compose numbers that contradict the draw on
-// disk. No-op when numberPrefix is empty or the roster is empty.
-func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
-	if numberPrefix == "" || len(players) == 0 {
+// disk. No-op when comp is nil, its NumberPrefix is empty, or the roster is
+// empty.
+func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.Player, pools []helper.Pool) {
+	if comp == nil || comp.NumberPrefix == "" || len(players) == 0 {
 		return
 	}
 	if len(pools) == 0 {
-		if format != state.CompFormatPlayoffs {
+		if comp.EffectiveFormat() != state.CompFormatPlayoffs {
 			return
 		}
 		// Playoffs-only: nothing on disk carries a number, so derive it from
@@ -54,11 +59,17 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 		// composition helper (helper.Player is an alias of domain.Player). A
 		// prefix change is therefore reflected on the next read with no file
 		// write.
-		helper.AssignPlayerNumbers(players, numberPrefix, 1)
+		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
 		return
 	}
 	byID := make(map[string]string)
-	byName := make(map[string]string)
+	// bc-pnum A4: keyed on (name, dojo) via the shared identity primitive, not
+	// bare name -- two legal namesakes from DIFFERENT dojos (allowed
+	// everywhere per this repo's identity rule) used to collide in a
+	// name-only map, so the SECOND one written silently overwrote the
+	// FIRST's number and both entrants in the public payload showed the
+	// second's number.
+	byNameDojo := make(map[string]string)
 	for _, pool := range pools {
 		for _, pp := range pool.Players {
 			if pp.Number == "" {
@@ -67,7 +78,7 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 			if pp.ID != "" {
 				byID[pp.ID] = pp.Number
 			}
-			byName[pp.Name] = pp.Number
+			byNameDojo[helper.CompetitorKey("", pp.Name, pp.Dojo)] = pp.Number
 		}
 	}
 	for i := range players {
@@ -78,7 +89,7 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 			players[i].Number = n
 			continue
 		}
-		if n, ok := byName[players[i].Name]; ok && n != "" {
+		if n, ok := byNameDojo[helper.CompetitorKey("", players[i].Name, players[i].Dojo)]; ok && n != "" {
 			players[i].Number = n
 		}
 	}
@@ -121,15 +132,13 @@ func provisionalCompetitorNumbers(comp *state.Competition) []string {
 }
 
 // mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
-// pointer. Existing call sites that hold a *Competition keep their idiomatic
-// form; the work happens in the slice-typed helper below.
+// pointer's own roster. Existing call sites that hold a *Competition keep
+// their idiomatic form; the work happens in the slice-typed helper above.
 func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs too,
-	// see mergePoolNumbersIntoPlayersSlice's doc comment.
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.EffectiveFormat())
+	mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
@@ -250,22 +259,34 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	}
 	comp.Players = players
 	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
-	// pools.csv read entirely when no prefix is configured (the common case).
+	// pools.csv read entirely when no prefix is configured -- bc-pnum G2
+	// means that is now the rare case (a legacy competition that predates
+	// the never-empty-prefix rule and has not yet had a chance to heal it,
+	// see RenumberCompetitors/G7), not the common one.
 	var poolsErr error
 	if comp.NumberPrefix != "" {
 		var pools []helper.Pool
 		pools, poolsErr = store.LoadPools(compID)
 		if poolsErr != nil {
 			// Reported, not merged: an unreadable pools.csv must show as
-			// MISSING numbers, never as composed ones (D1). It also joins the
-			// payload's dataIssues below, so the operator console names the
-			// file instead of showing every number gone with no explanation.
+			// MISSING numbers, never as composed ones (D1). bc-pnum C4: only a
+			// PARSE failure joins the payload's dataIssues below (dataIssuesFrom
+			// -> state.AsCorruptFile, which corruptCSV populates from a
+			// csv.ParseError specifically). A raw READ error (permissions, I/O)
+			// is not something an operator repairs with a text editor, and its
+			// message names the absolute path on disk, which must never reach
+			// this PUBLIC payload -- it is logged server-side only, here.
 			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
 		} else {
 			mergePoolNumbersIntoPlayers(comp, pools)
 		}
-		comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 	}
+	// Hoisted out of the guard above (bc-pnum C2): provisionalCompetitorNumbers
+	// already self-guards on an empty NumberPrefix internally, matching the
+	// single-competition detail endpoint below, which assigns unconditionally
+	// for the same reason -- two different shapes for one self-guarded call
+	// is how they drift.
+	comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
 	// with assigned times. It MUST NOT leak into the public match-list payloads

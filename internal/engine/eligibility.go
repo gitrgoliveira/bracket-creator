@@ -76,10 +76,22 @@ func (e *AlreadyIneligibleError) Error() string {
 	return fmt.Sprintf("competitor %q already ineligible (match %s)", e.PlayerID, e.MatchID)
 }
 
-// checkConcurrentIneligibility returns *AlreadyIneligibleError when
-// loserName already has Eligible:false from a different match. Returns
-// nil on any lookup failure (non-fatal, missing player IDs, store
-// errors) so a degraded-mode run doesn't break the score flow.
+// checkConcurrentIneligibility returns *AlreadyIneligibleError when the
+// loser (identified by loserID when the caller already resolved it from the
+// match's own side ids, else by loserName) already has Eligible:false from a
+// different match. Returns nil on any lookup failure (non-fatal, missing
+// player IDs, store errors) so a degraded-mode run doesn't break the score
+// flow.
+//
+// loserID is resolved by the caller from the match row's own SideAID/SideBID
+// (never by a name-based roster scan here): a name-only lookup here would
+// silently pick the FIRST namesake registered in the roster, which is a
+// DIFFERENT competitor whenever the loser shares a display name with someone
+// else (repro: roster Tanaka@DojoB registered before Tanaka@DojoA; Tanaka@A
+// withdraws, but a name-only resolution here would check Tanaka@B's status
+// instead). loserName is used ONLY when loserID is empty (a match row with no
+// stamped side ids at all, e.g. a bracket kiken -- BracketMatch carries no
+// per-side id).
 //
 // Takes h state.StoreTx so both the transactional (RecordDecisionTx) and
 // non-transactional (test) callers share one body (bc-twin follow-up):
@@ -89,27 +101,30 @@ func (e *AlreadyIneligibleError) Error() string {
 // does not need to assert h is transactional.
 //
 // CHK047, T105.
-func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, loserName string) error {
-	if loserName == "" {
+func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, loserID, loserName string) error {
+	if loserID == "" && loserName == "" {
 		return nil
 	}
-	comp, err := h.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		if err != nil {
-			log.Printf("engine: checkConcurrentIneligibility LoadCompetition compId=%s: %v (T105 guard skipped)", compID, err)
-		}
-		return nil
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
-		return nil
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, loserName)
+	playerID := loserID
 	if playerID == "" {
-		return nil
+		comp, err := h.LoadCompetition(compID)
+		if err != nil || comp == nil {
+			if err != nil {
+				log.Printf("engine: checkConcurrentIneligibility LoadCompetition compId=%s: %v (T105 guard skipped)", compID, err)
+			}
+			return nil
+		}
+		// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+		participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+		if err != nil {
+			log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
+			return nil
+		}
+		pool := combinedPlayerPool(comp.Players, participants)
+		playerID = lookupPlayerID(pool, loserName)
+		if playerID == "" {
+			return nil
+		}
 	}
 	statuses, err := h.LoadCompetitorStatus(compID)
 	if err != nil {
@@ -521,39 +536,49 @@ func (e *Engine) hasDownstreamMatchStarted(h state.StoreTx, compID string, playe
 }
 
 // restoreCompetitorEligibility writes a CompetitorStatus{Eligible: true}
-// for the player named priorLoser on competition compID. Used by the
-// kiken-undo flow (T103) after a previous kiken/fusenpai has been
-// overwritten with a different outcome. matchID is the originating
-// match (the one being undone), carried for traceability.
+// for the player identified by priorLoserID (when the caller already
+// resolved it from the undone match's own side ids) or, failing that, by
+// priorLoserName. Used by the kiken-undo flow (T103) after a previous
+// kiken/fusenpai has been overwritten with a different outcome. matchID is
+// the originating match (the one being undone), carried for traceability.
 //
-// Returns (nil, nil) when the player can't be resolved (unknown name),
-// so the caller can fall through to the regular response without
-// failing the undo.
+// A name-only resolution would silently pick the FIRST namesake registered
+// in the roster (lookupPlayerID's linear scan) -- a DIFFERENT competitor
+// whenever priorLoserName is shared, so priorLoserID (resolved by the
+// caller from the undone match's SideAID/SideBID) takes priority; the name
+// fallback is for a match row with no stamped side ids at all (e.g. a
+// bracket kiken).
+//
+// Returns (nil, nil) when the player can't be resolved, so the caller can
+// fall through to the regular response without failing the undo.
 //
 // Takes h state.StoreTx so both the transactional (RecordDecisionTx) and
 // non-transactional (test) callers share one body (bc-twin follow-up).
-func (e *Engine) restoreCompetitorEligibility(h state.StoreTx, compID, priorLoser, matchID string) (*domain.CompetitorStatus, error) {
-	if priorLoser == "" {
+func (e *Engine) restoreCompetitorEligibility(h state.StoreTx, compID, priorLoserID, priorLoserName, matchID string) (*domain.CompetitorStatus, error) {
+	if priorLoserID == "" && priorLoserName == "" {
 		return nil, nil
 	}
-	comp, err := h.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		// Missing/deleted config: nothing to resolve. Best-effort like the
-		// unresolvable-player case below, so an undo isn't failed by it.
-		return nil, nil
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return nil, err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, priorLoser)
+	playerID := priorLoserID
 	if playerID == "" {
-		return nil, nil
+		comp, err := h.LoadCompetition(compID)
+		if err != nil {
+			return nil, err
+		}
+		if comp == nil {
+			// Missing/deleted config: nothing to resolve. Best-effort like the
+			// unresolvable-player case below, so an undo isn't failed by it.
+			return nil, nil
+		}
+		// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+		participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+		if err != nil {
+			return nil, err
+		}
+		pool := combinedPlayerPool(comp.Players, participants)
+		playerID = lookupPlayerID(pool, priorLoserName)
+		if playerID == "" {
+			return nil, nil
+		}
 	}
 	status := domain.CompetitorStatus{
 		PlayerID:   playerID,
@@ -657,6 +682,16 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 // ippon-count fallback) becomes ineligible for subsequent matches in
 // this competition.
 //
+// The losing player is resolved by ID FIRST, straight from result's own
+// SideAID/SideBID (loserPlayerID, mirroring resolveWinnerSide), and only
+// falls back to a name-based roster scan (lookupPlayerID) when the row
+// carries no side ids at all. A name-only resolution silently picks the
+// FIRST namesake registered in the roster -- a DIFFERENT competitor whenever
+// the actual loser shares a display name with someone else (repro: roster
+// Tanaka@DojoB registered before Tanaka@DojoA; Tanaka@DojoA withdraws, but
+// the old name-only resolution wrote Eligible:false for Tanaka@DojoB
+// instead, and her own next match then incorrectly 409'd).
+//
 // Returns the persisted CompetitorStatus when a status was written
 // (so the handler layer can broadcast the corresponding
 // `competitor-status-updated` SSE event), or (nil, nil) when no
@@ -675,24 +710,27 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	if loser == "" {
 		return nil, nil
 	}
-	comp, err := h.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		// Side-effect helper: no config means no eligibility record to write,
-		// so safely no-op rather than panic on a missing/deleted competition.
-		return nil, nil
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return nil, err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	playerID := lookupPlayerID(pool, loser)
+	playerID := loserPlayerID(result)
 	if playerID == "" {
-		return nil, nil
+		comp, err := h.LoadCompetition(compID)
+		if err != nil {
+			return nil, err
+		}
+		if comp == nil {
+			// Side-effect helper: no config means no eligibility record to write,
+			// so safely no-op rather than panic on a missing/deleted competition.
+			return nil, nil
+		}
+		// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+		participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+		if err != nil {
+			return nil, err
+		}
+		pool := combinedPlayerPool(comp.Players, participants)
+		playerID = lookupPlayerID(pool, loser)
+		if playerID == "" {
+			return nil, nil
+		}
 	}
 	status := domain.CompetitorStatus{
 		PlayerID:      playerID,
@@ -769,6 +807,34 @@ func loserSideName(result *state.MatchResult) string {
 		return result.SideA
 	case !aEmpty && bEmpty:
 		return result.SideB
+	}
+	return ""
+}
+
+// loserPlayerID resolves the losing side's participant id directly from
+// result's own SideAID/SideBID, via resolveWinnerSide -- the SAME
+// side-attribution resolveWinnerSide gives every other identity-keyed
+// standings consumer (applyTiebreakSort, groupNeedsChusen). Preferring the
+// match row's own ids over a name-based roster scan is what keeps a
+// same-name pairing (or a same-name-elsewhere-in-the-roster collision) from
+// being resolved to the wrong competitor: lookupPlayerID's linear scan picks
+// the FIRST namesake registered, which names a DIFFERENT person whenever the
+// actual loser is not that one.
+//
+// Returns "" when the row carries no side ids at all (resolveWinnerSide's id
+// branch needs at least one of SideAID/SideBID non-empty -- e.g. a bracket
+// match, which persists none), so callers fall back to their own name-based
+// resolution exactly as before this existed.
+func loserPlayerID(result *state.MatchResult) string {
+	if result.SideAID == "" && result.SideBID == "" {
+		return ""
+	}
+	winnerIsA, winnerIsB := resolveWinnerSide(*result)
+	switch {
+	case winnerIsA:
+		return result.SideBID
+	case winnerIsB:
+		return result.SideAID
 	}
 	return ""
 }

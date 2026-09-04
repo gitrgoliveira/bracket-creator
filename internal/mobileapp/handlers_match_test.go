@@ -287,6 +287,60 @@ func TestBulkScoreHandler_HanteiValidation(t *testing.T) {
 	})
 }
 
+// TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide is the bead's
+// repro (bc-idfx finding 10): a bulk-score entry whose winnerId names
+// NEITHER sideAId nor sideBId is invalid data. Before the fix, nothing at
+// the HTTP boundary or in the engine's backfillMatchIdentity checked this,
+// so the row was persisted verbatim as a "completed" match with a winner
+// that counts for nobody in standings (resolveWinnerSide's id branch also
+// silently fails open in that shape). It must now land in `errors`, never
+// in `succeeded`, and the stored match must be left untouched.
+func TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+	store.SaveCompetition(&state.Competition{ID: "wid"})
+	require.NoError(t, store.SavePoolMatches("wid", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideAID: idA, SideB: "P2", SideBID: idB, Status: state.MatchStatusScheduled},
+	}))
+
+	body, _ := json.Marshal([]state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "P1", SideAID: idA, SideB: "P2", SideBID: idB,
+			Winner: "P1", WinnerID: "not-a-side-id",
+			IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/wid/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "bulk-score's partial-success shape returns 200 with per-item errors")
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded, "a winnerId matching neither side must not be counted as succeeded")
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+	assert.Contains(t, resp.Errors[0].Error, "winnerId")
+
+	stored, err := store.LoadPoolMatches("wid")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Empty(t, stored[0].Winner, "the rejected write must not have landed")
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the match must remain unscored")
+}
+
 // TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict pins the bc-qual
 // review fix: a legacy client may send a score payload that omits
 // sideA/sideB (specs/openapi.yaml does not require them; the engine's

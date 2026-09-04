@@ -118,17 +118,36 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // with its members in a DIFFERENT order (reproduced:
 // [Alpha,Beta,Gamma] -> [Beta,Alpha,Gamma] after two of three writes). An
 // index-keyed input map then reads the operator's typed value for the WRONG
-// team on retry, silently inverting the recorded draw. Delegating to the
-// shared window.checkinPid (data.jsx) keys this the same way the rest of the
-// admin UI already keys check-in/roster state: server id when present, else
-// the "name|dojo" composite -- competitor identity is (name, dojo), never
-// bare name.
+// team on retry, silently inverting the recorded draw.
 //
-// Exported for vitest at __tests__/admin_pools.test.jsx: AdminPools itself
-// pulls in EmptyState/ScoreEditorModal/window.API and is not practical to
-// mount in the render harness, so the key derivation is tested directly.
+// id when NON-EMPTY, else "name|dojo" -- the same identity rule
+// helper.CompetitorKey applies server-side, and the one window.checkinPid
+// (data.jsx) applies for check-in/roster state EXCEPT for one gap that
+// matters here: checkinPid's `p.id ?? fallback` only falls back on a
+// null/undefined id, but the chusen-candidates handler always emits an "id"
+// key (handlers_competition.go: `gin.H{"id": t.Player.ID, ...}`), which is
+// "" -- not null or undefined -- for a competitor with no UUID (a legacy or
+// mixed roster). "" ?? fallback still returns "", so every legacy member in
+// a group would key to the SAME empty string: duplicate React keys, duplicate
+// DOM ids, and typing into one row's input moves all of them (reproduced in
+// the render harness). This function is deliberately self-contained rather
+// than delegating to checkinPid so that gap cannot silently reopen here.
+//
+// No positional tie-break is needed for the reachable collisions: two
+// members with the same name AND dojo are a duplicate roster row the
+// write-floor save already refuses (state.ErrDuplicateName /
+// CheckDuplicateEntriesByNameDojo), so that pairing cannot reach this
+// screen; the pairing that CAN -- same name, different dojo, via the
+// documented team-name-uniqueness enforcement hole -- is already separated
+// by the dojo half of the key.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx: a focused unit test
+// of the key derivation itself, in addition to (not instead of) the
+// full-mount behavioural coverage in
+// __tests__/render/admin_pools_chusen.render.test.jsx, which does mount
+// AdminPools and drives the actual chusen fetch/submit flow.
 function chusenMemberKey(member) {
-  return window.checkinPid(member);
+  return member.id ? member.id : `${member.name}|${member.dojo || ""}`;
 }
 
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
@@ -161,9 +180,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
   const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
-  // Per-member input values: keys are "${groupKey}::${idx}" -> string, where
-  // groupKey is "${poolName}::${minPosition}" and idx is the member's index
-  // in that group (never the display name, which two members can share).
+  // Per-member input values: keys are "${groupKey}::${identity}" -> string,
+  // where groupKey is "${poolName}::${minPosition}" and identity is
+  // chusenMemberKey(member) (id when non-empty, else "name|dojo") -- never
+  // the member's index in the group, which reorders after a partial write
+  // (bc-appx item 2), and never the bare display name, which two members
+  // can share.
   const [chusenInputs, setChusenInputs] = useStateA({});
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
   // (a pool can hold more than one unresolved tied group).
@@ -304,7 +326,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {chusenCandidates.map((group) => {
         const { poolName, teamNames, minPosition } = group;
-        // Members keyed by INDEX, never by name (bc-cse follow-up): `teams`
+        // Members keyed by IDENTITY (chusenMemberKey), never by name
+        // (bc-cse follow-up) and never by index (bc-appx item 2): `teams`
         // carries the authoritative per-member identity ({id, name, dojo}),
         // positionally parallel to the legacy `teamNames` strings (server:
         // handlers_competition.go builds teams[i] and names[i] from the same
@@ -312,13 +335,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // reachable only via the documented enforcement hole in team-name
         // uniqueness (an unreadable config.md write skips
         // checkNewTeamNameCollisions) -- so keying anything by bare name
-        // collapses both onto one identity. `teamNames.map` synthesizes a
-        // same-shaped member list only when an older server omits `teams`
-        // entirely: a wire-compat branch on the payload shape, not a
-        // name-keyed fallback lookup.
-        const members = (group.teams && group.teams.length === teamNames.length)
-          ? group.teams
-          : teamNames.map((name) => ({ name }));
+        // collapses both onto one identity. `teams` is required on the wire
+        // (this SPA ships in the same binary as the server that emits it,
+        // so there is no older-server case to be compatible with); a
+        // teamNames-only fallback would silently collapse a same-name pair
+        // back onto one key, exactly the bug this comment used to guard
+        // against, so there is deliberately no fallback here.
+        const members = group.teams;
         // A pool can hold more than one unresolved tied group (e.g. a cycle at
         // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
         // so the React key and the busy/error maps never collide across groups.

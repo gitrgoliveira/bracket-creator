@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -382,7 +383,10 @@ func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testin
 // an anonymous walk-up for someone else's data problem and leaks that OTHER
 // competitor's name to them. This is server-side data damage, not a client
 // error: the fix answers 500-class with a generic message and logs the
-// offending row for the operator.
+// offending row for the operator -- pinned here too (bc-appx review item 7):
+// the log is the operator's ONLY repair signal once the HTTP response is
+// generic, so a fix that silenced both would leave the roster stuck with no
+// way for anyone to find out why.
 func TestRegistration_POST_BlankDojoElsewhereInRoster_Returns500NotLeakingName(t *testing.T) {
 	r, store, _, tempDir := setupRegistrationRouter(t, selfRunTournament())
 
@@ -399,6 +403,16 @@ func TestRegistration_POST_BlankDojoElsewhereInRoster_Returns500NotLeakingName(t
 	// only way to get one onto disk.
 	writeLegacyRosterCSV(t, tempDir, compID, "Other Person,\n")
 
+	// Capture the default logger's output for the duration of the request so
+	// the operator-repair signal (internalError's log.Printf) can be
+	// asserted on, not just the HTTP response. Same approach as
+	// TestApplyMatchWrite_LogsTheUnstampedOverwrite (internal/engine).
+	var logBuf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	defer func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) }()
+
 	w := doRegister(r, compID, map[string]any{
 		"name": "Alice Tanaka", "dojo": "Raizan",
 	})
@@ -409,6 +423,12 @@ func TestRegistration_POST_BlankDojoElsewhereInRoster_Returns500NotLeakingName(t
 		"the public registration response must never name another competitor's row")
 	assert.NotContains(t, w.Body.String(), "must not be blank",
 		"the raw ErrBlankDojo wording must not reach the public endpoint")
+
+	// The offending row's name MUST reach the server log: it is the only
+	// place an operator can learn which row to repair, now that the HTTP
+	// response is deliberately generic.
+	assert.Contains(t, logBuf.String(), "Other Person",
+		"the offending row's name must reach the server log; that is the operator's only repair signal")
 
 	// The refused write must leave the roster untouched: Alice must not have
 	// been persisted.

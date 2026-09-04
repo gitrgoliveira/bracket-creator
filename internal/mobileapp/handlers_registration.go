@@ -163,7 +163,10 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			// public message instead, and log the offending row so the
 			// operator can find and fix it.
 			if errors.Is(err, state.ErrBlankDojo) {
-				internalError(c, err, "registration is temporarily unavailable, please contact an organiser")
+				// Sentence case with a full stop: registration.jsx renders this
+				// string verbatim (data.error, no added punctuation/casing) in
+				// the public registration form's error banner.
+				internalError(c, err, "Registration is temporarily unavailable. Please contact an organiser.")
 				return
 			}
 			if respondRosterWriteError(c, err) {

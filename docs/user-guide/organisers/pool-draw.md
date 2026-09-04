@@ -66,7 +66,9 @@ Because the seeds are spread before the pools fill, the top seeds' pools sit on 
 
 ## Competitor numbers
 
-Every competition has a number prefix. You can set your own in competition setup, or leave it blank: the app then derives one from the competition's name, for example "Kendo Open" becomes K, or KO if K is already used by another competition that day. The setup page always shows you the derived prefix as you type the name, before you save. Competitions saved by an earlier version of the app without a prefix are given one when the app starts, and their competitors are numbered at the same time, so every competition has a prefix from the moment it is loaded; the settings page simply shows the stored value.
+Every competition has a number prefix. You can set your own in competition setup, or leave it blank: the app then derives one from the competition's name, for example "Kendo Open" becomes K, or KO if K is already used by another competition. Prefixes are unique across the whole tournament, so a prefix already in use by an earlier competition is not offered again for a later one, even on a different day. The setup page always shows you the derived prefix as you type the name, before you save. Competitions saved by an earlier version of the app without a prefix are given one when the app starts, and their competitors are numbered at the same time, so every competition has a prefix from the moment it is loaded; the settings page simply shows the stored value.
+
+This section covers pooled formats (mixed and league), where numbers follow the drawn pools. For a knockout-only competition, see [Competitor numbers](knockout-draw.md#competitor-numbers) instead: numbers are final from setup, not provisional. A Swiss competition's competitors carry no number at all.
 
 Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
 

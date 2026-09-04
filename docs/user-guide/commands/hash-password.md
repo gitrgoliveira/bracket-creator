@@ -1,6 +1,6 @@
 # hash-password
 
-Produces a bcrypt hash for use with the [`mobile-app`](mobile-app.md) command's locked-password mode. Operators set the resulting hash in the `TOURNAMENT_PASSWORD_HASH` environment variable so the running server can compare incoming `X-Tournament-Password` headers against it without storing the plaintext.
+Produces a bcrypt hash for use with the [`mobile-app`](mobile-app.md) command's locked mode. Operators set the resulting hash in the `TOURNAMENT_PASSWORD_HASH` environment variable so the running server can compare incoming `X-Tournament-Password` headers against it without storing the plaintext.
 
 ```
 bracket-creator hash-password [plaintext]
@@ -21,17 +21,24 @@ Single line on stdout: the bcrypt hash (for example, `$2a$10$tq9jkGYsf1ttx0ZM.UU
 
 ## Examples
 
+Pass the password as an argument:
+
 ```bash
-# Quick generation via argument (leaves password in shell history)
 bracket-creator hash-password mysecret
+```
 
-# Stdin path: pipe from another command
+Pipe it from another command:
+
+```bash
 echo -n "$MY_SECRET" | bracket-creator hash-password
+```
 
-# Capture into a shell variable for the mobile-app server
+Capture the hash into a shell variable and start the tournament app in locked mode:
+
+```bash
 HASH=$(printf '%s' "$MY_SECRET" | bracket-creator hash-password)
 TOURNAMENT_PASSWORD_HASH="$HASH" \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-See the [mobile-app command reference](mobile-app.md#locked-mode-lock-password) for how the hash is consumed at startup.
+Refer to the [mobile-app command reference](mobile-app.md#locked-mode-lock-password) for how the hash is consumed at startup.

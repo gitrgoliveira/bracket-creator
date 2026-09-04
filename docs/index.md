@@ -42,7 +42,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     ---
 
-    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the tournament app, with one device per court. Some printed material is still needed for scoreboards and competitors.
+    Internet is available but there are no display screens. Keep every shiai-jo in sync through a shared Google Sheet or the tournament app. Some printed material is still needed for scoreboards and competitors.
 
     *Needs:* one device per shiai-jo.
 
@@ -54,7 +54,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     On-screen scoreboards and mobile result pages, updated in real time. Organisers still print player tags and numbers.
 
-    *Needs:* a device and monitor per court, plus network access for competitors.
+    *Needs:* a device and monitor per shiai-jo, plus network access for competitors.
 
     [Host it online](user-guide/install/hosting.md)
 
@@ -109,15 +109,15 @@ The simplest way to run the tournament app, no Go toolchain needed:
     bracket-creator mobile-app --folder ./tournament-data
     ```
 
-3. Open [http://localhost:8080](http://localhost:8080) and follow the setup in the [tournament app guide](user-guide/organisers/run-tournament.md).
+3. Open `http://localhost:8080` and follow the setup in the [tournament app guide](user-guide/organisers/run-tournament.md).
 
-Prefer Go or Docker? See the [install options](user-guide/install/install.md).
+Prefer Go or Docker? Refer to the [install options](user-guide/install/install.md).
 
 ## What you need on tournament day
 
 - **A3 printer**: for team/player name sheets
 - **A4 printer**: for the bracket trees
-- Scoreboards, whiteboard markers, scissors, tasuki
+- **Scoreboards, whiteboard markers, scissors, tasuki**: for keeping score at the courts and marking competitors
 
 ### Keep courts in sync
 
@@ -132,4 +132,4 @@ If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar
 
 ## On the day
 
-Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). See the [tournament app guide](user-guide/organisers/run-tournament.md).
+Use the **tournament app** to manage pools and scores in real time across all devices on your network (no Excel required on the day). Refer to the [tournament app guide](user-guide/organisers/run-tournament.md).

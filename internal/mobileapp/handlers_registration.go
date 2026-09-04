@@ -144,8 +144,11 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 			// classifier (errors.go) always answers with err.Error()
 			// verbatim, which would leak the raw "same name and dojo" wording
 			// to a walk-up competitor instead of this endpoint's guidance.
+			// The form already requires a dojo and the duplicate rule is name
+			// plus dojo, so the advice points at the organiser rather than at
+			// a dojo field the competitor cannot change.
 			if errors.Is(err, state.ErrDuplicateName) {
-				c.JSON(http.StatusConflict, gin.H{"error": "A participant with this name is already registered. If this is you, no action needed. If not, try including your dojo name."})
+				c.JSON(http.StatusConflict, gin.H{"error": "A participant with this name and dojo is already registered. If this is you, no action needed. If not, ask the organiser to add you."})
 				return
 			}
 			if respondRosterWriteError(c, err) {

@@ -20,12 +20,12 @@ Each option links to its full guide on **GitHub**, where the Compose and Terrafo
 The Docker baseline is the reusable core: the GCP and Oracle Terraform modules render the same Compose file and Caddyfile onto a cloud VM using cloud-init. Each guide includes the full prerequisites and a one-command Terraform (or Compose) flow.
 
 !!! note "PDF export needs the PDF-enabled image"
-    The lean default image cannot generate PDFs (competitor tags, name sheets, trees), it ships without LibreOffice to stay small. If your operators export PDFs, run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` image variant instead. Excel export works on every image.
+    The lean default image cannot generate PDFs (competitor tags, name sheets, trees). It ships without LibreOffice to stay small. If your operators export PDFs, run the `ghcr.io/gitrgoliveira/bracket-creator-mobile-pdf:latest` image variant instead. Excel export works on every image.
 
 ## Security
 
-Any deployment reachable over the internet should run in **locked-password mode** rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and disables the public password-reset endpoint. See [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
+Any deployment reachable over the internet should run in locked mode rather than the default file mode. Locked mode reads a bcrypt hash from an environment variable and disables the public password-reset endpoint. Refer to [Admin authentication](../organisers/operating-modes.md#admin-authentication-mode) for the setup steps.
 
 ## What still needs printing
 
-A fully digital setup still leaves one job on paper: organisers print player tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. See the [three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.
+A fully digital setup still leaves one job on paper: organisers print player tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. Refer to the [three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.

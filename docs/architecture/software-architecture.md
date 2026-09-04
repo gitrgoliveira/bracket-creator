@@ -87,6 +87,7 @@ flowchart TD
     helper --> domain
     helper --> excel
     cmd --> pdf
+    mobileapp --> pdf
 ```
 
 **Dual domain model (in transition).** `internal/helper` is where the real algorithms are implemented.
@@ -170,7 +171,7 @@ fan-out. Scoring is ACID; a legitimate operator change is never dropped.
 flowchart LR
     start["POST /api/competitions/:id/start"] --> eng["engine.StartCompetition"]
     eng --> mode{"format?"}
-    mode -->|pools + playoffs| pools["helper: greedy pools<br/>(dojo-conflict avoidance)<br/>court-aware seeding"]
+    mode -->|pools + playoffs| pools["helper: tree-aware pool descent<br/>(BuildPoolPhaseTreeAwareWithMode)<br/>seeds first, then dojo counts per node<br/>fill-bracket uses its own builder"]
     mode -->|playoffs only| tree["helper/tree.go<br/>binary tree (max 16/tree)<br/>StandardSeeding"]
     pools --> store[("state.Store")]
     tree --> store
@@ -202,7 +203,7 @@ The operator console is a tablet/desktop surface; the viewer is mobile-first. Th
 
 ## Key design rules
 
-See [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md) for the full visual design system.
+Refer to [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md) for the full visual design system.
 
 - **Persist before broadcast**; scoring is ACID; never drop a legitimate operator change.
 - **Use layout/sheet constants** (`internal/helper/constants.go`), never string literals.

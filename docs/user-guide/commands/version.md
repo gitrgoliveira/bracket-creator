@@ -1,3 +1,5 @@
+# version
+
 Print the currently installed CLI version:
 
 ```bash

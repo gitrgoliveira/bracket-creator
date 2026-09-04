@@ -5,6 +5,12 @@ site_url: https://gitrgoliveira.github.io/bracket-creator/
 repo_name: gitrgoliveira/bracket-creator
 repo_url: https://github.com/gitrgoliveira/bracket-creator
 
+# check_prose.py and check_links.py live under docs/ for proximity to what
+# they check, but they are tooling, not site content: exclude them from the
+# build so they never get copied into the published site.
+exclude_docs: |
+  *.py
+
 extra_css:
   - assets/stylesheets/extra.css
   - assets/stylesheets/pool-draw-animation.css

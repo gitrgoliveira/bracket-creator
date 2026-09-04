@@ -2,15 +2,15 @@
 
 In a competition with a pool phase, the knockout bracket is not redrawn once the pools finish. It is built when you generate the draw: every qualifying place has a slot waiting for it before a single pool match is played, and the preview shows you which pool feeds which slot.
 
-This page explains how those slots are worked out, so you can verify a bracket before publishing it. For the phase before this one, how the pools themselves are drawn, see [The pool draw](pool-draw.md).
+This page explains how those slots are worked out, so you can verify a bracket before publishing it. For the phase before this one, how the pools themselves are drawn, refer to [The pool draw](pool-draw.md).
 
-It describes the **Pools + Knockout** format, pools followed by a knockout. A **Knockout only** competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) below still apply to it.
+It describes the **Pools + Knockout** format, pools followed by a knockout. A **Knockout only** competition has no pool finishers to place, so it seeds competitors into the bracket directly; the shiai-jo pages and the [shiai-jo count rule](#how-many-shiai-jo-a-competition-can-use) still apply to it.
 
 ## How many qualify from each pool
 
-Everything below this section assumes you already know how many competitors each pool sends up. This section is about where that number comes from.
+The rest of this page assumes you already know how many competitors each pool sends up. This section is about where that number comes from.
 
-By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Pools + Knockout** competitions under that pool-size setting. See [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
+By default, every pool sends the same number of qualifiers, set by **Winners per pool** in competition setup. When pool size is set to a **minimum** number of players rather than a maximum, so pools can come out different sizes, two further options let some pools send an extra qualifier instead of leaving the difference as byes. Choose between the three under **Knockout qualifiers**, which only appears for **Pools + Knockout** competitions under that pool-size setting. Refer to [Knockout qualifiers](run-tournament.md#knockout-qualifiers) for where this lives in the app.
 
 ### Standard
 
@@ -18,7 +18,7 @@ Every pool sends the same top-N; the bracket is padded with byes.
 
 ![Standard: every pool sends its winner and the bracket is padded with byes](../../screenshots/qualifiers-standard.svg)
 
-Every pool sends the same number of qualifiers. If those qualifiers don't fill every bracket slot, the rest are byes, allocated as described in [Byes](#byes) above. This is the default, and the only option available when pool size is set to a maximum.
+Every pool sends the same number of qualifiers. If those qualifiers don't fill every bracket slot, the rest are byes, allocated as described in [Byes](#byes). This is the default, and the only option available when pool size is set to a maximum.
 
 ### Oversized send +1
 
@@ -28,7 +28,7 @@ Same pools; 4-person pools send their top 2 (at the default minimum of 3; in gen
 
 A pool with more members than the smallest pool in the competition sends one additional qualifier, on top of the usual number. The extra qualifier is placed in a different part of the bracket from its own pool's other qualifier, and always fights in the first round: it never receives a bye. This offsets the extra pool matches that pool's members had to play to qualify.
 
-The [oversized-pool bye priority](#byes) described above does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
+The [oversized-pool bye priority](#byes) does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
 
 Requires **Winners per pool** set to 1. It works at any size, including a competition on a single shiai-jo: where there is more than one shiai-jo the extra qualifier is drawn onto a neighbouring one, and where there is only one it stays in that shiai-jo's bracket but in the opposite half from its own pool's winner. Either way the two qualifiers from the same pool cannot meet before the final, and the extra qualifier always fights in the first round.
 
@@ -70,7 +70,7 @@ At this size, two of the 34 pools are oversized. Oversized send +1 keeps all 34 
 
 ## Shiai-jo blocks
 
-Each shiai-jo gets its own block of the bracket, and it gets exactly one. Pools are allocated to shiai-jo in order: the first pools to shiai-jo A, the next to B, and so on. The qualifiers from those pools fill that shiai-jo's block. On fewer than four shiai-jo, and with two or more qualifiers per pool, that block is subdivided further so the draw keeps the shape a larger competition would have; see [One or two shiai-jo](#one-or-two-shiai-jo).
+Each shiai-jo gets its own block of the bracket, and it gets exactly one. Pools are allocated to shiai-jo in order: the first pools to shiai-jo A, the next to B, and so on. The qualifiers from those pools fill that shiai-jo's block. On fewer than four shiai-jo, and with two or more qualifiers per pool, that block is subdivided further so the draw keeps the shape a larger competition would have; refer to [One or two shiai-jo](#one-or-two-shiai-jo).
 
 A block is a real branch of the bracket, not just a run of names printed next to each other. Everything inside a block plays itself out and produces one survivor, and that survivor then meets the survivor of another block. This is what makes a shiai-jo's pages self-contained: an official running shiai-jo C can pick up the pages for shiai-jo C, and every match printed on them belongs to shiai-jo C.
 
@@ -107,15 +107,15 @@ From two qualifiers per pool upwards, a competition on fewer than four shiai-jo 
 
 A one-shiai-jo competition and a two-shiai-jo one with the same pools and the same number of qualifiers therefore get the same draw, with the same first-round matches and the same byes. Against four shiai-jo the match is close but not exact, because pools are allocated to shiai-jo before the draw is built and that allocation does not always divide the same way; six, ten or fourteen pools split five and five across two shiai-jo but three, three, two and two across four, which puts a different pool in the first half.
 
-Two things limit the splitting. A block is only split again while every block would still hold two competitors on average, because a block left holding a single competitor gives that competitor a bye whatever the order below says, and a bye handed out by the shape of the split rather than chosen is not one the draw should be creating. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go, so that the two halves of the draw stay the ones a two-shiai-jo competition would have.
+Two things limit the splitting. A block is only split again while every block would still hold two competitors on average, because a block left holding a single competitor gives that competitor a bye whatever the order in [Byes](#byes) says, and a bye handed out by the shape of the split rather than chosen is not one the draw should be creating. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go, so that the two halves of the draw stay the ones a two-shiai-jo competition would have.
 
 At **one qualifier per pool** nothing is split at all. Nothing crosses between shiai-jo when each pool sends up a single competitor, so there is no partner structure to imitate, and each shiai-jo's block is left whole. That also lets the bye be chosen from every pool winner on that shiai-jo rather than from whichever half the split happened to leave with an odd number.
 
-Partnering is also part of why the number of shiai-jo a competition uses is restricted. That restriction has its own section below: [How many shiai-jo a competition can use](#how-many-shiai-jo-a-competition-can-use).
+Partnering is also part of why the number of shiai-jo a competition uses is restricted. That restriction has its own section: [How many shiai-jo a competition can use](#how-many-shiai-jo-a-competition-can-use).
 
 ### When a block runs short
 
-Structure comes first. A shiai-jo with fewer pools than the ones crossing into it ends up with a block short of home pool winners, filled out by crossed-in qualifiers. Two of those can come from the same shiai-jo and meet each other in the first round. The draw accepts that rather than breaking a block apart to avoid it; the third worked example below shows it happening.
+Structure comes first. A shiai-jo with fewer pools than the ones crossing into it ends up with a block short of home pool winners, filled out by crossed-in qualifiers. Two of those can come from the same shiai-jo and meet each other in the first round. The draw accepts that rather than breaking a block apart to avoid it; the third [worked example](#seven-pools-two-qualifiers-per-pool-four-shiai-jo) shows it happening.
 
 The same applies to the depth of a block. When blocks that merge into the same match have different depths, the shallower slot goes to the shiai-jo with the fewest pools, then the fewest entrants, then the earliest shiai-jo letter. That shiai-jo's occupants had the smallest field to qualify from, so the shallower path evens out the number of matches on the way to the final. It is worked out automatically and is not a random draw.
 
@@ -123,7 +123,7 @@ The same applies to the depth of a block. When blocks that merge into the same m
 
 A competition must be assigned **1, 2, 4, 8 or 16 shiai-jo**, which is to say a power of two. No other count is accepted, and that includes even counts such as 6 and 10.
 
-The reason is the block structure described above. The draw gives each shiai-jo its own block of the bracket, and the blocks merge in pairs: two blocks produce one survivor between them, those survivors pair off again, and so on until one is left. The count therefore has to halve cleanly all the way down, and only 1, 2, 4, 8 and 16 do.
+The reason is the block structure described in [Shiai-jo blocks](#shiai-jo-blocks). The draw gives each shiai-jo its own block of the bracket, and the blocks merge in pairs: two blocks produce one survivor between them, those survivors pair off again, and so on until one is left. The count therefore has to halve cleanly all the way down, and only 1, 2, 4, 8 and 16 do.
 
 Six shiai-jo shows why being even is not enough on its own. Six blocks pair off into three survivors, and three cannot pair off again: one of them would reach the final having fought a round fewer than the other two, purely because of how many blocks there were. Four blocks become two, and two become one, with no such gap.
 
@@ -131,9 +131,9 @@ Six shiai-jo shows why being even is not enough on its own. Six blocks pair off 
 
 The rule applies to the formats that build a knockout bracket, which are mixed and playoffs. League and Swiss competitions produce no bracket to merge, so they can use any number of shiai-jo the tournament has.
 
-It is a rule about one competition's allocation, never about your venue: a hall with three shiai-jo is perfectly normal and runs its competitions on 1 or 2 of them. See [Assigning shiai-jo](run-tournament.md#assigning-shiai-jo) for how that works in practice, and for what happens to a competition that was saved with a count the rule does not allow.
+It is a rule about one competition's allocation, never about your venue: a hall with three shiai-jo is perfectly normal and runs its competitions on 1 or 2 of them. Refer to [Assigning shiai-jo](run-tournament.md#assigning-shiai-jo) for how that works in practice, and for what happens to a competition that was saved with a count the rule does not allow.
 
-The count you assign is also not always the count the draw uses. A competition is never drawn onto more shiai-jo than it has pools, so a larger allocation steps down to the largest allowed count that fits, without an error and without a warning: seven pools assigned eight shiai-jo run on four. See [If you assign more shiai-jo than the competition has pools](run-tournament.md#if-you-assign-more-shiai-jo-than-the-competition-has-pools).
+The count you assign is also not always the count the draw uses. A competition is never drawn onto more shiai-jo than it has pools, so a larger allocation steps down to the largest allowed count that fits, without an error and without a warning: seven pools assigned eight shiai-jo run on four. Refer to [If you assign more shiai-jo than the competition has pools](run-tournament.md#if-you-assign-more-shiai-jo-than-the-competition-has-pools).
 
 ## Dojo-mates in the first round
 
@@ -141,7 +141,7 @@ The draw avoids opening a knockout with two competitors from the same dojo. Afte
 
 This matters most for a **Knockout only** competition, where there is no pool phase to separate dojo-mates beforehand and the draw follows the order your roster is in. Rosters are usually entered a dojo at a time, and without this the first round can be almost entirely dojo against dojo.
 
-Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
+Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. Refer to [The pool draw](pool-draw.md) for how that spreading works.
 
 ## Byes
 
@@ -158,7 +158,7 @@ Where a block has a bye, it goes to a pool winner, in this order:
 
 The second criterion is fatigue compensation. In a round-robin pool of four, a competitor fights three matches to qualify, where a pool of three fights two. A knockout bye evens out both the total match count and the rest between matches. It ranks below seeding because seeding protects the competitive shape of the draw, which matters more.
 
-A block does not have to hold a pool winner. From two qualifiers per pool upwards there are more qualifiers than there are pools, so a block can be filled entirely by qualifiers that crossed in from other shiai-jo. Its bye then goes to the best of those instead: runners-up first, ranked by their own pool's place in the list above, then third qualifiers. The same thing happens where a bye lands in a part of a block that holds no pool winner, and it can also happen because keeping a pool's own qualifiers apart outranks this order.
+A block does not have to hold a pool winner. From two qualifiers per pool upwards there are more qualifiers than there are pools, so a block can be filled entirely by qualifiers that crossed in from other shiai-jo. Its bye then goes to the best of those instead: runners-up first, ranked by their own pool's place in the bye order, then third qualifiers. The same thing happens where a bye lands in a part of a block that holds no pool winner, and it can also happen because keeping a pool's own qualifiers apart outranks this order.
 
 In later rounds, a block with an odd number of survivors produces a bye there too. That one falls to whichever match winner reaches the empty slot, so there is nothing to allocate and nothing for you to choose.
 
@@ -169,7 +169,7 @@ In later rounds, a block with an odd number of survivors produces a bye there to
 
 You choose the seeds and their order. The tool never derives them from previous results, and it never accepts two competitors on the same rank. Set them in the seeding panel described in [Adding participants](run-tournament.md#adding-participants), or pass a seeds file to the command line.
 
-The ranks you set must run from 1 with no number missing. You can type them in any order, so setting your 4th seed before your 1st is fine and the panel saves it as you go, but a seeding left with a hole in it will not draw. While one is incomplete the panel shows which ranks are still unset, and the **Generate draw** and **Start competition** buttons stay disabled until you either fill them in or clear the seeds. If you start the draw from another screen, or through the API, it is refused with the same list of missing ranks.
+The ranks you set must run from 1 with no number missing. You can type them in any order, so setting seed 4 before seed 1 is fine and the panel saves it as you go, but a seeding left with a hole in it does not draw. While one is incomplete the panel shows which ranks are still unset, and the **Generate draw** and **Start competition** buttons stay disabled until you either fill them in or clear the seeds. If you start the draw from another screen, or through the API, it is refused with the same list of missing ranks.
 
 Seeds are placed so the top of the draw is spread as widely as the shape allows:
 
@@ -184,9 +184,9 @@ So if the seeds hold, the semi-finals are **seed 1 against seed 3** and **seed 2
 
 Fewer than four seeds is a normal configuration, and so is none at all. The rule applies to whichever ranks you have set, in rank order, so with three seeds one quarter has no seed in it, and with no seeds the draw is built from crossing and block shape alone. A competition without seeds produces no warning.
 
-Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first, and you get a warning describing what was relaxed. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
+Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first, and you are told what was relaxed: the competition page shows a banner, **Seeding: the draw could not honour every rule**, and the command line prints the same as a `Warning:` line. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
 
-Seeding also decides who receives a bye, as described above.
+Seeding also decides who receives a bye, as described in [Byes](#byes).
 
 ## Tree pages, one set per shiai-jo
 
@@ -194,7 +194,7 @@ The Excel tree sheets are split so that each shiai-jo's pages stand on their own
 
 Every shiai-jo therefore gets the same number of pages, and every page is a genuine branch of the bracket. An official can take the pages for their own shiai-jo and have a complete, printable bracket in hand. A block larger than the rest never causes an error; it just means every shiai-jo gets more pages.
 
-The `--single-tree` option on the command line overrides all of this and prints the whole bracket on one page. See [create-pools](../commands/create-pools.md).
+The `--single-tree` option on the command line overrides all of this and prints the whole bracket on one page. Refer to [create-pools](../commands/create-pools.md).
 
 ## Worked examples
 

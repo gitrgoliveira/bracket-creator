@@ -168,7 +168,7 @@ describe('RegistrationForm', () => {
         return Promise.resolve({
           status: 409,
           ok: false,
-          json: () => Promise.resolve({ error: 'A participant with this name is already registered. If this is you, no action needed.' }),
+          json: () => Promise.resolve({ error: 'A participant with this name and dojo is already registered. If this is you, no action needed. If not, ask the organiser to add you.' }),
         });
       });
 

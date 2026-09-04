@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -241,7 +241,7 @@ docker/build: ## Build Docker image
 docker/run: docker/build ## Run the application in Docker
 	docker run -p 8080:8080 $(IMAGE_NAME):latest
 
-pre-commit: go/test go/security ## Run pre-commit checks
+pre-commit: docs/prose go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
 # Documentation (MkDocs Material): pinned toolchain.
@@ -276,13 +276,16 @@ docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
 	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
 	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
-docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
+docs/build: $(DOCS_STAMP) docs/prose ## Build static documentation site (output: site/)
 	@echo "Building documentation..."
 	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
 
 docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
 	@echo "Checking internal documentation links..."
 	$(DOCS_BIN)/python docs/check_links.py site
+
+docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
+	$(PYTHON) docs/check_prose.py docs
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

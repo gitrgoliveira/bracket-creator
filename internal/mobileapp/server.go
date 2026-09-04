@@ -26,6 +26,11 @@ import (
 // It is the elevated-credential analogue of TOURNAMENT_PASSWORD_HASH.
 const AdminPasswordHashEnv = "TOURNAMENT_ADMIN_PASSWORD_HASH"
 
+// mobileWebRoot is the embedded-resources subdirectory the mobile-app SPA is
+// served from. Shared between the fs.Sub call below and FrontendBundleMissing
+// (frontend_bundle.go) so the two can't drift on which root they check.
+const mobileWebRoot = "web-mobile"
+
 // defaultElevatedVerifier derives the elevated-password verifier from the
 // main verifier's mode (spec 004). File mode reads the write-only
 // Tournament.AdminPassword from the store (no env var); locked mode reads
@@ -224,7 +229,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 
 	// Static files & SPA Fallback
 	mobileFS := res.GetMobileWebFS()
-	subFS, err := fs.Sub(mobileFS, "web-mobile")
+	subFS, err := fs.Sub(mobileFS, mobileWebRoot)
 	if err != nil {
 		log.Printf("Warning: web-mobile directory not found: %v", err)
 	} else {

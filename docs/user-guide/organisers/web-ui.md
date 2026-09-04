@@ -1,6 +1,6 @@
 # Legacy Web UI
 
-The Legacy Web UI is the **organiser's** tool for the days before the event: turn a roster into a print-ready bracket from your browser, with no CSV editing. It is a standalone one-shot bracket generator, separate from the [tournament app](run-tournament.md), which takes over on the day for scorers, competitors, and spectators.
+The Legacy Web UI is the organiser's tool for the days before the event: turn a roster into a print-ready bracket from your browser, with no CSV editing. It is a standalone one-shot bracket generator, separate from the [tournament app](run-tournament.md), which takes over on the day for scorers, competitors, and spectators.
 
 You run one command to start the local server, then do everything else in the browser. Start it with the [`serve` command](../commands/serve.md):
 
@@ -12,15 +12,15 @@ Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## Main screen
 
-Configure the tournament on the main screen. Choose the format, either Pools and Playoffs or Playoffs (Knockout Tournament), then set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
+Configure the tournament on the main screen. Choose the format, either **Pools and Playoffs** or **Playoffs (Knockout Tournament)**, then set the number of courts, pool sizes, and other options. Upload your participant CSV directly from the browser.
 
-Both formats build a knockout bracket, so the number of courts must be 1, 2, 4, 8 or 16. The bracket is split into one block per shiai-jo and those blocks merge in pairs, so the count has to halve cleanly all the way down; any other number is refused with the counts to use instead. See [Shiai-jo count](../commands/create-pools.md#shiai-jo-count).
+Both formats build a knockout bracket, so the number of courts must be 1, 2, 4, 8 or 16. The bracket is split into one block per shiai-jo and those blocks merge in pairs, so the count has to halve cleanly all the way down; any other number is refused with the counts to use instead. Refer to [Shiai-jo count](../commands/create-pools.md#shiai-jo-count).
 
 ![Web UI main screen](../../screenshots/webui-main.png)
 
 ## Participant list
 
-After uploading a CSV the participant list is shown for review before generating the bracket.
+After uploading a CSV the participant list is shown for review before generating the bracket. A banner under the list reads **Participant list format looks good** and gives the number of participants read. If the list has problems, the banner reads **Participant list needs attention** and lists them; seeding and creating the tournament both refuse until you fix the rows it names. Warnings alone give **Participant list looks usable, with a few caveats**, and you can carry on.
 
 ![Participant list](../../screenshots/webui-player-list.png)
 
@@ -30,7 +30,7 @@ Click **Seed Participants** to open the seeding modal. Type a seed number into e
 
 ![Seeding modal](../../screenshots/webui-seeding-modal.png)
 
-After confirming, the assigned seeds are shown inline next to each participant name.
+After confirming, the button reads **N Seeds Assigned**, where N is the number of seeds you set. The list itself does not change.
 
 ![Seeds assigned](../../screenshots/webui-seeds-assigned.png)
 

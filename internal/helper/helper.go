@@ -228,6 +228,18 @@ func ReadEntriesFromFile(filePath string) ([]string, error) {
 	return entries, nil
 }
 
+// IsBlankRecord reports whether every field in rec is empty after trimming
+// surrounding whitespace. Used to skip fully-blank CSV rows before any
+// column-specific validation runs.
+func IsBlankRecord(rec []string) bool {
+	for _, f := range rec {
+		if strings.TrimSpace(f) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // ReadCSVFile reads a CSV file using encoding/csv, properly handling
 // RFC 4180 quoting (fields with commas, double-quotes, or newlines).
 func ReadCSVFile(filePath string) ([][]string, error) {
@@ -261,14 +273,7 @@ func ReadCSVFile(filePath string) ([][]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		allEmpty := true
-		for _, f := range record {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if !allEmpty {
+		if !IsBlankRecord(record) {
 			records = append(records, record)
 		}
 	}

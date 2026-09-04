@@ -14,9 +14,9 @@ Open `http://localhost:8080` in a browser. When the data folder is empty, the ap
 
 ## 2. Create a competition
 
-From the dashboard, click **+ Add competition**. Choose Individual or Team, then pick a format: **Knockout only**, **Pools + Knockout**, **League**, or **Swiss**. See [Formats](../organisers/formats.md) for a description of each format and when to use it.
+From the dashboard, click **+ Add competition**. Choose Individual or Team, then pick a format: **Knockout only**, **Pools + Knockout**, **League**, or **Swiss**. Refer to [Formats](../organisers/formats.md) for a description of each format and when to use it.
 
-The number of shiai-jo you entered in [Install and start the server](#1-install-and-start-the-server) is your venue's total, and can be anything from 1 to 16. Each competition is then assigned some of them, and a competition that ends in a knockout has to be assigned 1, 2, 4, 8 or 16, because its bracket is split into one block per shiai-jo and those blocks merge in pairs. So a hall with three shiai-jo runs each competition on 1 or 2, and can run two competitions at once to use all three. See [Assigning shiai-jo](../organisers/run-tournament.md#assigning-shiai-jo).
+The number of shiai-jo you entered in [Install and start the server](#1-install-and-start-the-server) is your venue's total, and can be anything from 1 to 16. Each competition is then assigned some of them, and a competition that ends in a knockout has to be assigned 1, 2, 4, 8 or 16, because its bracket is split into one block per shiai-jo and those blocks merge in pairs. So a hall with three shiai-jo runs each competition on 1 or 2, and can run two competitions at once to use all three. Refer to [Assigning shiai-jo](../organisers/run-tournament.md#assigning-shiai-jo).
 
 ![Creating a competition: the name, type, format, pool-size, and shiai-jo options on the setup form.](../../screenshots/mobile-create-competition.png)
 
@@ -34,13 +34,13 @@ Click **Generate draw** to build the pools and bracket. Review the preview, then
 
 ## 5. Enter a score
 
-Go to the **Scores** tab, open a match, and record the result. See [Scoring a match](../court-operators/scoring-a-match.md) for the full scoring workflow, including points, decisions, and team bouts.
+Go to the **Scores** tab, open a match, and record the result. Refer to [Scoring a match](../court-operators/scoring-a-match.md) for the full scoring workflow, including points, decisions, and team bouts.
 
 ![The score editor: Shiro and Aka fighters with ippon buttons, foul counters, and decision controls.](../../screenshots/mobile-score-editor.png)
 
 !!! tip
-    Open `http://localhost:8080` on a second screen (a scoreboard TV or a phone) with no password. Standings and brackets update in real time as a scorer records each result. See [Following a tournament](../spectators/following.md) for the full viewer experience.
+    Open `http://localhost:8080` on a second screen (a scoreboard TV or a phone) with no password. Standings and brackets update in real time as a scorer records each result. Refer to [Following a tournament](../spectators/following.md) for the full viewer experience.
 
 ## Next steps
 
-For the complete organiser workflow, including pools, seeding, and competition settings, see [Run a tournament](../organisers/run-tournament.md). To generate print-ready brackets without the tournament app, see [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).
+For the complete organiser workflow, including pools, seeding, and competition settings, refer to [Run a tournament](../organisers/run-tournament.md). To generate print-ready brackets without the tournament app, refer to [Legacy Web UI](../organisers/web-ui.md) and the [create-pools command](../commands/create-pools.md).

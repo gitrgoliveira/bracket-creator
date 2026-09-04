@@ -2,7 +2,7 @@
 
 The public viewer needs no password. It is the shared screen for competitors, coaches, and spectators. Open the tournament URL on any device on the same network and you see results as they happen, the standings, and the bracket as the day unfolds.
 
-Not sure which role fits you? See [Choosing your setup](../start-here/choosing-your-setup.md) for a full guide.
+Not sure which role fits you? Refer to [Choosing your setup](../start-here/choosing-your-setup.md) for a full guide.
 
 ## What the public viewer shows
 
@@ -67,7 +67,4 @@ Scores entered by the operator appear on the viewer immediately, across every co
 When the organiser sets the tournament public URL, each printed competitor tag includes a personal QR code. Scan it to open your own page on the viewer, showing your schedule and results directly.
 
 !!! tip
-    You do not need to set up a Watchlist if you use your tag's QR code. The personal page opens straight to your matches.
-
-!!! note
-    The QR code only works when the organiser has configured a public URL for the tournament. If the code does not open anything, ask the organiser for the tournament URL and use the Watchlist instead.
+    You do not need to set up a Watchlist if you use your tag's QR code: the personal page opens straight to your matches. The code only works once the organiser has configured a public URL for the tournament. If scanning your tag does not open anything, ask the organiser for the tournament URL and use the Watchlist instead.

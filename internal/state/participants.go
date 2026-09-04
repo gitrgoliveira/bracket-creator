@@ -44,6 +44,26 @@ var ErrDuplicateName = errors.New("a participant with the same name and dojo alr
 // blank-dojo roster: errors.Is against the wrong one silently never matches.
 var ErrBlankDojo = errors.New("participant dojo must not be blank")
 
+// ErrBlankName is returned by every participant write path when an entry
+// carries no name. A competitor's identity is (name, dojo), so a blank name
+// is not a missing display detail: it makes the competitor unidentifiable to
+// every consumer that has no participant id to fall back on.
+//
+// Enforced HERE, at the lowest write layer, rather than only in the handlers,
+// for the same reason as the duplicate guard above: a guard that lives in the
+// handlers is bypassable by the next caller. The handlers keep their own
+// checks so the operator gets a per-field 400 naming the offending row.
+//
+// READ is deliberately NOT gated. A roster written before this rule (or hand
+// edited) still loads, so an operator can see it and repair the name through
+// the edit UI. The cost of that choice is real and worth stating: until the
+// blank name is fixed, ANY save touching that roster is refused, including a
+// check-in, because every write goes through this one floor.
+//
+// DISTINCT from helper.ErrBlankNameInDraw, the draw-time refusal of a loaded
+// blank-name roster: errors.Is against the wrong one silently never matches.
+var ErrBlankName = errors.New("participant name must not be blank")
+
 // duplicateTeamNameError reports two teams sharing a name in a team
 // competition. It deliberately does NOT wrap ErrDuplicateName's text: that
 // sentinel says "same name and dojo", whereas this gate fires precisely when
@@ -295,14 +315,7 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		// Skip records that are empty after UUID stripping (e.g. a
 		// UUID-only row); CreatePlayersFromRecords would skip these
 		// too, and the metadata slices must stay aligned.
-		allEmpty := true
-		for _, f := range dataFields {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
+		if helper.IsBlankRecord(dataFields) {
 			continue
 		}
 
@@ -1056,6 +1069,9 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// wrong problem and sends the operator looking for a competitor who is
 	// not there.
 	for _, p := range players {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("%w: %q", ErrBlankName, p.Dojo)
+		}
 		if strings.TrimSpace(p.Dojo) == "" {
 			return fmt.Errorf("%w: %q", ErrBlankDojo, p.Name)
 		}

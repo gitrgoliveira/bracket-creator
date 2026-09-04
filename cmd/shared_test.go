@@ -59,3 +59,46 @@ func TestProcessEntries_DuplicateError(t *testing.T) {
 	assert.Nil(t, players)
 	assert.Contains(t, err.Error(), "duplicate participant entries found")
 }
+
+func TestProcessEntries_BlankName(t *testing.T) {
+	tests := []struct {
+		name        string
+		entries     []string
+		errContains string
+	}{
+		{
+			name:        "blank name is rejected",
+			entries:     []string{"John Doe, Dojo A", ", Dojo B"},
+			errContains: "entry 2: missing name",
+		},
+		{
+			name:    "normal list still passes",
+			entries: []string{"John Doe, Dojo A", "Jane Smith, Dojo B"},
+		},
+		{
+			// The CLI reads a missing dojo as NA; a name-only entry is
+			// documented behaviour and must not be rejected here.
+			name:    "name-only entry still passes",
+			entries: []string{"Bob Brown"},
+		},
+		{
+			// A whitespace-only entry is dropped as a blank line before
+			// validation ever sees it, not reported as a missing name.
+			name:    "whitespace-only entry is skipped",
+			entries: []string{"John Doe, Dojo A", "   "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			players, err := processEntries(tt.entries, true, false)
+			if tt.errContains != "" {
+				require.Error(t, err)
+				assert.Nil(t, players)
+				assert.Contains(t, err.Error(), tt.errContains)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}

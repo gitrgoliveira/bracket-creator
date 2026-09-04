@@ -285,7 +285,7 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames(t *testi
 }
 
 // TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo pins
-// validateNoBlankDojo's TrimSpace alignment with state.ErrBlankDojo's own
+// validateNoBlankIdentity's TrimSpace alignment with state.ErrBlankDojo's own
 // write-floor check (saveParticipantsNoLock): a Dojo of "   " is exactly as
 // blank as "" and must be refused at the draw too, not just at the
 // participant-write floor, so a future in-memory producer that skips that
@@ -300,6 +300,58 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo(t *testing.T)
 	require.Error(t, err, "a whitespace-only dojo must be refused, not silently drawn")
 	assert.ErrorIs(t, err, ErrBlankDojoInDraw)
 	assert.Contains(t, err.Error(), "WhitespaceDojo", "the error must name the offending player")
+}
+
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankName mirrors
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo for the analogous
+// name check: a roster containing a blank-name player must be refused
+// outright by the shared pre-flight, reached by all three tree-aware entry
+// points. The error names the offending row by POSITION, since the name
+// itself is what's blank, and no pools may be returned.
+func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankName(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "Bob", Dojo: "DojoB"},
+		{Name: "", Dojo: "DojoD"},
+		{Name: "Carol", Dojo: "DojoC"},
+		{Name: "Dave", Dojo: "DojoA"},
+		{Name: "Erin", Dojo: "DojoB"},
+		{Name: "Frank", Dojo: "DojoC"},
+		{Name: "Grace", Dojo: "DojoA"},
+	}
+
+	pools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(players, 4, false, 1, 2, "")
+	require.Error(t, err, "a blank-name roster must be refused, not silently drawn")
+	assert.ErrorIs(t, err, ErrBlankNameInDraw)
+	assert.Contains(t, err.Error(), "row 3", "the error must name the offending row by position")
+	assert.Nil(t, pools)
+	assert.Zero(t, drawCourts)
+
+	// Every tree-aware entry point funnels through the same pre-flight.
+	pools2, _, err2 := BuildPoolPhaseTreeAware(players, 4, false, 1, 2)
+	require.Error(t, err2)
+	assert.ErrorIs(t, err2, ErrBlankNameInDraw)
+	assert.Nil(t, pools2)
+
+	pools3, _, err3 := BuildPoolPhaseFillBracketTreeAware(players, 4, 1)
+	require.Error(t, err3)
+	assert.ErrorIs(t, err3, ErrBlankNameInDraw)
+	assert.Nil(t, pools3)
+}
+
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyName mirrors
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo: a Name of
+// "   " is exactly as blank as "" and must be refused at the draw too.
+func TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyName(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "DojoA"},
+		{Name: "   ", Dojo: "DojoB"},
+		{Name: "Carol", Dojo: "DojoC"},
+	}
+	_, _, err := BuildPoolPhaseTreeAwareWithMode(players, 1, false, 1, 2, "")
+	require.Error(t, err, "a whitespace-only name must be refused, not silently drawn")
+	assert.ErrorIs(t, err, ErrBlankNameInDraw)
+	assert.Contains(t, err.Error(), "row 2", "the error must name the offending row by position")
 }
 
 // referenceEarliestDojoMeeting is the pre-P3 nested-scan algorithm, kept
@@ -447,7 +499,7 @@ func TestEarliestDojoMeeting_MatchesReference(t *testing.T) {
 // change with it.
 func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, baseTargetSizes []int, numCourts, poolWinners int) ([]Pool, []int, [][]int) {
 	t.Helper()
-	require.NoError(t, validateNoBlankDojo(players))
+	require.NoError(t, validateNoBlankIdentity(players))
 
 	drawCourts := EffectiveDrawCourts(numPools, numCourts)
 	pools := make([]Pool, numPools)

@@ -340,8 +340,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // so there is no older-server case to be compatible with); a
         // teamNames-only fallback would silently collapse a same-name pair
         // back onto one key, exactly the bug this comment used to guard
-        // against, so there is deliberately no fallback here.
+        // against, so there is deliberately no fallback here. A payload
+        // without it is a server bug, and skipping the group keeps that
+        // contained to this banner rather than tripping the page-level
+        // error boundary for every other pool on the screen.
         const members = group.teams;
+        if (!members) return null;
         // A pool can hold more than one unresolved tied group (e.g. a cycle at
         // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
         // so the React key and the busy/error maps never collide across groups.

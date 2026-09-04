@@ -1517,30 +1517,50 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			// to mean anything: a legacy bare-name override of exactly 1 (see
 			// TestCalculatePoolStandings_Override_LegacyBareNameKey) must beat
 			// an undefeated, non-overridden natural WINNER, which only happens
-			// when that winner's own natural rank is 1, not 0), captured by
-			// IDENTITY key rather than by position -- sort.SliceStable
-			// physically swaps elements, so a position-indexed cache would go
-			// stale exactly like the analogous case in tiebreaker.go's
-			// applyTiebreakSort. Then sort by key = override rank when
-			// present, else the natural rank, so an override is only ever
-			// preferred over another row's rank number when the numbers
-			// themselves say so. Ties (an override rank numerically colliding
-			// with another row's natural rank, or two rows both lacking an
-			// override) resolve override-first, then by natural index, with
-			// sort.SliceStable so no other equal pair is ever reordered.
-			naturalRank := make(map[string]int, len(sorted))
-			for i, s := range sorted {
-				naturalRank[standingsPlayerKey(s.Player.ID, s.Player.Name)] = i + 1
+			// when that winner's own natural rank is 1, not 0.
+			//
+			// The natural rank MUST be captured PER ELEMENT, not in a map keyed
+			// by identity (standingsPlayerKey): two id-less namesakes (legal
+			// across dojos, CheckDuplicateEntriesByNameDojo) share the identical
+			// key, so a map assignment for the SECOND one silently overwrites
+			// the FIRST one's entry, and both then read whichever was written
+			// LAST -- corrupting the earlier one's rank (BLOCKER caught by
+			// review: an unrelated override elsewhere in the pool was enough to
+			// drop a 2-0 undefeated leader to rank 3, because her natural rank
+			// had been overwritten by her own lower-placed namesake's). A
+			// pairing struct fixes this: `nat` travels glued to its own
+			// `standing` through the sort, so it can never be read off the
+			// wrong row regardless of how many rows share a display name.
+			//
+			// Sorted by key = override rank when present, else the row's own
+			// natural rank, so an override is only ever preferred over another
+			// row's rank number when the numbers themselves say so. Every
+			// non-overridden row's natural rank is UNIQUE by construction (each
+			// occupies exactly one position i in the already points-sorted
+			// slice), so non-overridden rows can never tie with each other --
+			// that uniqueness is what actually fixes the original ">12-row pool
+			// scrambled" bug, not sort stability. sort.SliceStable is still used
+			// as belt-and-braces for the one case a genuine tie remains
+			// possible: an override rank numerically colliding with another
+			// row's rank (natural or overridden); ties resolve override-first,
+			// then whichever pairing was already ahead going into the sort.
+			type poolRankPairing struct {
+				standing state.PlayerStanding
+				nat      int // 1-based natural (points-order) rank, captured once per element
 			}
-			rankFor := func(s *state.PlayerStanding) (rank int, overridden bool) {
-				if r, ok := lookupPoolRankOverride(poolOverrides, s.Player.ID, s.Player.Name, s.Player.Dojo); ok {
+			wrapped := make([]poolRankPairing, len(sorted))
+			for i, s := range sorted {
+				wrapped[i] = poolRankPairing{standing: s, nat: i + 1}
+			}
+			rankFor := func(w *poolRankPairing) (rank int, overridden bool) {
+				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID, w.standing.Player.Name, w.standing.Player.Dojo); ok {
 					return r, true
 				}
-				return naturalRank[standingsPlayerKey(s.Player.ID, s.Player.Name)], false
+				return w.nat, false
 			}
-			sort.SliceStable(sorted, func(i, j int) bool {
-				rankI, okI := rankFor(&sorted[i])
-				rankJ, okJ := rankFor(&sorted[j])
+			sort.SliceStable(wrapped, func(i, j int) bool {
+				rankI, okI := rankFor(&wrapped[i])
+				rankJ, okJ := rankFor(&wrapped[j])
 				if rankI != rankJ {
 					return rankI < rankJ
 				}
@@ -1549,6 +1569,9 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				}
 				return false
 			})
+			for i, w := range wrapped {
+				sorted[i] = w.standing
+			}
 		}
 
 		poolHasOverrides := len(poolOverrides) > 0

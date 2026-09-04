@@ -310,6 +310,71 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 	})
 }
 
+// TestComputeStandingsFrom_OverrideSort_IDlessNamesakesDoNotCollideOnNaturalRank
+// is the BLOCKER from the Opus review round 2 of this bead: naturalRank was a
+// map keyed by standingsPlayerKey(ID, Name), so two id-less namesakes (legal
+// across dojos, CheckDuplicateEntriesByNameDojo) collapse onto ONE map entry
+// -- whichever is processed LAST in points-sorted order overwrites the
+// natural rank the FIRST one had just written. An unrelated override
+// elsewhere in the pool is enough to expose it: the undefeated leader's own
+// natural rank silently becomes her lower-placed namesake's, and she sorts
+// below rows that never legitimately outrank her.
+//
+// Fixture: TanakaGhost (0-0-0, registered FIRST in roster order) and
+// TanakaReal (2-0, undefeated leader, registered LAST) share the name
+// "Tanaka" across different dojos and carry no id. Because match sides are
+// id-less, both "Tanaka"-named match rows resolve via the roster's
+// last-write-wins name index to TanakaReal, exactly as computeStandingsFrom's
+// own win/loss accrual already does -- TanakaGhost genuinely never appears in
+// a match and stays at 0-0-0. Carol carries an override unrelated to either
+// Tanaka. Before the fix this drops the 2-0 leader to rank 3 (probe-verified);
+// after it she is rank 1.
+func TestComputeStandingsFrom_OverrideSort_IDlessNamesakesDoNotCollideOnNaturalRank(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "override-idless-namesake-collision"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "IDless Namesake Collision", Format: state.CompFormatMixed,
+		Status: state.CompStatusPools, Courts: []string{"A"},
+	}))
+
+	// Roster order matters: TanakaGhost registered BEFORE TanakaReal, neither
+	// carries an id (legacy data).
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Tanaka", Dojo: "DojoGhost"},
+			{Name: "Bob", Dojo: "DojoBob"},
+			{Name: "Carol", Dojo: "DojoCarol"},
+			{Name: "Tanaka", Dojo: "DojoReal"},
+		}},
+	}))
+	// "Tanaka" always resolves to the last-registered roster entry
+	// (TanakaReal), exactly as the standings accrual itself resolves it.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka", SideB: "Bob", Winner: "Tanaka", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "Tanaka", SideB: "Carol", Winner: "Tanaka", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-2", SideA: "Bob", SideB: "Carol", Winner: "Bob", Status: state.MatchStatusCompleted},
+	}))
+	// Carol's override is unrelated to either Tanaka; its mere presence is
+	// enough to enter the override-sort code path.
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "", "Carol", "DojoCarol", 2))
+
+	standings, err := eng.CalculatePoolStandings(compID)
+	require.NoError(t, err)
+	poolA := standings["Pool A"]
+	require.Len(t, poolA, 4)
+
+	byDojo := make(map[string]state.PlayerStanding, len(poolA))
+	for _, s := range poolA {
+		byDojo[s.Player.Dojo] = s
+	}
+	require.Contains(t, byDojo, "DojoGhost")
+	require.Contains(t, byDojo, "DojoReal")
+	assert.Equal(t, 0, byDojo["DojoGhost"].Wins, "the ghost Tanaka never appears in a match and must stay 0-0-0")
+	assert.Equal(t, 2, byDojo["DojoReal"].Wins, "the real Tanaka is the 2-0 undefeated leader")
+	assert.Equal(t, 1, byDojo["DojoReal"].Rank, "the undefeated leader must be rank 1, not collide with her id-less namesake's natural rank")
+}
+
 // --- Finding 5: RecordDecisionTx must attribute WinnerID by side, not by name ---
 
 // TestRecordDecisionTx_SameNamePairing_AttributesWinnerBySide is the bead's

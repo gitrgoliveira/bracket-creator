@@ -302,7 +302,7 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames(t *testi
 }
 
 // TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo pins
-// validateNoBlankDojo's TrimSpace alignment with state.ErrBlankDojo's own
+// ValidateNoBlankDojo's TrimSpace alignment with state.ErrBlankDojo's own
 // write-floor check (saveParticipantsNoLock): a Dojo of "   " is exactly as
 // blank as "" and must be refused at the draw too, not just at the
 // participant-write floor, so a future in-memory producer that skips that
@@ -464,7 +464,7 @@ func TestEarliestDojoMeeting_MatchesReference(t *testing.T) {
 // change with it.
 func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, baseTargetSizes []int, numCourts, poolWinners int) ([]Pool, []int, [][]int) {
 	t.Helper()
-	require.NoError(t, validateNoBlankDojo(players))
+	require.NoError(t, ValidateNoBlankDojo(players))
 
 	drawCourts := EffectiveDrawCourts(numPools, numCourts)
 	pools := make([]Pool, numPools)

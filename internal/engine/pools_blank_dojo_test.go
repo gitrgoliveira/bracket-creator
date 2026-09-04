@@ -61,3 +61,88 @@ func TestGenerateDraw_RefusesBlankDojoRoster(t *testing.T) {
 	require.NoError(t, perr)
 	assert.Empty(t, pools, "nothing may be persisted for a refused draw")
 }
+
+// writeBlankDojoRosterCSV writes the same legacy/hand-edited blank-dojo
+// roster TestGenerateDraw_RefusesBlankDojoRoster uses, directly to
+// participants.csv for compID (bypassing state.SaveParticipants' own
+// write-time guard -- see that test's own doc comment for why the draw
+// pipeline must supply its own refusal instead of relying on it).
+func writeBlankDojoRosterCSV(t *testing.T, dir, compID string) {
+	t.Helper()
+	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
+	csv := "Alice,DojoA\n" +
+		"NoDojoHere,\n" +
+		"Carol,DojoC\n" +
+		"Dave,DojoA\n" +
+		"Bob,DojoB\n" +
+		"Erin,DojoB\n" +
+		"Frank,DojoC\n" +
+		"Grace,DojoA\n"
+	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
+}
+
+// TestGenerateDraw_RefusesBlankDojoRoster_Playoffs and
+// TestGenerateDraw_RefusesBlankDojoRoster_Swiss pin bc-drwx item 8: the
+// blank-dojo refusal used to live ONLY inside the pool distributor
+// (BuildPoolPhaseTreeAware*, reached by generatePools for mixed/league), so
+// a standalone playoffs or Swiss competition over the exact same
+// legacy/hand-edited blank-dojo roster TestGenerateDraw_RefusesBlankDojoRoster
+// exercises for mixed drew SILENTLY instead of refusing -- neither
+// generatePlayoffs (helper.StandardSeeding has no dojo opinion) nor
+// GenerateSwissRound goes anywhere near the distributor. runDrawPipeline's
+// own pre-flight (helper.ValidateNoBlankDojo, called once ahead of the
+// format switch) now covers every format.
+func TestGenerateDraw_RefusesBlankDojoRoster_Playoffs(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "blank-dojo-roster-playoffs"
+
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+	})
+	writeBlankDojoRosterCSV(t, dir, compID)
+
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err)
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve, "must surface as a *engine.ValidationError (-> HTTP 400 at POST /competitions/:id/generate-draw)")
+	assert.Contains(t, ve.Error(), "NoDojoHere", "the error must name the offending player so the operator knows which row to repair")
+
+	comp, lerr := store.LoadCompetition(compID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "a rejected draw must not transition the competition")
+	bracket, berr := store.LoadBracket(compID)
+	require.NoError(t, berr)
+	assert.Empty(t, bracket.Rounds, "nothing may be persisted for a refused draw")
+}
+
+func TestGenerateDraw_RefusesBlankDojoRoster_Swiss(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "blank-dojo-roster-swiss"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:          compID,
+		Name:        "Blank Dojo Swiss",
+		Kind:        "individual",
+		Format:      state.CompFormatSwiss,
+		SwissRounds: 3,
+		Courts:      []string{"A"},
+		StartTime:   "09:00",
+		Status:      state.CompStatusSetup,
+	}))
+	writeBlankDojoRosterCSV(t, dir, compID)
+
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err)
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve, "must surface as a *engine.ValidationError (-> HTTP 400 at POST /competitions/:id/generate-draw)")
+	assert.Contains(t, ve.Error(), "NoDojoHere", "the error must name the offending player so the operator knows which row to repair")
+
+	comp, lerr := store.LoadCompetition(compID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "a rejected draw must not transition the competition")
+	assert.Equal(t, 0, comp.SwissCurrentRound, "a refused draw must not advance the Swiss round")
+	matches, merr := store.LoadPoolMatches(compID)
+	require.NoError(t, merr)
+	assert.Empty(t, matches, "nothing may be persisted for a refused draw")
+}

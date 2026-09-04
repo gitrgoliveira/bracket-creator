@@ -314,8 +314,11 @@ func PoolCount(numPlayers, poolSize int, isMax bool) int {
 // tree before it places anyone, followed by a narrow pairwise-exchange
 // pass (improveDojoMeetings) that closes the one residual the forward pass
 // alone cannot see. That exchange pass is a different animal from the
-// deleted post-fill repair: it is scored on the winner-path metric alone,
-// touches only unseeded-for-unseeded swaps, and is a no-op on the
+// deleted post-fill repair: it is scored on a four-tier lexicographic
+// objective led by a total spread-cap excess delta, then the winner-path
+// metric, then an all-qualifier best-effort tie-break (see
+// improveDojoMeetings' own doc comment for the full tier list), touches
+// only unseeded-for-unseeded swaps, and is a no-op on the
 // unique-dojo and single-dojo cases the old repair also left untouched
 // (see BuildPoolPhaseTreeAware's own doc comment for the full pipeline).
 //

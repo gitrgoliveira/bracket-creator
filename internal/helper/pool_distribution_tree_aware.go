@@ -35,9 +35,12 @@ import (
 //     bypasses the tree entirely (leastConflictedPool), which is what
 //     keeps the unique-dojo round-robin identity contract intact.
 //  2. improveDojoMeetings (below) then runs a PAIRWISE-ONLY exchange pass
-//     -- no three-way rotation -- scored on the WINNER-PATH metric alone
-//     (poolPairRounds fed winner-only slot lists, i.e. slots[0] per pool,
-//     the same pre-reorder space the descent itself uses). This is what
+//     -- no three-way rotation -- scored on a FOUR-TIER lexicographic
+//     objective led by a total spread-cap excess delta, then the
+//     WINNER-PATH metric (poolPairRounds fed winner-only slot lists, i.e.
+//     slots[0] per pool, the same pre-reorder space the descent itself
+//     uses), then an all-qualifier best-effort tie-break (see
+//     improveDojoMeetings' own doc comment for the full tier list). This is what
 //     closes the one gap the descent alone could not: on a MULTI-dojo
 //     roster the dojos the descent places early can still box a later
 //     dojo into pools whose own qualifiers meet in round 1, because the
@@ -110,14 +113,16 @@ import (
 //     assignUnseededByDojoTree's own doc comment for the placement
 //     mechanism.
 //  4. improveDojoMeetings then runs a PAIRWISE-ONLY exchange pass over the
-//     result, scored on the winner-path metric alone: the descent commits
-//     each player the moment it places them and cannot see a later dojo's
-//     needs, so on a multi-dojo roster an early dojo can still box a later
-//     one into pools whose winners meet in round 1. The exchange pass
-//     closes exactly that residual (accepted only when it strictly
-//     improves, never worsens any dojo's earliest winner-path meeting);
-//     it is a no-op on an all-unique-dojo roster and on a single-dojo
-//     roster already at the brute-force ceiling. See improveDojoMeetings'
+//     result, scored on a FOUR-TIER lexicographic objective led by a total
+//     spread-cap excess delta, then the winner-path metric, then an
+//     all-qualifier best-effort tie-break: the descent commits each player
+//     the moment it places them and cannot see a later dojo's needs, so on
+//     a multi-dojo roster an early dojo can still box a later one into
+//     pools whose winners meet in round 1. The exchange pass closes
+//     exactly that residual (accepted only when it strictly improves,
+//     never worsens any dojo's earliest winner-path meeting); it is a
+//     no-op on an all-unique-dojo roster and on a single-dojo roster
+//     already at the brute-force ceiling. See improveDojoMeetings'
 //     own doc comment.
 //  5. ReorderPoolsForCourts runs last, exactly as BuildPoolPhase's does.
 //
@@ -291,7 +296,7 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // the DRAW itself refuses, at this one shared pre-flight.
 var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must have a dojo")
 
-// validateNoBlankDojo is the one pre-flight check shared by
+// ValidateNoBlankDojo is the one pre-flight check shared by
 // BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
 // BuildPoolPhaseFillBracketTreeAware (all three funnel through
 // buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
@@ -300,7 +305,20 @@ var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must ha
 // state.ErrBlankDojo's own write-floor check, saveParticipantsNoLock) so a
 // future in-memory producer that hands this a whitespace-only Dojo without
 // going through that floor first cannot slip "   " past this guard too.
-func validateNoBlankDojo(players []Player) error {
+//
+// Exported (bc-drwx item 8) so internal/engine's runDrawPipeline can call it
+// as ONE roster pre-flight covering every competition format, not just the
+// pool-distributor formats (mixed/league) that reach it via
+// buildPoolPhaseTreeAwareCore: a standalone playoffs or Swiss competition
+// used to draw silently over a blank-dojo roster, since neither
+// generatePlayoffs nor GenerateSwissRound ever passes through the
+// distributor at all. The call INSIDE buildPoolPhaseTreeAwareCore stays --
+// it is what makes this function true for a caller that reaches the
+// distributor some OTHER way (a CLI/test caller of BuildPoolPhaseTreeAware*
+// directly, bypassing the engine's own pre-flight entirely) -- but for the
+// engine's own callers it is now the ASSERT this doc always claimed it was,
+// never the operator-facing refusal: that already fired one layer up.
+func ValidateNoBlankDojo(players []Player) error {
 	var names []string
 	for _, p := range players {
 		if strings.TrimSpace(p.Dojo) == "" {
@@ -326,7 +344,11 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// front, before any seed/pool arithmetic runs, rather than let one
 	// silently corrupt the tree-aware capacity accounting below. See
 	// ErrBlankDojoInDraw's own doc comment for the two mechanisms this closes.
-	if err := validateNoBlankDojo(players); err != nil {
+	// Redundant with -- and now effectively an ASSERT behind -- the engine's
+	// own runDrawPipeline pre-flight (bc-drwx item 8) for every caller that
+	// reaches this through the engine; still the real, operator-facing
+	// refusal for a caller (CLI, test) that reaches this function directly.
+	if err := ValidateNoBlankDojo(players); err != nil {
 		return nil, 0, err
 	}
 
@@ -543,19 +565,30 @@ func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int) func(dojo 
 // poolWinners>1 also carries runner-up/crossed-in leaves for -- the same
 // metric the descent itself optimises, and the one the operator ruled the
 // ship/keep decision on (a same-dojo collision through runner-up CROSSING
-// is accepted chance, not a defect either stage owes a fix for). Objective,
-// lexicographic and strictly decreasing on every accepted exchange (so the
-// loop terminates): first the number of multi-pool dojos whose earliest
-// WINNER-PATH meeting is round 1, then the negated sum of finite
-// WINNER-PATH meeting rounds. An exchange moves one unseeded player of a
-// round-1 dojo out of one of its pools in return for an unseeded player of
-// a different dojo, and is legal only when afterwards (a) neither
-// exchanged dojo's earliest WINNER-PATH meeting got EARLIER, (b) neither
-// pool holds more of either dojo than the dojo's per-pool optimum
-// ceil(total/numPools) allows, so the spread invariants the gate pins
-// survive by construction. NO three-way rotation: a pairwise stall simply
-// stops the loop (see the file-level doc comment for the measured
-// dominance this simplification still achieves over the old
+// is accepted chance, not a defect either stage owes a fix for).
+//
+// Objective is FOUR-tier lexicographic (bc-drwx item 7 corrected this doc,
+// which used to describe only the middle two tiers and a flat per-pool cap
+// precondition the code had already replaced with tier (a)'s delta check --
+// see `better`'s own doc comment for the authoritative statement): (a) total
+// spread-cap excess (sum over every (pool, dojo) of how far that pool sits
+// over the dojo's per-pool optimum ceil(total/numPools)) must never
+// increase; (b) the number of multi-pool dojos whose earliest WINNER-PATH
+// meeting is round 1; (c) the negated sum of finite WINNER-PATH meeting
+// rounds; (d) the all-qualifier best-effort (allQualPairRound), a PURE
+// TIE-BREAK that only ever decides a comparison where (a)-(c) are exactly
+// tied and can never veto a swap those tiers already prefer. Strictly
+// decreasing (or, for tier (d), non-increasing) on every accepted exchange,
+// so the loop terminates.
+//
+// An exchange moves one unseeded player of a round-1 dojo out of one of its
+// pools in return for an unseeded player of a different dojo, and is legal
+// only when afterwards neither exchanged dojo's earliest WINNER-PATH
+// meeting got EARLIER -- the one hard precondition alongside the objective
+// itself (the operator's ruling; the all-qualifier tier (d) does NOT get
+// the same hard veto, see `better`'s call site). NO three-way rotation: a
+// pairwise stall simply stops the loop (see the file-level doc comment for
+// the measured dominance this simplification still achieves over the old
 // pairwise+rotation repair it replaces).
 //
 // Takes only `pools` and `qualifierSlots` (bc-drwx item 11): the
@@ -604,7 +637,7 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
 	// totalExcess is tier (a): sum over every (pool, dojo) pair of that
 	// pool's excess for that dojo. This is the operator's spread tier --
 	// see this function's own doc comment for why it must lead the other
-	// two tiers, and dojoNode's doc comment (pool_distribution_tree_aware.go)
+	// three tiers, and dojoNode's doc comment (pool_distribution_tree_aware.go)
 	// for the descent-side guard this backstops for the one placement
 	// order the descent's own forward-only guard cannot reach (the
 	// roster's literal last remaining seat).
@@ -816,8 +849,25 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int) {
 								newAQ -= aft
 							}
 						}
+						// bc-drwx item 7: the all-qualifier (tier d) "never
+						// earlier" terms used to be ANDed in here as a HARD
+						// PRECONDITION alongside the winner-path guard,
+						// which let tier (d) VETO a swap tiers (a)-(c)
+						// preferred (repro: a swap moving dojo X's
+						// winner-path meeting from round 1 to 3 was refused
+						// because dojo Y's all-qualifier crossing moved
+						// from round 6 to 1, even though nothing about
+						// tiers (a)-(c) objected). Tier (d) is a PURE
+						// TIE-BREAK (this function's own doc comment: "it
+						// never overrides (a)-(c): a swap tier (c) already
+						// prefers is taken regardless of what tier (d)
+						// thinks of it") and better() already encodes that
+						// -- newAQ only ever decides a comparison where
+						// tiers (a)-(c) are EXACTLY tied. The winner-path
+						// "never earlier" guard (afterA/afterB) stays a
+						// hard precondition: that one IS the ruling,
+						// unlike the all-qualifier best-effort.
 						if afterA >= beforeA && afterB >= beforeB &&
-							afterAQA >= beforeAQA && afterAQB >= beforeAQB &&
 							better(newExc, newR1, newNS, newAQ, curExc, curR1, curNS, curAQ) {
 							improved = true
 							break

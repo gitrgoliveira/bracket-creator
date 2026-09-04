@@ -95,6 +95,14 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 		// leaves every member on 0 wins - a duplicate, which correctly
 		// surfaces as needing chusen below.
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
+		// A same-name pairing (both sides share a display name, no ids to
+		// tell them apart) can make Winner match SideA and SideB at once, so
+		// resolveWinnerSide returns (true, true) rather than one true. The
+		// switch below tries winnerIsA FIRST, so that degenerate row credits
+		// AKA (SideA) by convention -- the same aka-first tie-break Go's
+		// isWinForSide/TeamResultFrom/SideMarksLR and the JS mirror
+		// (subWinnerSides) apply for the identical reason -- rather than
+		// crediting nobody or picking arbitrarily.
 		switch {
 		case winnerIsA:
 			dhWins[keyA]++

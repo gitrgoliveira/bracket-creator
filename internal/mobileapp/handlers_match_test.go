@@ -333,7 +333,15 @@ func TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide(t *testing.T) {
 	assert.Equal(t, 0, resp.Succeeded, "a winnerId matching neither side must not be counted as succeeded")
 	require.Len(t, resp.Errors, 1)
 	assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
-	assert.Contains(t, resp.Errors[0].Error, "winnerId")
+	// The exact phrase from validateWinnerIDMatchesSide (validation.go), not
+	// just "winnerId": backfillMatchIdentity (internal/engine/scoring.go)
+	// rejects the identical shape one layer downstream with a DIFFERENTLY
+	// worded message ("winnerId %q does not match sideAId..."), which also
+	// contains "winnerId" -- a bare substring check here would stay green
+	// even if validateBulkScoreLengths's own call to
+	// validateWinnerIDMatchesSide were removed, so it would not actually pin
+	// THIS boundary check.
+	assert.Contains(t, resp.Errors[0].Error, "must equal sideAId or sideBId")
 
 	stored, err := store.LoadPoolMatches("wid")
 	require.NoError(t, err)

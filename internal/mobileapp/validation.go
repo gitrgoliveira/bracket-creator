@@ -984,7 +984,10 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 // once the STORED ids are known and rejects the write at that point instead,
 // so a winnerId that only turns out to be invalid once the stored pairing is
 // known is still caught, just one layer later than a self-inconsistent
-// payload is.
+// payload is. Both HTTP paths reach it: the single-score write and every
+// bulk-score entry both go through RecordMatchResultWithIneligibilityTx,
+// which is backfillMatchIdentity's one caller, so this later check applies
+// uniformly regardless of which endpoint the payload arrived through.
 func validateWinnerIDMatchesSide(winnerID, sideAID, sideBID string) error {
 	if winnerID == "" || sideAID == "" || sideBID == "" {
 		return nil

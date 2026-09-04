@@ -89,6 +89,67 @@ func TestApplyTiebreakSort_ForeignIDNeverCreditsWrongMember(t *testing.T) {
 	assert.Equal(t, "id2", sorted[1].Player.ID)
 }
 
+// TestNewGroupKeyResolver_FullyLegacyGroupFallsThroughForeignIDToName pins the
+// bc-idfx review's nit 20 fix: the strict foreign-id rejection above only
+// makes sense when the GROUP itself has at least one id-carrying member --
+// otherwise there is nothing to check a bout's id against, ids simply are not
+// authoritative for this group at all. A fully legacy group (neither member
+// carries an id, e.g. a pool never regenerated since before ids were
+// stamped) must fall through to the bare-name index even when the bout row
+// happens to carry a non-empty id, rather than refusing to resolve a bout
+// the name index could have handled just fine.
+func TestNewGroupKeyResolver_FullyLegacyGroupFallsThroughForeignIDToName(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{Name: "X", Dojo: "Dojo A"}}, // no ID
+		{Player: domain.Player{Name: "Y", Dojo: "Dojo Y"}}, // no ID
+	}
+	resolve := newGroupKeyResolver(group)
+
+	// The bout row carries an id ("some-id") that belongs to NEITHER member
+	// (neither has one at all). Because the GROUP has no ids to compare
+	// against, this must fall through to the name index and resolve X by
+	// name, not fail outright the way it would for an id-aware group.
+	key, ok := resolve("some-id", "X")
+	assert.True(t, ok, "a fully legacy group must fall through to the name index even when the bout row carries an id")
+	assert.Equal(t, "name:X", key)
+}
+
+// TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID is the
+// end-to-end twin: a pool with no ids anywhere, but a supplementary bout row
+// that (e.g. from a different data source, or hand-edited data) carries a
+// non-empty SideAID. Before the nit-20 fix this bout would fail to resolve
+// for either side and be silently skipped, leaving the tie unbroken even
+// though the names alone are enough to identify both competitors.
+//
+// sorted starts as [X, Y] (input order) while Y is the BOUT WINNER: a
+// resolved bout must move Y to first place, while a skipped bout (the
+// pre-fix behaviour) leaves the input order untouched -- deliberately
+// chosen so the two outcomes are distinguishable. An earlier draft of this
+// test put the winner already in the position a no-op would also produce,
+// which stayed green under the pre-fix mutation and pinned nothing; caught
+// and fixed via mutation testing before landing.
+func TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID(t *testing.T) {
+	sorted := []state.PlayerStanding{
+		{Player: domain.Player{Name: "X", Dojo: "Dojo A"}, Points: 100},
+		{Player: domain.Player{Name: "Y", Dojo: "Dojo Y"}, Points: 100},
+	}
+	matches := []state.MatchResult{
+		{
+			ID:    "Pool P-TB-0",
+			SideA: "X", SideAID: "some-stray-id", // stray id, group has none
+			SideB:  "Y",
+			Winner: "Y",
+			Status: state.MatchStatusCompleted,
+		},
+	}
+
+	applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
+
+	require.Len(t, sorted, 2)
+	assert.Equal(t, "Y", sorted[0].Player.Name, "Y won the TB bout and must sort first, even though SideA's row carried a stray id the group has nothing to compare it against")
+	assert.Equal(t, "X", sorted[1].Player.Name)
+}
+
 // --- Finding 2: eligibility resolution must use side ids, not the first namesake ---
 
 // TestRecordDecision_KikenResolvesLoserByID_NotFirstRegisteredNamesake is the
@@ -785,12 +846,14 @@ func TestComputeStandingsFrom_CorruptOverrides_PropagatesError(t *testing.T) {
 
 // --- Finding 12: dhCycleExists comment + tiebreakerPairKey/pairKey dedup ---
 
-// TestPairKeyRemoved_UsesTiebreakerPairKey pins that swiss.go's pairKey was
-// deduplicated into tiebreakerPairKey (byte-identical bodies): the Swiss
-// pairing pipeline (which uses pairKey internally for rematch avoidance) must
-// still behave identically once the duplicate is removed. This test exercises
-// tiebreakerPairKey directly for order-independence, the property both
-// versions shared.
+// TestPairKeyRemoved_UsesTiebreakerPairKey documents swiss.go's pairKey being
+// deduplicated into tiebreakerPairKey (byte-identical bodies), by pinning the
+// order-independence property both versions shared directly on
+// tiebreakerPairKey. It does NOT exercise the Swiss pairing pipeline itself
+// (which uses tiebreakerPairKey internally for rematch avoidance) and so
+// cannot detect a reintroduced separate pairKey, or the pipeline drifting to
+// call something else -- only Swiss-pipeline-level tests elsewhere in this
+// package cover that.
 func TestPairKeyRemoved_UsesTiebreakerPairKey(t *testing.T) {
 	assert.Equal(t, tiebreakerPairKey("a", "b"), tiebreakerPairKey("b", "a"), "order-independent")
 	assert.Equal(t, "a|b", tiebreakerPairKey("a", "b"))

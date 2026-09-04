@@ -530,14 +530,18 @@ func TestLookupPlayerID_EmptyName(t *testing.T) {
 	assert.Equal(t, "", lookupPlayerID(players, ""), "empty name should return empty ID")
 }
 
-// TestCheckConcurrentIneligibility_EmptyLoser covers the loserName==""
-// fast path in checkConcurrentIneligibility.
+// TestCheckConcurrentIneligibility_EmptyLoser covers the fast path in
+// checkConcurrentIneligibility when BOTH loserID and loserName are empty
+// (the guard is `loserID == "" && loserName == ""`, not loserName alone --
+// a non-empty loserID with an empty loserName does not take this path at
+// all, see TestCheckConcurrentIneligibility_PlayerNotInParticipants below
+// for the loserID=="" / loserName-lookup-fails path instead).
 func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "conc-empty-loser"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "")
-	assert.NoError(t, err, "empty loserName should return nil")
+	assert.NoError(t, err, "both loserID and loserName empty should return nil")
 }
 
 // TestCheckConcurrentIneligibility_PlayerNotInParticipants covers the

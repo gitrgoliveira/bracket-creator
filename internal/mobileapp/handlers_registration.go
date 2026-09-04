@@ -148,6 +148,24 @@ func RegisterPublicRegistrationHandlers(r *gin.RouterGroup, store *state.Store, 
 				c.JSON(http.StatusConflict, gin.H{"error": "A participant with this name is already registered. If this is you, no action needed. If not, try including your dojo name."})
 				return
 			}
+			// ErrBlankDojo is also checked BEFORE respondRosterWriteError, for a
+			// different reason than ErrDuplicateName above: the write-floor
+			// guard (state.saveParticipantsNoLock) scans the WHOLE stored
+			// roster, not just this incoming player, and this registrant's own
+			// dojo was already validated non-blank above. So when it fires
+			// here, it is naming a blank dojo left by ANOTHER, pre-existing
+			// (legacy-imported or hand-edited) row -- server-side data damage,
+			// not something this registrant did wrong. respondRosterWriteError
+			// would answer 400 with err.Error() verbatim, which is that OTHER
+			// competitor's name leaked to an anonymous walk-up, and it would
+			// block every registration until an operator repairs the row, with
+			// no signal that repair is needed. Answer 500-class with a generic
+			// public message instead, and log the offending row so the
+			// operator can find and fix it.
+			if errors.Is(err, state.ErrBlankDojo) {
+				internalError(c, err, "registration is temporarily unavailable, please contact an organiser")
+				return
+			}
 			if respondRosterWriteError(c, err) {
 				return
 			}

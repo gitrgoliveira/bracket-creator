@@ -369,6 +369,57 @@ func TestRegistration_POST_DuplicateName_Returns409WithFriendlyMessage(t *testin
 }
 
 // ---------------------------------------------------------------------------
+// POST, pre-existing blank-dojo row elsewhere in the roster → 500, no leak
+// ---------------------------------------------------------------------------
+
+// TestRegistration_POST_BlankDojoElsewhereInRoster_Returns500NotLeakingName
+// pins the FIX 1 contract (bc-appx item 1). state.ErrBlankDojo is raised by
+// the write-floor guard (saveParticipantsNoLock) against the WHOLE stored
+// roster, not just the incoming registrant, so a pre-existing legacy row with
+// no dojo makes EVERY write to that roster fail -- including a brand-new,
+// perfectly valid self-registration. Before the fix, respondRosterWriteError
+// answered that with a 400 carrying err.Error() verbatim, which both blames
+// an anonymous walk-up for someone else's data problem and leaks that OTHER
+// competitor's name to them. This is server-side data damage, not a client
+// error: the fix answers 500-class with a generic message and logs the
+// offending row for the operator.
+func TestRegistration_POST_BlankDojoElsewhereInRoster_Returns500NotLeakingName(t *testing.T) {
+	r, store, _, tempDir := setupRegistrationRouter(t, selfRunTournament())
+
+	const compID = "comp-blank-dojo-reg"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Blank Dojo Elsewhere",
+		Status: state.CompStatusSetup,
+	}))
+	// A genuine legacy (UUID-less) row with no dojo, written straight to disk
+	// (bypassing every store write path, which refuses blank dojos outright)
+	// to reproduce a pre-fix or hand-edited roster. See writeLegacyRosterCSV's
+	// own doc comment (handlers_participants_test.go) for why this is the
+	// only way to get one onto disk.
+	writeLegacyRosterCSV(t, tempDir, compID, "Other Person,\n")
+
+	w := doRegister(r, compID, map[string]any{
+		"name": "Alice Tanaka", "dojo": "Raizan",
+	})
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code,
+		"a blank dojo on ANOTHER competitor's row is server-side data damage, not this registrant's error")
+	assert.NotContains(t, w.Body.String(), "Other Person",
+		"the public registration response must never name another competitor's row")
+	assert.NotContains(t, w.Body.String(), "must not be blank",
+		"the raw ErrBlankDojo wording must not reach the public endpoint")
+
+	// The refused write must leave the roster untouched: Alice must not have
+	// been persisted.
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	for _, p := range players {
+		assert.NotEqual(t, "Alice Tanaka", p.Name, "a refused write must not have landed")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // POST, missing required fields → 400
 // ---------------------------------------------------------------------------
 

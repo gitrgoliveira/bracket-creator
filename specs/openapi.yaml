@@ -3013,7 +3013,11 @@ paths:
         Generates the round-robin daihyosen (representative-bout) matches for one
         consequential tied group. Admin-gated. `teamNames` must match exactly one
         group from `GET .../league-tiebreak/candidates` (order-independent, no
-        duplicates).
+        duplicates). Optional `teamIds` selects the group by participant id
+        instead of name, needed to disambiguate a tied group holding two
+        same-named teams (a namesake collision reachable through the
+        documented `checkNewTeamNameCollisions` restore hole); when present it
+        takes priority over `teamNames` for matching the candidate group.
       security:
         - TournamentPassword: []
       requestBody:
@@ -4853,9 +4857,22 @@ components:
       properties:
         teamNames:
           type: array
-          description: Names of the tied teams, in standings order.
+          description: >
+            Names of the tied teams, in standings order. Kept for backward
+            compatibility; a namesake collision (two teams sharing a display
+            name across dojos) cannot be told apart by this array alone,
+            use `teams`.
           items:
             type: string
+        teams:
+          type: array
+          description: >
+            The same tied teams as `teamNames`, with identity (id, name, dojo)
+            per team, mirroring the `teams` array `GET .../chusen-candidates`
+            already returns. Lets an operator select a namesake-holding group
+            unambiguously via POST `.../league-tiebreak`'s `teamIds`.
+          items:
+            $ref: '#/components/schemas/LeagueTiebreakTeamRef'
         minPosition:
           type: integer
           description: 1-based best finishing rank among the tied teams.
@@ -4863,14 +4880,37 @@ components:
           type: integer
           description: 1-based worst finishing rank among the tied teams.
 
+    LeagueTiebreakTeamRef:
+      type: object
+      description: Identity of one team in a tied group.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        dojo:
+          type: string
+
     LeagueTiebreakRequest:
       type: object
       description: >
-        Selects exactly one tied group (by team name set) for the league
-        tie-breaker POST/DELETE endpoints. Order-independent; duplicates rejected.
+        Selects exactly one tied group for the league tie-breaker POST/DELETE
+        endpoints. `teamNames` is always required (order-independent,
+        duplicates rejected unless `teamIds` is also present -- a namesake
+        pair legitimately repeats a name). `teamIds` is optional and, when
+        present, must be the same length as `teamNames`; it is honoured by
+        `POST .../league-tiebreak` (both for matching the candidate group and
+        for resolving it), letting a namesake-holding group be selected where
+        `teamNames` alone is ambiguous. `DELETE .../league-tiebreak` does not
+        yet consult `teamIds` and continues to match by name only.
       required: [teamNames]
       properties:
         teamNames:
+          type: array
+          minItems: 2
+          items:
+            type: string
+        teamIds:
           type: array
           minItems: 2
           items:

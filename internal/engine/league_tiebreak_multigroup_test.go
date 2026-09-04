@@ -69,7 +69,7 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 // running + scoring a tie-breaker.
 func scoreGroupDH(t *testing.T, eng *Engine, store *state.Store, compID string, teams []string, winner string) {
 	t.Helper()
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teams)
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teams, nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, injected, "expected DH matches to be generated for %v", teams)
 
@@ -149,7 +149,7 @@ func TestMaybeAutoCompletePools_SingleGroupNoWedge(t *testing.T) {
 
 	// Operator runs the full 3-way round-robin tie-breaker with a clear order
 	// (Alpha > Beta > Gamma, Alpha > Gamma): no cycle.
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"})
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"}, nil)
 	require.NoError(t, err)
 	require.Len(t, injected, 3)
 	all, err := store.LoadPoolMatches(compID)

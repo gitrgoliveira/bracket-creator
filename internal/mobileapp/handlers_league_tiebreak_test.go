@@ -115,13 +115,19 @@ type stubLeagueTiebreakEngine struct {
 	generateErr   error
 	autoOutcome   engine.AutoCompleteOutcome
 	autoErr       error
+
+	// receivedTeamIDs captures the tiedTeamIDs argument GenerateLeagueTiebreakMatches
+	// was last called with, so a test can assert the handler forwarded
+	// req.TeamIDs through (bc-idfx) rather than silently dropping it.
+	receivedTeamIDs []string
 }
 
 func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidates(string) ([]engine.TiedGroup, error) {
 	return e.candidates, e.candidatesErr
 }
 
-func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string, tiedTeamIDs []string) ([]state.MatchResult, error) {
+	e.receivedTeamIDs = tiedTeamIDs
 	return e.generated, e.generateErr
 }
 
@@ -191,6 +197,49 @@ func TestLeagueTiebreakCandidates_Happy(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, cands, 1)
 	assert.Equal(t, false, body["finalized"])
+}
+
+// TestLeagueTiebreakCandidates_TeamsCarryIdentity is the bc-idfx finding 11
+// regression: the "teams" array (id/name/dojo per team, mirroring what
+// GET /chusen-candidates already emits) must be present alongside the
+// legacy "teamNames" array, so a namesake-holding group's members can be
+// told apart on the wire.
+func TestLeagueTiebreakCandidates_TeamsCarryIdentity(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-team-x-a", Name: "Team X", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-team-x-b", Name: "Team X", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Candidates []struct {
+			TeamNames []string `json:"teamNames"`
+			Teams     []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Dojo string `json:"dojo"`
+			} `json:"teams"`
+		} `json:"candidates"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	require.Len(t, body.Candidates, 1)
+	require.Len(t, body.Candidates[0].Teams, 2, "teams must carry both namesake-holding entries")
+	gotIDs := []string{body.Candidates[0].Teams[0].ID, body.Candidates[0].Teams[1].ID}
+	assert.ElementsMatch(t, []string{"id-team-x-a", "id-team-x-b"}, gotIDs)
+	gotDojos := []string{body.Candidates[0].Teams[0].Dojo, body.Candidates[0].Teams[1].Dojo}
+	assert.ElementsMatch(t, []string{"Dojo A", "Dojo B"}, gotDojos, "dojo must disambiguate what teamNames alone cannot")
 }
 
 func TestLeagueTiebreakCandidates_Empty(t *testing.T) {
@@ -285,6 +334,62 @@ func TestLeagueTiebreakPost_Happy(t *testing.T) {
 	assert.Len(t, matches, 1)
 	// Two SSE events should have been broadcast.
 	assert.GreaterOrEqual(t, len(hub.events), 2)
+}
+
+// TestLeagueTiebreakPost_TeamIDsSelectsNamesakeGroupAndForwards is the
+// bc-idfx finding 11 regression: a request naming a namesake-holding group
+// by teamIds (not resolvable by teamNames alone, since both teams share the
+// name "Team X") must match the candidate group by id and forward teamIds
+// through to GenerateLeagueTiebreakMatches unchanged.
+func TestLeagueTiebreakPost_TeamIDsSelectsNamesakeGroupAndForwards(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-team-x-a", Name: "Team X", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-team-x-b", Name: "Team X", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	generated := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team X", SideAID: "id-team-x-a", SideB: "Team X", SideBID: "id-team-x-b"},
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates, generated: generated}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools), matches: nil}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	assert.ElementsMatch(t, []string{"id-team-x-a", "id-team-x-b"}, eng.receivedTeamIDs,
+		"the handler must forward teamIds to GenerateLeagueTiebreakMatches, not silently drop it")
+}
+
+// TestLeagueTiebreakPost_MismatchedTeamIDsLength rejects a request whose
+// teamIds does not line up 1:1 with teamNames.
+func TestLeagueTiebreakPost_MismatchedTeamIDsLength(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestLeagueTiebreakPost_InvalidSelection(t *testing.T) {

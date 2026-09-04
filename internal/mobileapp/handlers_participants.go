@@ -518,7 +518,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if cascadeDisplayName == "" {
 				cascadeDisplayName = helper.SanitizeName(updatedPlayer.Name)
 			}
-			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, pid, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
 			if cascadeErr != nil {
 				// participants.csv (and seeds.csv) were already updated, broadcast and
 				// return 200 with the updated player so the client keeps its local state.

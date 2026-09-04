@@ -510,6 +510,15 @@
 
   // ------------------------------------------------------------ rendering
 
+  // Widget is a plain ES5 constructor (invoked with `new`, methods hung off
+  // Widget.prototype below), not a Preact/React component -- this whole file
+  // is vanilla DOM-manipulating JS with no React/Preact runtime in scope
+  // (see the file header). oxlint's react plugin still flags `this` inside
+  // any PascalCase-named function as a stateless-functional-component
+  // mistake, which is the correct rule for actual React/Preact SFCs but a
+  // false positive here: `this` is exactly right for a constructor's
+  // per-instance state.
+  /* oxlint-disable react/no-this-in-sfc */
   function Widget(host) {
     this.host = host;
     this.presetIdx = 0;
@@ -518,6 +527,7 @@
     this.build();
     this.load(0);
   }
+  /* oxlint-enable react/no-this-in-sfc */
 
   Widget.prototype.build = function () {
     var self = this;

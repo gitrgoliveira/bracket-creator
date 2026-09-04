@@ -6,10 +6,41 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	excelize "github.com/xuri/excelize/v2"
 )
+
+// numberPrefixFlagHelp is the --number-prefix flag's help string, shared by
+// create-pools and create-playoffs (bc-pnum A10): both commands used to carry
+// a byte-identical copy.
+const numberPrefixFlagHelp = "Letter prefix for competitor numbers (e.g. 'K' produces K1, K2, ...); derived from --title-prefix when omitted"
+
+// resolveNumberPrefix is the CLI's ONE derivation of a competition's number
+// prefix (bc-pnum A10), shared by create-pools and create-playoffs, which
+// used to each carry a byte-identical copy of this logic (the same 4-line
+// comment included) that never validated an EXPLICIT value at all: --number-prefix
+// "SENIORS1" (8 characters, well past MaxNumberPrefixLen) was accepted
+// verbatim, and " K " was used as literally typed -- fmt.Sprintf's
+// prefix+counter concatenation then baked the surrounding whitespace into
+// every competitor's tag (" K 1", not "K1").
+//
+// numberPrefix stays optional to TYPE, but a competition is never drawn
+// without one: an unprefixed number ("1", "2") would collide with every
+// other competition's and is not a tag anyone can call at the desk. The CLI
+// has no tournament to be unique within, so nothing is taken (nil) when
+// deriving from titlePrefix.
+func resolveNumberPrefix(numberPrefix, titlePrefix string) (string, error) {
+	trimmed := strings.TrimSpace(numberPrefix)
+	if trimmed == "" {
+		return helper.DefaultNumberPrefix(titlePrefix, nil), nil
+	}
+	if len(trimmed) > helper.MaxNumberPrefixLen {
+		return "", fmt.Errorf("--number-prefix %q is too long: must be at most %d characters", trimmed, helper.MaxNumberPrefixLen)
+	}
+	return trimmed, nil
+}
 
 // blankWorkbookCourtPlan is the CLI's court plan: Draw and Courts only.
 //

@@ -59,3 +59,39 @@ func TestProcessEntries_DuplicateError(t *testing.T) {
 	assert.Nil(t, players)
 	assert.Contains(t, err.Error(), "duplicate participant entries found")
 }
+
+// TestResolveNumberPrefix pins bc-pnum A10: the ONE derivation shared by
+// create-pools and create-playoffs, which used to each carry a byte-identical
+// unvalidated copy -- an explicit --number-prefix was used verbatim, so
+// "SENIORS1" (well past the length cap) was accepted, and " K " kept its
+// surrounding whitespace baked into every competitor's tag.
+func TestResolveNumberPrefix(t *testing.T) {
+	t.Run("an explicit value is trimmed", func(t *testing.T) {
+		got, err := resolveNumberPrefix(" K ", "Kendo Open")
+		require.NoError(t, err)
+		assert.Equal(t, "K", got)
+	})
+
+	t.Run("an over-long explicit value errors instead of being accepted verbatim", func(t *testing.T) {
+		_, err := resolveNumberPrefix("SENIORS1", "Senior Open")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SENIORS1")
+	})
+
+	// bc-pnum D2 (correction over the original finding): "Senior Men" has TWO
+	// words, so its initials are "SM", but with nothing else taken the
+	// initials loop returns the BARE first initial "S" immediately -- it
+	// never needs to escalate to "SM". The shortest non-taken candidate,
+	// not the full initials, is what a CLI run with no --number-prefix gets.
+	t.Run("empty value derives from title-prefix: the shortest non-taken candidate, not the full initials", func(t *testing.T) {
+		got, err := resolveNumberPrefix("", "Senior Men")
+		require.NoError(t, err)
+		assert.Equal(t, "S", got)
+	})
+
+	t.Run("empty value and empty title-prefix falls back to the kendo default", func(t *testing.T) {
+		got, err := resolveNumberPrefix("", "")
+		require.NoError(t, err)
+		assert.Equal(t, "K", got)
+	})
+}

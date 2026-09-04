@@ -67,7 +67,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
-	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Letter prefix for competitor numbers (e.g. 'K' produces K1, K2, ...); derived from --title-prefix when omitted")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", numberPrefixFlagHelp)
 	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default), \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo), or \"fill-bracket\" (pools are cut so winners plus a handful of drafted 2nd places exactly fill the knockout with no byes); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
 	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
@@ -272,12 +272,13 @@ func (o *poolOptions) createPools(entries []string) error {
 	// argument -- would silently title a two-shiaijo draw "Shiaijo A-D".
 	courtNames := helper.CourtLabels(o.courts)
 
-	// --number-prefix stays optional to TYPE, but a competition is never drawn
-	// without one: an unprefixed number ("1", "2") would collide with every
-	// other competition's and is not a tag anyone can call at the desk. The CLI
-	// has no tournament to be unique within, so nothing is taken.
-	if o.numberPrefix == "" {
-		o.numberPrefix = helper.DefaultNumberPrefix(o.titlePrefix, nil)
+	// resolveNumberPrefix (bc-pnum A10, cmd/shared.go) is the ONE derivation
+	// shared with create-playoffs: trims an explicit value, derives from
+	// --title-prefix when omitted, and refuses one over the length cap
+	// rather than accepting it verbatim.
+	o.numberPrefix, err = resolveNumberPrefix(o.numberPrefix, o.titlePrefix)
+	if err != nil {
+		return err
 	}
 	helper.NumberPools(pools, o.numberPrefix)
 

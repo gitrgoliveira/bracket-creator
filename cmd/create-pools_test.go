@@ -187,6 +187,67 @@ func TestCreatePools_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
 		"an explicit --number-prefix must number straight through the pools with no gap, duplicate or reordering")
 }
 
+// TestCreatePools_NumberPrefix_OverLongExplicit_Errors pins bc-pnum A10: an
+// over-long explicit --number-prefix must be refused, not accepted verbatim.
+func TestCreatePools_NumberPrefix_OverLongExplicit_Errors(t *testing.T) {
+	var b bytes.Buffer
+	o := &poolOptions{
+		outputWriter: bufio.NewWriter(&b),
+		numPlayers:   3,
+		poolWinners:  2,
+		courts:       2,
+		numberPrefix: "SENIORS1",
+	}
+	err := o.createPools([]string{"A,D1", "B,D2", "C,D3", "D,D4", "E,D5", "F,D6"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SENIORS1")
+}
+
+// TestCreatePools_TitlePrefixDerivation pins bc-pnum A10/D2: with no explicit
+// --number-prefix, the CLI derives one from --title-prefix through the
+// shared resolveNumberPrefix. "Senior Men" has two words (initials "SM"),
+// but with nothing else taken the initials loop returns the bare first
+// initial "S" immediately -- the shortest non-taken candidate, not the full
+// initials. Mutation: replacing o.titlePrefix with "" here must go red (the
+// fallback "K" would print instead).
+func TestCreatePools_TitlePrefixDerivation(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+	o := &poolOptions{
+		outputWriter: writer,
+		outputPath:   "titleprefix.xlsx",
+		numPlayers:   2,
+		poolWinners:  1,
+		courts:       1,
+		determined:   true,
+		titlePrefix:  "Senior Men",
+	}
+	entries := []string{
+		"Alice,DojoA",
+		"Bob,DojoB",
+		"Carol,DojoC",
+		"Dave,DojoD",
+	}
+	require.NoError(t, o.createPools(entries))
+	require.NoError(t, writer.Flush())
+
+	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, f.Close()) }()
+
+	rows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	var got []string
+	for i, row := range rows {
+		if i < 2 || len(row) < 4 {
+			continue
+		}
+		got = append(got, row[3])
+	}
+	assert.Equal(t, []string{"S1", "S2", "S3", "S4"}, got,
+		"derivation from --title-prefix 'Senior Men' must give S1.., not SM1..")
+}
+
 func TestCreatePools_InvalidCourts(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")

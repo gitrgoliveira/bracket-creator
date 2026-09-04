@@ -920,3 +920,117 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 	_, err := eng.MaybeAutoCompletePools(compID)
 	assert.Error(t, err, "a corrupt overrides.json must surface as an error from MaybeAutoCompletePools, not be silently dropped")
 }
+
+// --- Finding 8 / nit 16: ReplaceParticipantInDraw's bracket-ambiguity check ---
+
+// TestReplaceParticipantInDraw_NamesakeExcludedFromDrawCascadesWithoutWarning
+// pins the bc-idfx review's item 8 fix: bracketNameAmbiguous used to scan the
+// FULL roster for a namesake, including a participant who was never placed in
+// the bracket at all (excluded by GenerateDraw's own filterCheckedIn opt-in
+// check-in filter). A namesake who only ever existed in participants.csv can
+// never occupy a bracket row, so counting her toward ambiguity produced a
+// false "ambiguous across dojos" warning and silently skipped a rename that
+// was actually perfectly safe. The fix scopes the candidate pool to
+// filterCheckedIn(participants) -- the same roster GenerateDraw itself built
+// the bracket from.
+func TestReplaceParticipantInDraw_NamesakeExcludedFromDrawCascadesWithoutWarning(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-checkin-excluded-namesake"
+	comp := &state.Competition{
+		ID: compID, Name: "Checkin Namesake", Kind: "individual",
+		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		StartTime: "09:00", Status: "setup",
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo0", CheckedIn: true},
+		{Name: "Bob", Dojo: "Dojo1", CheckedIn: true},
+		{Name: "Charlie", Dojo: "Dojo2", CheckedIn: true},
+		{Name: "Dave", Dojo: "Dojo3", CheckedIn: true},
+		// Same display name as the drawn Alice, different dojo, NOT checked
+		// in. filterCheckedIn's opt-in semantics (at least one participant
+		// above IS checked in) excludes her from GenerateDraw entirely, so
+		// she can never appear as a bracket row.
+		{Name: "Alice", Dojo: "DojoExcluded", CheckedIn: false},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, eng.GenerateDraw(compID))
+
+	bracketBefore, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.True(t, findNameInBracket(bracketBefore, "Alice"), "the checked-in Alice must be in the bracket before the rename")
+
+	all, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	var drawnAliceID string
+	for _, p := range all {
+		if p.Name == "Alice" && p.Dojo == "Dojo0" {
+			drawnAliceID = p.ID
+		}
+	}
+	require.NotEmpty(t, drawnAliceID, "the checked-in Alice must have a minted id")
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, drawnAliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	require.NoError(t, err)
+	assert.Empty(t, warnings, "the checked-in-out namesake must not trigger a false bracket-ambiguity warning")
+
+	bracketAfter, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.False(t, findNameInBracket(bracketAfter, "Alice"), "old name must be cascaded away, not left ambiguous")
+	assert.True(t, findNameInBracket(bracketAfter, "Alicia"), "new name must appear in the bracket after the rename")
+}
+
+// corruptParticipantsFile forces LoadParticipants to error on compID's
+// participants.csv. Unlike corruptOverridesFile (malformed JSON), malformed
+// CSV content is not reliable here: helper.ReadCSVFile deliberately parses
+// with LazyQuotes/FieldsPerRecord=-1 (participants.csv loading "stays
+// tolerant on purpose so the roster can be repaired", CLAUDE.md), so
+// syntactically broken CSV bytes are silently tolerated rather than
+// rejected. Stripping read permission forces a genuine I/O error
+// regardless of content. The permission strip must follow a fresh write
+// (not just chmod on the existing file): loadParticipantsNoLock caches on
+// participants.csv's mtime, so without a real content rewrite a warm cache
+// from an earlier read in the same test would keep serving the pre-corruption
+// data and never touch the now-unreadable file at all.
+func corruptParticipantsFile(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	path := filepath.Join(store.GetFolder(), "competitions", compID, "participants.csv")
+	require.NoError(t, os.WriteFile(path, []byte("unreadable\n"), 0o600))
+	require.NoError(t, os.Chmod(path, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+}
+
+// TestReplaceParticipantInDraw_EmptyBracketSkipsParticipantsLoad pins nit 16:
+// the bracket-ambiguity check's LoadParticipants call must not run at all
+// when the bracket is empty (League format never generates one), since there
+// is nothing in bracket.json to rename or warn about. A corrupted
+// participants.csv would surface as an error from the ambiguity check's own
+// LoadParticipants call if it ran unconditionally; with the fix, the pools.csv
+// rename still succeeds because the bracket branch is skipped entirely.
+func TestReplaceParticipantInDraw_EmptyBracketSkipsParticipantsLoad(t *testing.T) {
+	// setupDrawReadyMixed uses League format (createTestCompetition's
+	// second call), which never generates an elimination bracket.
+	eng, store, compID := setupDrawReadyMixed(t, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Empty(t, bracket.Rounds, "League format must not generate an elimination bracket")
+	require.Nil(t, bracket.ThirdPlaceMatch)
+
+	// Resolve the id BEFORE corrupting the file: participantID does its own
+	// LoadParticipants call, which must succeed to hand back a real pid.
+	pid := participantID(t, store, compID, "Alice")
+	corruptParticipantsFile(t, store, compID)
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, pid, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	require.NoError(t, err, "the empty-bracket branch must not touch the corrupted participants.csv at all")
+	assert.Empty(t, warnings)
+
+	poolsAfter, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	assert.False(t, findPlayerInPools(poolsAfter, "Alice"), "old name must be gone from pools")
+	assert.True(t, findPlayerInPools(poolsAfter, "Alicia"), "new name must be present in pools")
+}

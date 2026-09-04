@@ -136,20 +136,34 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// so the "not found in draw artifacts" fallback warning below doesn't
 		// misfire), but nothing is rewritten and the operator is warned
 		// instead of a guess being made.
-		participants, perr := tx.LoadParticipants(compID, current.EffectiveWithZekkenName())
-		if perr != nil {
-			return fmt.Errorf("loading participants for bracket ambiguity check: %w", perr)
-		}
+		//
+		// The candidate pool is deliberately NOT the full roster: a namesake
+		// who was excluded from the draw (filterCheckedIn's opt-in check-in
+		// semantics, the same mechanism the "not found in draw artifacts"
+		// warning below already names) can never physically occupy a bracket
+		// row, so counting her toward ambiguity produces a false warning and
+		// blocks a perfectly safe rename cascade. filterCheckedIn is the same
+		// function GenerateDraw itself runs, so "would this participant have
+		// been placed in the draw" is answered identically here and there.
+		// Skipped entirely when the bracket is empty (no rounds, no bronze
+		// match): there is nothing to rename or warn about, so the
+		// participants.csv read is avoided outright.
 		bracketNameAmbiguous := false
-		for _, p := range participants {
-			if p.Name != oldName {
-				continue
+		if len(bracket.Rounds) > 0 || bracket.ThirdPlaceMatch != nil {
+			participants, perr := tx.LoadParticipants(compID, current.EffectiveWithZekkenName())
+			if perr != nil {
+				return fmt.Errorf("loading participants for bracket ambiguity check: %w", perr)
 			}
-			if pid != "" && p.ID == pid {
-				continue // the participant being renamed herself, not "another" namesake
+			for _, p := range filterCheckedIn(participants) {
+				if p.Name != oldName {
+					continue
+				}
+				if pid != "" && p.ID == pid {
+					continue // the participant being renamed herself, not "another" namesake
+				}
+				bracketNameAmbiguous = true
+				break
 			}
-			bracketNameAmbiguous = true
-			break
 		}
 		bracketChanged := false
 		for i, round := range bracket.Rounds {

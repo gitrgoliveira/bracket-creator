@@ -314,34 +314,45 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// available, which is why "never first" falls out of maximising this
 	// rather than needing a rule of its own.
 	//
-	// Performance note (bc-drwx item 2): the ORIGINAL shape of this climb
-	// re-scanned every same-dojo pair (O(N^2)) on every outer iteration to
-	// find the CURRENT worst one, excluding one PAIR at a time when it
-	// turned out unfixable. That is fine when swaps land often, but a
-	// roster with few or no cross-dojo swap PARTNERS -- the early-out
-	// above's exact target, plus shapes like two large dojos and nothing
-	// else -- can have O(N^2) same-dojo pairs ALL turn out unfixable before
-	// the climb gives up, each one re-paying that O(N^2) rescan: O(N^4)
-	// overall.
+	// Performance note (bc-drwx items 2 and 3, COMBINED). Item 2: the
+	// ORIGINAL shape of this climb re-scanned every same-dojo pair (O(N^2))
+	// on every outer iteration to find the CURRENT worst one, excluding one
+	// PAIR at a time when it turned out unfixable. That is fine when swaps
+	// land often, but a roster with few or no cross-dojo swap PARTNERS --
+	// the early-out above's exact target, plus shapes like two large dojos
+	// and nothing else -- can have O(N^2) same-dojo pairs ALL turn out
+	// unfixable before the climb gives up, each one re-paying that O(N^2)
+	// rescan: O(N^4) overall.
 	//
-	// Measured on this machine (StandardSeeding, BEFORE -> AFTER this
-	// rewrite, single run each, BenchmarkStandardSeeding_*):
-	//   single-dojo,    64 entrants:  130ms      -> 32.4us   (~4,000x)
-	//   single-dojo,   128 entrants:  2.38s      -> 122.7us  (~19,000x)
-	//   single-dojo,   256 entrants:  44.9s      -> 87.4us   (~510,000x;
-	//     the early-out above turns this into an O(N) no-op)
-	//   2 dojos of 128 (256 entrants): 12.3s     -> 677ms    (~18x)
-	//   2 dojos of 96 + 64 singletons: 6.16s     -> 2.08s    (~3x -- the one
-	//     shape that does not reach the sub-1s target: many singleton
+	// A prior version of this note measured item 2's O(N^2)->O(N^2 log N)
+	// selection rewrite alone, on a build that predated item 3's dojoKey/
+	// NormalizeParticipantName spelling-insensitive dojo matching. That
+	// build never shipped: once item 3 landed, dojoKey was called fresh
+	// inside this very selection loop (sortedSameDojoPairs/bestRelocation/
+	// dojoSumMeetRounds' pairScore), which cost 25x-200x on its own until
+	// this session's own review fix hoisted it into `keys` above. The
+	// numbers below are the two fixes TOGETHER, measured on this machine,
+	// origin/main (neither fix) vs. this file as committed (both fixes),
+	// single run each, BenchmarkStandardSeeding_*:
+	//   single-dojo,    64 entrants: (no origin/main equivalent -- this
+	//     benchmark was added alongside the fix) -> 61.5us
+	//   single-dojo,   128 entrants: (no origin/main equivalent) -> 128.7us
+	//   single-dojo,   256 entrants: (no origin/main equivalent) -> 254.5us
+	//     (all three confirm the early-out above is an O(N) no-op
+	//     regardless of N, which is the one property this shape pins)
+	//   2 dojos of 128 (256 entrants): 12.24s    -> 889ms    (~13.8x)
+	//   2 dojos of 96 + 64 singletons: 6.13s     -> 2.30s    (~2.7x -- the
+	//     one shape that does not reach the sub-1s target: many singleton
 	//     partners mean many small accepted swaps, so many generations each
 	//     re-pay the O(N^2 log N) sort; still no longer O(N^4))
-	//   16 dojos of 16 (256 entrants): 1.40s     -> 962ms
-	//   32 dojos of 8  (256 entrants): 1.02s     -> 835ms
-	//   16 dojos of 8  (128 entrants): 136ms     -> 106ms
-	//   32 dojos of 4  (128 entrants): 106ms     -> 94.8ms
-	//   16 dojos of 4   (64 entrants): 15.0ms    -> 13.2ms
-	//   32 dojos of 2   (64 entrants): 10.6ms    -> 10.7ms (unchanged: few
-	//     enough pairs that the rescan was already cheap)
+	//   16 dojos of 16 (256 entrants): 1.39s     -> 1.00s    (~1.4x)
+	//   32 dojos of 8  (256 entrants): 1.02s     -> 907ms    (~1.1x)
+	//   16 dojos of 8  (128 entrants): 133ms     -> 113ms    (~1.2x)
+	//   32 dojos of 4  (128 entrants): 111ms     -> 102ms    (~1.1x)
+	//   16 dojos of 4   (64 entrants): 14.0ms    -> 13.6ms   (roughly
+	//     unchanged)
+	//   32 dojos of 2   (64 entrants): 11.1ms    -> 11.0ms   (roughly
+	//     unchanged: few enough pairs that the rescan was already cheap)
 	//
 	// This rewrite reduces the SELECTION cost from O(N^2) per stuck pair to
 	// one O(N^2 log N) sort per GENERATION (the span between accepted
@@ -623,7 +634,8 @@ func dojoSwapGain(result []Player, keys []string, slots []int, x, y int) int {
 // placement avoids whatever index an earlier seed already claimed
 // (`occupied`), so processing order matters and must stay `seeded`'s order.
 //
-// numCourts must already be clamped by the caller (clampCourts); PoolSeeding
+// numCourts must already be clamped by the caller (clampCourts); the live
+// caller, buildPoolPhaseTreeAwareCore (pool_distribution_tree_aware.go),
 // clamps once before calling this. totalLen is the FULL roster length (every
 // player, not just the seeded ones) -- a seed's target index is computed
 // against that whole slot space.

@@ -592,6 +592,17 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 // keys knockout leaves by pool name, qualifierSlotsFromLeaves) then dropped
 // one of them, reading the second "Pool AA" as a duplicate winner label for
 // the first.
+//
+// Mirrored (bc-drwx item 9) by poolLetterName in web-mobile/js/data.jsx,
+// which builds the SAME sequence for buildPools' client-side preview: that
+// JS copy used to wrap past 26 with the raw single-character
+// String.fromCharCode(65+i) (no bijective carry at all, printing "Pool ["
+// and worse past position 26), a different failure mode from this
+// function's old doubled-letter collision but the same root cause -- naming
+// a pool by a single ASCII-arithmetic letter instead of the bijective
+// base-26 sequence. Keep the two in lockstep: a change here without the
+// matching JS change reintroduces the exact class of bug bc-drwx item 6
+// closed on this side.
 func poolPositionName(i int) string {
 	// i is 0-based; bijective base-26 is naturally 1-based (there is no
 	// "digit zero" -- Z rolls over to AA the same way 9 rolls over to 10 in
@@ -800,10 +811,12 @@ func leastConflictedPool(pools []Pool, targetSizes []int, dojo string, keys dojo
 	return best
 }
 
-// forcePoolSize picks the pool an overflow player lands in, walking the pools
-// outer to inner and taking the first with room for one over its target. It
-// reads pool LENGTHS and nothing else, which is what lets realTargetSizes
-// precompute the same landing order before any player exists.
+// forcePoolSize picks the pool an overflow player lands in: the one with the
+// LEAST excess over its own target, tie-broken outer to inner (see
+// forcePoolSizeFromCounts' own doc comment for why "least excess" and not
+// merely "the first with room" is the real rule). It reads pool LENGTHS and
+// nothing else, which is what lets realTargetSizes precompute the same
+// landing order before any player exists.
 func forcePoolSize(pools []Pool, targetSizes []int) int {
 	counts := make([]int, len(pools))
 	for i := range pools {

@@ -29,4 +29,10 @@ func TestPoolPositionName_UniqueBeyond52(t *testing.T) {
 	assert.Equal(t, "Pool BA", poolPositionName(52))
 	assert.NotEqual(t, poolPositionName(26), poolPositionName(52),
 		"pool 26 and pool 52 must not share a name")
+	// The SECOND rollover, two letters to three (bc-drwx item 9 review: the
+	// JS mirror, poolLetterName in web-mobile/js/data.jsx, pins these exact
+	// same six positions -- 25/26/51/52/701/702 -- so a regression on
+	// either side of the mirror is caught at the identical boundary).
+	assert.Equal(t, "Pool ZZ", poolPositionName(701))
+	assert.Equal(t, "Pool AAA", poolPositionName(702))
 }

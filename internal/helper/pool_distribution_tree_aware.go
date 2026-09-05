@@ -255,16 +255,23 @@ func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool,
 // the remainder spread, the one-pass distribution, ReorderPoolsForCourts
 // last) is the shared core BuildPoolPhaseTreeAware itself now uses.
 func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
-	// bc-drwx item 13: the same upper guard poolTargetSizes applies to
-	// poolSize (its own doc comment: "the upper guard... is what keeps a
-	// DRAWN pool inside" MaxPoolSize), mirrored here for minSize -- this
-	// entry point built its base target-size row directly, without going
-	// through poolTargetSizes at all, so nothing bounded minSize against
-	// MaxPoolSize before it was used to size a []Player-backed skeleton pool
-	// (buildQualifierSkeleton allocates minSize placeholder seats per pool).
-	// Strict ">=" for the same reason poolTargetSizes uses it: leaves room
-	// for realTargetSizes' own +1 remainder spread to land exactly on
-	// MaxPoolSize without exceeding it.
+	// bc-drwx item 13, corrected (bc-drwx review): this guard is
+	// MESSAGE-ONLY, not a safety necessity -- an earlier version of this
+	// comment claimed it prevented an uncontrolled allocation in
+	// buildQualifierSkeleton (minSize placeholder seats per pool), but
+	// that allocation was never actually unbounded: FillBracketPoolCount's
+	// own numPools is capped at n/minSize (its own maxP), so
+	// numPools*minSize -- the exact quantity buildQualifierSkeleton
+	// allocates -- can never exceed n, the caller's OWN roster length,
+	// whatever minSize is. A minSize at or above MaxPoolSize left
+	// unguarded here still cannot reach that allocation: FillBracketPoolCount
+	// already refuses it, either via "fewer than the minimum pool size" (n
+	// < minSize) or its own "no pool count fits" error for the cases where
+	// n >= minSize but no valid pool count satisfies the draft-supply rule.
+	// The guard is kept anyway because "pool size must be less than 1000"
+	// names the real limit and the reason in one line, which is a clearer
+	// operator-facing message than whichever of those two FillBracketPoolCount
+	// errors would otherwise surface.
 	if minSize >= MaxPoolSize {
 		return nil, 0, fmt.Errorf("cannot create pools: pool size must be less than %d, got %d", MaxPoolSize, minSize)
 	}
@@ -440,22 +447,20 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 		return nil, 0, err
 	}
 
-	// Step 4: winner-path pairwise-exchange repair. The descent above is
+	// Step 4: the pairwise-exchange repair pass. The descent above is
 	// greedy per player, and on a MULTI-dojo roster the dojos placed early
 	// can still box a later dojo into pools whose own qualifiers meet in
 	// round 1, because the descent commits each player the moment it
 	// places them and cannot see a later dojo's needs -- measured before
 	// this step existed (this bead's own sweep): 12 of 1596 multi-dojo
 	// configs, all at poolWinners>=2, reached a worse winner-path result
-	// through the descent alone than through repair. The operator's rule
-	// is absolute -- a first match against a dojo-mate must not happen
-	// where any assignment avoids it -- so the finished pools get a
-	// repair loop: unseeded-for-unseeded exchanges, accepted only when
-	// they strictly improve (fewer dojos meeting in round 1 BY WINNER
-	// PATH, then a later winner-path meeting-sum), never worsen ANY
-	// dojo's earliest winner-path meeting, never move a seed and never
-	// break a dojo's per-pool optimum. Single-dojo rosters are already at
-	// their brute-force ceiling (the Phase 3 gate pins 180/180) and an
+	// through the descent alone than through repair. See
+	// improveDojoMeetings' own doc comment for the exchange rule and its
+	// four-tier objective (bc-drwx item 4: this comment used to restate
+	// that objective itself, a copy this file already carried three other
+	// times, so it now points at the one place that description lives
+	// instead of drifting from it again). Single-dojo rosters are already
+	// at their brute-force ceiling (the Phase 3 gate pins 180/180) and an
 	// all-unique-dojo roster has no dojo spanning >=2 pools at all, so
 	// this loop is a no-op in both cases, which is what keeps the gate
 	// numbers and the unique-dojo identity contract exactly where they

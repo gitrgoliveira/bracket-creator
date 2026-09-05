@@ -52,7 +52,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	// prints as two stacked lines, "KO" over "20"; a one-letter prefix stays
 	// on one line, "K20"). See splitNumberLines/firstNumberedSplit
 	// (numbers.go) for the single owner of that decision.
-	_, _, stacked, _ := firstNumberedSplitInPools(pools)
+	stacked := firstNumberedSplitInPools(pools)
 	style, err := tagNumberStyle(f, stacked)
 	if err != nil {
 		return fmt.Errorf("failed to create style: %w", err)
@@ -159,17 +159,28 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	return nil
 }
 
-// firstNumberedSplitInPools flattens pools and delegates to
-// firstNumberedSplit: the Tags sheet holds every pool's players in one
-// sheet, so the FIRST numbered player across all of them decides the whole
-// sheet's layout (bc-pnum).
-func firstNumberedSplitInPools(pools []Pool) (letters, digits string, stacked, ok bool) {
+// firstNumberedSplitInPools walks every pool's players, in order, for the
+// FIRST one carrying a Number, and reports whether splitNumberLines calls
+// that one stacked: the Tags sheet holds every pool's players in one sheet,
+// so that single representative player decides the whole sheet's layout
+// (bc-pnum). It calls splitNumberLines directly rather than going through
+// firstNumberedSplit (numbers.go): that helper's "not found" case also
+// reports letters=="", which is indistinguishable from a genuine
+// bare-digit number and so cannot be used as a per-pool "keep looking"
+// signal -- this loop needs that signal to move to the next pool, so it
+// does its own p.Number=="" check instead. Narrowed to the one value the
+// caller reads (bc-pnum review).
+func firstNumberedSplitInPools(pools []Pool) bool {
 	for _, pool := range pools {
-		if letters, digits, stacked, ok := firstNumberedSplit(pool.Players); ok {
-			return letters, digits, stacked, true
+		for _, p := range pool.Players {
+			if p.Number == "" {
+				continue
+			}
+			_, _, stacked := splitNumberLines(p.Number)
+			return stacked
 		}
 	}
-	return "", "", false, false
+	return false
 }
 
 // tagNumberStyle builds the Tags sheet's number-cell style: stacked (a

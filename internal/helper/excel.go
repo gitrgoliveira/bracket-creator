@@ -45,6 +45,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -1731,13 +1732,18 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 
 // Names to Print column widths, in Excel width units. Operator ruling: both
 // columns ALWAYS fit one page side by side and never change size; only the
-// text shrinks to fit (both cell styles set ShrinkToFit). A3 landscape at
-// this sheet's 0.1in margins offers about 1176pt of printable width, which
-// LibreOffice renders at roughly 6.3pt per width unit, so the two widths
-// must sum to at most namesToPrintPageWidthUnits or the page breaks between
-// the columns and the sheet prints as a run of number-only pages followed by
-// a run of name-only pages (the previous 30 + 160 did exactly that, three
-// units over). Pinned by TestNamesToPrintColumnsFitOnePage.
+// text shrinks to fit. That holds for the name cell and the SINGLE-LINE
+// position cell (both set ShrinkToFit); the STACKED position cell (a
+// multi-letter prefix, bc-pnum) is the one exception -- it WRAPS a
+// letters-over-digits value instead, sized per letter count so the wrap
+// never grows past two lines (see buildNameIDPositionStackedStyle,
+// excel_styles.go). A3 landscape at this sheet's 0.1in margins offers about
+// 1176pt of printable width, which LibreOffice renders at roughly 6.3pt per
+// width unit, so the two widths must sum to at most
+// namesToPrintPageWidthUnits or the page breaks between the columns and the
+// sheet prints as a run of number-only pages followed by a run of name-only
+// pages (the previous 30 + 160 did exactly that, three units over). Pinned
+// by TestNamesToPrintColumnsFitOnePage.
 const (
 	namesToPrintNumberColWidth = 40
 	namesToPrintNameColWidth   = 140
@@ -1876,11 +1882,19 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	// prefix keeps the plain cross-sheet reference on one line, "K20"). See
 	// splitNumberLines/firstNumberedSplit (numbers.go) for the single owner
 	// of that decision.
-	letters, _, stacked, _ := firstNumberedSplit(players)
-	prefixLen := len(letters)
+	//
+	// prefixLen is a rune COUNT, not a byte length (bc-pnum review): Excel's
+	// LEFT/MID formulas below count characters, and a byte length disagrees
+	// with that for any multi-byte prefix letter (e.g. "Ö" is one character
+	// but two UTF-8 bytes), which split the formula's output at the wrong
+	// character while the Tags sheet -- which just slices the Go string, not
+	// an Excel formula -- showed the correct letters. utf8.RuneCountInString
+	// is what keeps the two print sites agreeing.
+	letters, stacked := firstNumberedSplit(players)
+	prefixLen := utf8.RuneCountInString(letters)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	if stacked {
-		nameIDPositionStyle = getNameIDPositionStackedStyle(f)
+		nameIDPositionStyle = getNameIDPositionStackedStyle(f, prefixLen)
 	}
 	nameIDStyle := getNameIDStyle(f)
 

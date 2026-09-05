@@ -400,8 +400,36 @@ func buildNameIDPositionStyle(f *excelize.File) int {
 	return style
 }
 
-func getNameIDPositionStackedStyle(f *excelize.File) int {
-	return getCachedStyle(f, styleNameIDPositionStack, buildNameIDPositionStackedStyle)
+// getNameIDPositionStackedStyle returns the stacked position style sized for
+// letterCount letters (a rune count -- see printNameEntries in excel.go).
+// Cached per size: two prefixes of the same letter count share one style
+// object, but a two-letter and a three-letter prefix need DIFFERENT font
+// sizes (see buildNameIDPositionStackedStyle) and so cannot share a cache
+// entry keyed only on styleNameIDPositionStack (bc-pnum review).
+func getNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
+	key := styleKey(fmt.Sprintf("%s_%d", styleNameIDPositionStack, letterCount))
+	return getCachedStyle(f, key, func(f *excelize.File) int {
+		return buildNameIDPositionStackedStyle(f, letterCount)
+	})
+}
+
+// nameIDPositionStackedFontSize returns the stacked position style's font
+// size for a prefix of letterCount letters. Two letters fit the 40-unit
+// column at 100pt ("WW1234" -> "WW"/"1234" renders clean). Rendered with
+// LibreOffice, a WIDE three-letter prefix ("WOM", "MMM", "WWW") at 100pt
+// does not: the letters line itself is too wide for the column and wraps
+// onto a THIRD line, overflowing the 270pt row cap ("WOM"/"119" rendered as
+// "WO"/"M"/"119") -- KOR's narrower glyphs happened to fit at 100pt, which
+// is why that fixture alone gave false confidence (bc-pnum review). 80pt is
+// the measured fix for three letters (rendered clean for KOR, WOM and WWW);
+// 90pt still wraps. MaxNumberPrefixLen caps a prefix at 3 characters, so
+// letterCount is never reachable above 3 in practice, but any count of 3 or
+// more takes the smaller size rather than assuming the cap holds.
+func nameIDPositionStackedFontSize(letterCount int) float64 {
+	if letterCount >= 3 {
+		return 80
+	}
+	return 100
 }
 
 // buildNameIDPositionStackedStyle is the wrap-text counterpart of
@@ -409,19 +437,18 @@ func getNameIDPositionStackedStyle(f *excelize.File) int {
 // more than one letter (bc-pnum operator ruling): the position cell then
 // holds a two-line LEFT/MID formula (letters over digits, see
 // printNameEntries in excel.go) instead of a plain cross-sheet reference, so
-// it needs WrapText rather than ShrinkToFit. Two lines at 100pt fit the
-// 270pt row height (setupNamesToPrintLayout's SetRowHeight), and up to three
-// letters at 100pt fit the 40-unit column (namesToPrintNumberColWidth) --
-// the same margin that lets a lone one-letter prefix's own long number
-// shrink-to-fit above.
-func buildNameIDPositionStackedStyle(f *excelize.File) int {
+// it needs WrapText rather than ShrinkToFit. The row height (270pt) is set
+// per-row in printNameEntries (excel.go), not by setupNamesToPrintLayout,
+// which only sets column widths; see nameIDPositionStackedFontSize above
+// for why the font size depends on letterCount.
+func buildNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{
 			Horizontal: "center",
 			Vertical:   "center",
 			WrapText:   true,
 		},
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 100},
+		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: nameIDPositionStackedFontSize(letterCount)},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},

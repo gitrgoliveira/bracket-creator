@@ -285,10 +285,20 @@ func TestNameInitials_AccentedAndOtherScripts(t *testing.T) {
 }
 
 // TestSplitNumberLines pins the bc-pnum operator ruling: a competitor number
-// prints as two stacked lines only when its prefix is MORE THAN ONE letter
-// AND there are digits to put below it. A one-letter prefix, a bare digit
-// string (the empty-prefix numbering AssignPlayerNumbers also supports), and
-// a prefix with no digits at all each stay single-line.
+// prints as two stacked lines only when its prefix is MORE THAN ONE
+// CHARACTER (a rune count, not a byte count -- bc-pnum review) AND there are
+// digits to put below it. A one-letter prefix, a bare digit string (the
+// empty-prefix numbering AssignPlayerNumbers also supports), and a prefix
+// with no digits at all each stay single-line. The Unicode cases pin the
+// rune-vs-byte fix directly: "Ö" is ONE character but two UTF-8 bytes, so a
+// byte-length check would wrongly stack "Ö20"; "劃" is one character at
+// three UTF-8 bytes, same wrong-by-byte-count trap. The legacy
+// digit-bearing cases document a pre-existing, accepted limitation: a
+// digit inside the STORED prefix itself ("K2", "KO2") is indistinguishable
+// from that digit being the counter's first digit, so "K220" reads as
+// prefix "K" + counter "220", and "KO220" as prefix "KO" + counter "220" --
+// both already correct under the leading-non-digit-run rule, kept here as
+// regression coverage rather than new behaviour.
 func TestSplitNumberLines(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -304,6 +314,11 @@ func TestSplitNumberLines(t *testing.T) {
 		{"one-letter prefix, no digits", "K", "K", "", false},
 		{"multi-letter prefix, no digits, stays single-line", "KO", "KO", "", false},
 		{"empty number", "", "", "", false},
+		{"single accented letter is ONE character, stays single-line", "Ö20", "Ö", "20", false},
+		{"accented letter plus a second letter is two characters, stacks", "ÖZ20", "ÖZ", "20", true},
+		{"single multi-byte CJK-style letter is ONE character, stays single-line", "劃20", "劃", "20", false},
+		{"legacy digit-bearing one-letter prefix stays single-line", "K220", "K", "220", false},
+		{"legacy digit-bearing two-letter prefix stacks", "KO220", "KO", "220", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -317,9 +332,10 @@ func TestSplitNumberLines(t *testing.T) {
 
 // TestFirstNumberedSplit pins the "decide once per sheet" rule: the first
 // player carrying a Number stands for every player on the sheet, and an
-// unnumbered slice (or one with no players at all) reports ok=false so
+// unnumbered slice (or one with no players at all) reports stacked=false so
 // callers keep the single-line layout rather than mis-reading a zero value
-// as "single-letter prefix".
+// as "single-letter prefix". Narrowed to (letters, stacked): no caller reads
+// digits or a separate found/not-found flag (bc-pnum review).
 func TestFirstNumberedSplit(t *testing.T) {
 	t.Run("skips unnumbered players and uses the first numbered one", func(t *testing.T) {
 		players := []Player{
@@ -327,21 +343,21 @@ func TestFirstNumberedSplit(t *testing.T) {
 			{Name: "Alice", Number: "KO20"},
 			{Name: "Bob", Number: "KO21"},
 		}
-		letters, digits, stacked, ok := firstNumberedSplit(players)
-		require.True(t, ok)
+		letters, stacked := firstNumberedSplit(players)
 		assert.Equal(t, "KO", letters)
-		assert.Equal(t, "20", digits)
 		assert.True(t, stacked)
 	})
 
-	t.Run("no numbered player reports ok=false", func(t *testing.T) {
+	t.Run("no numbered player reports stacked=false and empty letters", func(t *testing.T) {
 		players := []Player{{Name: "Alice"}, {Name: "Bob"}}
-		_, _, _, ok := firstNumberedSplit(players)
-		assert.False(t, ok)
+		letters, stacked := firstNumberedSplit(players)
+		assert.Equal(t, "", letters)
+		assert.False(t, stacked)
 	})
 
-	t.Run("empty slice reports ok=false", func(t *testing.T) {
-		_, _, _, ok := firstNumberedSplit(nil)
-		assert.False(t, ok)
+	t.Run("empty slice reports stacked=false and empty letters", func(t *testing.T) {
+		letters, stacked := firstNumberedSplit(nil)
+		assert.Equal(t, "", letters)
+		assert.False(t, stacked)
 	})
 }

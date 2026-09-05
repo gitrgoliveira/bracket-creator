@@ -39,24 +39,32 @@ func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 // splitNumberLines splits a competitor number into its leading non-digit
 // prefix run (letters) and the remaining digits, and reports whether the
 // pair should be PRINTED as two stacked lines rather than one: only when the
-// prefix is more than one character AND there are digits to put below it
-// (operator ruling, bc-pnum: "KO" over "20", "KOR" over "120", but "K20"
-// stays on one line). A bare digit string (no prefix, the empty-prefix
-// numbering AssignPlayerNumbers also supports) and a prefix with no digits
-// at all (unreachable via AssignPlayerNumbers, which always appends a
-// counter, but guarded here rather than assumed) both stay single-line too.
+// prefix is more than one CHARACTER (rune, not byte -- bc-pnum review: "Ö20"
+// is a ONE-letter prefix and must stay single-line, but len("Ö") is 2 bytes
+// in UTF-8, so a byte-length check wrongly stacked it) AND there are digits
+// to put below it (operator ruling, bc-pnum: "KO" over "20", "KOR" over
+// "120", but "K20" stays on one line). A bare digit string (no prefix, the
+// empty-prefix numbering AssignPlayerNumbers also supports) and a prefix
+// with no digits at all (unreachable via AssignPlayerNumbers, which always
+// appends a counter, but guarded here rather than assumed) both stay
+// single-line too. The split itself (the letters/digits byte slices) is
+// unaffected by the rune-vs-byte distinction: an ASCII digit byte never
+// appears inside a multi-byte UTF-8 sequence, so cutting at the first digit
+// BYTE always lands on a rune boundary.
 //
 // This is the ONE place that decides the split, for both print sites (the
 // Tags sheet, internal/helper/excel_tags.go, and the Names to Print number
 // cell, printNameEntries in excel.go): a change to what counts as "stacked"
-// only has to change here.
+// only has to change here. printNameEntries additionally needs the letters'
+// rune COUNT of its own, to hand Excel's character-counting LEFT/MID
+// functions the right split point; see firstNumberedSplit below.
 func splitNumberLines(number string) (letters, digits string, stacked bool) {
 	i := 0
 	for i < len(number) && (number[i] < '0' || number[i] > '9') {
 		i++
 	}
 	letters, digits = number[:i], number[i:]
-	stacked = len(letters) > 1 && digits != ""
+	stacked = utf8.RuneCountInString(letters) > 1 && digits != ""
 	return letters, digits, stacked
 }
 
@@ -64,18 +72,23 @@ func splitNumberLines(number string) (letters, digits string, stacked bool) {
 // representative player: every competitor on one sheet shares the
 // competition's one prefix (AssignPlayerNumbers/NumberPools assign exactly
 // one prefix for the whole draw), so scanning every player for the same
-// answer would be redundant work for the same result. ok is false when no
-// player in players carries a Number at all (an unnumbered competition, or
-// an empty sheet), in which case callers keep the single-line layout.
-func firstNumberedSplit(players []Player) (letters, digits string, stacked, ok bool) {
+// answer would be redundant work for the same result. letters is "" and
+// stacked is false when no player in players carries a Number at all (an
+// unnumbered competition, or an empty sheet), in which case callers keep
+// the single-line layout; that is indistinguishable from a genuine
+// bare-digit number ("no prefix at all" also has letters==""), but both
+// cases want the identical single-line behaviour, so callers do not need to
+// tell them apart. digits and the found/not-found flag are dropped from the
+// signature: no caller reads them (narrowed per bc-pnum review).
+func firstNumberedSplit(players []Player) (letters string, stacked bool) {
 	for _, p := range players {
 		if p.Number == "" {
 			continue
 		}
-		letters, digits, stacked = splitNumberLines(p.Number)
-		return letters, digits, stacked, true
+		letters, _, stacked = splitNumberLines(p.Number)
+		return letters, stacked
 	}
-	return "", "", false, false
+	return "", false
 }
 
 // NumberPools numbers every competitor across pools with a single counter that

@@ -821,12 +821,19 @@ func TestCreateNamesToPrint_WithNumberCell(t *testing.T) {
 // prefix's position cell holds a LIVE LEFT/MID split of the Data-sheet
 // reference (letters over digits) with the wrap style, while a one-letter
 // prefix keeps the plain cross-sheet reference with the shrink-to-fit style.
-// It also checks a three-letter prefix ("KOR"), the widest reachable, still
-// produces a two-line split rather than a third line (design item 4: three
-// letters at 100pt fit the 40-unit column width -- see
-// buildNameIDPositionStackedStyle's comment for the arithmetic).
+// A three-letter prefix still produces exactly a two-line SPLIT (never a
+// third literal newline), but that alone does not prove the render fits:
+// a unit test cannot see LibreOffice wrap the letters line itself onto a
+// third visual line when the glyphs are too wide for the 40-unit column, so
+// the font-size assertions here (and the rendered check in the orchestrator)
+// are the actual proof. Three letters at 100pt do NOT reliably fit --
+// "WOM"/"MMM"/"WWW" wrap to a third line at that size and only "KOR"'s
+// narrower glyphs happened not to, which is why an earlier version of this
+// test (checking only the newline count) gave false confidence. The fix
+// sizes the stacked style per letter count: 100pt for two letters, 80pt for
+// three (bc-pnum review; see nameIDPositionStackedFontSize, excel_styles.go).
 func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
-	t.Run("two-letter prefix: LEFT/MID formula and wrap style", func(t *testing.T) {
+	t.Run("two-letter prefix: LEFT/MID formula, wrap style, 100pt", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer f.Close()
 		f.NewSheet("Pool1")
@@ -863,6 +870,8 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 		assert.False(t, style.Alignment.ShrinkToFit, "stacked position style must not shrink to fit")
 		assert.Equal(t, "center", style.Alignment.Horizontal)
 		assert.Equal(t, "center", style.Alignment.Vertical)
+		require.NotNil(t, style.Font)
+		assert.Equal(t, float64(100), style.Font.Size, "two letters use the 100pt stacked size")
 	})
 
 	t.Run("one-letter prefix: plain reference and shrink style", func(t *testing.T) {
@@ -893,7 +902,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 		assert.True(t, style.Alignment.ShrinkToFit, "single-line position style must shrink to fit")
 	})
 
-	t.Run("three-letter prefix still splits into exactly two lines", func(t *testing.T) {
+	t.Run("three-letter prefix splits into two lines at the smaller 80pt size", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer f.Close()
 		f.NewSheet("Pool1")
@@ -911,8 +920,69 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 		valA1, err := f.CalcCellValue(sheet, "A1")
 		require.NoError(t, err)
 		assert.Equal(t, "KOR\n120", valA1)
-		assert.Equal(t, 1, strings.Count(valA1, "\n"), "must be exactly two lines, never a third")
+		assert.Equal(t, 1, strings.Count(valA1, "\n"), "the formula's own newline count -- never proves the RENDER stays two lines, see the render check")
+
+		styleID, err := f.GetCellStyle(sheet, "A1")
+		require.NoError(t, err)
+		style, err := f.GetStyle(styleID)
+		require.NoError(t, err)
+		require.NotNil(t, style.Font)
+		assert.Equal(t, float64(80), style.Font.Size, "three letters must use the smaller 80pt stacked size, or the letters line itself wraps onto a third line (rendered: WOM/MMM/WWW at 100pt)")
 	})
+
+	t.Run("three wide letters (WOM, WWW, MMM) all get the 80pt size, not just the narrower KOR", func(t *testing.T) {
+		for _, prefix := range []string{"WOM", "WWW", "MMM"} {
+			t.Run(prefix, func(t *testing.T) {
+				f := excelize.NewFile()
+				defer f.Close()
+				f.NewSheet("Pool1")
+				f.NewSheet(SheetNamesToPrint)
+				number := prefix + "119"
+				handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", number))
+
+				players := []Player{{Name: "Player1", PoolPosition: 1, Number: number}}
+				pCoords := map[string]playerCellCoord{
+					playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+				}
+
+				CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+
+				sheet := "Names to Print A"
+				styleID, err := f.GetCellStyle(sheet, "A1")
+				require.NoError(t, err)
+				style, err := f.GetStyle(styleID)
+				require.NoError(t, err)
+				require.NotNil(t, style.Font)
+				assert.Equal(t, float64(80), style.Font.Size)
+			})
+		}
+	})
+}
+
+// TestCreateNamesToPrint_StackedFormulaCountsRunesNotBytes pins the bc-pnum
+// review fix: the LEFT/MID split point must be a rune count. "Ö" is one
+// character but two UTF-8 bytes, so a byte-length split would compute
+// LEFT(ref,2) -- taking "Ö2", not "Ö" -- and MID(ref,3,99) -- dropping the
+// "2" -- splitting "Ö20" as "Ö2"/"0" instead of "Ö"/"20". The correct,
+// rune-counted split takes exactly one character for the letters line.
+func TestCreateNamesToPrint_StackedFormulaCountsRunesNotBytes(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet(SheetNamesToPrint)
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "ÖZ20"))
+
+	players := []Player{{Name: "Player1", PoolPosition: 1, Number: "ÖZ20"}}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+	}
+
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+
+	sheet := "Names to Print A"
+	formula, err := f.GetCellFormula(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, `LEFT('Pool1'!$A$2,2)&CHAR(10)&MID('Pool1'!$A$2,3,99)`, formula, "the split point must count the TWO characters Ö and Z, not their three UTF-8 bytes")
 }
 
 func TestCreateNamesToPrint_MultiCourt(t *testing.T) {

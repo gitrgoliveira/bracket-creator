@@ -343,4 +343,35 @@ func TestCreateTagsSheet_StackedNumberLayout(t *testing.T) {
 			t.Errorf("expected the single-line style at 250pt, got %+v", style.Font)
 		}
 	})
+
+	// bc-pnum review: "Ö" is ONE character but two UTF-8 bytes, so a
+	// byte-length "more than one letter" check wrongly stacked a one-letter
+	// accented prefix. A rune count keeps this single-line, like "K20".
+	t.Run("single accented-letter prefix stays single-line (rune count, not byte count)", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer func() { _ = f.Close() }()
+		pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "Ö20"}}}}
+		if err := CreateTagsSheet(f, pools, ""); err != nil {
+			t.Fatalf("CreateTagsSheet: %v", err)
+		}
+		got, err := f.GetCellValue(SheetTags, "A1")
+		if err != nil {
+			t.Fatalf("GetCellValue: %v", err)
+		}
+		if got != "Ö20" {
+			t.Errorf("expected single-line value %q, got %q", "Ö20", got)
+		}
+
+		styleID, err := f.GetCellStyle(SheetTags, "A1")
+		if err != nil {
+			t.Fatalf("GetCellStyle: %v", err)
+		}
+		style, err := f.GetStyle(styleID)
+		if err != nil {
+			t.Fatalf("GetStyle: %v", err)
+		}
+		if style.Alignment == nil || style.Alignment.WrapText {
+			t.Errorf("expected the single-line style NOT to set WrapText, got %+v", style.Alignment)
+		}
+	})
 }

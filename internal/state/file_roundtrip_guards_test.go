@@ -214,6 +214,12 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 				"the struct from participants.csv (and seeds.csv) at load time; " +
 				"marshalling it into config.md front-matter would store a second " +
 				"copy that the next roster write silently outdates.",
+			"ProvisionalNumbers": "a view, not config data: the registration-order " +
+				"numbers the check-in desk calls before the draw, composed onto " +
+				"the viewer AND the settings-and-roster-PUT responses of a " +
+				"competition in setup from Players and NumberPrefix at read time " +
+				"(mobileapp.provisionalCompetitorNumbers); persisting them would " +
+				"freeze a number the draw is about to replace.",
 		}},
 	}
 

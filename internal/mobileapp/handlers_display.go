@@ -25,10 +25,14 @@ import (
 //
 // Per NFR-002 the handler depends on the *state.Store concrete type (the
 // same boundary handlers_viewer.go uses); there is no snug-fit interface
-// in deps.go that covers the read methods we need here, and inventing one
-// for a single consumer would be premature. If a second polled surface
-// lands later we can hoist a DisplayStore interface then.
-func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
+// in deps.go that covers the OTHER read methods we need here, and inventing
+// one for a single consumer would be premature. If a second polled surface
+// lands later we can hoist a DisplayStore interface then. eng is narrower:
+// PlayoffsNumberingEngine (deps.go) is the ONE derivation of an
+// effective-playoffs competition's numbers, shared with handlers_viewer.go
+// and the blank-template export (bc-pnum A8/[review]), so this surface's
+// numbers cannot silently disagree with either of those.
+func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store, eng PlayoffsNumberingEngine) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
 	// Unlike the constant "competitions" key, the key here includes the
@@ -83,7 +87,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				if !strings.EqualFold(m.Court, court) || m.Status != state.MatchStatusRunning {
 					continue
 				}
-				players := currentMatchPlayers(store, comp)
+				players := currentMatchPlayers(store, eng, comp)
 				// Pool daihyosen/tiebreaker rep bouts carry team names in
 				// sideA/sideB; the representative fighter for each side lives in
 				// RepPlayerA/B. Empty for every regular match (mp-62vr).
@@ -109,7 +113,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					if !strings.EqualFold(bm.Court, court) || bm.Status != state.MatchStatusRunning {
 						continue
 					}
-					players := currentMatchPlayers(store, comp)
+					players := currentMatchPlayers(store, eng, comp)
 					c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
 						bm.SideA, bm.SideB, bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
 						phaseFromMatchID(bm.ID), "", ""))
@@ -122,7 +126,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			if bm := bracket.ThirdPlaceMatch; bm != nil &&
 				strings.EqualFold(bm.Court, court) &&
 				bm.Status == state.MatchStatusRunning {
-				players := currentMatchPlayers(store, comp)
+				players := currentMatchPlayers(store, eng, comp)
 				ipponsA, hansokuA := bm.IpponsA, bm.HansokuA
 				ipponsB, hansokuB := bm.IpponsB, bm.HansokuB
 				// phaseFromMatchID(bm.ID) would return "m" for the bronze
@@ -183,7 +187,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			// comps is non-nil even when empty, so zero competitions
 			// marshals as [] not null (the wire shape the SPA and the
 			// regression test pin).
-			comps, err := buildViewerCompetitionPayloads(store, court)
+			comps, err := buildViewerCompetitionPayloads(eng, store, court)
 			if err != nil {
 				return nil, err
 			}
@@ -297,14 +301,17 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // configured, merge the pools.csv-derived numbers onto the slice so buildSide
 // can include "number" in the polled OBS/vMix overlay payload; the pools.csv
 // read is skipped entirely otherwise (the common case).
-func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
+func currentMatchPlayers(store *state.Store, eng PlayoffsNumberingEngine, comp *state.Competition) []domain.Player {
 	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if comp.NumberPrefix != "" {
-		pools, _ := store.LoadPools(comp.ID)
-		// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs
-		// too, and mergePoolNumbersIntoPlayersSlice's playoffs-only branch must
-		// see that or it silently skips number assignment for those entrants.
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.EffectiveFormat())
+		pools, err := store.LoadPools(comp.ID)
+		if err != nil {
+			// Reported, not merged: an unreadable pools.csv must show as
+			// MISSING numbers on the overlay, never as composed ones (D1).
+			log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
+		} else {
+			mergePoolNumbersIntoPlayersSlice(eng, comp, players, pools)
+		}
 	}
 	return players
 }

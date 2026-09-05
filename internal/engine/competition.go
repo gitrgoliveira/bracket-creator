@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -253,7 +254,10 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		if standErr != nil {
 			return AutoCompleteNoChange, standErr
 		}
-		overridesObj, _ := e.store.LoadOverrides(compID)
+		overridesObj, oerr := e.store.LoadOverrides(compID)
+		if oerr != nil {
+			return AutoCompleteNoChange, oerr
+		}
 		var poolRanks map[string]map[string]int
 		if overridesObj != nil {
 			poolRanks = overridesObj.PoolRanks
@@ -416,8 +420,10 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 // matches are injected only for advancement-affecting groups, so a below-cut
 // group has no DH bouts and groupNeedsChusen returns false. When it does return
 // true the operator resolves the group via the chusen (drawing lots) panel,
-// which writes poolRanks (pool name -> team name -> rank); a group whose every
-// member has an override is resolved and no longer blocks completion.
+// which writes poolRanks (pool name -> helper.CompetitorKey(id, name, dojo) ->
+// rank; lookupPoolRankOverride also honours a legacy bare-name key for
+// pre-identity overrides.json data, see its own doc comment); a group whose
+// every member has an override is resolved and no longer blocks completion.
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
@@ -428,6 +434,23 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 		}
 	}
 	return false
+}
+
+// CanStart reports whether StartCompetition accepts a competition in status:
+// setup (and the legacy empty status) take the one-click draw-then-run path,
+// draw-ready only flips status over an already-generated draw. It is the ONE
+// statement of that precondition: StartCompetition gates on it, and so does
+// the mobileapp start handler's pre-flight (ensureNumberPrefix), which must
+// act on exactly the statuses the engine will then accept and on no other.
+func CanStart(status state.CompetitionStatus) bool {
+	return status == state.CompStatusDrawReady || CanGenerateDraw(status)
+}
+
+// CanGenerateDraw reports whether GenerateDraw accepts a competition in
+// status: only setup (and the legacy empty status). Shared with the mobileapp
+// generate-draw pre-flight for the same reason as CanStart.
+func CanGenerateDraw(status state.CompetitionStatus) bool {
+	return status == state.CompStatusSetup || status == ""
 }
 
 // StartCompetition starts a competition. When called on a draw-ready
@@ -444,19 +467,18 @@ func (e *Engine) StartCompetition(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	switch comp.Status {
-	case state.CompStatusDrawReady:
-		// Draw already exists; only flip status.
-		return e.transitionDrawToRunning(id)
-	case state.CompStatusSetup, "":
-		// One-click path: generate draw then transition.
-		if err := e.runDrawPipeline(id); err != nil {
-			return err
-		}
-		return e.transitionDrawToRunning(id)
-	default:
+	if !CanStart(comp.Status) {
 		return validationErrorf("competition %s already started", id)
 	}
+	if comp.Status == state.CompStatusDrawReady {
+		// Draw already exists; only flip status.
+		return e.transitionDrawToRunning(id)
+	}
+	// One-click path: generate draw then transition.
+	if err := e.runDrawPipeline(id); err != nil {
+		return err
+	}
+	return e.transitionDrawToRunning(id)
 }
 
 // GenerateDraw generates pools/bracket/Swiss-r1 for a Setup competition
@@ -471,10 +493,10 @@ func (e *Engine) GenerateDraw(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	switch comp.Status {
-	case state.CompStatusSetup, "":
+	switch {
+	case CanGenerateDraw(comp.Status):
 		return e.runDrawPipeline(id)
-	case state.CompStatusDrawReady:
+	case comp.Status == state.CompStatusDrawReady:
 		return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
 	default:
 		return validationErrorf("competition %s cannot generate draw (status: %s)", id, comp.Status)
@@ -915,6 +937,21 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
 	seeds = dropSeedAssignments(fullRoster, seeds, excludedByCheckIn)
 
+	// Blank-dojo pre-flight (bc-drwx item 8). helper.ValidateNoBlankDojo used
+	// to be reachable only through the pool distributor (generatePools ->
+	// BuildPoolPhaseTreeAware*), so a standalone playoffs or Swiss
+	// competition over a legacy blank-dojo roster drew silently: neither
+	// generatePlayoffs (helper.StandardSeeding has no dojo opinion at all)
+	// nor GenerateSwissRound goes anywhere near the distributor. This is the
+	// ONE roster pre-flight, ahead of the format switch below, that covers
+	// every format runDrawPipeline can generate -- the distributor's own
+	// call to the same function (buildPoolPhaseTreeAwareCore) becomes the
+	// assert its doc comment always claimed it was for every caller that
+	// reaches it through here.
+	if err := helper.ValidateNoBlankDojo(players); err != nil {
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
+
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all
 	// participants, and round-robin is guaranteed. The viewer surface
@@ -1028,7 +1065,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// generatePools / generatePlayoffs read:
 		//   - Format (decides which generator)
 		//   - PoolSize, PoolSizeMode, RoundRobin (pools structure)
-		//   - NumberPrefix (player numbering in both generators)
+		//   - NumberPrefix (player numbering in generatePools; generatePlayoffs
+		//     composes none, its tree is built from names alone)
 		//   - StartTime (initial ScheduledAt for generated matches)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)

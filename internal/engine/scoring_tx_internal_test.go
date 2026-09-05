@@ -7,7 +7,6 @@ package engine
 // - lookupMatchSides through a tx handle (bracket path + not-found)
 // - checkConcurrentIneligibility through a tx handle (already-ineligible path)
 // - withPoolMatch through a tx handle (not-found branch)
-// - restoreCompetitorEligibility through a tx handle (empty priorLoser + happy path)
 
 import (
 	"testing"
@@ -274,7 +273,7 @@ func TestCheckConcurrentIneligibilityTx_AlreadyIneligible(t *testing.T) {
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		// "Alice" is the loser of a different match "Pool A-1".
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "", "Alice")
 		return nil
 	})
 	require.Error(t, txErr)
@@ -302,7 +301,7 @@ func TestCheckConcurrentIneligibilityTx_SameMatchAllowed(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "", "Alice")
 		return nil
 	})
 	require.NoError(t, txErr, "same-match ineligibility must be allowed (undo path)")
@@ -317,7 +316,7 @@ func TestCheckConcurrentIneligibilityTx_EmptyLoser(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "", "")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -340,60 +339,6 @@ func TestWithPoolMatchTx_NotFound(t *testing.T) {
 	})
 	require.Error(t, txErr)
 	assert.ErrorIs(t, txErr, errMatchNotFound)
-}
-
-// TestRestoreCompetitorEligibilityTx_EmptyPriorLoser confirms the
-// empty-priorLoser fast path returns (nil, nil).
-func TestRestoreCompetitorEligibilityTx_EmptyPriorLoser(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "rcetx-empty"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-
-	var (
-		got   *domain.CompetitorStatus
-		txErr error
-	)
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.restoreCompetitorEligibility(tx, compID, "", "M1")
-		return nil
-	})
-	require.NoError(t, txErr)
-	assert.Nil(t, got)
-}
-
-// TestRestoreCompetitorEligibilityTx_HappyPath confirms the function
-// writes an eligibility-restored status and returns it.
-func TestRestoreCompetitorEligibilityTx_HappyPath(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "rcetx-ok"
-
-	aliceID := helper.NewUUID4()
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: aliceID, Name: "Alice", Dojo: "A"},
-	}))
-	// Initially ineligible.
-	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
-		PlayerID: aliceID, Eligible: false, MatchID: "Pool A-0", Reason: "kiken",
-	}))
-
-	var (
-		got   *domain.CompetitorStatus
-		txErr error
-	)
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.restoreCompetitorEligibility(tx, compID, "Alice", "Pool A-0")
-		return nil
-	})
-	require.NoError(t, txErr)
-	require.NotNil(t, got)
-	assert.Equal(t, aliceID, got.PlayerID)
-	assert.True(t, got.Eligible)
-
-	// Verify the restored status landed on disk.
-	statuses, err := store.LoadCompetitorStatus(compID)
-	require.NoError(t, err)
-	assert.True(t, statuses[aliceID].Eligible)
 }
 
 // TestRecordMatchResultWithIneligibilityTx_BracketPath confirms the
@@ -676,7 +621,7 @@ func TestCheckConcurrentIneligibilityTx_PlayerNotInPool(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "Unknown")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "", "Unknown")
 		return nil
 	})
 	require.NoError(t, txErr, "unknown player must not trigger an error (best-effort)")

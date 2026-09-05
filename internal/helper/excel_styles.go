@@ -348,6 +348,9 @@ func buildNameIDStyle(f *excelize.File) int {
 		Alignment: &excelize.Alignment{
 			Horizontal: "center",
 			Vertical:   "center",
+			// The name column has a fixed width (namesToPrintNameColWidth); a
+			// long name shrinks into it rather than overflowing or wrapping.
+			ShrinkToFit: true,
 		},
 		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 110},
 		Border: []excelize.Border{
@@ -367,11 +370,20 @@ func getNameIDPositionStyle(f *excelize.File) int {
 // buildNameIDPositionStyle creates a large, bold style for the position-number
 // row in "Names to Print" column A.  The font size matches the Tags sheet so
 // the number is clearly visible when printed.
+//
+// ShrinkToFit (bc-pnum A9): a 4- or 5-character number (a prefix up to 3
+// characters plus a multi-digit counter, e.g. "KOR19") rasterised
+// byte-identically to shorter numbers in the same column ("KOR10".."KOR19"
+// were indistinguishable in the reproduction) because the cell clipped
+// rather than shrinking the glyphs to fit. No width/font change is needed
+// here (unlike the Tags sheet): this column's width already comes from
+// setupNamesToPrintLayout, so this flag alone is the fix.
 func buildNameIDPositionStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{
-			Horizontal: "center",
-			Vertical:   "center",
+			Horizontal:  "center",
+			Vertical:    "center",
+			ShrinkToFit: true,
 		},
 		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 100},
 		Border: []excelize.Border{

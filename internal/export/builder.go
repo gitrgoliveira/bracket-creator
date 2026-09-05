@@ -149,8 +149,12 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// steps and order to Engine.ExportCompetitionXlsx. poolsByCourt is the one
 	// artifact the overlays below need (PrintPoolMatches's pool-index grouping
 	// per shiaijo band); everything else PrintPoolMatches/AddPoolDataToSheet
-	// return is consumed entirely inside the shared pipeline.
-	poolsByCourt, err := engine.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	// return is consumed entirely inside the shared pipeline. namesToPrintPlayers
+	// is nil here (unlike the blank-template export): this builder handles a
+	// playoffs-only competition's Data/names sheets by overlaying literal
+	// bracket names further down instead (see the len(pools) == 0 branch
+	// below), never by feeding a numbered roster into the shared pipeline.
+	poolsByCourt, err := engine.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, nil)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}

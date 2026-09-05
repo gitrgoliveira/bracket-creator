@@ -434,7 +434,7 @@ func TestMaybeAutoCompletePools_TeamLeague_DHCompletedAfterOperatorInject(t *tes
 	require.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
 
 	// Operator injects DH for the tied group (Phase 3b path).
-	injected, injErr := eng.GenerateLeagueTiebreakMatches("league-operator-dh", []string{"Alpha", "Beta"})
+	injected, injErr := eng.GenerateLeagueTiebreakMatches("league-operator-dh", []string{"Alpha", "Beta"}, nil)
 	require.NoError(t, injErr)
 	require.Len(t, injected, 1, "one DH match for a two-way tie")
 

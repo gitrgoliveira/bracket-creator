@@ -97,10 +97,31 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
+	// bc-pnum A8: a playoffs-only competition never has a pools.csv (its
+	// numbers are participant order under the prefix, composed on read, see
+	// NumberedParticipantsFor), so feeding the shared pipeline below the
+	// (empty) pools slice alone would make its Data and Names-to-Print steps
+	// no-ops -- a knockout-only competition's printed materials would be
+	// silently blank. Computed HERE, before the pipeline call, and threaded
+	// through as namesToPrintPlayers so RenderCompetitionWorkbook's own
+	// step 1/step 6 branch is the ONE place that decides which writer runs
+	// for each sheet (see that function's doc comment): this used to be a
+	// SECOND write of the Data sheet, run here after the pipeline returned,
+	// which is why "Data added to spreadsheet" printed twice for this one
+	// shape.
+	var namesToPrintPlayers []helper.Player
+	if comp.EffectiveFormat() == state.CompFormatPlayoffs && len(pools) == 0 && comp.NumberPrefix != "" {
+		numbered, npErr := e.NumberedParticipantsFor(comp)
+		if npErr != nil {
+			return nil, npErr
+		}
+		namesToPrintPlayers = numbered
+	}
+
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
 	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
 	// steps and order to internal/export.BuildResultsWorkbook.
-	if _, err := RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches); err != nil {
+	if _, err := RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, namesToPrintPlayers); err != nil {
 		return nil, err
 	}
 
@@ -113,7 +134,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	if tourn != nil {
 		publicURL = tourn.PublicURL
 	}
-	if err := helper.CreateTagsSheet(f, pools, publicURL); err != nil {
+	tagsPools := pools
+	if namesToPrintPlayers != nil {
+		// Same numbered roster as the Names-to-Print sheet above (bc-pnum A8):
+		// CreateTagsSheet only reads player.Number as a literal value, so a
+		// single synthetic pool wrapping the roster is enough; PoolName is
+		// never read by this sheet.
+		tagsPools = []helper.Pool{{Players: namesToPrintPlayers}}
+	}
+	if err := helper.CreateTagsSheet(f, tagsPools, publicURL); err != nil {
 		return nil, err
 	}
 

@@ -106,6 +106,72 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
 }
 
+// chusenMemberKey derives the stable identity string used to key a chusen
+// (drawing-lots) rank input to a specific team member, rather than to that
+// member's position in the `members` array (bc-appx item 2). The
+// chusen-candidates payload's `teams` array is "the still-tied members in
+// current standings order" (engine.ChusenCandidates), and standings order
+// depends on which members already carry a rank override: a member with ANY
+// recorded override sorts ahead of one without, regardless of the override's
+// actual value (engine/scoring.go), so completing 2 of 3 sequential writes
+// and then re-fetching after a mid-loop failure can return the SAME group
+// with its members in a DIFFERENT order (reproduced:
+// [Alpha,Beta,Gamma] -> [Beta,Alpha,Gamma] after two of three writes). An
+// index-keyed input map then reads the operator's typed value for the WRONG
+// team on retry, silently inverting the recorded draw.
+//
+// id when NON-EMPTY, else "name|dojo" -- the same identity rule
+// helper.CompetitorKey applies server-side, and the one window.checkinPid
+// (data.jsx) applies for check-in/roster state EXCEPT for one gap that
+// matters here: checkinPid's `p.id ?? fallback` only falls back on a
+// null/undefined id, but the chusen-candidates handler always emits an "id"
+// key (handlers_competition.go: `gin.H{"id": t.Player.ID, ...}`), which is
+// "" -- not null or undefined -- for a competitor with no UUID (a legacy or
+// mixed roster). "" ?? fallback still returns "", so every legacy member in
+// a group would key to the SAME empty string: duplicate React keys, duplicate
+// DOM ids, and typing into one row's input moves all of them (reproduced in
+// the render harness). This function is deliberately self-contained rather
+// than delegating to checkinPid so that gap cannot silently reopen here.
+//
+// No positional tie-break is needed for the reachable collisions: two
+// members with the same name AND dojo are a duplicate roster row the
+// write-floor save already refuses (state.ErrDuplicateName /
+// CheckDuplicateEntriesByNameDojo), so that pairing cannot reach this
+// screen; the pairing that CAN -- same name, different dojo, via the
+// documented team-name-uniqueness enforcement hole -- is already separated
+// by the dojo half of the key.
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx: a focused unit test
+// of the key derivation itself, in addition to (not instead of) the
+// full-mount behavioural coverage in
+// __tests__/render/admin_pools_chusen.render.test.jsx, which does mount
+// AdminPools and drives the actual chusen fetch/submit flow.
+function chusenMemberKey(member) {
+  return member.id ? member.id : `${member.name}|${member.dojo || ""}`;
+}
+
+// groupTeamIds derives the teamIds array to send alongside teamNames on a
+// league-tiebreak generate/remove request (second-Opus-pass nit 7): the
+// candidates payload's `teams` array carries {id,name,dojo} per team,
+// positionally parallel to `teamNames` (server: handlers_competition.go's
+// GET /league-tiebreak/candidates builds both from the same loop over
+// g.Teams, mirroring chusen's own teams array).
+//
+// Returns undefined -- teamIds omitted entirely -- unless `teams` is
+// present, the same length as `names`, and EVERY team carries a non-empty
+// id: a legacy id-less group (or a group predating this field) must not
+// send a teamIds array at all, since the server now rejects a blank entry
+// outright (second-Opus-pass item 4) rather than treat it as "no id
+// available".
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function groupTeamIds(teams, names) {
+  if (!teams || teams.length !== names.length) return undefined;
+  const ids = teams.map(t => t && t.id);
+  if (ids.some(id => !id)) return undefined;
+  return ids;
+}
+
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
@@ -136,9 +202,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   // the "pools" phase (non-league too: mixed pool stage can have DH cycles).
   const isTeamComp = c && (c.kind === "team" || c.teamSize > 0);
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
-  // Per-member input values: keys are "${groupKey}::${idx}" -> string, where
-  // groupKey is "${poolName}::${minPosition}" and idx is the member's index
-  // in that group (never the display name, which two members can share).
+  // Per-member input values: keys are "${groupKey}::${identity}" -> string,
+  // where groupKey is "${poolName}::${minPosition}" and identity is
+  // chusenMemberKey(member) (id when non-empty, else "name|dojo") -- never
+  // the member's index in the group, which reorders after a partial write
+  // (bc-appx item 2), and never the bare display name, which two members
+  // can share.
   const [chusenInputs, setChusenInputs] = useStateA({});
   // Per-group busy flag: keyed by groupKey "${poolName}::${minPosition}" -> bool
   // (a pool can hold more than one unresolved tied group).
@@ -197,13 +266,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     return () => { cancelled = true; };
   }, [c.id, c.status, isTeamLeague, poolMatches]);
 
-  const handleTiebreakGenerate = async (groupTeamNames) => {
+  const handleTiebreakGenerate = async (groupTeamNames, teamIds) => {
     const actionKey = groupTeamNames.join(",") + ":generate";
     setTiebreakActionBusy(true);
     setTiebreakBusyAction(actionKey);
     setTiebreakErr(null);
     try {
-      await window.API.leagueTiebreakGenerate(c.id, groupTeamNames, password);
+      await window.API.leagueTiebreakGenerate(c.id, groupTeamNames, password, teamIds);
       // SSE match_updated will reload poolMatches and re-fetch candidates.
     } catch (e) {
       if (mountedRef.current) setTiebreakErr(e.message || "Failed to generate tie-breaker matches");
@@ -212,14 +281,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     }
   };
 
-  const handleTiebreakRemove = async (groupTeamNames) => {
+  const handleTiebreakRemove = async (groupTeamNames, teamIds) => {
     if (!(await window.confirmDialog({ message: `Remove unscored tie-breaker matches for ${groupTeamNames.join(", ")}?`, confirmLabel: "Remove", danger: true }))) return;
     const actionKey = groupTeamNames.join(",") + ":remove";
     setTiebreakActionBusy(true);
     setTiebreakBusyAction(actionKey);
     setTiebreakErr(null);
     try {
-      await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password);
+      await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password, teamIds);
     } catch (e) {
       if (mountedRef.current) setTiebreakErr(e.message || "Failed to remove tie-breaker matches");
     } finally {
@@ -279,7 +348,8 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {chusenCandidates.map((group) => {
         const { poolName, teamNames, minPosition } = group;
-        // Members keyed by INDEX, never by name (bc-cse follow-up): `teams`
+        // Members keyed by IDENTITY (chusenMemberKey), never by name
+        // (bc-cse follow-up) and never by index (bc-appx item 2): `teams`
         // carries the authoritative per-member identity ({id, name, dojo}),
         // positionally parallel to the legacy `teamNames` strings (server:
         // handlers_competition.go builds teams[i] and names[i] from the same
@@ -287,13 +357,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // reachable only via the documented enforcement hole in team-name
         // uniqueness (an unreadable config.md write skips
         // checkNewTeamNameCollisions) -- so keying anything by bare name
-        // collapses both onto one identity. `teamNames.map` synthesizes a
-        // same-shaped member list only when an older server omits `teams`
-        // entirely: a wire-compat branch on the payload shape, not a
-        // name-keyed fallback lookup.
-        const members = (group.teams && group.teams.length === teamNames.length)
-          ? group.teams
-          : teamNames.map((name) => ({ name }));
+        // collapses both onto one identity. `teams` is required on the wire
+        // (this SPA ships in the same binary as the server that emits it,
+        // so there is no older-server case to be compatible with); a
+        // teamNames-only fallback would silently collapse a same-name pair
+        // back onto one key, exactly the bug this comment used to guard
+        // against, so there is deliberately no fallback here. A payload
+        // without it is a server bug, and skipping the group keeps that
+        // contained to this banner rather than tripping the page-level
+        // error boundary for every other pool on the screen.
+        const members = group.teams;
+        if (!members) return null;
         // A pool can hold more than one unresolved tied group (e.g. a cycle at
         // 1st/2nd and a separate cycle at 3rd/4th). Key by pool + best position
         // so the React key and the busy/error maps never collide across groups.
@@ -301,18 +375,25 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const isBusy = !!chusenBusy[groupKey];
         const groupErrMsg = chusenGroupErr[groupKey] || null;
 
-        // Effective value for a member's input, by its INDEX in the group:
-        // the operator's edit if present, else the displayed default
-        // (minPosition + index). Both validation and submit read this so
-        // accepting the shown defaults (already a valid permutation) records
-        // without forcing a manual edit. Keyed on groupKey (pool + minPosition),
-        // not bare poolName: a pool can hold more than one unresolved tied
-        // group (see the groupKey comment above), and PoolWinners has no
-        // upper bound, so e.g. a cycle at 1st/2nd and another at 3rd/4th in
-        // the SAME pool both start their members at idx 0 -- a poolName-only
-        // key collapses them onto one shared input and one shared clear.
-        const effRank = (idx) => {
-          const raw = chusenInputs[`${groupKey}::${idx}`];
+        // Effective value for a member's input, by the member's IDENTITY
+        // (chusenMemberKey), never its position in `members`: the group order
+        // comes from the server's live standings sort, which reorders after
+        // ANY partial write (see chusenMemberKey's doc comment for the
+        // mechanism and the reproduced [Alpha,Beta,Gamma] ->
+        // [Beta,Alpha,Gamma] case), so an index-keyed lookup can read back a
+        // DIFFERENT team's typed value after a mid-loop failure. The operator's
+        // edit if present, else the displayed default (minPosition + index --
+        // idx is still used here only to pick a distinct default rank per
+        // position, not to key the input). Both validation and submit read
+        // this so accepting the shown defaults (already a valid permutation)
+        // records without forcing a manual edit. Keyed on groupKey (pool +
+        // minPosition) as well as identity, not bare poolName: a pool can hold
+        // more than one unresolved tied group (see the groupKey comment
+        // above), and PoolWinners has no upper bound, so e.g. a cycle at
+        // 1st/2nd and another at 3rd/4th in the SAME pool must not share one
+        // input/clear per member.
+        const effRank = (member, idx) => {
+          const raw = chusenInputs[`${groupKey}::${chusenMemberKey(member)}`];
           return parseInt(raw !== undefined ? raw : String(minPosition + idx), 10);
         };
 
@@ -324,7 +405,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           const entered = new Set();
           let valid = true;
           for (let i = 0; i < members.length; i++) {
-            const val = effRank(i);
+            const val = effRank(members[i], i);
             if (isNaN(val) || !expected.has(val) || entered.has(val)) { valid = false; break; }
             entered.add(val);
           }
@@ -339,17 +420,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           try {
             for (let i = 0; i < members.length; i++) {
               const member = members[i];
-              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(i), password, member.id, member.dojo);
+              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(member, i), password, member.id, member.dojo);
             }
             // Optimistically hide THIS group only (a pool can hold several) - the
             // effect re-fetches on the next update to reconcile.
             setChusenCandidates(prev => (prev || []).filter(g => !(g.poolName === poolName && g.minPosition === minPosition)));
-            // Clear inputs for this group only (groupKey, not bare poolName --
-            // see the effRank comment: a sibling tied group in the same pool
-            // shares idx 0..N and must not have its inputs wiped here too).
+            // Clear inputs for this group only (groupKey + identity, not bare
+            // poolName -- see the effRank comment: a sibling tied group in the
+            // same pool must not have its inputs wiped here too).
             setChusenInputs(prev => {
               const next = { ...prev };
-              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${i}`];
+              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${chusenMemberKey(members[i])}`];
               return next;
             });
           } catch (e) {
@@ -380,14 +461,16 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               Assign positions {minPosition} to {minPosition + members.length - 1} (one per team):
             </div>
             {members.map((member, idx) => {
-              // groupKey, not bare poolName: see the effRank comment above --
-              // a pool can hold more than one unresolved tied group, and
-              // without minPosition in the key two groups in the same pool
-              // collide on the same idx.
-              const inputKey = `${groupKey}::${idx}`;
+              // groupKey + member IDENTITY, not index: see the effRank/
+              // chusenMemberKey comments above -- the member array order is
+              // not stable across a re-fetch, so an index-keyed input can
+              // silently attach to the WRONG team after a mid-loop failure.
+              const memberKey = chusenMemberKey(member);
+              const inputKey = `${groupKey}::${memberKey}`;
               const defaultVal = minPosition + idx;
-              // Stable DOM id so the label is programmatically tied to its input.
-              const inputId = `chusen-${groupKey}-${idx}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+              // Stable DOM id so the label is programmatically tied to its
+              // input; identity-based (not idx) for the same reason as inputKey.
+              const inputId = `chusen-${groupKey}-${memberKey}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
               return (
                 <div key={inputKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <label htmlFor={inputId} style={{ flex: 1 }}>{member.name}</label>
@@ -438,6 +521,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {tiebreakCandidates.map((group) => {
         const names = group.teamNames || [];
+        const teamIds = groupTeamIds(group.teams, names);
         const hasDH = dhMatchExistsForGroup(names);
         const dhScored = hasDH && dhMatchScoredForGroup(names);
         const posLabel = group.minPosition === group.maxPosition
@@ -457,7 +541,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   type="button"
                   className="btn btn--sm btn--primary"
                   disabled={tiebreakActionBusy}
-                  onClick={() => handleTiebreakGenerate(names)}
+                  onClick={() => handleTiebreakGenerate(names, teamIds)}
                 >
                   {tiebreakBusyAction === generateKey && <span className="spinner" />}
                   Run tie-breaker
@@ -468,7 +552,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     type="button"
                     className="btn btn--sm btn--danger btn--ghost"
                     disabled={tiebreakActionBusy || dhScored}
-                    onClick={() => handleTiebreakRemove(names)}
+                    onClick={() => handleTiebreakRemove(names, teamIds)}
                   >
                     {tiebreakBusyAction === removeKey && <span className="spinner" />}
                     Remove unscored tie-breaker
@@ -603,4 +687,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool };
+export { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey, groupTeamIds };

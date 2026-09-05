@@ -80,16 +80,34 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 		}
 		keyA, okA := resolve(m.SideAID, m.SideA)
 		keyB, okB := resolve(m.SideBID, m.SideB)
-		if okA && okB && keyA != keyB {
-			dhCompleted++
-			// A hikiwake (Winner == "") counts toward round completeness but adds
-			// no win, so an all-drawn round leaves every member on 0 wins - a
-			// duplicate, which correctly surfaces as needing chusen below.
-			if m.Winner != "" {
-				if wk, ok := resolve(m.WinnerID, m.Winner); ok {
-					dhWins[wk]++
-				}
-			}
+		if !okA || !okB || keyA == keyB {
+			continue
+		}
+		dhCompleted++
+		// The winner is attributed EXACTLY as applyTiebreakSort attributes a
+		// TB/DH win: resolveWinnerSide over the SIDE ids/names (never
+		// resolve(m.WinnerID, m.Winner) directly, which -- with WinnerID
+		// unstamped, e.g. a hantei-decided bout before RecordDecisionTx's own
+		// fix -- falls straight to the group's bare-name index and can pick a
+		// member who isn't even one of THIS bout's two sides). A hikiwake
+		// (Winner == "", or a mark that resolves to neither side) counts
+		// toward round completeness but adds no win, so an all-drawn round
+		// leaves every member on 0 wins - a duplicate, which correctly
+		// surfaces as needing chusen below.
+		winnerIsA, winnerIsB := resolveWinnerSide(m)
+		// A same-name pairing (both sides share a display name, no ids to
+		// tell them apart) can make Winner match SideA and SideB at once, so
+		// resolveWinnerSide returns (true, true) rather than one true. The
+		// switch below tries winnerIsA FIRST, so that degenerate row credits
+		// AKA (SideA) by convention -- the same aka-first tie-break Go's
+		// isWinForSide/TeamResultFrom/SideMarksLR and the JS mirror
+		// (subWinnerSides) apply for the identical reason -- rather than
+		// crediting nobody or picking arbitrarily.
+		switch {
+		case winnerIsA:
+			dhWins[keyA]++
+		case winnerIsB:
+			dhWins[keyB]++
 		}
 	}
 	// Only judge the group once its FULL pairwise daihyosen round is complete

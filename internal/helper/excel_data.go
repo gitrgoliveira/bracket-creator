@@ -108,21 +108,59 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	return poolCoords, playerCoords
 }
 
+// AddPlayerDataToSheet is the playoffs-only (no pools) counterpart of
+// AddPoolDataToSheet, used by a pure-playoffs draw's Data sheet.
+//
+// Column A (bc-pnum A11) is headed "Draw order", 1-based: CreatePlayers
+// (tournament.go) stamps each entrant's PoolPosition 0-based (len(players)
+// BEFORE the append), a value pool distribution overwrites 1-based for every
+// pooled competition but nothing ever touches for a playoffs-only one, so
+// this sheet showed row 3 (the first entrant) as "0" beside a "Player
+// Number" column already reading "K1" -- two different counting
+// conventions on the same row. Nothing reads this cell by formula reference
+// anywhere downstream (unlike the "Player Number" column, which
+// CreateNamesToPrint links to); it is display-only, which is what makes a
+// pure rename-and-reindex here safe.
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) map[string]playerCellCoord {
 	hasNumber := len(players) > 0 && players[0].Number != ""
-	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Number")
+	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Draw order")
 
 	playerCoords := make(map[string]playerCellCoord, len(players))
 
 	row := 3
 	for i := range players {
-		handleExcelError("SetCellInt", f.SetCellInt(SheetData, fmt.Sprintf("A%d", row), players[i].PoolPosition))
+		handleExcelError("SetCellInt", f.SetCellInt(SheetData, fmt.Sprintf("A%d", row), players[i].PoolPosition+1))
 		layout.writePlayer(f, row, &players[i], sanitize, playerCoords)
 		row++
 	}
 
 	finishDataSheet(f)
 	return playerCoords
+}
+
+// AddDataToSheetForExport is RenderCompetitionWorkbook's step 1 (bc-pnum
+// A8/[review]): the ONE writer of the Data sheet for that shared pipeline,
+// so a caller never has to run AddPoolDataToSheet and then separately
+// AddPlayerDataToSheet on the same workbook to cover the one shape
+// (playoffs-only, no pools.csv) that needs the latter. namesToPrintPlayers
+// takes priority when non-empty (the blank-template export's numbered
+// roster, see Engine.NumberedParticipantsFor); pools is used otherwise,
+// including the ordinary "no pools drawn yet" case, which AddPoolDataToSheet
+// already renders as a header-only sheet.
+//
+// Before this existed, the blank-template export called AddPoolDataToSheet
+// unconditionally (writing only headers when pools was empty) and THEN
+// called AddPlayerDataToSheet a second time for the playoffs-only case,
+// after RenderCompetitionWorkbook had already returned -- two writers of one
+// sheet, which is why "Data added to spreadsheet" printed twice for exactly
+// that shape. cmd/create-pools.go and cmd/create-playoffs.go call
+// AddPoolDataToSheet/AddPlayerDataToSheet directly and are unaffected: this
+// wrapper exists only for the shared engine/export pipeline's step 1.
+func AddDataToSheetForExport(f *excelize.File, pools []Pool, namesToPrintPlayers []Player, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {
+	if len(namesToPrintPlayers) > 0 {
+		return nil, AddPlayerDataToSheet(f, namesToPrintPlayers, sanitize, titlePrefix)
+	}
+	return AddPoolDataToSheet(f, pools, sanitize, titlePrefix)
 }
 
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.

@@ -3,6 +3,7 @@ package helper
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -139,8 +140,9 @@ func earliestDojoMeetingRound(pools []Pool, poolWinners, numCourts int, dojo str
 // re-deriving the slot-extraction logic.
 func earliestMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo string) int {
 	dojoPools := map[string]bool{}
+	keys := make(dojoKeyCache)
 	for _, p := range pools {
-		if countDojoInPool(p, dojo) > 0 {
+		if countDojoInPool(p, dojo, keys) > 0 {
 			dojoPools[p.PoolName] = true
 		}
 	}
@@ -282,8 +284,9 @@ func earliestDojoWinnerMeetingRound(pools []Pool, poolWinners, numCourts int, do
 // "-"+GetOrdinal(1), i.e. "-1st"), never a runner-up/crossed-in qualifier.
 func earliestWinnerMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo string) int {
 	dojoPools := map[string]bool{}
+	keys := make(dojoKeyCache)
 	for _, p := range pools {
-		if countDojoInPool(p, dojo) > 0 {
+		if countDojoInPool(p, dojo, keys) > 0 {
 			dojoPools[p.PoolName] = true
 		}
 	}
@@ -311,21 +314,87 @@ func earliestWinnerMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo str
 	return earliest
 }
 
+// referencePoolSeeding, referenceSortUnseededByDojoCluster and
+// referencePlaceSeedsForPools are PoolSeeding, sortUnseededByDojoCluster
+// and placeSeedsForPools' exact bodies, moved here (bc-drwx item 11:
+// PoolSeeding and its two private helpers were removed as dead PRODUCTION
+// code -- no caller left outside their own tests, ever since bc-dojo Phase 4
+// made BuildPoolPhase delegate to the tree-aware distributor instead).
+// referencePlaceSeedsForPools still wraps placeSeedIndices, the ONE piece
+// of this trio that IS live (shared with buildPoolPhaseTreeAwareCore) --
+// this is not a resurrection of dead code, it is what lets
+// referencePoolSeedingPipeline below keep serving as an INDEPENDENT
+// reconstruction of the pre-Phase-4 pipeline that placeSeedIndices'
+// extraction can be checked against, and what lets the many pre-existing
+// PoolSeeding-based tests in this package keep pinning the same properties
+// under their new name rather than losing that coverage outright.
+func referencePoolSeeding(players []Player, numPools int, numCourts int) []Player {
+	if numPools <= 0 {
+		return players
+	}
+	// Both ends, through the one owner: numCourts is the spread modulus below.
+	numCourts = clampCourts(numCourts)
+
+	seeded, unseeded := partitionSeeded(players)
+	referenceSortUnseededByDojoCluster(unseeded)
+
+	result, occupied := referencePlaceSeedsForPools(seeded, numPools, numCourts, len(players))
+
+	unIdx := 0
+	for i := 0; i < len(players); i++ {
+		if !occupied[i] {
+			if unIdx < len(unseeded) {
+				result[i] = unseeded[unIdx]
+				unIdx++
+			}
+		}
+	}
+
+	return result
+}
+
+func referenceSortUnseededByDojoCluster(unseeded []Player) {
+	dojoCount := make(map[string]int)
+	for _, p := range unseeded {
+		dojoCount[p.Dojo]++
+	}
+	sort.SliceStable(unseeded, func(i, j int) bool {
+		ci, cj := dojoCount[unseeded[i].Dojo], dojoCount[unseeded[j].Dojo]
+		if ci != cj {
+			return ci > cj
+		}
+		if unseeded[i].Dojo != unseeded[j].Dojo {
+			return unseeded[i].Dojo < unseeded[j].Dojo
+		}
+		return false
+	})
+}
+
+func referencePlaceSeedsForPools(seeded []Player, numPools, numCourts, totalLen int) (result []Player, occupied map[int]bool) {
+	result = make([]Player, totalLen)
+	occupied = make(map[int]bool, len(seeded))
+	indices := placeSeedIndices(seeded, numPools, numCourts, totalLen)
+	for si, idx := range indices {
+		if idx < 0 {
+			continue
+		}
+		result[idx] = seeded[si]
+		occupied[idx] = true
+	}
+	return result, occupied
+}
+
 // referencePoolSeedingPipeline reconstructs BuildPoolPhase's PRE-Phase-4
 // body -- PoolSeeding -> CreatePools -> ReorderPoolsForCourts -- from the
 // primitive functions directly, since BuildPoolPhase itself now delegates
 // to the tree-aware distributor and can no longer serve as "the other
-// pipeline" for this comparison. It exists ONLY so
-// TestTreeAwareGateScorecard's seed-placement pin has something independent
-// to check placeSeedIndices' extraction claim against: PoolSeeding is still
-// a real, exported, tested function (CreatePools' own callers, and
-// helper/estimate.go's synthetic-roster path, still route through it), so
-// this is not a resurrection of dead code, just a caller that assembles the
-// same three primitives BuildPoolPhase itself used to.
+// pipeline" for this comparison. It exists so TestTreeAwareGateScorecard's
+// seed-placement pin has something independent to check placeSeedIndices'
+// extraction claim against.
 func referencePoolSeedingPipeline(players []Player, poolSize int, isMax bool, numCourts int) ([]Pool, int, error) {
 	numPools := PoolCount(len(players), poolSize, isMax)
 	drawCourts := EffectiveDrawCourts(numPools, numCourts)
-	pools, err := CreatePools(PoolSeeding(players, numPools, drawCourts), poolSize, isMax)
+	pools, err := CreatePools(referencePoolSeeding(players, numPools, drawCourts), poolSize, isMax)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -667,7 +736,7 @@ func identityContractHolds(r []Player, numPools int, pools []Pool) bool {
 // between the chosen pools' qualifier slots. Exponential in numPools, which
 // is capped at 7 in the sweep, so at most C(7,3)=35 subsets of pair-checks.
 func bruteForceMeetingCeiling(targetSizes []int, poolWinners, drawCourts, span int) int {
-	slots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: qualifierModeStandard})
+	slots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: QualifierModeStandard})
 	n := len(slots)
 	if span < 2 || span > n {
 		return math.MaxInt
@@ -715,7 +784,7 @@ func bruteForceMeetingCeiling(targetSizes []int, poolWinners, drawCourts, span i
 // no part in this ceiling, by the same ruling that keeps them out of the
 // gate metric itself.
 func bruteForceWinnerMeetingCeiling(targetSizes []int, poolWinners, drawCourts, span int) int {
-	full := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: qualifierModeStandard})
+	full := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: QualifierModeStandard})
 	slots := make([][]int, len(full))
 	for i, s := range full {
 		if len(s) > 0 {

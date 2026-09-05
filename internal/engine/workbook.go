@@ -21,7 +21,8 @@ import (
 // Order (mandatory, matches TestExportPipelineSheetParity in
 // internal/export/pipeline_parity_test.go):
 //
-//  1. Data sheet (helper.AddPoolDataToSheet)
+//  1. Data sheet (helper.AddDataToSheetForExport, the ONE writer -- see the
+//     namesToPrintPlayers parameter doc below)
 //  2. Pool Draw sheet (helper.AddPoolsToSheet)
 //  3. Pool Matches sheet (helper.PrintPoolMatches)
 //  4. Knockout: Tree pages + Elimination Matches, when the competition has a
@@ -32,7 +33,9 @@ import (
 //     see that predicate's comment below for why that state is refused
 //     rather than partially rendered.
 //  5. Delete the "Tree" template sheet (f.DeleteSheet)
-//  6. Names to Print sheet, one per shiaijo (helper.CreateNamesWithPoolToPrint)
+//  6. Names to Print sheet, one per shiaijo (helper.CreateNamesWithPoolToPrint,
+//     or helper.CreateNamesToPrint over namesToPrintPlayers -- same branch as
+//     step 1)
 //  7. Kachinuki Detail sheet (helper.WriteKachinukiDetailSheet)
 //
 // Every caller-specific extra rides OUTSIDE this function, called by the
@@ -76,6 +79,20 @@ import (
 // playerCoords, matchWinners) is read again once this function's own steps
 // that consume them have run, so returning them would be dead weight at
 // every call site.
+//
+// namesToPrintPlayers is bc-pnum A8/[review]'s single guarded branch for a
+// playoffs-only competition (never has a pools.csv, so nothing above would
+// otherwise populate the Data / Names-to-Print sheets at all): non-nil only
+// for the blank-template export's numbered roster
+// (Engine.NumberedParticipantsFor), nil for every other caller and every
+// other format. Before this parameter existed, the blank-template export
+// called helper.AddPoolDataToSheet here (over the empty pools slice, writing
+// only headers) and THEN called helper.AddPlayerDataToSheet a second time,
+// itself, after this function returned -- two writers of the same sheet,
+// which is why "Data added to spreadsheet" used to print twice for the one
+// playoffs-only shape that needed the second writer at all. Steps 1 and 6
+// below are now the ONE place that decides which writer runs, so the sheet
+// is written exactly once regardless of caller.
 func RenderCompetitionWorkbook(
 	f *excelize.File,
 	comp *state.Competition,
@@ -85,9 +102,17 @@ func RenderCompetitionWorkbook(
 	courtOfPool map[string]string,
 	draw *helper.KnockoutDraw,
 	kachinukiMatches []helper.KachinukiMatchDetail,
+	namesToPrintPlayers []helper.Player,
 ) ([][]int, error) {
-	// 1. Data sheet (Player Name, Dojo, Display Name).
-	poolCoords, playerCoords := helper.AddPoolDataToSheet(f, pools, comp.EffectiveWithZekkenName(), comp.Name)
+	// 1. Data sheet (Player Name, Dojo, Display Name). AddDataToSheetForExport
+	//    is the ONE writer of this sheet: it picks AddPlayerDataToSheet over
+	//    the numbered roster when namesToPrintPlayers is non-empty (the
+	//    playoffs-only shape with no pools.csv), else AddPoolDataToSheet as
+	//    before. AddPoolDataToSheet is never ALSO called in the
+	//    namesToPrintPlayers branch, which is what used to make "Data added
+	//    to spreadsheet" print twice for that one shape (see the doc comment
+	//    above).
+	poolCoords, playerCoords := helper.AddDataToSheetForExport(f, pools, namesToPrintPlayers, comp.EffectiveWithZekkenName(), comp.Name)
 
 	// 2. Pool Draw sheet (reactive formula references to data sheet).
 	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
@@ -197,19 +222,27 @@ func RenderCompetitionWorkbook(
 		// error. EffectiveFormat is why that shape is now caught here instead.
 		return nil, ErrBracketDrawMismatch
 	}
-	// The bare "Tree" sheet is a layout scaffold, never output. Delete it
-	// whether it was copied into pages above or left unused (a format with no
-	// knockout), so no blank tree page ever reaches the workbook or the
-	// printed booklet.
+	// 5. The bare "Tree" sheet is a layout scaffold, never output. Delete it
+	//    whether it was copied into pages above or left unused (a format with
+	//    no knockout), so no blank tree page ever reaches the workbook or the
+	//    printed booklet.
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		return nil, fmt.Errorf("render workbook: delete tree template sheet: %w", err)
 	}
 
-	// 5. Names to Print sheet, one per shiaijo. Clamps the allocation to the
-	//    pool phase's own shiaijo count internally, as step 3 does.
-	helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
+	// 6. Names to Print sheet, one per shiaijo. Clamps the allocation to the
+	//    pool phase's own shiaijo count internally, as step 3 does. Same
+	//    namesToPrintPlayers branch as step 1: a playoffs-only export routes
+	//    through CreateNamesToPrint over the numbered roster instead of
+	//    CreateNamesWithPoolToPrint's empty-pools no-op (which used to leave
+	//    this sheet missing entirely, see bc-pnum A8).
+	if len(namesToPrintPlayers) > 0 {
+		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords)
+	} else {
+		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
+	}
 
-	// 6. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
+	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
 	//    when the competition runs the kachinuki team-match format AND has
 	//    at least one match with bout data. The renderer is a no-op for
 	//    empty input, so this is safe even when the format is fixed.

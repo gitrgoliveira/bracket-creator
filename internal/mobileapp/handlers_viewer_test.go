@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -20,22 +22,32 @@ import (
 // display / streaming overlay / viewer card render the prefix at all
 // (participants.csv does NOT persist Number).
 func TestMergePoolNumbersIntoPlayers(t *testing.T) {
+	// bc-pnum A8/[review]: the real engine, not a hand-rolled stub, so this
+	// unit test exercises the SAME NumberPlayoffsOnlyParticipants the viewer
+	// handler threads through -- a stub reimplementing the derivation here
+	// would be exactly the second independent composition the fix removed.
+	// The playoffs-only branch never touches the store, so a nil one is safe.
+	eng := engine.New(nil)
 	t.Run("no-op when numberPrefix is empty", func(t *testing.T) {
 		comp := &state.Competition{
 			Players: []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
 	t.Run("no-op when pools is empty and format is not playoffs", func(t *testing.T) {
+		// Before the draw a mixed competition has no pools.csv and NO assigned
+		// number: the check-in desk's provisional number travels separately
+		// (Competition.ProvisionalNumbers), never in Player.Number, so a
+		// public surface cannot show a number the draw has not assigned.
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 
@@ -49,7 +61,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p3", Name: "Santos Ana", Dojo: "Dojo Santos Ana"},
 			},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number)
 		assert.Equal(t, "D2", comp.Players[1].Number)
 		assert.Equal(t, "D3", comp.Players[2].Number)
@@ -69,19 +81,32 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
 			},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number)
 		assert.Equal(t, "D2", comp.Players[1].Number)
 	})
 
-	t.Run("playoffs-only: preserves existing non-empty Number", func(t *testing.T) {
+	// bc-pnum G8: this subtest used to assert the opposite -- that an
+	// existing non-empty Number survived the merge untouched. That guard
+	// (the playoffs-only branch's own `if players[i].Number == ""`) was
+	// RETIRED: participants.csv never persists Number, so the only Number
+	// this branch could ever see already set was one THIS SAME function had
+	// just assigned on an earlier call in the request; the preserve was
+	// unreachable in production, and preserving a stale value on purpose
+	// (rather than a competition's CURRENT prefix) is exactly the partial-
+	// preserve fallback D1 forbids. helper.AssignPlayerNumbers now runs
+	// unconditionally here, same as generatePlayoffs itself, so a
+	// NumberPrefix changed after a playoffs-only draw is reflected
+	// immediately on read -- there is no pools.csv for playoffs-only, so
+	// there is nothing to rewrite either (acceptance criterion 4).
+	t.Run("playoffs-only: re-derives unconditionally, overwriting any existing Number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
 			Format:       state.CompFormatPlayoffs,
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "STALE", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
-		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
+		assert.Equal(t, "D1", comp.Players[0].Number, "must overwrite a stale Number with the current prefix, not preserve it")
 	})
 
 	t.Run("merges by id when HasParticipantIDs", func(t *testing.T) {
@@ -102,7 +127,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Suzuki", Number: "K3", Dojo: "Dojo Suzuki"},
 			}},
 		}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K3", comp.Players[1].Number)
 		assert.Equal(t, "K2", comp.Players[2].Number)
@@ -120,7 +145,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			{Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"},
 			{Name: "Suzuki", Number: "K2", Dojo: "Dojo Suzuki"},
 		}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K2", comp.Players[1].Number)
 	})
@@ -131,8 +156,30 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
+	})
+
+	// bc-pnum A4: two legal namesakes from DIFFERENT dojos (allowed everywhere
+	// per this repo's (name, dojo) identity rule) used to collide in a
+	// name-only fallback map, so the SECOND one written into the map silently
+	// won for BOTH entrants. Neither player carries an ID here (legacy
+	// roster), forcing the name/dojo fallback tier.
+	t.Run("falls back to (name, dojo), not bare name: two namesakes from different dojos", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Players: []domain.Player{
+				{Name: "Taro", Dojo: "Dojo Kyoto"},
+				{Name: "Taro", Dojo: "Dojo Osaka"},
+			},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{
+			{Name: "Taro", Dojo: "Dojo Kyoto", Number: "K3"},
+			{Name: "Taro", Dojo: "Dojo Osaka", Number: "K11"},
+		}}}
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
+		assert.Equal(t, "K3", comp.Players[0].Number, "the Kyoto Taro must get his own number, not the Osaka Taro's")
+		assert.Equal(t, "K11", comp.Players[1].Number, "the Osaka Taro must get his own number, not the Kyoto Taro's")
 	})
 
 	t.Run("skips pool players with empty Number", func(t *testing.T) {
@@ -141,7 +188,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 }
@@ -272,4 +319,144 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	assert.Equal(t, float64(1), match0["hansokuB"])
 	assert.NotContains(t, match0, "scoreA")
 	assert.NotContains(t, match0, "scoreB")
+}
+
+// TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw pins the payload
+// the operator console's check-in list reads: before a draw exists Number is
+// EMPTY and the competitors' registration-order numbers travel as
+// provisionalNumbers, index-aligned with players; once pools.csv exists its
+// numbers fill Number and provisionalNumbers is gone. The reverts this pins:
+// composing provisional numbers INTO Number (a public surface would show a
+// number the draw never assigned), and dropping the provisional array (the
+// check-in desk would have nothing to call before the draw).
+func TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-numbers"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Viewer Numbers", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
+		NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+
+	payload := func(t *testing.T) (numbers, provisional []string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		var body struct {
+			Config state.Competition `json:"config"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		numbers = make([]string, 0, len(body.Config.Players))
+		for _, p := range body.Config.Players {
+			numbers = append(numbers, p.Number)
+		}
+		return numbers, body.Config.ProvisionalNumbers
+	}
+
+	numbers, provisional := payload(t)
+	assert.Equal(t, []string{"", ""}, numbers, "pre-draw: no ASSIGNED number")
+	assert.Equal(t, []string{"K1", "K2"}, provisional, "pre-draw: provisional registration-order numbers, index-aligned with players")
+
+	// The draw puts Bob first: pools.csv wins, and the provisional array goes.
+	require.NoError(t, store.SavePools(cid, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob", Number: "K1"},
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice", Number: "K2"},
+	}}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Viewer Numbers", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusDrawReady,
+		NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	numbers, provisional = payload(t)
+	assert.Equal(t, []string{"K2", "K1"}, numbers, "post-draw: pools.csv numbers")
+	assert.Empty(t, provisional, "post-draw: nothing provisional")
+}
+
+// TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers pins D1 on the read
+// side: a drawn competition whose pools.csv will not parse shows MISSING
+// numbers on the public list (and no provisional ones), never numbers
+// composed from registration order that would contradict the draw on disk.
+// The revert this pins: passing a nil pools slice to the merge on a read
+// error, which the merge reads as "no draw yet". The fixture is a
+// playoffs-only competition on purpose: for that format "no pools" DOES
+// compose numbers (participant order is its assigned number), so it is the
+// one format where an unreadable file handed to the merge as "no pools" is
+// observable as invented numbers rather than as silence.
+func TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "corrupt-pools-list"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Corrupt Pools", Format: state.CompFormatPlayoffs, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	// The aggregate is a list of {config, poolMatches, bracket} items.
+	var items []struct {
+		Config state.Competition `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+	var found bool
+	for _, item := range items {
+		comp := item.Config
+		if comp.ID != cid {
+			continue
+		}
+		found = true
+		require.NotEmpty(t, comp.Players, "the roster must still be served")
+		for _, p := range comp.Players {
+			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable pools.csv, got %q", p.Name, p.Number)
+		}
+		assert.Empty(t, comp.ProvisionalNumbers, "a drawn competition never carries provisional numbers")
+		assert.Contains(t, w.Body.String(), `"file":"pools.csv"`, "the unreadable file must be named in the item's dataIssues, not only in the server log")
+	}
+	assert.True(t, found, "the competition must still be listed")
+}
+
+// TestProvisionalCompetitorNumbers pins where the separate provisional list
+// exists: only for a competition a draw can still be generated from, with a
+// prefix and a roster, and never for Swiss, whose draw assigns no number that
+// could replace it.
+func TestProvisionalCompetitorNumbers(t *testing.T) {
+	roster := []domain.Player{{ID: "p1", Name: "A", Dojo: "D"}, {ID: "p2", Name: "B", Dojo: "D"}}
+	for _, tc := range []struct {
+		name string
+		comp *state.Competition
+		want []string
+	}{
+		{"setup mixed", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusSetup, NumberPrefix: "K", Players: roster}, []string{"K1", "K2"}},
+		{"legacy empty status", &state.Competition{Format: state.CompFormatMixed, Status: "", NumberPrefix: "K", Players: roster}, []string{"K1", "K2"}},
+		{"draw-ready", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusDrawReady, NumberPrefix: "K", Players: roster}, nil},
+		{"running", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusPools, NumberPrefix: "K", Players: roster}, nil},
+		{"no prefix", &state.Competition{Format: state.CompFormatMixed, Status: state.CompStatusSetup, Players: roster}, nil},
+		{"swiss", &state.Competition{Format: state.CompFormatSwiss, Status: state.CompStatusSetup, NumberPrefix: "S", Players: roster}, nil},
+		{"playoffs-only: Number is already final", &state.Competition{Format: state.CompFormatPlayoffs, Status: state.CompStatusSetup, NumberPrefix: "P", Players: roster}, nil},
+		{"legacy unset format is playoffs-only too", &state.Competition{Format: "", Status: state.CompStatusSetup, NumberPrefix: "P", Players: roster}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := provisionalCompetitorNumbers(tc.comp)
+			assert.Equal(t, tc.want, got)
+			for _, p := range tc.comp.Players {
+				assert.Empty(t, p.Number, "Player.Number itself must stay untouched")
+			}
+		})
+	}
 }

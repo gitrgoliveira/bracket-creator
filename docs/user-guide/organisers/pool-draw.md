@@ -32,7 +32,7 @@ The **Fit the knockout** qualifier option chooses its own pool count so that the
 
 The dojo is the only thing the draw keeps apart. Sharing a name is not a conflict: two competitors can share a name only when their dojos differ, because a second entry with both the same name and the same dojo is refused as a duplicate of the same person. Namesakes are two different people, they may fight in the same pool, and the sheet tells them apart by dojo and by competitor number.
 
-Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps: no dojo's first meeting may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
+Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps: no dojo's first meeting against a pool's own winner may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. Where a second qualifier's crossing is involved, described below, keeping that meeting apart is a best effort rather than a guarantee, and an exchange may occasionally let one such meeting move earlier when doing so still leaves every winner-path meeting the same or later. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
 
 ### Watch a draw being made
 
@@ -66,6 +66,12 @@ Because the seeds are spread before the pools fill, the top seeds' pools sit on 
 
 ## Competitor numbers
 
-When the competition has a number prefix set, generating the draw gives every competitor a number, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
+Every competition has a number prefix. You can set your own in competition setup, or leave it blank: the app then derives one from the competition's name, for example "Kendo Open" becomes K, or KO if K is already used by another competition. Prefixes are unique across the whole tournament, so a prefix already in use by an earlier competition is not offered again for a later one, even on a different day. The setup page always shows you the derived prefix as you type the name, before you save. Competitions saved by an earlier version of the app without a prefix are given one when the app starts, and their competitors are numbered at the same time, so every competition has a prefix from the moment it is loaded; the settings page simply shows the stored value.
 
-Because the numbers follow the finished draw, they are only fixed once you generate it. Until then the participants panel shows a provisional number, which changes if the roster or the draw changes. A competition with no number prefix set is drawn the same way but assigns no numbers, and competitors are identified by name and dojo alone.
+This section covers pooled formats (mixed and league), where numbers follow the drawn pools. For a knockout-only competition, see [Competitor numbers](knockout-draw.md#competitor-numbers) instead: numbers are final from setup, not provisional. A Swiss competition's competitors carry no number at all.
+
+Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
+
+Because the numbers follow the finished draw, they are only fixed once you generate it. Until then the participants panel shows a provisional number, which changes if the roster or the draw changes.
+
+You can change the number prefix at any time, including after the draw is generated or the competition has started. Saving the new prefix renumbers every competitor immediately; it does not change who is in which pool or who plays whom. If you have already printed tags, reprint them after changing the prefix, because the numbers on the old tags no longer match.

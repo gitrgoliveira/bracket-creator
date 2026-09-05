@@ -487,6 +487,23 @@ type Competition struct {
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
+	// ProvisionalNumbers is set on the viewer payloads AND on the settings
+	// and roster PUT /api/competitions/:id responses (bc-pnum B1: BOTH
+	// branches re-load and compose this for their response, not only the
+	// roster-save one, see D9), for a competition a
+	// draw can still be generated from (status "setup" or the legacy empty
+	// status, engine.CanGenerateDraw) that has a number prefix: one entry per
+	// Players, in the same order, holding the registration-order number the
+	// check-in desk calls BEFORE the draw. It is a separate field from
+	// Player.Number on purpose: a provisional number is a different fact from
+	// an assigned one. The public surfaces show only assigned numbers; the
+	// operator's roster shows these, styled provisional, until the draw
+	// replaces them. Absent for a Swiss competition (its draw never writes
+	// pools.csv, so it carries no number at all) and for an
+	// effective-playoffs competition (its number IS participant order,
+	// composed on every read, so it is never provisional -- see
+	// Player.Number). Never persisted; absent in every other status.
+	ProvisionalNumbers []string `yaml:"-" json:"provisionalNumbers,omitempty"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this
@@ -867,15 +884,21 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 // at all).
 func (c Competition) QualifiersForPool(pool helper.Pool) int {
 	base := c.EffectivePoolWinners()
-	// PoolSize <= 0 means there is no minimum to be over: without a baseline
-	// the oversized test would mark EVERY pool oversized, so degrade to the
-	// uniform count instead. Unreachable for a started competition (the
-	// engine rejects starting with an unset PoolSize) but cheap to make safe
-	// against drifted or hand-edited config.md data.
-	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
-		return base + 1
+	if c.ExtraQualifiers != ExtraQualifiersLargerPools {
+		return base
 	}
-	return base
+	// helper.QualifiersForOversizedPool (bc-drwx item 13) owns the
+	// "oversized pool sends one extra qualifier" rule itself, shared with
+	// extraQualifierOverridesFromSizes (internal/helper/
+	// pool_distribution_tree_aware.go), which used to be a second,
+	// independent implementation of the identical arithmetic. PoolSize <= 0
+	// means there is no minimum to be over -- without a baseline the
+	// oversized test would mark EVERY pool oversized, so
+	// QualifiersForOversizedPool degrades to the uniform count instead.
+	// Unreachable for a started competition (the engine rejects starting
+	// with an unset PoolSize) but cheap to make safe against drifted or
+	// hand-edited config.md data.
+	return helper.QualifiersForOversizedPool(len(pool.Players), c.PoolSize, base)
 }
 
 // MatchWinnerRanksNeeded returns the highest per-pool qualifier rank the

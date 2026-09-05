@@ -33,7 +33,7 @@ func seededDraw(t *testing.T, numPools, numSeeds, numCourts int) ([]Pool, *Knock
 	counted := PoolCount(len(players), 4, false)
 	require.Equal(t, numPools, counted)
 
-	players = PoolSeeding(players, counted, numCourts)
+	players = referencePoolSeeding(players, counted, numCourts)
 	pools, err := CreatePools(players, 4, false)
 	require.NoError(t, err)
 	pools = ReorderPoolsForCourts(pools, numCourts)

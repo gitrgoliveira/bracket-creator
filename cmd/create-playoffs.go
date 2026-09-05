@@ -49,7 +49,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
-	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", numberPrefixFlagHelp)
 	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
@@ -140,9 +140,15 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Using Zekken names")
 	}
 
-	if o.numberPrefix != "" {
-		helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
+	// resolveNumberPrefix (bc-pnum A10, cmd/shared.go) is the ONE derivation
+	// shared with create-pools: trims an explicit value, derives from
+	// --title-prefix when omitted, and refuses one over the length cap
+	// rather than accepting it verbatim.
+	o.numberPrefix, err = resolveNumberPrefix(o.numberPrefix, o.titlePrefix)
+	if err != nil {
+		return err
 	}
+	helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
 
 	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
 

@@ -582,14 +582,14 @@ func validateMatchHantei(r *state.MatchResult) error {
 
 // validateBulkScoreLengths enforces persisted-string caps on a single
 // MatchResult before it lands in the engine. Used by the bulk-score
-// endpoint, which writes through RecordMatchResult and so bypasses
+// endpoint, which writes through RecordMatchResultWithIneligibilityTx and so bypasses
 // ScoreRequest.Validate's checks. Same caps as ScoreRequest.Validate
 // so the per-result and per-endpoint enforcement stays in lockstep.
 // allowNumberedEncho mirrors validateSubBout's kachinuki exception; the
 // bulk handler derives it from the competition it already loads.
 func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) error {
 	// Same legacy fold + FULL hantei rule set as validateWithOptions (via the
-	// shared validateMatchHantei): this path writes through RecordMatchResult
+	// shared validateMatchHantei): this path writes through RecordMatchResultWithIneligibilityTx
 	// and nothing downstream re-checks, so a misplaced judges'-decision mark
 	// (or a pre-ruling decidedByHantei flag), an incompatible decision, or a
 	// withdrawal-audit field alongside a hantei verdict must be caught here
@@ -629,6 +629,14 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 		return err
 	}
 	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
+		return err
+	}
+	// bc-idfx: the id twin of the wire-level winner==sideA/sideB check
+	// (validateWithOptions) -- bulk-score bypasses that path entirely (it
+	// writes through RecordMatchResultWithIneligibilityTx, never ScoreRequest.Validate), so a
+	// crafted batch entry naming a winnerId that matches neither side id was
+	// persisted verbatim and counted for nobody in standings.
+	if err := validateWinnerIDMatchesSide(r.WinnerID, r.SideAID, r.SideBID); err != nil {
 		return err
 	}
 	if r.FlagsA < 0 {
@@ -869,6 +877,14 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 			}
 		}
 	}
+	// The id twin of the check above: a client-supplied winnerId naming
+	// NEITHER side id is invalid data, caught here whenever the payload
+	// itself carries enough to check (see validateWinnerIDMatchesSide's own
+	// comment for why a payload that omits the side ids has nothing to
+	// check yet, and where the authoritative check lives for that case).
+	if err := validateWinnerIDMatchesSide(r.WinnerID, r.SideAID, r.SideBID); err != nil {
+		return err
+	}
 	// Best-of-3 ippon invariants on the top-level scoreline.
 	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
 		return err
@@ -951,6 +967,38 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 	a := len(ipponsA)
 	b := len(ipponsB)
 	return (a == n && b == 0) || (a == 0 && b == n)
+}
+
+// validateWinnerIDMatchesSide is the id twin of the wire winner==sideA/sideB
+// name check: a WinnerID that names NEITHER SideAID nor SideBID is invalid
+// data (a client cannot declare a winner who isn't one of the two
+// competitors), and shared by both score-writing HTTP paths (validateWithOptions,
+// validateBulkScoreLengths) so the check cannot drift between them.
+//
+// Only checked when all three fields are present on the wire: SideAID/SideBID
+// are NOT required on a score write (specs/openapi.yaml) -- the engine's
+// reconcileSides/backfillMatchIdentity backfill them from the stored match so
+// a minimal payload (winner + ippons only) still writes cleanly -- so a
+// payload that omits them has nothing to check here YET. That is not a gap:
+// backfillMatchIdentity (internal/engine/scoring.go) re-runs this exact check
+// once the STORED ids are known and rejects the write at that point instead,
+// so a winnerId that only turns out to be invalid once the stored pairing is
+// known is still caught, just one layer later than a self-inconsistent
+// payload is. Both HTTP paths reach it: the single-score write and every
+// bulk-score entry both go through RecordMatchResultWithIneligibilityTx,
+// which is backfillMatchIdentity's one caller, so this later check applies
+// uniformly regardless of which endpoint the payload arrived through.
+func validateWinnerIDMatchesSide(winnerID, sideAID, sideBID string) error {
+	if winnerID == "" || sideAID == "" || sideBID == "" {
+		return nil
+	}
+	if winnerID != sideAID && winnerID != sideBID {
+		return &ValidationError{
+			Field:   "winnerId",
+			Message: fmt.Sprintf("must equal sideAId or sideBId, got %q", winnerID),
+		}
+	}
+	return nil
 }
 
 // validateIppons is the ONE gate every ippon slice crosses on its way in, from

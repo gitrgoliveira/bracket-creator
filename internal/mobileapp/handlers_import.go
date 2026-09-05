@@ -6,12 +6,14 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"gopkg.in/yaml.v3"
@@ -64,9 +66,18 @@ type ImportResult struct {
 	ParticipantCount int    `json:"participantCount"`
 	SeedCount        int    `json:"seedCount"`
 	Error            string `json:"error,omitempty"`
+	// Warning is non-empty when the row imported successfully but with a
+	// caveat the operator must act on -- currently only the import-boundary
+	// prefix reassignment ([review] round 2, item 2): the row landed, but
+	// under a DIFFERENT number prefix than the archive requested, so every
+	// tag this competition already had printed (under the old prefix) now
+	// names a number it no longer has. A bare Error-only result would let
+	// the SPA's all-success banner auto-navigate away without the operator
+	// ever seeing that a competition needs reprinting.
+	Warning string `json:"warning,omitempty"`
 }
 
-func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, elevated ElevatedVerifier) {
+func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.POST("/tournament/import", RequireElevatedPassword(elevated), func(c *gin.Context) {
 		if err := c.Request.ParseMultipartForm(64 << 20); err != nil { // 64 MB limit
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse multipart form: " + err.Error()})
@@ -114,7 +125,7 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, el
 
 		var results []ImportResult
 		for _, entry := range manifest.Competitions {
-			r := importCompetition(store, entry, fileMap)
+			r := importCompetition(store, eng, entry, fileMap)
 			results = append(results, r)
 		}
 
@@ -123,7 +134,7 @@ func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub, el
 	})
 }
 
-func importCompetition(store *state.Store, entry ImportManifestComp, files map[string][]byte) ImportResult {
+func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManifestComp, files map[string][]byte) ImportResult {
 	// Pre-trim Name so the ImportResult returned to the client matches
 	// the canonical record we save. Pre-fix: res.Name = entry.Name kept
 	// any leading/trailing whitespace from the manifest, so the import
@@ -448,11 +459,84 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 			res.Error = fmt.Sprintf("competition ID %q already exists", comp.ID)
 			return nil
 		}
-		if infraErr, uniqueErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, comp.ID); infraErr != nil {
+		// Same defaulting the POST /competitions handler applies (G2): a
+		// manifest row is as capable of omitting number_prefix as a JSON
+		// body is, and this competition must not end up without one either.
+		if infraErr := assignDefaultNumberPrefix(eng, comp, comp.ID); infraErr != nil {
 			return infraErr
-		} else if uniqueErr != nil {
-			res.Error = uniqueErr.Error()
+		}
+		// Name collision is a genuine identity conflict this row cannot
+		// safely resolve on its own (renaming one side risks confusing the
+		// operator restoring the archive), so it still rejects exactly like
+		// create/PUT. Checked separately from the prefix below (prefix
+		// exempted with "" here) so a name collision and a prefix collision
+		// can be told apart without parsing the error text.
+		if infraErr, nameErr := checkUniqueCompFields(store, comp.Name, "", comp.ID); infraErr != nil {
+			return infraErr
+		} else if nameErr != nil {
+			res.Error = nameErr.Error()
 			return nil
+		}
+		// bc-pnum A1 (import boundary, [review] nit d): a restored archive
+		// can legally carry a prefix pair that predates the ambiguity rule
+		// -- e.g. "K" and "K2", both saved back when only an EXACT duplicate
+		// was refused. Rejecting this row would silently drop half of a
+		// legitimate restore over a rule that did not exist when the data
+		// was created. The governing rule for this bead is explicit: on
+		// legacy data we ASSIGN, never reject. So a prefix collision here
+		// (exact OR ambiguous, whichever checkUniqueCompFields caught) is
+		// healed by re-deriving a fresh prefix through the same
+		// DefaultNumberPrefixFor every other assignment path already uses
+		// (create, settings, the start/generate-draw pre-flight,
+		// MigrateNumberPrefixes) -- never a bespoke suffix scheme invented
+		// here -- and logged so the operator can see a tag changed on
+		// restore. RenumberCompetitors below then makes that reassignment
+		// visible on this row's pools.csv too, exactly as MigrateNumberPrefixes
+		// does for the equivalent load-time case (it is a no-op today: this
+		// manifest format has no pools file to restore, but the pairing
+		// keeps import consistent with every other place a prefix is
+		// (re)assigned, and covers a manifest extended with pools later).
+		if infraErr, prefixErr := checkUniqueCompFields(store, "", comp.NumberPrefix, comp.ID); infraErr != nil {
+			return infraErr
+		} else if prefixErr != nil {
+			oldPrefix := comp.NumberPrefix
+			newPrefix, deriveErr := eng.DefaultNumberPrefixFor(comp.Name, comp.ID)
+			if deriveErr != nil {
+				return deriveErr
+			}
+			// [review] round 2, item 1: DefaultNumberPrefixFor's own contract
+			// (helper/numbers.go) is an explicit best-effort SUGGESTION, not a
+			// uniqueness guarantee -- once every candidate up to the length
+			// cap is exhausted it returns the LAST one tried, unmodified,
+			// which can itself already be taken (e.g. ~100 siblings holding
+			// "K" and every "K02".."K99" exhausts the derivation onto "K99",
+			// colliding with the sibling that already holds it). Every OTHER
+			// caller of this function (create, settings, the
+			// start/generate-draw pre-flight) re-validates the suggestion
+			// before trusting it; this reassign branch must too. At genuine
+			// exhaustion the collision cannot be resolved by re-deriving
+			// again (the taken set has not changed), so a refusal here is
+			// the honest outcome -- exactly like the name-collision branch
+			// above, which also refuses rather than silently landing bad
+			// data.
+			if infraErr, reErr := checkUniqueCompFields(store, "", newPrefix, comp.ID); infraErr != nil {
+				return infraErr
+			} else if reErr != nil {
+				res.Error = fmt.Sprintf("number prefix %q collided on restore and no replacement prefix could be derived: %v", oldPrefix, reErr)
+				return nil
+			}
+			log.Printf("mobileapp: import %s: number prefix %q collided on restore (%v); reassigned %q",
+				comp.ID, oldPrefix, prefixErr, newPrefix)
+			comp.NumberPrefix = newPrefix
+			// [review] round 2, item 2: the reassignment PRESERVES mp-yin4's
+			// global prefix+number uniqueness invariant, but every tag this
+			// competition already had printed under oldPrefix now names a
+			// number it no longer has. ImportResult.Error would make the SPA
+			// treat this row as a hard failure (it is not: the row landed);
+			// Warning surfaces the caveat without that, so the operator
+			// restoring the archive is told to reprint rather than finding
+			// out from a competitor holding a stale tag.
+			res.Warning = fmt.Sprintf("number prefix %q was already in use: assigned %q; reprint this competition's tags", oldPrefix, newPrefix)
 		}
 		if len(parsedPlayers) > 0 {
 			// Mirror saveCompetitionWithPlayers semantics: when
@@ -469,6 +553,19 @@ func importCompetition(store *state.Store, entry ImportManifestComp, files map[s
 	// closure, abort the row before participants/seeds save below.
 	if res.Error != "" {
 		return res
+	}
+	// bc-pnum A1 ([review] nit d): renumber whatever this row already has on
+	// disk under its (possibly just-reassigned) prefix, the same pairing
+	// every other assignment site uses. A no-op today -- this manifest
+	// format never restores pools.csv, so RenumberCompetitors' own
+	// len(pools)==0 guard returns immediately -- but the row must not be
+	// left silently unrenumbered if a future manifest format adds one.
+	// Best-effort: this is inherited/restore-time state, not something the
+	// row's own participants/seeds save below could have introduced, so a
+	// failure here is logged rather than failing the whole import row (the
+	// same "inherited damage" contract ensureNumberPrefix documents).
+	if _, err := eng.RenumberCompetitors(entry.ID); err != nil {
+		log.Printf("mobileapp: import %s: competitors not numbered: %v (retried on the next settings save, G4)", entry.ID, err)
 	}
 
 	// Save participants, already parsed pre-save, so this is a pure

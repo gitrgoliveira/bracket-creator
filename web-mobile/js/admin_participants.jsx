@@ -456,27 +456,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
-  // The draw assigns the final, pool-interleaved numbers (player.number);
-  // before that there is none. We surface a stable registration-order number
-  // (numberPrefix + position in c.players) so operators can call competitors
-  // by number during check-in. Keyed off the unfiltered roster so the number
-  // doesn't jump when the list is searched/sorted. Rendered as provisional
-  // (muted, dotted) since the final numbers may differ after the draw.
-  const provisionalNumberById = useMemoA(() => {
-    // Null-prototype object: keys are user-controlled (window.checkinPid(p)), so
-    // a participant named "__proto__" or "constructor" against a plain `{}` map
-    // could pollute the prototype chain or return inherited values on lookup.
-    // `Object.create(null)` removes both risks and keeps the `map[key]` /
-    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
-    const map = Object.create(null);
-    if (c.numberPrefix) {
-      (c.players || []).forEach((p, i) => {
-        map[window.checkinPid(p)] = `${c.numberPrefix}${i + 1}`;
-      });
-    }
-    return map;
-  }, [c.players, c.numberPrefix]);
+  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk):
+  // the server's provisionalNumbers, keyed by checkinPid through the shared
+  // data.jsx helper (which also guards the index alignment). Rendered as
+  // provisional (muted, dotted) since the draw replaces them.
+  const provisionalNumberById = useMemoA(
+    () => window.provisionalNumberMap(c.players, c.provisionalNumbers),
+    [c.players, c.provisionalNumbers]
+  );
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();

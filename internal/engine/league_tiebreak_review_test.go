@@ -58,15 +58,15 @@ func TestGenerateLeagueTiebreakMatches_RejectsBadNames(t *testing.T) {
 	eng, _ := setupTeamPoolComp(t, compID, true) // Alpha/Beta/Gamma all tied, complete
 
 	t.Run("unknown team name", func(t *testing.T) {
-		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Zeta"})
+		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Zeta"}, nil)
 		require.Error(t, err, "an unknown team must be rejected, not silently dropped")
 	})
 	t.Run("duplicate team name", func(t *testing.T) {
-		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Alpha"})
+		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Alpha"}, nil)
 		require.Error(t, err, "a duplicate team must be rejected")
 	})
 	t.Run("valid group succeeds", func(t *testing.T) {
-		injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"})
+		injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"}, nil)
 		require.NoError(t, err)
 		assert.Len(t, injected, 3, "3-team round-robin → 3 tie-break bouts")
 	})
@@ -105,10 +105,45 @@ func TestGenerateLeagueTiebreakMatches_AmbiguousNameDiagnosis(t *testing.T) {
 	// pool player even with zero matches played, and GenerateLeagueTiebreakMatches
 	// does not re-validate consequentiality (the handler is the gate).
 
-	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Team X", "Team Y"})
+	_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Team X", "Team Y"}, nil)
 	require.Error(t, err, "an ambiguous team name must be rejected")
 	assert.NotContains(t, err.Error(), "not found",
 		"a name that matched twice was FOUND, just ambiguously -- must not be reported as missing")
 	assert.Contains(t, err.Error(), "Team X",
 		"the error must name the ambiguous team so the operator isn't left guessing")
+}
+
+// TestGenerateLeagueTiebreakMatches_TeamIDsResolveNamesakeCollision is the
+// bc-idfx finding 11 companion to the ambiguous-name test above: the EXACT
+// same namesake-collision fixture (two "Team X" from different dojos) that
+// name-based selection cannot disambiguate must succeed when the operator
+// selects by participant id (tiedTeamIDs) instead.
+func TestGenerateLeagueTiebreakMatches_TeamIDsResolveNamesakeCollision(t *testing.T) {
+	compID := "lt-namesake-by-id"
+	eng, store, _ := setupTestEngine(t)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:       compID,
+		Name:     "Namesake By ID Test",
+		Format:   state.CompFormatLeague,
+		Status:   state.CompStatusPools,
+		Courts:   []string{"A"},
+		Kind:     "team",
+		TeamSize: 2,
+	}))
+	// Two DIFFERENT teams share the display name "Team X" (different dojos,
+	// the documented checkNewTeamNameCollisions enforcement-hole shape).
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "id-team-x-dojo-a", Name: "Team X", Dojo: "Dojo A"},
+			{ID: "id-team-x-dojo-b", Name: "Team X", Dojo: "Dojo B"},
+		}},
+	}))
+
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Team X", "Team X"}, []string{"id-team-x-dojo-a", "id-team-x-dojo-b"})
+	require.NoError(t, err, "selecting by id must resolve the exact same collision name selection cannot")
+	require.Len(t, injected, 1, "a 2-team round-robin is exactly one DH bout")
+	m := injected[0]
+	assert.ElementsMatch(t, []string{"id-team-x-dojo-a", "id-team-x-dojo-b"}, []string{m.SideAID, m.SideBID},
+		"the generated bout must be stamped with BOTH teams' real ids, not merged under the shared name")
 }

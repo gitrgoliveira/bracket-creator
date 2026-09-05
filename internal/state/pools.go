@@ -228,6 +228,13 @@ func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
 	cache.mtime = s.FileMtime(compID, "pools.csv")
 	cache.mu.Unlock()
 
+	// Bumped AFTER the bytes land and the cache is refreshed (bumpFileVersion's
+	// contract): anything keying a cache on pools.csv, notably engine's
+	// standingsTokens (RenumberCompetitors is the first pools.csv writer that
+	// runs after the pool phase has standings, so a stale-cache read here would
+	// otherwise serve pre-renumber numbers for the process lifetime, see bc-pnum).
+	s.bumpFileVersion(compID, "pools.csv")
+
 	return nil
 }
 

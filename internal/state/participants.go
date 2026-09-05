@@ -328,7 +328,14 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		checkedInFlags = append(checkedInFlags, isCheckedIn)
 	}
 
-	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName)
+	// requireDojo=false (bc-drwx item 10): this reads an EXISTING roster
+	// back off disk, and per ErrBlankDojo's own doc comment READ is
+	// deliberately NOT gated -- a roster written before the write-time
+	// guard existed, or hand-edited, must still load so an operator can
+	// see it and repair the dojo through the edit UI. Only CreatePlayers
+	// (helper/tournament.go), the CLI/web-preview/import entry point that
+	// builds a roster FRESH from raw text, requires one.
+	players, err := helper.CreatePlayersFromRecords(playerRecords, withZekkenName, false)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,8 @@ package cmd
 import (
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -117,6 +119,56 @@ func TestMobileAppOptions_RunReachesServer(t *testing.T) {
 	err := o.run(nil, nil)
 	// The server fails to bind, expect a non-nil listen error.
 	require.Error(t, err)
+}
+
+// TestMobileAppOptions_RunMigratesNumberPrefixesBeforeServing pins bc-pnum
+// D6: the startup migration (engine.MigrateNumberPrefixes) runs BEFORE the
+// server attempts to bind, so a legacy prefix-less competition on disk is
+// healed even on a run() call that fails to bind (the port here is >65535,
+// guaranteed to fail net.Listen immediately, same as
+// TestMobileAppOptions_RunReachesServer): the migration step has already run
+// and persisted its changes by the time that error surfaces.
+func TestMobileAppOptions_RunMigratesNumberPrefixesBeforeServing(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	const cid = "legacy-draw-ready"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Legacy Draw Ready", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 3, PoolWinners: 2, Status: state.CompStatusDrawReady,
+		// NumberPrefix intentionally left empty: this is the legacy shape.
+	}))
+	require.NoError(t, store.SavePools(cid, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			// Number intentionally left empty: legacy pools.csv drawn before
+			// this rule existed (G7).
+			{ID: "p1", Name: "Alice", Dojo: "Dojo Alice"},
+			{ID: "p2", Name: "Bob", Dojo: "Dojo Bob"},
+		}},
+	}))
+
+	o := &mobileAppOptions{
+		folder:      dir,
+		bindAddress: "localhost",
+		port:        99999, // >65535: net.Listen fails immediately
+	}
+	runErr := o.run(nil, nil)
+	require.Error(t, runErr, "the server still fails to bind; this test is about what ran BEFORE that")
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.NotEmpty(t, stored.NumberPrefix, "the legacy blank prefix must be assigned before the server ever tries to bind")
+
+	pools, err := store.LoadPools(cid)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 2)
+	for _, p := range pools[0].Players {
+		assert.NotEmptyf(t, p.Number, "competitor %q must be numbered by the startup migration, not left blank", p.Name)
+		assert.Truef(t, len(p.Number) > len(stored.NumberPrefix) && p.Number[:len(stored.NumberPrefix)] == stored.NumberPrefix,
+			"number %q should start with the assigned prefix %q", p.Number, stored.NumberPrefix)
+	}
 }
 
 // TestMobileAppOptions_RunSSEMaxClientsValid exercises the valid-positive-int

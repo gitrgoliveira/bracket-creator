@@ -196,6 +196,36 @@ func TestAddPoolDataToSheet(t *testing.T) {
 	}
 }
 
+// TestAddPlayerDataToSheet_DrawOrderMatchesRealZeroBasedRoster pins bc-pnum
+// A11 against the shape CreatePlayers (tournament.go) actually produces: the
+// FIRST entrant carries PoolPosition 0 (len(players) BEFORE the append), a
+// value pool distribution overwrites 1-based for every pooled competition
+// but nothing ever touches for a playoffs-only one. Before the fix, row 3
+// (the first entrant) read "0" in the renamed "Draw order" column beside a
+// "Player Number" column reading "K1" -- two different counting conventions
+// on the same row. The fix must show "1" for the first entrant.
+func TestAddPlayerDataToSheet_DrawOrderMatchesRealZeroBasedRoster(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "Dojo A", PoolPosition: 0, Number: "K1"},
+		{Name: "Bob", Dojo: "Dojo B", PoolPosition: 1, Number: "K2"},
+		{Name: "Carol", Dojo: "Dojo C", PoolPosition: 2, Number: "K3"},
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+	_, err := f.NewSheet(SheetData)
+	require.NoError(t, err)
+
+	AddPlayerDataToSheet(f, players, false, "")
+
+	for i, want := range []string{"1", "2", "3"} {
+		row := i + 3
+		got, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
+		require.NoError(t, err)
+		assert.Equalf(t, want, got, "row %d (entrant %q, tag %q) must show 1-based draw order", row, players[i].Name, players[i].Number)
+	}
+}
+
 func TestAddPlayerDataToSheet(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -266,10 +296,13 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "Title prefix:", prefixLabel)
 
-			// Verify headers (row 2)
+			// Verify headers (row 2). bc-pnum A11: renamed from "Number" -- this
+			// column is the roster's draw order, not the "Player Number" tag
+			// column (E/D below), and the two used to read as the same concept
+			// under one label while counting from different bases.
 			numberHeader, err := f.GetCellValue(SheetData, "A2")
 			require.NoError(t, err)
-			assert.Equal(t, "Number", numberHeader)
+			assert.Equal(t, "Draw order", numberHeader)
 
 			playerNameHeader, err := f.GetCellValue(SheetData, "B2")
 			require.NoError(t, err)
@@ -293,10 +326,12 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			for i, player := range tt.players {
 				row := i + 3
 
-				// Verify position number
+				// Verify position number. bc-pnum A11: written 1-based
+				// (PoolPosition+1) now, since PoolPosition itself is 0-based
+				// for a playoffs-only roster (CreatePlayers, tournament.go).
 				position, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
 				require.NoError(t, err)
-				assert.Equal(t, fmt.Sprint(player.PoolPosition), position)
+				assert.Equal(t, fmt.Sprint(player.PoolPosition+1), position)
 
 				// Verify name
 				name, err := f.GetCellValue(SheetData, fmt.Sprintf("B%d", row))

@@ -141,33 +141,42 @@ func TestCreatePools_CourtLabelsFollowTheClampedCourtCount(t *testing.T) {
 // the raw field, "or an unset PoolWinners would read as poolWinners=0 and
 // incorrectly pass this check". createPools passed the raw flag.
 //
-// The consequence is not a missed rejection -- the run still fails -- but a
-// WRONG rejection: 0 slips the >= 2 gate, the draw builder is handed
-// defaultWinners=0 and refuses, and the operator is told their pool/shiaijo
-// SHAPE is unsupported and to adjust --courts, when the actual problem is a
+// The consequence WAS not a missed rejection -- the run still failed -- but a
+// WRONG rejection: 0 used to slip the >= 2 gate, the draw builder was handed
+// defaultWinners=0 and refused, and the operator was told their pool/shiaijo
+// SHAPE was unsupported and to adjust --courts, when the actual problem was a
 // pool-winners count the mode does not allow.
 //
-// Fault injection (verified): passing o.poolWinners instead of the resolved
-// value turns this red with "outside what --extra-qualifiers larger-pools
-// currently supports".
-func TestCreatePools_ExtraQualifiersValidatesTheResolvedPoolWinners(t *testing.T) {
+// SUPERSEDED by bc-drwx item 9: createPools now rejects o.poolWinners < 1
+// OUTRIGHT, ahead of ValidateExtraQualifiers, ahead of everything -- the CLI
+// flag already carries an explicit default of 2 (newCreatePoolCmd), so an
+// operator who types `-w 0` almost certainly made a mistake and gets told so
+// directly, rather than having 0 silently treated as "unset, use the
+// default" and rejected several layers downstream (sometimes with the wrong
+// reason, which is what this test used to pin). This test now pins that the
+// new, earlier, mode-independent rejection fires FIRST for `-w 0`, even
+// under a mode (larger-pools) that has its own, more specific pool-winners
+// rule -- superseding both of this test's old possible outcomes.
+func TestCreatePools_ExtraQualifiersRejectsPoolWinnersZeroBeforeModeValidation(t *testing.T) {
 	dir := t.TempDir()
 
 	o := &poolOptions{
 		filePath:        poolRoster(t, dir, 12),
 		outputPath:      filepath.Join(dir, "out.xlsx"),
 		numPlayers:      3,
-		poolWinners:     0, // unset: EffectivePoolWinners() resolves it to 2
+		poolWinners:     0,
 		courts:          2,
 		extraQualifiers: state.ExtraQualifiersLargerPools,
 		determined:      true,
 	}
 	err := o.run(nil, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "requires pool winners = 1",
-		"the operator must be told which setting is wrong")
+	assert.Contains(t, err.Error(), "--pool-winners must be at least 1, got 0",
+		"the operator must be told the actual problem: an explicit, invalid --pool-winners value")
+	assert.NotContains(t, err.Error(), "requires pool winners = 1",
+		"the old mode-specific rejection must not fire: the new check catches it first")
 	assert.NotContains(t, err.Error(), "outside what --extra-qualifiers",
-		"an unresolved pool-winners count slipped the rule and was reported as an unsupported draw shape instead")
+		"the old generic unsupported-shape rejection must not fire either")
 }
 
 // The rule's own case still has to reject: an explicit 2 is not "unset", and

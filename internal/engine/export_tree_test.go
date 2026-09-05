@@ -14,6 +14,7 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -404,6 +405,176 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 7, countEliminationMatchBlocks(elim),
 		"an 8-entrant playoffs knockout must render 7 elimination match blocks")
+}
+
+// TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint pins
+// bc-pnum A8: a playoffs-only competition never has a pools.csv, so
+// ExportCompetitionXlsx used to feed CreateTagsSheet and (inside
+// RenderCompetitionWorkbook) CreateNamesWithPoolToPrint the EMPTY pools
+// slice, which produced a Tags sheet with zero rows and no Names-to-Print
+// sheet at all -- despite the competition having numbered competitors on
+// every other surface. The fix feeds those two sheets the numbered
+// participant list (NumberedParticipantsFor, the same
+// helper.AssignPlayerNumbers composition the public viewer merge uses), so
+// the numbers on the printed tags must equal what the app already shows.
+//
+// [review] narrowed what this test can prove: it derives wantNumbers by
+// calling eng.NumberedParticipantsFor, the exact function ExportCompetitionXlsx
+// itself calls, so it can only catch the export disagreeing with ITSELF, not
+// with the public viewer payload. This package cannot hold the stronger
+// check -- internal/mobileapp already imports internal/engine, so the
+// reverse import needed to drive a real viewer HTTP handler from here would
+// cycle. That independent-oracle cross-check (export numbers against an
+// ACTUAL /api/viewer/competitions/:id response) lives in
+// internal/mobileapp/export_numbering_crosscheck_test.go,
+// TestExportedTagsNumbersMatchActualViewerPayload. This test remains as the
+// lighter same-package regression guard for the sheet-shape bug the doc
+// comment above describes (empty Tags, missing Names-to-Print sheet).
+func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-tags"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	names := make([]string, 4)
+	for i := range names {
+		names[i] = fmt.Sprintf("Player%02d", i+1)
+	}
+	saveTestParticipants(t, store, compID, names)
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	wantNumbered, err := eng.NumberedParticipantsFor(comp)
+	require.NoError(t, err)
+	wantNumbers := make(map[string]string, len(wantNumbered))
+	for _, p := range wantNumbered {
+		wantNumbers[p.Name] = p.Number
+	}
+	require.Len(t, wantNumbers, 4, "premise: every entrant carries a K-prefixed number")
+
+	f := openExportedWorkbook(t, eng, compID)
+
+	// Tags sheet: one row (two cells, A and G columns of one row -- see
+	// CreateTagsSheet) per entrant, and the printed number must equal the
+	// one the rest of the app already shows for that entrant.
+	tagRows, err := f.GetRows(helper.SheetTags)
+	require.NoError(t, err)
+	gotTagNumbers := map[string]bool{}
+	for _, row := range tagRows {
+		for _, cell := range row {
+			cell = strings.TrimSpace(cell)
+			if cell != "" {
+				gotTagNumbers[cell] = true
+			}
+		}
+	}
+	for name, number := range wantNumbers {
+		assert.Truef(t, gotTagNumbers[number], "Tags sheet must print %q's number %q; got cells %v", name, number, gotTagNumbers)
+	}
+
+	// Names to Print: a sheet must now exist (deleted-with-nothing-created was
+	// the bug) and carry an entry per entrant.
+	sheetList := f.GetSheetList()
+	var namesSheet string
+	for _, s := range sheetList {
+		if strings.HasPrefix(s, "Names to Print") {
+			namesSheet = s
+			break
+		}
+	}
+	require.NotEmpty(t, namesSheet, "a playoffs-only competition must still get a Names to Print sheet")
+	nameRows, err := f.GetRows(namesSheet)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(nameRows), 4, "Names to Print must carry one row per entrant")
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it, for pinning helper.finishDataSheet's
+// fmt.Printf("Data added to spreadsheet\n") call count below.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	defer r.Close()
+
+	// [review] nit (a): drain the pipe CONCURRENTLY, started before fn()
+	// runs. A pipe's kernel buffer is bounded (64 KiB on Linux); fn() used
+	// to run to completion before anything read from r, so an export
+	// printing more than that in one call would block the writer forever --
+	// deadlocking the whole test binary, not just this test, since
+	// captureStdout exists specifically to count finishDataSheet's stdout
+	// line. The goroutine delivers the fully-drained buffer on `copied` once
+	// fn() has returned and w.Close() below gives io.Copy its EOF.
+	var buf bytes.Buffer
+	copied := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&buf, r)
+		copied <- copyErr
+	}()
+
+	fn()
+
+	require.NoError(t, w.Close())
+	require.NoError(t, <-copied)
+	return buf.String()
+}
+
+// TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce pins the
+// [review] nit (a): a playoffs-only export (no pools.csv) used to call
+// helper.AddPoolDataToSheet inside RenderCompetitionWorkbook's step 1 (over
+// the empty pools slice, writing only headers) and THEN call
+// helper.AddPlayerDataToSheet a second time in ExportCompetitionXlsx itself,
+// after the pipeline returned -- two writers of the same Data sheet, so
+// "Data added to spreadsheet" (finishDataSheet's own stdout line) printed
+// twice for this one shape. The fix (helper.AddDataToSheetForExport, called
+// once from RenderCompetitionWorkbook's step 1) collapses that to a single
+// guarded call. This is the ONLY reliable observable of "how many times was
+// the Data sheet written" available from outside the helper package: the
+// workbook itself has no artifact recording writer count once the file is
+// closed.
+func TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-data-once"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	output := captureStdout(t, func() {
+		_, exportErr := eng.ExportCompetitionXlsx(compID)
+		require.NoError(t, exportErr)
+	})
+	assert.Equal(t, 1, strings.Count(output, "Data added to spreadsheet"),
+		"the Data sheet must have exactly ONE writer for a playoffs-only export; captured stdout: %q", output)
+}
+
+// TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea pins a
+// review finding on top of bc-pnum A9: a mixed competition still in `setup`
+// (no draw generated, so pools.csv does not exist and CreateTagsSheet gets
+// zero players) used to have helper.SetPrintArea called with lastRow 0 (the
+// write loop never ran, so `row` stayed at its initial 1 and row-1 was 0),
+// defining the INVALID range "$A$1:$A$0" on the Tags sheet. The fix skips
+// the print area entirely when nothing was written.
+func TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "setup-mixed-no-draw"
+	createTestCompetition(t, store, compID, "mixed", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	// Deliberately NOT started: no draw, no pools.csv, status stays "setup".
+
+	f := openExportedWorkbook(t, eng, compID)
+	for _, d := range f.GetDefinedName() {
+		if d.Name == "_xlnm.Print_Area" && d.Scope == helper.SheetTags {
+			t.Errorf("expected NO print area for the zero-player Tags sheet of a setup competition, got %q", d.RefersTo)
+		}
+	}
 }
 
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:

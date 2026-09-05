@@ -37,7 +37,7 @@ import {
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
-  teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
+  teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError, competitorsCarryNumbers,
   shapeConfigForSave, resolveTeamSize, kindChangeBlockedReason,
   FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_PARTIAL,
   MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears, swissSettingsError,
@@ -732,15 +732,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   };
 
   // draw-ready lock: output-affecting fields: those that reach the Excel
-  // generator (pools, courts, format, kind, team size, mirror, numberPrefix,
+  // generator (pools, courts, format, kind, team size, mirror,
   // withZekkenName): are disabled while a draw exists. Fields that do NOT
-  // affect the generated workbook (name, date, startTime, checkInEnabled,
-  // naginata) remain editable. Discard the draw from the competition header to
-  // unlock everything.
+  // affect the generated workbook (name, date, startTime, checkInEnabled)
+  // remain editable. Discard the draw from the competition header to
+  // unlock everything. numberPrefix is deliberately NOT in the disabled set
+  // (bc-pnum G4b): it only labels competitors, and RenumberCompetitors
+  // rewrites pools.csv in place after every save, so it stays editable in
+  // every status; see its own field below for the inline reprint warning.
+  // (bc-pnum C5: naginata is NOT on this "remain editable" list -- it has
+  // its own lock, `lockedAfterDraw` below, which the Engi/Naginata comment
+  // right after this one describes.)
   const isDrawReady = local.status === "draw-ready";
-  // Engi and Naginata are locked once the competition has started (pools, playoffs,
-  // completed, or any future status beyond draw-ready): flipping engi mid-tournament
-  // changes the scoring paradigm; flipping naginata affects the bronze match.
+  // Engi and Naginata are locked from draw-ready onward (lockedAfterDraw =
+  // isDrawReady || isStarted, both checkboxes below use it directly):
+  // flipping engi mid-tournament changes the scoring paradigm; flipping
+  // naginata affects the bronze match, and both would desync from a draw
+  // already generated on the OLD value, the same reason format/courts/pool
+  // sizing lock at draw-ready above.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
   // The draw-lock condition and its copy, named once. Both were repeated
@@ -1504,9 +1513,27 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           })()}
         </div>
       )}
+      {/* bc-pnum C5: unlike the OUTPUT-AFFECTING fields (format, courts, pool
+          sizing, ...), which lock once a draw exists, the prefix is NEVER
+          disabled (bc-pnum G4b): RenumberCompetitors
+          rewrites pools.csv in place after a save, so changing it never
+          invalidates the draw the way format/courts/pool sizing would.
+          A change while a draw already exists is still consequential enough
+          to call out inline, so the hint grows a warning (R10's reuse of
+          this same append-to-hint pattern, without actually locking the
+          input) whenever the pending value differs from what's saved AND is
+          not blank: a blank is inherited as the stored prefix on save (G2a),
+          so it renumbers nothing and must not threaten a reprint. competitorsCarryNumbers
+          (bc-pnum A7) gates it too: Swiss competitors carry no number at all
+          (RenumberCompetitors is a permanent no-op for Swiss, see its Go doc),
+          so warning a Swiss operator about a renumber describes something
+          that can never happen. */}
       <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
         value={local.numberPrefix} onChange={(raw) => update("numberPrefix", raw.substring(0, 3))}
-        disabled={isDrawReady} hint={HINT_NUMBER_PREFIX} width={80} />
+        hint={lockedAfterDraw && competitorsCarryNumbers(local.format) && (local.numberPrefix || "").trim() !== "" && (local.numberPrefix || "").trim() !== (c.numberPrefix || "").trim()
+          ? `${HINT_NUMBER_PREFIX} Every competitor will be renumbered and any tags already printed must be reprinted.`
+          : HINT_NUMBER_PREFIX}
+        width={80} />
       <div style={{ display: "flex", flexDirection: "column" }}>
         {/* zekkenApplies/engiApplies express the RULE (competition_shape.jsx);
             this screen keeps its own PRESENTATION of it -- render both

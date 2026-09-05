@@ -568,7 +568,17 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) error {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
 		// actually take — the site the hand-copied merge once missed.
-		mismatch, superseded = applyPoolWrite(r, result, policy)
+		var werr error
+		mismatch, superseded, werr = applyPoolWrite(r, result, policy)
+		if werr != nil {
+			// A genuine validation failure (e.g. backfillMatchIdentity's
+			// winnerId-names-neither-side check): propagate it AS the error,
+			// distinct from errPoolWriteDropped below, so it reaches the
+			// caller as a real rejection rather than being folded into the
+			// silent-abandonment path. UpdatePoolMatchByID skips the save
+			// when mutate returns an error, so nothing is persisted either way.
+			return werr
+		}
 		if mismatch || superseded {
 			// applyPoolWrite left the stored match untouched, so there is
 			// nothing to persist. Aborting here is what makes a dropped POOL
@@ -621,7 +631,14 @@ func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, r
 // client must not be able to clear (ReopenPending) are re-stamped at the HTTP
 // boundary instead - see handlers_match.go - so a new field of that kind still
 // needs a decision about which layer preserves it.
-func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch, superseded bool) {
+//
+// A THIRD abandonment reason joined the two above (bc-idfx): backfillMatchIdentity
+// rejects a client-supplied WinnerID that names neither side once the row's
+// own ids are known. It is reported through `err`, not through mismatch,
+// because it is a different verdict again -- not "wrong pairing" (mismatch)
+// and not "stale" (superseded), but "this winner doesn't correspond to
+// either competitor in this match" -- and the caller maps it to 400, not 409.
+func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) (mismatch, superseded bool, err error) {
 	// reconcileSides BACKFILLS omitted sides as a side effect and only reports
 	// the mismatch, so it must run under both policies; hoisted out of the
 	// condition below because folding it into a short-circuit would let a later
@@ -631,7 +648,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	// restore policy replays sides captured from this same match, so a mismatch
 	// there is not a client error.
 	if sidesDisagree && policy == matchWriteForward {
-		return true, false
+		return true, false, nil
 	}
 	// Timestamp last-write-wins, the SAME guard, the same primitive and now the
 	// same call shape the bracket branch uses: a reconnecting offline court's
@@ -639,11 +656,13 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 	// exemption lives inside applyMatchWrite, which is load-bearing here — unlike
 	// the bracket's, this branch's rollback snapshot carries a real stamp.
 	if !applyMatchWrite(result, stored.ModifiedAt, policy) {
-		return false, true
+		return false, true, nil
 	}
 	// Preserve generation-time participant ids + resolve winner id across the
 	// overwrite: score requests carry side NAMES only. See backfillMatchIdentity.
-	backfillMatchIdentity(result, stored)
+	if berr := backfillMatchIdentity(result, stored, policy); berr != nil {
+		return false, false, berr
+	}
 	// Keep the stored stamp when this write is unstamped, so an un-stamped
 	// client cannot reset the field to 0 and reopen the match to stale writes.
 	// The whole-struct overwrite below would otherwise zero it; the bracket
@@ -696,7 +715,7 @@ func applyPoolWrite(stored, result *state.MatchResult, policy matchWritePolicy) 
 		result.SubResultsUnreadable = false
 	}
 	*stored = *result
-	return false, false
+	return false, false, nil
 }
 
 // applyHansokuIppons auto-awards ippons from accumulated hansoku counts per
@@ -955,7 +974,18 @@ func deriveDaihyosenWinner(result *state.MatchResult) {
 // fielded, a later score write that omits them (e.g. a correction that only
 // re-sends the ippons) must not wipe them. An explicit value in `result`
 // always wins, so the operator can still change the rep player.
-func backfillMatchIdentity(result, stored *state.MatchResult) {
+// Returns an error when a client-supplied WinnerID names neither side once
+// the row's own ids are known (see the validation block below); callers must
+// treat that as a rejected write, never a silently-persisted one. That
+// rejection is gated on policy == matchWriteForward, exactly like
+// applyPoolWrite's sidesDisagree gate: matchWriteRestore replays a TRUSTED
+// stored snapshot (the K3 rollback undoing a rejected/partial forward
+// write), and rollbackMatchResultTx only LOGS a restore failure -- it never
+// retries -- so rejecting a restore whose OWN stored WinnerID happens not to
+// match its own side ids (legacy data predating this validation) would leave
+// the very forward write the rollback exists to undo sitting on disk
+// uncorrected.
+func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWritePolicy) error {
 	if result.RepPlayerA == "" {
 		result.RepPlayerA = stored.RepPlayerA
 	}
@@ -968,8 +998,22 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 	if result.SideBID == "" {
 		result.SideBID = stored.SideBID
 	}
+	// A client-supplied WinnerID that names NEITHER side is invalid data: it
+	// would otherwise be persisted verbatim (the early return just below
+	// trusted it outright) and counted for nobody in standings -- a
+	// completed match with a winner nobody can find. Checked whenever the
+	// row has an id to check against (either side, gated the same way
+	// resolveWinnerSide gates its own id branch) AND the write is a FORWARD
+	// (client) write -- a row with no ids at all has nothing to validate
+	// WinnerID against and is left to the name-based fallback below,
+	// unchanged, and a RESTORE never rejects (see the doc comment above).
+	if policy == matchWriteForward && result.WinnerID != "" && (result.SideAID != "" || result.SideBID != "") &&
+		result.WinnerID != result.SideAID && result.WinnerID != result.SideBID {
+		return validationErrorf("match %s: winnerId %q does not match sideAId %q or sideBId %q",
+			result.ID, result.WinnerID, result.SideAID, result.SideBID)
+	}
 	if result.WinnerID != "" {
-		return
+		return nil
 	}
 	switch {
 	case result.WinnerSide == "A":
@@ -993,6 +1037,7 @@ func backfillMatchIdentity(result, stored *state.MatchResult) {
 			result.WinnerID = result.SideBID
 		}
 	}
+	return nil
 }
 
 // preserveLoserScore implements FIK Regulations Article 32 ("Any point
@@ -1256,8 +1301,12 @@ func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
 	return standingsTokens{
 		poolMatchesMtime:   e.store.FileMtime(compId, "pool-matches.csv"),
 		overridesMtime:     e.store.FileMtime(compId, "overrides.json"),
+		poolsMtime:         e.store.FileMtime(compId, "pools.csv"),
+		configMtime:        e.store.FileMtime(compId, "config.md"),
 		poolMatchesVersion: e.store.FileVersion(compId, "pool-matches.csv"),
 		overridesVersion:   e.store.FileVersion(compId, "overrides.json"),
+		poolsVersion:       e.store.FileVersion(compId, "pools.csv"),
+		configVersion:      e.store.FileVersion(compId, "config.md"),
 	}
 }
 
@@ -1325,6 +1374,18 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		if pn, ok := poolNameFromMatchID(r.ID); ok {
 			poolResults[pn] = append(poolResults[pn], r)
 		}
+	}
+
+	// Loaded ONCE for the whole competition, before the per-pool loop: a
+	// corrupt overrides.json must abort the whole standings computation (this
+	// function's callers already return errors), not silently drop every
+	// chusen for every pool with no signal to the operator, and there is no
+	// reason to re-read the same file once per pool -- overrides read-only in
+	// the scoring path (see this function's own doc comment above) makes a
+	// single load correct for every pool in one call.
+	overrides, err := e.store.LoadOverrides(compId)
+	if err != nil {
+		return nil, fmt.Errorf("computeStandingsFrom: load overrides for %s: %w", compId, err)
 	}
 
 	allStandings := make(map[string][]state.PlayerStanding)
@@ -1429,33 +1490,105 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		// adjacent elements, so it must run while the slice is still Points-sorted.
 		// Overrides only change the display order; the underlying scoring tie is real
 		// regardless of how the operator chose to resolve it.
-		markTiedStandings(comp, sorted, poolResults[p.PoolName])
+		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
 
 		// Apply manual rank overrides. Overrides are keyed by competitor
 		// IDENTITY (helper.CompetitorKey: id-preferred, name+dojo fallback),
 		// not bare name (bc-cse) -- lookupPoolRankOverride also honours a
 		// legacy bare-name key for an overrides.json written before this fix,
 		// see its doc comment for the read-only compatibility decision.
-		overrides, _ := e.store.LoadOverrides(compId)
+		// `overrides` itself is loaded ONCE above this loop, not per pool.
 		var poolOverrides map[string]int
 		if overrides != nil {
 			poolOverrides = overrides.PoolRanks[p.PoolName]
 		}
 		if len(poolOverrides) > 0 {
-			sort.Slice(sorted, func(i, j int) bool {
-				rankI, okI := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo)
-				rankJ, okJ := lookupPoolRankOverride(poolOverrides, sorted[j].Player.ID, sorted[j].Player.Name, sorted[j].Player.Dojo)
-				if okI && okJ {
+			// TWO defects fixed together (bc-idfx):
+			//
+			//  1. The old fallback comparator read sorted[i].Rank for the
+			//     non-overridden case, but Rank is not assigned until the loop
+			//     BELOW this one runs -- every row's Rank still reads its zero
+			//     value here, so the comparator returned "not less than" for
+			//     every non-overridden pair. sort.Slice is not stable, so on a
+			//     pool with more than ~12 rows (past go's insertion-sort cutover
+			//     to an unstable partition), that degenerate all-equal
+			//     comparator could reorder the non-overridden rows arbitrarily
+			//     (observed: a 14-row pool's undefeated points leader landed at
+			//     rank 7).
+			//  2. Every overridden row sorted ahead of every non-overridden row
+			//     UNCONDITIONALLY (`if okI { return true }`), regardless of the
+			//     override's own recorded rank number. A chusen recording
+			//     positions 2..N (leaving the undefeated pool winner, who needs
+			//     no override, at natural position 1) demoted that winner below
+			//     every overridden row -- and a PARTIAL chusen (only some of a
+			//     tied group's members overridden) dissolved the whole group's
+			//     adjacency, since the still-natural-ranked remainder no longer
+			//     sorted next to their now-overridden groupmates.
+			//
+			// Fix: compute each row's NATURAL points-order position first (the
+			// slice is already sorted by Points descending at this point in the
+			// function, so index+1 == natural 1-based rank -- 1-based because
+			// an override's OWN rank number is 1-based (an operator recording
+			// "Alice is rank 1" via the chusen panel), and the two numbers must
+			// live on the same scale for "sort by whichever number is smaller"
+			// to mean anything: a legacy bare-name override of exactly 1 (see
+			// TestCalculatePoolStandings_Override_LegacyBareNameKey) must beat
+			// an undefeated, non-overridden natural WINNER, which only happens
+			// when that winner's own natural rank is 1, not 0.
+			//
+			// The natural rank MUST be captured PER ELEMENT, not in a map keyed
+			// by identity (standingsPlayerKey): two id-less namesakes (legal
+			// across dojos, CheckDuplicateEntriesByNameDojo) share the identical
+			// key, so a map assignment for the SECOND one silently overwrites
+			// the FIRST one's entry, and both then read whichever was written
+			// LAST -- corrupting the earlier one's rank (BLOCKER caught by
+			// review: an unrelated override elsewhere in the pool was enough to
+			// drop a 2-0 undefeated leader to rank 3, because her natural rank
+			// had been overwritten by her own lower-placed namesake's). A
+			// pairing struct fixes this: `nat` travels glued to its own
+			// `standing` through the sort, so it can never be read off the
+			// wrong row regardless of how many rows share a display name.
+			//
+			// Sorted by key = override rank when present, else the row's own
+			// natural rank, so an override is only ever preferred over another
+			// row's rank number when the numbers themselves say so. Every
+			// non-overridden row's natural rank is UNIQUE by construction (each
+			// occupies exactly one position i in the already points-sorted
+			// slice), so non-overridden rows can never tie with each other --
+			// that uniqueness is what actually fixes the original ">12-row pool
+			// scrambled" bug, not sort stability. sort.SliceStable is still used
+			// as belt-and-braces for the one case a genuine tie remains
+			// possible: an override rank numerically colliding with another
+			// row's rank (natural or overridden); ties resolve override-first,
+			// then whichever pairing was already ahead going into the sort.
+			type poolRankPairing struct {
+				standing state.PlayerStanding
+				nat      int // 1-based natural (points-order) rank, captured once per element
+			}
+			wrapped := make([]poolRankPairing, len(sorted))
+			for i, s := range sorted {
+				wrapped[i] = poolRankPairing{standing: s, nat: i + 1}
+			}
+			rankFor := func(w *poolRankPairing) (rank int, overridden bool) {
+				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID, w.standing.Player.Name, w.standing.Player.Dojo); ok {
+					return r, true
+				}
+				return w.nat, false
+			}
+			sort.SliceStable(wrapped, func(i, j int) bool {
+				rankI, okI := rankFor(&wrapped[i])
+				rankJ, okJ := rankFor(&wrapped[j])
+				if rankI != rankJ {
 					return rankI < rankJ
 				}
-				if okI {
-					return true
+				if okI != okJ {
+					return okI
 				}
-				if okJ {
-					return false
-				}
-				return sorted[i].Rank < sorted[j].Rank
+				return false
 			})
+			for i, w := range wrapped {
+				sorted[i] = w.standing
+			}
 		}
 
 		poolHasOverrides := len(poolOverrides) > 0
@@ -1526,7 +1659,15 @@ func applyJointThirdRanks(comp *state.Competition, sorted []state.PlayerStanding
 //
 // matches contains only the regular+supplementary matches for this specific
 // pool (already filtered upstream by poolNameFromMatchID).
-func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult) {
+//
+// rosterIndex is computeStandingsFrom's OWN identity index (playerStandings,
+// built from p.Players in the pool's on-disk roster order), threaded through
+// to markTiedStandingsLeague so its match-side resolution can never disagree
+// with the resolution that actually computed `sorted`'s Wins/Losses -- see
+// that function's doc comment. Unused by the pools branch (nil is fine, e.g.
+// direct callers such as the unit tests in tied_standings_test.go, which
+// build a synthetic byKey from `sorted` itself via rosterIndexFrom).
+func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, matches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
 	if len(sorted) == 0 {
 		return
 	}
@@ -1542,7 +1683,7 @@ func markTiedStandings(comp *state.Competition, sorted []state.PlayerStanding, m
 	isLeague := comp != nil && comp.Format == state.CompFormatLeague
 
 	if isLeague {
-		markTiedStandingsLeague(comp, sorted, regularMatches)
+		markTiedStandingsLeague(comp, sorted, regularMatches, rosterIndex)
 	} else {
 		markTiedStandingsPools(sorted, regularMatches)
 	}
@@ -1575,45 +1716,83 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 // emerging-tie trigger: once ANY top-N competitor has finished all their own
 // regular fights, mark consequential tied groups amber. Works for both team
 // and individual leagues.
-func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult) {
+//
+// TWO SEPARATE fixes are needed together here, and each addresses a
+// DIFFERENT failure mode (round-2 review correction: an earlier version of
+// this comment credited rosterIndex ALONE, but rosterIndex was inert on its
+// own regression test -- the completion buckets were still merging id-less
+// namesakes into one shared entry, exactly what this function's OWN
+// pre-existing comment used to warn against, and that merge happened to
+// still read "done" often enough to pass the one fixture that existed):
+//
+//  1. Completion buckets (statusFor) are keyed by helper.CompetitorKey(ID,
+//     Name, Dojo) -- id-preferred, NAME+DOJO fallback -- never by
+//     standingsPlayerKey(ID, Name) alone. Two id-less league competitors can
+//     share a display name across dojos (CheckDuplicateEntriesByNameDojo
+//     only rejects same-name AND same-dojo); standingsPlayerKey ignores
+//     dojo, so both namesakes' completion counts silently merged into ONE
+//     bucket. A merged bucket can read "done" from the SUM of two
+//     competitors' fixtures even when neither one individually finished her
+//     own -- or, as it happened to in the original repro fixture, merges a
+//     genuine 1/1 with an untouched 0/0 and still reads correctly by
+//     coincidence, which is exactly why that fixture alone could not tell
+//     this bug from a correct implementation. CompetitorKey's dojo fallback
+//     keeps the two namesakes' buckets distinct.
+//
+//  2. rosterIndex resolves a match side to the roster entry
+//     computeStandingsFrom itself used to accrue that side's Wins/Losses in
+//     the first place (its playerStandings map, built from p.Players in the
+//     pool's ON-DISK ROSTER order) -- REQUIRED once buckets are correctly
+//     separated, because separate buckets only help if the match is
+//     credited to the RIGHT one. A match row with no side id names a
+//     competitor by bare NAME ALONE (no dojo on a MatchResult side), so
+//     resolving it still depends on which roster index does the lookup:
+//     registerStandingsPlayer's id-less name key is last-write-wins, so
+//     which of two same-name roster entries (id-less, OR id-carrying with an
+//     id-less match row -- e.g. legacy data written before SideAID/SideBID
+//     stamping existed) a bare name resolves to depends on the order they
+//     were indexed in. Rebuilding a second index from `sorted` (POINTS
+//     order, which diverges from roster order the moment any match is
+//     played) can therefore resolve to a DIFFERENT competitor than the one
+//     computeStandingsFrom's own roster-order resolution credited -- and
+//     unlike the id-less-namesake case above, an id-carrying mismatch lands
+//     the increment in a bucket keyed by the WRONG real id, an unambiguous
+//     wrong answer with no coincidental save. Threading through the SAME
+//     index computeStandingsFrom used removes that second, independently
+//     ordered index entirely: there is only ever one resolution of "who does
+//     this match side mean" per pool.
+func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
 	topN := min(effectiveTopN(comp), len(sorted))
 
-	// Build per-competitor regular match counts and completion status,
-	// keyed by IDENTITY rather than bare Player.Name: two league competitors
-	// can share a display name across dojos (CheckDuplicateEntriesByNameDojo
-	// only rejects same-name AND same-dojo), and a bare-name key here would
-	// merge their completion counters into one shared bucket -- one
-	// namesake's still-in-progress fights then either delay or falsely
-	// trigger the OTHER namesake's emerging-tie mark. newStandingsIndex /
-	// lookupStandingsPlayer are the same identity machinery
-	// computeStandingsFrom itself used to build `sorted` in the first place
-	// (a fresh index built here, over the same roster, resolves each match
-	// side to the correct *state.PlayerStanding pointer exactly as that
-	// original build did), reused rather than re-deriving a second ad hoc
-	// key scheme.
+	// statusFor is keyed by helper.CompetitorKey (id-preferred, name+dojo
+	// fallback -- see the fix-1 note above), not by a locally rebuilt
+	// *state.PlayerStanding pointer: `sorted` holds VALUE copies
+	// (computeStandingsFrom appends *s, not s itself), so its rows are
+	// different objects from rosterIndex's pointers even for the same
+	// competitor -- the string key is what ties the two together.
 	type compStatus struct {
 		total     int
 		completed int
 	}
-	players := make([]domain.Player, len(sorted))
-	for i, s := range sorted {
-		players[i] = s.Player
+	statusFor := make(map[string]*compStatus, len(sorted))
+	for _, s := range sorted {
+		statusFor[helper.CompetitorKey(s.Player.ID, s.Player.Name, s.Player.Dojo)] = &compStatus{}
 	}
-	byKey, order := newStandingsIndex(players)
-	statusFor := make(map[*state.PlayerStanding]*compStatus, len(order))
-	for _, st := range order {
-		statusFor[st] = &compStatus{}
+	tally := func(id, name string) *compStatus {
+		st := lookupStandingsPlayer(rosterIndex, id, name)
+		if st == nil {
+			return nil
+		}
+		return statusFor[helper.CompetitorKey(st.Player.ID, st.Player.Name, st.Player.Dojo)]
 	}
 	for _, m := range regularMatches {
-		if sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA); sA != nil {
-			cs := statusFor[sA]
+		if cs := tally(m.SideAID, m.SideA); cs != nil {
 			cs.total++
 			if m.Status == state.MatchStatusCompleted {
 				cs.completed++
 			}
 		}
-		if sB := lookupStandingsPlayer(byKey, m.SideBID, m.SideB); sB != nil {
-			cs := statusFor[sB]
+		if cs := tally(m.SideBID, m.SideB); cs != nil {
 			cs.total++
 			if m.Status == state.MatchStatusCompleted {
 				cs.completed++
@@ -1622,12 +1801,9 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 	}
 
 	// Check if ANY top-N competitor has completed all their own fights.
-	// order[i] is the standings entry for players[i], i.e. sorted[i]'s
-	// player, since newStandingsIndex ranges players in the same order it
-	// received them and appends each registered entry to order in lockstep.
 	triggerFired := false
-	for i := range topN {
-		cs := statusFor[order[i]]
+	for i := 0; i < topN; i++ {
+		cs := statusFor[helper.CompetitorKey(sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo)]
 		if cs != nil && cs.total > 0 && cs.completed == cs.total {
 			triggerFired = true
 			break

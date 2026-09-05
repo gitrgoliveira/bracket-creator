@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"strings"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -38,13 +37,25 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 		Top:    &margin,
 	}))
 
-	// Column width to fill A4 portrait content width (~205 mm)
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 110))
+	// Column width to fill A4 portrait content width (~205 mm). bc-pnum A9:
+	// 110 units renders to ~691pt, wider than the ~580.9pt A4-portrait
+	// printable width (narrow margins from above), so a 4-character tag
+	// (e.g. "KOR19", now reachable since a prefix can be up to 3 characters
+	// everywhere) was sheared at the page edge -- rendered LibreOffice PDFs
+	// showed "KOR1(" indistinguishable from "KOR1", and the excess spilled
+	// into blank overflow pages. 88 units fits the printable width.
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 88))
 
 	style, err := f.NewStyle(&excelize.Style{
 		Alignment: &excelize.Alignment{
 			Horizontal: "center",
 			Vertical:   "center",
+			// ShrinkToFit is the second half of the same fix: even at 88
+			// units, a 5-character tag ("KOR19") at 250pt bold can still
+			// overflow the column, and shrinking the font to fit rather than
+			// clipping is what actually keeps every character of a long tag
+			// visible and readable at the desk.
+			ShrinkToFit: true,
 		},
 		Font: &excelize.Font{Family: "Calibri",
 			Bold: true,
@@ -59,13 +70,14 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 
 	row := 1
 	for _, pool := range pools {
-		poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
-
 		for _, player := range pool.Players {
-			tag := fmt.Sprintf("%s%d", poolLetter, player.PoolPosition)
-			if player.Number != "" {
-				tag = player.Number
-			}
+			// The tag IS the competitor's number: it has to match the
+			// competition's number prefix, because that is what the desk and
+			// the tag's own QR resolve against. There is deliberately no
+			// pool-letter substitute for an unnumbered competitor -- a
+			// second, prefix-less numbering scheme on the printed tag was
+			// considered for this bead and rejected (bc-pnum).
+			tag := player.Number
 
 			// Generate QR once per player; reuse PNG for both tag copies.
 			// playerTagQRPNG returns nil,nil for empty inputs, so no guard needed.
@@ -88,20 +100,26 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 409))
 
 				if len(qrPNG) > 0 {
-					// Left of the number, vertically aligned with its centre (OffsetX/Y in px at 96 DPI).
-					// Column 110 units ≈ 770 px; "K1" at 250 pt ≈ 420 px wide, so the left white
-					// space is ≈175 px. A 60 px QR (200 px × ScaleX 0.3) centred in that gap:
-					// OffsetX = (175−60)/2 = 57 px.
-					// Row 409 pt ≈ 545 px; number centre at 272 px; QR at OffsetY 242 (= 272−30).
+					// Bottom-left corner of the tag, BELOW the number (OffsetX/Y in px at
+					// 96 DPI). The QR used to sit left of the number at its vertical
+					// centre, in white space that only a short number left free: the
+					// number now shrinks to fit the 88-unit column, so a four- or
+					// five-character number ("KO20", "KOR20") fills the width and the
+					// code landed on top of the first letter. The vertical band is free
+					// instead: the row is 409 pt ≈ 545 px and the shrunk glyphs occupy
+					// roughly the middle 280 px, leaving ≈130 px below them. A 90 px QR
+					// (200 px × 0.45, about 2.4 cm on paper) at OffsetY 440 sits inside
+					// that band clear of any glyph for every prefix length; rendered
+					// with LibreOffice for K20, KO20 and KOR20 (bc-pnum review).
 					if err := f.AddPictureFromBytes(sheetName, cell, &excelize.Picture{
 						Extension: ".png",
 						File:      qrPNG,
 						Format: &excelize.GraphicOptions{
 							PrintObject: &printObj,
-							OffsetX:     57,
-							OffsetY:     242,
-							ScaleX:      0.3,
-							ScaleY:      0.3,
+							OffsetX:     12,
+							OffsetY:     440,
+							ScaleX:      0.45,
+							ScaleY:      0.45,
 							Positioning: "oneCell",
 						},
 					}); err != nil {
@@ -115,6 +133,22 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 			// Page break after each pair of identical labels.
 			handleExcelError("InsertPageBreak", f.InsertPageBreak(sheetName, fmt.Sprintf("A%d", row)))
 		}
+	}
+
+	// bc-pnum A9: without an explicit print area, LibreOffice's rendering of
+	// this sheet's used range (which excelize's own column-width/row-height
+	// bookkeeping can make wider than the actual A column) spilled 82 blank
+	// overflow pages in the reproduction that surfaced this. row-1 is the
+	// last row actually written (the loop above leaves row one past it).
+	//
+	// Guarded on row > 1 (bc-pnum [review]): with zero players (reachable --
+	// an export of a mixed competition still in setup, before any pool has a
+	// member) the loop above never runs and row stays at its initial 1, so
+	// row-1 is 0 and SetPrintArea would define the invalid range
+	// "$A$1:$A$0" (row 0 does not exist). No players means nothing was
+	// written, so there is nothing to scope a print area to at all.
+	if row > 1 {
+		SetPrintArea(f, sheetName, 1, row-1)
 	}
 
 	f.SetActiveSheet(index)

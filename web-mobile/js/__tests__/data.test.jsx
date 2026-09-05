@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
-  buildPools, computeStandings, parseParticipantLines
+  buildPools, poolLetterName, computeStandings, parseParticipantLines
 } from '../data.jsx';
+import { provisionalNumberMap } from '../data.jsx';
 
 describe('Data Utils', () => {
   describe('standardSeedOrder', () => {
@@ -63,6 +64,33 @@ describe('Data Utils', () => {
     });
   });
 
+  describe('poolLetterName', () => {
+    // Mirrors internal/helper/pool_position_name_test.go's
+    // TestPoolPositionName_UniqueBeyond52 (bc-drwx item 9): the same six
+    // 0-based positions, pinned on both sides of the Go/JS mirror so a
+    // regression at either rollover (single letter to double, double to
+    // triple) is caught wherever it happens. poolLetterName replaces a bare
+    // String.fromCharCode(65+i), which never wrapped at all -- position 26
+    // printed "Pool [" (one past "Z" in ASCII) instead of "Pool AA".
+    it('is bijective base-26 and never repeats past the raw ASCII wrap point', () => {
+      expect(poolLetterName(25)).toBe('Z');
+      expect(poolLetterName(26)).toBe('AA');
+      expect(poolLetterName(51)).toBe('AZ');
+      expect(poolLetterName(52)).toBe('BA');
+      expect(poolLetterName(701)).toBe('ZZ');
+      expect(poolLetterName(702)).toBe('AAA');
+    });
+
+    it('never repeats a name across a large run (the raw scheme this replaces collided every 26)', () => {
+      const seen = new Set();
+      for (let i = 0; i < 64; i++) {
+        const name = poolLetterName(i);
+        expect(seen.has(name)).toBe(false);
+        seen.add(name);
+      }
+    });
+  });
+
   describe('computeStandings', () => {
     it('should correctly calculate wins and sort standings', () => {
       const p1 = { id: 'p1', name: 'P1' };
@@ -119,5 +147,50 @@ describe('parseParticipantLines', () => {
     const [p] = parseParticipantLines(['Bob Lee, Kyoto, vip'], false);
     expect(p.source).toBe('');
     expect(p.danGrade).toBe('vip');
+  });
+});
+
+// bc-pnum: the check-in list's provisional numbers are the server's
+// index-aligned provisionalNumbers array; the SPA only keys it by checkinPid
+// and refuses a misaligned array rather than mislabel the roster.
+describe('provisionalNumberMap', () => {
+  const roster = [
+    { id: 'p-1', name: 'Alice', dojo: 'Dojo Alice' },
+    { name: 'Bob', dojo: 'Dojo Bob' }, // legacy row without an id
+  ];
+
+  it('keys the aligned array by checkinPid, ids and composite keys alike', () => {
+    const map = provisionalNumberMap(roster, ['K1', 'K2']);
+    expect(map['p-1']).toBe('K1');
+    expect(map['Bob|Dojo Bob']).toBe('K2');
+  });
+
+  it('yields an empty map when the array is misaligned with the roster', () => {
+    expect(Object.keys(provisionalNumberMap(roster, ['K1']))).toEqual([]);
+    expect(Object.keys(provisionalNumberMap(roster, ['K1', 'K2', 'K3']))).toEqual([]);
+  });
+
+  it('yields an empty map when either side is absent', () => {
+    expect(Object.keys(provisionalNumberMap(roster, undefined))).toEqual([]);
+    expect(Object.keys(provisionalNumberMap(undefined, ['K1']))).toEqual([]);
+    expect(Object.keys(provisionalNumberMap([], []))).toEqual([]);
+  });
+
+  // bc-pnum D10: checkinPid is USER-CONTROLLED (a participant's own id or
+  // name|dojo), so the returned map must be prototype-pollution-safe: a
+  // participant legitimately (or maliciously) named/id'd "__proto__" must
+  // land as an OWN key holding its own number, never leak through the
+  // prototype chain, and never collide with an inherited Object method name.
+  it('is prototype-pollution-safe: a null-prototype map, "__proto__" as a plain own key', () => {
+    expect(Object.getPrototypeOf(provisionalNumberMap([], []))).toBeNull();
+
+    const map = provisionalNumberMap([{ id: '__proto__' }, { id: 'plain' }], ['K1', 'K2']);
+    expect(map['__proto__']).toBe('K1');
+    expect(map.plain).toBe('K2');
+
+    // "toString" is an inherited Object.prototype member on a plain {}; on
+    // this null-prototype map it must be undefined until the entry it
+    // legitimately names does not exist here, never inherited.
+    expect(provisionalNumberMap([{ id: 'p-1' }], ['K1'])['toString']).toBeUndefined();
   });
 });

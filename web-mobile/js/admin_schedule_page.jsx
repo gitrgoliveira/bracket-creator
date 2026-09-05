@@ -241,7 +241,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   // Operate on allMatches so UI filters (player/dojo/competition pill) don't
   // shrink the set being scheduled: otherwise it's easy to time only a subset.
   const autoSchedule = async () => {
-    const comp = tournament.competitions.find(c => c.id === autoComp);
+    const comp = (tournament.competitions || []).find(c => c.id === autoComp);
     if (!comp) return;
     // Skip matches with no/unknown court: the per-court scheduler assumes
     // each match lives on one of the configured courts; otherwise we'd
@@ -293,8 +293,8 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
           <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap" }}>
             <div className="field" style={{ minWidth: 180 }}>
               <label className="field__label">Competition</label>
-              <select className="input" value={autoComp} onChange={e => { setAutoComp(e.target.value); const c = tournament.competitions.find(x => x.id === e.target.value); if (c?.startTime) setAutoStart(c.startTime); }}>
-                {tournament.competitions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <select className="input" value={autoComp} onChange={e => { setAutoComp(e.target.value); const c = (tournament.competitions || []).find(x => x.id === e.target.value); if (c?.startTime) setAutoStart(c.startTime); }}>
+                {(tournament.competitions || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div className="field">
@@ -333,7 +333,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
             <window.PlayerMultiFilter tournament={tournament} picked={picked} setPicked={setPicked} dojoText={dojoText} setDojoText={setDojoText} />
             <select className="input" style={{ width: "auto", minWidth: 200 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
               <option value="all">All competitions</option>
-              {tournament.competitions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {(tournament.competitions || []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             {hasAnyFilter && (
               <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setPicked([]); setDojoText(""); setCompFilter("all"); }}>Clear</button>

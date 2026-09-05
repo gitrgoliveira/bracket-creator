@@ -73,7 +73,12 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// The whole pool phase, in the one order its steps are valid in, shared with
 	// cmd/create-pools.go so the two paths cannot drift again -- they have twice,
 	// each time misplacing real competitors. helper.BuildPoolPhase's doc comment
-	// carries the constraints and the worked examples.
+	// (bc-drwx item 11: corrected the claim below -- it did not actually carry
+	// worked examples, and its own constraint 3 named the pre-bc-dojo-Phase-4
+	// PoolSeeding/CreatePools pipeline this engine has not called in years)
+	// carries the four ordering constraints; BuildPoolPhaseTreeAwareWithMode's
+	// own doc comment covers the mode-aware entry point this function actually
+	// calls below.
 	//
 	// drawCourts is what comes back, not what went in: a shiaijo with no home pool
 	// would own an empty bracket region, so the count steps down to what the pools
@@ -166,12 +171,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// pools.
 	}
 
-	if comp.NumberPrefix != "" {
-		counter := 1
-		for i := range pools {
-			counter = helper.AssignPlayerNumbers(pools[i].Players, comp.NumberPrefix, counter)
-		}
-	}
+	helper.NumberPools(pools, comp.NumberPrefix)
 
 	hasRounds := false
 	switch comp.PoolFormat {

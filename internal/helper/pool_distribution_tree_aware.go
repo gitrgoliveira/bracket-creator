@@ -35,9 +35,12 @@ import (
 //     bypasses the tree entirely (leastConflictedPool), which is what
 //     keeps the unique-dojo round-robin identity contract intact.
 //  2. improveDojoMeetings (below) then runs a PAIRWISE-ONLY exchange pass
-//     -- no three-way rotation -- scored on the WINNER-PATH metric alone
-//     (poolPairRounds fed winner-only slot lists, i.e. slots[0] per pool,
-//     the same pre-reorder space the descent itself uses). This is what
+//     -- no three-way rotation -- scored on a FOUR-TIER lexicographic
+//     objective led by a total spread-cap excess delta, then the
+//     WINNER-PATH metric (poolPairRounds fed winner-only slot lists, i.e.
+//     slots[0] per pool, the same pre-reorder space the descent itself
+//     uses), then an all-qualifier best-effort tie-break (see
+//     improveDojoMeetings' own doc comment for the full tier list). This is what
 //     closes the one gap the descent alone could not: on a MULTI-dojo
 //     roster the dojos the descent places early can still box a later
 //     dojo into pools whose own qualifiers meet in round 1, because the
@@ -85,6 +88,42 @@ import (
 // and the exchange pass both only ever read a pool's WINNER leaf out of
 // whichever tree that dispatch selects, so mode-awareness is unchanged by
 // this bead.
+//
+// bc-pnum (int-id rewrite): the bijective pool-label fix
+// (bc-dojo-least-conflicted-pool) restored 12 previously collided pools to
+// improveDojoMeetings' own exchange pass, which is legitimate extra work,
+// not a regression -- but a CPU profile of that pass afterwards showed
+// improveDojoMeetings at 99.34% cumulative, earliestDojoMeeting at 86.86%,
+// and mapaccess2_faststr (a map[string]* lookup) at 51%: the per-pool `counts`
+// this pass and the descent's dojoNode.dojoCount both used were
+// map[string]int keyed by the normalized dojo string, looked up on every
+// candidate evaluated. dojoIDCache (tournament.go) interns each distinct
+// normalized key to a dense int ONCE per draw, up front, so both structures
+// became a plain []int/[][]int indexed by that id instead -- see
+// dojoIDCache's own doc comment for the measured before/after numbers, and
+// earliestDojoMeetingScan's (below) for the buffer-reuse fix that removed
+// the remaining per-call allocation once the map lookup itself was gone.
+//
+// Follow-up (bc-pnum review): the id-conversion above still left every
+// candidate's ak/bk resolved via ids.of(a.Dojo)/ids.of(b.Dojo) -- two map
+// probes each (dojoKeyCache's raw->normalized lookup, then dojoIDCache's own
+// normalized->id lookup) -- so a re-profile after the first pass still
+// showed a measurable mapaccess2_faststr share. poolDojoIDs (a [][]int kept
+// in lockstep with `counts` at the same two swap sites, improveDojoMeetings)
+// removed that too: ak/bk are now a plain slice index. A CPU profile of
+// BuildPoolPhaseTreeAware_256_16x16_Interleaved after BOTH fixes shows
+// mapaccess2_faststr, dojoIDCache.of and dojoKeyCache.of absent entirely
+// from a full (nodefraction=0) node listing -- not merely small, genuinely
+// not sampled. What remains (~86% cumulative) is earliestDojoMeetingScan
+// itself: the O(numPools) countIn scan collecting a dojo's occupied pools,
+// plus the O(occupied^2) pairRound comparison over them -- real arithmetic
+// over the extra pools the bijective-label fix legitimately restored to the
+// exchange pass, not a lookup cost left to remove. See dojoIDCache's own
+// doc comment for the measured before/after benchmark numbers this left.
+//
+// Output is unchanged: this only touches HOW the existing objective is
+// computed, never what it computes, and `make examples` was re-run and
+// diffed byte-identical after every pass of this rewrite.
 
 // BuildPoolPhaseTreeAware is BuildPoolPhase's region-aware sibling. It
 // returns the same (pools, drawCourts, error) shape, for the same reasons
@@ -110,14 +149,16 @@ import (
 //     assignUnseededByDojoTree's own doc comment for the placement
 //     mechanism.
 //  4. improveDojoMeetings then runs a PAIRWISE-ONLY exchange pass over the
-//     result, scored on the winner-path metric alone: the descent commits
-//     each player the moment it places them and cannot see a later dojo's
-//     needs, so on a multi-dojo roster an early dojo can still box a later
-//     one into pools whose winners meet in round 1. The exchange pass
-//     closes exactly that residual (accepted only when it strictly
-//     improves, never worsens any dojo's earliest winner-path meeting);
-//     it is a no-op on an all-unique-dojo roster and on a single-dojo
-//     roster already at the brute-force ceiling. See improveDojoMeetings'
+//     result, scored on a FOUR-TIER lexicographic objective led by a total
+//     spread-cap excess delta, then the winner-path metric, then an
+//     all-qualifier best-effort tie-break: the descent commits each player
+//     the moment it places them and cannot see a later dojo's needs, so on
+//     a multi-dojo roster an early dojo can still box a later one into
+//     pools whose winners meet in round 1. The exchange pass closes
+//     exactly that residual (accepted only when it strictly improves,
+//     never worsens any dojo's earliest winner-path meeting); it is a
+//     no-op on an all-unique-dojo roster and on a single-dojo roster
+//     already at the brute-force ceiling. See improveDojoMeetings'
 //     own doc comment.
 //  5. ReorderPoolsForCourts runs last, exactly as BuildPoolPhase's does.
 //
@@ -136,20 +177,21 @@ import (
 // front. BuildPoolPhase's signature and behaviour are untouched by this
 // function's existence.
 //
-// This is always STANDARD mode (qualifierModeStandard): a caller that knows
+// This is always STANDARD mode (QualifierModeStandard): a caller that knows
 // its competition's real extra-qualifiers setting must call
 // BuildPoolPhaseTreeAwareWithMode instead, or the distributor scores every
 // candidate against the wrong knockout tree whenever that setting is not
-// the default. Kept as its own entry point (rather than folded into the
-// mode-aware one with a fixed argument) because every one of this file's
-// and pool_distribution_gate_test.go's existing tests call it by this exact
-// 5-argument signature, pinned before mode-awareness existed.
+// the default. Kept as its own entry point, for the many existing tests
+// (this file's and pool_distribution_gate_test.go's) that call it by this
+// exact 5-argument signature, pinned before mode-awareness existed -- but
+// FOLDED into BuildPoolPhaseTreeAwareWithMode (bc-drwx item 11) rather than
+// carrying its own duplicate poolTargetSizes+buildPoolPhaseTreeAwareCore
+// call pair: qualifierMode.MinPoolSize is documented as unused in standard
+// mode, so BuildPoolPhaseTreeAwareWithMode's own MinPoolSize derivation
+// (which BuildPoolPhaseTreeAware never computed at all) cannot change this
+// function's behaviour, only its implementation.
 func BuildPoolPhaseTreeAware(players []Player, poolSize int, isMax bool, numCourts int, poolWinners int) ([]Pool, int, error) {
-	numPools, targetSizes, err := poolTargetSizes(len(players), poolSize, isMax)
-	if err != nil {
-		return nil, 0, err
-	}
-	return buildPoolPhaseTreeAwareCore(players, numPools, targetSizes, numCourts, poolWinners, qualifierMode{ExtraQualifiers: qualifierModeStandard})
+	return BuildPoolPhaseTreeAwareWithMode(players, poolSize, isMax, numCourts, poolWinners, QualifierModeStandard)
 }
 
 // defaultPoolWinners is the pool-winners count BuildPoolPhase falls back to
@@ -194,11 +236,17 @@ type qualifierMode struct {
 
 // qualifierMode.ExtraQualifiers values, mirroring
 // state.Competition.ExtraQualifiers* -- see qualifierMode's own doc comment
-// for why the values are duplicated here rather than imported.
+// for why the values are duplicated here rather than imported. Exported
+// (bc-drwx item 13) so internal/state's own test suite -- which already
+// imports internal/helper in production code (Competition.QualifiersForPool
+// takes a helper.Pool) -- can pin state.ExtraQualifiers* equal to these by
+// direct reference (TestExtraQualifiersConstantsMatchHelper,
+// internal/state/extra_qualifiers_constants_test.go) instead of the two
+// sets of string literals only ever being checked by convention.
 const (
-	qualifierModeStandard    = ""
-	qualifierModeLargerPools = "larger-pools"
-	qualifierModeFillBracket = "fill-bracket"
+	QualifierModeStandard    = ""
+	QualifierModeLargerPools = "larger-pools"
+	QualifierModeFillBracket = "fill-bracket"
 )
 
 // BuildPoolPhaseTreeAwareWithMode is BuildPoolPhaseTreeAware's mode-aware
@@ -235,13 +283,34 @@ func BuildPoolPhaseTreeAwareWithMode(players []Player, poolSize int, isMax bool,
 // region-aware body (bc-dojo Phase 4), mirroring BuildPoolPhaseTreeAware's
 // relationship to BuildPoolPhase: the pool COUNT and BASE target sizes come
 // from this function's own FillBracketPoolCount formation objective (a
-// uniform minSize row, exactly what CreatePoolsForCount cuts to before its
-// own remainder spreads), fill-bracket's poolWinners is always 1
+// uniform minSize row, spread by realTargetSizes' own remainder walk --
+// see tournament.go's assignPlayersToPools doc comment, bc-drwx item 11),
+// fill-bracket's poolWinners is always 1
 // (state.ValidateExtraQualifiers' own gate), and the mode is
-// qualifierModeFillBracket throughout -- everything else (seed placement,
+// QualifierModeFillBracket throughout -- everything else (seed placement,
 // the remainder spread, the one-pass distribution, ReorderPoolsForCourts
 // last) is the shared core BuildPoolPhaseTreeAware itself now uses.
 func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts int) ([]Pool, int, error) {
+	// bc-drwx item 13, corrected (bc-drwx review): this guard is
+	// MESSAGE-ONLY, not a safety necessity -- an earlier version of this
+	// comment claimed it prevented an uncontrolled allocation in
+	// buildQualifierSkeleton (minSize placeholder seats per pool), but
+	// that allocation was never actually unbounded: FillBracketPoolCount's
+	// own numPools is capped at n/minSize (its own maxP), so
+	// numPools*minSize -- the exact quantity buildQualifierSkeleton
+	// allocates -- can never exceed n, the caller's OWN roster length,
+	// whatever minSize is. A minSize at or above MaxPoolSize left
+	// unguarded here still cannot reach that allocation: FillBracketPoolCount
+	// already refuses it, either via "fewer than the minimum pool size" (n
+	// < minSize) or its own "no pool count fits" error for the cases where
+	// n >= minSize but no valid pool count satisfies the draft-supply rule.
+	// The guard is kept anyway because "pool size must be less than 1000"
+	// names the real limit and the reason in one line, which is a clearer
+	// operator-facing message than whichever of those two FillBracketPoolCount
+	// errors would otherwise surface.
+	if minSize >= MaxPoolSize {
+		return nil, 0, fmt.Errorf("cannot create pools: pool size must be less than %d, got %d", MaxPoolSize, minSize)
+	}
 	// Same rule 4 supply-side read as BuildPoolPhaseFillBracket's own
 	// pre-Phase-4 body: FillBracketPoolCount needs the roster's seed RANKS,
 	// not just a count, to know which pool counts a gapped seed set can
@@ -259,7 +328,7 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 	for i := range base {
 		base[i] = minSize
 	}
-	return buildPoolPhaseTreeAwareCore(players, numPools, base, numCourts, 1, qualifierMode{ExtraQualifiers: qualifierModeFillBracket, MinPoolSize: minSize})
+	return buildPoolPhaseTreeAwareCore(players, numPools, base, numCourts, 1, qualifierMode{ExtraQualifiers: QualifierModeFillBracket, MinPoolSize: minSize})
 }
 
 // ErrBlankDojoInDraw is the sentinel identifying a draw refused because the
@@ -275,15 +344,24 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // carries the "InDraw" suffix rather than the same bare name.
 //
 // Every downstream signal in this file is defined only for non-blank
-// dojos: recordDojoOccupancy is guarded on `p.Dojo != ""` (so a blank-dojo
-// player consumes a real pool seat via the leastConflictedPool bypass
-// without ever updating the tree's capacity accounting -- the descent's
-// ONLY fullness signal -- which lets a later descent overfill a pool past
-// its target size) and improveDojoMeetings' footprint/spread/meeting
-// objective would otherwise count Dojo=="" as a phantom dojo that drives
-// and vetoes real swaps. Per the operator's absolute "dojo must never be
-// empty" rule (NO FALLBACKS), a blank-dojo roster is refused outright
-// rather than tolerated by a new blank-skipping accounting path.
+// dojos: without this pre-flight, a blank-dojo player would consume a real
+// pool seat via the leastConflictedPool bypass without ever updating the
+// tree's capacity accounting -- the descent's ONLY fullness signal, which
+// lets a later descent overfill a pool past its target size -- and
+// improveDojoMeetings' footprint/spread/meeting objective would count
+// Dojo=="" as a phantom dojo that drives and vetoes real swaps. Per the
+// operator's absolute "dojo must never be empty" rule (NO FALLBACKS), a
+// blank-dojo roster is refused outright rather than tolerated by a
+// blank-skipping accounting path.
+//
+// This is why every call site downstream (recordDojoOccupancy's callers,
+// dojoFootprintOptimum's footprint builders, pickDojoTreeAwarePool) used to
+// carry its OWN `dojo != ""` guard: this pre-flight did not always run
+// first. Now that it does -- the ONE gate every entry point funnels
+// through, before any of those call sites are ever reached -- those guards
+// are unreachable, not merely redundant, and were removed (bc-drwx item
+// 11) rather than kept as a second, silent floor a future change could
+// drift from this one.
 //
 // Participant LOADING stays blank-tolerant on purpose (state.LoadParticipants
 // and its CSV parser accept a blank dojo, so a legacy or hand-edited roster
@@ -291,7 +369,7 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // the DRAW itself refuses, at this one shared pre-flight.
 var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must have a dojo")
 
-// validateNoBlankDojo is the one pre-flight check shared by
+// ValidateNoBlankDojo is the one pre-flight check shared by
 // BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
 // BuildPoolPhaseFillBracketTreeAware (all three funnel through
 // buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
@@ -300,7 +378,20 @@ var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must ha
 // state.ErrBlankDojo's own write-floor check, saveParticipantsNoLock) so a
 // future in-memory producer that hands this a whitespace-only Dojo without
 // going through that floor first cannot slip "   " past this guard too.
-func validateNoBlankDojo(players []Player) error {
+//
+// Exported (bc-drwx item 8) so internal/engine's runDrawPipeline can call it
+// as ONE roster pre-flight covering every competition format, not just the
+// pool-distributor formats (mixed/league) that reach it via
+// buildPoolPhaseTreeAwareCore: a standalone playoffs or Swiss competition
+// used to draw silently over a blank-dojo roster, since neither
+// generatePlayoffs nor GenerateSwissRound ever passes through the
+// distributor at all. The call INSIDE buildPoolPhaseTreeAwareCore stays --
+// it is what makes this function true for a caller that reaches the
+// distributor some OTHER way (a CLI/test caller of BuildPoolPhaseTreeAware*
+// directly, bypassing the engine's own pre-flight entirely) -- but for the
+// engine's own callers it is now the ASSERT this doc always claimed it was,
+// never the operator-facing refusal: that already fired one layer up.
+func ValidateNoBlankDojo(players []Player) error {
 	var names []string
 	for _, p := range players {
 		if strings.TrimSpace(p.Dojo) == "" {
@@ -326,7 +417,11 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// front, before any seed/pool arithmetic runs, rather than let one
 	// silently corrupt the tree-aware capacity accounting below. See
 	// ErrBlankDojoInDraw's own doc comment for the two mechanisms this closes.
-	if err := validateNoBlankDojo(players); err != nil {
+	// Redundant with -- and now effectively an ASSERT behind -- the engine's
+	// own runDrawPipeline pre-flight (bc-drwx item 8) for every caller that
+	// reaches this through the engine; still the real, operator-facing
+	// refusal for a caller (CLI, test) that reaches this function directly.
+	if err := ValidateNoBlankDojo(players); err != nil {
 		return nil, 0, err
 	}
 
@@ -373,35 +468,70 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// decision rather than help it), by descending the dojo tree built
 	// over the mode's own knockout skeleton. See assignUnseededByDojoTree's
 	// own doc comment for the placement mechanism.
+	//
+	// keys memoizes dojoKey by raw dojo string for the whole of this draw
+	// (bc-drwx review fix): both this step and the exchange pass below
+	// compare dojo identity in loops that scale with roster/pool size, and
+	// NormalizeParticipantName (what dojoKey calls) is expensive real work
+	// (NFD decompose, strip marks, re-NFC, lowercase, whitespace collapse)
+	// that a draw's hot paths used to redo on every single comparison --
+	// see dojoKeyCache's own doc comment (tournament.go) for the measured
+	// cost.
+	//
+	// ids interns every distinct normalized dojo key across the WHOLE
+	// roster to a dense int id, ONCE, here -- BEFORE assignUnseededByDojoTree
+	// or improveDojoMeetings allocate a single []int/[][]int sized by it
+	// (bc-pnum). This is what lets both of those hot loops index a plain
+	// []int per pool/tree-node instead of paying a map[string]* lookup
+	// (mapaccess2_faststr, profiled at 51% cumulative in
+	// BuildPoolPhaseTreeAware_256_16x16_Interleaved) on every candidate
+	// evaluated -- see dojoIDCache's own doc comment for why every id must
+	// be minted before that sizing happens, and its own callers for the
+	// measured before/after numbers. newDojoIDCacheFor is the one shared
+	// body for this "intern the whole roster up front" block (tournament.go).
+	ids, keys := newDojoIDCacheFor(players)
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
-	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots); err != nil {
+	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, keys, ids); err != nil {
 		return nil, 0, err
 	}
 
-	// Step 4: winner-path pairwise-exchange repair. The descent above is
+	// Step 4: the pairwise-exchange repair pass. The descent above is
 	// greedy per player, and on a MULTI-dojo roster the dojos placed early
 	// can still box a later dojo into pools whose own qualifiers meet in
 	// round 1, because the descent commits each player the moment it
 	// places them and cannot see a later dojo's needs -- measured before
 	// this step existed (this bead's own sweep): 12 of 1596 multi-dojo
 	// configs, all at poolWinners>=2, reached a worse winner-path result
-	// through the descent alone than through repair. The operator's rule
-	// is absolute -- a first match against a dojo-mate must not happen
-	// where any assignment avoids it -- so the finished pools get a
-	// repair loop: unseeded-for-unseeded exchanges, accepted only when
-	// they strictly improve (fewer dojos meeting in round 1 BY WINNER
-	// PATH, then a later winner-path meeting-sum), never worsen ANY
-	// dojo's earliest winner-path meeting, never move a seed and never
-	// break a dojo's per-pool optimum. Single-dojo rosters are already at
-	// their brute-force ceiling (the Phase 3 gate pins 180/180) and an
+	// through the descent alone than through repair. See
+	// improveDojoMeetings' own doc comment for the exchange rule and its
+	// four-tier objective (bc-drwx item 4: this comment used to restate
+	// that objective itself, a copy this file already carried three other
+	// times, so it now points at the one place that description lives
+	// instead of drifting from it again). Single-dojo rosters are already
+	// at their brute-force ceiling (the Phase 3 gate pins 180/180) and an
 	// all-unique-dojo roster has no dojo spanning >=2 pools at all, so
 	// this loop is a no-op in both cases, which is what keeps the gate
 	// numbers and the unique-dojo identity contract exactly where they
 	// were.
-	improveDojoMeetings(pools, targetSizes, qualifierSlots, players)
+	improveDojoMeetings(pools, qualifierSlots, ids)
 
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
 }
+
+// dojoCounter reports how many members of the dojo identified by DENSE ID id
+// (dojoIDCache, bc-pnum) currently occupy pool poolIdx -- an int id, not a
+// normalized dojo string, so the hot per-candidate lookups in
+// improveDojoMeetings' exchange pass index a plain []int instead of paying a
+// map[string]* lookup (mapaccess2_faststr, profiled at 51% cumulative in
+// BuildPoolPhaseTreeAware_256_16x16_Interleaved even after dojoKeyCache
+// memoized the normalization itself -- see dojoIDCache's own doc comment).
+// earliestDojoMeeting takes one rather than a bare []Pool so its caller can
+// choose the cheapest available source of truth: a standalone caller with no
+// other state wraps countDojoInPool directly (O(poolSize) per call, given
+// the id's original dojo string), while improveDojoMeetings' own exchange
+// pass wraps its incrementally-maintained per-pool `counts` [][]int instead
+// (O(1) per call, indexed by the SAME id this type's caller already has).
+type dojoCounter func(poolIdx int, id int) int
 
 // earliestDojoMeeting returns the earliest knockout round two of dojo's pools
 // are drawn to meet, or math.MaxInt when dojo occupies fewer than two pools.
@@ -409,27 +539,67 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 // the repair loop evaluates hundreds of thousands of candidate exchanges,
 // and recomputing each pool pair's slot pairing per candidate multiplied the
 // whole test suite's runtime by three before the matrix existed.
-func earliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string) int {
-	// Collect dojo's occupied-pool indices ONCE (O(P*poolSize)) instead of
-	// rediscovering pool j's membership inside the pair loop for every i
-	// (the old code called countDojoInPool(pools[j], ...) up to once per
-	// (i, j) pair, i.e. O(P^2*poolSize)). The pair loop below then only
-	// ever visits the k <= P pools that actually hold the dojo, via direct
-	// pairRound lookups (k^2), which is where the real savings are: k is
-	// typically small even when P (pool count) is large.
-	occupied := make([]int, 0, len(pools))
+//
+// A thin wrapper over earliestDojoMeetingScan (bc-pnum) with a fresh,
+// throwaway scratch slice: kept as its own entry point because every OTHER
+// caller (this file's own tests, the reference oracles) already calls it by
+// this exact signature, and none of them run often enough for the scratch
+// allocation to matter. improveDojoMeetings' own exchange loop -- the hot
+// candidate scan, on the order of numPools^2*poolSize^2 calls per pass --
+// calls earliestDojoMeetingScan directly instead, with a buffer it reuses
+// across the whole function; that same shared buffer is also what
+// improveDojoMeetings' objective() closure uses (objective runs only at the
+// TOP of a pass, before the exchange scan below it starts, so the two never
+// have the buffer in flight at once) -- see that function's own doc comment
+// for why.
+func earliestDojoMeeting(pools []Pool, pairRound [][]int, id int, count dojoCounter) int {
+	var occupied []int
+	return earliestDojoMeetingScan(pools, pairRound, id, count, &occupied)
+}
+
+// earliestDojoMeetingScan is earliestDojoMeeting's body, factored out
+// (bc-pnum) so a hot caller can hand it a REUSABLE scratch slice instead of
+// paying a fresh make([]int, 0, len(pools)) on every call: profiling
+// BuildPoolPhaseTreeAware_256_16x16_Interleaved after the mapaccess2_faststr
+// fix (dojoIDCache) still showed earliestDojoMeeting itself, plus GC
+// scanning/mallocgc together, over half of cumulative time -- this
+// function's own per-call slice was the source. *occupied is reset to
+// length 0 (keeping its capacity) on every call rather than reallocated, and
+// left holding the current dojo's occupied-pool indices on return purely as
+// a side effect of the reset-and-refill; callers never read it directly.
+//
+// Collects dojo's occupied-pool indices ONCE (O(P*poolSize)) instead of
+// rediscovering pool j's membership inside the pair loop for every i (the
+// old code called countDojoInPool(pools[j], ...) up to once per (i, j)
+// pair, i.e. O(P^2*poolSize)). The pair loop below then only ever visits
+// the k <= P pools that actually hold the dojo, via direct pairRound
+// lookups (k^2), which is where the real savings are: k is typically small
+// even when P (pool count) is large.
+//
+// count (bc-drwx review fix, then bc-pnum's int-id rewrite) replaces a raw
+// countDojoInPool(pools[i], dojo) call: improveDojoMeetings' own exchange
+// pass calls this function on the order of numPools^2*poolSize^2 times, and
+// an O(poolSize) re-scan of pool.Players per query at that scale multiplied
+// the whole pass by poolSize for nothing once dojo identity itself is
+// already a cached int id (dojoIDCache) -- see improveDojoMeetings' own
+// `counts`/`countIn` doc comment for the O(1) replacement it passes here. A
+// standalone caller (this file's own tests) can still pass a
+// countDojoInPool-backed closure and get exactly the old behaviour.
+func earliestDojoMeetingScan(pools []Pool, pairRound [][]int, id int, count dojoCounter, occupied *[]int) int {
+	buf := (*occupied)[:0]
 	for i := range pools {
 		if i >= len(pairRound) {
 			continue
 		}
-		if countDojoInPool(pools[i], dojo) > 0 {
-			occupied = append(occupied, i)
+		if count(i, id) > 0 {
+			buf = append(buf, i)
 		}
 	}
+	*occupied = buf
 	earliest := math.MaxInt
-	for oi := 0; oi < len(occupied); oi++ {
-		for oj := oi + 1; oj < len(occupied); oj++ {
-			i, j := occupied[oi], occupied[oj]
+	for oi := 0; oi < len(buf); oi++ {
+		for oj := oi + 1; oj < len(buf); oj++ {
+			i, j := buf[oi], buf[oj]
 			if r := pairRound[i][j]; r < earliest {
 				earliest = r
 			}
@@ -438,20 +608,32 @@ func earliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string) int {
 	return earliest
 }
 
-// cachedDojoMeeting is earliestDojoMeeting memoized by dojo name in cache.
-// Callers (improveDojoMeetings) hold cache valid only across a span of calls
-// during which pools' CONTENTS are known not to change -- see the call
-// site's own comment for why that span is exactly "one pass" there. Getting
-// that invariant wrong would silently serve a stale round for a dojo whose
-// pool membership already moved, so this stays a private helper rather than
+// cachedDojoMeeting is earliestDojoMeeting memoized by dense dojo id
+// (dojoIDCache, bc-pnum -- two spellings of one dojo already share the one
+// id, matching earliestDojoMeeting's own count-derived answer, which is
+// already spelling-insensitive). known/cache are a matched pair of
+// numDojos()-sized slices rather than a map (bc-pnum: this cache is cleared
+// every pass -- see the call site's own comment -- and clearing a slice is
+// both cheaper and avoids the int-map lookup a map[int]int cache would still
+// pay). Takes the id pre-resolved, not a raw dojo string, since every call
+// site in this file already has one on hand (a.Dojo/b.Dojo resolved once at
+// the ai/bi level) -- see dojoCounter's own doc comment for why re-resolving
+// here would undo that. occupied is threaded straight through to
+// earliestDojoMeetingScan -- see that function's own doc comment. Callers
+// (improveDojoMeetings) hold cache valid only across a span of calls during
+// which pools' CONTENTS are known not to change -- see the call site's own
+// comment for why that span is exactly "one pass" there. Getting that
+// invariant wrong would silently serve a stale round for a dojo whose pool
+// membership already moved, so this stays a private helper rather than
 // something a new caller could reach for without re-deriving the same
 // guarantee.
-func cachedDojoMeeting(pools []Pool, pairRound [][]int, dojo string, cache map[string]int) int {
-	if v, ok := cache[dojo]; ok {
-		return v
+func cachedDojoMeeting(pools []Pool, pairRound [][]int, id int, known []bool, cache []int, count dojoCounter, occupied *[]int) int {
+	if known[id] {
+		return cache[id]
 	}
-	v := earliestDojoMeeting(pools, pairRound, dojo)
-	cache[dojo] = v
+	v := earliestDojoMeetingScan(pools, pairRound, id, count, occupied)
+	known[id] = true
+	cache[id] = v
 	return v
 }
 
@@ -492,6 +674,54 @@ func earliestPairing(a, b []int) int {
 	return worst
 }
 
+// dojoFootprintOptimum returns a per-dojo (dense id) optimum function:
+// ceil(totalMembers/numPools), the per-pool spread cap every dojo-count
+// comparison in this file is measured against (bc-drwx item 11: shared by
+// improveDojoMeetings' exchange pass and assignUnseededByDojoTree's forward
+// descent, which used to keep two independently-built footprint maps that
+// could drift on what "how many of this dojo, in total" means). totalMembers
+// is counted from `pools`' current occupants plus `extra` -- non-nil only
+// for assignUnseededByDojoTree, whose still-to-place unseeded slice has not
+// reached `pools` yet at the point it needs the optimum; improveDojoMeetings
+// runs after every player already has a pool, so its own call passes nil.
+//
+// The footprint is a []int indexed by dense dojo id (bc-pnum: was a
+// map[string]int keyed by dojoKey, in the hot excessOf/optimum call path of
+// improveDojoMeetings' exchange loop, so its lookup was part of the
+// mapaccess2_faststr cost that motivated dojoIDCache -- see that type's own
+// doc comment). ids must already have interned every dojo in `pools` and
+// `extra` BEFORE this call: footprint is sized to ids.numDojos() once, up
+// front, and a caller that lets ids mint a NEW id while this function's own
+// two loops run would index past the end of it. Every production caller
+// satisfies this by interning the whole roster at buildPoolPhaseTreeAwareCore
+// entry, before pool formation starts.
+//
+// Two spellings of one dojo ("Mumeishi"/"mumeishi") already resolve to the
+// SAME id via ids.of (see dojoIDCache's own doc comment), so they still
+// accumulate into one footprint entry rather than two half-sized ones.
+//
+// No blank-dojo guard (bc-drwx item 11): every caller of this function is
+// reached only after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo
+// pre-flight has already refused the whole roster if any player's Dojo is
+// blank, so a blank entry here is unreachable, not merely rare.
+func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int, ids dojoIDCache) func(id int) int {
+	footprint := make([]int, ids.numDojos())
+	for i := range pools {
+		for _, pl := range pools[i].Players {
+			footprint[ids.of(pl.Dojo)]++
+		}
+	}
+	for _, p := range extra {
+		footprint[ids.of(p.Dojo)]++
+	}
+	return func(id int) int {
+		if numPools <= 0 {
+			return 0
+		}
+		return (footprint[id] + numPools - 1) / numPools
+	}
+}
+
 // improveDojoMeetings is the multi-dojo repair loop described at its call
 // site: a WINNER-PATH-ONLY pairwise exchange pass over the pools the
 // descent (assignUnseededByDojoTree) already placed. pairRound is built
@@ -500,21 +730,48 @@ func earliestPairing(a, b []int) int {
 // poolWinners>1 also carries runner-up/crossed-in leaves for -- the same
 // metric the descent itself optimises, and the one the operator ruled the
 // ship/keep decision on (a same-dojo collision through runner-up CROSSING
-// is accepted chance, not a defect either stage owes a fix for). Objective,
-// lexicographic and strictly decreasing on every accepted exchange (so the
-// loop terminates): first the number of multi-pool dojos whose earliest
-// WINNER-PATH meeting is round 1, then the negated sum of finite
-// WINNER-PATH meeting rounds. An exchange moves one unseeded player of a
-// round-1 dojo out of one of its pools in return for an unseeded player of
-// a different dojo, and is legal only when afterwards (a) neither
-// exchanged dojo's earliest WINNER-PATH meeting got EARLIER, (b) neither
-// pool holds more of either dojo than the dojo's per-pool optimum
-// ceil(total/numPools) allows, so the spread invariants the gate pins
-// survive by construction. NO three-way rotation: a pairwise stall simply
-// stops the loop (see the file-level doc comment for the measured
-// dominance this simplification still achieves over the old
+// is accepted chance, not a defect either stage owes a fix for).
+//
+// Objective is FOUR-tier lexicographic (bc-drwx item 7 corrected this doc,
+// which used to describe only the middle two tiers and a flat per-pool cap
+// precondition the code had already replaced with tier (a)'s delta check --
+// see `better`'s own doc comment for the authoritative statement): (a) total
+// spread-cap excess (sum over every (pool, dojo) of how far that pool sits
+// over the dojo's per-pool optimum ceil(total/numPools)) must never
+// increase; (b) the number of multi-pool dojos whose earliest WINNER-PATH
+// meeting is round 1; (c) the negated sum of finite WINNER-PATH meeting
+// rounds; (d) the all-qualifier best-effort (allQualPairRound), a PURE
+// TIE-BREAK that only ever decides a comparison where (a)-(c) are exactly
+// tied and can never veto a swap those tiers already prefer. Strictly
+// decreasing (or, for tier (d), non-increasing) on every accepted exchange,
+// so the loop terminates.
+//
+// An exchange moves one unseeded player of a round-1 dojo out of one of its
+// pools in return for an unseeded player of a different dojo, and is legal
+// only when afterwards neither exchanged dojo's earliest WINNER-PATH
+// meeting got EARLIER -- the one hard precondition alongside the objective
+// itself (the operator's ruling; the all-qualifier tier (d) does NOT get
+// the same hard veto, see `better`'s call site). NO three-way rotation: a
+// pairwise stall simply stops the loop (see the file-level doc comment for
+// the measured dominance this simplification still achieves over the old
 // pairwise+rotation repair it replaces).
-func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int, roster []Player) {
+//
+// Takes only `pools` and `qualifierSlots` (bc-drwx item 11): the
+// `targetSizes` parameter this function used to also take was never read in
+// its body, and the `roster []Player` parameter it used to build its own
+// footprint map from is redundant with `pools` -- by the time this runs
+// (buildPoolPhaseTreeAwareCore, AFTER assignUnseededByDojoTree has placed
+// every player), `pools`' membership already IS the whole roster.
+// dojoFootprintOptimum derives the same optimum from `pools` alone.
+func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) {
+	// rosterSize replaces the old `roster []Player` parameter's len() for
+	// map pre-allocation sizing and the pass-count cap below; both are
+	// sizing hints only, so summing pool membership (rather than a real
+	// player list) is exactly as good.
+	rosterSize := 0
+	for i := range pools {
+		rosterSize += len(pools[i].Players)
+	}
 	winnerSlots := make([][]int, len(qualifierSlots))
 	for i, s := range qualifierSlots {
 		if len(s) > 0 {
@@ -528,21 +785,93 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// effort when there are 2 qualifiers from the pool?": yes, as a final
 	// tie-break, never a trade against the winner-path tiers ahead of it.
 	allQualPairRound := poolPairRounds(qualifierSlots)
-	footprint := make(map[string]int, len(roster))
-	for _, p := range roster {
-		footprint[p.Dojo]++
-	}
 	numPools := len(pools)
-	optimum := func(dojo string) int {
-		return (footprint[dojo] + numPools - 1) / numPools
+	optimum := dojoFootprintOptimum(pools, nil, numPools, ids)
+
+	// numDojos is the dense id space's size: `ids` must already have
+	// interned every dojo in `pools` before this point (the caller,
+	// buildPoolPhaseTreeAwareCore, interns the whole roster up front -- see
+	// dojoIDCache's own doc comment), so this is stable for the rest of the
+	// function and every []int/[][]int below can be sized to it once.
+	numDojos := ids.numDojos()
+
+	// counts[i][id] is pool i's current member count for dojo id, maintained
+	// incrementally by every speculative and accepted swap below (bc-drwx
+	// review fix, then bc-pnum's int-id rewrite: this was a
+	// []map[string]int, and cAi/cAj/cBi/cBj plus every earliestDojoMeeting
+	// call's own occupied-pool scan paid a map[string]* lookup
+	// (mapaccess2_faststr) per candidate on top of the identity lookup
+	// dojoKeyCache already memoized -- profiled at 51% cumulative in
+	// BuildPoolPhaseTreeAware_256_16x16_Interleaved. A plain []int indexed
+	// by dense id removes that lookup entirely, leaving integer indexing).
+	// countIn below is the O(1) replacement threaded through both the direct
+	// cAi/cAj/cBi/cBj reads and every earliestDojoMeeting/cachedDojoMeeting
+	// call in this function.
+	//
+	// poolDojoIDs[i][k] is the dense dojo id of pools[i].Players[k] (bc-pnum
+	// follow-up): the int-id rewrite above still called ids.of(a.Dojo) once
+	// per ai and ids.of(b.Dojo) once per CANDIDATE -- on the order of
+	// numPools^2*poolSize^2 times for bk alone -- and dojoIDCache.of does
+	// TWO map probes per call (dojoKeyCache.of's raw->normalized lookup,
+	// then its own normalized->id lookup), which a follow-up profile still
+	// showed as a measurable cost even after the per-pool tallies stopped
+	// being map-keyed. poolDojoIDs removes it: built once here alongside
+	// counts, and moved together with it by the ONE `exchange` closure
+	// below (bc-pnum review: this used to be a hand-mirrored update at each
+	// of two call sites, which is exactly the shape that let a half-update
+	// slip through the whole test suite green -- see exchange's own doc
+	// comment), a candidate's ak/bk become a plain slice index instead of a
+	// cache lookup.
+	counts := make([][]int, numPools)
+	poolDojoIDs := make([][]int, numPools)
+	for i := range pools {
+		counts[i] = make([]int, numDojos)
+		poolDojoIDs[i] = make([]int, len(pools[i].Players))
+		for k, pl := range pools[i].Players {
+			id := ids.of(pl.Dojo)
+			counts[i][id]++
+			poolDojoIDs[i][k] = id
+		}
+	}
+	countIn := dojoCounter(func(poolIdx int, id int) int {
+		return counts[poolIdx][id]
+	})
+
+	// exchange swaps the players CURRENTLY at (i, ai) and (j, bi), moving
+	// counts and poolDojoIDs with them (bc-pnum review, G1): pools, counts
+	// and poolDojoIDs must always move together, and a hand-written pair of
+	// call sites -- one for "do the swap", a second, separately typed-out
+	// one for "undo it" -- is exactly the shape that lets a half-update
+	// (updating only one of the three structures, or only one side of a
+	// pair) slip through unnoticed: the whole helper suite stayed green
+	// under a mutation that dropped one poolDojoIDs write, because nothing
+	// short of an end-of-function invariant check ever re-derives
+	// poolDojoIDs from `pools` to catch the drift.
+	//
+	// Self-inverse BY CONSTRUCTION, not by a hand-mirrored copy of the
+	// deltas: it reads whatever ids currently occupy the two slots (x, y)
+	// FIRST, then swaps, so calling it a second time on the SAME (i, ai, j,
+	// bi) reads back the post-swap ids and swaps again, restoring every one
+	// of the three structures to exactly its pre-call state. The revert
+	// below is therefore the identical call, not a second, independently
+	// maintained mirror of it -- there is only one place this operation is
+	// written down.
+	exchange := func(i, ai, j, bi int) {
+		x, y := poolDojoIDs[i][ai], poolDojoIDs[j][bi]
+		pools[i].Players[ai], pools[j].Players[bi] = pools[j].Players[bi], pools[i].Players[ai]
+		poolDojoIDs[i][ai], poolDojoIDs[j][bi] = y, x
+		counts[i][x]--
+		counts[i][y]++
+		counts[j][y]--
+		counts[j][x]++
 	}
 
-	// excessOf is dojo's contribution to tier (a) from a single pool
+	// excessOf is dojo id's contribution to tier (a) from a single pool
 	// holding `count` of it: how far over its per-pool optimum that one
 	// pool sits, floored at 0 (a pool at or under optimum contributes
 	// nothing -- only OVER-cap pools count, never under).
-	excessOf := func(dojo string, count int) int {
-		if over := count - optimum(dojo); over > 0 {
+	excessOf := func(id int, count int) int {
+		if over := count - optimum(id); over > 0 {
 			return over
 		}
 		return 0
@@ -551,43 +880,86 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// totalExcess is tier (a): sum over every (pool, dojo) pair of that
 	// pool's excess for that dojo. This is the operator's spread tier --
 	// see this function's own doc comment for why it must lead the other
-	// two tiers, and dojoNode's doc comment (pool_distribution_tree_aware.go)
+	// three tiers, and dojoNode's doc comment (pool_distribution_tree_aware.go)
 	// for the descent-side guard this backstops for the one placement
 	// order the descent's own forward-only guard cannot reach (the
-	// roster's literal last remaining seat).
+	// roster's literal last remaining seat). Reads `counts` directly
+	// (bc-drwx review fix) instead of re-scanning every pool's Players --
+	// `counts` is already the authoritative per-pool tally, kept in sync by
+	// every swap below, so re-deriving it here via dojoKey per player was
+	// pure waste. Walks every id in 0..numDojos (bc-pnum: `counts[i]` is now
+	// a dense []int rather than a map with one entry per dojo ACTUALLY IN
+	// this pool), which excessOf(id, 0) correctly scores as 0 excess for
+	// every dojo absent from pool i -- this only runs once per PASS, not per
+	// candidate, so the extra zero-entries are not the loop this bead
+	// targeted.
 	totalExcess := func() int {
 		total := 0
-		counts := map[string]int{}
 		for i := range pools {
-			for k := range counts {
-				delete(counts, k)
-			}
-			for _, pl := range pools[i].Players {
-				counts[pl.Dojo]++
-			}
-			for d, c := range counts {
-				total += excessOf(d, c)
+			for id, c := range counts[i] {
+				total += excessOf(id, c)
 			}
 		}
 		return total
 	}
 
+	// scanBuf is earliestDojoMeetingScan's reusable occupied-pool scratch
+	// slice (bc-pnum), shared across every call EITHER objective() or the
+	// exchange loop below makes: the exchange loop alone calls
+	// earliestDojoMeetingScan on the order of numPools^2*poolSize^2 times,
+	// and a fresh make([]int, 0, numPools) per call (earliestDojoMeeting's
+	// own throwaway-buffer behaviour) was, once dojoIDCache had already
+	// removed the map[string]* lookup, the next-largest measured cost --
+	// mostly paid back as GC scanning rather than the allocation itself.
+	// Declared here, ABOVE objective (bc-pnum follow-up: objective() used
+	// to call the throwaway-buffer earliestDojoMeeting wrapper instead,
+	// which is what its own doc comment used to describe as having no
+	// production caller -- wrong, since objective() itself is one, twice
+	// per DISTINCT DOJO per pass (guarded by seen[id] below, not twice per
+	// pass flat), so objective() can share it too. Every call is
+	// synchronous and objective() always runs to completion BEFORE the
+	// exchange loop below starts for that pass (never interleaved with
+	// it), so no two scans are ever in flight on this buffer at once, and
+	// nothing reads *occupied after the call that filled it returns --
+	// one growing slice is safe to reuse for the whole function.
+	var scanBuf []int
+
+	// objective() itself calls earliestDojoMeetingScan directly (sharing
+	// scanBuf above) rather than the cachedDojoMeeting wrapper (bc-drwx
+	// item 13, noted rather than changed: it runs at the TOP of each pass,
+	// before winnerMeetCache/allQualMeetCache are cleared a few lines below
+	// at the call site, so routing it through THAT cache would need the
+	// clear() calls moved AHEAD of this call instead of after it -- a real
+	// reordering, not the loop-invariant code motion applied to cAi/cAj
+	// above, and the measured cost here is one whole-roster pass per OUTER
+	// iteration of the climb (bounded by the number of accepted swaps, not
+	// by candidate count), a much smaller multiplier than the
+	// candidate-scan cost the wave-2 slotBest memo (seed.go) was written to
+	// fix. Left alone rather than restructured for a marginal win.
 	objective := func() (excess, roundOnes, negSum, allQualNegSum int) {
 		excess = totalExcess()
-		seen := map[string]bool{}
+		seen := make([]bool, numDojos)
 		for i := range pools {
-			for _, pl := range pools[i].Players {
-				if seen[pl.Dojo] {
+			// id read from poolDojoIDs (bc-pnum review), not
+			// ids.of(pl.Dojo): poolDojoIDs is already in scope and kept in
+			// lockstep with pools' membership by every exchange (see
+			// exchange's own doc comment above), so this is what makes "no
+			// map probe anywhere in the exchange pass" a structural
+			// property of the code rather than something only true by
+			// measurement on the shapes profiled so far.
+			for k := range pools[i].Players {
+				id := poolDojoIDs[i][k]
+				if seen[id] {
 					continue
 				}
-				seen[pl.Dojo] = true
-				if m := earliestDojoMeeting(pools, pairRound, pl.Dojo); m != math.MaxInt {
+				seen[id] = true
+				if m := earliestDojoMeetingScan(pools, pairRound, id, countIn, &scanBuf); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
 					}
 					negSum -= m
 				}
-				if m := earliestDojoMeeting(pools, allQualPairRound, pl.Dojo); m != math.MaxInt {
+				if m := earliestDojoMeetingScan(pools, allQualPairRound, id, countIn, &scanBuf); m != math.MaxInt {
 					allQualNegSum -= m
 				}
 			}
@@ -627,11 +999,16 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 		return aqa < aqb
 	}
 
-	// Per-pass memoization for earliestDojoMeeting, keyed by dojo name --
+	// Per-pass memoization for earliestDojoMeeting, keyed by dense dojo id --
 	// see the cache-clearing comment inside the pass loop for why a single
-	// map reused (and cleared) across passes is safe here.
-	winnerMeetCache := make(map[string]int, len(roster))
-	allQualMeetCache := make(map[string]int, len(roster))
+	// pair of slices reused (and cleared) across passes is safe here.
+	// known/cache are matched pairs (bc-pnum: were map[string]int) so a
+	// miss is a bool check rather than a second map probe, and clear() on a
+	// bool slice is cheaper than clearing a map of the same size.
+	winnerMeetKnown := make([]bool, numDojos)
+	winnerMeetCache := make([]int, numDojos)
+	allQualMeetKnown := make([]bool, numDojos)
+	allQualMeetCache := make([]int, numDojos)
 
 	// Bounded belt-and-braces cap; the lexicographic strict improvement is
 	// the real termination argument. Runs to a FULL fixpoint of the
@@ -648,7 +1025,7 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 	// could still buy it; tier (a) is what returns
 	// dojo/deep-oversubscription (draw_shapes_golden_test.go) to
 	// MaxSameDojoCount 2.
-	for pass := 0; pass < len(roster)*numPools+1; pass++ {
+	for pass := 0; pass < rosterSize*numPools+1; pass++ {
 		curExc, curR1, curNS, curAQ := objective()
 		// winnerMeetCache/allQualMeetCache memoize earliestDojoMeeting by
 		// dojo name for the duration of THIS pass: pools are only ever
@@ -660,8 +1037,8 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 		// accept -- nothing in THIS pass reads the cache again once a swap
 		// is accepted. "After" values are never cached: they are the
 		// post-swap state of one specific candidate and are never reused.
-		clear(winnerMeetCache)
-		clear(allQualMeetCache)
+		clear(winnerMeetKnown)
+		clear(allQualMeetKnown)
 		improved := false
 		for i := 0; i < numPools && !improved; i++ {
 			for ai := 0; ai < len(pools[i].Players) && !improved; ai++ {
@@ -676,10 +1053,29 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 				// and reused directly for hasMeetingSignal rather than
 				// calling earliestDojoMeeting a second time for the same
 				// answer.
-				beforeA := cachedDojoMeeting(pools, pairRound, a.Dojo, winnerMeetCache)
-				beforeAQA := cachedDojoMeeting(pools, allQualPairRound, a.Dojo, allQualMeetCache)
+				// ak (bc-drwx review fix, then bc-pnum's int-id rewrite,
+				// then the poolDojoIDs follow-up): a's dense id read
+				// straight out of poolDojoIDs rather than re-resolved via
+				// ids.of(a.Dojo) -- see poolDojoIDs' own doc comment
+				// (above, where `counts` is built) for why the cache
+				// lookup itself was still a measurable cost. Reused for
+				// every countIn/cachedDojoMeeting call below that needs a's
+				// identity -- see dojoCounter's own doc comment for why
+				// passing the raw string through instead would have put an
+				// O(numPools) run of cache lookups back inside
+				// earliestDojoMeeting's occupied-pool scan.
+				ak := poolDojoIDs[i][ai]
+				beforeA := cachedDojoMeeting(pools, pairRound, ak, winnerMeetKnown, winnerMeetCache, countIn, &scanBuf)
+				beforeAQA := cachedDojoMeeting(pools, allQualPairRound, ak, allQualMeetKnown, allQualMeetCache, countIn, &scanBuf)
 				hasMeetingSignal := beforeA != math.MaxInt
-				hasExcessSignal := excessOf(a.Dojo, countDojoInPool(pools[i], a.Dojo)) > 0
+				// cAi (bc-drwx item 13: hoisted, same reasoning as beforeA/
+				// beforeAQA above -- it depends only on pools[i] and a.Dojo,
+				// both loop-invariant across the whole (j, bi) scan below,
+				// so recomputing it per candidate b bought nothing). Reused
+				// directly for hasExcessSignal rather than calling
+				// countDojoInPool a second time for the same answer.
+				cAi := countIn(i, ak) // includes a
+				hasExcessSignal := excessOf(ak, cAi) > 0
 				if !hasMeetingSignal && !hasExcessSignal {
 					continue // nothing an exchange could ever improve for this dojo, from THIS pool
 				}
@@ -687,9 +1083,25 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 					if j == i {
 						continue
 					}
+					// cAj (bc-drwx item 13: hoisted to the j level -- it
+					// depends on pools[j] and a.Dojo, both loop-invariant
+					// across the bi scan below for this j, unlike cBj/cBi
+					// which depend on b.Dojo and must stay per-candidate).
+					cAj := countIn(j, ak) // a not in j yet
 					for bi := 0; bi < len(pools[j].Players) && !improved; bi++ {
 						b := pools[j].Players[bi]
-						if b.Seed > 0 || b.Dojo == a.Dojo {
+						if b.Seed > 0 {
+							continue
+						}
+						// bk (bc-drwx review fix, then bc-pnum's int-id
+						// rewrite, then the poolDojoIDs follow-up): b's
+						// dense id read straight out of poolDojoIDs,
+						// mirroring ak above -- this is the read that used
+						// to run once per CANDIDATE (numPools^2*poolSize^2
+						// scale), so it is the one this follow-up mattered
+						// most for.
+						bk := poolDojoIDs[j][bi]
+						if bk == ak {
 							continue
 						}
 						// Tier (a) delta, re-derived from the four (pool,
@@ -703,12 +1115,10 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 						// A swap is only ever rejected here for making
 						// TOTAL excess WORSE, never for a single pool's
 						// count in isolation.
-						cAi := countDojoInPool(pools[i], a.Dojo) // includes a
-						cAj := countDojoInPool(pools[j], a.Dojo) // a not in j yet
-						cBj := countDojoInPool(pools[j], b.Dojo) // includes b
-						cBi := countDojoInPool(pools[i], b.Dojo) // b not in i yet
-						beforeExc := excessOf(a.Dojo, cAi) + excessOf(a.Dojo, cAj) + excessOf(b.Dojo, cBi) + excessOf(b.Dojo, cBj)
-						afterExc := excessOf(a.Dojo, cAi-1) + excessOf(a.Dojo, cAj+1) + excessOf(b.Dojo, cBi+1) + excessOf(b.Dojo, cBj-1)
+						cBj := countIn(j, bk) // includes b
+						cBi := countIn(i, bk) // b not in i yet
+						beforeExc := excessOf(ak, cAi) + excessOf(ak, cAj) + excessOf(bk, cBi) + excessOf(bk, cBj)
+						afterExc := excessOf(ak, cAi-1) + excessOf(ak, cAj+1) + excessOf(bk, cBi+1) + excessOf(bk, cBj-1)
 						deltaExc := afterExc - beforeExc
 						if deltaExc > 0 {
 							continue
@@ -730,13 +1140,22 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 						// beforeAQB come from the pass-scoped cache, since
 						// b.Dojo recurs across many (i, ai, j, bi)
 						// candidates within one pass.
-						beforeB := cachedDojoMeeting(pools, pairRound, b.Dojo, winnerMeetCache)
-						beforeAQB := cachedDojoMeeting(pools, allQualPairRound, b.Dojo, allQualMeetCache)
-						pools[i].Players[ai], pools[j].Players[bi] = b, a
-						afterA := earliestDojoMeeting(pools, pairRound, a.Dojo)
-						afterB := earliestDojoMeeting(pools, pairRound, b.Dojo)
-						afterAQA := earliestDojoMeeting(pools, allQualPairRound, a.Dojo)
-						afterAQB := earliestDojoMeeting(pools, allQualPairRound, b.Dojo)
+						beforeB := cachedDojoMeeting(pools, pairRound, bk, winnerMeetKnown, winnerMeetCache, countIn, &scanBuf)
+						beforeAQB := cachedDojoMeeting(pools, allQualPairRound, bk, allQualMeetKnown, allQualMeetCache, countIn, &scanBuf)
+						// exchange moves pools/counts/poolDojoIDs together,
+						// speculatively (bc-pnum review, G1 -- see that
+						// closure's own doc comment for why this is ONE
+						// call rather than a hand-mirrored update): every
+						// read below this point (afterA/afterB/afterAQA/
+						// afterAQB, via countIn, and any LATER candidate's
+						// ak/bk read via poolDojoIDs) must see the
+						// POST-swap tally/identity, and the revert a few
+						// lines down is the SAME call, self-inverse.
+						exchange(i, ai, j, bi)
+						afterA := earliestDojoMeetingScan(pools, pairRound, ak, countIn, &scanBuf)
+						afterB := earliestDojoMeetingScan(pools, pairRound, bk, countIn, &scanBuf)
+						afterAQA := earliestDojoMeetingScan(pools, allQualPairRound, ak, countIn, &scanBuf)
+						afterAQB := earliestDojoMeetingScan(pools, allQualPairRound, bk, countIn, &scanBuf)
 						newExc, newR1, newNS := curExc+deltaExc, curR1, curNS
 						for _, d := range [2][2]int{{beforeA, afterA}, {beforeB, afterB}} {
 							bef, aft := d[0], d[1]
@@ -763,13 +1182,35 @@ func improveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int
 								newAQ -= aft
 							}
 						}
+						// bc-drwx item 7: the all-qualifier (tier d) "never
+						// earlier" terms used to be ANDed in here as a HARD
+						// PRECONDITION alongside the winner-path guard,
+						// which let tier (d) VETO a swap tiers (a)-(c)
+						// preferred (repro: a swap moving dojo X's
+						// winner-path meeting from round 1 to 3 was refused
+						// because dojo Y's all-qualifier crossing moved
+						// from round 6 to 1, even though nothing about
+						// tiers (a)-(c) objected). Tier (d) is a PURE
+						// TIE-BREAK (this function's own doc comment: "it
+						// never overrides (a)-(c): a swap tier (c) already
+						// prefers is taken regardless of what tier (d)
+						// thinks of it") and better() already encodes that
+						// -- newAQ only ever decides a comparison where
+						// tiers (a)-(c) are EXACTLY tied. The winner-path
+						// "never earlier" guard (afterA/afterB) stays a
+						// hard precondition: that one IS the ruling,
+						// unlike the all-qualifier best-effort.
 						if afterA >= beforeA && afterB >= beforeB &&
-							afterAQA >= beforeAQA && afterAQB >= beforeAQB &&
 							better(newExc, newR1, newNS, newAQ, curExc, curR1, curNS, curAQ) {
 							improved = true
 							break
 						}
-						pools[i].Players[ai], pools[j].Players[bi] = a, b // revert
+						// revert: exchange is self-inverse (see its own doc
+						// comment), so calling it again on this same
+						// (i, ai, j, bi) undoes pools, counts AND
+						// poolDojoIDs together -- not a second,
+						// hand-mirrored copy of the deltas above.
+						exchange(i, ai, j, bi)
 					}
 				}
 			}
@@ -846,10 +1287,10 @@ func treeAwareQualifierSlots(targetSizes []int, poolWinners, numCourts int, mode
 
 	var postSlots [][]int
 	switch mode.ExtraQualifiers {
-	case qualifierModeLargerPools:
+	case QualifierModeLargerPools:
 		overrides := extraQualifierOverridesFromSizes(postSizes, mode.MinPoolSize, poolWinners)
 		postSlots = poolQualifierPathsPerPool(postSizes, poolWinners, overrides, numCourts)
-	case qualifierModeFillBracket:
+	case QualifierModeFillBracket:
 		postSeedPoolIdx := make(map[int]int, len(mode.SeedPoolIndex))
 		for rank, preIdx := range mode.SeedPoolIndex {
 			if preIdx >= 0 && preIdx < numPools {
@@ -870,31 +1311,55 @@ func treeAwareQualifierSlots(targetSizes []int, poolWinners, numCourts int, mode
 	return preSlots
 }
 
-// extraQualifierOverridesFromSizes mirrors
-// state.Competition.QualifiersForPool's larger-pools rule (a pool sends
-// poolWinners+1 exactly when it is OVERSIZED, i.e. len(pool.Players) >
-// PoolSize) but pre-placement, from target SIZES alone: pool i is oversized
-// when sizes[i] > minPoolSize. This is exact, not an approximation --
+// QualifiersForOversizedPool is the larger-pools "oversized pool sends one
+// extra qualifier" rule (bc-qual): a pool sends poolWinners+1 qualifiers
+// exactly when it is OVERSIZED (size > minPoolSize), else poolWinners
+// unchanged. minPoolSize <= 0 means there is no minimum to be over, so no
+// pool is ever oversized (degrades to the uniform poolWinners count) rather
+// than marking every pool oversized.
+//
+// Shared (bc-drwx item 13) by state.Competition.QualifiersForPool
+// (internal/state/models.go, POST-placement, from a real pool's
+// participant count) and extraQualifierOverridesFromSizes below
+// (PRE-placement, from a target size alone) so the two -- previously two
+// independent implementations of the identical rule, one per package --
+// can never drift on what "oversized" means. internal/state already
+// imports internal/helper (Competition.QualifiersForPool's own helper.Pool
+// parameter), so this is the one direction sharing can go; helper cannot
+// import state back (see qualifierMode's own doc comment).
+func QualifiersForOversizedPool(size, minPoolSize, poolWinners int) int {
+	if minPoolSize > 0 && size > minPoolSize {
+		return poolWinners + 1
+	}
+	return poolWinners
+}
+
+// extraQualifierOverridesFromSizes applies QualifiersForOversizedPool
+// pre-placement, from target SIZES alone: pool i is oversized when
+// sizes[i] > minPoolSize. This is exact, not an approximation --
 // QualifiersForPool's own oversized test only ever reads a pool's
 // participant COUNT, which is exactly what sizes[i] already promises pool i
 // will end up holding once distribution finishes (both the old fill+repair
 // pipeline and this one guarantee every pool's FINAL size equals its target
 // size; nobody is ever short or over).
 //
-// minPoolSize <= 0 returns nil (no minimum to be over, matching
-// QualifiersForPool's own degrade-to-uniform behaviour for that case) rather
-// than marking every pool oversized.
+// minPoolSize <= 0 returns nil (no minimum to be over) rather than an
+// empty-but-present map: QualifiersForOversizedPool would never actually
+// populate one in that case either (every pool degrades to the uniform
+// poolWinners, so the `w != poolWinners` check below never fires), but the
+// early return states the "no minimum" case as itself rather than relying
+// on that being the loop's incidental behaviour.
 func extraQualifierOverridesFromSizes(sizes []int, minPoolSize, poolWinners int) map[int]int {
 	if minPoolSize <= 0 {
 		return nil
 	}
 	var overrides map[int]int
 	for i, sz := range sizes {
-		if sz > minPoolSize {
+		if w := QualifiersForOversizedPool(sz, minPoolSize, poolWinners); w != poolWinners {
 			if overrides == nil {
 				overrides = make(map[int]int, len(sizes))
 			}
-			overrides[i] = poolWinners + 1
+			overrides[i] = w
 		}
 	}
 	return overrides
@@ -989,8 +1454,16 @@ type dojoNode struct {
 	poolIdx     int
 	poolCount   int
 	roomPools   int
-	dojoCount   map[string]int
-	capacity    int
+	// dojoCount is indexed by dense dojo id (dojoIDCache, bc-pnum: was a
+	// map[string]int). recordDojoOccupancy/chooseDojoTreePool are called
+	// once per placed player times its root-to-leaf depth, so a
+	// map[string]* lookup (mapaccess2_faststr) per node visited was real,
+	// measured cost -- a plain []int removes it. Sized to numDojos at build
+	// time (buildDojoTree/buildDojoTreeRec) for every node, leaf and
+	// internal alike, since every node in the tree can in principle see
+	// every dojo.
+	dojoCount []int
+	capacity  int
 	// poolIndices lists every REAL pool index beneath this node (fixed at
 	// build time, like poolCount). Used only by the all-qualifier
 	// best-effort tie-break in chooseDojoTreePool: a genuine tie on every
@@ -1018,7 +1491,13 @@ type dojoNode struct {
 // case, exactly as the region-scoring predecessor of this function degraded
 // when it had no region information (see treeAwareQualifierSlots' own doc
 // comment on this same nil case).
-func buildDojoTree(qualifierSlots [][]int, targetSizes []int, placed []int) (*dojoNode, int) {
+//
+// numDojos sizes every node's dojoCount []int (bc-pnum): the caller's
+// dojoIDCache must already have interned every dojo that will ever be
+// recorded against this tree (buildPoolPhaseTreeAwareCore interns the whole
+// roster before this is called) -- see dojoIDCache's own doc comment for why
+// minting an id after this sizing would index past the end of it.
+func buildDojoTree(qualifierSlots [][]int, targetSizes []int, placed []int, numDojos int) (*dojoNode, int) {
 	if len(qualifierSlots) == 0 {
 		return nil, 0
 	}
@@ -1040,7 +1519,7 @@ func buildDojoTree(qualifierSlots [][]int, targetSizes []int, placed []int) (*do
 		return nil, 0
 	}
 	totalBits := bits.Len(uint(maxSlot))
-	root := buildDojoTreeRec(poolAtSlot, targetSizes, placed, totalBits, 0)
+	root := buildDojoTreeRec(poolAtSlot, targetSizes, placed, totalBits, 0, numDojos)
 	return root, totalBits
 }
 
@@ -1050,9 +1529,9 @@ func buildDojoTree(qualifierSlots [][]int, targetSizes []int, placed []int) (*do
 // exactly the bit dojoMeetRound (seed.go) says two slots must differ in to
 // meet only in the final -- and the split floor (bitsLeft == 0) lands on one
 // specific slot number, i.e. at most one real pool.
-func buildDojoTreeRec(poolAtSlot map[int]int, targetSizes, placed []int, bitsLeft, prefix int) *dojoNode {
+func buildDojoTreeRec(poolAtSlot map[int]int, targetSizes, placed []int, bitsLeft, prefix, numDojos int) *dojoNode {
 	if bitsLeft == 0 {
-		n := &dojoNode{poolIdx: -1, dojoCount: map[string]int{}}
+		n := &dojoNode{poolIdx: -1, dojoCount: make([]int, numDojos)}
 		if i, ok := poolAtSlot[prefix]; ok {
 			n.poolIdx = i
 			n.poolCount = 1
@@ -1064,14 +1543,14 @@ func buildDojoTreeRec(poolAtSlot map[int]int, targetSizes, placed []int, bitsLef
 		}
 		return n
 	}
-	left := buildDojoTreeRec(poolAtSlot, targetSizes, placed, bitsLeft-1, prefix<<1)
-	right := buildDojoTreeRec(poolAtSlot, targetSizes, placed, bitsLeft-1, (prefix<<1)|1)
+	left := buildDojoTreeRec(poolAtSlot, targetSizes, placed, bitsLeft-1, prefix<<1, numDojos)
+	right := buildDojoTreeRec(poolAtSlot, targetSizes, placed, bitsLeft-1, (prefix<<1)|1, numDojos)
 	poolIndices := make([]int, 0, len(left.poolIndices)+len(right.poolIndices))
 	poolIndices = append(poolIndices, left.poolIndices...)
 	poolIndices = append(poolIndices, right.poolIndices...)
 	return &dojoNode{
 		left: left, right: right, poolIdx: -1,
-		dojoCount:   map[string]int{},
+		dojoCount:   make([]int, numDojos),
 		capacity:    left.capacity + right.capacity,
 		poolCount:   left.poolCount + right.poolCount,
 		roomPools:   left.roomPools + right.roomPools,
@@ -1081,7 +1560,7 @@ func buildDojoTreeRec(poolAtSlot map[int]int, targetSizes, placed []int, bitsLef
 
 // recordDojoOccupancy walks root-to-leaf along winnerSlot's own bit path
 // (the identical path buildDojoTreeRec assigned that slot to) and updates
-// every node on the way: dojoCount[dojo]++ always, capacity += capacityDelta.
+// every node on the way: dojoCount[id]++ always, capacity += capacityDelta.
 //
 // capacityDelta is 0 when recording a SEED's occupancy: a seed's pool
 // already had its room removed from the leaf's starting capacity (via
@@ -1092,11 +1571,21 @@ func buildDojoTreeRec(poolAtSlot map[int]int, targetSizes, placed []int, bitsLef
 // case that can exhaust a leaf's LAST seat, in which case roomPools is
 // decremented all the way back up to the root too (see dojoNode's own doc
 // comment on why roomPools is tracked separately from capacity/poolCount).
-func recordDojoOccupancy(root *dojoNode, dojo string, winnerSlot, totalBits, capacityDelta int) {
+//
+// id is the caller's already-resolved dense dojo id (dojoIDCache, bc-pnum):
+// this used to take the raw dojo string and a dojoKeyCache and normalize
+// here, but every call site already has an id on hand by the time it calls
+// this (assignUnseededByDojoTree resolves it once per player), so passing
+// the string through again would have cost a second cache lookup for no
+// reason. Two spellings of one dojo ("Mumeishi"/"mumeishi") already resolve
+// to the SAME id (dojoIDCache.of), so they still accumulate into the SAME
+// node count instead of two separate, half-sized ones -- chooseDojoTreePool
+// and pickDojoTreeAwarePool read the same id back.
+func recordDojoOccupancy(root *dojoNode, id, winnerSlot, totalBits, capacityDelta int) {
 	node := root
 	bitsLeft := totalBits
 	for {
-		node.dojoCount[dojo]++
+		node.dojoCount[id]++
 		node.capacity += capacityDelta
 		if bitsLeft == 0 {
 			break
@@ -1187,7 +1676,12 @@ func allQualifierWorstMeeting(candidatePools []int, qualifierSlots [][]int, dojo
 // dojo already occupies, by index) is computed ONCE by the caller and
 // threaded through unchanged for the whole descent, since it does not
 // change mid-walk.
-func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, dojoPoolIndices []int) int {
+//
+// id is the caller's already-resolved dense dojo id (dojoIDCache, bc-pnum),
+// matching recordDojoOccupancy's own write -- see that function's doc
+// comment for why the resolution happens once at the caller rather than
+// here.
+func chooseDojoTreePool(root *dojoNode, id int, qualifierSlots [][]int, dojoPoolIndices []int) int {
 	node := root
 	for node.left != nil {
 		l, r := node.left, node.right
@@ -1199,7 +1693,7 @@ func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, doj
 		case r.capacity <= 0:
 			node = l
 		default:
-			lc, rc := l.dojoCount[dojo]*r.poolCount, r.dojoCount[dojo]*l.poolCount
+			lc, rc := l.dojoCount[id]*r.poolCount, r.dojoCount[id]*l.poolCount
 			lcap, rcap := l.capacity*r.poolCount, r.capacity*l.poolCount
 			switch {
 			case lc < rc:
@@ -1238,7 +1732,7 @@ func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, doj
 // descent (chooseDojoTreePool) when the tree has something to say, plain
 // leastConflictedPool otherwise.
 //
-// A dojo with NOBODY placed anywhere yet (root == nil, dojo == "", or
+// A dojo with NOBODY placed anywhere yet (root == nil, or
 // root.dojoCount[dojo] == 0 -- no seed and no earlier unseeded member of
 // this dojo) has no tree signal to route on at all: every branch would tie
 // 0-vs-0 at every level, all the way down, and the decision would then rest
@@ -1256,24 +1750,34 @@ func chooseDojoTreePool(root *dojoNode, dojo string, qualifierSlots [][]int, doj
 // same bypass), root.dojoCount[dojo] is no longer 0 and every later member
 // of that dojo genuinely does have a branch to avoid, so the tree descent
 // takes over from there.
-func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, qualifierSlots [][]int) int {
-	if root == nil || dojo == "" || root.dojoCount[dojo] == 0 {
-		return leastConflictedPool(pools, targetSizes, dojo)
+func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, id int, qualifierSlots [][]int, keys dojoKeyCache) int {
+	// id is the caller's already-resolved dense dojo id (dojoIDCache,
+	// bc-pnum), matching recordDojoOccupancy's own write. dojo (the raw
+	// string) is still needed alongside it: leastConflictedPool and
+	// countDojoInPool below stay string-based, since they are not on this
+	// bead's hot path (see those functions' own doc comments).
+	//
+	// No `dojo == ""` guard (bc-drwx item 11): every caller is reached only
+	// after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has
+	// already refused a roster with any blank dojo, so a blank dojo here is
+	// unreachable -- see ErrBlankDojoInDraw's own doc comment.
+	if root == nil || root.dojoCount[id] == 0 {
+		return leastConflictedPool(pools, targetSizes, dojo, keys)
 	}
 	dojoPoolIndices := make([]int, 0, 4)
 	for idx := range pools {
-		if countDojoInPool(pools[idx], dojo) > 0 {
+		if countDojoInPool(pools[idx], dojo, keys) > 0 {
 			dojoPoolIndices = append(dojoPoolIndices, idx)
 		}
 	}
-	if best := chooseDojoTreePool(root, dojo, qualifierSlots, dojoPoolIndices); best >= 0 {
+	if best := chooseDojoTreePool(root, id, qualifierSlots, dojoPoolIndices); best >= 0 {
 		return best
 	}
 	// The tree found no room (a bye-heavy corner, or a pool this roster's
 	// mode left out of the tree entirely, per buildDojoTree's own doc
 	// comment) -- leastConflictedPool still has the full, real pool list to
 	// fall back on.
-	return leastConflictedPool(pools, targetSizes, dojo)
+	return leastConflictedPool(pools, targetSizes, dojo, keys)
 }
 
 // assignUnseededByDojoTree places every unseeded player, IN ROSTER ORDER --
@@ -1313,65 +1817,65 @@ func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo
 // forward-only, no-repair pass can route around that, since nothing short
 // of a different EARLIER placement (requiring foresight this pass does not
 // have) could have left a different pool as the last one standing.
-func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player, qualifierSlots [][]int) error {
+// No blank-dojo guards (bc-drwx item 11: this function used to carry three
+// -- around the seed-occupancy recording loop, the per-player cap check,
+// and the live-placement recordDojoOccupancy call -- one per p.Dojo/pl.Dojo
+// read below). Every caller is reached only after
+// buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has already
+// refused a roster with any blank dojo, so a blank dojo anywhere in `pools`
+// or `unseeded` is unreachable -- see ErrBlankDojoInDraw's own doc comment.
+//
+// ids (bc-pnum) must already have interned every dojo in `pools` and
+// `unseeded` before this call -- see dojoIDCache's own doc comment for why;
+// buildPoolPhaseTreeAwareCore interns the whole roster before calling this.
+// A per-player id is resolved ONCE per loop iteration below (mirroring the
+// hoisting already used throughout this file) and threaded into
+// pickDojoTreeAwarePool/recordDojoOccupancy/dojoOptimum instead of each of
+// those re-resolving it from the raw string.
+func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player, qualifierSlots [][]int, keys dojoKeyCache, ids dojoIDCache) error {
 	placed := make([]int, len(pools))
 	for i := range pools {
 		placed[i] = len(pools[i].Players)
 	}
-	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed)
+	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed, ids.numDojos())
 	if root != nil {
 		for i := range pools {
 			if i >= len(qualifierSlots) || len(qualifierSlots[i]) == 0 {
 				continue
 			}
 			for _, pl := range pools[i].Players {
-				if pl.Dojo == "" {
-					continue
-				}
-				recordDojoOccupancy(root, pl.Dojo, qualifierSlots[i][0], totalBits, 0)
+				recordDojoOccupancy(root, ids.of(pl.Dojo), qualifierSlots[i][0], totalBits, 0)
 			}
 		}
 	}
 
 	numPools := len(pools)
-	footprint := make(map[string]int, len(unseeded))
-	for i := range pools {
-		for _, pl := range pools[i].Players {
-			if pl.Dojo != "" {
-				footprint[pl.Dojo]++
-			}
-		}
-	}
-	for _, p := range unseeded {
-		if p.Dojo != "" {
-			footprint[p.Dojo]++
-		}
-	}
-	dojoOptimum := func(dojo string) int {
-		if numPools <= 0 {
-			return 0
-		}
-		f := footprint[dojo]
-		return (f + numPools - 1) / numPools
-	}
+	// dojoFootprintOptimum (bc-drwx items 3 and 11, then bc-pnum's int-id
+	// rewrite): shared with improveDojoMeetings so the two can never
+	// independently drift on what "how many of this dojo, in total" means,
+	// and indexed by dense id so two spellings of one dojo count toward the
+	// SAME cap. `unseeded` is the extra slice: at this point those players
+	// are not in `pools` yet.
+	dojoOptimum := dojoFootprintOptimum(pools, unseeded, numPools, ids)
 
 	for _, p := range unseeded {
-		best := pickDojoTreeAwarePool(pools, targetSizes, root, p.Dojo, qualifierSlots)
+		id := ids.of(p.Dojo)
+		best := pickDojoTreeAwarePool(pools, targetSizes, root, p.Dojo, id, qualifierSlots, keys)
 		if best < 0 {
 			// Cannot happen when sum(targetSizes) == len(players), which
 			// realTargetSizes guarantees; kept as a defensive error rather
 			// than a panic or a silently dropped player.
 			return fmt.Errorf("cannot place player %s: no pool has room", p.Name)
 		}
-		if p.Dojo != "" && countDojoInPool(pools[best], p.Dojo) >= dojoOptimum(p.Dojo) {
-			if alt := poolUnderDojoCap(pools, targetSizes, p.Dojo, dojoOptimum(p.Dojo)); alt >= 0 {
+		if countDojoInPool(pools[best], p.Dojo, keys) >= dojoOptimum(id) {
+			if alt := poolUnderDojoCap(pools, targetSizes, p.Dojo, dojoOptimum(id), keys); alt >= 0 {
 				best = alt
 			}
 		}
 		p.PoolPosition = int64(len(pools[best].Players) + 1)
 		pools[best].Players = append(pools[best].Players, p)
-		if root != nil && p.Dojo != "" && best < len(qualifierSlots) && len(qualifierSlots[best]) > 0 {
-			recordDojoOccupancy(root, p.Dojo, qualifierSlots[best][0], totalBits, -1)
+		if root != nil && best < len(qualifierSlots) && len(qualifierSlots[best]) > 0 {
+			recordDojoOccupancy(root, id, qualifierSlots[best][0], totalBits, -1)
 		}
 	}
 	return nil
@@ -1385,12 +1889,12 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 // candidates while still returning a true original index. Returns -1 when
 // no pool is both under cap and has room, matching leastConflictedPool's
 // own sentinel.
-func poolUnderDojoCap(pools []Pool, targetSizes []int, dojo string, dojoCap int) int {
+func poolUnderDojoCap(pools []Pool, targetSizes []int, dojo string, dojoCap int, keys dojoKeyCache) int {
 	masked := append([]int(nil), targetSizes...)
 	for i := range pools {
-		if countDojoInPool(pools[i], dojo) >= dojoCap {
+		if countDojoInPool(pools[i], dojo, keys) >= dojoCap {
 			masked[i] = len(pools[i].Players)
 		}
 	}
-	return leastConflictedPool(pools, masked, dojo)
+	return leastConflictedPool(pools, masked, dojo, keys)
 }

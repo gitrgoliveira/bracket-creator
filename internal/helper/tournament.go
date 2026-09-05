@@ -87,8 +87,8 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 // below rejects a missing/blank dojo column (true, "entry N: missing
 // dojo", matching the zekken branch's own long-standing behaviour a few
 // lines down -- that branch is UNCONDITIONAL and always rejects,
-// regardless of this parameter) or defaults it to the literal string "NA"
-// (false, this function's own pre-bc-drwx behaviour for every caller).
+// regardless of this parameter) or leaves it blank (false: a tolerant
+// read, so the row still loads and can be repaired -- see below).
 //
 //   - CreatePlayers (this file) -- the CLI/web-preview/import entry point,
 //     building a roster fresh from raw text -- always passes true: docs/
@@ -189,21 +189,25 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDo
 			// dojo to the pool/knockout distributor).
 			//
 			// The tolerant (requireDojo=false) path preserves this
-			// function's exact pre-bc-drwx behaviour, INCLUDING the
-			// asymmetry between the two ways a dojo can be missing: no
-			// dojo COLUMN at all (len(line) < 2) defaults to the literal
-			// "NA", but an EMPTY dojo COLUMN (line[1] == "") is left
-			// BLANK, not defaulted -- state.LoadParticipants relies on
-			// exactly that blank surviving so a legacy/hand-edited roster's
-			// blank-dojo row still loads AS blank (visible and repairable
-			// in the edit UI, per state.ErrBlankDojo's own doc comment),
-			// rather than being masked behind the "NA" sentinel.
+			// function's pre-bc-drwx behaviour EXCEPT for one asymmetry a
+			// later review round (bc-drwx item 7) found and closed: no dojo
+			// COLUMN at all (len(line) < 2) used to default to the literal
+			// "NA" while an EMPTY dojo COLUMN (line[1] == "") was left
+			// BLANK -- so a legacy, one-column roster (no comma anywhere)
+			// sailed straight past ValidateNoBlankDojo, since "NA" reads as
+			// a real, non-blank dojo, and drew as one giant "NA" dojo
+			// instead of being refused the way "Name," (an EXPLICIT blank)
+			// already was. Both spellings of "no dojo here" now yield the
+			// SAME blank string, so state.LoadParticipants still loads a
+			// legacy/hand-edited roster tolerantly (visible and repairable
+			// in the edit UI, per state.ErrBlankDojo's own doc comment), and
+			// the draw pre-flight (ErrBlankDojoInDraw) catches both shapes
+			// identically instead of only one of them.
 			if len(line) < 2 {
 				if requireDojo {
 					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
 					continue
 				}
-				player.Dojo = "NA"
 			} else {
 				player.Dojo = line[1]
 				if requireDojo && player.Dojo == "" {
@@ -628,6 +632,11 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	totalPools := len(targetSizes)
 	pools := make([]Pool, totalPools)
 
+	// keys is built once for the whole assignment (bc-drwx review fix),
+	// not re-normalized per player/pool comparison -- see dojoKeyCache's
+	// own doc comment.
+	keys := make(dojoKeyCache, totalPools)
+
 	// Per-pool sets for O(1) dojo-conflict detection.
 	dojoSets := make([]map[string]bool, totalPools)
 	for i := range dojoSets {
@@ -635,10 +644,10 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 	}
 
 	for i, player := range players {
-		poolN := discoverPool(pools, dojoSets, player, targetSizes, i%totalPools)
+		poolN := discoverPool(pools, dojoSets, player, targetSizes, i%totalPools, keys)
 		// no conflict-free pool available: pick the least-conflicted one
 		if poolN < 0 {
-			poolN = leastConflictedPool(pools, targetSizes, player.Dojo)
+			poolN = leastConflictedPool(pools, targetSizes, player.Dojo, keys)
 		}
 
 		// try and force pool size
@@ -647,7 +656,7 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 		}
 		player.PoolPosition = int64(len(pools[poolN].Players) + 1)
 		pools[poolN].Players = append(pools[poolN].Players, player)
-		dojoSets[poolN][dojoKey(player.Dojo)] = true
+		dojoSets[poolN][keys.of(player.Dojo)] = true
 	}
 
 	for i := 0; i < len(pools); i++ {
@@ -671,11 +680,16 @@ func assignPlayersToPools(players []Player, targetSizes []int) []Pool {
 // because PoolSeeding's dojo clustering and the rotating start already separate
 // them. It is dropped rather than kept as a no-op so the draw has one stated
 // separation rule instead of a second, silent one.
-func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targetSizes []int, startIndex int) int {
+func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targetSizes []int, startIndex int, keys dojoKeyCache) int {
 	totalPools := len(pools)
 	if totalPools == 0 {
 		return -1
 	}
+
+	// Hoisted out of the loop (bc-drwx review fix): player.Dojo does not
+	// change across candidates, so normalizing it once here instead of once
+	// per candidate pool is a pure win.
+	key := keys.of(player.Dojo)
 
 	for i := 0; i < totalPools; i++ {
 		curr := (startIndex + i) % totalPools
@@ -686,7 +700,7 @@ func discoverPool(pools []Pool, dojoSets []map[string]bool, player Player, targe
 		}
 
 		// O(1): reject if this dojo is already present in the pool
-		if dojoSets[curr][dojoKey(player.Dojo)] {
+		if dojoSets[curr][key] {
 			continue
 		}
 
@@ -722,16 +736,39 @@ func dojoKey(dojo string) string {
 	return NormalizeParticipantName(dojo)
 }
 
+// dojoKeyCache memoizes dojoKey by its raw input string, built ONCE per draw
+// call and threaded through every hot dojo-comparison path (bc-drwx review
+// fix: the original item-3 fix called dojoKey/NormalizeParticipantName fresh
+// inside countDojoInPool and its callers, which measured 25x-200x slower
+// than origin/main -- NormalizeParticipantName does real work (NFD
+// decompose, strip combining marks, re-NFC, lowercase, whitespace collapse),
+// and a draw's hot paths compare the SAME small set of distinct dojo strings
+// over and over. Keying by the raw string and normalizing only on a cache
+// miss turns O(comparisons) normalizations into O(distinct dojos). dojoKey
+// itself stays the one normalization primitive; this only avoids calling it
+// twice for a string it has already seen.
+type dojoKeyCache map[string]string
+
+// of returns dojo's normalized key, computing and caching it on first use.
+func (c dojoKeyCache) of(dojo string) string {
+	if k, ok := c[dojo]; ok {
+		return k
+	}
+	k := dojoKey(dojo)
+	c[dojo] = k
+	return k
+}
+
 // countDojoInPool returns how many of pool's competitors are from dojo. Shared
 // by the fallback that chooses where an unplaceable competitor goes and by the
 // repair pass that swaps competitors afterwards, so the two can never disagree
 // about what "how many of this dojo are here" means -- dojo comparison is
 // normalized (dojoKey) here, in the one place it changes.
-func countDojoInPool(pool Pool, dojo string) int {
-	key := dojoKey(dojo)
+func countDojoInPool(pool Pool, dojo string, keys dojoKeyCache) int {
+	key := keys.of(dojo)
 	n := 0
 	for _, pl := range pool.Players {
-		if dojoKey(pl.Dojo) == key {
+		if keys.of(pl.Dojo) == key {
 			n++
 		}
 	}
@@ -748,14 +785,14 @@ func countDojoInPool(pool Pool, dojo string) int {
 // The strict "<" comparisons (rather than "<=") keep the lowest-index pool on
 // a tie, which is what makes the output deterministic. Returns -1 if no pool
 // has room.
-func leastConflictedPool(pools []Pool, targetSizes []int, dojo string) int {
+func leastConflictedPool(pools []Pool, targetSizes []int, dojo string, keys dojoKeyCache) int {
 	best := -1
 	bestDojo, bestSize := 0, 0
 	for i, pool := range pools {
 		if len(pool.Players) >= targetSizes[i] {
 			continue
 		}
-		n := countDojoInPool(pool, dojo)
+		n := countDojoInPool(pool, dojo, keys)
 		if best < 0 || n < bestDojo || (n == bestDojo && len(pool.Players) < bestSize) {
 			best, bestDojo, bestSize = i, n, len(pool.Players)
 		}

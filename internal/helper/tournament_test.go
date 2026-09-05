@@ -649,7 +649,7 @@ func TestDiscoverPool(t *testing.T) {
 	t.Run("finds empty pool", func(t *testing.T) {
 		dojoSets := buildSetsFromPools(pools)
 		player := Player{Name: "P2", Dojo: "Dojo B"}
-		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0, make(dojoKeyCache))
 
 		if poolIdx != 0 {
 			t.Errorf("Expected pool 0, got %d", poolIdx)
@@ -659,7 +659,7 @@ func TestDiscoverPool(t *testing.T) {
 	t.Run("avoids same dojo", func(t *testing.T) {
 		dojoSets := buildSetsFromPools(pools)
 		player := Player{Name: "P3", Dojo: "Dojo A"}
-		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0, make(dojoKeyCache))
 
 		// Should find pool 1 since pool 0 has same dojo
 		if poolIdx != 1 {
@@ -679,7 +679,7 @@ func TestDiscoverPool(t *testing.T) {
 		}
 		dojoSets := buildSetsFromPools(fullPools)
 		player := Player{Name: "P3", Dojo: "D3"}
-		poolIdx := discoverPool(fullPools, dojoSets, player, []int{2}, 0)
+		poolIdx := discoverPool(fullPools, dojoSets, player, []int{2}, 0, make(dojoKeyCache))
 
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
@@ -694,7 +694,7 @@ func TestLeastConflictedPool(t *testing.T) {
 			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}}},
 		}
 
-		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo", make(dojoKeyCache))
 		if poolIdx != 1 {
 			t.Errorf("Expected pool 1, got %d", poolIdx)
 		}
@@ -706,7 +706,7 @@ func TestLeastConflictedPool(t *testing.T) {
 			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}, {Name: "P4", Dojo: "Dojo P4"}}},
 		}
 
-		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo", make(dojoKeyCache))
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
 		}
@@ -792,7 +792,7 @@ func TestLeastConflictedPool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := leastConflictedPool(tt.pools, tt.targetSizes, tt.dojo)
+			got := leastConflictedPool(tt.pools, tt.targetSizes, tt.dojo, make(dojoKeyCache))
 			if got != tt.want {
 				t.Errorf("leastConflictedPool() = %d, want %d", got, tt.want)
 			}
@@ -1719,13 +1719,14 @@ func TestDiscoverPool_StartIndexRoundRobin(t *testing.T) {
 	dojoSets := buildSetsFromPools(pools)
 	player := Player{Name: "P", Dojo: "D"}
 
-	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 1); got != 1 {
+	keys := make(dojoKeyCache)
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 1, keys); got != 1 {
 		t.Errorf("expected start-index 1, got %d", got)
 	}
-	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 2); got != 2 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 2, keys); got != 2 {
 		t.Errorf("expected start-index 2, got %d", got)
 	}
-	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 0); got != 0 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 0, keys); got != 0 {
 		t.Errorf("expected start-index 0, got %d", got)
 	}
 }

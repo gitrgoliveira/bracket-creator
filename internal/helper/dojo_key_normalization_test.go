@@ -29,9 +29,10 @@ func TestDojoKey_NormalizesCaseAndDiacritics(t *testing.T) {
 // have kept apart.
 func TestCountDojoInPool_NormalizesSpelling(t *testing.T) {
 	pool := Pool{Players: []Player{{Name: "Alice", Dojo: "Mumeishi"}}}
-	assert.Equal(t, 1, countDojoInPool(pool, "mumeishi"),
+	keys := make(dojoKeyCache)
+	assert.Equal(t, 1, countDojoInPool(pool, "mumeishi", keys),
 		"a differently-cased spelling of the same dojo must still count")
-	assert.Equal(t, 0, countDojoInPool(pool, "SomeOtherDojo"),
+	assert.Equal(t, 0, countDojoInPool(pool, "SomeOtherDojo", keys),
 		"a genuinely different dojo must not count")
 }
 
@@ -62,13 +63,14 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 	placed := []int{1, 1, 1}
 	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed)
 	require.NotNil(t, root)
+	keys := make(dojoKeyCache)
 	for i := range pools {
 		for _, pl := range pools[i].Players {
-			recordDojoOccupancy(root, pl.Dojo, qualifierSlots[i][0], totalBits, 0)
+			recordDojoOccupancy(root, pl.Dojo, qualifierSlots[i][0], totalBits, 0, keys)
 		}
 	}
 
-	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", qualifierSlots)
+	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", qualifierSlots, keys)
 	assert.Equal(t, 2, best,
 		"a third, differently-cased member of the same dojo must be routed to the only dojo-free pool")
 }

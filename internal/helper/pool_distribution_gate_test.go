@@ -140,8 +140,9 @@ func earliestDojoMeetingRound(pools []Pool, poolWinners, numCourts int, dojo str
 // re-deriving the slot-extraction logic.
 func earliestMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo string) int {
 	dojoPools := map[string]bool{}
+	keys := make(dojoKeyCache)
 	for _, p := range pools {
-		if countDojoInPool(p, dojo) > 0 {
+		if countDojoInPool(p, dojo, keys) > 0 {
 			dojoPools[p.PoolName] = true
 		}
 	}
@@ -283,8 +284,9 @@ func earliestDojoWinnerMeetingRound(pools []Pool, poolWinners, numCourts int, do
 // "-"+GetOrdinal(1), i.e. "-1st"), never a runner-up/crossed-in qualifier.
 func earliestWinnerMeetingRoundInDraw(draw *KnockoutDraw, pools []Pool, dojo string) int {
 	dojoPools := map[string]bool{}
+	keys := make(dojoKeyCache)
 	for _, p := range pools {
-		if countDojoInPool(p, dojo) > 0 {
+		if countDojoInPool(p, dojo, keys) > 0 {
 			dojoPools[p.PoolName] = true
 		}
 	}

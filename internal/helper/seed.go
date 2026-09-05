@@ -265,6 +265,23 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// and does not change as players are swapped between dense positions.
 	slots := denseSlotMap(len(result))
 
+	// keys[i] is dojoKey(result[i].Dojo) -- built ONCE here rather than
+	// recomputed inside every comparison (bc-drwx review fix: the original
+	// item-3 fix called dojoKey/NormalizeParticipantName fresh inside
+	// sortedSameDojoPairs, bestRelocation and dojoSumMeetRounds' pairScore,
+	// which measured 25x-200x slower than origin/main -- NormalizeParticipantName
+	// does real work (NFD decompose, strip combining marks, re-NFC, lowercase,
+	// whitespace collapse), and those functions called it on the SAME O(N)
+	// dojo strings over and over inside O(N^2)-O(N^3) loops. keys is kept in
+	// lockstep with result: whenever result[i]/result[j] are swapped (the
+	// accepted swap below, and dojoSwapGain's own temporary swap-and-revert),
+	// keys[i]/keys[j] are swapped too, so it is always exactly
+	// dojoKey(result[i].Dojo) without ever calling dojoKey again.
+	keys := make([]string, len(result))
+	for i := range result {
+		keys[i] = dojoKey(result[i].Dojo)
+	}
+
 	movable := func(i int) bool {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
@@ -281,7 +298,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	movableDojos := map[string]bool{}
 	for i := range result {
 		if movable(i) {
-			movableDojos[dojoKey(result[i].Dojo)] = true
+			movableDojos[keys[i]] = true
 			if len(movableDojos) >= 2 {
 				break
 			}
@@ -345,7 +362,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// matching the original's "accept the first improving swap found while
 	// scanning worst-first" behaviour exactly.
 	for iter := 0; iter < len(result)*len(result); iter++ {
-		pairs := sortedSameDojoPairs(result, slots)
+		pairs := sortedSameDojoPairs(result, keys, slots)
 		if len(pairs) == 0 {
 			return // no selectable dojo pair remains: nothing left to delay
 		}
@@ -363,10 +380,10 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 			gain, y = 0, -1
 			if movable(x) {
 				for cand := range result {
-					if cand == x || !movable(cand) || dojoKey(result[cand].Dojo) == dojoKey(result[x].Dojo) {
+					if cand == x || !movable(cand) || keys[cand] == keys[x] {
 						continue
 					}
-					if g := dojoSwapGain(result, slots, x, cand); g > gain {
+					if g := dojoSwapGain(result, keys, slots, x, cand); g > gain {
 						gain, y = g, cand
 					}
 				}
@@ -398,6 +415,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 				continue
 			}
 			result[bestX], result[bestY] = result[bestY], result[bestX]
+			keys[bestX], keys[bestY] = keys[bestY], keys[bestX]
 			swapped = true
 			break
 		}
@@ -426,14 +444,14 @@ type dojoMeetPair struct{ i, j, round int }
 // original repeated-rescan's worst-first, first-found-on-a-tie selection
 // exactly, just without repaying the O(N^2) scan once per stuck pair (see
 // delayDojoMeetings' own "Performance note").
-func sortedSameDojoPairs(result []Player, slots []int) []dojoMeetPair {
+func sortedSameDojoPairs(result []Player, keys []string, slots []int) []dojoMeetPair {
 	var pairs []dojoMeetPair
 	for i := range result {
 		if result[i].Name == "" || result[i].Dojo == "" {
 			continue
 		}
 		for j := i + 1; j < len(result); j++ {
-			if result[j].Name == "" || dojoKey(result[i].Dojo) != dojoKey(result[j].Dojo) {
+			if result[j].Name == "" || keys[i] != keys[j] {
 				continue
 			}
 			pairs = append(pairs, dojoMeetPair{i, j, dojoMeetRound(slots[i], slots[j])})
@@ -534,12 +552,12 @@ func denseSlotMap(n int) []int {
 // x, y and every index this walks are DENSE indices into result; slots is
 // denseSlotMap(len(result)), translating each pair to real tree-slot space
 // before it reaches dojoMeetRound (bc-drwx item 1).
-func dojoSumMeetRounds(result []Player, slots []int, x, y int) int {
+func dojoSumMeetRounds(result []Player, keys []string, slots []int, x, y int) int {
 	pairScore := func(i, j int) int {
 		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 			return 0
 		}
-		if dojoKey(result[i].Dojo) != dojoKey(result[j].Dojo) {
+		if keys[i] != keys[j] {
 			return 0
 		}
 		return dojoMeetRound(slots[i], slots[j])
@@ -569,11 +587,13 @@ func dojoSumMeetRounds(result []Player, slots []int, x, y int) int {
 // occupants of slots x and y traded places. Positive means an improvement.
 // x, y are DENSE indices; slots is denseSlotMap(len(result)) (see
 // dojoSumMeetRounds' own doc comment).
-func dojoSwapGain(result []Player, slots []int, x, y int) int {
-	before := dojoSumMeetRounds(result, slots, x, y)
+func dojoSwapGain(result []Player, keys []string, slots []int, x, y int) int {
+	before := dojoSumMeetRounds(result, keys, slots, x, y)
 	result[x], result[y] = result[y], result[x]
-	after := dojoSumMeetRounds(result, slots, x, y)
+	keys[x], keys[y] = keys[y], keys[x]
+	after := dojoSumMeetRounds(result, keys, slots, x, y)
 	result[x], result[y] = result[y], result[x]
+	keys[x], keys[y] = keys[y], keys[x]
 	return after - before
 }
 

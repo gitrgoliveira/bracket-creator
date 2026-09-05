@@ -2649,7 +2649,7 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 // (bc-drwx item 1): both the reference and the function under test must read
 // the same (correct) tree geometry, or this test would only ever pin the two
 // implementations agreeing with EACH OTHER, not with the real tree.
-func referenceDojoSumMeetRoundsTouching(result []Player, slots []int, x, y int) int {
+func referenceDojoSumMeetRoundsTouching(result []Player, keys []string, slots []int, x, y int) int {
 	sum := 0
 	for i := range result {
 		for j := i + 1; j < len(result); j++ {
@@ -2659,7 +2659,7 @@ func referenceDojoSumMeetRoundsTouching(result []Player, slots []int, x, y int) 
 			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 				continue
 			}
-			if result[i].Dojo != result[j].Dojo {
+			if keys[i] != keys[j] {
 				continue
 			}
 			sum += dojoMeetRound(slots[i], slots[j])
@@ -2674,14 +2674,14 @@ func referenceDojoSumMeetRoundsTouching(result []Player, slots []int, x, y int) 
 // oracle for a swap's gain. slots is denseSlotMap(len(result)) -- see
 // referenceDojoSumMeetRoundsTouching's own doc comment for why this must
 // match what the real function is handed.
-func referenceFullDrawDojoSum(result []Player, slots []int) int {
+func referenceFullDrawDojoSum(result []Player, keys []string, slots []int) int {
 	sum := 0
 	for i := range result {
 		for j := i + 1; j < len(result); j++ {
 			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 				continue
 			}
-			if result[i].Dojo != result[j].Dojo {
+			if keys[i] != keys[j] {
 				continue
 			}
 			sum += dojoMeetRound(slots[i], slots[j])
@@ -2747,13 +2747,17 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
 			slots := denseSlotMap(len(roster))
+			keys := make([]string, len(roster))
+			for i := range roster {
+				keys[i] = dojoKey(roster[i].Dojo)
+			}
 			for x := range roster {
 				for y := range roster {
 					if x == y {
 						continue
 					}
-					want := referenceDojoSumMeetRoundsTouching(roster, slots, x, y)
-					got := dojoSumMeetRounds(roster, slots, x, y)
+					want := referenceDojoSumMeetRoundsTouching(roster, keys, slots, x, y)
+					got := dojoSumMeetRounds(roster, keys, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2772,18 +2776,24 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
 			slots := denseSlotMap(len(roster))
+			keys := make([]string, len(roster))
+			for i := range roster {
+				keys[i] = dojoKey(roster[i].Dojo)
+			}
 			for x := range roster {
 				for y := range roster {
 					if x == y {
 						continue
 					}
-					before := referenceFullDrawDojoSum(roster, slots)
+					before := referenceFullDrawDojoSum(roster, keys, slots)
 					roster[x], roster[y] = roster[y], roster[x]
-					after := referenceFullDrawDojoSum(roster, slots)
+					keys[x], keys[y] = keys[y], keys[x]
+					after := referenceFullDrawDojoSum(roster, keys, slots)
 					roster[x], roster[y] = roster[y], roster[x]
+					keys[x], keys[y] = keys[y], keys[x]
 					want := after - before
 
-					got := dojoSwapGain(roster, slots, x, y)
+					got := dojoSwapGain(roster, keys, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2805,6 +2815,13 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 	// function now uses, or a drift here would be misattributed to the
 	// memo when it is really the dense/slot translation.
 	slots := denseSlotMap(len(result))
+	// keys mirrors delayDojoMeetings' own keys slice (bc-drwx review fix),
+	// kept in lockstep with result on every swap below -- same reason as
+	// slots: a drift here would be misattributed to the memo.
+	keys := make([]string, len(result))
+	for i := range result {
+		keys[i] = dojoKey(result[i].Dojo)
+	}
 
 	movable := func(i int) bool {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
@@ -2820,7 +2837,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 					continue
 				}
-				if result[i].Dojo != result[j].Dojo {
+				if keys[i] != keys[j] {
 					continue
 				}
 				if excluded[pairKey{i, j}] {
@@ -2841,10 +2858,10 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				continue
 			}
 			for y := range result {
-				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
+				if y == x || !movable(y) || keys[y] == keys[x] {
 					continue
 				}
-				if gain := dojoSwapGain(result, slots, x, y); gain > bestGain {
+				if gain := dojoSwapGain(result, keys, slots, x, y); gain > bestGain {
 					bestGain, bestX, bestY = gain, x, y
 				}
 			}
@@ -2854,6 +2871,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 			continue
 		}
 		result[bestX], result[bestY] = result[bestY], result[bestX]
+		keys[bestX], keys[bestY] = keys[bestY], keys[bestX]
 		excluded = map[pairKey]bool{}
 	}
 }

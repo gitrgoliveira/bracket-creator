@@ -62,7 +62,14 @@ func TestImproveDojoMeetings_AllQualifierNeverVetoesWinnerPathImprovement(t *tes
 	}
 
 	pools := buildPools()
-	improveDojoMeetings(pools, qualifierSlots, make(dojoKeyCache))
+	keys := make(dojoKeyCache)
+	ids := newDojoIDCache(keys, 0)
+	for i := range pools {
+		for _, pl := range pools[i].Players {
+			ids.of(pl.Dojo)
+		}
+	}
+	improveDojoMeetings(pools, qualifierSlots, ids)
 
 	assert.Equal(t, "DojoX", pools[2].Players[0].Dojo,
 		"Pool C must now hold the DojoX player: tiers (a)-(c) strictly prefer this swap "+

@@ -134,7 +134,12 @@ func TestPoolDrawDocWalkthroughMatchesTheDraw(t *testing.T) {
 			for i := range descended {
 				descended[i] = Pool{PoolName: preset.PoolNames[i]}
 			}
-			require.NoError(t, assignUnseededByDojoTree(descended, sizes, players, slots, make(dojoKeyCache)))
+			keys := make(dojoKeyCache, len(players))
+			ids := newDojoIDCache(keys, len(players))
+			for i := range players {
+				ids.of(players[i].Dojo)
+			}
+			require.NoError(t, assignUnseededByDojoTree(descended, sizes, players, slots, keys, ids))
 			assert.Equal(t, preset.PoolsAfterDescent, docDrawNames(descended),
 				"recorded pools after the descent")
 
@@ -147,7 +152,7 @@ func TestPoolDrawDocWalkthroughMatchesTheDraw(t *testing.T) {
 					Players:  append([]Player(nil), descended[i].Players...),
 				}
 			}
-			improveDojoMeetings(exchanged, slots, make(dojoKeyCache))
+			improveDojoMeetings(exchanged, slots, ids)
 			assert.Equal(t, docDrawSwaps(preset, descended, exchanged), preset.Exchanges,
 				"recorded exchanges")
 

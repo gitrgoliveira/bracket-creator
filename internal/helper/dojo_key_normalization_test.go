@@ -61,16 +61,23 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 	qualifierSlots := [][]int{{0}, {1}, {2}}
 
 	placed := []int{1, 1, 1}
-	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed)
-	require.NotNil(t, root)
 	keys := make(dojoKeyCache)
+	ids := newDojoIDCache(keys, 0)
 	for i := range pools {
 		for _, pl := range pools[i].Players {
-			recordDojoOccupancy(root, pl.Dojo, qualifierSlots[i][0], totalBits, 0, keys)
+			ids.of(pl.Dojo)
+		}
+	}
+	ids.of("MUMEISHI")
+	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed, ids.numDojos())
+	require.NotNil(t, root)
+	for i := range pools {
+		for _, pl := range pools[i].Players {
+			recordDojoOccupancy(root, ids.of(pl.Dojo), qualifierSlots[i][0], totalBits, 0)
 		}
 	}
 
-	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", qualifierSlots, keys)
+	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", ids.of("MUMEISHI"), qualifierSlots, keys)
 	assert.Equal(t, 2, best,
 		"a third, differently-cased member of the same dojo must be routed to the only dojo-free pool")
 }

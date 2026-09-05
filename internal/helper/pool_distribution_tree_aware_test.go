@@ -448,10 +448,15 @@ func TestEarliestDojoMeeting_MatchesReference(t *testing.T) {
 			}
 			keys := make(dojoKeyCache)
 			want := referenceEarliestDojoMeeting(tc.pools, pairRound, tc.dojo, keys)
-			count := dojoCounter(func(poolIdx int, dojo string) int {
-				return countDojoInPool(tc.pools[poolIdx], dojo, keys)
+			// count ignores its id argument and always resolves back to
+			// tc.dojo directly: earliestDojoMeeting only ever calls it with
+			// the ONE id this test case resolves below, so there is nothing
+			// to translate an id back to a dojo string FOR.
+			count := dojoCounter(func(poolIdx int, id int) int {
+				return countDojoInPool(tc.pools[poolIdx], tc.dojo, keys)
 			})
-			got := earliestDojoMeeting(tc.pools, pairRound, tc.dojo, count)
+			ids := newDojoIDCache(keys, 0)
+			got := earliestDojoMeeting(tc.pools, pairRound, ids.of(tc.dojo), count)
 			assert.Equal(t, want, got)
 		})
 	}
@@ -495,7 +500,12 @@ func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, ba
 	mode := qualifierMode{ExtraQualifiers: QualifierModeStandard, SeedPoolIndex: seedPoolIdx}
 
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
-	require.NoError(t, assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, make(dojoKeyCache)))
+	keys := make(dojoKeyCache, len(players))
+	ids := newDojoIDCache(keys, len(players))
+	for i := range players {
+		ids.of(players[i].Dojo)
+	}
+	require.NoError(t, assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, keys, ids))
 	return pools, targetSizes, qualifierSlots
 }
 
@@ -529,12 +539,21 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 	}
 	pairRound := poolPairRounds(winnerSlots)
 	allQualPairRound := poolPairRounds(qualifierSlots)
+	// ids/idOfID exist only to translate the (bc-pnum) int-id interface
+	// earliestDojoMeeting/dojoCounter now take back into the raw dojo
+	// string this reference's own count closure needs -- the reference
+	// itself stays string-keyed throughout, on purpose (see below).
+	ids := newDojoIDCache(keys, len(roster))
+	idOfID := make(map[int]string, len(roster))
+	for _, p := range roster {
+		idOfID[ids.of(p.Dojo)] = p.Dojo
+	}
 	// count wraps countDojoInPool directly (unlike the real function's own
 	// incrementally-maintained `counts` map): this reference exists to pin
 	// the P2 caching optimisation alone, so its own dojo-count source stays
 	// the pre-P2 (and pre-bc-drwx-item-1) O(poolSize) scan on purpose.
-	count := dojoCounter(func(poolIdx int, dojo string) int {
-		return countDojoInPool(pools[poolIdx], dojo, keys)
+	count := dojoCounter(func(poolIdx int, id int) int {
+		return countDojoInPool(pools[poolIdx], idOfID[id], keys)
 	})
 	// Normalized via dojoKey (bc-drwx item 3), matching the real function,
 	// so this reference's only remaining difference from it is the caching
@@ -578,13 +597,14 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 					continue
 				}
 				seen[keys.of(pl.Dojo)] = true
-				if m := earliestDojoMeeting(pools, pairRound, pl.Dojo, count); m != math.MaxInt {
+				plID := ids.of(pl.Dojo)
+				if m := earliestDojoMeeting(pools, pairRound, plID, count); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
 					}
 					negSum -= m
 				}
-				if m := earliestDojoMeeting(pools, allQualPairRound, pl.Dojo, count); m != math.MaxInt {
+				if m := earliestDojoMeeting(pools, allQualPairRound, plID, count); m != math.MaxInt {
 					allQualNegSum -= m
 				}
 			}
@@ -613,7 +633,8 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 				if a.Seed > 0 {
 					continue
 				}
-				hasMeetingSignal := earliestDojoMeeting(pools, pairRound, a.Dojo, count) != math.MaxInt
+				aID := ids.of(a.Dojo)
+				hasMeetingSignal := earliestDojoMeeting(pools, pairRound, aID, count) != math.MaxInt
 				hasExcessSignal := excessOf(a.Dojo, countDojoInPool(pools[i], a.Dojo, keys)) > 0
 				if !hasMeetingSignal && !hasExcessSignal {
 					continue
@@ -627,6 +648,7 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 						if b.Seed > 0 || keys.of(b.Dojo) == keys.of(a.Dojo) {
 							continue
 						}
+						bID := ids.of(b.Dojo)
 						cAi := countDojoInPool(pools[i], a.Dojo, keys)
 						cAj := countDojoInPool(pools[j], a.Dojo, keys)
 						cBj := countDojoInPool(pools[j], b.Dojo, keys)
@@ -637,15 +659,15 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 						if deltaExc > 0 {
 							continue
 						}
-						beforeA := earliestDojoMeeting(pools, pairRound, a.Dojo, count)
-						beforeB := earliestDojoMeeting(pools, pairRound, b.Dojo, count)
-						beforeAQA := earliestDojoMeeting(pools, allQualPairRound, a.Dojo, count)
-						beforeAQB := earliestDojoMeeting(pools, allQualPairRound, b.Dojo, count)
+						beforeA := earliestDojoMeeting(pools, pairRound, aID, count)
+						beforeB := earliestDojoMeeting(pools, pairRound, bID, count)
+						beforeAQA := earliestDojoMeeting(pools, allQualPairRound, aID, count)
+						beforeAQB := earliestDojoMeeting(pools, allQualPairRound, bID, count)
 						pools[i].Players[ai], pools[j].Players[bi] = b, a
-						afterA := earliestDojoMeeting(pools, pairRound, a.Dojo, count)
-						afterB := earliestDojoMeeting(pools, pairRound, b.Dojo, count)
-						afterAQA := earliestDojoMeeting(pools, allQualPairRound, a.Dojo, count)
-						afterAQB := earliestDojoMeeting(pools, allQualPairRound, b.Dojo, count)
+						afterA := earliestDojoMeeting(pools, pairRound, aID, count)
+						afterB := earliestDojoMeeting(pools, pairRound, bID, count)
+						afterAQA := earliestDojoMeeting(pools, allQualPairRound, aID, count)
+						afterAQB := earliestDojoMeeting(pools, allQualPairRound, bID, count)
 						newExc, newR1, newNS := curExc+deltaExc, curR1, curNS
 						for _, d := range [2][2]int{{beforeA, afterA}, {beforeB, afterB}} {
 							bef, aft := d[0], d[1]
@@ -758,7 +780,12 @@ func TestImproveDojoMeetings_MatchesUncachedReference(t *testing.T) {
 		poolsCached := clonePools(pools)
 		poolsRef := clonePools(pools)
 
-		improveDojoMeetings(poolsCached, qualifierSlots, make(dojoKeyCache))
+		cachedKeys := make(dojoKeyCache, len(players))
+		cachedIDs := newDojoIDCache(cachedKeys, len(players))
+		for i := range players {
+			cachedIDs.of(players[i].Dojo)
+		}
+		improveDojoMeetings(poolsCached, qualifierSlots, cachedIDs)
 		referenceImproveDojoMeetings(poolsRef, targetSizes, qualifierSlots, players, make(dojoKeyCache))
 
 		require.Len(t, poolsCached, len(poolsRef))

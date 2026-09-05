@@ -2747,9 +2747,23 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
 			slots := denseSlotMap(len(roster))
+			// keys (string) feeds referenceDojoSumMeetRoundsTouching, the
+			// independent string-keyed oracle; ids (int, bc-pnum) feeds the
+			// production dojoSumMeetRounds, which now indexes by dense id.
+			// Built from the same roster in the same order, so ids[i] ==
+			// ids[j] iff keys[i] == keys[j] -- the two stay equivalent even
+			// though their concrete values differ.
 			keys := make([]string, len(roster))
 			for i := range roster {
 				keys[i] = dojoKey(roster[i].Dojo)
+			}
+			ids := make([]int, len(roster))
+			idOf := map[string]int{}
+			for i := range roster {
+				if _, ok := idOf[keys[i]]; !ok {
+					idOf[keys[i]] = len(idOf)
+				}
+				ids[i] = idOf[keys[i]]
 			}
 			for x := range roster {
 				for y := range roster {
@@ -2757,7 +2771,7 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 						continue
 					}
 					want := referenceDojoSumMeetRoundsTouching(roster, keys, slots, x, y)
-					got := dojoSumMeetRounds(roster, keys, slots, x, y)
+					got := dojoSumMeetRounds(roster, ids, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2776,9 +2790,22 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
 			slots := denseSlotMap(len(roster))
+			// keys (string) feeds referenceFullDrawDojoSum, the independent
+			// string-keyed oracle; ids (int, bc-pnum) feeds the production
+			// dojoSwapGain, which now indexes by dense id -- see
+			// TestDojoSumMeetRounds_MatchesFullScan's own comment for why
+			// both are built here.
 			keys := make([]string, len(roster))
 			for i := range roster {
 				keys[i] = dojoKey(roster[i].Dojo)
+			}
+			ids := make([]int, len(roster))
+			idOf := map[string]int{}
+			for i := range roster {
+				if _, ok := idOf[keys[i]]; !ok {
+					idOf[keys[i]] = len(idOf)
+				}
+				ids[i] = idOf[keys[i]]
 			}
 			for x := range roster {
 				for y := range roster {
@@ -2793,7 +2820,7 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 					keys[x], keys[y] = keys[y], keys[x]
 					want := after - before
 
-					got := dojoSwapGain(roster, keys, slots, x, y)
+					got := dojoSwapGain(roster, ids, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2815,12 +2842,15 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 	// function now uses, or a drift here would be misattributed to the
 	// memo when it is really the dense/slot translation.
 	slots := denseSlotMap(len(result))
-	// keys mirrors delayDojoMeetings' own keys slice (bc-drwx review fix),
-	// kept in lockstep with result on every swap below -- same reason as
-	// slots: a drift here would be misattributed to the memo.
-	keys := make([]string, len(result))
+	// ids mirrors delayDojoMeetings' own ids slice (bc-drwx review fix, then
+	// bc-pnum's int-id rewrite), kept in lockstep with result on every swap
+	// below -- same reason as slots: a drift here would be misattributed to
+	// the memo.
+	keys := make(dojoKeyCache, len(result))
+	idCache := newDojoIDCache(keys, len(result))
+	ids := make([]int, len(result))
 	for i := range result {
-		keys[i] = dojoKey(result[i].Dojo)
+		ids[i] = idCache.of(result[i].Dojo)
 	}
 
 	movable := func(i int) bool {
@@ -2837,7 +2867,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 					continue
 				}
-				if keys[i] != keys[j] {
+				if ids[i] != ids[j] {
 					continue
 				}
 				if excluded[pairKey{i, j}] {
@@ -2858,10 +2888,10 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				continue
 			}
 			for y := range result {
-				if y == x || !movable(y) || keys[y] == keys[x] {
+				if y == x || !movable(y) || ids[y] == ids[x] {
 					continue
 				}
-				if gain := dojoSwapGain(result, keys, slots, x, y); gain > bestGain {
+				if gain := dojoSwapGain(result, ids, slots, x, y); gain > bestGain {
 					bestGain, bestX, bestY = gain, x, y
 				}
 			}
@@ -2871,7 +2901,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 			continue
 		}
 		result[bestX], result[bestY] = result[bestY], result[bestX]
-		keys[bestX], keys[bestY] = keys[bestY], keys[bestX]
+		ids[bestX], ids[bestY] = ids[bestY], ids[bestX]
 		excluded = map[pairKey]bool{}
 	}
 }

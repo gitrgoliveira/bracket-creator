@@ -758,6 +758,25 @@ func dojoKey(dojo string) string {
 // miss turns O(comparisons) normalizations into O(distinct dojos). dojoKey
 // itself stays the one normalization primitive; this only avoids calling it
 // twice for a string it has already seen.
+//
+// dojoIDCache (below) is this cache's int-keyed sibling (bc-pnum): a draw's
+// PER-POOL and PER-NODE dojo tallies (the tree-aware distributor's `counts`
+// and dojoNode.dojoCount, pool_distribution_tree_aware.go) still paid a
+// map[string]* lookup on every candidate evaluated even once dojoKey itself
+// was memoized here -- mapaccess2_faststr profiled at 51% cumulative in
+// BuildPoolPhaseTreeAware_256_16x16_Interleaved. dojoIDCache wraps a
+// dojoKeyCache to interning each normalized key ONE level further, into a
+// dense int, so those tallies can be a plain []int instead.
+//
+// MEASURED (bc-pnum, this machine, -benchtime 1x, median of 3):
+// BuildPoolPhaseTreeAware_256_16x16_Interleaved 3029ms before this change,
+// 452-736ms after (pool composition dependent -- the shape's own run-to-run
+// variance is real, not a regression; see this file's own comment on the
+// tree-aware distributor's file-level doc comment for the residual this
+// leaves and why); BuildPoolPhaseTreeAware_64_16x4_Interleaved 12.9ms
+// before, 3.7ms after. A CPU profile of the same benchmark post-fix (with
+// earliestDojoMeetingScan's buffer reuse, see that function's own doc
+// comment) shows mapaccess2_faststr down to ~1.3% cumulative, from 51%.
 type dojoKeyCache map[string]string
 
 // of returns dojo's normalized key, computing and caching it on first use.
@@ -768,6 +787,52 @@ func (c dojoKeyCache) of(dojo string) string {
 	k := dojoKey(dojo)
 	c[dojo] = k
 	return k
+}
+
+// dojoIDCache interns each distinct NORMALIZED dojo key (via the
+// dojoKeyCache it wraps) to a dense int id (0..n-1), built once per draw
+// call, BEFORE any []int/[][]int sized by numDojos() is allocated: a caller
+// that mints a new id (by calling `of` on a not-yet-seen dojo) AFTER sizing
+// a slice to a prior numDojos() would index past the end of it. Every
+// production caller avoids this by interning every player in the whole
+// roster up front (buildPoolPhaseTreeAwareCore, delayDojoMeetings) before
+// building anything sized by the result.
+//
+// `of` returns the SAME id for two spellings of one dojo, exactly as
+// dojoKeyCache.of returns the same normalized string for them -- two raw
+// spellings share one byKey entry, so a repeat raw string only ever costs
+// one dojoKeyCache probe (of) plus one int-map probe (byKey), and a repeat
+// NORMALIZED key costs only the second.
+type dojoIDCache struct {
+	keys  dojoKeyCache
+	byKey map[string]int
+}
+
+// newDojoIDCache wraps an existing dojoKeyCache (raw -> normalized),
+// layering the normalized -> dense-id map on top. capacity is a sizing hint
+// for that map, matching dojoKeyCache's own make(dojoKeyCache, capacity)
+// idiom.
+func newDojoIDCache(keys dojoKeyCache, capacity int) dojoIDCache {
+	return dojoIDCache{keys: keys, byKey: make(map[string]int, capacity)}
+}
+
+// of returns dojo's dense id, minting a new one (the current byKey size) the
+// first time its normalized key is seen.
+func (c dojoIDCache) of(dojo string) int {
+	key := c.keys.of(dojo)
+	if id, ok := c.byKey[key]; ok {
+		return id
+	}
+	id := len(c.byKey)
+	c.byKey[key] = id
+	return id
+}
+
+// numDojos returns the number of distinct dojos interned so far: the dense
+// id space's size, i.e. the length every []int/[][]int this cache indexes
+// into must be allocated with.
+func (c dojoIDCache) numDojos() int {
+	return len(c.byKey)
 }
 
 // countDojoInPool returns how many of pool's competitors are from dojo. Shared

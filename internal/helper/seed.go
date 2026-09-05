@@ -265,21 +265,29 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// and does not change as players are swapped between dense positions.
 	slots := denseSlotMap(len(result))
 
-	// keys[i] is dojoKey(result[i].Dojo) -- built ONCE here rather than
-	// recomputed inside every comparison (bc-drwx review fix: the original
-	// item-3 fix called dojoKey/NormalizeParticipantName fresh inside
-	// sortedSameDojoPairs, bestRelocation and dojoSumMeetRounds' pairScore,
-	// which measured 25x-200x slower than origin/main -- NormalizeParticipantName
-	// does real work (NFD decompose, strip combining marks, re-NFC, lowercase,
-	// whitespace collapse), and those functions called it on the SAME O(N)
-	// dojo strings over and over inside O(N^2)-O(N^3) loops. keys is kept in
-	// lockstep with result: whenever result[i]/result[j] are swapped (the
-	// accepted swap below, and dojoSwapGain's own temporary swap-and-revert),
-	// keys[i]/keys[j] are swapped too, so it is always exactly
-	// dojoKey(result[i].Dojo) without ever calling dojoKey again.
-	keys := make([]string, len(result))
+	// ids[i] is dojoIDCache.of(result[i].Dojo) -- a dense int, built ONCE
+	// here rather than recomputed inside every comparison (bc-drwx review
+	// fix: the original item-3 fix called dojoKey/NormalizeParticipantName
+	// fresh inside sortedSameDojoPairs, bestRelocation and
+	// dojoSumMeetRounds' pairScore, which measured 25x-200x slower than
+	// origin/main -- NormalizeParticipantName does real work (NFD
+	// decompose, strip combining marks, re-NFC, lowercase, whitespace
+	// collapse), and those functions called it on the SAME O(N) dojo
+	// strings over and over inside O(N^2)-O(N^3) loops. bc-pnum then
+	// replaced the []string this used to be with a dense []int: two
+	// spellings of one dojo already share a normalized key via dojoKey, but
+	// every comparison below (ids[cand] == ids[x], etc.) still paid a
+	// string compare per call at O(N)-O(N^2) scale -- an int compare is
+	// cheaper still. ids is kept in lockstep with result: whenever
+	// result[i]/result[j] are swapped (the accepted swap below, and
+	// dojoSwapGain's own temporary swap-and-revert), ids[i]/ids[j] are
+	// swapped too, so it is always exactly the id of result[i].Dojo without
+	// ever resolving it again.
+	keys := make(dojoKeyCache, len(result))
+	idCache := newDojoIDCache(keys, len(result))
+	ids := make([]int, len(result))
 	for i := range result {
-		keys[i] = dojoKey(result[i].Dojo)
+		ids[i] = idCache.of(result[i].Dojo)
 	}
 
 	movable := func(i int) bool {
@@ -295,10 +303,10 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// parser defaulted every blank dojo to "NA") used to pay for that
 	// discovery the slow way: see this function's own "Performance note"
 	// below for the O(N^4) it used to cost. This check is O(N).
-	movableDojos := map[string]bool{}
+	movableDojos := map[int]bool{}
 	for i := range result {
 		if movable(i) {
-			movableDojos[keys[i]] = true
+			movableDojos[ids[i]] = true
 			if len(movableDojos) >= 2 {
 				break
 			}
@@ -372,8 +380,30 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// relocation ends the generation immediately (swap, re-sort, go again),
 	// matching the original's "accept the first improving swap found while
 	// scanning worst-first" behaviour exactly.
+	//
+	// Performance note (bc-pnum, int-id rewrite): `keys` above used to be a
+	// []string, normalized once via dojoKey/dojoKeyCache (bc-drwx item 3's
+	// own fix) but still compared by STRING equality on every candidate
+	// (keys[cand] == keys[x], etc.) inside this climb's O(N)-per-slot
+	// bestRelocation scan. Interning those keys to a dense int (ids,
+	// dojoIDCache) once up front and comparing ints instead removes that
+	// string-compare cost. MEASURED on this machine, -benchtime 1x, median
+	// of 3, this file as committed before this rewrite vs. after, same
+	// BenchmarkStandardSeeding_* shapes as the table above:
+	//   256 entrants, 16 dojos of 16 (BenchmarkStandardSeeding_256_16x16):
+	//     1096ms -> 453ms (~2.4x)
+	//   256 entrants, 2 dojos of 128 (BenchmarkStandardSeeding_256_2x128):
+	//     756ms -> 646ms (~1.2x -- a smaller win: with only 2 distinct
+	//     dojos the string comparisons this fixes are already cheap per
+	//     call, and this shape's cost is dominated by the sheer NUMBER of
+	//     candidates/generations, not each candidate's comparison cost)
+	// See dojoIDCache's own doc comment (tournament.go) for the sibling
+	// fix to the tree-aware pool distributor's own hot loops, where the
+	// SAME class of string-keyed lookup was the dominant cost by a wider
+	// margin (BuildPoolPhaseTreeAware_256_16x16_Interleaved: 3029ms ->
+	// 452-736ms).
 	for iter := 0; iter < len(result)*len(result); iter++ {
-		pairs := sortedSameDojoPairs(result, keys, slots)
+		pairs := sortedSameDojoPairs(result, ids, slots)
 		if len(pairs) == 0 {
 			return // no selectable dojo pair remains: nothing left to delay
 		}
@@ -391,10 +421,10 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 			gain, y = 0, -1
 			if movable(x) {
 				for cand := range result {
-					if cand == x || !movable(cand) || keys[cand] == keys[x] {
+					if cand == x || !movable(cand) || ids[cand] == ids[x] {
 						continue
 					}
-					if g := dojoSwapGain(result, keys, slots, x, cand); g > gain {
+					if g := dojoSwapGain(result, ids, slots, x, cand); g > gain {
 						gain, y = g, cand
 					}
 				}
@@ -426,7 +456,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 				continue
 			}
 			result[bestX], result[bestY] = result[bestY], result[bestX]
-			keys[bestX], keys[bestY] = keys[bestY], keys[bestX]
+			ids[bestX], ids[bestY] = ids[bestY], ids[bestX]
 			swapped = true
 			break
 		}
@@ -455,14 +485,14 @@ type dojoMeetPair struct{ i, j, round int }
 // original repeated-rescan's worst-first, first-found-on-a-tie selection
 // exactly, just without repaying the O(N^2) scan once per stuck pair (see
 // delayDojoMeetings' own "Performance note").
-func sortedSameDojoPairs(result []Player, keys []string, slots []int) []dojoMeetPair {
+func sortedSameDojoPairs(result []Player, ids []int, slots []int) []dojoMeetPair {
 	var pairs []dojoMeetPair
 	for i := range result {
 		if result[i].Name == "" || result[i].Dojo == "" {
 			continue
 		}
 		for j := i + 1; j < len(result); j++ {
-			if result[j].Name == "" || keys[i] != keys[j] {
+			if result[j].Name == "" || ids[i] != ids[j] {
 				continue
 			}
 			pairs = append(pairs, dojoMeetPair{i, j, dojoMeetRound(slots[i], slots[j])})
@@ -563,12 +593,12 @@ func denseSlotMap(n int) []int {
 // x, y and every index this walks are DENSE indices into result; slots is
 // denseSlotMap(len(result)), translating each pair to real tree-slot space
 // before it reaches dojoMeetRound (bc-drwx item 1).
-func dojoSumMeetRounds(result []Player, keys []string, slots []int, x, y int) int {
+func dojoSumMeetRounds(result []Player, ids []int, slots []int, x, y int) int {
 	pairScore := func(i, j int) int {
 		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 			return 0
 		}
-		if keys[i] != keys[j] {
+		if ids[i] != ids[j] {
 			return 0
 		}
 		return dojoMeetRound(slots[i], slots[j])
@@ -598,13 +628,13 @@ func dojoSumMeetRounds(result []Player, keys []string, slots []int, x, y int) in
 // occupants of slots x and y traded places. Positive means an improvement.
 // x, y are DENSE indices; slots is denseSlotMap(len(result)) (see
 // dojoSumMeetRounds' own doc comment).
-func dojoSwapGain(result []Player, keys []string, slots []int, x, y int) int {
-	before := dojoSumMeetRounds(result, keys, slots, x, y)
+func dojoSwapGain(result []Player, ids []int, slots []int, x, y int) int {
+	before := dojoSumMeetRounds(result, ids, slots, x, y)
 	result[x], result[y] = result[y], result[x]
-	keys[x], keys[y] = keys[y], keys[x]
-	after := dojoSumMeetRounds(result, keys, slots, x, y)
+	ids[x], ids[y] = ids[y], ids[x]
+	after := dojoSumMeetRounds(result, ids, slots, x, y)
 	result[x], result[y] = result[y], result[x]
-	keys[x], keys[y] = keys[y], keys[x]
+	ids[x], ids[y] = ids[y], ids[x]
 	return after - before
 }
 

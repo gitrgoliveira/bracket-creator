@@ -49,7 +49,12 @@ func buildPoolPhaseDojoTree(players []Player, poolSize int, isMax bool, numCourt
 	}
 
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: QualifierModeStandard})
-	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, make(dojoKeyCache)); err != nil {
+	keys := make(dojoKeyCache, len(players))
+	ids := newDojoIDCache(keys, len(players))
+	for i := range players {
+		ids.of(players[i].Dojo)
+	}
+	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, keys, ids); err != nil {
 		return nil, 0, err
 	}
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil

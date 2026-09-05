@@ -18,7 +18,7 @@ import (
 //
 // Both tests hold pool COUNT and per-pool target SIZES fixed between a
 // mode-AWARE placement and a mode-BLIND one (the identical roster and
-// target sizes, but scored with qualifierModeStandard instead of the real
+// target sizes, but scored with QualifierModeStandard instead of the real
 // mode) and feed BOTH into the SAME real per-mode draw builder. Pool count
 // and sizes being fixed also fixes which pool INDICES are oversized/seeded,
 // so larger-pools' overrides map and fill-bracket's draftPoolIdx are
@@ -82,12 +82,12 @@ func TestQualifierModeSeam_LargerPools(t *testing.T) {
 
 				tag := fmt.Sprintf("larger-pools pools=%d minSize=%d courts=%d", numPools, minSize, courts)
 
-				awarePools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(r, minSize, false, courts, poolWinners, qualifierModeLargerPools)
+				awarePools, drawCourts, err := BuildPoolPhaseTreeAwareWithMode(r, minSize, false, courts, poolWinners, QualifierModeLargerPools)
 				require.NoError(t, err, tag)
 
 				numPoolsGot, baseSizes, err := poolTargetSizes(n, minSize, false)
 				require.NoError(t, err, tag)
-				blindPools, _, err := buildPoolPhaseTreeAwareCore(r, numPoolsGot, baseSizes, courts, poolWinners, qualifierMode{ExtraQualifiers: qualifierModeStandard})
+				blindPools, _, err := buildPoolPhaseTreeAwareCore(r, numPoolsGot, baseSizes, courts, poolWinners, qualifierMode{ExtraQualifiers: QualifierModeStandard})
 				require.NoError(t, err, tag)
 
 				// Pool count/sizes must be identical between the two runs,
@@ -179,7 +179,7 @@ func TestQualifierModeSeam_FillBracket(t *testing.T) {
 			for i := range base {
 				base[i] = minSize
 			}
-			blindPools, _, err := buildPoolPhaseTreeAwareCore(r, numPoolsGot, base, courts, 1, qualifierMode{ExtraQualifiers: qualifierModeStandard})
+			blindPools, _, err := buildPoolPhaseTreeAwareCore(r, numPoolsGot, base, courts, 1, qualifierMode{ExtraQualifiers: QualifierModeStandard})
 			require.NoError(t, err, tag)
 
 			require.Len(t, blindPools, len(awarePools), tag)

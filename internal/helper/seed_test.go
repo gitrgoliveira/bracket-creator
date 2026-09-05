@@ -1,12 +1,9 @@
 package helper
 
 import (
-	"encoding/csv"
 	"fmt"
 	"math/bits"
-	"os"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -710,7 +707,7 @@ func TestPoolSeeding_WithPools_Integration(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Run pool seeding
-	seededPlayers := PoolSeeding(players, 8, 1)
+	seededPlayers := referencePoolSeeding(players, 8, 1)
 
 	// Verify no duplicates
 	nameCount := make(map[string]int)
@@ -757,7 +754,7 @@ func TestPoolSeeding_WithBalancedPools_Integration(t *testing.T) {
 	players[3].Seed = 4
 
 	// Use PoolSeeding for pool distribution
-	seededPlayers := PoolSeeding(players, 4, 1)
+	seededPlayers := referencePoolSeeding(players, 4, 1)
 
 	// Create pools with max size 3 -> should create 4 pools (3, 3, 2, 2)
 	pools, err := CreatePools(seededPlayers, 3, true)
@@ -1400,7 +1397,7 @@ func TestPoolSeeding(t *testing.T) {
 		players[3].Seed = 4
 
 		numPools := 12
-		result := PoolSeeding(players, numPools, 1)
+		result := referencePoolSeeding(players, numPools, 1)
 
 		// Create pools to verify final placement
 		pools, err := CreatePools(result, 3, false)
@@ -1424,7 +1421,7 @@ func TestPoolSeeding(t *testing.T) {
 			players[i] = Player{Name: fmt.Sprintf("P%d", i+1), Seed: i + 1, Dojo: fmt.Sprintf("Dojo%d", i+1)}
 		}
 
-		result := PoolSeeding(players, numPools, 1)
+		result := referencePoolSeeding(players, numPools, 1)
 		pools, err := CreatePools(result, 3, false)
 		assert.NoError(t, err)
 
@@ -1462,7 +1459,7 @@ func seededPoolCourts(t *testing.T, ranks []int, numPools, poolSize, numCourts i
 		players[i].Seed = r
 	}
 
-	pools, err := CreatePools(PoolSeeding(players, numPools, numCourts), poolSize, false)
+	pools, err := CreatePools(referencePoolSeeding(players, numPools, numCourts), poolSize, false)
 	require.NoError(t, err)
 	require.Len(t, pools, numPools)
 	pools = ReorderPoolsForCourts(pools, numCourts)
@@ -1521,19 +1518,19 @@ func TestPoolSeedingPlacesByRankNotByPosition(t *testing.T) {
 func TestPoolSeeding_CornerCases(t *testing.T) {
 	t.Run("zero pools returns input unchanged", func(t *testing.T) {
 		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
-		result := PoolSeeding(players, 0, 1)
+		result := referencePoolSeeding(players, 0, 1)
 		assert.Equal(t, players, result)
 	})
 
 	t.Run("negative pools returns input unchanged", func(t *testing.T) {
 		players := []Player{{Name: "A", Seed: 1}, {Name: "B"}}
-		result := PoolSeeding(players, -1, 1)
+		result := referencePoolSeeding(players, -1, 1)
 		assert.Equal(t, players, result)
 	})
 
 	t.Run("no seeded players keeps unseeded order", func(t *testing.T) {
 		players := []Player{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}}
-		result := PoolSeeding(players, 2, 1)
+		result := referencePoolSeeding(players, 2, 1)
 		// Unseeded should fill linearly in order.
 		assert.Equal(t, "A", result[0].Name)
 		assert.Equal(t, "B", result[1].Name)
@@ -1547,7 +1544,7 @@ func TestPoolSeeding_CornerCases(t *testing.T) {
 			{Name: "S2", Seed: 2},
 			{Name: "U1"},
 		}
-		result := PoolSeeding(players, 1, 1)
+		result := referencePoolSeeding(players, 1, 1)
 		// All players present, seeds preserved.
 		seen := map[string]bool{}
 		for _, p := range result {
@@ -1564,7 +1561,7 @@ func TestPoolSeeding_CornerCases(t *testing.T) {
 		players[0].Seed = 1
 		players[1].Seed = 2
 		players[2].Seed = 3
-		result := PoolSeeding(players, 6, 1)
+		result := referencePoolSeeding(players, 6, 1)
 		assert.Len(t, result, 17)
 
 		nonEmpty := 0
@@ -1604,7 +1601,7 @@ func TestPoolSeeding_DistributesSeedsAcrossPools(t *testing.T) {
 				players[i].Seed = i + 1
 			}
 
-			result := PoolSeeding(players, tt.numPools, 1)
+			result := referencePoolSeeding(players, tt.numPools, 1)
 			pools, err := CreatePools(result, tt.poolSize, false)
 			assert.NoError(t, err)
 			assert.Len(t, pools, tt.numPools)
@@ -1707,7 +1704,7 @@ func TestPoolSeeding_DojoConflict(t *testing.T) {
 		{Name: "KAORU FUJITA", Dojo: "Tora Dojo London"},
 	}
 
-	result := PoolSeeding(players, 5, 2)
+	result := referencePoolSeeding(players, 5, 2)
 	require.Len(t, result, 15)
 
 	pools, err := CreatePools(result, 3, false)
@@ -1769,7 +1766,7 @@ func TestPoolSeeding_LargeSameDojo(t *testing.T) {
 				}
 			}
 
-			result := PoolSeeding(players, tt.numPools, tt.numCourts)
+			result := referencePoolSeeding(players, tt.numPools, tt.numCourts)
 			pools, err := CreatePools(result, tt.poolSize, false)
 			require.NoError(t, err)
 			require.Len(t, pools, tt.numPools)
@@ -1847,7 +1844,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Alpha", 5}, {"Beta", 5}}, 5)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1866,7 +1863,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Mega", 6}}, 9)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		doublings := 0
@@ -1890,7 +1887,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Red", 3}, {"Blue", 3}, {"Green", 3}}, 0)
-		result := PoolSeeding(players, 3, 2)
+		result := referencePoolSeeding(players, 3, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1909,7 +1906,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"AAA", 4}, {"BBB", 4}}, 4)
-		result := PoolSeeding(players, 4, 2)
+		result := referencePoolSeeding(players, 4, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1934,7 +1931,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 				break
 			}
 		}
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1953,7 +1950,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Big", 5}}, 15)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 4, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1973,7 +1970,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Big", 5}}, 8)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, true)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -1989,7 +1986,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 
 	t.Run("single pool degenerate", func(t *testing.T) {
 		players := makePlayers(map[string]int{"X": 2}, 1)
-		result := PoolSeeding(players, 1, 1)
+		result := referencePoolSeeding(players, 1, 1)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		require.Len(t, pools, 1)
@@ -2002,7 +1999,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 		for i := range 9 {
 			players = append(players, Player{Name: fmt.Sprintf("OnlyOne_%d", i+1), Dojo: "Only"})
 		}
-		result := PoolSeeding(players, 3, 2)
+		result := referencePoolSeeding(players, 3, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		total := 0
@@ -2017,7 +2014,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Alpha", 4}, {"Beta", 4}, {"Gamma", 2}}, 5)
-		result := PoolSeeding(players, 5, 2)
+		result := referencePoolSeeding(players, 5, 2)
 		pools, err := CreatePools(result, 3, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -2036,7 +2033,7 @@ func TestPoolSeeding_DojoEdgeCases(t *testing.T) {
 			Name string
 			Size int
 		}{{"Big", 4}}, 12)
-		result := PoolSeeding(players, 4, 4)
+		result := referencePoolSeeding(players, 4, 4)
 		pools, err := CreatePools(result, 4, false)
 		require.NoError(t, err)
 		for _, pool := range pools {
@@ -2184,33 +2181,6 @@ func TestPoolSeeding_DojoSpreadFallback(t *testing.T) {
 	assert.LessOrEqual(t, maxCount, 2, "Tora Dojo should never exceed 2 players in any pool, got per-pool counts %v", toraCounts)
 }
 
-// loadCSVPlayers reads a "Name,Zekken,Dojo,DanGrade" CSV file (the layout of
-// test-data/individual_men_up_to_2nd_2026.csv) directly, bypassing
-// helper.ReadCSVFile, which rejects the ".." needed to reach test-data/ from
-// this package's directory as an escaping relative path.
-func loadCSVPlayers(t *testing.T, path string) []Player {
-	t.Helper()
-
-	f, err := os.Open(path) // #nosec G304 -- test-only, fixed path under test-data/
-	require.NoError(t, err)
-	defer func() { _ = f.Close() }()
-
-	reader := csv.NewReader(f)
-	reader.FieldsPerRecord = -1
-	records, err := reader.ReadAll()
-	require.NoError(t, err)
-
-	players := make([]Player, 0, len(records))
-	for _, rec := range records {
-		require.GreaterOrEqual(t, len(rec), 3, "record %v missing dojo column", rec)
-		players = append(players, Player{
-			Name: strings.TrimSpace(rec[0]),
-			Dojo: strings.TrimSpace(rec[2]),
-		})
-	}
-	return players
-}
-
 func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
 	// Regression test for bc-dojo, using the real committed roster
 	// test-data/individual_men_up_to_2nd_2026.csv (50 players, 15 "Team Rho"),
@@ -2219,7 +2189,17 @@ func TestPoolSeeding_RealRosterDojoSpread(t *testing.T) {
 	// order and the derived pool/court counts right, exactly as the real
 	// draw does (BuildPoolPhase's own doc comment names hand-assembling this
 	// sequence as the exact drift it exists to prevent).
-	players := loadCSVPlayers(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
+	//
+	// loadDistributionRoster (pool_distribution_invariants_test.go), not a
+	// second, near-identical CSV loader (bc-drwx item 13: this file used to
+	// carry its own loadCSVPlayers, which only ever differed from
+	// loadDistributionRoster in REQUIRING 3+ columns instead of also
+	// accepting 2 -- individual_men_up_to_2nd_2026.csv is 4-column, so every
+	// row already has len(rec)>=3 and both loaders read the identical
+	// rec[2] dojo column for it; the two were never actually testing
+	// different parsing behaviour for the file either one was ever called
+	// with).
+	players := loadDistributionRoster(t, "../../test-data/individual_men_up_to_2nd_2026.csv")
 	require.Len(t, players, 50)
 
 	rhoCount := 0
@@ -2311,7 +2291,7 @@ func TestPoolSeeding_SingleCourt_DojoSpread(t *testing.T) {
 		players = append(players, Player{Name: fmt.Sprintf("Solo%d", i+1), Dojo: fmt.Sprintf("SoloDojo%d", i+1)})
 	}
 
-	result := PoolSeeding(players, numPools, 1)
+	result := referencePoolSeeding(players, numPools, 1)
 	pools, err := CreatePools(result, poolSize, false)
 	require.NoError(t, err)
 	require.Len(t, pools, numPools)
@@ -2658,14 +2638,18 @@ func TestStandardSeeding_DelaysDojoMeetings(t *testing.T) {
 
 // referenceDojoSumMeetRoundsTouching is a full O(N^2) scan over EVERY pair in
 // the draw, kept only for TestDojoSumMeetRounds_MatchesFullScan: it is the
-// pre-P1 semantics of dojoSumMeetRounds(result, x, y) restated independently
-// -- sum dojoMeetRound(i, j) for every same-dojo pair where i or j is x or y,
-// counting the {x, y} pair itself exactly once -- rather than derived from
-// the two-loop-over-x-and-y shape the real function now uses. A bug that
-// double-counts or drops the {x, y} pair, or that mis-scopes "touching",
-// would still pass a test built from the same two-loop shape; this does not
-// share that shape.
-func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
+// pre-P1 semantics of dojoSumMeetRounds(result, slots, x, y) restated
+// independently -- sum dojoMeetRound(slots[i], slots[j]) for every same-dojo
+// pair where i or j is x or y, counting the {x, y} pair itself exactly once
+// -- rather than derived from the two-loop-over-x-and-y shape the real
+// function now uses. A bug that double-counts or drops the {x, y} pair, or
+// that mis-scopes "touching", would still pass a test built from the same
+// two-loop shape; this does not share that shape. slots is
+// denseSlotMap(len(result)), matching what the real function is now handed
+// (bc-drwx item 1): both the reference and the function under test must read
+// the same (correct) tree geometry, or this test would only ever pin the two
+// implementations agreeing with EACH OTHER, not with the real tree.
+func referenceDojoSumMeetRoundsTouching(result []Player, keys []string, slots []int, x, y int) int {
 	sum := 0
 	for i := range result {
 		for j := i + 1; j < len(result); j++ {
@@ -2675,10 +2659,10 @@ func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
 			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 				continue
 			}
-			if result[i].Dojo != result[j].Dojo {
+			if keys[i] != keys[j] {
 				continue
 			}
-			sum += dojoMeetRound(i, j)
+			sum += dojoMeetRound(slots[i], slots[j])
 		}
 	}
 	return sum
@@ -2687,18 +2671,20 @@ func referenceDojoSumMeetRoundsTouching(result []Player, x, y int) int {
 // referenceFullDrawDojoSum is a full whole-draw meeting-round total,
 // independent of both dojoSumMeetRounds and dojoSwapGain, used by
 // TestDojoSwapGain_MatchesFullDrawDelta as the "recompute from scratch"
-// oracle for a swap's gain.
-func referenceFullDrawDojoSum(result []Player) int {
+// oracle for a swap's gain. slots is denseSlotMap(len(result)) -- see
+// referenceDojoSumMeetRoundsTouching's own doc comment for why this must
+// match what the real function is handed.
+func referenceFullDrawDojoSum(result []Player, keys []string, slots []int) int {
 	sum := 0
 	for i := range result {
 		for j := i + 1; j < len(result); j++ {
 			if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 				continue
 			}
-			if result[i].Dojo != result[j].Dojo {
+			if keys[i] != keys[j] {
 				continue
 			}
-			sum += dojoMeetRound(i, j)
+			sum += dojoMeetRound(slots[i], slots[j])
 		}
 	}
 	return sum
@@ -2760,13 +2746,18 @@ func dojoSumTestRosters() map[string][]Player {
 func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
+			slots := denseSlotMap(len(roster))
+			keys := make([]string, len(roster))
+			for i := range roster {
+				keys[i] = dojoKey(roster[i].Dojo)
+			}
 			for x := range roster {
 				for y := range roster {
 					if x == y {
 						continue
 					}
-					want := referenceDojoSumMeetRoundsTouching(roster, x, y)
-					got := dojoSumMeetRounds(roster, x, y)
+					want := referenceDojoSumMeetRoundsTouching(roster, keys, slots, x, y)
+					got := dojoSumMeetRounds(roster, keys, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2784,18 +2775,25 @@ func TestDojoSumMeetRounds_MatchesFullScan(t *testing.T) {
 func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 	for name, roster := range dojoSumTestRosters() {
 		t.Run(name, func(t *testing.T) {
+			slots := denseSlotMap(len(roster))
+			keys := make([]string, len(roster))
+			for i := range roster {
+				keys[i] = dojoKey(roster[i].Dojo)
+			}
 			for x := range roster {
 				for y := range roster {
 					if x == y {
 						continue
 					}
-					before := referenceFullDrawDojoSum(roster)
+					before := referenceFullDrawDojoSum(roster, keys, slots)
 					roster[x], roster[y] = roster[y], roster[x]
-					after := referenceFullDrawDojoSum(roster)
+					keys[x], keys[y] = keys[y], keys[x]
+					after := referenceFullDrawDojoSum(roster, keys, slots)
 					roster[x], roster[y] = roster[y], roster[x]
+					keys[x], keys[y] = keys[y], keys[x]
 					want := after - before
 
-					got := dojoSwapGain(roster, x, y)
+					got := dojoSwapGain(roster, keys, slots, x, y)
 					assert.Equalf(t, want, got, "x=%d y=%d", x, y)
 				}
 			}
@@ -2812,6 +2810,19 @@ func TestDojoSwapGain_MatchesFullDrawDelta(t *testing.T) {
 // and accept condition are copied unchanged, so any drift from the real
 // (memoized) function can only be attributed to the memo itself.
 func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool) {
+	// slots mirrors delayDojoMeetings' own denseSlotMap call (bc-drwx item
+	// 1): this reference must use the SAME real-tree geometry the memoized
+	// function now uses, or a drift here would be misattributed to the
+	// memo when it is really the dense/slot translation.
+	slots := denseSlotMap(len(result))
+	// keys mirrors delayDojoMeetings' own keys slice (bc-drwx review fix),
+	// kept in lockstep with result on every swap below -- same reason as
+	// slots: a drift here would be misattributed to the memo.
+	keys := make([]string, len(result))
+	for i := range result {
+		keys[i] = dojoKey(result[i].Dojo)
+	}
+
 	movable := func(i int) bool {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
@@ -2826,13 +2837,13 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
 					continue
 				}
-				if result[i].Dojo != result[j].Dojo {
+				if keys[i] != keys[j] {
 					continue
 				}
 				if excluded[pairKey{i, j}] {
 					continue
 				}
-				if r := dojoMeetRound(i, j); r < worstRound {
+				if r := dojoMeetRound(slots[i], slots[j]); r < worstRound {
 					worstA, worstB, worstRound = i, j, r
 				}
 			}
@@ -2847,10 +2858,10 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 				continue
 			}
 			for y := range result {
-				if y == x || !movable(y) || result[y].Dojo == result[x].Dojo {
+				if y == x || !movable(y) || keys[y] == keys[x] {
 					continue
 				}
-				if gain := dojoSwapGain(result, x, y); gain > bestGain {
+				if gain := dojoSwapGain(result, keys, slots, x, y); gain > bestGain {
 					bestGain, bestX, bestY = gain, x, y
 				}
 			}
@@ -2860,6 +2871,7 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 			continue
 		}
 		result[bestX], result[bestY] = result[bestY], result[bestX]
+		keys[bestX], keys[bestY] = keys[bestY], keys[bestX]
 		excluded = map[pairKey]bool{}
 	}
 }

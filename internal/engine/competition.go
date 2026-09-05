@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -935,6 +936,21 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// review) so ApplySeeds doesn't fail on an absent seeded player. Remaining
 	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
 	seeds = dropSeedAssignments(fullRoster, seeds, excludedByCheckIn)
+
+	// Blank-dojo pre-flight (bc-drwx item 8). helper.ValidateNoBlankDojo used
+	// to be reachable only through the pool distributor (generatePools ->
+	// BuildPoolPhaseTreeAware*), so a standalone playoffs or Swiss
+	// competition over a legacy blank-dojo roster drew silently: neither
+	// generatePlayoffs (helper.StandardSeeding has no dojo opinion at all)
+	// nor GenerateSwissRound goes anywhere near the distributor. This is the
+	// ONE roster pre-flight, ahead of the format switch below, that covers
+	// every format runDrawPipeline can generate -- the distributor's own
+	// call to the same function (buildPoolPhaseTreeAwareCore) becomes the
+	// assert its doc comment always claimed it was for every caller that
+	// reaches it through here.
+	if err := helper.ValidateNoBlankDojo(players); err != nil {
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
 
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all

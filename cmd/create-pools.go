@@ -169,6 +169,24 @@ func (o *poolOptions) createPools(entries []string) error {
 	// accessor rather than a local `if <= 0 { 2 }`, so the CLI and the app
 	// cannot disagree about what an unset pool-winners count means.
 	effectivePoolWinners := (state.Competition{PoolWinners: o.poolWinners}).EffectivePoolWinners()
+	// bc-drwx item 9: reject an out-of-range --pool-winners flag HERE,
+	// before it can reach EffectivePoolWinners' own "<=0 means unset,
+	// default to 2" resolution. That resolution exists for the app's
+	// state.Competition, whose zero value genuinely means "the operator
+	// has not configured this yet" -- but this CLI flag already carries an
+	// explicit default of 2 (newCreatePoolCmd), so an operator who types
+	// `-w 0` (or a negative value) almost certainly made a mistake and
+	// deserves a clear "pool-winners must be at least 1" error, not a
+	// silent substitution. Without this, `-w 0` sailed past every check
+	// below (0 < activePoolSize, len(entries) < 0 is never true) and
+	// reached helper.BuildPoolPhaseTreeAwareWithMode with an unresolved
+	// poolWinners of 0, which collapses the dojo-tree skeleton
+	// (poolQualifierPaths returns nil for poolWinners <= 0) and later
+	// fails with the generic "could not build a knockout draw" error
+	// instead of naming the actual problem.
+	if o.poolWinners < 1 {
+		return fmt.Errorf("--pool-winners must be at least 1, got %d", o.poolWinners)
+	}
 	if err := state.ValidateExtraQualifiers(o.extraQualifiers, poolSizeModeForValidation, effectivePoolWinners); err != nil {
 		return err
 	}
@@ -239,17 +257,23 @@ func (o *poolOptions) createPools(entries []string) error {
 	// The standard/larger-pools branch calls
 	// helper.BuildPoolPhaseTreeAwareWithMode, not plain helper.BuildPoolPhase
 	// (bc-dojo Phase 4): this command has a REAL pool-winners count
-	// (o.poolWinners) and extra-qualifiers mode (o.extraQualifiers, "" or
-	// "larger-pools" here) to hand it, and BuildPoolPhase's own poolWinners
-	// is FIXED at its documented default (2) -- calling it here would score
-	// every candidate placement against the WRONG knockout tree whenever
-	// either real value differs from that default.
+	// (effectivePoolWinners) and extra-qualifiers mode (o.extraQualifiers,
+	// "" or "larger-pools" here) to hand it, and BuildPoolPhase's own
+	// poolWinners is FIXED at its documented default (2) -- calling it here
+	// would score every candidate placement against the WRONG knockout tree
+	// whenever either real value differs from that default.
+	//
+	// effectivePoolWinners, not o.poolWinners (bc-drwx item 9): the range
+	// guard above already makes the two equal for a real CLI invocation,
+	// but this is the same resolved value ValidateExtraQualifiers was
+	// already handed, so the distributor can never see a different,
+	// unresolved view of pool-winners than validation did.
 	var pools []helper.Pool
 	var drawCourts int
 	if o.extraQualifiers == state.ExtraQualifiersFillBracket {
 		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, activePoolSize, o.courts)
 	} else {
-		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, o.poolWinners, o.extraQualifiers)
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, effectivePoolWinners, o.extraQualifiers)
 	}
 	if err != nil {
 		return err

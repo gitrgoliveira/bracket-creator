@@ -110,6 +110,10 @@ func TestCreatePools_NumPoolsZero(t *testing.T) {
 	o := &poolOptions{
 		outputWriter: bufio.NewWriter(&b),
 		numPlayers:   10,
+		// poolWinners: 2, not the Go zero value (bc-drwx item 9 added an
+		// earlier "--pool-winners must be at least 1" check; this test is
+		// about entry-count validation, not pool-winners).
+		poolWinners: 2,
 	}
 	// Use 3 players (minimum valid entries but not enough for a pool of 10)
 	err := o.createPools([]string{"A,D1", "B,D2", "C,D3"})
@@ -770,6 +774,27 @@ func TestCreatePools_ValidationErrors(t *testing.T) {
 			poolWinners:   3,
 			expectedError: "number of pool winners must be less than number of players per pool",
 		},
+		{
+			// bc-drwx item 9: -w 0 used to sail past every check in this
+			// table (0 < activePoolSize is never true, len(entries) < 0 is
+			// never true) and reach helper.BuildPoolPhaseTreeAwareWithMode
+			// with an unresolved poolWinners of 0, which collapsed the
+			// dojo-tree skeleton and failed later with the generic
+			// "could not build a knockout draw" message instead of naming
+			// the actual problem.
+			name:          "pool-winners zero",
+			entries:       []string{"John Doe,Dojo1", "Jane Smith,Dojo2", "Alice,Dojo3"},
+			numPlayers:    3,
+			poolWinners:   0,
+			expectedError: "--pool-winners must be at least 1, got 0",
+		},
+		{
+			name:          "pool-winners negative",
+			entries:       []string{"John Doe,Dojo1", "Jane Smith,Dojo2", "Alice,Dojo3"},
+			numPlayers:    3,
+			poolWinners:   -1,
+			expectedError: "--pool-winners must be at least 1, got -1",
+		},
 	}
 
 	for _, tt := range tests {
@@ -970,17 +995,23 @@ func TestCreatePools_MaxMode_ValidationErrors(t *testing.T) {
 		expectedError string
 	}{
 		{
+			// poolWinners: 1, not 0 (bc-drwx item 9 added an earlier,
+			// dedicated "--pool-winners must be at least 1" check ahead of
+			// this one; these two cases are about entry-count/pool-size
+			// validation, not pool-winners, so they need a valid
+			// pool-winners value to still reach the check they exist to
+			// pin).
 			name:          "max mode requires at least 2 entries",
 			entries:       []string{"John Doe,Dojo1"},
 			maxPlayers:    3,
-			poolWinners:   0,
+			poolWinners:   1,
 			expectedError: "number of entries must be at least 2",
 		},
 		{
 			name:          "max mode rejects pool size below 2",
 			entries:       []string{"A,D1", "B,D2", "C,D3"},
 			maxPlayers:    1,
-			poolWinners:   0,
+			poolWinners:   1,
 			expectedError: "number of players per pool must be greater than 1",
 		},
 		{

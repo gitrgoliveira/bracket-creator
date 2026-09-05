@@ -32,7 +32,7 @@ The **Fit the knockout** qualifier option chooses its own pool count so that the
 
 The dojo is the only thing the draw keeps apart. Sharing a name is not a conflict: two competitors can share a name only when their dojos differ, because a second entry with both the same name and the same dojo is refused as a duplicate of the same person. Namesakes are two different people, they may fight in the same pool, and the sheet tells them apart by dojo and by competitor number.
 
-Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps: no dojo's first meeting may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
+Once every competitor has a pool, the draw examines the finished result and exchanges competitors between pools where that keeps dojos apart longer, and only then. An exchange is taken only when it helps: no dojo's first meeting against a pool's own winner may get earlier because of one, pool sizes never change, and a seeded competitor is never moved. Where a second qualifier's crossing is involved, described below, keeping that meeting apart is a best effort rather than a guarantee, and an exchange may occasionally let one such meeting move earlier when doing so still leaves every winner-path meeting the same or later. On a roster where no dojo can be kept apart any better, the pools come out exactly as placed.
 
 ### Watch a draw being made
 

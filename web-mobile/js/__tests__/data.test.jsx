@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
-  buildPools, computeStandings, parseParticipantLines
+  buildPools, poolLetterName, computeStandings, parseParticipantLines
 } from '../data.jsx';
 import { provisionalNumberMap } from '../data.jsx';
 
@@ -61,6 +61,33 @@ describe('Data Utils', () => {
       expect(pools[0].players[1].name).toBe('P4');
       expect(pools[1].players[0].name).toBe('P2');
       expect(pools[1].players[1].name).toBe('P3');
+    });
+  });
+
+  describe('poolLetterName', () => {
+    // Mirrors internal/helper/pool_position_name_test.go's
+    // TestPoolPositionName_UniqueBeyond52 (bc-drwx item 9): the same six
+    // 0-based positions, pinned on both sides of the Go/JS mirror so a
+    // regression at either rollover (single letter to double, double to
+    // triple) is caught wherever it happens. poolLetterName replaces a bare
+    // String.fromCharCode(65+i), which never wrapped at all -- position 26
+    // printed "Pool [" (one past "Z" in ASCII) instead of "Pool AA".
+    it('is bijective base-26 and never repeats past the raw ASCII wrap point', () => {
+      expect(poolLetterName(25)).toBe('Z');
+      expect(poolLetterName(26)).toBe('AA');
+      expect(poolLetterName(51)).toBe('AZ');
+      expect(poolLetterName(52)).toBe('BA');
+      expect(poolLetterName(701)).toBe('ZZ');
+      expect(poolLetterName(702)).toBe('AAA');
+    });
+
+    it('never repeats a name across a large run (the raw scheme this replaces collided every 26)', () => {
+      const seen = new Set();
+      for (let i = 0; i < 64; i++) {
+        const name = poolLetterName(i);
+        expect(seen.has(name)).toBe(false);
+        seen.add(name);
+      }
     });
   });
 

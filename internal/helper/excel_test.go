@@ -737,12 +737,12 @@ func TestSetupNamesToPrintLayout(t *testing.T) {
 	setupNamesToPrintLayout(f, sheetName)
 
 	width, _ := f.GetColWidth(sheetName, "A")
-	if width != 30 {
-		t.Errorf("Expected column A width 30, got %f", width)
+	if width != namesToPrintNumberColWidth {
+		t.Errorf("Expected column A width %d, got %f", namesToPrintNumberColWidth, width)
 	}
 	widthB, _ := f.GetColWidth(sheetName, "B")
-	if widthB != 160 {
-		t.Errorf("Expected column B width 160, got %f", widthB)
+	if widthB != namesToPrintNameColWidth {
+		t.Errorf("Expected column B width %d, got %f", namesToPrintNameColWidth, widthB)
 	}
 }
 

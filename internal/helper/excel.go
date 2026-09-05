@@ -1725,9 +1725,24 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 		Top: &margin, Bottom: &margin, Left: &margin, Right: &margin,
 		Header: &margin, Footer: &margin,
 	}))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 30))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "B", 160))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", namesToPrintNumberColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "B", namesToPrintNameColWidth))
 }
+
+// Names to Print column widths, in Excel width units. Operator ruling: both
+// columns ALWAYS fit one page side by side and never change size; only the
+// text shrinks to fit (both cell styles set ShrinkToFit). A3 landscape at
+// this sheet's 0.1in margins offers about 1176pt of printable width, which
+// LibreOffice renders at roughly 6.3pt per width unit, so the two widths
+// must sum to at most namesToPrintPageWidthUnits or the page breaks between
+// the columns and the sheet prints as a run of number-only pages followed by
+// a run of name-only pages (the previous 30 + 160 did exactly that, three
+// units over). Pinned by TestNamesToPrintColumnsFitOnePage.
+const (
+	namesToPrintNumberColWidth = 40
+	namesToPrintNameColWidth   = 140
+	namesToPrintPageWidthUnits = 186
+)
 
 // courtSheetName names the per-shiaijo "Names to Print" sheet after the shiaijo
 // the competition actually runs on, not after the band's position.

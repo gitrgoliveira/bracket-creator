@@ -66,3 +66,47 @@ func TestGetDurationStyle(t *testing.T) {
 		t.Errorf("Expected positive style ID, got %d", style)
 	}
 }
+
+// TestNameIDStyle_ShrinkToFit pins the name half of the Names-to-Print ruling:
+// the name column never changes size, so a long name must shrink into it.
+func TestNameIDStyle_ShrinkToFit(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	style, err := f.GetStyle(buildNameIDStyle(f))
+	if err != nil {
+		t.Fatalf("GetStyle: %v", err)
+	}
+	if style.Alignment == nil || !style.Alignment.ShrinkToFit {
+		t.Errorf("expected the Names-to-Print name style to set ShrinkToFit, got %+v", style.Alignment)
+	}
+	if style.Alignment != nil && style.Alignment.WrapText {
+		t.Errorf("the name cell must shrink, never wrap: %+v", style.Alignment)
+	}
+}
+
+// TestNamesToPrintColumnsFitOnePage pins the operator ruling that the number
+// and name columns always sit side by side on one A3 landscape page: their
+// fixed widths must not exceed what the page offers at the sheet's margins.
+func TestNamesToPrintColumnsFitOnePage(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	const sheet = "Names to Print A"
+	if _, err := f.NewSheet(sheet); err != nil {
+		t.Fatalf("NewSheet: %v", err)
+	}
+	setupNamesToPrintLayout(f, sheet)
+	a, err := f.GetColWidth(sheet, "A")
+	if err != nil {
+		t.Fatalf("GetColWidth A: %v", err)
+	}
+	b, err := f.GetColWidth(sheet, "B")
+	if err != nil {
+		t.Fatalf("GetColWidth B: %v", err)
+	}
+	if a+b > namesToPrintPageWidthUnits {
+		t.Errorf("Names to Print columns A (%v) + B (%v) = %v exceed the %d units an A3 landscape page offers; the sheet would print numbers and names as separate page runs", a, b, a+b, namesToPrintPageWidthUnits)
+	}
+	if a != namesToPrintNumberColWidth || b != namesToPrintNameColWidth {
+		t.Errorf("column widths must be the fixed constants (%d, %d), got (%v, %v)", namesToPrintNumberColWidth, namesToPrintNameColWidth, a, b)
+	}
+}

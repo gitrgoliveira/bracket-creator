@@ -348,6 +348,9 @@ func buildNameIDStyle(f *excelize.File) int {
 		Alignment: &excelize.Alignment{
 			Horizontal: "center",
 			Vertical:   "center",
+			// The name column has a fixed width (namesToPrintNameColWidth); a
+			// long name shrinks into it rather than overflowing or wrapping.
+			ShrinkToFit: true,
 		},
 		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 110},
 		Border: []excelize.Border{

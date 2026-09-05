@@ -216,3 +216,35 @@ func TestCreateTagsSheet_EmptyNumber(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateTagsSheet_QRSitsBelowTheNumber pins the QR placement the bc-pnum
+// review settled by rendering: the code sits in the bottom-left band of the
+// tag, below the number, at 0.45 scale (about 2.4 cm on paper). The old
+// placement (OffsetX 57, OffsetY 242 at the number's vertical centre) assumed
+// white space left of a short number; a shrink-to-fit "KOR20" fills the
+// column and the code landed on its first letter.
+func TestCreateTagsSheet_QRSitsBelowTheNumber(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "KOR20"}}}}
+	if err := CreateTagsSheet(f, pools, "https://example.org/viewer"); err != nil {
+		t.Fatalf("CreateTagsSheet: %v", err)
+	}
+	pics, err := f.GetPictures(SheetTags, "A1")
+	if err != nil {
+		t.Fatalf("GetPictures: %v", err)
+	}
+	if len(pics) != 1 {
+		t.Fatalf("expected one QR picture on the first tag, got %d", len(pics))
+	}
+	got := pics[0].Format
+	if got == nil {
+		t.Fatal("QR picture has no graphic options")
+	}
+	if got.OffsetX != 12 || got.OffsetY != 440 {
+		t.Errorf("QR must sit in the bottom-left band below the number (OffsetX 12, OffsetY 440 px), got (%d, %d)", got.OffsetX, got.OffsetY)
+	}
+	if got.ScaleX != 0.45 || got.ScaleY != 0.45 {
+		t.Errorf("QR scale must be 0.45 (about 2.4 cm on paper), got (%v, %v)", got.ScaleX, got.ScaleY)
+	}
+}

@@ -100,20 +100,26 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 409))
 
 				if len(qrPNG) > 0 {
-					// Left of the number, vertically aligned with its centre (OffsetX/Y in px at 96 DPI).
-					// Column 110 units ≈ 770 px; "K1" at 250 pt ≈ 420 px wide, so the left white
-					// space is ≈175 px. A 60 px QR (200 px × ScaleX 0.3) centred in that gap:
-					// OffsetX = (175−60)/2 = 57 px.
-					// Row 409 pt ≈ 545 px; number centre at 272 px; QR at OffsetY 242 (= 272−30).
+					// Bottom-left corner of the tag, BELOW the number (OffsetX/Y in px at
+					// 96 DPI). The QR used to sit left of the number at its vertical
+					// centre, in white space that only a short number left free: the
+					// number now shrinks to fit the 88-unit column, so a four- or
+					// five-character number ("KO20", "KOR20") fills the width and the
+					// code landed on top of the first letter. The vertical band is free
+					// instead: the row is 409 pt ≈ 545 px and the shrunk glyphs occupy
+					// roughly the middle 280 px, leaving ≈130 px below them. A 90 px QR
+					// (200 px × 0.45, about 2.4 cm on paper) at OffsetY 440 sits inside
+					// that band clear of any glyph for every prefix length; rendered
+					// with LibreOffice for K20, KO20 and KOR20 (bc-pnum review).
 					if err := f.AddPictureFromBytes(sheetName, cell, &excelize.Picture{
 						Extension: ".png",
 						File:      qrPNG,
 						Format: &excelize.GraphicOptions{
 							PrintObject: &printObj,
-							OffsetX:     57,
-							OffsetY:     242,
-							ScaleX:      0.3,
-							ScaleY:      0.3,
+							OffsetX:     12,
+							OffsetY:     440,
+							ScaleX:      0.45,
+							ScaleY:      0.45,
 							Positioning: "oneCell",
 						},
 					}); err != nil {

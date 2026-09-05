@@ -66,6 +66,15 @@ type ImportResult struct {
 	ParticipantCount int    `json:"participantCount"`
 	SeedCount        int    `json:"seedCount"`
 	Error            string `json:"error,omitempty"`
+	// Warning is non-empty when the row imported successfully but with a
+	// caveat the operator must act on -- currently only the import-boundary
+	// prefix reassignment ([review] round 2, item 2): the row landed, but
+	// under a DIFFERENT number prefix than the archive requested, so every
+	// tag this competition already had printed (under the old prefix) now
+	// names a number it no longer has. A bare Error-only result would let
+	// the SPA's all-success banner auto-navigate away without the operator
+	// ever seeing that a competition needs reprinting.
+	Warning string `json:"warning,omitempty"`
 }
 
 func RegisterImportHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
@@ -490,13 +499,44 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		if infraErr, prefixErr := checkUniqueCompFields(store, "", comp.NumberPrefix, comp.ID); infraErr != nil {
 			return infraErr
 		} else if prefixErr != nil {
+			oldPrefix := comp.NumberPrefix
 			newPrefix, deriveErr := eng.DefaultNumberPrefixFor(comp.Name, comp.ID)
 			if deriveErr != nil {
 				return deriveErr
 			}
+			// [review] round 2, item 1: DefaultNumberPrefixFor's own contract
+			// (helper/numbers.go) is an explicit best-effort SUGGESTION, not a
+			// uniqueness guarantee -- once every candidate up to the length
+			// cap is exhausted it returns the LAST one tried, unmodified,
+			// which can itself already be taken (e.g. ~100 siblings holding
+			// "K" and every "K02".."K99" exhausts the derivation onto "K99",
+			// colliding with the sibling that already holds it). Every OTHER
+			// caller of this function (create, settings, the
+			// start/generate-draw pre-flight) re-validates the suggestion
+			// before trusting it; this reassign branch must too. At genuine
+			// exhaustion the collision cannot be resolved by re-deriving
+			// again (the taken set has not changed), so a refusal here is
+			// the honest outcome -- exactly like the name-collision branch
+			// above, which also refuses rather than silently landing bad
+			// data.
+			if infraErr, reErr := checkUniqueCompFields(store, "", newPrefix, comp.ID); infraErr != nil {
+				return infraErr
+			} else if reErr != nil {
+				res.Error = fmt.Sprintf("number prefix %q collided on restore and no replacement prefix could be derived: %v", oldPrefix, reErr)
+				return nil
+			}
 			log.Printf("mobileapp: import %s: number prefix %q collided on restore (%v); reassigned %q",
-				comp.ID, comp.NumberPrefix, prefixErr, newPrefix)
+				comp.ID, oldPrefix, prefixErr, newPrefix)
 			comp.NumberPrefix = newPrefix
+			// [review] round 2, item 2: the reassignment PRESERVES mp-yin4's
+			// global prefix+number uniqueness invariant, but every tag this
+			// competition already had printed under oldPrefix now names a
+			// number it no longer has. ImportResult.Error would make the SPA
+			// treat this row as a hard failure (it is not: the row landed);
+			// Warning surfaces the caveat without that, so the operator
+			// restoring the archive is told to reprint rather than finding
+			// out from a competitor holding a stale tag.
+			res.Warning = fmt.Sprintf("number prefix %q was already in use: assigned %q; reprint this competition's tags", oldPrefix, newPrefix)
 		}
 		if len(parsedPlayers) > 0 {
 			// Mirror saveCompetitionWithPlayers semantics: when

@@ -632,7 +632,12 @@ paths:
             partial success is allowed (one row's `error` doesn't abort
             the others). `name` is the trimmed value (matches what's
             saved to disk; the manifest's raw padded value is normalized
-            before save and before this response is constructed).
+            before save and before this response is constructed). A row
+            can also carry `warning` (see below) instead of `error`: the
+            row succeeded, but needs the operator's attention before they
+            leave the import page -- a client must not treat the whole
+            import as a silent, no-action-needed success while any row
+            carries a `warning`, even when no row carries an `error`.
           content:
             application/json:
               schema:
@@ -666,6 +671,24 @@ paths:
                             `seeds file "...": Seeding is incomplete: ...`
                             and rolls the competition back off disk, so the
                             file can be fixed and the import retried.
+                        warning:
+                          type: string
+                          description: |
+                            Non-empty when the row imported successfully
+                            (`error` empty) but needs the operator's
+                            attention. Currently the only producer is an
+                            import-boundary `number_prefix` reassignment: a
+                            restored archive can legally carry a prefix
+                            collision that predates the ambiguity/uniqueness
+                            rule (e.g. two competitions holding `K` and `K2`),
+                            so the row is ASSIGNED a fresh prefix rather than
+                            rejected -- but every tag this competition
+                            already had printed under the OLD prefix now
+                            names a number it no longer has. Example:
+                            `number prefix "K" was already in use: assigned
+                            "K3"; reprint this competition's tags`. Absent
+                            (omitted, not empty string) on every row that
+                            imported without a caveat.
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
 

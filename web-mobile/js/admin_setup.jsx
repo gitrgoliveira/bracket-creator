@@ -1577,7 +1577,15 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       if (!mountedRef.current) return;
       setResults(body.results || []);
       const hasErrors = (body.results || []).some(r => r.error);
-      if (!hasErrors) {
+      // bc-pnum [review] round 2, item 2: a row can land with a WARNING
+      // (currently only the import-boundary prefix reassignment) rather
+      // than an error -- the row succeeded, but every tag this
+      // competition already had printed under the old prefix now names a
+      // number it no longer has. Auto-navigating away here is exactly as
+      // wrong as it would be for an error: the operator has not yet seen
+      // the caveat, let alone acted on it.
+      const hasWarnings = (body.results || []).some(r => r.warning);
+      if (!hasErrors && !hasWarnings) {
         importedTimerRef.current = setTimeout(() => {
           importedTimerRef.current = null;
           // onImported is async (admin.jsx wires it to fetchCompetitions
@@ -1715,17 +1723,42 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                     </div>
                     {r.error
                       ? <span className="tag-badge tag-badge--warn">✕ not imported</span>
-                      : <span className="tag-badge">✓ imported</span>}
+                      : r.warning
+                        ? <span className="tag-badge tag-badge--warn">⚠ imported</span>
+                        : <span className="tag-badge">✓ imported</span>}
                   </div>
                   {r.error && (
                     <div className="import-result__error" role="alert" data-testid="import-result-error">
                       {importRowErrorText(r.error)}
                     </div>
                   )}
+                  {/* bc-pnum [review] round 2, item 2: the row succeeded (no
+                      .import-result__error, no "not imported" badge), but
+                      needs the operator's attention -- currently only the
+                      import-boundary prefix reassignment, whose already-
+                      printed tags for this competition are now wrong. role
+                      "status" not "alert": this is a caveat on a success,
+                      not a failure. */}
+                  {r.warning && (
+                    <div className="import-result__warning" role="status" data-testid="import-result-warning">
+                      {r.warning}
+                    </div>
+                  )}
                 </div>
               ))}
-              {!results.some(r => r.error) && (
+              {/* bc-pnum [review] round 2, item 2: the auto-navigate banner
+                  only fires when nothing needs a second look. A row can
+                  succeed with a warning (currently only a reassigned
+                  import-boundary prefix), and navigating away then would
+                  carry the operator past the one place that warning is
+                  shown before they could act on it. */}
+              {!results.some(r => r.error) && !results.some(r => r.warning) && (
                 <div className="alert alert--success" style={{ marginTop: 12 }}>All competitions imported successfully. Returning to dashboard…</div>
+              )}
+              {!results.some(r => r.error) && results.some(r => r.warning) && (
+                <div className="alert alert--warn" style={{ marginTop: 12 }}>
+                  All competitions imported, but one or more need attention above before you leave this page.
+                </div>
               )}
             </div>
           </div>

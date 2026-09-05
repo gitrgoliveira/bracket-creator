@@ -278,3 +278,91 @@ describe('Import row errors read as prose, not as a tag (U4)', () => {
     expect(row.querySelector('.tag-badge').textContent).toBe('✓ imported');
   });
 });
+
+// bc-pnum [review] round 2, item 2: a reassigned import row (the number
+// prefix collided on restore, so the server picked a different one) landed
+// successfully -- ImportResult carried only `error`, which stayed empty --
+// so this row was indistinguishable from a clean one. Every tag already
+// printed for that competition under the OLD prefix now names a number it
+// no longer has, and the all-success banner auto-navigated away before the
+// operator could see anything was different.
+describe('Import warning: a reassigned row surfaces without being mistaken for a clean one', () => {
+  const runImport = async (container, results) => {
+    window.API.importCompetitions.mockResolvedValueOnce({ results });
+    window.confirmDialog.mockResolvedValueOnce(true);
+    window.promptAdminPassword.mockResolvedValueOnce('');
+    const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent.trim() === 'Import');
+    await act(async () => { fireEvent.click(btn); });
+    await flushUntil(container, '[data-testid="import-result-row"]');
+  };
+
+  const WARNING = 'number prefix "K" was already in use: assigned "K3"; reprint this competition\'s tags';
+
+  it('renders the warning beside the row without marking it a failure', async () => {
+    const { container } = await mountImport();
+    await selectManifest(container, {
+      competitions: [{ id: 'a', name: 'Reserve Cup', format: 'mixed', courts: ['A', 'B'], participants: 'a.csv' }],
+    });
+    await runImport(container, [{ id: 'a', name: 'Reserve Cup', participantCount: 4, warning: WARNING }]);
+
+    expect(container.querySelector('[data-testid="import-result-error"]')).toBeNull();
+    const warn = container.querySelector('[data-testid="import-result-warning"]');
+    expect(warn).not.toBeNull();
+    expect(warn.textContent).toBe(WARNING);
+  });
+
+  it('does not auto-navigate away while a row still needs a reprint', async () => {
+    const onImported = vi.fn();
+    let result;
+    await act(async () => {
+      result = render(
+        <AdminImportPage
+          tournament={makeTournament()}
+          onBack={noop}
+          onImported={onImported}
+          onLogout={noop}
+          onViewerMode={noop}
+          password=""
+        />
+      );
+    });
+    const { container } = result;
+    await selectManifest(container, {
+      competitions: [{ id: 'a', name: 'Reserve Cup', format: 'mixed', courts: ['A', 'B'], participants: 'a.csv' }],
+    });
+    await runImport(container, [{ id: 'a', name: 'Reserve Cup', participantCount: 4, warning: WARNING }]);
+
+    expect(container.textContent).not.toContain('Returning to dashboard');
+
+    // The clean-row auto-navigate timer is 1500ms; wait past it with a
+    // margin and confirm it never fired for this warned row.
+    await act(async () => { await new Promise((r) => setTimeout(r, 1700)); });
+    expect(onImported).not.toHaveBeenCalled();
+  });
+
+  it('still auto-navigates when every row is clean (no warning, no error)', async () => {
+    const onImported = vi.fn();
+    let result;
+    await act(async () => {
+      result = render(
+        <AdminImportPage
+          tournament={makeTournament()}
+          onBack={noop}
+          onImported={onImported}
+          onLogout={noop}
+          onViewerMode={noop}
+          password=""
+        />
+      );
+    });
+    const { container } = result;
+    await selectManifest(container, {
+      competitions: [{ id: 'a', name: 'Reserve Cup', format: 'mixed', courts: ['A', 'B'], participants: 'a.csv' }],
+    });
+    await runImport(container, [{ id: 'a', name: 'Reserve Cup', participantCount: 4 }]);
+
+    expect(container.textContent).toContain('Returning to dashboard');
+    await act(async () => { await new Promise((r) => setTimeout(r, 1700)); });
+    expect(onImported).toHaveBeenCalledTimes(1);
+  });
+});

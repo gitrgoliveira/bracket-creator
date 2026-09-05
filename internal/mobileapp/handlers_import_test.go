@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -632,6 +633,16 @@ competitions:
 	// being refused. See TestImportCompetition_AssignsFreshPrefixOnRestoredCollision
 	// for the focused unit coverage (including the ambiguous, not just
 	// exact-duplicate, case) below the HTTP layer.
+	//
+	// [review] round 2, nit (b): this reassignment PRESERVES mp-yin4's
+	// invariant rather than abandoning it -- prefix+number stays globally
+	// unique across every competition, which is what lets the viewer's
+	// `?playerNumber=` deep link (mp-yin4 tag QR, viewer_home.jsx) resolve
+	// to exactly one competitor. Rejecting the row would also have
+	// preserved it, just by refusing the collision instead of resolving it;
+	// re-validating the re-derived prefix ([review] round 2, item 1) is
+	// what keeps a SUCCESSFUL reassignment from silently reintroducing the
+	// exact ambiguity this invariant forbids.
 	t.Run("Duplicate Number Prefix Across Import And Existing Comp Reassigned, Not Rejected", func(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: "pfx-import-existing", Name: "Pfx Import Existing", NumberPrefix: "I",
@@ -669,6 +680,22 @@ competitions:
 		require.NotNil(t, stored, "pfx-import-dup must have been persisted")
 		assert.NotEqual(t, "I", stored.NumberPrefix, "the colliding prefix must have been reassigned, not saved as-is")
 		assert.NotEmpty(t, stored.NumberPrefix, "a reassignment must still leave the competition WITH a prefix")
+
+		// [review] round 2, item 2: the wire payload (raw JSON over the
+		// real HTTP endpoint, not just the Go struct) must carry the
+		// warning, or the SPA never sees it. Asserted on the RAW body too,
+		// not only the decoded struct, since json:",omitempty" silently
+		// dropping the field on an empty string would still round-trip
+		// through Unmarshal into a Go zero value indistinguishable from
+		// "never set".
+		require.NotEmptyf(t, resp.Results[0].Warning, "a reassigned prefix must surface a warning on the wire payload")
+		assert.Contains(t, resp.Results[0].Warning, "reprint")
+		var rawBody map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rawBody))
+		rawResults, _ := rawBody["results"].([]any)
+		require.Len(t, rawResults, 1)
+		rawRow, _ := rawResults[0].(map[string]any)
+		assert.Contains(t, rawRow, "warning", "the raw JSON response must carry the \"warning\" key for a reassigned row")
 	})
 
 	// Date must be DD-MM-YYYY. Non-canonical formats (e.g. ISO YYYY-MM-DD)
@@ -1162,6 +1189,84 @@ func TestImportCompetition_AssignsFreshPrefixOnRestoredCollision(t *testing.T) {
 		require.NotEmptyf(t, res2.Error, "a genuine NAME collision is an identity conflict, not a cosmetic tag, and must still reject")
 		assert.Contains(t, res2.Error, "already exists")
 	})
+
+	// [review] round 2, item 1: DefaultNumberPrefixFor's own contract
+	// (helper/numbers.go) is a best-effort SUGGESTION, not a uniqueness
+	// guarantee -- once every candidate up to the length cap is exhausted it
+	// returns the LAST one tried, unmodified, which can itself already be
+	// taken. Every other caller (create, settings, the start/generate-draw
+	// pre-flight) re-validates that suggestion before trusting it; import's
+	// reassign branch did not. This reproduces the exact exhaustion the
+	// review named: a sibling holds "K" and another 98 siblings hold every
+	// zero-padded two-digit suffix "K02".."K99", so DefaultNumberPrefixFor's
+	// width-2 loop finds every candidate already taken and falls off the end
+	// returning "K99" -- which collides EXACTLY with the sibling that
+	// already holds it, and is ambiguous with "K" too.
+	t.Run("exhaustion: a re-derived prefix that still collides is refused, not silently persisted", func(t *testing.T) {
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+		}))
+		eng := engine.New(store)
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "sib-k", Name: "Sib K", NumberPrefix: "K"}))
+		for n := 2; n <= 99; n++ {
+			prefix := fmt.Sprintf("K%02d", n)
+			id := fmt.Sprintf("sib-k%02d", n)
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: "Sib " + prefix, NumberPrefix: prefix}))
+		}
+
+		// Its own requested prefix ("K") collides outright, entering the
+		// reassign branch; a SINGLE-WORD name gives nameInitials exactly "K"
+		// (not "KE" or similar), which is what walks DefaultNumberPrefixFor
+		// into the exact exhausted numeric-suffix space set up above rather
+		// than escaping onto a second, untaken initial.
+		entry := ImportManifestComp{ID: "imp-exhausted", Name: "Kendo", Date: "11-06-2026", NumberPrefix: "K"}
+		res := importCompetition(store, eng, entry, map[string][]byte{})
+
+		require.NotEmptyf(t, res.Error, "an unresolvable collision must refuse the row, not silently persist a colliding prefix")
+		assert.Contains(t, res.Error, "K")
+
+		comp, err := store.LoadCompetition("imp-exhausted")
+		require.NoError(t, err)
+		assert.Nil(t, comp, "a refused row must not have been persisted, exactly like the genuine-name-collision case")
+	})
+}
+
+// TestImportCompetition_ReassignmentSetsWarning pins [review] round 2, item
+// 2: a reassigned prefix invalidates every tag the archive's competition
+// already had printed under the OLD prefix (mp-yin4's prefix+number
+// global-uniqueness invariant is PRESERVED by the reassignment, see the
+// updated comment above TestRegisterImportHandlers' duplicate-prefix
+// subtest, but the operator restoring the archive has no way to know a tag
+// is now wrong unless told). ImportResult.Warning surfaces that without
+// failing the row.
+func TestImportCompetition_ReassignmentSetsWarning(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+	}))
+	eng := engine.New(store)
+
+	first := ImportManifestComp{ID: "imp-warn-1", Name: "Warn Cup", Date: "11-06-2026", NumberPrefix: "K"}
+	res1 := importCompetition(store, eng, first, map[string][]byte{})
+	require.Emptyf(t, res1.Error, "import should succeed: %s", res1.Error)
+	assert.Empty(t, res1.Warning, "the first, non-colliding row must carry no warning")
+
+	second := ImportManifestComp{ID: "imp-warn-2", Name: "Warn Cup Reserve", Date: "11-06-2026", NumberPrefix: "K"}
+	res2 := importCompetition(store, eng, second, map[string][]byte{})
+	require.Emptyf(t, res2.Error, "a reassigned row must still succeed: %s", res2.Error)
+
+	comp2, err := store.LoadCompetition("imp-warn-2")
+	require.NoError(t, err)
+	require.NotNil(t, comp2)
+
+	require.NotEmptyf(t, res2.Warning, "a reassigned prefix must surface a warning so the operator knows to reprint tags")
+	assert.Contains(t, res2.Warning, `"K"`, "the warning must name the ORIGINAL colliding prefix")
+	assert.Contains(t, res2.Warning, comp2.NumberPrefix, "the warning must name the prefix actually assigned")
+	assert.Contains(t, res2.Warning, "reprint", "the warning must tell the operator to reprint this competition's tags")
 }
 
 // The importer runs the SAME seeds-roster gate PUT /seeds runs

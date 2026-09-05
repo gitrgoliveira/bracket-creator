@@ -183,19 +183,35 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	}
 	// Exhausted every candidate up to the length cap: every one of them is
 	// already taken or ambiguous. Return the last one tried rather than
-	// inventing a value beyond MaxNumberPrefixLen -- every request-driven
-	// caller (checkUniqueCompFields, on the create, settings-save, import and
-	// start/generate-draw paths) re-validates uniqueness (and, per this same
-	// bead, ambiguity) against the SAME taken set and rejects the collision
-	// with its own error naming the actual conflict. That is the right place
-	// for this to surface: this function's contract is a best-effort
-	// SUGGESTION, not a uniqueness guarantee. The one caller that does not
-	// re-validate, the load-time migration (engine.MigrateNumberPrefixes),
-	// derives over the taken set of every competition it could READ,
-	// including its own in-pass assignments; a competition it had to skip
-	// keeps a prefix that set does not know, so a collision with it is
-	// possible and surfaces as that competition's next settings save being
-	// refused, which names the conflict.
+	// inventing a value beyond MaxNumberPrefixLen -- this function's
+	// contract is a best-effort SUGGESTION, not a uniqueness guarantee, and
+	// every request-driven caller validates that (via checkUniqueCompFields,
+	// against the SAME taken set) before trusting it:
+	//   - create, settings-save and the start/generate-draw pre-flight call
+	//     this function ONLY to fill in a blank field, validate the
+	//     resulting (derived-or-caller-supplied) prefix ONCE, and reject a
+	//     collision outright with an error naming the actual conflict --
+	//     there is no retry, because an explicit collision on one of these
+	//     paths is the operator's own request to fix, not legacy data to
+	//     heal.
+	//   - import (mobileapp.importCompetition) additionally RE-DERIVES on a
+	//     collision: a restored archive's collision is routinely legacy data
+	//     that predates the ambiguity/uniqueness rule (this bead's governing
+	//     rule is ASSIGN, never reject, on legacy data), so the row is
+	//     healed by calling this function a second time and RE-VALIDATING
+	//     that second candidate before trusting it -- catching the
+	//     exhaustion case above, where the last-tried candidate this
+	//     function returns can itself already be taken. Only when that
+	//     second validation also fails (exhaustion reached twice) does
+	//     import refuse the row, naming the conflict exactly like the
+	//     non-retrying callers above.
+	// The one caller that does not re-validate at all, the load-time
+	// migration (engine.MigrateNumberPrefixes), derives over the taken set
+	// of every competition it could READ, including its own in-pass
+	// assignments; a competition it had to skip keeps a prefix that set does
+	// not know, so a collision with it is possible and surfaces as that
+	// competition's next settings save being refused, which names the
+	// conflict.
 	return lastCandidate
 }
 

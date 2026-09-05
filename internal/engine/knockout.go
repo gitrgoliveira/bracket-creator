@@ -124,7 +124,10 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 		if serr != nil {
 			return nil, serr
 		}
-		overrides, _ := e.store.LoadOverrides(compID)
+		overrides, oerr := e.store.LoadOverrides(compID)
+		if oerr != nil {
+			return nil, oerr
+		}
 		var poolRanks map[string]map[string]int
 		if overrides != nil {
 			poolRanks = overrides.PoolRanks

@@ -948,7 +948,11 @@ func TestValidateHanteiMarkPlacement_IDsOverrideNames(t *testing.T) {
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Contains(t, verr.Message, "hantei mark belongs in the winner's ippon list")
+		// bc-idfx: validateWinnerIDMatchesSide now catches this shape FIRST,
+		// with a more direct diagnosis than the downstream hantei-placement
+		// check used to give (the winnerId is itself invalid data, not just
+		// a misplaced mark) -- same rejected request, sharper message.
+		assert.Contains(t, verr.Message, "must equal sideAId or sideBId")
 	})
 }
 

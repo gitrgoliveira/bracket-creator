@@ -482,26 +482,53 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 //
 // An id is preferred because two members can share a display name across dojos
 // (competitor identity is name+dojo, never name alone). A non-empty id that is
-// not one of this group's members -- foreign or stale data -- falls through to
-// the name lookup rather than resolving to nothing. When the bout carries no id
-// for that side (a row written before TB/DH generation stamped them), the name
-// lookup is all there is, and a genuine same-name collision there degrades to
-// the single entry byName holds, which is exactly the behaviour that predates
-// ids. A correctly stamped bout is never misattributed just because some other
-// row in the same pool lacks an id.
+// NOT one of this group's members -- foreign or stale data, e.g. a TB/DH row
+// generated for a tie that a later score correction has since reshaped --
+// resolves to ("", false) outright: it must NEVER fall through to the bare-name
+// index, because that would silently attribute the row to whichever OTHER
+// member of THIS group happens to share the foreign id's display name (operator
+// ruling: no fallback may invent an attribution). Repro: a pool has X@A, X@B and
+// Y; a TB bout is stamped (X@B, Y) and played; a score correction later moves
+// the CONSEQUENTIAL tie to (X@A, Y). Falling through on X@B's foreign id would
+// resolve it to X@A (same bare name "X"), crediting X@A with a bout X@A never
+// fought and reordering the group on it. Only an EMPTY id takes the name path:
+// when the bout carries no id for that side at all (a row written before
+// TB/DH generation stamped them), the name lookup is all there is, and a
+// genuine same-name collision there degrades to the single entry byName holds,
+// which is exactly the behaviour that predates ids. A correctly stamped bout is
+// never misattributed just because some other row in the same pool lacks an id.
+//
+// The strict foreign-id rejection above is gated on the GROUP carrying at
+// least one id, not on the bout row alone (bc-idfx nit 20). A fully legacy
+// group -- every member's own Player.ID is empty, e.g. a pool never
+// regenerated since before ids were stamped -- has no ids anywhere to compare
+// a bout's id against, so a non-empty id on the bout row is not evidence of
+// "foreign" the way it is for an id-aware group; ids simply are not
+// authoritative here at all, and rejecting on one would refuse a bout that
+// the bare-name index could resolve just fine. Only when the group itself
+// has at least one id-carrying member does an id become the trusted
+// disambiguator, and only then does a foreign id on the bout row correctly
+// mean "this cannot be resolved, do not guess" rather than "there is nothing
+// to check this against, fall back to name".
 func newGroupKeyResolver(members []state.PlayerStanding) func(id, name string) (string, bool) {
 	groupKeys := make(map[string]bool, len(members))
 	byName := make(map[string]string, len(members))
+	groupHasIDs := false
 	for _, s := range members {
 		ck := standingsPlayerKey(s.Player.ID, s.Player.Name)
 		groupKeys[ck] = true
 		byName[standingsPlayerKey("", s.Player.Name)] = ck
+		if s.Player.ID != "" {
+			groupHasIDs = true
+		}
 	}
 	return func(id, name string) (string, bool) {
-		if id != "" {
-			if ck := standingsPlayerKey(id, ""); groupKeys[ck] {
+		if id != "" && groupHasIDs {
+			ck := standingsPlayerKey(id, "")
+			if groupKeys[ck] {
 				return ck, true
 			}
+			return "", false
 		}
 		ck, ok := byName[standingsPlayerKey("", name)]
 		return ck, ok

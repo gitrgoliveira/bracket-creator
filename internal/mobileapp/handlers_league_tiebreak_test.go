@@ -115,13 +115,19 @@ type stubLeagueTiebreakEngine struct {
 	generateErr   error
 	autoOutcome   engine.AutoCompleteOutcome
 	autoErr       error
+
+	// receivedTeamIDs captures the tiedTeamIDs argument GenerateLeagueTiebreakMatches
+	// was last called with, so a test can assert the handler forwarded
+	// req.TeamIDs through (bc-idfx) rather than silently dropping it.
+	receivedTeamIDs []string
 }
 
 func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidates(string) ([]engine.TiedGroup, error) {
 	return e.candidates, e.candidatesErr
 }
 
-func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string, tiedTeamIDs []string) ([]state.MatchResult, error) {
+	e.receivedTeamIDs = tiedTeamIDs
 	return e.generated, e.generateErr
 }
 
@@ -191,6 +197,49 @@ func TestLeagueTiebreakCandidates_Happy(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, cands, 1)
 	assert.Equal(t, false, body["finalized"])
+}
+
+// TestLeagueTiebreakCandidates_TeamsCarryIdentity is the bc-idfx finding 11
+// regression: the "teams" array (id/name/dojo per team, mirroring what
+// GET /chusen-candidates already emits) must be present alongside the
+// legacy "teamNames" array, so a namesake-holding group's members can be
+// told apart on the wire.
+func TestLeagueTiebreakCandidates_TeamsCarryIdentity(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-team-x-a", Name: "Team X", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-team-x-b", Name: "Team X", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Candidates []struct {
+			TeamNames []string `json:"teamNames"`
+			Teams     []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Dojo string `json:"dojo"`
+			} `json:"teams"`
+		} `json:"candidates"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	require.Len(t, body.Candidates, 1)
+	require.Len(t, body.Candidates[0].Teams, 2, "teams must carry both namesake-holding entries")
+	gotIDs := []string{body.Candidates[0].Teams[0].ID, body.Candidates[0].Teams[1].ID}
+	assert.ElementsMatch(t, []string{"id-team-x-a", "id-team-x-b"}, gotIDs)
+	gotDojos := []string{body.Candidates[0].Teams[0].Dojo, body.Candidates[0].Teams[1].Dojo}
+	assert.ElementsMatch(t, []string{"Dojo A", "Dojo B"}, gotDojos, "dojo must disambiguate what teamNames alone cannot")
 }
 
 func TestLeagueTiebreakCandidates_Empty(t *testing.T) {
@@ -285,6 +334,87 @@ func TestLeagueTiebreakPost_Happy(t *testing.T) {
 	assert.Len(t, matches, 1)
 	// Two SSE events should have been broadcast.
 	assert.GreaterOrEqual(t, len(hub.events), 2)
+}
+
+// TestLeagueTiebreakPost_TeamIDsSelectsNamesakeGroupAndForwards is the
+// bc-idfx finding 11 regression: a request naming a namesake-holding group
+// by teamIds (not resolvable by teamNames alone, since both teams share the
+// name "Team X") must match the candidate group by id and forward teamIds
+// through to GenerateLeagueTiebreakMatches unchanged.
+func TestLeagueTiebreakPost_TeamIDsSelectsNamesakeGroupAndForwards(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-team-x-a", Name: "Team X", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-team-x-b", Name: "Team X", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	generated := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team X", SideAID: "id-team-x-a", SideB: "Team X", SideBID: "id-team-x-b"},
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates, generated: generated}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools), matches: nil}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	assert.ElementsMatch(t, []string{"id-team-x-a", "id-team-x-b"}, eng.receivedTeamIDs,
+		"the handler must forward teamIds to GenerateLeagueTiebreakMatches, not silently drop it")
+}
+
+// TestLeagueTiebreakPost_MismatchedTeamIDsLength rejects a request whose
+// teamIds does not line up 1:1 with teamNames.
+func TestLeagueTiebreakPost_MismatchedTeamIDsLength(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLeagueTiebreakPost_BlankTeamIDsEntryRejected pins the second-Opus-pass
+// item 4 fix: dedupedStringSet has no opinion on what the strings ARE, so a
+// single "" entry in teamIds deduped cleanly and was passed straight through
+// to the group-match check as if it were a real participant id. Every
+// id-less DH row (SideAID/SideBID both "") would then match that "" entry on
+// BOTH sides, group membership for a request that supplied no real id at
+// all. Rejected outright before it ever reaches dedupedStringSet.
+func TestLeagueTiebreakPost_BlankTeamIDsEntryRejected(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"", "id-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "teamIds entries must be non-empty")
 }
 
 func TestLeagueTiebreakPost_InvalidSelection(t *testing.T) {
@@ -485,6 +615,116 @@ func TestLeagueTiebreakDelete_TooFewTeams(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLeagueTiebreakDelete_TeamIDsRemovesNamesakeGroup pins the bc-idfx
+// review's item 9 fix: a namesake tie-breaker group (two "Team X" from
+// different dojos) can only ever be CREATED via teamIds -- POST's own
+// teamNames-only path collapses the duplicate name and is rejected -- and
+// generatePoolDaihyosenMatches stamps SideAID/SideBID on the DH row it
+// writes for exactly that reason. Before the fix, DELETE had no teamIds
+// counterpart at all: a name-only delete request also collapses the
+// duplicate name in dedupedStringSet and is rejected before ever reaching the
+// group match, so such a group could be created but never removed.
+func TestLeagueTiebreakDelete_TeamIDsRemovesNamesakeGroup(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:    "Pool A-DH-0",
+			SideA: "Team X", SideAID: "id-team-x-a",
+			SideB: "Team X", SideBID: "id-team-x-b",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-b"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, float64(1), resp["deleted"])
+	assert.Empty(t, store.matches, "the namesake group's DH row must actually be removed")
+}
+
+// TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs is the
+// other half of item 9: deleting a namesake group by teamNames alone (no
+// teamIds) must still be rejected -- names can't disambiguate the pair -- but
+// the error message must point the operator at teamIds rather than just
+// refusing outright, since GET .../league-tiebreak/candidates already
+// returns each team's id specifically to unblock this case.
+func TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:    "Pool A-DH-0",
+			SideA: "Team X", SideAID: "id-team-x-a",
+			SideB: "Team X", SideBID: "id-team-x-b",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team X", "Team X"}})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "duplicate")
+	assert.Contains(t, w.Body.String(), "teamIds", "the message must point the operator at the disambiguating field")
+	assert.Len(t, store.matches, 1, "the rejected request must not remove anything")
+}
+
+// TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected pins the second-Opus-pass
+// item 4 fix. Before it, a blank teamIds entry deduped to "" and matched
+// BOTH sides of every id-less DH row -- reproduced here with TWO id-less
+// DH rows from entirely UNRELATED groups (Team C/Team D and Team E/Team F);
+// a request naming neither group, but carrying one blank teamIds entry,
+// used to delete both of them (200 {"deleted":2}) instead of being rejected.
+func TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected(t *testing.T) {
+	existing := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team C", SideB: "Team D", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-DH-1", SideA: "Team E", SideB: "Team F", Status: state.MatchStatusScheduled},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	// Neither "Alice" nor "Bob" names any real group; the blank teamIds
+	// entry is what the pre-fix code silently matched every id-less row on.
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Alice", "Bob"},
+		TeamIDs:   []string{"", "id-bob"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "teamIds entries must be non-empty")
+	assert.Len(t, store.matches, 2, "neither unrelated group's bout may be removed")
 }
 
 // ---------------------------------------------------------------------------

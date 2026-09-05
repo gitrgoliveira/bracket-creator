@@ -3295,7 +3295,11 @@ paths:
         Generates the round-robin daihyosen (representative-bout) matches for one
         consequential tied group. Admin-gated. `teamNames` must match exactly one
         group from `GET .../league-tiebreak/candidates` (order-independent, no
-        duplicates).
+        duplicates). Optional `teamIds` selects the group by participant id
+        instead of name, needed to disambiguate a tied group holding two
+        same-named teams (a namesake collision reachable through the
+        documented `checkNewTeamNameCollisions` restore hole); when present it
+        takes priority over `teamNames` for matching the candidate group.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3329,8 +3333,13 @@ paths:
       summary: Remove unscored league tie-breaker matches for a group
       description: >
         Removes the unscored daihyosen matches for one tied group. Admin-gated.
-        `teamNames` must cover a complete tie-breaker group (no duplicates, no
-        partial selection).
+        `teamNames` must cover a complete tie-breaker group (no duplicates
+        unless `teamIds` is also present, no partial selection). Optional
+        `teamIds` selects and matches the group's daihyosen rows by
+        participant id instead of name, needed to remove a tied group holding
+        two same-named teams (the same namesake collision `POST` disambiguates
+        with `teamIds`) -- such a group can only ever be created via
+        `teamIds`, so this must accept it too.
       security:
         - TournamentPassword: []
       requestBody:
@@ -5233,9 +5242,22 @@ components:
       properties:
         teamNames:
           type: array
-          description: Names of the tied teams, in standings order.
+          description: >
+            Names of the tied teams, in standings order. Kept for backward
+            compatibility; a namesake collision (two teams sharing a display
+            name across dojos) cannot be told apart by this array alone,
+            use `teams`.
           items:
             type: string
+        teams:
+          type: array
+          description: >
+            The same tied teams as `teamNames`, with identity (id, name, dojo)
+            per team, mirroring the `teams` array `GET .../chusen-candidates`
+            already returns. Lets an operator select a namesake-holding group
+            unambiguously via POST `.../league-tiebreak`'s `teamIds`.
+          items:
+            $ref: '#/components/schemas/LeagueTiebreakTeamRef'
         minPosition:
           type: integer
           description: 1-based best finishing rank among the tied teams.
@@ -5243,14 +5265,40 @@ components:
           type: integer
           description: 1-based worst finishing rank among the tied teams.
 
+    LeagueTiebreakTeamRef:
+      type: object
+      description: Identity of one team in a tied group.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        dojo:
+          type: string
+
     LeagueTiebreakRequest:
       type: object
       description: >
-        Selects exactly one tied group (by team name set) for the league
-        tie-breaker POST/DELETE endpoints. Order-independent; duplicates rejected.
+        Selects exactly one tied group for the league tie-breaker POST/DELETE
+        endpoints. `teamNames` is always required (order-independent,
+        duplicates rejected unless `teamIds` is also present -- a namesake
+        pair legitimately repeats a name). `teamIds` is optional and, when
+        present, must be the same length as `teamNames`; it is honoured by
+        both `POST .../league-tiebreak` (matching the candidate group and
+        resolving it) and `DELETE .../league-tiebreak` (matching the group's
+        daihyosen rows by `SideAID`/`SideBID` instead of by name), letting a
+        namesake-holding group be selected, created, and removed where
+        `teamNames` alone is ambiguous. A namesake group can only be created
+        via `teamIds` in the first place, so `DELETE` must accept it too or
+        such a group could never be removed again.
       required: [teamNames]
       properties:
         teamNames:
+          type: array
+          minItems: 2
+          items:
+            type: string
+        teamIds:
           type: array
           minItems: 2
           items:

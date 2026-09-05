@@ -530,14 +530,18 @@ func TestLookupPlayerID_EmptyName(t *testing.T) {
 	assert.Equal(t, "", lookupPlayerID(players, ""), "empty name should return empty ID")
 }
 
-// TestCheckConcurrentIneligibility_EmptyLoser covers the loserName==""
-// fast path in checkConcurrentIneligibility.
+// TestCheckConcurrentIneligibility_EmptyLoser covers the fast path in
+// checkConcurrentIneligibility when BOTH loserID and loserName are empty
+// (the guard is `loserID == "" && loserName == ""`, not loserName alone --
+// a non-empty loserID with an empty loserName does not take this path at
+// all, see TestCheckConcurrentIneligibility_PlayerNotInParticipants below
+// for the loserID=="" / loserName-lookup-fails path instead).
 func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "conc-empty-loser"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "")
-	assert.NoError(t, err, "empty loserName should return nil")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "")
+	assert.NoError(t, err, "both loserID and loserName empty should return nil")
 }
 
 // TestCheckConcurrentIneligibility_PlayerNotInParticipants covers the
@@ -547,31 +551,8 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "conc-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants saved → lookupPlayerID returns ""
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "Ghost Player")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "Ghost Player")
 	assert.NoError(t, err, "unknown player should return nil without error")
-}
-
-// TestRestoreCompetitorEligibility_EmptyPriorLoser covers the priorLoser==""
-// fast path in restoreCompetitorEligibility.
-func TestRestoreCompetitorEligibility_EmptyPriorLoser(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "restore-empty"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "", "M1")
-	assert.NoError(t, err)
-	assert.Nil(t, status)
-}
-
-// TestRestoreCompetitorEligibility_PlayerNotInParticipants covers the
-// playerID=="" path when the prior loser is not a registered participant.
-func TestRestoreCompetitorEligibility_PlayerNotInParticipants(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "restore-unknown"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// No participants → lookupPlayerID returns ""
-	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "Ghost Player", "M1")
-	assert.NoError(t, err)
-	assert.Nil(t, status)
 }
 
 // TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides
@@ -635,7 +616,7 @@ func TestCheckConcurrentIneligibility_AlreadyIneligible(t *testing.T) {
 		MatchID:  "M-prev",
 	}))
 
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "Alice")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "", "Alice")
 	require.Error(t, err)
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
@@ -662,7 +643,7 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 		MatchID:  "M-current", // same as what we're re-scoring
 	}))
 
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "Bob")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "", "Bob")
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 
@@ -1369,12 +1350,6 @@ func TestCheckCrossCompCourtBusy(t *testing.T) {
 func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
 	const missing = "no-such-competition"
-
-	t.Run("restoreCompetitorEligibility no-ops on missing config", func(t *testing.T) {
-		status, err := eng.restoreCompetitorEligibility(eng.store, missing, "Bob", "m1")
-		assert.NoError(t, err)
-		assert.Nil(t, status)
-	})
 
 	t.Run("recordIneligibilityFromDecision no-ops on missing config", func(t *testing.T) {
 		result := &state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice", Decision: string(domain.DecisionKikenVoluntary)}

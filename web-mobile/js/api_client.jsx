@@ -3174,7 +3174,9 @@ const API = {
     // Phase 3b (mp-8rc9): league tie-breaker operator API.
     //
     // leagueTiebreakCandidates: GET /competitions/:id/league-tiebreak/candidates
-    // Returns { candidates: [{teamNames, minPosition, maxPosition}], finalized: bool }.
+    // Returns { candidates: [{teamNames, teams, minPosition, maxPosition}], finalized: bool }
+    // where teams is [{id, name, dojo}] (id "" for a legacy competitor): groupTeamIds
+    // in admin_pools.jsx derives the teamIds a namesake group needs from it.
     async leagueTiebreakCandidates(compID) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/candidates`);
         if (!res.ok) {
@@ -3204,14 +3206,25 @@ const API = {
     },
 
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak
-    // Body: { teamNames: string[] }: the tied group to break the tie.
+    // Body: { teamNames: string[], teamIds?: string[] }: the tied group to
+    // break the tie. teamIds (bc-idfx, second-Opus-pass nit 7) is optional
+    // and, when the caller passes a non-empty array, is sent alongside
+    // teamNames so a namesake-holding group (two tied teams sharing a
+    // display name across dojos) can be selected at all -- teamNames alone
+    // is ambiguous for that shape and the server rejects the duplicate
+    // outright. Only include it when the caller has a REAL id for every
+    // team: the server also rejects a blank entry (second-Opus-pass item 4),
+    // so omit teamIds entirely rather than pad it with empties for a
+    // legacy id-less group.
     // Returns { matches: MatchResult[] } on 201.
     // Throws on 400 (invalid group), 409 (matches already exist).
-    async leagueTiebreakGenerate(compID, teamNames, password) {
+    async leagueTiebreakGenerate(compID, teamNames, password, teamIds) {
+        const body = { teamNames };
+        if (teamIds && teamIds.length > 0) body.teamIds = teamIds;
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ teamNames }),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -3223,14 +3236,20 @@ const API = {
     },
 
     // leagueTiebreakRemove: DELETE /competitions/:id/league-tiebreak
-    // Body: { teamNames: string[] }: the tied group whose unscored matches to remove.
+    // Body: { teamNames: string[], teamIds?: string[] }: the tied group
+    // whose unscored matches to remove. teamIds is optional, same contract
+    // as leagueTiebreakGenerate above -- a namesake-holding group can only
+    // ever have been CREATED via teamIds, so it must be removable the same
+    // way or it could never be deleted again.
     // Returns { deleted: number } on 200.
     // Throws on 404 (no matches found), 409 (any match already scored).
-    async leagueTiebreakRemove(compID, teamNames, password) {
+    async leagueTiebreakRemove(compID, teamNames, password, teamIds) {
+        const body = { teamNames };
+        if (teamIds && teamIds.length > 0) body.teamIds = teamIds;
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ teamNames }),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

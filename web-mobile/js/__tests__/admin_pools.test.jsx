@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey, groupTeamIds } from '../admin_pools.jsx';
 // Imported so the tests below can assert chusenMemberKey's behaviour
 // against the REAL window.checkinPid, not to satisfy a chusenMemberKey
 // dependency: chusenMemberKey is deliberately self-contained (bc-appx item
@@ -422,5 +422,41 @@ describe('chusenMemberKey', () => {
     expect(distinct[chusenMemberKey(after[0])]).toBe('beta-value');
     expect(distinct[chusenMemberKey(after[1])]).toBe('alpha-value');
     expect(distinct[chusenMemberKey(after[2])]).toBe('gamma-value');
+  });
+});
+
+// groupTeamIds pins the second-Opus-pass nit 7 fix: the league-tiebreak
+// candidates payload's `teams` array must convert to a teamIds array to send
+// alongside teamNames -- present when every team carries a real id,
+// omitted entirely for a legacy id-less group (the server rejects a blank
+// entry outright, second-Opus-pass item 4, so padding with "" is not an
+// option).
+describe('groupTeamIds', () => {
+  const names = ['Team X', 'Team X'];
+
+  it('returns the ids array when every team carries a real id', () => {
+    const teams = [
+      { id: 'id-team-x-a', name: 'Team X', dojo: 'Dojo A' },
+      { id: 'id-team-x-b', name: 'Team X', dojo: 'Dojo B' },
+    ];
+    expect(groupTeamIds(teams, names)).toEqual(['id-team-x-a', 'id-team-x-b']);
+  });
+
+  it('returns undefined when teams is absent (legacy id-less group / older server)', () => {
+    expect(groupTeamIds(undefined, names)).toBeUndefined();
+    expect(groupTeamIds(null, names)).toBeUndefined();
+  });
+
+  it('returns undefined when any team is missing its id', () => {
+    const teams = [
+      { id: 'id-team-x-a', name: 'Team X', dojo: 'Dojo A' },
+      { id: '', name: 'Team X', dojo: 'Dojo B' },
+    ];
+    expect(groupTeamIds(teams, names)).toBeUndefined();
+  });
+
+  it('returns undefined when teams and names have mismatched lengths', () => {
+    const teams = [{ id: 'id-a', name: 'Team X', dojo: 'Dojo A' }];
+    expect(groupTeamIds(teams, names)).toBeUndefined();
   });
 });

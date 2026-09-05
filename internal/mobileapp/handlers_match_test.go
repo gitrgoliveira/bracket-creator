@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -285,6 +286,161 @@ func TestBulkScoreHandler_HanteiValidation(t *testing.T) {
 		assert.Equal(t, "PoolA-2", resp.Errors[0].MatchID)
 		assert.Contains(t, resp.Errors[0].Error, "decisionBy must be empty on a hantei result")
 	})
+}
+
+// TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide is the bead's
+// repro (bc-idfx finding 10): a bulk-score entry whose winnerId names
+// NEITHER sideAId nor sideBId is invalid data. Before the fix, nothing at
+// the HTTP boundary or in the engine's backfillMatchIdentity checked this,
+// so the row was persisted verbatim as a "completed" match with a winner
+// that counts for nobody in standings (resolveWinnerSide's id branch also
+// silently fails open in that shape). It must now land in `errors`, never
+// in `succeeded`, and the stored match must be left untouched.
+func TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+	store.SaveCompetition(&state.Competition{ID: "wid"})
+	require.NoError(t, store.SavePoolMatches("wid", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideAID: idA, SideB: "P2", SideBID: idB, Status: state.MatchStatusScheduled},
+	}))
+
+	body, _ := json.Marshal([]state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "P1", SideAID: idA, SideB: "P2", SideBID: idB,
+			Winner: "P1", WinnerID: "not-a-side-id",
+			IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/wid/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "bulk-score's partial-success shape returns 200 with per-item errors")
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded, "a winnerId matching neither side must not be counted as succeeded")
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+	// The exact phrase from validateWinnerIDMatchesSide (validation.go), not
+	// just "winnerId": backfillMatchIdentity (internal/engine/scoring.go)
+	// rejects the identical shape one layer downstream with a DIFFERENTLY
+	// worded message ("winnerId %q does not match sideAId..."), which also
+	// contains "winnerId" -- a bare substring check here would stay green
+	// even if validateBulkScoreLengths's own call to
+	// validateWinnerIDMatchesSide were removed, so it would not actually pin
+	// THIS boundary check.
+	assert.Contains(t, resp.Errors[0].Error, "must equal sideAId or sideBId")
+
+	stored, err := store.LoadPoolMatches("wid")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Empty(t, stored[0].Winner, "the rejected write must not have landed")
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the match must remain unscored")
+}
+
+// TestBulkScoreHandler_KikenSameNameNamesakesNoWinnerIDRejectedNotMisattributed
+// pins the bc-idfx review's item 7 fix: recordIneligibilityFromDecision must
+// not fall back to a name-only roster scan when the match row's own side ids
+// are present but resolveWinnerSide could not attribute them.
+//
+// bulk-score writes a decision straight through RecordMatchResultWithIneligibilityTx
+// (validateBulkScoreLengths runs no validateDecision), so a kiken entry can
+// reach here with SideAID/SideBID stamped but no Winner/WinnerID at all -- a
+// shape RecordDecisionTx's own decisionBy-based resolution never produces,
+// but a bulk-imported/corrected batch legally can. The two competitors here
+// share the display name "Tanaka" from different dojos; "Tanaka"@DojoB is
+// registered FIRST in the roster. Before the fix, loserPlayerID returned a
+// bare "" for this row (side ids present but inconclusive), which the caller
+// could not distinguish from "no ids at all" and so fell back to
+// lookupPlayerID's linear name scan -- silently marking the FIRST-registered
+// namesake (DojoB) ineligible even though her own match never happened.
+//
+// recordIneligibilityFromDecision's non-nil error is a SIDE-EFFECT failure,
+// not a primary-write failure (RecordDecisionTx/scoring.go's callers log and
+// continue for every error here except AlreadyIneligibleError, which is a
+// pre-existing, deliberate design this test does not change): the write
+// itself still succeeds, but the log line proves the ambiguity branch fired
+// rather than some other early return, and the empty competitor-status map
+// proves nobody was misattributed.
+func TestBulkScoreHandler_KikenSameNameNamesakesNoWinnerIDRejectedNotMisattributed(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+
+	const (
+		idTanakaDojoB = "33333333-3333-4333-8333-333333333333" // registered first
+		idTanakaDojoA = "44444444-4444-4444-8444-444444444444"
+	)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "knm"}))
+	require.NoError(t, store.SaveParticipants("knm", []domain.Player{
+		{ID: idTanakaDojoB, Name: "Tanaka", Dojo: "DojoB"},
+		{ID: idTanakaDojoA, Name: "Tanaka", Dojo: "DojoA"},
+	}))
+	require.NoError(t, store.SavePoolMatches("knm", []state.MatchResult{
+		{
+			ID:    "PoolA-1",
+			SideA: "Tanaka", SideAID: idTanakaDojoA,
+			SideB: "Tanaka", SideBID: idTanakaDojoB,
+			Status: state.MatchStatusScheduled,
+		},
+	}))
+
+	// Kiken decision, no Winner and no WinnerID at all -- resolveWinnerSide's
+	// name branch cannot pick a side (Winner == "" matches neither SideA nor
+	// SideB) and its id branch is skipped (WinnerID == ""). IpponsA present /
+	// IpponsB empty gives loserSideName a resolvable NAME ("Tanaka", via the
+	// ippon-count fallback) so the write reaches loserPlayerID at all; it is
+	// loserPlayerID's OWN id resolution that stays ambiguous.
+	body, _ := json.Marshal([]state.MatchResult{
+		{
+			ID:    "PoolA-1",
+			SideA: "Tanaka", SideAID: idTanakaDojoA,
+			SideB: "Tanaka", SideBID: idTanakaDojoB,
+			Decision: string(domain.DecisionKikenVoluntary),
+			IpponsA:  []string{"M"},
+			Status:   state.MatchStatusCompleted,
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/knm/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "bulk-score's partial-success shape returns 200 with per-item errors")
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 1, resp.Succeeded, "errors: %+v; the decision write itself must still land -- only the eligibility side effect is skipped", resp.Errors)
+	assert.Empty(t, resp.Errors)
+
+	statuses, err := store.LoadCompetitorStatus("knm")
+	require.NoError(t, err)
+	assert.Empty(t, statuses, "neither namesake may be marked ineligible from an ambiguous row -- guessing the wrong one is worse than recording nothing")
+
+	assert.Contains(t, logBuf.String(), "ambiguous", "the swallowed error must still be logged for operator visibility")
 }
 
 // TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict pins the bc-qual

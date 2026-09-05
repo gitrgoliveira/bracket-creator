@@ -253,7 +253,10 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		if standErr != nil {
 			return AutoCompleteNoChange, standErr
 		}
-		overridesObj, _ := e.store.LoadOverrides(compID)
+		overridesObj, oerr := e.store.LoadOverrides(compID)
+		if oerr != nil {
+			return AutoCompleteNoChange, oerr
+		}
 		var poolRanks map[string]map[string]int
 		if overridesObj != nil {
 			poolRanks = overridesObj.PoolRanks
@@ -416,8 +419,10 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 // matches are injected only for advancement-affecting groups, so a below-cut
 // group has no DH bouts and groupNeedsChusen returns false. When it does return
 // true the operator resolves the group via the chusen (drawing lots) panel,
-// which writes poolRanks (pool name -> team name -> rank); a group whose every
-// member has an override is resolved and no longer blocks completion.
+// which writes poolRanks (pool name -> helper.CompetitorKey(id, name, dojo) ->
+// rank; lookupPoolRankOverride also honours a legacy bare-name key for
+// pre-identity overrides.json data, see its own doc comment); a group whose
+// every member has an override is resolved and no longer blocks completion.
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {

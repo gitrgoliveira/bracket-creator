@@ -93,8 +93,8 @@ import (
 // (bc-dojo-least-conflicted-pool) restored 12 previously collided pools to
 // improveDojoMeetings' own exchange pass, which is legitimate extra work,
 // not a regression -- but a CPU profile of that pass afterwards showed
-// improveDojoMeetings at 88% cumulative, earliestDojoMeeting at 77%, and
-// mapaccess2_faststr (a map[string]* lookup) at 51%: the per-pool `counts`
+// improveDojoMeetings at 99.34% cumulative, earliestDojoMeeting at 86.86%,
+// and mapaccess2_faststr (a map[string]* lookup) at 51%: the per-pool `counts`
 // this pass and the descent's dojoNode.dojoCount both used were
 // map[string]int keyed by the normalized dojo string, looked up on every
 // candidate evaluated. dojoIDCache (tournament.go) interns each distinct
@@ -816,9 +816,11 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 	// then its own normalized->id lookup), which a follow-up profile still
 	// showed as a measurable cost even after the per-pool tallies stopped
 	// being map-keyed. poolDojoIDs removes it: built once here alongside
-	// counts, and kept in lockstep with `pools` at the SAME two sites that
-	// already keep `counts` in lockstep (the speculative swap and its
-	// revert), a candidate's ak/bk become a plain slice index instead of a
+	// counts, and moved together with it by the ONE `exchange` closure
+	// below (bc-pnum review: this used to be a hand-mirrored update at each
+	// of two call sites, which is exactly the shape that let a half-update
+	// slip through the whole test suite green -- see exchange's own doc
+	// comment), a candidate's ak/bk become a plain slice index instead of a
 	// cache lookup.
 	counts := make([][]int, numPools)
 	poolDojoIDs := make([][]int, numPools)
@@ -834,6 +836,35 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 	countIn := dojoCounter(func(poolIdx int, id int) int {
 		return counts[poolIdx][id]
 	})
+
+	// exchange swaps the players CURRENTLY at (i, ai) and (j, bi), moving
+	// counts and poolDojoIDs with them (bc-pnum review, G1): pools, counts
+	// and poolDojoIDs must always move together, and a hand-written pair of
+	// call sites -- one for "do the swap", a second, separately typed-out
+	// one for "undo it" -- is exactly the shape that lets a half-update
+	// (updating only one of the three structures, or only one side of a
+	// pair) slip through unnoticed: the whole helper suite stayed green
+	// under a mutation that dropped one poolDojoIDs write, because nothing
+	// short of an end-of-function invariant check ever re-derives
+	// poolDojoIDs from `pools` to catch the drift.
+	//
+	// Self-inverse BY CONSTRUCTION, not by a hand-mirrored copy of the
+	// deltas: it reads whatever ids currently occupy the two slots (x, y)
+	// FIRST, then swaps, so calling it a second time on the SAME (i, ai, j,
+	// bi) reads back the post-swap ids and swaps again, restoring every one
+	// of the three structures to exactly its pre-call state. The revert
+	// below is therefore the identical call, not a second, independently
+	// maintained mirror of it -- there is only one place this operation is
+	// written down.
+	exchange := func(i, ai, j, bi int) {
+		x, y := poolDojoIDs[i][ai], poolDojoIDs[j][bi]
+		pools[i].Players[ai], pools[j].Players[bi] = pools[j].Players[bi], pools[i].Players[ai]
+		poolDojoIDs[i][ai], poolDojoIDs[j][bi] = y, x
+		counts[i][x]--
+		counts[i][y]++
+		counts[j][y]--
+		counts[j][x]++
+	}
 
 	// excessOf is dojo id's contribution to tier (a) from a single pool
 	// holding `count` of it: how far over its per-pool optimum that one
@@ -884,7 +915,8 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 	// to call the throwaway-buffer earliestDojoMeeting wrapper instead,
 	// which is what its own doc comment used to describe as having no
 	// production caller -- wrong, since objective() itself is one, twice
-	// per pass), so objective() can share it too. Every call is
+	// per DISTINCT DOJO per pass (guarded by seen[id] below, not twice per
+	// pass flat), so objective() can share it too. Every call is
 	// synchronous and objective() always runs to completion BEFORE the
 	// exchange loop below starts for that pass (never interleaved with
 	// it), so no two scans are ever in flight on this buffer at once, and
@@ -908,8 +940,15 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 		excess = totalExcess()
 		seen := make([]bool, numDojos)
 		for i := range pools {
-			for _, pl := range pools[i].Players {
-				id := ids.of(pl.Dojo)
+			// id read from poolDojoIDs (bc-pnum review), not
+			// ids.of(pl.Dojo): poolDojoIDs is already in scope and kept in
+			// lockstep with pools' membership by every exchange (see
+			// exchange's own doc comment below), so this is what makes "no
+			// map probe anywhere in the exchange pass" a structural
+			// property of the code rather than something only true by
+			// measurement on the shapes profiled so far.
+			for k := range pools[i].Players {
+				id := poolDojoIDs[i][k]
 				if seen[id] {
 					continue
 				}
@@ -1103,20 +1142,16 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 						// candidates within one pass.
 						beforeB := cachedDojoMeeting(pools, pairRound, bk, winnerMeetKnown, winnerMeetCache, countIn, &scanBuf)
 						beforeAQB := cachedDojoMeeting(pools, allQualPairRound, bk, allQualMeetKnown, allQualMeetCache, countIn, &scanBuf)
-						// counts (and poolDojoIDs, bc-pnum) are updated
-						// speculatively IN LOCKSTEP with the player swap
-						// (bc-drwx review fix): every read below this point
-						// (afterA/afterB/afterAQA/afterAQB, via countIn, and
-						// any LATER candidate's ak/bk read via poolDojoIDs)
-						// must see the POST-swap tally/identity, and the
-						// revert a few lines down the other branch must undo
-						// all three together or the structures drift.
-						pools[i].Players[ai], pools[j].Players[bi] = b, a
-						counts[i][ak]--
-						counts[i][bk]++
-						counts[j][bk]--
-						counts[j][ak]++
-						poolDojoIDs[i][ai], poolDojoIDs[j][bi] = bk, ak
+						// exchange moves pools/counts/poolDojoIDs together,
+						// speculatively (bc-pnum review, G1 -- see that
+						// closure's own doc comment for why this is ONE
+						// call rather than a hand-mirrored update): every
+						// read below this point (afterA/afterB/afterAQA/
+						// afterAQB, via countIn, and any LATER candidate's
+						// ak/bk read via poolDojoIDs) must see the
+						// POST-swap tally/identity, and the revert a few
+						// lines down is the SAME call, self-inverse.
+						exchange(i, ai, j, bi)
 						afterA := earliestDojoMeetingScan(pools, pairRound, ak, countIn, &scanBuf)
 						afterB := earliestDojoMeetingScan(pools, pairRound, bk, countIn, &scanBuf)
 						afterAQA := earliestDojoMeetingScan(pools, allQualPairRound, ak, countIn, &scanBuf)
@@ -1170,14 +1205,12 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 							improved = true
 							break
 						}
-						// revert the player swap, its counts update, and its
-						// poolDojoIDs update (bc-pnum) together
-						pools[i].Players[ai], pools[j].Players[bi] = a, b
-						counts[i][ak]++
-						counts[i][bk]--
-						counts[j][bk]++
-						counts[j][ak]--
-						poolDojoIDs[i][ai], poolDojoIDs[j][bi] = ak, bk
+						// revert: exchange is self-inverse (see its own doc
+						// comment), so calling it again on this same
+						// (i, ai, j, bi) undoes pools, counts AND
+						// poolDojoIDs together -- not a second,
+						// hand-mirrored copy of the deltas above.
+						exchange(i, ai, j, bi)
 					}
 				}
 			}

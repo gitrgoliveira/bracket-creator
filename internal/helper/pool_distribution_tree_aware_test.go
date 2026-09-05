@@ -764,6 +764,31 @@ func TestImproveDojoMeetings_MatchesUncachedReference(t *testing.T) {
 		// the shapes above, which the dojo-tree descent alone already
 		// solves without any accepted exchange.
 		{"deep-oversubscription (forces repair passes)", drawGoldenDojoRoster(24, 12, drawGoldenDojoName), drawGoldenPoolSize, drawGoldenDojoPoolWinners, 2},
+		// bc-pnum review (G1), belt and braces: the case above only ever
+		// fires tier (a) ONCE (confirmed by instrumenting improveDojoMeetings
+		// during review: exactly one accepted swap), so it can pin the P2
+		// cache but cannot exercise a SECOND accepted exchange re-reading
+		// poolDojoIDs/counts after the first one already moved them. That
+		// gap mattered for the OLD hand-mirrored swap/revert (two
+		// independently typed-out call sites): a half-update there could
+		// stay latent through a REJECTED candidate (whose own revert
+		// happens to re-assert the correct values regardless) and only
+		// surface once an ACCEPTED swap's corruption was read back by a
+		// later pass. Doubling the same shape (48 entrants, still exactly
+		// half from one dojo, zero slack) reaches two accepted swaps
+		// (confirmed the same way) and is kept as this belt-and-braces
+		// case even though the exchange closure below turned out to make
+		// the corruption MUCH louder than that: a half-update inside the
+		// shared `exchange` closure corrupts poolDojoIDs on the very FIRST
+		// candidate it is ever called for, accepted or rejected (the
+		// closure's revert is a second call to itself, so it reads back
+		// the already-wrong value rather than independently re-asserting
+		// the right one) -- verified by mutation (dropping exchange's
+		// poolDojoIDs[j][bi] write): this case fails, ALONGSIDE the
+		// single-swap case above and several others, since the corruption
+		// is no longer confined to the accepted-swap-then-reused-later
+		// path the old architecture had.
+		{"deep-oversubscription, two accepted swaps", drawGoldenDojoRoster(48, 24, drawGoldenDojoName), drawGoldenPoolSize, drawGoldenDojoPoolWinners, 2},
 	}
 
 	runCase := func(t *testing.T, players []Player, poolSize, poolWinners, numCourts int) {

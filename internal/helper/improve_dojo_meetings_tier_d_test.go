@@ -62,13 +62,11 @@ func TestImproveDojoMeetings_AllQualifierNeverVetoesWinnerPathImprovement(t *tes
 	}
 
 	pools := buildPools()
-	keys := make(dojoKeyCache)
-	ids := newDojoIDCache(keys, 0)
+	var roster []Player
 	for i := range pools {
-		for _, pl := range pools[i].Players {
-			ids.of(pl.Dojo)
-		}
+		roster = append(roster, pools[i].Players...)
 	}
+	ids, _ := newDojoIDCacheFor(roster)
 	improveDojoMeetings(pools, qualifierSlots, ids)
 
 	assert.Equal(t, "DojoX", pools[2].Players[0].Dojo,

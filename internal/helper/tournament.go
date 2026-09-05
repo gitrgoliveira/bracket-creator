@@ -765,18 +765,38 @@ func dojoKey(dojo string) string {
 // map[string]* lookup on every candidate evaluated even once dojoKey itself
 // was memoized here -- mapaccess2_faststr profiled at 51% cumulative in
 // BuildPoolPhaseTreeAware_256_16x16_Interleaved. dojoIDCache wraps a
-// dojoKeyCache to interning each normalized key ONE level further, into a
+// dojoKeyCache by interning each normalized key ONE level further, into a
 // dense int, so those tallies can be a plain []int instead.
 //
-// MEASURED (bc-pnum, this machine, -benchtime 1x, median of 3):
-// BuildPoolPhaseTreeAware_256_16x16_Interleaved 3029ms before this change,
-// 452-736ms after (pool composition dependent -- the shape's own run-to-run
-// variance is real, not a regression; see this file's own comment on the
-// tree-aware distributor's file-level doc comment for the residual this
-// leaves and why); BuildPoolPhaseTreeAware_64_16x4_Interleaved 12.9ms
-// before, 3.7ms after. A CPU profile of the same benchmark post-fix (with
-// earliestDojoMeetingScan's buffer reuse, see that function's own doc
-// comment) shows mapaccess2_faststr down to ~1.3% cumulative, from 51%.
+// MEASURED (bc-pnum, this machine, -benchtime 1x, median of 3, reproducible
+// -- the benchmark rosters are deterministic and the drawn pools are
+// byte-identical run to run):
+//   - BuildPoolPhaseTreeAware_256_16x16_Interleaved: 3029ms on the
+//     committed-but-unoptimized code (still map[string]int-keyed) -> 639ms
+//     after this cache PLUS the poolDojoIDs follow-up below (see
+//     pool_distribution_tree_aware.go's own file-level doc comment, the
+//     "Follow-up (bc-pnum review)" paragraph, for what poolDojoIDs removed
+//     and why ~86% cumulative legitimately remains real arithmetic rather
+//     than a lookup cost). main (origin/main, no dojoKeyCache/dojoIDCache
+//     at all): ~482ms, so ~1.3x main -- inside the accepted 2x bound this
+//     bead's own residual (the bijective pool-label fix restoring 12
+//     previously collided pools to the exchange pass) was scoped to.
+//   - BuildPoolPhaseTreeAware_64_16x4_Interleaved: 12.9ms -> 3.4ms; main
+//     ~10.5ms (this shape is faster than main outright).
+//   - BuildPoolPhaseTreeAware_256_SingleDojo: NOT touched by either fix
+//     above (a single-dojo roster is already at the descent's own
+//     brute-force ceiling, so improveDojoMeetings' exchange pass -- this
+//     bead's whole target -- is a no-op on it; its cost is the descent
+//     itself). ~11.4ms on this branch vs ~5.1ms on main, ~2.3x -- a
+//     PRE-EXISTING residual on the parent branch, unrelated to and
+//     unimproved by this bead, recorded here for completeness rather than
+//     left unmeasured; under 15ms absolute, so no fix was scoped for it.
+//
+// A CPU profile of BuildPoolPhaseTreeAware_256_16x16_Interleaved with BOTH
+// fixes applied (poolDojoIDs included) shows mapaccess2_faststr, dojoIDCache.of
+// and dojoKeyCache.of ABSENT from a full (nodefraction=0) top-node listing --
+// not a small percentage, not sampled at all -- down from mapaccess2_faststr's
+// original 51% cumulative.
 type dojoKeyCache map[string]string
 
 // of returns dojo's normalized key, computing and caching it on first use.
@@ -833,6 +853,29 @@ func (c dojoIDCache) of(dojo string) int {
 // into must be allocated with.
 func (c dojoIDCache) numDojos() int {
 	return len(c.byKey)
+}
+
+// newDojoIDCacheFor builds a fresh dojoKeyCache + dojoIDCache pair and
+// interns every player's Dojo into both, up front, before returning --
+// exactly the "warm the cache, then size everything off it" 4-line block
+// (make(dojoKeyCache, ...), newDojoIDCache, a for-range interning loop) that
+// buildPoolPhaseTreeAwareCore and six of this package's own tests used to
+// each write out by hand. One body means the "intern the WHOLE roster
+// before anything sized by numDojos() is allocated" invariant (dojoIDCache's
+// own doc comment) is enforced here once, rather than by convention at
+// every call site.
+//
+// A caller whose roster is a []Pool rather than a flat []Player (this
+// package's own pools-shaped tests) flattens it into one slice first --
+// there is no separate pools-shaped variant, on purpose: a second entry
+// point would only reintroduce the duplication this one exists to remove.
+func newDojoIDCacheFor(players []Player) (dojoIDCache, dojoKeyCache) {
+	keys := make(dojoKeyCache, len(players))
+	ids := newDojoIDCache(keys, len(players))
+	for i := range players {
+		ids.of(players[i].Dojo)
+	}
+	return ids, keys
 }
 
 // countDojoInPool returns how many of pool's competitors are from dojo. Shared

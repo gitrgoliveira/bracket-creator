@@ -103,9 +103,27 @@ import (
 // dojoIDCache's own doc comment for the measured before/after numbers, and
 // earliestDojoMeetingScan's (below) for the buffer-reuse fix that removed
 // the remaining per-call allocation once the map lookup itself was gone.
+//
+// Follow-up (bc-pnum review): the id-conversion above still left every
+// candidate's ak/bk resolved via ids.of(a.Dojo)/ids.of(b.Dojo) -- two map
+// probes each (dojoKeyCache's raw->normalized lookup, then dojoIDCache's own
+// normalized->id lookup) -- so a re-profile after the first pass still
+// showed a measurable mapaccess2_faststr share. poolDojoIDs (a [][]int kept
+// in lockstep with `counts` at the same two swap sites, improveDojoMeetings)
+// removed that too: ak/bk are now a plain slice index. A CPU profile of
+// BuildPoolPhaseTreeAware_256_16x16_Interleaved after BOTH fixes shows
+// mapaccess2_faststr, dojoIDCache.of and dojoKeyCache.of absent entirely
+// from a full (nodefraction=0) node listing -- not merely small, genuinely
+// not sampled. What remains (~86% cumulative) is earliestDojoMeetingScan
+// itself: the O(numPools) countIn scan collecting a dojo's occupied pools,
+// plus the O(occupied^2) pairRound comparison over them -- real arithmetic
+// over the extra pools the bijective-label fix legitimately restored to the
+// exchange pass, not a lookup cost left to remove. See dojoIDCache's own
+// doc comment for the measured before/after benchmark numbers this left.
+//
 // Output is unchanged: this only touches HOW the existing objective is
 // computed, never what it computes, and `make examples` was re-run and
-// diffed byte-identical after this rewrite.
+// diffed byte-identical after every pass of this rewrite.
 
 // BuildPoolPhaseTreeAware is BuildPoolPhase's region-aware sibling. It
 // returns the same (pools, drawCourts, error) shape, for the same reasons
@@ -469,12 +487,9 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// BuildPoolPhaseTreeAware_256_16x16_Interleaved) on every candidate
 	// evaluated -- see dojoIDCache's own doc comment for why every id must
 	// be minted before that sizing happens, and its own callers for the
-	// measured before/after numbers.
-	keys := make(dojoKeyCache, len(players))
-	ids := newDojoIDCache(keys, len(players))
-	for i := range players {
-		ids.of(players[i].Dojo)
-	}
+	// measured before/after numbers. newDojoIDCacheFor is the one shared
+	// body for this "intern the whole roster up front" block (tournament.go).
+	ids, keys := newDojoIDCacheFor(players)
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
 	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, keys, ids); err != nil {
 		return nil, 0, err
@@ -526,12 +541,17 @@ type dojoCounter func(poolIdx int, id int) int
 // whole test suite's runtime by three before the matrix existed.
 //
 // A thin wrapper over earliestDojoMeetingScan (bc-pnum) with a fresh,
-// throwaway scratch slice: kept as its own entry point because it is the one
-// every OTHER caller (this file's own tests, the reference oracles) already
-// calls by this exact signature, and none of them run often enough for the
-// scratch allocation to matter. improveDojoMeetings' own hot loop calls
-// earliestDojoMeetingScan directly instead, with a buffer it reuses across
-// the whole pass -- see that function's own doc comment for why.
+// throwaway scratch slice: kept as its own entry point because every OTHER
+// caller (this file's own tests, the reference oracles) already calls it by
+// this exact signature, and none of them run often enough for the scratch
+// allocation to matter. improveDojoMeetings' own exchange loop -- the hot
+// candidate scan, on the order of numPools^2*poolSize^2 calls per pass --
+// calls earliestDojoMeetingScan directly instead, with a buffer it reuses
+// across the whole function; that same shared buffer is also what
+// improveDojoMeetings' objective() closure uses (objective runs only at the
+// TOP of a pass, before the exchange scan below it starts, so the two never
+// have the buffer in flight at once) -- see that function's own doc comment
+// for why.
 func earliestDojoMeeting(pools []Pool, pairRound [][]int, id int, count dojoCounter) int {
 	var occupied []int
 	return earliestDojoMeetingScan(pools, pairRound, id, count, &occupied)
@@ -787,11 +807,28 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 	// countIn below is the O(1) replacement threaded through both the direct
 	// cAi/cAj/cBi/cBj reads and every earliestDojoMeeting/cachedDojoMeeting
 	// call in this function.
+	//
+	// poolDojoIDs[i][k] is the dense dojo id of pools[i].Players[k] (bc-pnum
+	// follow-up): the int-id rewrite above still called ids.of(a.Dojo) once
+	// per ai and ids.of(b.Dojo) once per CANDIDATE -- on the order of
+	// numPools^2*poolSize^2 times for bk alone -- and dojoIDCache.of does
+	// TWO map probes per call (dojoKeyCache.of's raw->normalized lookup,
+	// then its own normalized->id lookup), which a follow-up profile still
+	// showed as a measurable cost even after the per-pool tallies stopped
+	// being map-keyed. poolDojoIDs removes it: built once here alongside
+	// counts, and kept in lockstep with `pools` at the SAME two sites that
+	// already keep `counts` in lockstep (the speculative swap and its
+	// revert), a candidate's ak/bk become a plain slice index instead of a
+	// cache lookup.
 	counts := make([][]int, numPools)
+	poolDojoIDs := make([][]int, numPools)
 	for i := range pools {
 		counts[i] = make([]int, numDojos)
-		for _, pl := range pools[i].Players {
-			counts[i][ids.of(pl.Dojo)]++
+		poolDojoIDs[i] = make([]int, len(pools[i].Players))
+		for k, pl := range pools[i].Players {
+			id := ids.of(pl.Dojo)
+			counts[i][id]++
+			poolDojoIDs[i][k] = id
 		}
 	}
 	countIn := dojoCounter(func(poolIdx int, id int) int {
@@ -835,15 +872,36 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 		return total
 	}
 
-	// objective() itself calls earliestDojoMeeting directly rather than the
-	// cachedDojoMeeting wrapper (bc-drwx item 13, noted rather than changed:
-	// it runs at the TOP of each pass, before winnerMeetCache/allQualMeetCache
-	// are cleared a few lines below at the call site, so routing it through
-	// the cache would need the clear() calls moved AHEAD of this call instead
-	// of after it -- a real reordering, not the loop-invariant code motion
-	// applied to cAi/cAj above, and the measured cost here is one whole-roster
-	// pass per OUTER iteration of the climb (bounded by the number of accepted
-	// swaps, not by candidate count), a much smaller multiplier than the
+	// scanBuf is earliestDojoMeetingScan's reusable occupied-pool scratch
+	// slice (bc-pnum), shared across every call EITHER objective() or the
+	// exchange loop below makes: the exchange loop alone calls
+	// earliestDojoMeetingScan on the order of numPools^2*poolSize^2 times,
+	// and a fresh make([]int, 0, numPools) per call (earliestDojoMeeting's
+	// own throwaway-buffer behaviour) was, once dojoIDCache had already
+	// removed the map[string]* lookup, the next-largest measured cost --
+	// mostly paid back as GC scanning rather than the allocation itself.
+	// Declared here, ABOVE objective (bc-pnum follow-up: objective() used
+	// to call the throwaway-buffer earliestDojoMeeting wrapper instead,
+	// which is what its own doc comment used to describe as having no
+	// production caller -- wrong, since objective() itself is one, twice
+	// per pass), so objective() can share it too. Every call is
+	// synchronous and objective() always runs to completion BEFORE the
+	// exchange loop below starts for that pass (never interleaved with
+	// it), so no two scans are ever in flight on this buffer at once, and
+	// nothing reads *occupied after the call that filled it returns --
+	// one growing slice is safe to reuse for the whole function.
+	var scanBuf []int
+
+	// objective() itself calls earliestDojoMeetingScan directly (sharing
+	// scanBuf above) rather than the cachedDojoMeeting wrapper (bc-drwx
+	// item 13, noted rather than changed: it runs at the TOP of each pass,
+	// before winnerMeetCache/allQualMeetCache are cleared a few lines below
+	// at the call site, so routing it through THAT cache would need the
+	// clear() calls moved AHEAD of this call instead of after it -- a real
+	// reordering, not the loop-invariant code motion applied to cAi/cAj
+	// above, and the measured cost here is one whole-roster pass per OUTER
+	// iteration of the climb (bounded by the number of accepted swaps, not
+	// by candidate count), a much smaller multiplier than the
 	// candidate-scan cost the wave-2 slotBest memo (seed.go) was written to
 	// fix. Left alone rather than restructured for a marginal win.
 	objective := func() (excess, roundOnes, negSum, allQualNegSum int) {
@@ -856,13 +914,13 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 					continue
 				}
 				seen[id] = true
-				if m := earliestDojoMeeting(pools, pairRound, id, countIn); m != math.MaxInt {
+				if m := earliestDojoMeetingScan(pools, pairRound, id, countIn, &scanBuf); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
 					}
 					negSum -= m
 				}
-				if m := earliestDojoMeeting(pools, allQualPairRound, id, countIn); m != math.MaxInt {
+				if m := earliestDojoMeetingScan(pools, allQualPairRound, id, countIn, &scanBuf); m != math.MaxInt {
 					allQualNegSum -= m
 				}
 			}
@@ -913,19 +971,6 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 	allQualMeetKnown := make([]bool, numDojos)
 	allQualMeetCache := make([]int, numDojos)
 
-	// scanBuf is earliestDojoMeetingScan's reusable occupied-pool scratch
-	// slice (bc-pnum), shared across every before/after call this whole
-	// function makes: this loop calls earliestDojoMeetingScan on the order
-	// of numPools^2*poolSize^2 times, and a fresh make([]int, 0, numPools)
-	// per call (earliestDojoMeeting's own throwaway-buffer behaviour) was,
-	// once dojoIDCache had already removed the map[string]* lookup, the
-	// next-largest measured cost -- mostly paid back as GC scanning rather
-	// than the allocation itself. Every call here is synchronous (no two
-	// scans are ever in flight at once, and nothing reads *occupied after
-	// the call that filled it returns), so one growing slice is safe to
-	// reuse for the whole function, not just one pass.
-	var scanBuf []int
-
 	// Bounded belt-and-braces cap; the lexicographic strict improvement is
 	// the real termination argument. Runs to a FULL fixpoint of the
 	// lexicographic objective -- excess first, then round-1 count, then
@@ -969,14 +1014,18 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 				// and reused directly for hasMeetingSignal rather than
 				// calling earliestDojoMeeting a second time for the same
 				// answer.
-				// ak (bc-drwx review fix, then bc-pnum's int-id rewrite):
-				// a.Dojo resolved to its dense id ONCE here, reused for
+				// ak (bc-drwx review fix, then bc-pnum's int-id rewrite,
+				// then the poolDojoIDs follow-up): a's dense id read
+				// straight out of poolDojoIDs rather than re-resolved via
+				// ids.of(a.Dojo) -- see poolDojoIDs' own doc comment
+				// (above, where `counts` is built) for why the cache
+				// lookup itself was still a measurable cost. Reused for
 				// every countIn/cachedDojoMeeting call below that needs a's
 				// identity -- see dojoCounter's own doc comment for why
 				// passing the raw string through instead would have put an
 				// O(numPools) run of cache lookups back inside
 				// earliestDojoMeeting's occupied-pool scan.
-				ak := ids.of(a.Dojo)
+				ak := poolDojoIDs[i][ai]
 				beforeA := cachedDojoMeeting(pools, pairRound, ak, winnerMeetKnown, winnerMeetCache, countIn, &scanBuf)
 				beforeAQA := cachedDojoMeeting(pools, allQualPairRound, ak, allQualMeetKnown, allQualMeetCache, countIn, &scanBuf)
 				hasMeetingSignal := beforeA != math.MaxInt
@@ -1006,9 +1055,13 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 							continue
 						}
 						// bk (bc-drwx review fix, then bc-pnum's int-id
-						// rewrite): b.Dojo resolved to its dense id ONCE per
-						// candidate, mirroring ak above.
-						bk := ids.of(b.Dojo)
+						// rewrite, then the poolDojoIDs follow-up): b's
+						// dense id read straight out of poolDojoIDs,
+						// mirroring ak above -- this is the read that used
+						// to run once per CANDIDATE (numPools^2*poolSize^2
+						// scale), so it is the one this follow-up mattered
+						// most for.
+						bk := poolDojoIDs[j][bi]
 						if bk == ak {
 							continue
 						}
@@ -1050,17 +1103,20 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 						// candidates within one pass.
 						beforeB := cachedDojoMeeting(pools, pairRound, bk, winnerMeetKnown, winnerMeetCache, countIn, &scanBuf)
 						beforeAQB := cachedDojoMeeting(pools, allQualPairRound, bk, allQualMeetKnown, allQualMeetCache, countIn, &scanBuf)
-						// counts is updated speculatively IN LOCKSTEP with the
-						// player swap (bc-drwx review fix): every read below
-						// this point (afterA/afterB/afterAQA/afterAQB, via
-						// countIn) must see the POST-swap tally, and the
-						// revert three lines down the other branch must undo
-						// both together or the two structures drift.
+						// counts (and poolDojoIDs, bc-pnum) are updated
+						// speculatively IN LOCKSTEP with the player swap
+						// (bc-drwx review fix): every read below this point
+						// (afterA/afterB/afterAQA/afterAQB, via countIn, and
+						// any LATER candidate's ak/bk read via poolDojoIDs)
+						// must see the POST-swap tally/identity, and the
+						// revert a few lines down the other branch must undo
+						// all three together or the structures drift.
 						pools[i].Players[ai], pools[j].Players[bi] = b, a
 						counts[i][ak]--
 						counts[i][bk]++
 						counts[j][bk]--
 						counts[j][ak]++
+						poolDojoIDs[i][ai], poolDojoIDs[j][bi] = bk, ak
 						afterA := earliestDojoMeetingScan(pools, pairRound, ak, countIn, &scanBuf)
 						afterB := earliestDojoMeetingScan(pools, pairRound, bk, countIn, &scanBuf)
 						afterAQA := earliestDojoMeetingScan(pools, allQualPairRound, ak, countIn, &scanBuf)
@@ -1114,12 +1170,14 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 							improved = true
 							break
 						}
-						// revert both the player swap and its counts update
+						// revert the player swap, its counts update, and its
+						// poolDojoIDs update (bc-pnum) together
 						pools[i].Players[ai], pools[j].Players[bi] = a, b
 						counts[i][ak]++
 						counts[i][bk]--
 						counts[j][bk]++
 						counts[j][ak]--
+						poolDojoIDs[i][ai], poolDojoIDs[j][bi] = ak, bk
 					}
 				}
 			}

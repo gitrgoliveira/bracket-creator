@@ -245,3 +245,23 @@ func BenchmarkBuildPoolPhaseTreeAware_256_16x16_Interleaved(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkBuildPoolPhaseTreeAware_256_SingleDojo (bc-pnum review): every
+// entrant shares ONE dojo, the shape benchSingleDojoRoster already builds
+// for the StandardSeeding_SingleDojo_* benchmarks above, run here through
+// the full tree-aware distributor instead of just delayDojoMeetings. A
+// single-dojo roster is already at the descent's own brute-force ceiling
+// (TestTreeAwareGateScorecard's 180/180 sweep), so improveDojoMeetings'
+// exchange pass is a no-op here -- this benchmark exists to cover the
+// descent's OWN cost (assignUnseededByDojoTree/dojoNode), which none of the
+// multi-dojo shapes above isolate, not to exercise the exchange pass this
+// bead's own int-id rewrite targeted.
+func BenchmarkBuildPoolPhaseTreeAware_256_SingleDojo(b *testing.B) {
+	roster := benchSingleDojoRoster(256)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, _, err := BuildPoolPhaseTreeAware(roster, 4, false, 4, 2); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

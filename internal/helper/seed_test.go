@@ -2845,12 +2845,20 @@ func referenceDelayDojoMeetingsUnmemoized(result []Player, occupied map[int]bool
 	// ids mirrors delayDojoMeetings' own ids slice (bc-drwx review fix, then
 	// bc-pnum's int-id rewrite), kept in lockstep with result on every swap
 	// below -- same reason as slots: a drift here would be misattributed to
-	// the memo.
-	keys := make(dojoKeyCache, len(result))
-	idCache := newDojoIDCache(keys, len(result))
+	// the memo. Built INDEPENDENTLY of the production dojoIDCache/
+	// newDojoIDCache interner (mirroring TestDojoSumMeetRounds_MatchesFullScan's
+	// and TestDojoSwapGain_MatchesFullDrawDelta's own idOf block, not calling
+	// into dojoIDCache at all): a bug in dojoIDCache's own id-minting logic
+	// must stay visible to this oracle, not be baked into both sides of the
+	// comparison by sharing the same interner.
 	ids := make([]int, len(result))
+	idOf := map[string]int{}
 	for i := range result {
-		ids[i] = idCache.of(result[i].Dojo)
+		key := dojoKey(result[i].Dojo)
+		if _, ok := idOf[key]; !ok {
+			idOf[key] = len(idOf)
+		}
+		ids[i] = idOf[key]
 	}
 
 	movable := func(i int) bool {

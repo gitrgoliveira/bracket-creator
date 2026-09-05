@@ -500,11 +500,7 @@ func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, ba
 	mode := qualifierMode{ExtraQualifiers: QualifierModeStandard, SeedPoolIndex: seedPoolIdx}
 
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
-	keys := make(dojoKeyCache, len(players))
-	ids := newDojoIDCache(keys, len(players))
-	for i := range players {
-		ids.of(players[i].Dojo)
-	}
+	ids, keys := newDojoIDCacheFor(players)
 	require.NoError(t, assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, keys, ids))
 	return pools, targetSizes, qualifierSlots
 }
@@ -780,11 +776,7 @@ func TestImproveDojoMeetings_MatchesUncachedReference(t *testing.T) {
 		poolsCached := clonePools(pools)
 		poolsRef := clonePools(pools)
 
-		cachedKeys := make(dojoKeyCache, len(players))
-		cachedIDs := newDojoIDCache(cachedKeys, len(players))
-		for i := range players {
-			cachedIDs.of(players[i].Dojo)
-		}
+		cachedIDs, _ := newDojoIDCacheFor(players)
 		improveDojoMeetings(poolsCached, qualifierSlots, cachedIDs)
 		referenceImproveDojoMeetings(poolsRef, targetSizes, qualifierSlots, players, make(dojoKeyCache))
 

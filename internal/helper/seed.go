@@ -401,7 +401,9 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// fix to the tree-aware pool distributor's own hot loops, where the
 	// SAME class of string-keyed lookup was the dominant cost by a wider
 	// margin (BuildPoolPhaseTreeAware_256_16x16_Interleaved: 3029ms ->
-	// 452-736ms).
+	// 639ms, reproducible median of 3 -- see that comment for the fuller
+	// number, including the poolDojoIDs follow-up this file's own bk/ak
+	// fix has a direct analogue in).
 	for iter := 0; iter < len(result)*len(result); iter++ {
 		pairs := sortedSameDojoPairs(result, ids, slots)
 		if len(pairs) == 0 {

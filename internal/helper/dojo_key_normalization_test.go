@@ -61,14 +61,16 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 	qualifierSlots := [][]int{{0}, {1}, {2}}
 
 	placed := []int{1, 1, 1}
-	keys := make(dojoKeyCache)
-	ids := newDojoIDCache(keys, 0)
+	// roster flattens pools' players plus a synthetic "MUMEISHI"-dojo entry
+	// (a third spelling of the same dojo, never actually seated anywhere)
+	// so newDojoIDCacheFor interns every spelling this test resolves below
+	// up front, same as every other caller of that helper.
+	var roster []Player
 	for i := range pools {
-		for _, pl := range pools[i].Players {
-			ids.of(pl.Dojo)
-		}
+		roster = append(roster, pools[i].Players...)
 	}
-	ids.of("MUMEISHI")
+	roster = append(roster, Player{Dojo: "MUMEISHI"})
+	ids, keys := newDojoIDCacheFor(roster)
 	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed, ids.numDojos())
 	require.NotNil(t, root)
 	for i := range pools {
@@ -80,4 +82,67 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", ids.of("MUMEISHI"), qualifierSlots, keys)
 	assert.Equal(t, 2, best,
 		"a third, differently-cased member of the same dojo must be routed to the only dojo-free pool")
+}
+
+// TestDojoIDCache_Contract pins dojoIDCache's four load-bearing properties
+// (bc-pnum review): every hot loop in pool_distribution_tree_aware.go and
+// seed.go indexes a []int/[][]int by the ids this type mints, so a
+// regression in any one of these four would eventually surface as an
+// out-of-range index or a silently-wrong dojo-spread count somewhere
+// downstream, never as an obvious failure at the interning site itself.
+func TestDojoIDCache_Contract(t *testing.T) {
+	t.Run("dense 0..n-1 in first-seen order", func(t *testing.T) {
+		ids, _ := newDojoIDCacheFor([]Player{
+			{Dojo: "Charlie"}, {Dojo: "Alpha"}, {Dojo: "Bravo"},
+		})
+		assert.Equal(t, 0, ids.of("Charlie"))
+		assert.Equal(t, 1, ids.of("Alpha"))
+		assert.Equal(t, 2, ids.of("Bravo"))
+		assert.Equal(t, 3, ids.numDojos())
+	})
+
+	t.Run("stable across re-resolution", func(t *testing.T) {
+		ids, _ := newDojoIDCacheFor([]Player{{Dojo: "Alpha"}, {Dojo: "Bravo"}})
+		first := ids.of("Alpha")
+		for i := 0; i < 5; i++ {
+			assert.Equal(t, first, ids.of("Alpha"),
+				"re-resolving the same dojo must return the same id every time")
+		}
+	})
+
+	t.Run("spelling collapse", func(t *testing.T) {
+		ids, _ := newDojoIDCacheFor([]Player{{Dojo: "Mumeishi"}})
+		want := ids.of("Mumeishi")
+		assert.Equal(t, want, ids.of("MUMEISHI"),
+			"an all-caps spelling must collapse to the same id")
+		assert.Equal(t, want, ids.of("  mumeishi  "),
+			"a lowercase, whitespace-padded spelling must collapse to the same id")
+	})
+
+	t.Run("blank-safe", func(t *testing.T) {
+		require.NotPanics(t, func() {
+			ids, _ := newDojoIDCacheFor([]Player{{Dojo: ""}, {Dojo: "   "}})
+			assert.Equal(t, ids.of(""), ids.of("   "),
+				"an empty dojo and a whitespace-only one must collapse to the same id")
+			assert.Equal(t, 1, ids.numDojos(),
+				"both blank spellings must intern to ONE id, not two")
+		})
+	})
+
+	t.Run("value copy shares the interning table", func(t *testing.T) {
+		// dojoIDCache is a struct of two maps (reference types), passed by
+		// value everywhere in this package (matching dojoKeyCache's own
+		// value-type convention) -- a plain Go assignment must still share
+		// the SAME underlying interning table, not fork it, or a caller
+		// that copies the value (e.g. by passing it into a function that
+		// takes it by value) would silently stop seeing ids minted through
+		// the other copy.
+		original, _ := newDojoIDCacheFor([]Player{{Dojo: "Alpha"}})
+		dup := original
+		mintedViaDup := dup.of("Bravo")
+		assert.Equal(t, mintedViaDup, original.of("Bravo"),
+			"an id minted through a copy must be visible through the original")
+		assert.Equal(t, 2, original.numDojos())
+		assert.Equal(t, 2, dup.numDojos())
+	})
 }

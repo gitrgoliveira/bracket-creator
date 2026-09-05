@@ -1231,6 +1231,11 @@ func corruptParticipantsFile(t *testing.T, store *state.Store, compID string) {
 	require.NoError(t, os.WriteFile(path, []byte("unreadable\n"), 0o600))
 	require.NoError(t, os.Chmod(path, 0o000))
 	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+	// A root test runner ignores mode 0o000, and then the two tests built on
+	// this helper pass under the old and the new code alike (a false pass, not
+	// a false failure). Prove the corruption bites before any test acts on it.
+	_, err := store.LoadParticipants(compID, false)
+	require.Error(t, err, "participants.csv must be unreadable for this helper to discriminate anything; running as root defeats chmod")
 }
 
 // TestReplaceParticipantInDraw_EmptyBracketSkipsParticipantsLoad pins nit 16:

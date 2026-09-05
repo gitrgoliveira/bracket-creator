@@ -3151,7 +3151,9 @@ const API = {
     // Phase 3b (mp-8rc9): league tie-breaker operator API.
     //
     // leagueTiebreakCandidates: GET /competitions/:id/league-tiebreak/candidates
-    // Returns { candidates: [{teamNames, minPosition, maxPosition}], finalized: bool }.
+    // Returns { candidates: [{teamNames, teams, minPosition, maxPosition}], finalized: bool }
+    // where teams is [{id, name, dojo}] (id "" for a legacy competitor): groupTeamIds
+    // in admin_pools.jsx derives the teamIds a namesake group needs from it.
     async leagueTiebreakCandidates(compID) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/candidates`);
         if (!res.ok) {

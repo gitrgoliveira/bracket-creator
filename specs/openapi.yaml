@@ -1312,15 +1312,20 @@ paths:
         competition has a number prefix: a legacy competition saved before the
         never-empty-prefix rule (empty `numberPrefix`) has one derived and
         PERSISTED to `config.md` (the same derivation `GET
-        /api/competitions/number-prefix-default` previews), and `pools.csv` is
-        renumbered under it whenever a draw already exists on disk. A competition
-        that already has a prefix is left untouched by this step. A derived
-        prefix that collides with another competition's is refused with 400,
-        naming the conflict, and NOTHING is persisted. If the prefix IS assigned
-        and saved but the subsequent renumber then fails, 500 is returned (see
-        below); `config.md` already carries the new prefix in that case and a
-        `tournament_updated` event is broadcast even though this request failed,
-        so open clients refetch it rather than show stale state until reload.
+        /api/competitions/number-prefix-default` previews). A competition that
+        already has a prefix skips only this assignment step; `pools.csv` is
+        renumbered UNCONDITIONALLY whenever a draw already exists on disk,
+        whether or not this request is what assigned the prefix (a cheap no-op
+        when every number already matches). A derived prefix that collides
+        with, or is ambiguous with, another competition's is refused with 400,
+        naming the conflict, and NOTHING is persisted; an already-stored prefix
+        is never re-validated, so two competitions saved before this rule
+        existed stay usable until one of them actually changes its own prefix.
+        If the prefix IS assigned and saved but the subsequent renumber then
+        fails, 500 is returned (see below); `config.md` already carries the new
+        prefix in that case and a `tournament_updated` event is broadcast even
+        though this request failed, so open clients refetch it rather than show
+        stale state until reload.
       security:
         - TournamentPassword: []
       parameters:
@@ -1443,18 +1448,22 @@ paths:
         competition has a number prefix: a legacy competition saved before the
         never-empty-prefix rule (empty `numberPrefix`) has one derived and
         PERSISTED to `config.md` (the same derivation `GET
-        /api/competitions/number-prefix-default` previews), and `pools.csv` is
-        renumbered under it whenever a draw already exists on disk -- this is
-        what numbers a `draw-ready` legacy competition's existing draw when it is
-        finally started under this rule. A competition that already has a
-        prefix is left untouched by this step. A derived prefix that collides
-        with another competition's is refused with 400, naming the conflict, and
-        NOTHING is persisted. If the prefix IS assigned and saved but the
-        subsequent renumber then fails, 500 is returned (see below);
-        `config.md` already carries the new prefix in that case and a
-        `tournament_updated` event is broadcast even though this request
-        failed, so open clients refetch it rather than show stale state until
-        reload.
+        /api/competitions/number-prefix-default` previews). A competition that
+        already has a prefix skips only this assignment step; `pools.csv` is
+        renumbered UNCONDITIONALLY whenever a draw already exists on disk,
+        whether or not this request is what assigned the prefix -- this is what
+        numbers a `draw-ready` legacy competition's existing draw when it is
+        finally started under this rule, a cheap no-op once every number
+        already matches. A derived prefix that collides with, or is ambiguous
+        with, another competition's is refused with 400, naming the conflict,
+        and NOTHING is persisted; an already-stored prefix is never
+        re-validated, so two competitions saved before this rule existed stay
+        usable until one of them actually changes its own prefix. If the
+        prefix IS assigned and saved but the subsequent renumber then fails,
+        500 is returned (see below); `config.md` already carries the new
+        prefix in that case and a `tournament_updated` event is broadcast
+        even though this request failed, so open clients refetch it rather
+        than show stale state until reload.
       security:
         - TournamentPassword: []
       parameters:
@@ -4270,10 +4279,13 @@ components:
           type: array
           description: >
             Player list. Populated on the viewer responses (`GET /api/viewer/competitions` and
-            `GET /api/viewer/competitions/{id}`) and on a roster-save `PUT /api/competitions/{id}`
-            response (the fresh roster it just wrote, see that endpoint's Roster-save
-            description). Empty on every OTHER admin competition response (`GET
-            /api/competitions`, `GET /api/competitions/{id}`, a settings-only PUT).
+            `GET /api/viewer/competitions/{id}`) and on the SETTINGS and ROSTER PUT
+            responses (`PUT /api/competitions/{id}`, both branches: a settings-only PUT
+            re-loads the on-disk roster for its response even though the request body
+            didn't send one, and a roster-save PUT returns the fresh roster it just
+            wrote; see that endpoint's Settings-update and Roster-save descriptions).
+            Empty on every OTHER admin competition response (`GET /api/competitions`,
+            `GET /api/competitions/{id}`).
           items:
             $ref: '#/components/schemas/Player'
         provisionalNumbers:
@@ -4284,13 +4296,13 @@ components:
             `Player.number` (which the draw assigns), carried separately so public
             surfaces show only assigned numbers; the operator's roster shows these as
             provisional until the draw replaces them. Carried on the SAME responses as
-            `players` above (viewer responses and a roster-save PUT response), and only
-            for a competition a draw can still be generated from (status `setup` or the
-            legacy empty status) that has a number prefix. Absent for a Swiss
-            competition (its draw never writes pools.csv, so it carries no number at
-            all) and for an effective-playoffs competition (its number is already
-            final -- participant order -- so there is nothing "provisional" about it,
-            see `Player.number`). Absent in every other status.
+            `players` above (viewer responses and the settings and roster PUT
+            responses), and only for a competition a draw can still be generated from
+            (status `setup` or the legacy empty status) that has a number prefix.
+            Absent for a Swiss competition (its draw never writes pools.csv, so it
+            carries no number at all) and for an effective-playoffs competition (its
+            number is already final -- participant order -- so there is nothing
+            "provisional" about it, see `Player.number`). Absent in every other status.
           items:
             type: string
 

@@ -487,8 +487,10 @@ type Competition struct {
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
-	// ProvisionalNumbers is set on the viewer payloads AND on a roster-save
-	// PUT /api/competitions/:id response (bc-pnum B1), for a competition a
+	// ProvisionalNumbers is set on the viewer payloads AND on the settings
+	// and roster PUT /api/competitions/:id responses (bc-pnum B1: BOTH
+	// branches re-load and compose this for their response, not only the
+	// roster-save one, see D9), for a competition a
 	// draw can still be generated from (status "setup" or the legacy empty
 	// status, engine.CanGenerateDraw) that has a number prefix: one entry per
 	// Players, in the same order, holding the registration-order number the

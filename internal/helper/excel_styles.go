@@ -439,7 +439,7 @@ func nameIDPositionStackedFontSize(letterCount int) float64 {
 // printNameEntries in excel.go) instead of a plain cross-sheet reference, so
 // it needs WrapText rather than ShrinkToFit. The row height (270pt) is set
 // per-row in printNameEntries (excel.go), not by setupNamesToPrintLayout,
-// which only sets column widths; see nameIDPositionStackedFontSize above
+// which sets the page layout and column widths; see nameIDPositionStackedFontSize above
 // for why the font size depends on letterCount.
 func buildNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
 	style := mustNewStyle(f, &excelize.Style{

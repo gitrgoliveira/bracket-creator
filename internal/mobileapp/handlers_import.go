@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -455,11 +456,47 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		if infraErr := assignDefaultNumberPrefix(eng, comp, comp.ID); infraErr != nil {
 			return infraErr
 		}
-		if infraErr, uniqueErr := checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, comp.ID); infraErr != nil {
+		// Name collision is a genuine identity conflict this row cannot
+		// safely resolve on its own (renaming one side risks confusing the
+		// operator restoring the archive), so it still rejects exactly like
+		// create/PUT. Checked separately from the prefix below (prefix
+		// exempted with "" here) so a name collision and a prefix collision
+		// can be told apart without parsing the error text.
+		if infraErr, nameErr := checkUniqueCompFields(store, comp.Name, "", comp.ID); infraErr != nil {
 			return infraErr
-		} else if uniqueErr != nil {
-			res.Error = uniqueErr.Error()
+		} else if nameErr != nil {
+			res.Error = nameErr.Error()
 			return nil
+		}
+		// bc-pnum A1 (import boundary, [review] nit d): a restored archive
+		// can legally carry a prefix pair that predates the ambiguity rule
+		// -- e.g. "K" and "K2", both saved back when only an EXACT duplicate
+		// was refused. Rejecting this row would silently drop half of a
+		// legitimate restore over a rule that did not exist when the data
+		// was created. The governing rule for this bead is explicit: on
+		// legacy data we ASSIGN, never reject. So a prefix collision here
+		// (exact OR ambiguous, whichever checkUniqueCompFields caught) is
+		// healed by re-deriving a fresh prefix through the same
+		// DefaultNumberPrefixFor every other assignment path already uses
+		// (create, settings, the start/generate-draw pre-flight,
+		// MigrateNumberPrefixes) -- never a bespoke suffix scheme invented
+		// here -- and logged so the operator can see a tag changed on
+		// restore. RenumberCompetitors below then makes that reassignment
+		// visible on this row's pools.csv too, exactly as MigrateNumberPrefixes
+		// does for the equivalent load-time case (it is a no-op today: this
+		// manifest format has no pools file to restore, but the pairing
+		// keeps import consistent with every other place a prefix is
+		// (re)assigned, and covers a manifest extended with pools later).
+		if infraErr, prefixErr := checkUniqueCompFields(store, "", comp.NumberPrefix, comp.ID); infraErr != nil {
+			return infraErr
+		} else if prefixErr != nil {
+			newPrefix, deriveErr := eng.DefaultNumberPrefixFor(comp.Name, comp.ID)
+			if deriveErr != nil {
+				return deriveErr
+			}
+			log.Printf("mobileapp: import %s: number prefix %q collided on restore (%v); reassigned %q",
+				comp.ID, comp.NumberPrefix, prefixErr, newPrefix)
+			comp.NumberPrefix = newPrefix
 		}
 		if len(parsedPlayers) > 0 {
 			// Mirror saveCompetitionWithPlayers semantics: when
@@ -476,6 +513,19 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	// closure, abort the row before participants/seeds save below.
 	if res.Error != "" {
 		return res
+	}
+	// bc-pnum A1 ([review] nit d): renumber whatever this row already has on
+	// disk under its (possibly just-reassigned) prefix, the same pairing
+	// every other assignment site uses. A no-op today -- this manifest
+	// format never restores pools.csv, so RenumberCompetitors' own
+	// len(pools)==0 guard returns immediately -- but the row must not be
+	// left silently unrenumbered if a future manifest format adds one.
+	// Best-effort: this is inherited/restore-time state, not something the
+	// row's own participants/seeds save below could have introduced, so a
+	// failure here is logged rather than failing the whole import row (the
+	// same "inherited damage" contract ensureNumberPrefix documents).
+	if _, err := eng.RenumberCompetitors(entry.ID); err != nil {
+		log.Printf("mobileapp: import %s: competitors not numbered: %v (retried on the next settings save, G4)", entry.ID, err)
 	}
 
 	// Save participants, already parsed pre-save, so this is a pure

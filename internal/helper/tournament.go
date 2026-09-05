@@ -772,13 +772,19 @@ func dojoKey(dojo string) string {
 // -- the benchmark rosters are deterministic and the drawn pools are
 // byte-identical run to run):
 //   - BuildPoolPhaseTreeAware_256_16x16_Interleaved: 3029ms on the
-//     committed-but-unoptimized code (still map[string]int-keyed) -> 639ms
+//     committed-but-unoptimized code (still map[string]int-keyed) -> ~640ms
 //     after this cache PLUS the poolDojoIDs follow-up below (see
 //     pool_distribution_tree_aware.go's own file-level doc comment, the
 //     "Follow-up (bc-pnum review)" paragraph, for what poolDojoIDs removed
 //     and why ~86% cumulative legitimately remains real arithmetic rather
-//     than a lookup cost). main (origin/main, no dojoKeyCache/dojoIDCache
-//     at all): ~482ms, so ~1.3x main -- inside the accepted 2x bound this
+//     than a lookup cost) -> ~725-740ms once the swap and its revert moved
+//     into the single self-inverse exchange closure (paired runs, 9 of 9
+//     slower, 1.05-1.11x: the closure does not inline and re-reads the two
+//     ids the hand-written blocks held in registers; accepted, because that
+//     closure is what makes a half-updated swap structurally impossible and
+//     turns the lockstep invariant into a 12-failure mutation instead of a
+//     silent one). main (origin/main, no dojoKeyCache/dojoIDCache at all):
+//     ~500-520ms, so ~1.4-1.45x main -- inside the accepted 2x bound this
 //     bead's own residual (the bijective pool-label fix restoring 12
 //     previously collided pools to the exchange pass) was scoped to.
 //   - BuildPoolPhaseTreeAware_64_16x4_Interleaved: 12.9ms -> 3.4ms; main

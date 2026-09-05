@@ -943,7 +943,7 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 			// id read from poolDojoIDs (bc-pnum review), not
 			// ids.of(pl.Dojo): poolDojoIDs is already in scope and kept in
 			// lockstep with pools' membership by every exchange (see
-			// exchange's own doc comment below), so this is what makes "no
+			// exchange's own doc comment above), so this is what makes "no
 			// map probe anywhere in the exchange pass" a structural
 			// property of the code rather than something only true by
 			// measurement on the shapes profiled so far.

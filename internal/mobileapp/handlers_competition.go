@@ -433,19 +433,21 @@ func assignDefaultNumberPrefix(eng *engine.Engine, comp *state.Competition, excl
 // A missing competition is not an error here (nil); the engine call reports
 // the 404 on its own terms.
 //
-// A competition that ALREADY has a prefix is left entirely alone: no save and
-// no renumber. The renumber exists for the one case this call introduces, an
-// assignment on a draw-ready legacy competition, whose pools.csv carries no
-// Number column and which engine.StartCompetition's draw-ready branch
-// (transitionDrawToRunning) would otherwise start unnumbered, since that
-// branch only flips status and never re-runs the draw. For a not-yet-drawn
-// competition the renumber is a no-op (no pools.csv) and the draw pipeline
-// numbers from the fresh prefix itself. Scoping the renumber to the assignment
-// is what keeps "a write answers for what it introduces" (G4c): a pre-existing
-// prefix over a pools.csv that will not parse is inherited damage and start
-// must not be refused for it (the next settings save heals it), while a
-// renumber that fails right after THIS assignment is this write's own and is
-// reported.
+// A competition that ALREADY has a prefix skips only the ASSIGNMENT step (no
+// new prefix is derived or saved). The RENUMBER still runs UNCONDITIONALLY
+// whenever pools.csv exists (bc-pnum A5(a)), regardless of whether THIS call
+// assigned anything: RenumberCompetitors is a cheap read-compare-discard when
+// every number already matches, so this costs nothing on the common already-
+// numbered case, and it is what lets a retry after an earlier renumber
+// failure actually retry -- the prefix was already saved on the failed
+// attempt, so a renumber scoped to "only right after an assignment" would
+// never run again. Keeping "a write answers for what it introduces" (G4c) is
+// done differently: not by scoping WHETHER the renumber runs, but by scoping
+// HOW A FAILURE IS REPORTED. A pre-existing prefix over a pools.csv that will
+// not parse is inherited damage and must not refuse start (logged, the next
+// settings save heals it); a renumber that fails right after THIS call's OWN
+// assignment is this write's own and is reported as a 500 (see `assigned`
+// below).
 //
 // checkUniqueCompFields runs here as on every other assignment path, so a
 // derived prefix that collides (DefaultNumberPrefix's exhaustion case) is
@@ -1521,16 +1523,22 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		var formatOrKindStartedFlag bool
 		var changed bool
 		// numberPrefixMoved records whether THIS PUT actually changed the
-		// stored NumberPrefix (computed inside the transform below, where
-		// `current` is the on-disk record, immediately before it is
-		// overwritten with the post-inheritance request value). It drives the
+		// stored NumberPrefix (computed inside the transform below, comparing
+		// the post-inheritance EFFECTIVE prefix against the on-disk value
+		// captured before inheritOrAssignNumberPrefix ran). It drives two
+		// things: the uniqueness/ambiguity check below validates the prefix
+		// ONLY when it moved (a write validates only what it moves; an
+		// already-set stored prefix, even one ambiguous with a sibling from
+		// before that rule existed, is grandfathered until one of the two
+		// competitions actually changes its own), and it drives the
 		// RenumberCompetitors error policy after the transform commits: a
 		// renumber failure following a prefix THIS write moved is damage this
 		// write caused (500, the operator must retry); a renumber failure
 		// with the prefix unchanged is inherited damage from something else
-		// (logged, 200, healed by the next save). Stays false for a
-		// roster-only PUT, whose transform branch returns before ever
-		// touching NumberPrefix.
+		// (logged, 200, healed by the next save). Set on BOTH branches (bc-pnum
+		// [blocker]): a roster-only PUT that just healed a blank stored prefix
+		// is as much "this write moved it" as a settings PUT that retypes the
+		// field.
 		var numberPrefixMoved bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
@@ -1567,11 +1575,34 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// one for the first time) on the roster-only path too, the
 					// same inherit+assign step the settings branch runs below.
 					// A no-op when current already carries a prefix
-					// (assignDefaultNumberPrefix's own guard).
-					if err := inheritOrAssignNumberPrefix(eng, current, current.NumberPrefix, id); err != nil {
+					// (assignDefaultNumberPrefix's own guard). storedPrefix is
+					// captured BEFORE this call, which mutates current in
+					// place, so numberPrefixMoved below reflects what THIS
+					// write actually changed.
+					storedPrefix := current.NumberPrefix
+					if err := inheritOrAssignNumberPrefix(eng, current, storedPrefix, id); err != nil {
 						return nil, err
 					}
-					if infraErr, vErr := checkUniqueCompFields(store, current.Name, current.NumberPrefix, id); infraErr != nil {
+					numberPrefixMoved = current.NumberPrefix != storedPrefix
+					// bc-pnum [blocker]: a write validates only what it moves.
+					// A roster-only PUT never changes Name (see the comment
+					// above this branch), so it is never re-validated: "" is
+					// the same exemption checkUniqueCompFields already gives
+					// an untouched/empty field. The prefix is validated only
+					// when THIS write moved it (blank -> assigned): an
+					// already-set stored prefix -- even one ambiguous with a
+					// sibling from before that rule existed, a legacy K/K2
+					// pair that was legal when both were saved -- is
+					// grandfathered until one of the two competitions
+					// actually changes its own prefix. Re-validating an
+					// unmoved stored value on every future roster save would
+					// refuse an operator's roster edit forever over a field
+					// this write never touched.
+					validatePrefix := ""
+					if numberPrefixMoved {
+						validatePrefix = current.NumberPrefix
+					}
+					if infraErr, vErr := checkUniqueCompFields(store, "", validatePrefix, id); infraErr != nil {
 						return nil, infraErr
 					} else if vErr != nil {
 						validationErr = vErr
@@ -1814,7 +1845,27 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if dErr := inheritOrAssignNumberPrefix(eng, &comp, current.NumberPrefix, id); dErr != nil {
 					return nil, dErr
 				}
-				infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)
+				// bc-pnum [blocker]: computed HERE, right after the prefix is
+				// resolved and before `current.NumberPrefix` is overwritten by
+				// the merge further down, so BOTH the validation gate below and
+				// the post-transform renumber-failure report (numberPrefixMoved's
+				// own declaration comment) read the identical answer. A write
+				// validates only what it moves: the name is checked only when
+				// this request's Name differs from the stored one, and the
+				// prefix only when it actually moved -- an already-set stored
+				// prefix (even one ambiguous with a sibling from before that
+				// rule existed) is grandfathered until one of the two
+				// competitions actually changes its own.
+				numberPrefixMoved = comp.NumberPrefix != current.NumberPrefix
+				validateName := ""
+				if comp.Name != current.Name {
+					validateName = comp.Name
+				}
+				validatePrefix := ""
+				if numberPrefixMoved {
+					validatePrefix = comp.NumberPrefix
+				}
+				infraErr, validationErr = checkUniqueCompFields(store, validateName, validatePrefix, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}
@@ -1926,11 +1977,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.RoundRobin = comp.RoundRobin
 				current.WithZekkenName = comp.WithZekkenName
 				current.TeamSize = comp.TeamSize
-				// Captured against the STILL-STORED value, one statement before
-				// it is overwritten: this is the one place that can tell whether
-				// THIS write is what moved the prefix (see numberPrefixMoved's
-				// declaration above).
-				numberPrefixMoved = comp.NumberPrefix != current.NumberPrefix
+				// numberPrefixMoved already computed above, against the SAME
+				// still-stored current.NumberPrefix this overwrites; nothing
+				// between there and here touches either side of that
+				// comparison, so recomputing it would only restate it.
 				current.NumberPrefix = comp.NumberPrefix
 				// started is computed here, ahead of the Format/Kind gate that
 				// needs it, rather than down by the Naginata/Engi guards below

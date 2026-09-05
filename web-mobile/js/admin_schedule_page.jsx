@@ -118,8 +118,12 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
   const [compFilter, setCompFilter] = useStateA("all");
   const [matchDurationSeconds, setMatchDurationSeconds] = useStateA(180); // seconds per match estimate (m:ss)
   // Per-competition auto-schedule: startTime + duration
-  const [autoComp, setAutoComp] = useStateA(tournament.competitions[0]?.id || "");
-  const [autoStart, setAutoStart] = useStateA(tournament.competitions[0]?.startTime || "09:00");
+  // Guarded with `|| []`, matching every other tournament.competitions read
+  // in this file: state.Tournament has no Competitions field, so a
+  // wizard-fresh tournament (POST /api/tournament's raw response, before
+  // app.jsx's onCreated normalises it) can reach here with the key absent.
+  const [autoComp, setAutoComp] = useStateA((tournament.competitions || [])[0]?.id || "");
+  const [autoStart, setAutoStart] = useStateA((tournament.competitions || [])[0]?.startTime || "09:00");
   const [autoSaving, setAutoSaving] = useStateA(false);
   // Blocks Auto-schedule while the duration field holds an out-of-band value.
   // DurationInput never emits an invalid duration, so without this the button

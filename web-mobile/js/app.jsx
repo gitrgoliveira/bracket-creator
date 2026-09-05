@@ -1354,7 +1354,7 @@ function App() {
       <CreateTournament
         authConfig={authConfig}
         onCreated={(t, p) => {
-          setTournament(t);
+          setTournament(normalizeCreatedTournament(t));
           setAuthed(true);
           setMode("admin");
           setPassword(p);
@@ -1639,6 +1639,18 @@ function AuthModal({ onClose, onSuccess, onForgotPassword, resetEnabled, reauth 
       </div>
     </div>
   );
+}
+
+// normalizeCreatedTournament: state.Tournament has no Competitions field, so
+// POST /api/tournament's response body carries no `competitions` key. Every
+// other tournament producer normalises to an array (load() assigns the
+// fetched list; admin_shell's refresh spreads `competitions`; admin.jsx's
+// mergeCompetitionsIntoTournament defaults via `|| []`) -- this is the ONE
+// ingress that did not, so a wizard-fresh tournament reached components that
+// index `tournament.competitions[0]` with `undefined` instead of `[]`.
+// Extracted so the normalisation is unit-testable without mounting App.
+export function normalizeCreatedTournament(t) {
+  return { ...t, competitions: t.competitions || [] };
 }
 
 // validateCreateTournament: pure validation for the CreateTournament form.

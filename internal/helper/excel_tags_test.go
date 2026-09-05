@@ -160,6 +160,26 @@ func TestCreateTagsSheet_ClippingFix(t *testing.T) {
 	}
 }
 
+// TestCreateTagsSheet_ZeroPlayersNoPrintArea pins a review finding on top of
+// bc-pnum A9: with zero players (reachable -- an export of a mixed
+// competition still in setup, before any pool has a member, or a
+// competition with pools but every pool empty) the write loop never runs, so
+// `row` stays at its initial 1 and row-1 is 0. SetPrintArea(f, sheet, 1, 0)
+// would define the INVALID range "$A$1:$A$0" (row 0 does not exist). Must
+// be skipped entirely, not merely tolerated: no players means nothing was
+// written, so there is nothing to scope a print area to.
+func TestCreateTagsSheet_ZeroPlayersNoPrintArea(t *testing.T) {
+	f := excelize.NewFile()
+	if err := CreateTagsSheet(f, nil, ""); err != nil {
+		t.Fatalf("CreateTagsSheet failed: %v", err)
+	}
+	for _, d := range f.GetDefinedName() {
+		if d.Name == "_xlnm.Print_Area" && d.Scope == SheetTags {
+			t.Errorf("expected NO print area for a zero-player Tags sheet, got %q", d.RefersTo)
+		}
+	}
+}
+
 // TestCreateTagsSheet_EmptyNumber pins D1 (bc-pnum): a player with no Number
 // gets an EMPTY tag, never the pool-letter substitute ("A1", "A2", ...)
 // CreateTagsSheet used to compose when Number was blank. That fallback has

@@ -39,7 +39,7 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Public viewer
 	viewer := r.Group("/api/viewer")
 	RegisterViewerHandlers(viewer, store, eng)
-	RegisterDisplayHandlers(viewer, store)
+	RegisterDisplayHandlers(viewer, store, eng)
 
 	// Stateless schedule estimator, public, no auth.
 	publicAPI := r.Group("/api")

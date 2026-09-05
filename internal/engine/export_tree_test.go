@@ -14,6 +14,7 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -416,6 +417,19 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 // participant list (NumberedParticipantsFor, the same
 // helper.AssignPlayerNumbers composition the public viewer merge uses), so
 // the numbers on the printed tags must equal what the app already shows.
+//
+// [review] narrowed what this test can prove: it derives wantNumbers by
+// calling eng.NumberedParticipantsFor, the exact function ExportCompetitionXlsx
+// itself calls, so it can only catch the export disagreeing with ITSELF, not
+// with the public viewer payload. This package cannot hold the stronger
+// check -- internal/mobileapp already imports internal/engine, so the
+// reverse import needed to drive a real viewer HTTP handler from here would
+// cycle. That independent-oracle cross-check (export numbers against an
+// ACTUAL /api/viewer/competitions/:id response) lives in
+// internal/mobileapp/export_numbering_crosscheck_test.go,
+// TestExportedTagsNumbersMatchActualViewerPayload. This test remains as the
+// lighter same-package regression guard for the sheet-shape bug the doc
+// comment above describes (empty Tags, missing Names-to-Print sheet).
 func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pure-playoffs-tags"
@@ -474,6 +488,79 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 	nameRows, err := f.GetRows(namesSheet)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(nameRows), 4, "Names to Print must carry one row per entrant")
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it, for pinning helper.finishDataSheet's
+// fmt.Printf("Data added to spreadsheet\n") call count below.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+
+	fn()
+
+	require.NoError(t, w.Close())
+	var buf bytes.Buffer
+	_, err = io.Copy(&buf, r)
+	require.NoError(t, err)
+	return buf.String()
+}
+
+// TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce pins the
+// [review] nit (a): a playoffs-only export (no pools.csv) used to call
+// helper.AddPoolDataToSheet inside RenderCompetitionWorkbook's step 1 (over
+// the empty pools slice, writing only headers) and THEN call
+// helper.AddPlayerDataToSheet a second time in ExportCompetitionXlsx itself,
+// after the pipeline returned -- two writers of the same Data sheet, so
+// "Data added to spreadsheet" (finishDataSheet's own stdout line) printed
+// twice for this one shape. The fix (helper.AddDataToSheetForExport, called
+// once from RenderCompetitionWorkbook's step 1) collapses that to a single
+// guarded call. This is the ONLY reliable observable of "how many times was
+// the Data sheet written" available from outside the helper package: the
+// workbook itself has no artifact recording writer count once the file is
+// closed.
+func TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-data-once"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	output := captureStdout(t, func() {
+		_, exportErr := eng.ExportCompetitionXlsx(compID)
+		require.NoError(t, exportErr)
+	})
+	assert.Equal(t, 1, strings.Count(output, "Data added to spreadsheet"),
+		"the Data sheet must have exactly ONE writer for a playoffs-only export; captured stdout: %q", output)
+}
+
+// TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea pins a
+// review finding on top of bc-pnum A9: a mixed competition still in `setup`
+// (no draw generated, so pools.csv does not exist and CreateTagsSheet gets
+// zero players) used to have helper.SetPrintArea called with lastRow 0 (the
+// write loop never ran, so `row` stayed at its initial 1 and row-1 was 0),
+// defining the INVALID range "$A$1:$A$0" on the Tags sheet. The fix skips
+// the print area entirely when nothing was written.
+func TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "setup-mixed-no-draw"
+	createTestCompetition(t, store, compID, "mixed", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	// Deliberately NOT started: no draw, no pools.csv, status stays "setup".
+
+	f := openExportedWorkbook(t, eng, compID)
+	for _, d := range f.GetDefinedName() {
+		if d.Name == "_xlnm.Print_Area" && d.Scope == helper.SheetTags {
+			t.Errorf("expected NO print area for the zero-player Tags sheet of a setup competition, got %q", d.RefersTo)
+		}
+	}
 }
 
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:

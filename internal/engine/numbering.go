@@ -10,27 +10,42 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// NumberedParticipantsFor returns comp's roster with Number composed exactly
-// the way mobileapp.mergePoolNumbersIntoPlayersSlice's playoffs-only branch
-// derives it for the public viewer (bc-pnum A8, G8): participant order under
-// NumberPrefix, through helper.AssignPlayerNumbers, the ONE composition both
-// surfaces route through (R1). It exists so a second caller (the blank-
-// template export, which has no pools.csv to read a Number from for a
-// playoffs-only competition, see RenumberCompetitors's own doc comment on why
-// "no pools file" happens for playoffs) cannot silently derive the number a
-// different way and disagree with what the app already shows.
+// NumberPlayoffsOnlyParticipants is the ONE derivation of an effective-
+// playoffs competition's numbers (bc-pnum A8/G8, tightened by [review]):
+// participant order under NumberPrefix, through helper.AssignPlayerNumbers
+// (R1), mutating players in place. No-op when the competition has no
+// prefix, so a caller does not have to special-case that itself.
 //
-// Returns the roster with Number left as loaded (empty, since
-// participants.csv never persists it) when the competition has no prefix,
-// so a caller does not have to special-case that itself.
+// Both real callers reach it through this SAME method rather than each
+// calling helper.AssignPlayerNumbers independently: the public
+// viewer/display merge (mobileapp.mergePoolNumbersIntoPlayersSlice's
+// playoffs-only branch, threaded through the PlayoffsNumberingEngine
+// consumer-boundary interface in mobileapp/deps.go) and NumberedParticipantsFor
+// below (the blank-template export's caller, which has no pools.csv to read
+// a Number from for a playoffs-only competition, see RenumberCompetitors's
+// own doc comment on why "no pools file" happens for playoffs). One
+// function, not two independent call sites invoking the shared primitive,
+// is what actually prevents the two surfaces from silently disagreeing --
+// merely routing both through the same low-level helper.AssignPlayerNumbers
+// call left room for one of the two call sites to drift (a different load
+// order, a different options struct) without either side inherently
+// noticing.
+func (e *Engine) NumberPlayoffsOnlyParticipants(comp *state.Competition, players []domain.Player) {
+	if comp.NumberPrefix != "" {
+		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+	}
+}
+
+// NumberedParticipantsFor returns comp's roster, loaded fresh, with Number
+// composed by NumberPlayoffsOnlyParticipants above. Used by the
+// blank-template export, which (unlike the viewer/display merge) has no
+// already-loaded roster to mutate in place.
 func (e *Engine) NumberedParticipantsFor(comp *state.Competition) ([]domain.Player, error) {
 	players, err := e.store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if err != nil {
 		return nil, err
 	}
-	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
-	}
+	e.NumberPlayoffsOnlyParticipants(comp, players)
 	return players, nil
 }
 

@@ -138,6 +138,31 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 	return playerCoords
 }
 
+// AddDataToSheetForExport is RenderCompetitionWorkbook's step 1 (bc-pnum
+// A8/[review]): the ONE writer of the Data sheet for that shared pipeline,
+// so a caller never has to run AddPoolDataToSheet and then separately
+// AddPlayerDataToSheet on the same workbook to cover the one shape
+// (playoffs-only, no pools.csv) that needs the latter. namesToPrintPlayers
+// takes priority when non-empty (the blank-template export's numbered
+// roster, see Engine.NumberedParticipantsFor); pools is used otherwise,
+// including the ordinary "no pools drawn yet" case, which AddPoolDataToSheet
+// already renders as a header-only sheet.
+//
+// Before this existed, the blank-template export called AddPoolDataToSheet
+// unconditionally (writing only headers when pools was empty) and THEN
+// called AddPlayerDataToSheet a second time for the playoffs-only case,
+// after RenderCompetitionWorkbook had already returned -- two writers of one
+// sheet, which is why "Data added to spreadsheet" printed twice for exactly
+// that shape. cmd/create-pools.go and cmd/create-playoffs.go call
+// AddPoolDataToSheet/AddPlayerDataToSheet directly and are unaffected: this
+// wrapper exists only for the shared engine/export pipeline's step 1.
+func AddDataToSheetForExport(f *excelize.File, pools []Pool, namesToPrintPlayers []Player, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {
+	if len(namesToPrintPlayers) > 0 {
+		return nil, AddPlayerDataToSheet(f, namesToPrintPlayers, sanitize, titlePrefix)
+	}
+	return AddPoolDataToSheet(f, pools, sanitize, titlePrefix)
+}
+
 // poolDrawColumnCount is the fixed number of columns on the Pool Draw sheet.
 // Columns B, D, F (indices 2, 4, 6) are the three pool columns.
 const poolDrawColumnCount = 3

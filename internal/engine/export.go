@@ -97,27 +97,18 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
-	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
-	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
-	// steps and order to internal/export.BuildResultsWorkbook.
-	if _, err := RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches); err != nil {
-		return nil, err
-	}
-
 	// bc-pnum A8: a playoffs-only competition never has a pools.csv (its
 	// numbers are participant order under the prefix, composed on read, see
-	// NumberedParticipantsFor), so the pipeline above fed CreateNamesWithPoolToPrint
-	// (its step 6) an empty pools slice, which is a no-op that deletes the
-	// template Names-to-Print sheet and creates nothing. Below feeds the SAME
-	// two auxiliary sheets (Names to Print and, further down, Tags) the
-	// numbered roster instead, so a knockout-only competition's printed
-	// materials are not silently blank. The Data sheet also needs real rows
-	// for these players FIRST, because CreateNamesToPrint links its position
-	// cell to one by FORMULA (the same mechanism the pooled path uses); the
-	// pipeline's own step 1 (AddPoolDataToSheet) wrote only the column
-	// headers for this competition, since pools was empty, so there is
-	// nothing here to conflict with re-populating it via the CLI's own
-	// flat-roster writer.
+	// NumberedParticipantsFor), so feeding the shared pipeline below the
+	// (empty) pools slice alone would make its Data and Names-to-Print steps
+	// no-ops -- a knockout-only competition's printed materials would be
+	// silently blank. Computed HERE, before the pipeline call, and threaded
+	// through as namesToPrintPlayers so RenderCompetitionWorkbook's own
+	// step 1/step 6 branch is the ONE place that decides which writer runs
+	// for each sheet (see that function's doc comment): this used to be a
+	// SECOND write of the Data sheet, run here after the pipeline returned,
+	// which is why "Data added to spreadsheet" printed twice for this one
+	// shape.
 	var namesToPrintPlayers []helper.Player
 	if comp.EffectiveFormat() == state.CompFormatPlayoffs && len(pools) == 0 && comp.NumberPrefix != "" {
 		numbered, npErr := e.NumberedParticipantsFor(comp)
@@ -125,8 +116,13 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 			return nil, npErr
 		}
 		namesToPrintPlayers = numbered
-		playerCoords := helper.AddPlayerDataToSheet(f, numbered, comp.EffectiveWithZekkenName(), comp.Name)
-		helper.CreateNamesToPrint(f, numbered, comp.EffectiveWithZekkenName(), courts, playerCoords)
+	}
+
+	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
+	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
+	// steps and order to internal/export.BuildResultsWorkbook.
+	if _, err := RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, namesToPrintPlayers); err != nil {
+		return nil, err
 	}
 
 	// Tags sheet, blank-template-export-only extra: pass publicURL so numbered

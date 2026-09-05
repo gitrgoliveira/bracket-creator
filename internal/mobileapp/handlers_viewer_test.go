@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -21,12 +22,18 @@ import (
 // display / streaming overlay / viewer card render the prefix at all
 // (participants.csv does NOT persist Number).
 func TestMergePoolNumbersIntoPlayers(t *testing.T) {
+	// bc-pnum A8/[review]: the real engine, not a hand-rolled stub, so this
+	// unit test exercises the SAME NumberPlayoffsOnlyParticipants the viewer
+	// handler threads through -- a stub reimplementing the derivation here
+	// would be exactly the second independent composition the fix removed.
+	// The playoffs-only branch never touches the store, so a nil one is safe.
+	eng := engine.New(nil)
 	t.Run("no-op when numberPrefix is empty", func(t *testing.T) {
 		comp := &state.Competition{
 			Players: []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
@@ -40,7 +47,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Format:       state.CompFormatMixed,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 
@@ -54,7 +61,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p3", Name: "Santos Ana", Dojo: "Dojo Santos Ana"},
 			},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number)
 		assert.Equal(t, "D2", comp.Players[1].Number)
 		assert.Equal(t, "D3", comp.Players[2].Number)
@@ -74,7 +81,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
 			},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number)
 		assert.Equal(t, "D2", comp.Players[1].Number)
 	})
@@ -98,7 +105,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Format:       state.CompFormatPlayoffs,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "STALE", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayers(eng, comp, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number, "must overwrite a stale Number with the current prefix, not preserve it")
 	})
 
@@ -120,7 +127,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Suzuki", Number: "K3", Dojo: "Dojo Suzuki"},
 			}},
 		}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K3", comp.Players[1].Number)
 		assert.Equal(t, "K2", comp.Players[2].Number)
@@ -138,7 +145,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			{Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"},
 			{Name: "Suzuki", Number: "K2", Dojo: "Dojo Suzuki"},
 		}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K2", comp.Players[1].Number)
 	})
@@ -149,7 +156,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
 	})
 
@@ -170,7 +177,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			{Name: "Taro", Dojo: "Dojo Kyoto", Number: "K3"},
 			{Name: "Taro", Dojo: "Dojo Osaka", Number: "K11"},
 		}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "K3", comp.Players[0].Number, "the Kyoto Taro must get his own number, not the Osaka Taro's")
 		assert.Equal(t, "K11", comp.Players[1].Number, "the Osaka Taro must get his own number, not the Kyoto Taro's")
 	})
@@ -181,7 +188,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayers(eng, comp, pools)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 }

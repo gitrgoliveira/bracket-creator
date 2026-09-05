@@ -134,7 +134,16 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	// bookkeeping can make wider than the actual A column) spilled 82 blank
 	// overflow pages in the reproduction that surfaced this. row-1 is the
 	// last row actually written (the loop above leaves row one past it).
-	SetPrintArea(f, sheetName, 1, row-1)
+	//
+	// Guarded on row > 1 (bc-pnum [review]): with zero players (reachable --
+	// an export of a mixed competition still in setup, before any pool has a
+	// member) the loop above never runs and row stays at its initial 1, so
+	// row-1 is 0 and SetPrintArea would define the invalid range
+	// "$A$1:$A$0" (row 0 does not exist). No players means nothing was
+	// written, so there is nothing to scope a print area to at all.
+	if row > 1 {
+		SetPrintArea(f, sheetName, 1, row-1)
+	}
 
 	f.SetActiveSheet(index)
 	return nil

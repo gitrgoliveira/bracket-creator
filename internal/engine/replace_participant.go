@@ -3,6 +3,8 @@ package engine
 import (
 	"fmt"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -101,15 +103,20 @@ func (e *Engine) ReplaceParticipantInDraw(
 			}
 			// Dojo-conflict detection on affected pools after the swap.
 			// Warn but do not block, the operator decides whether to proceed.
+			// Dojos are compared under the roster's identity normalisation
+			// (case, diacritics, whitespace), the same rule the draw itself
+			// applies through helper.dojoKey, so "Mumeishi" and "mumeishi"
+			// count as one dojo here exactly as they do when the pools are
+			// formed; a raw string compare under-reported the conflict.
 			for _, pool := range pools {
 				if !affectedPools[pool.PoolName] {
 					continue
 				}
 				dojoCount := map[string]int{}
 				for _, p := range pool.Players {
-					dojoCount[p.Dojo]++
+					dojoCount[helper.NormalizeParticipantName(p.Dojo)]++
 				}
-				if count := dojoCount[newDojo]; count > 1 {
+				if count := dojoCount[helper.NormalizeParticipantName(newDojo)]; count > 1 {
 					warnings = append(warnings, fmt.Sprintf("dojo conflict: %q appears %d times in %s", newDojo, count, pool.PoolName))
 				}
 			}

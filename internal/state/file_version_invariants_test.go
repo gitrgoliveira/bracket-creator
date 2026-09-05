@@ -145,3 +145,18 @@ func TestFileVersionAdvancesOnBracketWrite(t *testing.T) {
 	assert.Equal(t, v2, store.FileVersion(compID, "bracket.json"),
 		"a not-found update writes nothing, so it must not bump the version")
 }
+
+// TestFileVersionAdvancesOnSaveCompetition pins that saving the competition
+// record bumps config.md's version counter: the standings cache derives its
+// scoring mode and format from that record, and a writer for a file a cache
+// derives from must bump after the bytes land.
+func TestFileVersionAdvancesOnSaveCompetition(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	compID := "config-version"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: compID}))
+	before := store.FileVersion(compID, "config.md")
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: compID, Courts: []string{"A"}}))
+	after := store.FileVersion(compID, "config.md")
+	require.Greater(t, after, before, "SaveCompetition must bump config.md's FileVersion after the write")
+}

@@ -24,9 +24,15 @@ type standingsTokens struct {
 	poolMatchesMtime   int64
 	overridesMtime     int64
 	poolsMtime         int64
+	configMtime        int64
 	poolMatchesVersion uint64
 	overridesVersion   uint64
 	poolsVersion       uint64
+	// config.md is an input too: computeStandingsFrom reads the competition
+	// record for the scoring mode (Engi, TeamSize) and markTiedStandings for
+	// the format, so a settings save that flips one of those must invalidate
+	// a live entry just as a pools.csv or pool-matches.csv write does.
+	configVersion uint64
 }
 
 type standingsCacheEntry struct {

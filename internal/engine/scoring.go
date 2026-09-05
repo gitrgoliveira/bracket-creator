@@ -1302,9 +1302,11 @@ func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
 		poolMatchesMtime:   e.store.FileMtime(compId, "pool-matches.csv"),
 		overridesMtime:     e.store.FileMtime(compId, "overrides.json"),
 		poolsMtime:         e.store.FileMtime(compId, "pools.csv"),
+		configMtime:        e.store.FileMtime(compId, "config.md"),
 		poolMatchesVersion: e.store.FileVersion(compId, "pool-matches.csv"),
 		overridesVersion:   e.store.FileVersion(compId, "overrides.json"),
 		poolsVersion:       e.store.FileVersion(compId, "pools.csv"),
+		configVersion:      e.store.FileVersion(compId, "config.md"),
 	}
 }
 

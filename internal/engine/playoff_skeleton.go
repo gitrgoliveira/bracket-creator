@@ -293,6 +293,7 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 	// with a caller), and only p.Name is read into the returned names slice
 	// below. Setting Number on it would be pure waste -- traced end to end,
 	// nothing downstream of this function's return value can ever see it.
+	//
 	// bc-drwx item 13 (noted, not changed): this re-runs the full
 	// StandardSeeding pass -- including delayDojoMeetings -- on every
 	// pre-draw export (an operator can preview/re-export the PDF skeleton

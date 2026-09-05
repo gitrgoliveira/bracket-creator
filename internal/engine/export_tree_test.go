@@ -500,13 +500,27 @@ func captureStdout(t *testing.T, fn func()) string {
 	require.NoError(t, err)
 	os.Stdout = w
 	defer func() { os.Stdout = old }()
+	defer r.Close()
+
+	// [review] nit (a): drain the pipe CONCURRENTLY, started before fn()
+	// runs. A pipe's kernel buffer is bounded (64 KiB on Linux); fn() used
+	// to run to completion before anything read from r, so an export
+	// printing more than that in one call would block the writer forever --
+	// deadlocking the whole test binary, not just this test, since
+	// captureStdout exists specifically to count finishDataSheet's stdout
+	// line. The goroutine delivers the fully-drained buffer on `copied` once
+	// fn() has returned and w.Close() below gives io.Copy its EOF.
+	var buf bytes.Buffer
+	copied := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&buf, r)
+		copied <- copyErr
+	}()
 
 	fn()
 
 	require.NoError(t, w.Close())
-	var buf bytes.Buffer
-	_, err = io.Copy(&buf, r)
-	require.NoError(t, err)
+	require.NoError(t, <-copied)
 	return buf.String()
 }
 

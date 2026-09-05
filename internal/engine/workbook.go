@@ -222,15 +222,15 @@ func RenderCompetitionWorkbook(
 		// error. EffectiveFormat is why that shape is now caught here instead.
 		return nil, ErrBracketDrawMismatch
 	}
-	// The bare "Tree" sheet is a layout scaffold, never output. Delete it
-	// whether it was copied into pages above or left unused (a format with no
-	// knockout), so no blank tree page ever reaches the workbook or the
-	// printed booklet.
+	// 5. The bare "Tree" sheet is a layout scaffold, never output. Delete it
+	//    whether it was copied into pages above or left unused (a format with
+	//    no knockout), so no blank tree page ever reaches the workbook or the
+	//    printed booklet.
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
 		return nil, fmt.Errorf("render workbook: delete tree template sheet: %w", err)
 	}
 
-	// 5. Names to Print sheet, one per shiaijo. Clamps the allocation to the
+	// 6. Names to Print sheet, one per shiaijo. Clamps the allocation to the
 	//    pool phase's own shiaijo count internally, as step 3 does. Same
 	//    namesToPrintPlayers branch as step 1: a playoffs-only export routes
 	//    through CreateNamesToPrint over the numbered roster instead of
@@ -242,7 +242,7 @@ func RenderCompetitionWorkbook(
 		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
 	}
 
-	// 6. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
+	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted
 	//    when the competition runs the kachinuki team-match format AND has
 	//    at least one match with bout data. The renderer is a no-op for
 	//    empty input, so this is safe even when the format is fixed.

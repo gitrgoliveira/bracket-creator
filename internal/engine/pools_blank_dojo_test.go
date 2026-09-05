@@ -146,3 +146,63 @@ func TestGenerateDraw_RefusesBlankDojoRoster_Swiss(t *testing.T) {
 	require.NoError(t, merr)
 	assert.Empty(t, matches, "nothing may be persisted for a refused draw")
 }
+
+// TestGenerateDraw_RefusesOneColumnLegacyRoster pins bc-drwx item 7: a
+// participants.csv with NO dojo column at all (every row is a bare name,
+// with no comma) must be refused at the SAME draw pre-flight as an explicit
+// blank dojo ("Name,"), not silently accepted as one giant dojo named "NA".
+//
+// helper.CreatePlayersFromRecords' tolerant (requireDojo=false) non-zekken
+// branch -- the one state.LoadParticipants uses -- used to default a MISSING
+// dojo column to the literal string "NA" while leaving an EXPLICIT blank
+// column ("Name,") as "". That asymmetry meant a legacy, one-column roster
+// (the shape a very old export, or a hand-typed name-only list, produces)
+// sailed straight past ValidateNoBlankDojo -- "NA" is non-blank -- and drew
+// as one giant "NA" dojo, spreading every competitor as if they shared a
+// single real dojo, while the exact same missing-dojo intent spelled with a
+// trailing comma was correctly refused. The fix makes a missing column
+// yield "" too, so both spellings of "no dojo here" are caught the same way
+// by the same pre-flight, and the operator sees one consistent refusal
+// naming every affected row instead of a silently-merged dojo.
+//
+// Written DIRECTLY to participants.csv, bypassing state.SaveParticipants'
+// own write-time guard, for the same reason writeBlankDojoRosterCSV is (see
+// TestGenerateDraw_RefusesBlankDojoRoster's own doc comment): the write
+// floor cannot protect a file that predates it or was hand-edited, so the
+// read-then-draw pipeline must catch this on its own.
+func TestGenerateDraw_RefusesOneColumnLegacyRoster(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "one-column-legacy-roster"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+	})
+
+	// Legacy, UUID-less, non-zekken, ONE-COLUMN CSV: no comma anywhere, so
+	// every row takes CreatePlayersFromRecords' len(line) < 2 branch.
+	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
+	csv := "Alice\n" +
+		"Bob\n" +
+		"Carol\n" +
+		"Dave\n" +
+		"Erin\n" +
+		"Frank\n" +
+		"Grace\n" +
+		"Heidi\n"
+	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
+
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err, "a one-column roster must be refused, not drawn as one giant \"NA\" dojo")
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve, "must surface as a *engine.ValidationError (-> HTTP 400 at POST /competitions/:id/generate-draw)")
+	assert.Contains(t, ve.Error(), "Alice", "the error must name the offending players so the operator knows which rows to repair")
+	assert.NotContains(t, ve.Error(), "NA", "the missing column must not be papered over with a fake dojo string")
+
+	comp, lerr := store.LoadCompetition(compID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "a rejected draw must not transition the competition")
+	pools, perr := store.LoadPools(compID)
+	require.NoError(t, perr)
+	assert.Empty(t, pools, "nothing may be persisted for a refused draw")
+}

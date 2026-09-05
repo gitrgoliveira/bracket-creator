@@ -109,11 +109,15 @@ func TestCreateTagsSheet(t *testing.T) {
 // TestCreateTagsSheet_ClippingFix pins bc-pnum A9: rendered with LibreOffice,
 // a 4+ character tag (now reachable everywhere the prefix can be up to 3
 // characters) used to be sheared at the page edge and spilled blank overflow
-// pages. A unit test cannot rasterise a PDF, so this pins the three things a
-// unit test CAN see directly: the narrowed column width, the ShrinkToFit
-// flag on the tag style, and a print area confining the sheet to what was
-// actually written (see the orchestrator's browser/LibreOffice render check
-// for the rasterised confirmation).
+// pages. A unit test cannot rasterise a PDF, so this pins the things a unit
+// test CAN see directly: the narrowed column width, a non-clipping style on
+// the tag, and a print area confining the sheet to what was actually written
+// (see the orchestrator's browser/LibreOffice render check for the
+// rasterised confirmation). "KOR19" carries a three-letter prefix, so since
+// the bc-pnum stacked-number ruling it takes the WRAP style (letters over
+// digits) rather than the shrink style; a single-letter prefix's own
+// clipping fix (ShrinkToFit) is pinned separately in
+// TestCreateTagsSheet_StackedNumberLayout.
 func TestCreateTagsSheet_ClippingFix(t *testing.T) {
 	f := excelize.NewFile()
 	pools := []Pool{
@@ -141,8 +145,8 @@ func TestCreateTagsSheet_ClippingFix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStyle: %v", err)
 	}
-	if style.Alignment == nil || !style.Alignment.ShrinkToFit {
-		t.Errorf("expected the tag style to set ShrinkToFit, got %+v", style.Alignment)
+	if style.Alignment == nil || !style.Alignment.WrapText {
+		t.Errorf("expected the three-letter-prefix tag style to set WrapText, got %+v", style.Alignment)
 	}
 
 	dn := f.GetDefinedName()
@@ -219,10 +223,11 @@ func TestCreateTagsSheet_EmptyNumber(t *testing.T) {
 
 // TestCreateTagsSheet_QRSitsBelowTheNumber pins the QR placement the bc-pnum
 // review settled by rendering: the code sits in the bottom-left band of the
-// tag, below the number, at 0.45 scale (about 2.4 cm on paper). The old
-// placement (OffsetX 57, OffsetY 242 at the number's vertical centre) assumed
-// white space left of a short number; a shrink-to-fit "KOR20" fills the
-// column and the code landed on its first letter.
+// tag, below the number, at 0.6 scale (about 3.2 cm on paper), in both the
+// single-line and stacked number layouts. The old placement (OffsetX 57,
+// OffsetY 242 at the number's vertical centre) assumed white space left of a
+// short number; a shrink-to-fit "KOR20" fills the column and the code landed
+// on its first letter.
 func TestCreateTagsSheet_QRSitsBelowTheNumber(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
@@ -241,10 +246,101 @@ func TestCreateTagsSheet_QRSitsBelowTheNumber(t *testing.T) {
 	if got == nil {
 		t.Fatal("QR picture has no graphic options")
 	}
-	if got.OffsetX != 12 || got.OffsetY != 440 {
-		t.Errorf("QR must sit in the bottom-left band below the number (OffsetX 12, OffsetY 440 px), got (%d, %d)", got.OffsetX, got.OffsetY)
+	if got.OffsetX != 8 || got.OffsetY != 415 {
+		t.Errorf("QR must sit in the bottom-left band below the number (OffsetX 8, OffsetY 415 px), got (%d, %d)", got.OffsetX, got.OffsetY)
 	}
-	if got.ScaleX != 0.45 || got.ScaleY != 0.45 {
-		t.Errorf("QR scale must be 0.45 (about 2.4 cm on paper), got (%v, %v)", got.ScaleX, got.ScaleY)
+	if got.ScaleX != 0.6 || got.ScaleY != 0.6 {
+		t.Errorf("QR scale must be 0.6 (about 3.2 cm on paper), got (%v, %v)", got.ScaleX, got.ScaleY)
 	}
+}
+
+// TestCreateTagsSheet_StackedNumberLayout pins the bc-pnum operator ruling: a
+// competition number prefix of more than one letter prints as TWO stacked
+// lines (letters over digits), decided once for the whole sheet from the
+// first numbered player, while a one-letter prefix keeps the single-line
+// layout and value.
+func TestCreateTagsSheet_StackedNumberLayout(t *testing.T) {
+	t.Run("two-letter prefix stacks", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer func() { _ = f.Close() }()
+		pools := []Pool{{PoolName: "Pool A", Players: []Player{
+			{Name: "Alice", Dojo: "Seishin", Number: "KO20"},
+			{Name: "Bob", Dojo: "Seishin", Number: "KO21"},
+		}}}
+		if err := CreateTagsSheet(f, pools, ""); err != nil {
+			t.Fatalf("CreateTagsSheet: %v", err)
+		}
+		got, err := f.GetCellValue(SheetTags, "A1")
+		if err != nil {
+			t.Fatalf("GetCellValue: %v", err)
+		}
+		if got != "KO\n20" {
+			t.Errorf("expected stacked value %q, got %q", "KO\n20", got)
+		}
+
+		styleID, err := f.GetCellStyle(SheetTags, "A1")
+		if err != nil {
+			t.Fatalf("GetCellStyle: %v", err)
+		}
+		style, err := f.GetStyle(styleID)
+		if err != nil {
+			t.Fatalf("GetStyle: %v", err)
+		}
+		if style.Alignment == nil || !style.Alignment.WrapText {
+			t.Errorf("expected the stacked style to set WrapText, got %+v", style.Alignment)
+		}
+		if style.Alignment.ShrinkToFit {
+			t.Errorf("expected the stacked style NOT to shrink to fit, got %+v", style.Alignment)
+		}
+		if style.Alignment.Vertical != "top" {
+			t.Errorf("expected the stacked style to align top (free band for the QR), got %q", style.Alignment.Vertical)
+		}
+		if style.Font == nil || style.Font.Size != 160 {
+			t.Errorf("expected the stacked style at 160pt, got %+v", style.Font)
+		}
+
+		// The SECOND player's own digits reach the cell too: the sheet-wide
+		// decision is stacked, but each tag still carries its own number.
+		got3, err := f.GetCellValue(SheetTags, "A3")
+		if err != nil {
+			t.Fatalf("GetCellValue: %v", err)
+		}
+		if got3 != "KO\n21" {
+			t.Errorf("expected stacked value %q, got %q", "KO\n21", got3)
+		}
+	})
+
+	t.Run("one-letter prefix stays single-line", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer func() { _ = f.Close() }()
+		pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "K20"}}}}
+		if err := CreateTagsSheet(f, pools, ""); err != nil {
+			t.Fatalf("CreateTagsSheet: %v", err)
+		}
+		got, err := f.GetCellValue(SheetTags, "A1")
+		if err != nil {
+			t.Fatalf("GetCellValue: %v", err)
+		}
+		if got != "K20" {
+			t.Errorf("expected single-line value %q, got %q", "K20", got)
+		}
+
+		styleID, err := f.GetCellStyle(SheetTags, "A1")
+		if err != nil {
+			t.Fatalf("GetCellStyle: %v", err)
+		}
+		style, err := f.GetStyle(styleID)
+		if err != nil {
+			t.Fatalf("GetStyle: %v", err)
+		}
+		if style.Alignment == nil || style.Alignment.WrapText {
+			t.Errorf("expected the single-line style NOT to set WrapText, got %+v", style.Alignment)
+		}
+		if style.Alignment == nil || !style.Alignment.ShrinkToFit {
+			t.Errorf("expected the single-line style to shrink to fit, got %+v", style.Alignment)
+		}
+		if style.Font == nil || style.Font.Size != 250 {
+			t.Errorf("expected the single-line style at 250pt, got %+v", style.Font)
+		}
+	})
 }

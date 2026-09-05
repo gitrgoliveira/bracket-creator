@@ -36,6 +36,48 @@ func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 	return start + len(players)
 }
 
+// splitNumberLines splits a competitor number into its leading non-digit
+// prefix run (letters) and the remaining digits, and reports whether the
+// pair should be PRINTED as two stacked lines rather than one: only when the
+// prefix is more than one character AND there are digits to put below it
+// (operator ruling, bc-pnum: "KO" over "20", "KOR" over "120", but "K20"
+// stays on one line). A bare digit string (no prefix, the empty-prefix
+// numbering AssignPlayerNumbers also supports) and a prefix with no digits
+// at all (unreachable via AssignPlayerNumbers, which always appends a
+// counter, but guarded here rather than assumed) both stay single-line too.
+//
+// This is the ONE place that decides the split, for both print sites (the
+// Tags sheet, internal/helper/excel_tags.go, and the Names to Print number
+// cell, printNameEntries in excel.go): a change to what counts as "stacked"
+// only has to change here.
+func splitNumberLines(number string) (letters, digits string, stacked bool) {
+	i := 0
+	for i < len(number) && (number[i] < '0' || number[i] > '9') {
+		i++
+	}
+	letters, digits = number[:i], number[i:]
+	stacked = len(letters) > 1 && digits != ""
+	return letters, digits, stacked
+}
+
+// firstNumberedSplit decides a SHEET's entire number layout from a single
+// representative player: every competitor on one sheet shares the
+// competition's one prefix (AssignPlayerNumbers/NumberPools assign exactly
+// one prefix for the whole draw), so scanning every player for the same
+// answer would be redundant work for the same result. ok is false when no
+// player in players carries a Number at all (an unnumbered competition, or
+// an empty sheet), in which case callers keep the single-line layout.
+func firstNumberedSplit(players []Player) (letters, digits string, stacked, ok bool) {
+	for _, p := range players {
+		if p.Number == "" {
+			continue
+		}
+		letters, digits, stacked = splitNumberLines(p.Number)
+		return letters, digits, stacked, true
+	}
+	return "", "", false, false
+}
+
 // NumberPools numbers every competitor across pools with a single counter that
 // runs THROUGH the pools in their final order: with prefix "K" and pools of
 // four, K1-K4 are the first pool, K5-K8 the second. The numbering is therefore

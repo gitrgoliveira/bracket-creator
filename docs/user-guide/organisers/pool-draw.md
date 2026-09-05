@@ -72,6 +72,8 @@ This section covers pooled formats (mixed and league), where numbers follow the 
 
 Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
 
+When a competition's number prefix is more than one letter, the printed tags and the Names to Print cards show the letters above the digits, for example KO above 20. A one-letter prefix stays on one line, for example K20.
+
 Because the numbers follow the finished draw, they are only fixed once you generate it. Until then the participants panel shows a provisional number, which changes if the roster or the draw changes.
 
 You can change the number prefix at any time, including after the draw is generated or the competition has started. Saving the new prefix renumbers every competitor immediately; it does not change who is in which pool or who plays whom. If you have already printed tags, reprint them after changing the prefix, because the numbers on the old tags no longer match.

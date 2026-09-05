@@ -25,6 +25,7 @@ const (
 	styleText                 styleKey = "text"
 	styleNameID               styleKey = "name_id"
 	styleNameIDPosition       styleKey = "name_id_position"
+	styleNameIDPositionStack  styleKey = "name_id_position_stacked"
 	styleTime                 styleKey = "time"
 	styleDuration             styleKey = "duration"
 	styleUnlockedText         styleKey = "unlocked_text"
@@ -368,22 +369,57 @@ func getNameIDPositionStyle(f *excelize.File) int {
 }
 
 // buildNameIDPositionStyle creates a large, bold style for the position-number
-// row in "Names to Print" column A.  The font size matches the Tags sheet so
-// the number is clearly visible when printed.
+// row in "Names to Print" column A, for a one-letter (or empty) number
+// prefix that prints on a SINGLE line (bc-pnum operator ruling: "K20" stays
+// one line, "KO20" stacks -- see getNameIDPositionStackedStyle below). The
+// font size matches the Tags sheet so the number is clearly visible when
+// printed.
 //
-// ShrinkToFit (bc-pnum A9): a 4- or 5-character number (a prefix up to 3
-// characters plus a multi-digit counter, e.g. "KOR19") rasterised
-// byte-identically to shorter numbers in the same column ("KOR10".."KOR19"
-// were indistinguishable in the reproduction) because the cell clipped
-// rather than shrinking the glyphs to fit. No width/font change is needed
-// here (unlike the Tags sheet): this column's width already comes from
-// setupNamesToPrintLayout, so this flag alone is the fix.
+// ShrinkToFit (bc-pnum A9): a 4- or 5-character number (a one-letter prefix
+// plus a multi-digit counter, e.g. "K1234") rasterised byte-identically to
+// shorter numbers in the same column ("K1230".."K1234" were indistinguishable
+// in the reproduction) because the cell clipped rather than shrinking the
+// glyphs to fit. No width/font change is needed here (unlike the Tags
+// sheet): this column's width already comes from setupNamesToPrintLayout, so
+// this flag alone is the fix.
 func buildNameIDPositionStyle(f *excelize.File) int {
 	style := mustNewStyle(f, &excelize.Style{
 		Alignment: &excelize.Alignment{
 			Horizontal:  "center",
 			Vertical:    "center",
 			ShrinkToFit: true,
+		},
+		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 100},
+		Border: []excelize.Border{
+			{Type: "top", Color: "000000", Style: 2},
+			{Type: "bottom", Color: "000000", Style: 2},
+			{Type: "left", Color: "000000", Style: 2},
+			{Type: "right", Color: "000000", Style: 2},
+		},
+	})
+	return style
+}
+
+func getNameIDPositionStackedStyle(f *excelize.File) int {
+	return getCachedStyle(f, styleNameIDPositionStack, buildNameIDPositionStackedStyle)
+}
+
+// buildNameIDPositionStackedStyle is the wrap-text counterpart of
+// buildNameIDPositionStyle above, used when the sheet's number prefix is
+// more than one letter (bc-pnum operator ruling): the position cell then
+// holds a two-line LEFT/MID formula (letters over digits, see
+// printNameEntries in excel.go) instead of a plain cross-sheet reference, so
+// it needs WrapText rather than ShrinkToFit. Two lines at 100pt fit the
+// 270pt row height (setupNamesToPrintLayout's SetRowHeight), and up to three
+// letters at 100pt fit the 40-unit column (namesToPrintNumberColWidth) --
+// the same margin that lets a lone one-letter prefix's own long number
+// shrink-to-fit above.
+func buildNameIDPositionStackedStyle(f *excelize.File) int {
+	style := mustNewStyle(f, &excelize.Style{
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "center",
+			WrapText:   true,
 		},
 		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 100},
 		Border: []excelize.Border{

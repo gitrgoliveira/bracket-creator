@@ -149,7 +149,7 @@ A **Knockout only** competition numbers its competitors differently from a poole
 
 There is no pool draw to wait for, so a knockout-only competition's numbers are **final from setup**: each competitor's number is their prefix plus their position in the registration order, and it is shown that way from the moment the roster is entered, not as a provisional value that later changes. It changes only when the roster itself changes (an entry added, removed or reordered) or when you change the number prefix; generating or discarding the draw does not touch it, because there is no pool draw to fix an order at.
 
-Everything else about the prefix works the same as the pooled-format rule: you can set your own or leave it blank to derive one, change it at any time, and the printed tags carry these numbers the same way, with a reprint needed after a prefix change.
+Everything else about the prefix works the same as the pooled-format rule: you can set your own or leave it blank to derive one, change it at any time, and the printed tags carry these numbers the same way, with a reprint needed after a prefix change. When the prefix is more than one letter, the printed tags and the Names to Print cards show the letters above the digits, for example KO above 20; a one-letter prefix stays on one line, for example K20.
 
 ## Byes
 

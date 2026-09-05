@@ -46,22 +46,14 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	// into blank overflow pages. 88 units fits the printable width.
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 88))
 
-	style, err := f.NewStyle(&excelize.Style{
-		Alignment: &excelize.Alignment{
-			Horizontal: "center",
-			Vertical:   "center",
-			// ShrinkToFit is the second half of the same fix: even at 88
-			// units, a 5-character tag ("KOR19") at 250pt bold can still
-			// overflow the column, and shrinking the font to fit rather than
-			// clipping is what actually keeps every character of a long tag
-			// visible and readable at the desk.
-			ShrinkToFit: true,
-		},
-		Font: &excelize.Font{Family: "Calibri",
-			Bold: true,
-			Size: 250,
-		},
-	})
+	// The sheet's number layout is decided ONCE, from the first numbered
+	// player: every competitor on this sheet shares the competition's one
+	// prefix (bc-pnum operator ruling -- a prefix of more than one letter
+	// prints as two stacked lines, "KO" over "20"; a one-letter prefix stays
+	// on one line, "K20"). See splitNumberLines/firstNumberedSplit
+	// (numbers.go) for the single owner of that decision.
+	_, _, stacked, _ := firstNumberedSplitInPools(pools)
+	style, err := tagNumberStyle(f, stacked)
 	if err != nil {
 		return fmt.Errorf("failed to create style: %w", err)
 	}
@@ -79,6 +71,18 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 			// considered for this bead and rejected (bc-pnum).
 			tag := player.Number
 
+			// Stacked layout (sheet-wide decision above) writes this
+			// PLAYER's own letters/digits split as two lines; the prefix
+			// is the same for every player on the sheet, only the digits
+			// differ. An unnumbered player's tag stays empty either way
+			// (splitNumberLines("") yields no digits, so nothing is
+			// stacked onto it).
+			cellValue := tag
+			if stacked && tag != "" {
+				letters, digits, _ := splitNumberLines(tag)
+				cellValue = letters + "\n" + digits
+			}
+
 			// Generate QR once per player; reuse PNG for both tag copies.
 			// playerTagQRPNG returns nil,nil for empty inputs, so no guard needed.
 			var qrPNG []byte
@@ -90,7 +94,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 			// Write the same tag twice (top half and bottom half of A4 = 2 per page).
 			for range 2 {
 				cell := fmt.Sprintf("A%d", row)
-				if err := f.SetCellValue(sheetName, cell, tag); err != nil {
+				if err := f.SetCellValue(sheetName, cell, cellValue); err != nil {
 					return fmt.Errorf("failed to set cell value: %w", err)
 				}
 				if err := f.SetCellStyle(sheetName, cell, cell, style); err != nil {
@@ -100,26 +104,26 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 				handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 409))
 
 				if len(qrPNG) > 0 {
-					// Bottom-left corner of the tag, BELOW the number (OffsetX/Y in px at
-					// 96 DPI). The QR used to sit left of the number at its vertical
-					// centre, in white space that only a short number left free: the
-					// number now shrinks to fit the 88-unit column, so a four- or
-					// five-character number ("KO20", "KOR20") fills the width and the
-					// code landed on top of the first letter. The vertical band is free
-					// instead: the row is 409 pt ≈ 545 px and the shrunk glyphs occupy
-					// roughly the middle 280 px, leaving ≈130 px below them. A 90 px QR
-					// (200 px × 0.45, about 2.4 cm on paper) at OffsetY 440 sits inside
-					// that band clear of any glyph for every prefix length; rendered
-					// with LibreOffice for K20, KO20 and KOR20 (bc-pnum review).
+					// Bottom-left corner of the tag, in BOTH the single-line and
+					// stacked layouts (bc-pnum operator ruling on stacked
+					// prefixes). Single-line stays vertical-top now (not
+					// centred), so the whole band below the glyphs is free;
+					// stacked is two lines at 160pt, and the centred digits
+					// line starts no further left than x≈130px, clear of a
+					// 120px QR anchored at the column's left edge. A 120 px QR
+					// (200 px × 0.6, about 3.2 cm on paper) at OffsetX 8,
+					// OffsetY 415 sits inside that band clear of any glyph for
+					// every prefix length; rendered with LibreOffice for K20,
+					// KO20, KOR20 and KO120 (bc-pnum review).
 					if err := f.AddPictureFromBytes(sheetName, cell, &excelize.Picture{
 						Extension: ".png",
 						File:      qrPNG,
 						Format: &excelize.GraphicOptions{
 							PrintObject: &printObj,
-							OffsetX:     12,
-							OffsetY:     440,
-							ScaleX:      0.45,
-							ScaleY:      0.45,
+							OffsetX:     8,
+							OffsetY:     415,
+							ScaleX:      0.6,
+							ScaleY:      0.6,
 							Positioning: "oneCell",
 						},
 					}); err != nil {
@@ -153,4 +157,53 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 
 	f.SetActiveSheet(index)
 	return nil
+}
+
+// firstNumberedSplitInPools flattens pools and delegates to
+// firstNumberedSplit: the Tags sheet holds every pool's players in one
+// sheet, so the FIRST numbered player across all of them decides the whole
+// sheet's layout (bc-pnum).
+func firstNumberedSplitInPools(pools []Pool) (letters, digits string, stacked, ok bool) {
+	for _, pool := range pools {
+		if letters, digits, stacked, ok := firstNumberedSplit(pool.Players); ok {
+			return letters, digits, stacked, true
+		}
+	}
+	return "", "", false, false
+}
+
+// tagNumberStyle builds the Tags sheet's number-cell style: stacked (a
+// prefix of more than one letter, "KO" over "20") wraps the letters+digits
+// value onto two lines at 160pt, which fits Excel's 409pt row-height cap and
+// keeps up to three letters within the 88-unit column; single-line (a
+// one-letter prefix, "K20") keeps the existing 250pt ShrinkToFit behaviour.
+// Both are vertical-top rather than centred, so the whole band below the
+// glyphs stays free for the QR (bc-pnum operator ruling).
+func tagNumberStyle(f *excelize.File, stacked bool) (int, error) {
+	if stacked {
+		return f.NewStyle(&excelize.Style{
+			Alignment: &excelize.Alignment{
+				Horizontal: "center",
+				Vertical:   "top",
+				WrapText:   true,
+			},
+			Font: &excelize.Font{Family: "Calibri", Bold: true, Size: 160},
+		})
+	}
+	return f.NewStyle(&excelize.Style{
+		Alignment: &excelize.Alignment{
+			Horizontal: "center",
+			Vertical:   "top",
+			// ShrinkToFit is the second half of the same fix: even at 88
+			// units, a 5-character tag ("KOR19") at 250pt bold can still
+			// overflow the column, and shrinking the font to fit rather than
+			// clipping is what actually keeps every character of a long tag
+			// visible and readable at the desk.
+			ShrinkToFit: true,
+		},
+		Font: &excelize.Font{Family: "Calibri",
+			Bold: true,
+			Size: 250,
+		},
+	})
 }

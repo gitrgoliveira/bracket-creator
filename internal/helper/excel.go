@@ -1868,7 +1868,20 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 
 func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord) {
 	setupNamesToPrintLayout(f, sheetName)
+
+	// The sheet's number layout is decided ONCE, from the first numbered
+	// player on it: every competitor on this sheet shares the competition's
+	// one prefix (bc-pnum operator ruling -- a prefix of more than one
+	// letter prints as two stacked lines, "KO" over "20"; a one-letter
+	// prefix keeps the plain cross-sheet reference on one line, "K20"). See
+	// splitNumberLines/firstNumberedSplit (numbers.go) for the single owner
+	// of that decision.
+	letters, _, stacked, _ := firstNumberedSplit(players)
+	prefixLen := len(letters)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
+	if stacked {
+		nameIDPositionStyle = getNameIDPositionStackedStyle(f)
+	}
 	nameIDStyle := getNameIDStyle(f)
 
 	for i, player := range players {
@@ -1884,7 +1897,20 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 		// so it cannot silently come back.
 		coord := pCoords[playerCoordKey(player)]
 		if coord.numberCell != "" {
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, sheetRef(coord.sheetName, coord.numberCell)))
+			ref := sheetRef(coord.sheetName, coord.numberCell)
+			formula := ref
+			if stacked {
+				// LIVE formula, not a static split: the referenced Data-sheet
+				// cell is the number's one source of truth (bc-pnum), so the
+				// stacked display recomputes from it rather than caching a
+				// value that could drift. prefixLen is the sheet-wide
+				// decision's letter count; every player's own number shares
+				// that same prefix, so splitting THIS player's reference at
+				// the same offset is correct even though prefixLen was read
+				// off a different (the first numbered) player.
+				formula = fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, prefixLen, ref, prefixLen+1)
+			}
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 

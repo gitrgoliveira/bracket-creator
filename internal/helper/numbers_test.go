@@ -283,3 +283,65 @@ func TestNameInitials_AccentedAndOtherScripts(t *testing.T) {
 	assert.Equal(t, "E", DefaultNumberPrefix("Épée Open", nil), "the accented initial reaches the derived prefix")
 	assert.Equal(t, DefaultNumberPrefixFallback, DefaultNumberPrefix("剣道", nil), "no Latin letters: the fallback")
 }
+
+// TestSplitNumberLines pins the bc-pnum operator ruling: a competitor number
+// prints as two stacked lines only when its prefix is MORE THAN ONE letter
+// AND there are digits to put below it. A one-letter prefix, a bare digit
+// string (the empty-prefix numbering AssignPlayerNumbers also supports), and
+// a prefix with no digits at all each stay single-line.
+func TestSplitNumberLines(t *testing.T) {
+	tests := []struct {
+		name        string
+		number      string
+		wantLetters string
+		wantDigits  string
+		wantStacked bool
+	}{
+		{"one-letter prefix stays single-line", "K20", "K", "20", false},
+		{"two-letter prefix stacks", "KO20", "KO", "20", true},
+		{"three-letter prefix stacks with a three-digit number", "KOR120", "KOR", "120", true},
+		{"bare digits, no prefix", "20", "", "20", false},
+		{"one-letter prefix, no digits", "K", "K", "", false},
+		{"multi-letter prefix, no digits, stays single-line", "KO", "KO", "", false},
+		{"empty number", "", "", "", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			letters, digits, stacked := splitNumberLines(tc.number)
+			assert.Equal(t, tc.wantLetters, letters)
+			assert.Equal(t, tc.wantDigits, digits)
+			assert.Equal(t, tc.wantStacked, stacked)
+		})
+	}
+}
+
+// TestFirstNumberedSplit pins the "decide once per sheet" rule: the first
+// player carrying a Number stands for every player on the sheet, and an
+// unnumbered slice (or one with no players at all) reports ok=false so
+// callers keep the single-line layout rather than mis-reading a zero value
+// as "single-letter prefix".
+func TestFirstNumberedSplit(t *testing.T) {
+	t.Run("skips unnumbered players and uses the first numbered one", func(t *testing.T) {
+		players := []Player{
+			{Name: "Unnumbered"},
+			{Name: "Alice", Number: "KO20"},
+			{Name: "Bob", Number: "KO21"},
+		}
+		letters, digits, stacked, ok := firstNumberedSplit(players)
+		require.True(t, ok)
+		assert.Equal(t, "KO", letters)
+		assert.Equal(t, "20", digits)
+		assert.True(t, stacked)
+	})
+
+	t.Run("no numbered player reports ok=false", func(t *testing.T) {
+		players := []Player{{Name: "Alice"}, {Name: "Bob"}}
+		_, _, _, ok := firstNumberedSplit(players)
+		assert.False(t, ok)
+	})
+
+	t.Run("empty slice reports ok=false", func(t *testing.T) {
+		_, _, _, ok := firstNumberedSplit(nil)
+		assert.False(t, ok)
+	})
+}

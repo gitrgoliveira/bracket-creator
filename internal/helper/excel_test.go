@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -813,6 +814,105 @@ func TestCreateNamesToPrint_WithNumberCell(t *testing.T) {
 
 	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
 	assert.Equal(t, -1, idx, "template sheet should be deleted")
+}
+
+// TestCreateNamesToPrint_StackedNumberLayout pins the bc-pnum operator
+// ruling for the Names to Print number cell: a two-letter (or longer)
+// prefix's position cell holds a LIVE LEFT/MID split of the Data-sheet
+// reference (letters over digits) with the wrap style, while a one-letter
+// prefix keeps the plain cross-sheet reference with the shrink-to-fit style.
+// It also checks a three-letter prefix ("KOR"), the widest reachable, still
+// produces a two-line split rather than a third line (design item 4: three
+// letters at 100pt fit the 40-unit column width -- see
+// buildNameIDPositionStackedStyle's comment for the arithmetic).
+func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
+	t.Run("two-letter prefix: LEFT/MID formula and wrap style", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		f.NewSheet("Pool1")
+		f.NewSheet(SheetNamesToPrint)
+		handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "KO20"))
+		handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A3", "KO21"))
+
+		players := []Player{
+			{Name: "Player1", PoolPosition: 1, Number: "KO20"},
+			{Name: "Player2", PoolPosition: 2, Number: "KO21"},
+		}
+		pCoords := map[string]playerCellCoord{
+			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+			playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
+		}
+
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+
+		sheet := "Names to Print A"
+		formula, err := f.GetCellFormula(sheet, "A1")
+		require.NoError(t, err)
+		assert.Equal(t, `LEFT('Pool1'!$A$2,2)&CHAR(10)&MID('Pool1'!$A$2,3,99)`, formula)
+
+		valA1, err := f.CalcCellValue(sheet, "A1")
+		require.NoError(t, err)
+		assert.Equal(t, "KO\n20", valA1)
+
+		styleID, err := f.GetCellStyle(sheet, "A1")
+		require.NoError(t, err)
+		style, err := f.GetStyle(styleID)
+		require.NoError(t, err)
+		require.NotNil(t, style.Alignment)
+		assert.True(t, style.Alignment.WrapText, "stacked position style must set WrapText")
+		assert.False(t, style.Alignment.ShrinkToFit, "stacked position style must not shrink to fit")
+		assert.Equal(t, "center", style.Alignment.Horizontal)
+		assert.Equal(t, "center", style.Alignment.Vertical)
+	})
+
+	t.Run("one-letter prefix: plain reference and shrink style", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		f.NewSheet("Pool1")
+		f.NewSheet(SheetNamesToPrint)
+		handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "K1"))
+
+		players := []Player{{Name: "Player1", PoolPosition: 1, Number: "K1"}}
+		pCoords := map[string]playerCellCoord{
+			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+		}
+
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+
+		sheet := "Names to Print A"
+		formula, err := f.GetCellFormula(sheet, "A1")
+		require.NoError(t, err)
+		assert.Equal(t, `'Pool1'!$A$2`, formula, "one-letter prefix keeps the plain cross-sheet reference")
+
+		styleID, err := f.GetCellStyle(sheet, "A1")
+		require.NoError(t, err)
+		style, err := f.GetStyle(styleID)
+		require.NoError(t, err)
+		require.NotNil(t, style.Alignment)
+		assert.False(t, style.Alignment.WrapText, "single-line position style must not wrap")
+		assert.True(t, style.Alignment.ShrinkToFit, "single-line position style must shrink to fit")
+	})
+
+	t.Run("three-letter prefix still splits into exactly two lines", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		f.NewSheet("Pool1")
+		f.NewSheet(SheetNamesToPrint)
+		handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "KOR120"))
+
+		players := []Player{{Name: "Player1", PoolPosition: 1, Number: "KOR120"}}
+		pCoords := map[string]playerCellCoord{
+			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+		}
+
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+
+		sheet := "Names to Print A"
+		valA1, err := f.CalcCellValue(sheet, "A1")
+		require.NoError(t, err)
+		assert.Equal(t, "KOR\n120", valA1)
+		assert.Equal(t, 1, strings.Count(valA1, "\n"), "must be exactly two lines, never a third")
+	})
 }
 
 func TestCreateNamesToPrint_MultiCourt(t *testing.T) {

@@ -264,11 +264,17 @@ describe('buildXlsxBody seeded participant dojo', () => {
     ]);
   });
 
-  it('falls back to "NA" when a seeded participant has no dojo (matches rosterLine\'s fallback)', () => {
+  it('sends a blank dojo blank, never a substitute, on both the roster line and the seed (no fallbacks)', () => {
+    // The generator refuses a row without a dojo; substituting "NA" here
+    // used to hide that refusal and draw every dojo-less competitor as one
+    // fake dojo. Roster line and seed must agree so domain.SeedKey still
+    // matches when the server does accept a (repaired) roster.
     const players = [{ name: 'Solo', dojo: '', seed: 1 }];
     const body = buildXlsxBody(cfg, 'Test', players);
+    expect(body.get('playerList')).toBe('Solo, ');
+    expect(body.get('playerList')).not.toContain('NA');
     const seeds = JSON.parse(body.get('seeds'));
-    expect(seeds).toEqual([{ name: 'Solo', dojo: 'NA', seedRank: 1 }]);
+    expect(seeds).toEqual([{ name: 'Solo', dojo: '', seedRank: 1 }]);
   });
 
   it('omits the seeds param entirely when no participant is seeded', () => {

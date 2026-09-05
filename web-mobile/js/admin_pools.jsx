@@ -106,6 +106,28 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
 }
 
+// groupTeamIds derives the teamIds array to send alongside teamNames on a
+// league-tiebreak generate/remove request (second-Opus-pass nit 7): the
+// candidates payload's `teams` array carries {id,name,dojo} per team,
+// positionally parallel to `teamNames` (server: handlers_competition.go's
+// GET /league-tiebreak/candidates builds both from the same loop over
+// g.Teams, mirroring chusen's own teams array).
+//
+// Returns undefined -- teamIds omitted entirely -- unless `teams` is
+// present, the same length as `names`, and EVERY team carries a non-empty
+// id: a legacy id-less group (or a group predating this field) must not
+// send a teamIds array at all, since the server now rejects a blank entry
+// outright (second-Opus-pass item 4) rather than treat it as "no id
+// available".
+//
+// Exported for vitest at __tests__/admin_pools.test.jsx.
+function groupTeamIds(teams, names) {
+  if (!teams || teams.length !== names.length) return undefined;
+  const ids = teams.map(t => t && t.id);
+  if (ids.some(id => !id)) return undefined;
+  return ids;
+}
+
 function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, password }) {
   const isLeague = c && c.format === "league";
   // A KEY, re-resolved from the live poolMatches every render, never a captured
@@ -197,13 +219,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     return () => { cancelled = true; };
   }, [c.id, c.status, isTeamLeague, poolMatches]);
 
-  const handleTiebreakGenerate = async (groupTeamNames) => {
+  const handleTiebreakGenerate = async (groupTeamNames, teamIds) => {
     const actionKey = groupTeamNames.join(",") + ":generate";
     setTiebreakActionBusy(true);
     setTiebreakBusyAction(actionKey);
     setTiebreakErr(null);
     try {
-      await window.API.leagueTiebreakGenerate(c.id, groupTeamNames, password);
+      await window.API.leagueTiebreakGenerate(c.id, groupTeamNames, password, teamIds);
       // SSE match_updated will reload poolMatches and re-fetch candidates.
     } catch (e) {
       if (mountedRef.current) setTiebreakErr(e.message || "Failed to generate tie-breaker matches");
@@ -212,14 +234,14 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
     }
   };
 
-  const handleTiebreakRemove = async (groupTeamNames) => {
+  const handleTiebreakRemove = async (groupTeamNames, teamIds) => {
     if (!(await window.confirmDialog({ message: `Remove unscored tie-breaker matches for ${groupTeamNames.join(", ")}?`, confirmLabel: "Remove", danger: true }))) return;
     const actionKey = groupTeamNames.join(",") + ":remove";
     setTiebreakActionBusy(true);
     setTiebreakBusyAction(actionKey);
     setTiebreakErr(null);
     try {
-      await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password);
+      await window.API.leagueTiebreakRemove(c.id, groupTeamNames, password, teamIds);
     } catch (e) {
       if (mountedRef.current) setTiebreakErr(e.message || "Failed to remove tie-breaker matches");
     } finally {
@@ -438,6 +460,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {tiebreakCandidates.map((group) => {
         const names = group.teamNames || [];
+        const teamIds = groupTeamIds(group.teams, names);
         const hasDH = dhMatchExistsForGroup(names);
         const dhScored = hasDH && dhMatchScoredForGroup(names);
         const posLabel = group.minPosition === group.maxPosition
@@ -457,7 +480,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                   type="button"
                   className="btn btn--sm btn--primary"
                   disabled={tiebreakActionBusy}
-                  onClick={() => handleTiebreakGenerate(names)}
+                  onClick={() => handleTiebreakGenerate(names, teamIds)}
                 >
                   {tiebreakBusyAction === generateKey && <span className="spinner" />}
                   Run tie-breaker
@@ -468,7 +491,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     type="button"
                     className="btn btn--sm btn--danger btn--ghost"
                     disabled={tiebreakActionBusy || dhScored}
-                    onClick={() => handleTiebreakRemove(names)}
+                    onClick={() => handleTiebreakRemove(names, teamIds)}
                   >
                     {tiebreakBusyAction === removeKey && <span className="spinner" />}
                     Remove unscored tie-breaker
@@ -603,4 +626,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds };

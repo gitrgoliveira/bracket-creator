@@ -76,6 +76,18 @@ func respondIfSuperseded(c *gin.Context, err error) bool {
 // surfaced as an opaque 500 the client's write-queue retries forever
 // (mp-q8c6 poisoned-queue pattern), exactly the class of bug the other
 // score-writing handlers already guard against.
+//
+// Currently unreachable from either call site (verified, not asserted):
+// both handlers clear u.WinnerID/u.WinnerSide before the write they forward
+// (bc-idfx finding 3, round 2), so backfillMatchIdentity's specific
+// WinnerID-mismatch check can never fire from here -- there is no non-empty
+// WinnerID left on the payload for it to reject. Kept anyway as defensive
+// depth: it costs nothing, and it is the SAME engine precondition every
+// other score-writing handler already guards, so a future daihyosen code
+// path that stops clearing the id (or a new ValidationError this engine
+// call starts returning for some other reason) fails closed with a 400
+// instead of silently regressing to the opaque-500 class of bug this
+// existed to fix in the first place.
 func respondIfValidationError(c *gin.Context, err error) bool {
 	var verr *engine.ValidationError
 	if !errors.As(err, &verr) {

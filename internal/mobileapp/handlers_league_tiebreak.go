@@ -21,6 +21,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -110,6 +111,27 @@ func dedupedStringSet(values []string) (set map[string]bool, hadDuplicate bool) 
 		set[v] = true
 	}
 	return set, len(set) != len(values)
+}
+
+// hasBlankEntry reports whether values contains an empty or whitespace-only
+// string. teamIds specifically: dedupedStringSet has no opinion on WHAT the
+// strings are, so a single "" entry dedupes cleanly and passes straight
+// through to the group-membership check as if "" were a real participant
+// id -- and every id-less DH row (SideAID/SideBID both "") then matches
+// BOTH sides of that check, group membership for a row that names no team
+// at all. Reachable concretely on DELETE: a caller sends a single blank
+// teamIds entry and every id-less DH row across every group reads as
+// "in the selected group", so a request meant to select nothing deletes an
+// unrelated group's bout instead (200 {"deleted":2} for zero real ids
+// supplied). Checked wherever teamIds is used at all, POST and DELETE
+// alike, before it reaches dedupedStringSet.
+func hasBlankEntry(values []string) bool {
+	for _, v := range values {
+		if strings.TrimSpace(v) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // RegisterPublicLeagueTiebreakHandlers wires the unauthenticated league-tiebreak
@@ -220,6 +242,10 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		useTeamIDs := len(req.TeamIDs) > 0
 		if useTeamIDs && len(req.TeamIDs) != len(req.TeamNames) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds, when provided, must have the same length as teamNames"})
+			return
+		}
+		if useTeamIDs && hasBlankEntry(req.TeamIDs) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds entries must be non-empty; omit teamIds entirely to select by name"})
 			return
 		}
 
@@ -424,6 +450,10 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		useTeamIDs := len(req.TeamIDs) > 0
 		if useTeamIDs && len(req.TeamIDs) != len(req.TeamNames) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds, when provided, must have the same length as teamNames"})
+			return
+		}
+		if useTeamIDs && hasBlankEntry(req.TeamIDs) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds entries must be non-empty; omit teamIds entirely to select by name"})
 			return
 		}
 

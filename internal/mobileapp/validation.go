@@ -582,14 +582,14 @@ func validateMatchHantei(r *state.MatchResult) error {
 
 // validateBulkScoreLengths enforces persisted-string caps on a single
 // MatchResult before it lands in the engine. Used by the bulk-score
-// endpoint, which writes through RecordMatchResult and so bypasses
+// endpoint, which writes through RecordMatchResultWithIneligibilityTx and so bypasses
 // ScoreRequest.Validate's checks. Same caps as ScoreRequest.Validate
 // so the per-result and per-endpoint enforcement stays in lockstep.
 // allowNumberedEncho mirrors validateSubBout's kachinuki exception; the
 // bulk handler derives it from the competition it already loads.
 func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) error {
 	// Same legacy fold + FULL hantei rule set as validateWithOptions (via the
-	// shared validateMatchHantei): this path writes through RecordMatchResult
+	// shared validateMatchHantei): this path writes through RecordMatchResultWithIneligibilityTx
 	// and nothing downstream re-checks, so a misplaced judges'-decision mark
 	// (or a pre-ruling decidedByHantei flag), an incompatible decision, or a
 	// withdrawal-audit field alongside a hantei verdict must be caught here
@@ -633,7 +633,7 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 	}
 	// bc-idfx: the id twin of the wire-level winner==sideA/sideB check
 	// (validateWithOptions) -- bulk-score bypasses that path entirely (it
-	// writes through RecordMatchResult, never ScoreRequest.Validate), so a
+	// writes through RecordMatchResultWithIneligibilityTx, never ScoreRequest.Validate), so a
 	// crafted batch entry naming a winnerId that matches neither side id was
 	// persisted verbatim and counted for nobody in standings.
 	if err := validateWinnerIDMatchesSide(r.WinnerID, r.SideAID, r.SideBID); err != nil {

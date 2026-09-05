@@ -392,6 +392,31 @@ func TestLeagueTiebreakPost_MismatchedTeamIDsLength(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestLeagueTiebreakPost_BlankTeamIDsEntryRejected pins the second-Opus-pass
+// item 4 fix: dedupedStringSet has no opinion on what the strings ARE, so a
+// single "" entry in teamIds deduped cleanly and was passed straight through
+// to the group-match check as if it were a real participant id. Every
+// id-less DH row (SideAID/SideBID both "") would then match that "" entry on
+// BOTH sides, group membership for a request that supplied no real id at
+// all. Rejected outright before it ever reaches dedupedStringSet.
+func TestLeagueTiebreakPost_BlankTeamIDsEntryRejected(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"", "id-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "teamIds entries must be non-empty")
+}
+
 func TestLeagueTiebreakPost_InvalidSelection(t *testing.T) {
 	candidates := []engine.TiedGroup{
 		makeTiedGroup("Team A", "Team B", 1, 2),
@@ -666,6 +691,40 @@ func TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs(t *tes
 	assert.Contains(t, w.Body.String(), "duplicate")
 	assert.Contains(t, w.Body.String(), "teamIds", "the message must point the operator at the disambiguating field")
 	assert.Len(t, store.matches, 1, "the rejected request must not remove anything")
+}
+
+// TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected pins the second-Opus-pass
+// item 4 fix. Before it, a blank teamIds entry deduped to "" and matched
+// BOTH sides of every id-less DH row -- reproduced here with TWO id-less
+// DH rows from entirely UNRELATED groups (Team C/Team D and Team E/Team F);
+// a request naming neither group, but carrying one blank teamIds entry,
+// used to delete both of them (200 {"deleted":2}) instead of being rejected.
+func TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected(t *testing.T) {
+	existing := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team C", SideB: "Team D", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-DH-1", SideA: "Team E", SideB: "Team F", Status: state.MatchStatusScheduled},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	// Neither "Alice" nor "Bob" names any real group; the blank teamIds
+	// entry is what the pre-fix code silently matched every id-less row on.
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Alice", "Bob"},
+		TeamIDs:   []string{"", "id-bob"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "teamIds entries must be non-empty")
+	assert.Len(t, store.matches, 2, "neither unrelated group's bout may be removed")
 }
 
 // ---------------------------------------------------------------------------

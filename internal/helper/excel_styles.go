@@ -383,13 +383,29 @@ func getNameIDPositionStyle(f *excelize.File) int {
 // sheet): this column's width already comes from setupNamesToPrintLayout, so
 // this flag alone is the fix.
 func buildNameIDPositionStyle(f *excelize.File) int {
-	style := mustNewStyle(f, &excelize.Style{
-		Alignment: &excelize.Alignment{
-			Horizontal:  "center",
-			Vertical:    "center",
-			ShrinkToFit: true,
-		},
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 100},
+	return buildNameIDPositionStyleFor(f, false, 0)
+}
+
+// buildNameIDPositionStyleFor holds the border/font/alignment block shared
+// by buildNameIDPositionStyle and buildNameIDPositionStackedStyle, which
+// differ only in ShrinkToFit-vs-WrapText and font size (bc-pnum review(d)).
+// letterCount is unused when stacked is false (buildNameIDPositionStyle
+// passes 0).
+func buildNameIDPositionStyleFor(f *excelize.File, stacked bool, letterCount int) int {
+	alignment := &excelize.Alignment{
+		Horizontal: "center",
+		Vertical:   "center",
+	}
+	fontSize := 100.0
+	if stacked {
+		alignment.WrapText = true
+		fontSize = nameIDPositionStackedFontSize(letterCount)
+	} else {
+		alignment.ShrinkToFit = true
+	}
+	return mustNewStyle(f, &excelize.Style{
+		Alignment: alignment,
+		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: fontSize},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
@@ -397,7 +413,6 @@ func buildNameIDPositionStyle(f *excelize.File) int {
 			{Type: "right", Color: "000000", Style: 2},
 		},
 	})
-	return style
 }
 
 // getNameIDPositionStackedStyle returns the stacked position style sized for
@@ -442,21 +457,7 @@ func nameIDPositionStackedFontSize(letterCount int) float64 {
 // which sets the page layout and column widths; see nameIDPositionStackedFontSize above
 // for why the font size depends on letterCount.
 func buildNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
-	style := mustNewStyle(f, &excelize.Style{
-		Alignment: &excelize.Alignment{
-			Horizontal: "center",
-			Vertical:   "center",
-			WrapText:   true,
-		},
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: nameIDPositionStackedFontSize(letterCount)},
-		Border: []excelize.Border{
-			{Type: "top", Color: "000000", Style: 2},
-			{Type: "bottom", Color: "000000", Style: 2},
-			{Type: "left", Color: "000000", Style: 2},
-			{Type: "right", Color: "000000", Style: 2},
-		},
-	})
-	return style
+	return buildNameIDPositionStyleFor(f, true, letterCount)
 }
 
 func getTimeStyle(f *excelize.File) int {

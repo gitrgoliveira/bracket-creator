@@ -712,19 +712,20 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 			return nil, nil, cerr
 		}
 	}
-	priorLoser := ""
+	hadPriorLoser := false
 	if domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai) {
 		// losingSide (not the narrower loserSideName) so a prior decision
 		// that itself came through RecordDecisionTx -- and so already
 		// carries WinnerSide -- is attributed by that authoritative hint
 		// rather than an ambiguous name/ippon guess (PR #416 findings 4/5).
-		_, priorLoser, _ = losingSide(prior)
+		_, name, ok := losingSide(prior)
+		hadPriorLoser = ok && name != ""
 	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been
 	// started or completed since the kiken/fusenpai, refuse the undo
 	// unless force is set.
-	if priorLoser != "" && !force {
+	if hadPriorLoser && !force {
 		started, err := e.hasDownstreamMatchStarted(tx, compID, []string{sideA, sideB}, matchID)
 		if err != nil {
 			return nil, nil, err

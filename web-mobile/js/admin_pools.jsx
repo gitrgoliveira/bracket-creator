@@ -469,8 +469,17 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               const inputKey = `${groupKey}::${memberKey}`;
               const defaultVal = minPosition + idx;
               // Stable DOM id so the label is programmatically tied to its
-              // input; identity-based (not idx) for the same reason as inputKey.
-              const inputId = `chusen-${groupKey}-${memberKey}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
+              // input. `idx` here, NOT memberKey: memberKey can be a
+              // non-ASCII name|dojo string (Japanese names are the normal
+              // case for this roster), and the regex below collapses every
+              // non-ASCII run to a single "-", so two id-less members whose
+              // keys differ only in non-ASCII characters collided on the
+              // SAME DOM id (duplicate ids, and the label's htmlFor focused
+              // the other team's input). idx is unique within this group's
+              // render (label and input come from the same map iteration),
+              // which is all a DOM id needs -- unlike inputKey/memberKey
+              // above, it does not need to survive a re-fetch reorder.
+              const inputId = `chusen-${groupKey}-${idx}`.replace(/[^a-zA-Z0-9_-]+/g, "-");
               return (
                 <div key={inputKey} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                   <label htmlFor={inputId} style={{ flex: 1 }}>{member.name}</label>

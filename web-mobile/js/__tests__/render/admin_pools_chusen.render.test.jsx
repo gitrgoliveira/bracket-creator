@@ -483,3 +483,46 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     expect(calls[2]).toEqual(['c1', 'Pool A', 'Gamma', 3, PASSWORD, '', 'Dojo G']);
   });
 });
+
+describe('AdminPools chusen banner: non-ASCII member keys do not collapse the DOM id (M11)', () => {
+  // Two id-less members (a legacy/UUID-less roster) whose chusenMemberKey
+  // ("name|dojo") is entirely non-ASCII. The DOM id used to be built as
+  // `chusen-${groupKey}-${memberKey}`.replace(/[^a-zA-Z0-9_-]+/g, "-"): that
+  // regex collapses ANY run of non-ASCII characters to a single "-", so once
+  // the id-prefix ("chusen-Pool A::1-") is stripped, both members' entire
+  // Japanese name|dojo run collapses to the same trailing "-", regardless of
+  // what the actual characters were. Two id-less Japanese-named members (the
+  // normal case for this roster, not an edge case) therefore got the SAME DOM
+  // id: invalid duplicate-id HTML, and the label's htmlFor then focused the
+  // OTHER team's input on click.
+  const nonAsciiGroup = {
+    poolName: 'Pool A',
+    teamNames: ['剣道さん', '剣道くん'],
+    teams: [
+      { id: '', name: '剣道さん', dojo: '道場A' },
+      { id: '', name: '剣道くん', dojo: '道場A' },
+    ],
+    minPosition: 1,
+  };
+
+  it('gives the two members distinct DOM ids, each label pointing at its own input', async () => {
+    const api = makeApi([nonAsciiGroup]);
+    const { container } = await mountAdminPools({ api });
+
+    await screen.findByText('Chusen (drawing lots) required');
+    const inputs = screen.getAllByRole('spinbutton');
+    expect(inputs.length).toBe(2);
+    expect(inputs[0].id).not.toBe(inputs[1].id);
+
+    // Each label's htmlFor must resolve to THAT team's own input. Checked
+    // directly against the label/input DOM nodes (rather than via
+    // getByLabelText, which would still appear to "work" even on a
+    // duplicate id by returning the first DOM match) so a real id collision
+    // cannot hide behind a lenient query.
+    const labels = container.querySelectorAll('label');
+    expect(labels.length).toBe(2);
+    expect(labels[0].htmlFor).toBe(inputs[0].id);
+    expect(labels[1].htmlFor).toBe(inputs[1].id);
+    expect(labels[0].htmlFor).not.toBe(labels[1].htmlFor);
+  });
+});

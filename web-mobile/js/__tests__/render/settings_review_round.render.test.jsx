@@ -1,6 +1,6 @@
 import { act, fireEvent } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { installSettingsHarness, mountSettings } from './settings_mount_harness.jsx';
+import { installSettingsHarness, mountSettings, makeSettingsCompetition } from './settings_mount_harness.jsx';
 
 // bc-symm-settings-create-parity, review round. Five defects the Format/Kind
 // editors on the Settings screen made reachable, each driven through the
@@ -30,32 +30,9 @@ installSettingsHarness({ competitionKindLabel: () => 'Team' });
 
 const noop = () => {};
 
+// No differences from the shared settings fixture.
 function makeCompetition(overrides = {}) {
-  return {
-    id: 'c1',
-    name: 'Autumn Cup',
-    status: 'setup',
-    format: 'playoffs',
-    kind: 'individual',
-    teamSize: 0,
-    teamMatchType: 'fixed',
-    poolSize: 0,
-    poolSizeMode: 'min',
-    poolWinners: 0,
-    extraQualifiers: '',
-    players: [],
-    courts: ['A'],
-    startTime: '09:00',
-    date: '',
-    fightingSpiritAwards: [],
-    swissCurrentRound: 0,
-    swissRounds: 0,
-    withZekkenName: false,
-    engi: false,
-    roundRobin: true,
-    poolFormat: 'full',
-    ...overrides,
-  };
+  return makeSettingsCompetition(overrides);
 }
 
 const byText = (container, tag, text) =>

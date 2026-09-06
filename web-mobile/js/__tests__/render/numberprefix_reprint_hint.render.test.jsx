@@ -1,6 +1,6 @@
 import { act, fireEvent } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { installSettingsHarness, mountSettings } from './settings_mount_harness.jsx';
+import { installSettingsHarness, mountSettings, makeSettingsCompetition } from './settings_mount_harness.jsx';
 import { HINT_NUMBER_PREFIX } from '../../competition_shape.jsx';
 
 // bc-pnum A3/A7/D7: the number-prefix field on the Settings screen.
@@ -19,33 +19,10 @@ installSettingsHarness();
 
 const noop = () => {};
 
+// This scenario's own differences from the shared settings fixture: a mixed
+// competition with pools, rather than the default playoffs/no-pools shape.
 function makeCompetition(overrides = {}) {
-  return {
-    id: 'c1',
-    name: 'Autumn Cup',
-    status: 'setup',
-    format: 'mixed',
-    kind: 'individual',
-    teamSize: 0,
-    teamMatchType: 'fixed',
-    poolSize: 4,
-    poolSizeMode: 'min',
-    poolWinners: 2,
-    extraQualifiers: '',
-    players: [],
-    courts: ['A'],
-    startTime: '09:00',
-    date: '',
-    fightingSpiritAwards: [],
-    swissCurrentRound: 0,
-    swissRounds: 0,
-    withZekkenName: false,
-    engi: false,
-    roundRobin: true,
-    poolFormat: 'full',
-    numberPrefix: 'K',
-    ...overrides,
-  };
+  return makeSettingsCompetition({ format: 'mixed', poolSize: 4, poolWinners: 2, ...overrides });
 }
 
 const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');

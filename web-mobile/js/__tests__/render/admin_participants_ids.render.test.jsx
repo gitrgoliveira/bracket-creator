@@ -1,6 +1,5 @@
-import React from 'react';
-import { render, act } from '@testing-library/react';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
 // bc-pnum ruling 1e: "When the participants list is applied, then the ids
 // are created and displayed." The roster PUT response re-serialises the
@@ -21,58 +20,22 @@ import { describe, it, expect, beforeAll } from 'vitest';
 //
 // Mounted for REAL, same setup as
 // admin_participants_number_badge.render.test.jsx: the render setup
-// preloads everything admin_participants.jsx needs at module-eval time.
+// preloads everything admin_participants.jsx needs at module-eval time. The
+// shared harness lives in admin_participants_mount_harness.jsx.
 
-let AdminParticipants;
+installParticipantsHarness();
 
-beforeAll(async () => {
-  await import('../../admin_participants.jsx');
-  AdminParticipants = window.AdminParticipants;
-});
-
-const noop = () => {};
-
-function makeCompetition(overrides = {}) {
-  return {
-    id: 'c1',
-    name: 'Autumn Cup',
-    status: 'setup',
-    format: 'mixed',
-    kind: 'individual',
-    poolSize: 4,
-    poolWinners: 2,
-    checkInEnabled: false,
-    withZekkenName: false,
-    numberPrefix: 'K',
-    players: [
-      { id: '11111111-2222-4333-8444-555555555555', name: 'Alice', dojo: 'Dojo Alice' },
-      { id: '', name: 'Bob', dojo: 'Dojo Bob' },
-    ],
-    ...overrides,
-  };
-}
-
-async function mount(c) {
-  let result;
-  await act(async () => {
-    result = render(
-      <AdminParticipants
-        c={c}
-        tournament={{ name: 'Spring Taikai', courts: ['A'] }}
-        onUpdate={noop}
-        password=""
-        showToast={noop}
-        onSection={noop}
-        onBack={noop}
-      />
-    );
-  });
-  return result;
-}
+// This file's own default roster: a stamped UUID row plus an id-less one,
+// the pairing the first test below (unlike its two siblings) relies on
+// implicitly, differing from the harness's own plain default.
+const idsRoster = [
+  { id: '11111111-2222-4333-8444-555555555555', name: 'Alice', dojo: 'Dojo Alice' },
+  { id: '', name: 'Bob', dojo: 'Dojo Bob' },
+];
 
 describe('AdminParticipants id display (bc-pnum ruling 1e)', () => {
   it('truncates a UUID id to the first 8 characters, with the full id on hover', async () => {
-    const { container } = await mount(makeCompetition());
+    const { container } = await mountParticipants(makeParticipantsCompetition({ players: idsRoster }));
 
     const idSpans = container.querySelectorAll('.seed-row__id');
     // Only Alice (the stamped row) gets a slot; Bob's id-less row gets none.
@@ -84,7 +47,7 @@ describe('AdminParticipants id display (bc-pnum ruling 1e)', () => {
   });
 
   it('shows a short slug id whole (12 characters or fewer), not truncated', async () => {
-    const { container } = await mount(makeCompetition({
+    const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [
         { id: 'ids-cup-p1', name: 'Alice', dojo: 'Dojo Alice' },
         { id: 'ids-cup-p2', name: 'Bob', dojo: 'Dojo Bob' },
@@ -102,7 +65,7 @@ describe('AdminParticipants id display (bc-pnum ruling 1e)', () => {
   });
 
   it('shows no id slot at all for a roster with no ids yet', async () => {
-    const { container } = await mount(makeCompetition({
+    const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [
         { id: '', name: 'Alice', dojo: 'Dojo Alice' },
         { id: '', name: 'Bob', dojo: 'Dojo Bob' },

@@ -1,6 +1,5 @@
-import React from 'react';
-import { render, act } from '@testing-library/react';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
+import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
 // bc-pnum operator ruling: "Pool by pool, after the draw, is the correct
 // way. Remove the provisional numbers, they are confusing." AdminParticipants'
@@ -13,67 +12,23 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // already preloads admin_helpers, viewer_utils, data and ui, which is
 // everything admin_participants.jsx needs at module-eval and render time
 // (window.pluralize, window.EmptyState, window.StableInput,
-// window.competitionSeedingBlocker, window.checkinPid).
+// window.competitionSeedingBlocker, window.checkinPid). The shared harness
+// lives in admin_participants_mount_harness.jsx.
 
-let AdminParticipants;
-
-beforeAll(async () => {
-  await import('../../admin_participants.jsx');
-  AdminParticipants = window.AdminParticipants;
-});
-
-const noop = () => {};
-
-function makeCompetition(overrides = {}) {
-  return {
-    id: 'c1',
-    name: 'Autumn Cup',
-    status: 'setup',
-    format: 'mixed',
-    kind: 'individual',
-    poolSize: 4,
-    poolWinners: 2,
-    checkInEnabled: false,
-    withZekkenName: false,
-    numberPrefix: 'K',
-    players: [
-      { id: 'p-1', name: 'Alice', dojo: 'Dojo Alice' },
-      { id: 'p-2', name: 'Bob', dojo: 'Dojo Bob' },
-    ],
-    ...overrides,
-  };
-}
-
-async function mount(c) {
-  let result;
-  await act(async () => {
-    result = render(
-      <AdminParticipants
-        c={c}
-        tournament={{ name: 'Spring Taikai', courts: ['A'] }}
-        onUpdate={noop}
-        password=""
-        showToast={noop}
-        onSection={noop}
-        onBack={noop}
-      />
-    );
-  });
-  return result;
-}
+installParticipantsHarness();
 
 describe('AdminParticipants competitor number badge (bc-pnum operator ruling)', () => {
   it('renders no number badge at all for a roster row with no assigned number, even if a stale provisionalNumbers array is still present on c', async () => {
     // The `provisionalNumbers` field carried here is what a pre-ruling
     // server response (or a stale cached list entry) used to carry; a
     // roster row with no `number` must show NO badge regardless.
-    const { container } = await mount(makeCompetition({ provisionalNumbers: ['K1', 'K2'] }));
+    const { container } = await mountParticipants(makeParticipantsCompetition({ provisionalNumbers: ['K1', 'K2'] }));
 
     expect(container.querySelectorAll('.num-prefix').length).toBe(0);
   });
 
   it('renders the assigned number badge once the draw has set p.number', async () => {
-    const { container } = await mount(makeCompetition({
+    const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [
         { id: 'p-1', name: 'Alice', dojo: 'Dojo Alice', number: 'K1' },
         { id: 'p-2', name: 'Bob', dojo: 'Dojo Bob', number: 'K2' },

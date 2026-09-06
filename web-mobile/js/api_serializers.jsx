@@ -105,7 +105,26 @@ function toBackendMatchResult(patch, match) {
         if (winnerName === sideAName && winnerName !== sideBName) winnerId = sideAId || "";
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
-    if (winnerId) result.winnerId = winnerId;
+    // F6-JS: only put winnerId on the wire when it is an id the SERVER
+    // itself supplied for the winning side (match.sideAId / match.sideBId,
+    // the raw flat fields -- not sideAId/sideBId above, which are read off
+    // the resolved side OBJECTS and can themselves carry the same invented
+    // fallback). Both derivations of winnerId above can land on
+    // buildPlayerMap's own invented id (`id: norm.id || norm.name`) for a
+    // side the server sent with NO id at all -- e.g. a partially-stamped
+    // legacy roster (SideAID "", SideBID set) -- in which case winnerId
+    // would be the competitor's NAME. Sending that as winnerId tells the
+    // engine's forward-write gate a name string is a participant UUID, and
+    // the write is rejected outright, so the match could never be scored.
+    // A real same-name pair where the server DID supply both flat ids still
+    // sends winnerId here (it will equal one of the two real ids): that is
+    // the one channel that disambiguates the pair, and this gate does not
+    // touch it.
+    const winnerIdIsServerSupplied = !!winnerId && (
+        (!!match?.sideAId && winnerId === match.sideAId) ||
+        (!!match?.sideBId && winnerId === match.sideBId)
+    );
+    if (winnerIdIsServerSupplied) result.winnerId = winnerId;
     // Belt and braces (bc-dmsr review): emit the side ids alongside
     // winnerId so the server's validateHanteiMarkPlacement sees the SAME
     // triple this function just used to place the mark above, rather than

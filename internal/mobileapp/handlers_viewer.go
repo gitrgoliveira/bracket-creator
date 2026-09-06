@@ -356,8 +356,11 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 // dataIssuesFrom collects the located file failures among errs, dropping
 // everything else: a missing file, a permissions problem or a nil is not
 // something an operator repairs with a text editor, so it gets no banner.
-// Each entry's "kind" is implicitly "corrupt-file" (the SPA defaults an
-// entry with no "kind" field to that reading; see data_integrity.jsx).
+// Each entry carries "kind": "corrupt-file" explicitly (PR #416 finding 9),
+// alongside missingParticipantIDsIssue's own "missing-ids" kind below, so a
+// consumer partitions the list by reading the field rather than by an
+// absent-vs-present convention (the SPA still reads an absent kind as
+// corrupt-file too, for an older payload's sake; see data_integrity.jsx).
 func dataIssuesFrom(errs ...error) []gin.H {
 	var issues []gin.H
 	for _, err := range errs {
@@ -366,6 +369,7 @@ func dataIssuesFrom(errs ...error) []gin.H {
 			continue
 		}
 		issues = append(issues, gin.H{
+			"kind":   "corrupt-file",
 			"file":   cf.File,
 			"line":   cf.Line,
 			"column": cf.Column,

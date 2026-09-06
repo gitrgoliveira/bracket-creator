@@ -44,6 +44,7 @@ func TestViewerAggregateReportsACorruptFile(t *testing.T) {
 	require.True(t, ok, "the competition carries its data issues, got %#v", payload[0]["dataIssues"])
 	require.Len(t, issues, 1)
 	issue := issues[0].(map[string]any)
+	assert.Equal(t, "corrupt-file", issue["kind"], "PR #416 finding 9: the kind must be explicit, not left for a consumer to infer from its absence")
 	assert.Equal(t, "bracket.json", issue["file"])
 	assert.EqualValues(t, 3, issue["line"], "the line the operator has to open")
 	assert.NotEmpty(t, issue["detail"])
@@ -76,6 +77,7 @@ func TestDataIssuesFromKeepsOnlyRepairableFailures(t *testing.T) {
 		&state.CorruptFileError{File: "pool-matches.csv", Line: 9, Column: 4, Detail: "bare \" in field"},
 	)
 	require.Len(t, issues, 1)
+	assert.Equal(t, "corrupt-file", issues[0]["kind"], "PR #416 finding 9: partitioned by kind, not by object identity")
 	assert.Equal(t, "pool-matches.csv", issues[0]["file"])
 	assert.Equal(t, 9, issues[0]["line"])
 }
@@ -237,6 +239,7 @@ func TestViewerDetail_ReportsCorruptPoolsAndDoesNotFail(t *testing.T) {
 	require.True(t, ok, "the detail payload carries dataIssues, got %#v", payload["dataIssues"])
 	require.Len(t, issues, 1, "poolsErr and standingsErr report the identical fault and must not double up: %#v", issues)
 	issue := issues[0].(map[string]any)
+	assert.Equal(t, "corrupt-file", issue["kind"])
 	assert.Equal(t, "pools.csv", issue["file"])
 	assert.NotEmpty(t, issue["detail"])
 }

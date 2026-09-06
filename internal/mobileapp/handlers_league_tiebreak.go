@@ -18,7 +18,6 @@
 package mobileapp
 
 import (
-	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -269,11 +268,6 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
 			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
 			// overrides.json (computeStandingsFrom). A corrupt file is an
 			// operator-recoverable state (repair via DELETE .../overrides), not
@@ -282,9 +276,7 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			if respondIfCorruptOverrides(c, err) {
 				return
 			}
-			// Public endpoint: opaque 500, log the real cause server-side.
-			log.Printf("league-tiebreak candidates LeagueTiebreakCandidates(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 
@@ -359,18 +351,12 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		// constraint itself, the handler is the gate.
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
 			// See the GET candidates handler's identical guard above: a corrupt
 			// overrides.json is operator-recoverable state, not a server fault.
 			if respondIfCorruptOverrides(c, err) {
 				return
 			}
-			log.Printf("league-tiebreak POST LeagueTiebreakCandidates(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 
@@ -461,18 +447,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 
 		injected, err := eng.GenerateLeagueTiebreakMatches(id, req.TeamNames, req.TeamIDs)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.As(err, &validation) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			log.Printf("league-tiebreak POST GenerateLeagueTiebreakMatches(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 

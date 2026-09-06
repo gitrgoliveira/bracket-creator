@@ -53,25 +53,15 @@ func RegisterSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.E
 		newMatches, nextRound, err := eng.AdvanceSwissRound(id)
 		if err != nil {
 			var notCompleted *engine.SwissRoundNotCompletedError
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notCompleted):
+			if errors.As(err, &notCompleted) {
 				c.JSON(http.StatusConflict, gin.H{
 					"error": err.Error(),
 					"code":  "round_incomplete",
 					"round": notCompleted.Round,
 				})
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				// Recorded on the context (not returned to the caller) so the
-				// root cause is still visible in server logs.
-				_ = c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+				return
 			}
+			respondEngineError(c, err)
 			return
 		}
 
@@ -115,16 +105,7 @@ func RegisterPublicSwissHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		standings, err := eng.SwissStandings(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			default:
-				// Recorded on the context (not returned to the caller) so the
-				// root cause is still visible in server logs.
-				_ = c.Error(err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
-			}
+			respondEngineError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, standings)

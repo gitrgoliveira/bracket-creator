@@ -2308,24 +2308,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// with no winner; resolve via daihyosen first") surfaced as a 500,
 			// which the client write-queue treats as transient and retries
 			// (mp-q8c6 poisoned-queue pattern) instead of showing the message.
-			var engValErr *engine.ValidationError
-			if errors.As(engErr, &engValErr) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
-				return
-			}
-			// PR #416 finding 10: a corrupt overrides.json makes
-			// computeStandingsFrom (reached here via the mp-e2k1 mixed-pool
-			// guard) fail closed, correctly, but an unmapped error here falls
-			// through to internalError's 500 -- and the SPA's offline write
-			// queue retries 5xx forever (mp-q8c6), so a genuinely corrupt file
-			// on disk would poison the queue rather than surface once.
-			// respondIfCorruptOverrides (errors.go) is the shared mapping to a
-			// terminal 422, also used by the decision/daihyosen/league-tiebreak/
-			// chusen-candidates handlers, which can reach the same LoadOverrides
-			// call through their own engine entry points. DELETE .../overrides
-			// (handlers_competition.go) is the repair door, wired to the
-			// load-free Store.ResetOverridesForce.
-			if respondIfCorruptOverrides(c, engErr) {
+			// A corrupt overrides.json (computeStandingsFrom, reached here via
+			// the mp-e2k1 mixed-pool guard) is the other case
+			// respondIfEngineWriteError maps, to the same terminal 422 the
+			// decision/daihyosen/league-tiebreak/chusen-candidates handlers use;
+			// DELETE .../overrides (handlers_competition.go) is the repair door.
+			if respondIfEngineWriteError(c, engErr) {
 				return
 			}
 			internalError(c, engErr)

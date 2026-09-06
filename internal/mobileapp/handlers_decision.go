@@ -210,7 +210,6 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// ErrDecisionLocked → 409 (T103/CHK024).
 			var alreadyIneligErr *engine.AlreadyIneligibleError
 			var ineligErr *engine.IneligibleCompetitorError
-			var engValErr *engine.ValidationError
 			var engNotFoundErr *engine.NotFoundError
 			switch {
 			case errors.Is(engErr, engine.ErrMatchSuperseded):
@@ -250,16 +249,16 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 					"error":  "decision_locked",
 					"reason": engErr.Error(),
 				})
-			case errors.As(engErr, &engValErr):
-				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
 			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
-			case respondIfCorruptOverrides(c, engErr):
-				// A corrupt overrides.json makes computeStandingsFrom (reached
-				// here via RecordDecisionTx -> RecordMatchResultWithIneligibilityTx's
-				// mp-e2k1 mixed-pool guard) fail closed. respondIfCorruptOverrides
-				// already wrote the terminal 422; nothing left to do.
 			default:
+				// engine.ValidationError → 400 and a corrupt overrides.json → 422
+				// (computeStandingsFrom, reached via RecordDecisionTx ->
+				// RecordMatchResultWithIneligibilityTx's mp-e2k1 mixed-pool guard)
+				// both fall through respondIfEngineWriteError.
+				if respondIfEngineWriteError(c, engErr) {
+					return
+				}
 				internalError(c, engErr)
 			}
 			return

@@ -55,6 +55,52 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 }
 
+// respondEngineError classifies err against the two typed engine sentinels
+// every handler in this package already checks by hand -- *engine.NotFoundError
+// (404) and *engine.ValidationError (400) -- and falls back to internalError
+// (500) for anything else. This is the ONE place that maps those two types to
+// a status; call it instead of hand-copying the same three-way switch at a new
+// or existing call site (PR #416 finding 1).
+func respondEngineError(c *gin.Context, err error) {
+	var notFound *engine.NotFoundError
+	var validation *engine.ValidationError
+	switch {
+	case errors.As(err, &notFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.As(err, &validation):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	default:
+		internalError(c, err)
+	}
+}
+
+// respondIfEngineWriteError composes the sentinel checks a match-write
+// handler (score, decision, daihyosen) needs after its engine call: a
+// superseded write (200 {"applied":false}), a rejected precondition
+// (*engine.ValidationError, 400), and a corrupt overrides.json (422) -- in
+// that order, matching the order these were hand-copied in before. Reports
+// whether it answered, so the caller's tail collapses to
+// `if respondIfEngineWriteError(c, err) { return }; internalError(c, err)`.
+//
+// Does NOT check *engine.NotFoundError: none of these three write paths can
+// reach one at this point in their own flow (the match/competition lookup
+// already happened earlier in each handler), so folding it in here would
+// silently swallow a future 404 into this function's callers that don't
+// separately guard for it. Add it explicitly at the call site if a new write
+// path needs it, the way respondEngineError does for read handlers.
+func respondIfEngineWriteError(c *gin.Context, err error) bool {
+	if respondIfSuperseded(c, err) {
+		return true
+	}
+	if respondIfValidationError(c, err) {
+		return true
+	}
+	if respondIfCorruptOverrides(c, err) {
+		return true
+	}
+	return false
+}
+
 // respondIfCorruptOverrides answers a corrupt overrides.json
 // (state.ErrCorruptOverrides) with a terminal 422 and reports that it
 // handled it, so the caller can return without falling through to its own

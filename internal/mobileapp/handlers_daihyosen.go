@@ -236,19 +236,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return nil
 		})
 		if txErr != nil {
-			if respondIfSuperseded(c, txErr) {
-				return
-			}
-			if respondIfValidationError(c, txErr) {
-				return
-			}
-			// Both endpoints write through RecordMatchResultWithIneligibilityTx,
-			// which can reach the mp-e2k1 mixed-pool guard's computeStandingsFrom
-			// call for a pool match (e.g. a legacy/hand-edited pool row carrying a
-			// Position=-1 daihyosen sub). A corrupt overrides.json makes that fail
-			// closed; map it to the same terminal 422 every other write reaching
-			// LoadOverrides answers with, rather than an opaque 500.
-			if respondIfCorruptOverrides(c, txErr) {
+			if respondIfEngineWriteError(c, txErr) {
 				return
 			}
 			internalError(c, txErr)
@@ -390,19 +378,7 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			return nil
 		})
 		if txErr != nil {
-			if respondIfSuperseded(c, txErr) {
-				return
-			}
-			if respondIfValidationError(c, txErr) {
-				return
-			}
-			// Both endpoints write through RecordMatchResultWithIneligibilityTx,
-			// which can reach the mp-e2k1 mixed-pool guard's computeStandingsFrom
-			// call for a pool match (e.g. a legacy/hand-edited pool row carrying a
-			// Position=-1 daihyosen sub). A corrupt overrides.json makes that fail
-			// closed; map it to the same terminal 422 every other write reaching
-			// LoadOverrides answers with, rather than an opaque 500.
-			if respondIfCorruptOverrides(c, txErr) {
+			if respondIfEngineWriteError(c, txErr) {
 				return
 			}
 			internalError(c, txErr)

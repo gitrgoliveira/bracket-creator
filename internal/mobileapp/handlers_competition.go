@@ -468,18 +468,13 @@ func respondNumberPrefixPreflightError(c *gin.Context, hub *Hub, assigned bool, 
 	}
 	var notFound *engine.NotFoundError
 	var validation *engine.ValidationError
-	switch {
-	case errors.As(err, &notFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-	case errors.As(err, &validation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case assigned:
+	if assigned && !errors.As(err, &notFound) && !errors.As(err, &validation) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "a number prefix was assigned but competitors could not be renumbered; retry once pools.csv is repaired",
 		})
-	default:
-		internalError(c, err)
+		return
 	}
+	respondEngineError(c, err)
 }
 
 // runWithNumberPrefixPreflight is the shared
@@ -508,16 +503,7 @@ func runWithNumberPrefixPreflight(c *gin.Context, eng *engine.Engine, hub *Hub, 
 		if assigned {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
-		var notFound *engine.NotFoundError
-		var validation *engine.ValidationError
-		switch {
-		case errors.As(err, &notFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		case errors.As(err, &validation):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		default:
-			internalError(c, err)
-		}
+		respondEngineError(c, err)
 		return false
 	}
 	return true
@@ -1156,17 +1142,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		estimate, err := eng.EstimateScheduleForCompetition(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.As(err, &validation) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			internalError(c, err)
+			respondEngineError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, estimate)
@@ -1185,12 +1161,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		clashes, err := eng.DetectClashesForCompetition(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
-			internalError(c, err)
+			respondEngineError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, clashes)
@@ -2507,16 +2478,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if err := eng.DiscardDraw(id); err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+			respondEngineError(c, err)
 			return
 		}
 		hub.Broadcast(EventDrawDiscarded, gin.H{"competitionId": id})
@@ -2534,21 +2496,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		res, err := eng.QuarantineCorruptBracket(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				// Covers both "there is nothing wrong with this bracket" and
-				// the refusal for a competition that draws its bracket
-				// directly, whose message explains why rebuilding would invent
-				// a draw rather than restore one. Both are
-				// answerable by the operator, so both are a 400 with the reason.
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+			// A validation failure here covers both "there is nothing wrong
+			// with this bracket" and the refusal for a competition that draws
+			// its bracket directly, whose message explains why rebuilding
+			// would invent a draw rather than restore one -- both are
+			// operator-answerable, hence respondEngineError's 400.
+			respondEngineError(c, err)
 			return
 		}
 		hub.Broadcast(EventBracketQuarantined, gin.H{"competitionId": id})
@@ -2796,11 +2749,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		candidates, err := eng.ChusenCandidates(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
 			// ChusenCandidates loads overrides.json directly. A corrupt file
 			// is operator-recoverable state (repair via DELETE .../overrides),
 			// not a server fault, so it gets the same terminal 422 every other
@@ -2808,11 +2756,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if respondIfCorruptOverrides(c, err) {
 				return
 			}
-			// Recorded on the context (not returned to the caller) so the
-			// root cause is still visible in server logs, consistent with the
-			// other opaque-500 handlers in this PR.
-			_ = c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 		out := make([]gin.H, 0, len(candidates))

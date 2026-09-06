@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { describe, it, expect } from 'vitest';
 import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
@@ -88,6 +90,40 @@ describe('Data Utils', () => {
         expect(seen.has(name)).toBe(false);
         seen.add(name);
       }
+    });
+  });
+
+  // bc-drwx item 9 / PR #416 finding 15: JS half of the shared Go/JS golden
+  // table for the pool-name sequence -- see the `_comment` in
+  // pool_letter_names.json for why the table is shared. Go half:
+  // TestPoolPositionName_MatchesFixture in
+  // internal/helper/pool_position_name_test.go.
+  describe('poolLetterName Go/JS mirror (pool_letter_names.json)', () => {
+    const table = JSON.parse(
+      readFileSync(
+        resolve(__dirname, '..', '..', '..', 'internal', 'helper', 'testdata', 'pool_letter_names.json'),
+        'utf8'
+      )
+    );
+
+    // Load-bearing: vitest's it.each over an empty array silently produces
+    // zero tests (no red), so a degraded table needs its own failure.
+    it('the shared golden table is present and non-empty', () => {
+      expect(
+        table.cases?.length,
+        'internal/helper/testdata/pool_letter_names.json parsed to zero cases: the mirror would assert nothing'
+      ).toBeGreaterThan(0);
+    });
+
+    // The fixture's `name` is the full "Pool <letters>" string (the Go
+    // owner's own return value); poolLetterName returns the bare letters,
+    // the "Pool " prefix is composed separately by buildPools' own template
+    // literal, so the JS assertion strips it before comparing.
+    it.each(table.cases)('index $index renders "$name"', ({ index, name }) => {
+      expect(
+        poolLetterName(index),
+        'JS poolLetterName disagrees with the shared table; update BOTH the Go and JS sequences together'
+      ).toBe(name.replace(/^Pool /, ''));
     });
   });
 

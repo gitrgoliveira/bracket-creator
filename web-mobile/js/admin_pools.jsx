@@ -114,41 +114,6 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
 }
 
-// Identity keying for the chusen (drawing-lots) rank inputs below: each rank
-// input is keyed by the member's IDENTITY (checkinPid, imported above; id
-// when non-empty, else "name|dojo" -- the same rule helper.CompetitorKey
-// applies server-side), never by that member's position in the `members`
-// array (bc-appx item 2). The chusen-candidates payload's `teams` array is
-// "the still-tied members in current standings order"
-// (engine.ChusenCandidates), and standings order depends on which members
-// already carry a rank override: a member with ANY recorded override sorts
-// ahead of one without, regardless of the override's actual value
-// (engine/scoring.go), so completing 2 of 3 sequential writes and then
-// re-fetching after a mid-loop failure can return the SAME group with its
-// members in a DIFFERENT order (reproduced: [Alpha,Beta,Gamma] ->
-// [Beta,Alpha,Gamma] after two of three writes). An index-keyed input map
-// then reads the operator's typed value for the WRONG team on retry,
-// silently inverting the recorded draw.
-//
-// checkinPid's own fallback previously had a gap that mattered here
-// (`p.id ?? fallback` only fell back on a null/undefined id, but the
-// chusen-candidates handler always emits an "id" key -- handlers_competition.go:
-// `gin.H{"id": t.Player.ID, ...}` -- which is "" for a competitor with no
-// UUID, not null/undefined, so every legacy member in a group collapsed onto
-// the SAME empty-string key: duplicate React keys, duplicate DOM ids, and
-// typing into one row's input moved all of them). That gap is now closed in
-// checkinPid itself (id-else-fallback via a truthiness check, not `??`),
-// so this file delegates to it rather than keeping a second, drift-prone
-// copy of the same rule.
-//
-// No positional tie-break is needed for the reachable collisions: two
-// members with the same name AND dojo are a duplicate roster row the
-// write-floor save already refuses (state.ErrDuplicateName /
-// CheckDuplicateEntriesByNameDojo), so that pairing cannot reach this
-// screen; the pairing that CAN -- same name, different dojo, via the
-// documented team-name-uniqueness enforcement hole -- is already separated
-// by the dojo half of the key (checkinPid's fallback).
-
 // groupTeamIds derives the teamIds array to send alongside teamNames on a
 // league-tiebreak generate/remove request (second-Opus-pass nit 7): the
 // candidates payload's `teams` array carries {id,name,dojo} per team,
@@ -374,15 +339,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const isBusy = !!chusenBusy[groupKey];
         const groupErrMsg = chusenGroupErr[groupKey] || null;
 
-        // Effective value for a member's input, by the member's IDENTITY
-        // (checkinPid), never its position in `members`: the group order
-        // comes from the server's live standings sort, which reorders after
-        // ANY partial write (see the identity-keying comment above the chusen
-        // banner for the
-        // mechanism and the reproduced [Alpha,Beta,Gamma] ->
-        // [Beta,Alpha,Gamma] case), so an index-keyed lookup can read back a
-        // DIFFERENT team's typed value after a mid-loop failure. The operator's
-        // edit if present, else the displayed default (minPosition + index --
+        // Effective value for a member's input, keyed by the member's
+        // IDENTITY (checkinPid; data.jsx owns id-vs-name|dojo fallback rule),
+        // never its position in `members`: the group order comes from the
+        // server's live standings sort, which reorders after a partial
+        // write, so an index-keyed lookup can read back a DIFFERENT team's
+        // typed value on retry. The operator's edit if present, else the
+        // displayed default (minPosition + index --
         // idx is still used here only to pick a distinct default rank per
         // position, not to key the input). Both validation and submit read
         // this so accepting the shown defaults (already a valid permutation)

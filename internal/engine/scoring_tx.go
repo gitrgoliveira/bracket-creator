@@ -52,6 +52,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -713,7 +714,11 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	priorLoser := ""
 	if domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai) {
-		priorLoser = loserSideName(prior)
+		// losingSide (not the narrower loserSideName) so a prior decision
+		// that itself came through RecordDecisionTx -- and so already
+		// carries WinnerSide -- is attributed by that authoritative hint
+		// rather than an ambiguous name/ippon guess (PR #416 findings 4/5).
+		_, _, priorLoser, _ = losingSide(prior)
 	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been
@@ -793,32 +798,87 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// non-fatal no-op). Every OTHER MatchID==matchID/Eligible==false entry
 	// is stale by construction (recordIneligibilityFromDecision's K2
 	// check-and-set only ever adds one such entry per call) and is restored.
-	if statuses, serr := tx.LoadCompetitorStatus(compID); serr != nil {
-		log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: LoadCompetitorStatus for restore: %v", compID, matchID, serr)
-	} else {
-		var currentLoserID string
-		if status != nil {
-			currentLoserID = status.PlayerID
-		}
-		for playerID, st := range statuses {
-			if st.MatchID != matchID || st.Eligible || playerID == currentLoserID {
-				continue
+	//
+	// PR #416 finding 1: status==nil does NOT always mean "this match no
+	// longer makes anyone ineligible" -- RecordMatchResultWithIneligibilityTx
+	// also returns (nil, nil) when recordIneligibilityFromDecision could not
+	// RESOLVE the loser (its *ValidationError is logged and swallowed a few
+	// lines above) or hit a non-fatal load error. Re-recording the SAME
+	// kiken/fusenpai on a match whose side name has drifted from the roster
+	// would otherwise flip the STILL-withdrawn competitor back to
+	// Eligible:true: the loop below would see status==nil, treat every
+	// MatchID==matchID entry as stale, and restore it. Gate the restore on
+	// the write having actually SETTLED the loser: when the new decision is
+	// itself a withdrawal and the write resolved no status at all, no
+	// MatchID==matchID record is provably stale, so skip the restore
+	// outright and log why, rather than silently un-revoking eligibility the
+	// operator never rescinded. Restoring proceeds as before whenever the
+	// new decision is NOT a withdrawal (the "fought"/undo path this loop
+	// exists for) or when a status WAS resolved (the write settled who,
+	// this match, is currently the loser).
+	newIsWithdrawal := domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai)
+	switch {
+	case newIsWithdrawal && status == nil:
+		log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: new decision %q is a withdrawal but recordIneligibilityFromDecision did not resolve/write a loser; skipping the stale-eligibility restore (no MatchID==%s record is provably stale)",
+			compID, matchID, decision, matchID)
+	default:
+		if statuses, serr := tx.LoadCompetitorStatus(compID); serr != nil {
+			log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: LoadCompetitorStatus for restore: %v", compID, matchID, serr)
+		} else {
+			var currentLoserID string
+			if status != nil {
+				currentLoserID = status.PlayerID
 			}
-			// A fresh minimal status, not the stale record with Eligible
-			// flipped: Reason/Reinstateable describe why the player WAS
-			// ineligible, which no longer applies once restored (mirrors the
-			// removed restoreCompetitorEligibility's own construction).
-			restored := domain.CompetitorStatus{
-				PlayerID:   playerID,
-				Eligible:   true,
-				MatchID:    matchID,
-				RecordedAt: time.Now().UTC(),
+			// PR #416 finding 2: iterate in sorted playerID order so the
+			// outcome is deterministic rather than depending on Go's
+			// randomized map iteration order -- matters once more than one
+			// stale entry needs restoring in the same call, which previously
+			// left BOTH which player's restore landed last (irrelevant, every
+			// resolved restore below is written unconditionally) and, more
+			// importantly, which one this function RETURNS to depend on map
+			// iteration order.
+			//
+			// This intentionally preserves the existing single-status
+			// priority (documented in the loop below by the fact that a
+			// restore, when one fires, still overwrites `status`), the same
+			// shape TestRecordDecision_KikenUndo and
+			// TestRecordDecisionTx_KikenUndoSucceeds already pin for a
+			// decisionBy flip (kiken moves from Alice to Bob): the RESTORED
+			// player's re-earned eligibility is what the operator's UI most
+			// needs surfaced from this single-value return -- the new
+			// loser's withdrawal is already conveyed by the returned
+			// MatchResult's own Decision/DecisionBy/Winner fields, while the
+			// restoration has no other channel. Changing that priority (or
+			// broadcasting every touched status individually) needs either a
+			// wider return shape or handler-side fan-out, both out of this
+			// change's scope; the sentence above is the deliberate, narrower
+			// slice of finding 2 this pass implements.
+			playerIDs := make([]string, 0, len(statuses))
+			for playerID := range statuses {
+				playerIDs = append(playerIDs, playerID)
 			}
-			if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
-				log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: restoring stale eligibility for playerId=%s: %v", compID, matchID, playerID, werr)
-				continue
+			sort.Strings(playerIDs)
+			for _, playerID := range playerIDs {
+				st := statuses[playerID]
+				if st.MatchID != matchID || st.Eligible || playerID == currentLoserID {
+					continue
+				}
+				// A fresh minimal status, not the stale record with Eligible
+				// flipped: Reason/Reinstateable describe why the player WAS
+				// ineligible, which no longer applies once restored (mirrors the
+				// removed restoreCompetitorEligibility's own construction).
+				restored := domain.CompetitorStatus{
+					PlayerID:   playerID,
+					Eligible:   true,
+					MatchID:    matchID,
+					RecordedAt: time.Now().UTC(),
+				}
+				if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
+					log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: restoring stale eligibility for playerId=%s: %v", compID, matchID, playerID, werr)
+					continue
+				}
+				status = &restored
 			}
-			status = &restored
 		}
 	}
 	return result, status, nil

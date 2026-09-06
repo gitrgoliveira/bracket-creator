@@ -217,6 +217,71 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 	assert.True(t, statuses[aliceID].Eligible)
 }
 
+// TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer
+// is PR #416 finding 1's repro. A bracket match carries no per-side ids
+// (BracketMatch persists names only), so the FIRST kiken resolves the loser
+// by a name-based roster scan -- correctly, at the time. If the roster is
+// then edited so the withdrawn player's display name no longer matches the
+// bracket row's stored SideA/SideB (a rename that never touches an
+// already-generated bracket), re-recording the SAME decision (same
+// decisionBy, hence the same intended loser) can no longer resolve a NEW
+// ineligibility by name: recordIneligibilityFromDecision returns (nil, nil),
+// exactly the "did not resolve/write a loser" case, not "this decision no
+// longer makes anyone ineligible".
+//
+// Before the fix, RecordDecisionTx's restore loop treated status==nil as
+// proof every MatchID==matchID/Eligible==false entry was stale and restored
+// it -- flipping the STILL-withdrawn player back to Eligible:true even
+// though the operator never rescinded anything. The fix gates the restore on
+// the new decision actually having settled a loser when it is itself a
+// withdrawal.
+func TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "renamed-loser-bracket"
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, bracket.Rounds)
+	matchID := bracket.Rounds[0][0].ID
+
+	// First kiken: decisionBy=shiro -> Bob (SideB) withdraws, resolved by
+	// name (bracket matches carry no ids at all).
+	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, bobID, status.PlayerID)
+	assert.False(t, status.Eligible, "precondition: Bob must be ineligible after the first kiken")
+
+	// Roster edit: Bob is renamed. The bracket row's own SideB still reads
+	// "Bob" (a rename never rewrites an already-generated bracket).
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob-Renamed", Dojo: "B"},
+	}))
+
+	// Re-record the SAME decision (same decisionBy, same intended loser).
+	// The name-based roster scan can no longer find "Bob" at all, so this
+	// write resolves no CompetitorStatus -- it neither confirms nor changes
+	// anyone's eligibility.
+	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	require.NoError(t, err)
+	assert.Nil(t, status2, "the write did not resolve/write a loser after the rename, so it must not report a restore")
+
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.Contains(t, statuses, bobID)
+	assert.False(t, statuses[bobID].Eligible, "Bob is STILL withdrawn; a re-score the engine could not attribute must never silently restore him")
+}
+
 // TestRecordDecisionTx_DownstreamLockReturnsErr asserts the T103
 // decision-lock check fires correctly in the tx-aware path.
 func TestRecordDecisionTx_DownstreamLockReturnsErr(t *testing.T) {

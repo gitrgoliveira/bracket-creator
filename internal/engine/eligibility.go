@@ -76,6 +76,43 @@ func (e *AlreadyIneligibleError) Error() string {
 	return fmt.Sprintf("competitor %q already ineligible (match %s)", e.PlayerID, e.MatchID)
 }
 
+// participantIDByName resolves name to a participant id against compID's
+// roster (comp.Players plus a fresh LoadParticipants read, combinedPlayerPool
+// -- the same union every other name-lookup call site in this file uses).
+// PR #416 finding 8: this is the LoadCompetition -> nil check ->
+// LoadParticipants -> combinedPlayerPool -> lookupPlayerID sequence that used
+// to be hand-copied inline in both checkConcurrentIneligibility and
+// recordIneligibilityFromDecision.
+//
+// Returns ("", nil) -- never an error -- for the two "nothing to resolve"
+// shapes: name == "" (nothing to look up) and a genuinely missing
+// competition (comp == nil, e.g. deleted mid-request; a side-effect lookup
+// has no config to resolve against, which is not a fault). Any other load
+// error (corrupt/unreadable competition or participants data) IS propagated,
+// since it means the roster could not be read at all, not that the name is
+// merely absent from it; callers decide for themselves whether that is
+// fatal (recordIneligibilityFromDecision, the primary write) or a
+// best-effort guard to log-and-skip (checkConcurrentIneligibility).
+func participantIDByName(h state.StoreTx, compID, name string) (string, error) {
+	if name == "" {
+		return "", nil
+	}
+	comp, err := h.LoadCompetition(compID)
+	if err != nil {
+		return "", err
+	}
+	if comp == nil {
+		return "", nil
+	}
+	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
+	participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	if err != nil {
+		return "", err
+	}
+	pool := combinedPlayerPool(comp.Players, participants)
+	return lookupPlayerID(pool, name), nil
+}
+
 // checkConcurrentIneligibility returns *AlreadyIneligibleError when the
 // loser (identified by loserID when the caller already resolved it from the
 // match's own side ids, else by loserName) already has Eligible:false from a
@@ -107,24 +144,15 @@ func (e *Engine) checkConcurrentIneligibility(h state.StoreTx, compID, matchID, 
 	}
 	playerID := loserID
 	if playerID == "" {
-		comp, err := h.LoadCompetition(compID)
-		if err != nil || comp == nil {
-			if err != nil {
-				log.Printf("engine: checkConcurrentIneligibility LoadCompetition compId=%s: %v (T105 guard skipped)", compID, err)
-			}
-			return nil
-		}
-		// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-		participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+		found, err := participantIDByName(h, compID, loserName)
 		if err != nil {
-			log.Printf("engine: checkConcurrentIneligibility LoadParticipants compId=%s: %v (T105 guard skipped)", compID, err)
+			log.Printf("engine: checkConcurrentIneligibility resolving %q compId=%s: %v (T105 guard skipped)", loserName, compID, err)
 			return nil
 		}
-		pool := combinedPlayerPool(comp.Players, participants)
-		playerID = lookupPlayerID(pool, loserName)
-		if playerID == "" {
+		if found == "" {
 			return nil
 		}
+		playerID = found
 	}
 	statuses, err := h.LoadCompetitorStatus(compID)
 	if err != nil {
@@ -621,34 +649,42 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 
 // recordIneligibilityFromDecision is the T085 engine-side side effect.
 // When a top-level match result records a kiken or fusenpai decision,
-// the losing player (the side opposite of result.Winner, with an
-// ippon-count fallback) becomes ineligible for subsequent matches in
-// this competition.
+// the losing player becomes ineligible for subsequent matches in this
+// competition.
 //
-// The losing player is resolved by ID FIRST, straight from result's own
-// SideAID/SideBID (loserPlayerID, mirroring resolveWinnerSide), and falls
-// back to a name-based roster scan (lookupPlayerID) whenever loserPlayerID
-// reports the SIDE itself as known (sideUnresolved=false) -- which covers
-// two different shapes: the row carries no side ids at all (no identity
-// data to prefer over a name), AND the row carries ids but the losing SIDE's
-// own id field happens to be empty (a partially-stamped row, e.g. one side
-// generated before ids existed) -- in that second shape the side is not in
-// doubt, only its id is missing, so falling back to the name already
-// computed via loserSideName is a legitimate resolution of THAT side, not a
-// guess among candidates. A name-only resolution silently picks the FIRST
-// namesake registered in the roster -- a DIFFERENT competitor whenever the
-// actual loser shares a display name with someone else (repro: roster
-// Tanaka@DojoB registered before Tanaka@DojoA; Tanaka@DojoA withdraws, but
-// the old name-only resolution wrote Eligible:false for Tanaka@DojoB
-// instead, and her own next match then incorrectly 409'd) -- which is why
-// the fallback is gated on the side being known, not merely on the id being
-// empty.
+// The losing side is resolved by losingSide, the ONE owner of "which side
+// lost" (PR #416 findings 4/5): result.WinnerSide first (the operator's own
+// explicit choice, stamped directly by RecordDecisionTx), then
+// domain.AttributeWinnerSide (id-preferred, name fallback -- the same
+// attribution every other winner-side consumer in this codebase uses), then
+// the legacy ippon-emptiness heuristic. losingSide replaced two independent,
+// narrower spellings of the same question (loserSideName's name/ippon-only
+// view and loserPlayerID's resolveWinnerSide-based id view) that never
+// consulted WinnerSide at all, so a same-name pairing whose loser was already
+// pinned by WinnerSide could still fall through to an ambiguous name/id
+// tie-break that silently assumed side A won and marked the WINNER
+// ineligible instead of the loser.
+//
+// The losing player's id is preferred straight from losingSide's own id
+// return, and falls back to a name-based roster scan (lookupPlayerID)
+// whenever losingSide resolves the SIDE but that side's own id field happens
+// to be empty (a partially-stamped row, e.g. one side generated before ids
+// existed) -- the side is not in doubt there, only its id is missing, so
+// falling back to the name losingSide already returned is a legitimate
+// resolution of THAT side, not a guess among candidates. A name-only
+// resolution silently picks the FIRST namesake registered in the roster --
+// a DIFFERENT competitor whenever the actual loser shares a display name
+// with someone else (repro: roster Tanaka@DojoB registered before
+// Tanaka@DojoA; Tanaka@DojoA withdraws, but the old name-only resolution
+// wrote Eligible:false for Tanaka@DojoB instead, and her own next match then
+// incorrectly 409'd) -- which is why the fallback is gated on the side being
+// known, not merely on the id being empty.
 //
 // A row that DOES carry ids but whose losing SIDE is still genuinely
-// unresolved (loserPlayerID's sideUnresolved=true case -- reachable via
-// bulk-score, which writes a decision directly and never runs
-// RecordDecisionTx's decisionBy-based resolution, so a same-name pairing can
-// reach here with no WinnerID stamped) is REJECTED with a *ValidationError
+// unresolved (losingSide's ok=false case -- reachable via bulk-score, which
+// writes a decision directly and never runs RecordDecisionTx's
+// decisionBy-based WinnerSide stamp, so a same-name pairing can reach here
+// with no WinnerID stamped either) is REJECTED with a *ValidationError
 // rather than falling back to the same first-namesake guess: the row's own
 // ids already prove there is more than one candidate and no way to tell
 // which side lost, so guessing from a name-only scan would silently mark the
@@ -670,41 +706,40 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
 		return nil, nil
 	}
-	loser := loserSideName(result)
-	if loser == "" {
+	_, playerID, loser, ok := losingSide(result)
+	if !ok {
+		if result.SideAID != "" || result.SideBID != "" {
+			// The row DOES carry side ids, but losingSide could not tell
+			// which SIDE lost (e.g. a same-name pairing decided via
+			// bulk-score, which never runs RecordDecisionTx's decisionBy-based
+			// WinnerSide stamp and so never stamps a disambiguating
+			// WinnerID either). Falling back to a name-only roster scan here
+			// would silently pick the FIRST namesake registered -- a
+			// DIFFERENT competitor whenever the actual loser is not that one
+			// -- so this is rejected outright rather than guessed.
+			return nil, validationErrorf("match %s: cannot resolve the losing side's identity for a %s decision (side ids present but ambiguous, e.g. a same-name pairing with no winnerId)", matchID, result.Decision)
+		}
 		return nil, nil
 	}
-	playerID, sideUnresolved := loserPlayerID(result)
-	if playerID == "" && sideUnresolved {
-		// The row DOES carry side ids, but resolveWinnerSide could not tell
-		// which SIDE lost (e.g. a same-name pairing decided via bulk-score,
-		// which never runs RecordDecisionTx's decisionBy-based resolution
-		// and so never stamps a disambiguating WinnerID). Falling back to a
-		// name-only roster scan here would silently pick the FIRST namesake
-		// registered -- a DIFFERENT competitor whenever the actual loser is
-		// not that one -- so this is rejected outright rather than guessed.
-		return nil, validationErrorf("match %s: cannot resolve the losing side's identity for a %s decision (side ids present but ambiguous, e.g. a same-name pairing with no winnerId)", matchID, result.Decision)
-	}
 	if playerID == "" {
-		comp, err := h.LoadCompetition(compID)
+		// losingSide resolved WHICH side lost, but that side's own id field
+		// is empty on this row (a partially-stamped row, e.g. one side
+		// generated before ids existed). The side is not in doubt, only its
+		// id is missing, so a name-based roster scan for THAT side's name is
+		// a legitimate resolution of it, not a guess among candidates.
+		//
+		// Unlike checkConcurrentIneligibility's best-effort guard, this is the
+		// PRIMARY eligibility write, so a load/parse error is propagated
+		// rather than logged-and-skipped (participantIDByName's own contract:
+		// ("", nil) only for "competition/name genuinely not found").
+		found, err := participantIDByName(h, compID, loser)
 		if err != nil {
 			return nil, err
 		}
-		if comp == nil {
-			// Side-effect helper: no config means no eligibility record to write,
-			// so safely no-op rather than panic on a missing/deleted competition.
+		if found == "" {
 			return nil, nil
 		}
-		// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-		participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-		if err != nil {
-			return nil, err
-		}
-		pool := combinedPlayerPool(comp.Players, participants)
-		playerID = lookupPlayerID(pool, loser)
-		if playerID == "" {
-			return nil, nil
-		}
+		playerID = found
 	}
 	status := domain.CompetitorStatus{
 		PlayerID:      playerID,
@@ -785,59 +820,67 @@ func loserSideName(result *state.MatchResult) string {
 	return ""
 }
 
-// loserPlayerID resolves the losing side's participant id directly from
-// result's own SideAID/SideBID, via resolveWinnerSide -- the SAME
-// side-attribution resolveWinnerSide gives every other identity-keyed
-// standings consumer (applyTiebreakSort, groupNeedsChusen). Preferring the
-// match row's own ids over a name-based roster scan is what keeps a
-// same-name pairing (or a same-name-elsewhere-in-the-roster collision) from
-// being resolved to the wrong competitor: lookupPlayerID's linear scan picks
-// the FIRST namesake registered, which names a DIFFERENT person whenever the
-// actual loser is not that one.
+// losingSide is the ONE owner of "which side lost" attribution for a
+// kiken/fusenpai/withdrawal decision (PR #416 findings 4/5). It replaces
+// three independent spellings of the same question that used to live in
+// loserSideName (name/ippon-only), loserPlayerID (id-preferred via
+// resolveWinnerSide, which never consulted result.WinnerSide), and
+// RecordDecisionTx's own decisionBy-derived loserName/loserID -- none of
+// which ever read result.WinnerSide, even though RecordDecisionTx stamps it
+// on every decision it records. On a same-name pairing whose loser was
+// already pinned by WinnerSide but had no disambiguating WinnerID, the old
+// loserPlayerID fell through to an ambiguous id/name tie-break that silently
+// assumed side A won, so recordIneligibilityFromDecision could mark the
+// actual WINNER ineligible instead of the loser.
 //
-// sideUnresolved answers a narrower question than "is id empty": whether the
-// losing SIDE itself (A or B) could be determined at all, not whether that
-// side happened to have an id on file. Three shapes:
+// Preference order, each step trusted completely once it applies:
 //
-//   - Neither SideAID nor SideBID is set at all (resolveWinnerSide's id
-//     branch needs at least one non-empty -- e.g. a bracket match, which
-//     persists neither): sideUnresolved=false, id="". No identity data
-//     exists anywhere on the row, so a name-based fallback is the only
-//     option there ever was.
-//   - The row DOES carry an id on at least one side, AND resolveWinnerSide
-//     can still tell which SIDE lost (winnerIsA or winnerIsB, not both/
-//     neither): sideUnresolved=false, id=thatSide'sID -- WHICH MAY ITSELF
-//     BE EMPTY on a partially-stamped row (e.g. SideAID unset, SideBID set,
-//     decisionBy or a name match still pins the loser to SideA). The side is
-//     not in doubt here, only its own id field is missing, so returning ""
-//     for it is a legitimate invitation for the caller to resolve THAT
-//     side's name -- not a guess among several candidates the way a
-//     genuinely unresolved side would be.
-//   - The row carries an id on at least one side, but resolveWinnerSide
-//     cannot tell which side lost (e.g. a same-name pairing with no
-//     WinnerID stamped, reachable via bulk-score, which writes a decision
-//     directly and never runs RecordDecisionTx's decisionBy-based
-//     resolution): sideUnresolved=true, id="". The row's own ids prove
-//     there is more than one candidate and no way to choose between them --
-//     callers must not fall back to a name scan here, because
-//     lookupPlayerID's first-namesake pick would silently mark the WRONG
-//     competitor ineligible using data the row itself already proved
-//     insufficient to trust. This is the one shape recordIneligibilityFromDecision
-//     turns into a *ValidationError; every caller of that function then logs
-//     it and continues rather than failing the primary write (the error is
-//     non-fatal there, not a hard reject of the whole decision).
-func loserPlayerID(result *state.MatchResult) (id string, sideUnresolved bool) {
-	if result.SideAID == "" && result.SideBID == "" {
-		return "", false
+//  1. result.WinnerSide ("A" or "B") -- the one explicit, unambiguous hint a
+//     producer stamps directly from the operator's own choice (e.g.
+//     RecordDecisionTx from decisionBy), never inferred. Authoritative over
+//     every other field on the row, including a contradicting Winner name
+//     or WinnerID (which would only arise from stale/inconsistent data).
+//  2. domain.AttributeWinnerSide -- the SAME id-preferred/name-fallback
+//     attribution every other winner-side consumer in this codebase uses
+//     (standings, hantei placement, team aggregation). Ids win over names
+//     when they disagree; see that function's own doc comment.
+//  3. The legacy ippon-emptiness heuristic (loserSideName's fallback: one
+//     side has struck ippons, the other has none) for a row with no
+//     winner-attribution data at all.
+//
+// ok reports whether the loss could be attributed; false replaces the old
+// sideUnresolved/"" signals. A caller like recordIneligibilityFromDecision
+// that needs to tell "no identity data at all" (safe no-op) from "ids
+// present but genuinely ambiguous" (reject) still does so from
+// result.SideAID/SideBID directly, exactly as before -- that distinction is
+// about what the CALLER does with an unresolved loss, not about how the loss
+// itself is attributed, so it stays out of this function.
+func losingSide(result *state.MatchResult) (side domain.MatchSide, id, name string, ok bool) {
+	switch result.WinnerSide {
+	case "A":
+		return domain.MatchSideB, result.SideBID, result.SideB, true
+	case "B":
+		return domain.MatchSideA, result.SideAID, result.SideA, true
 	}
-	winnerIsA, winnerIsB := resolveWinnerSide(*result)
-	switch {
-	case winnerIsA:
-		return result.SideBID, false
-	case winnerIsB:
-		return result.SideAID, false
+	switch domain.AttributeWinnerSide(domain.WinnerAttribution{
+		WinnerID: result.WinnerID, SideAID: result.SideAID, SideBID: result.SideBID,
+		Winner: result.Winner, SideA: result.SideA, SideB: result.SideB,
+	}) {
+	case domain.MatchSideA:
+		return domain.MatchSideB, result.SideBID, result.SideB, true
+	case domain.MatchSideB:
+		return domain.MatchSideA, result.SideAID, result.SideA, true
 	}
-	return "", true
+	switch loser := loserSideName(result); loser {
+	case "":
+		return domain.MatchSideNone, "", "", false
+	case result.SideA:
+		return domain.MatchSideA, result.SideAID, result.SideA, true
+	case result.SideB:
+		return domain.MatchSideB, result.SideBID, result.SideB, true
+	default:
+		return domain.MatchSideNone, "", "", false
+	}
 }
 
 // ReinstateCompetitor restores eligibility for a competitor who was

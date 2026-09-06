@@ -524,6 +524,118 @@ func TestLoserSideName(t *testing.T) {
 	}
 }
 
+// TestLosingSide is PR #416 findings 4/5's table test: losingSide is the ONE
+// owner of "which side lost", preferring WinnerSide, then
+// domain.AttributeWinnerSide (id-preferred, name fallback), then the legacy
+// ippon-emptiness heuristic.
+func TestLosingSide(t *testing.T) {
+	tests := []struct {
+		name     string
+		result   state.MatchResult
+		wantSide domain.MatchSide
+		wantID   string
+		wantName string
+		wantOK   bool
+	}{
+		{
+			name: "WinnerSide authoritative even against a contradicting name",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
+				Winner: "Bob", WinnerSide: "A", // WinnerSide says A won despite Winner naming Bob
+			},
+			wantSide: domain.MatchSideB, wantID: "idB", wantName: "Bob", wantOK: true,
+		},
+		{
+			name: "id-only: no WinnerSide, ids disambiguate via AttributeWinnerSide",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
+				WinnerID: "idB",
+			},
+			wantSide: domain.MatchSideA, wantID: "idA", wantName: "Alice", wantOK: true,
+		},
+		{
+			name: "name-only: no ids at all, resolved by Winner name",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			},
+			wantSide: domain.MatchSideA, wantID: "", wantName: "Alice", wantOK: true,
+		},
+		{
+			name: "contradictory Winner/WinnerID: ids win over the name (AttributeWinnerSide's own rule)",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
+				Winner: "Alice", WinnerID: "idB", // name says Alice, id says Bob
+			},
+			wantSide: domain.MatchSideA, wantID: "idA", wantName: "Alice", wantOK: true,
+		},
+		{
+			name: "ippon-emptiness fallback: no Winner, no WinnerSide, no ids",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", IpponsA: []string{"M"},
+			},
+			wantSide: domain.MatchSideB, wantID: "", wantName: "Bob", wantOK: true,
+		},
+		{
+			name:     "wholly unresolved: nothing to go on",
+			result:   state.MatchResult{SideA: "Alice", SideB: "Bob"},
+			wantSide: domain.MatchSideNone, wantID: "", wantName: "", wantOK: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			side, id, name, ok := losingSide(&tc.result)
+			assert.Equal(t, tc.wantSide, side, "side")
+			assert.Equal(t, tc.wantID, id, "id")
+			assert.Equal(t, tc.wantName, name, "name")
+			assert.Equal(t, tc.wantOK, ok, "ok")
+		})
+	}
+}
+
+// TestRecordIneligibilityFromDecision_WinnerSideOverridesAmbiguousNameTieBreak
+// is PR #416 finding 4/5's repro on recordIneligibilityFromDecision directly:
+// a same-name pairing (SideA==SideB=="Tanaka") with only SideA's id stamped,
+// WinnerSide="B" (Tanaka@SideB explicitly won) but no WinnerID. Before the
+// fix, the loser was resolved via loserPlayerID -> resolveWinnerSide, which
+// never consulted WinnerSide at all: with no WinnerID, it fell back to a
+// name comparison where Winner matches BOTH sides (same name), and Go's
+// switch matched "case winnerIsA" first -- silently assuming side A won and
+// writing the WINNER (SideB, whichever roster entry the first-namesake scan
+// happened to find) ineligible instead of the actual loser, SideA (whose own
+// id, "a1", was sitting right there on the row).
+func TestRecordIneligibilityFromDecision_WinnerSideOverridesAmbiguousNameTieBreak(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "losing-side-winnerside-override"
+	createTestCompetition(t, store, compID, "league", 3)
+
+	// The SideB namesake is registered FIRST in the roster: the old
+	// first-namesake-by-name fallback would find HER, not SideA -- the
+	// actual loser once WinnerSide is honoured.
+	tanakaSideBRegisteredFirst := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: tanakaSideBRegisteredFirst, Name: "Tanaka", Dojo: "DojoB"},
+	}))
+
+	result := &state.MatchResult{
+		ID:    "Pool A-0",
+		SideA: "Tanaka", SideB: "Tanaka",
+		SideAID: "a1", SideBID: "", // only SideA's id is stamped on this row
+		WinnerSide: "B", // SideB explicitly won -> SideA is the loser
+		Decision:   string(domain.DecisionKikenVoluntary),
+	}
+
+	var status *domain.CompetitorStatus
+	var err error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		status, err = eng.recordIneligibilityFromDecision(tx, compID, "Pool A-0", result)
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.NoError(t, err)
+	require.NotNil(t, status, "the loser (SideA) has its own id on the row and must resolve without any roster scan")
+	assert.Equal(t, "a1", status.PlayerID, "the ineligibility must land on SideA's own id, not the SideB roster namesake found by a first-match name scan")
+}
+
 // TestLookupPlayerID_EmptyName covers the early-return when name is "".
 func TestLookupPlayerID_EmptyName(t *testing.T) {
 	players := []domain.Player{{ID: "p1", Name: "Alice", Dojo: "A"}}
@@ -553,6 +665,61 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	// No participants saved → lookupPlayerID returns ""
 	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "Ghost Player")
 	assert.NoError(t, err, "unknown player should return nil without error")
+}
+
+// TestParticipantIDByName covers the three non-happy branches of PR #416
+// finding 8's extracted helper (participantIDByName), which replaced an
+// inline LoadCompetition -> nil check -> LoadParticipants ->
+// combinedPlayerPool -> lookupPlayerID sequence hand-copied in both
+// checkConcurrentIneligibility and recordIneligibilityFromDecision.
+func TestParticipantIDByName(t *testing.T) {
+	t.Run("nil competition returns empty id, no error", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		id, err := participantIDByName(eng.store, "does-not-exist", "Anyone")
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("unknown name returns empty id, no error", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "pidbn-unknown"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: helper.NewUUID4(), Name: "Alice", Dojo: "A"},
+		}))
+		id, err := participantIDByName(eng.store, compID, "Ghost Player")
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("empty name returns empty id, no error, no load at all", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		id, err := participantIDByName(eng.store, "irrelevant", "")
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("a load error propagates", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "pidbn-load-err"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		corruptCompetitionConfig(t, store, compID)
+		_, err := participantIDByName(eng.store, compID, "Alice")
+		assert.Error(t, err, "a genuine LoadCompetition failure must propagate, not read as \"name not found\"")
+	})
+
+	t.Run("known name resolves its id", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "pidbn-known"
+		aliceID := helper.NewUUID4()
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+		}))
+		id, err := participantIDByName(eng.store, compID, "Alice")
+		require.NoError(t, err)
+		assert.Equal(t, aliceID, id)
+	})
 }
 
 // TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides

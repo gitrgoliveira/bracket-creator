@@ -122,13 +122,23 @@ func TestExportCompetitionXlsx_EmptyNumberPrefixNeverLogs(t *testing.T) {
 	saveTestParticipants(t, store, compID, names)
 	require.NoError(t, eng.StartCompetition(compID))
 
+	// The draw pipeline assigns a derived prefix to a blank competition, so
+	// the only way an export meets an unprefixed competition today is legacy
+	// or hand-edited state: blank the stored prefix and one Number through
+	// the store, the shape a config.md saved by an earlier version leaves
+	// behind before the startup migration has run.
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	comp.NumberPrefix = ""
+	require.NoError(t, store.SaveCompetition(comp))
+
 	pools, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	require.NotEmpty(t, pools[0].Players)
 	pools[0].Players[0].Number = ""
 	require.NoError(t, store.SavePools(compID, pools))
 
-	comp, err := store.LoadCompetition(compID)
+	comp, err = store.LoadCompetition(compID)
 	require.NoError(t, err)
 	require.Empty(t, comp.NumberPrefix, "premise: this competition is not numbered")
 

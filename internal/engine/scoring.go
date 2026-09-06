@@ -1001,16 +1001,36 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 	// A client-supplied WinnerID that names NEITHER side is invalid data: it
 	// would otherwise be persisted verbatim (the early return just below
 	// trusted it outright) and counted for nobody in standings -- a
-	// completed match with a winner nobody can find. Checked whenever the
-	// row has an id to check against (either side, gated the same way
-	// resolveWinnerSide gates its own id branch) AND the write is a FORWARD
+	// completed match with a winner nobody can find. Checked whenever BOTH
+	// side ids are known (domain.BothSideIDsKnown -- the same gate
+	// domain.AttributeWinnerSide's id branch uses) AND the write is a FORWARD
 	// (client) write -- a row with no ids at all has nothing to validate
 	// WinnerID against and is left to the name-based fallback below,
 	// unchanged, and a RESTORE never rejects (see the doc comment above).
-	if policy == matchWriteForward && result.WinnerID != "" && (result.SideAID != "" || result.SideBID != "") &&
-		result.WinnerID != result.SideAID && result.WinnerID != result.SideBID {
-		return validationErrorf("match %s: winnerId %q does not match sideAId %q or sideBId %q",
-			result.ID, result.WinnerID, result.SideAID, result.SideBID)
+	//
+	// PR #416 finding 6: this used to fire whenever EITHER side id was known
+	// (an OR gate), so a partially-stamped pool row (one side id-less, e.g.
+	// the mixed-id participants.csv format) rejected a legitimate score the
+	// instant the SPA invented an id from the id-less side's NAME
+	// (api_serializers.jsx buildPlayerMap) and sent it as winnerId -- that
+	// invented id could never match the one real stamped id, so every score
+	// on such a match 400'd and the match could never be completed at all.
+	// With only one side's id known, a WinnerID matching neither is not
+	// proof of a contradiction (it may simply be the OTHER side's still-
+	// absent id), so it is DROPPED rather than rejected: never persisted,
+	// logged, and left to the name/scoreline inference below exactly as if
+	// the client had omitted WinnerID entirely.
+	bothIDsKnown := domain.BothSideIDsKnown(result.SideAID, result.SideBID)
+	winnerIDUnattributable := result.WinnerID != "" &&
+		result.WinnerID != result.SideAID && result.WinnerID != result.SideBID
+	if policy == matchWriteForward && winnerIDUnattributable {
+		if bothIDsKnown {
+			return validationErrorf("match %s: winnerId %q does not match sideAId %q or sideBId %q",
+				result.ID, result.WinnerID, result.SideAID, result.SideBID)
+		}
+		log.Printf("engine: backfillMatchIdentity: dropping unattributable winnerId %q for match %s (only one side id known: sideAId=%q sideBId=%q); falling back to name/scoreline inference",
+			result.WinnerID, result.ID, result.SideAID, result.SideBID)
+		result.WinnerID = ""
 	}
 	if result.WinnerID != "" {
 		return nil

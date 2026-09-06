@@ -1834,6 +1834,60 @@ func TestBackfillMatchIdentity(t *testing.T) {
 	}
 }
 
+// TestBackfillMatchIdentity_OneSideIDKnown is PR #416 finding 6's repro: a
+// partially-stamped pool row (only SideB has a real participant id, reachable
+// via the mixed-id participants.csv format, TestStore_ParticipantsCSV_MixedIDs,
+// and pools.go stamping SideAID only from a Player.ID that exists). The SPA
+// invents an id from the winning side's NAME when that side has none
+// (api_serializers.jsx buildPlayerMap: `id: norm.id || norm.name`) and sends
+// it as winnerId. The invented id can never match the one real stamped id, so
+// the old OR-gated check rejected every such score outright and the match
+// could never be completed. The fix drops the unattributable winnerId
+// (logging, never persisting it) instead of rejecting, and falls through to
+// the name/scoreline inference exactly as if winnerId had been omitted.
+func TestBackfillMatchIdentity_OneSideIDKnown(t *testing.T) {
+	const idB = "22222222-2222-4222-8222-222222222222"
+
+	// stored carries the generation-time ids: SideA (Bob) was never stamped
+	// (legacy/mixed-id roster), SideB (Alice) has a real id.
+	stored := &state.MatchResult{SideAID: "", SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "Bob", // invented from the id-less side's own name
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.NoError(t, err, "an unrecognized winnerId must be dropped, not rejected, when only one side id is known")
+	assert.Equal(t, "", result.SideAID, "SideAID stays empty; stored never had one to backfill")
+	assert.Equal(t, idB, result.SideBID, "SideBID backfilled from stored")
+	// Bob (SideA) has no id on this row, so the cleared WinnerID falls
+	// through to the name-based inference (Winner=="Bob"==SideA, !=SideB) and
+	// resolves to SideA's id -- which is itself empty here, since SideA was
+	// never stamped. The important assertion is the ABSENCE of an error and
+	// that the invented "Bob" string is never persisted as WinnerID.
+	assert.Equal(t, "", result.WinnerID, "the invented winnerId must never be persisted verbatim")
+}
+
+// TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide covers the
+// companion path: when the one known side id DOES match winnerId, the write
+// must still succeed as a normal, unambiguous attribution (no dropping, no
+// rejection) -- only an UNRECOGNIZED winnerId is special-cased.
+func TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide(t *testing.T) {
+	const idB = "22222222-2222-4222-8222-222222222222"
+
+	stored := &state.MatchResult{SideAID: "", SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Alice",
+		WinnerID: idB, // correctly names the one known side
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.NoError(t, err)
+	assert.Equal(t, idB, result.WinnerID, "a winnerId matching the one known side is trusted outright")
+}
+
 // TestBackfillMatchIdentity_RepPlayers pins the daihyosen rep-player preserve-
 // on-empty rule (mp-62vr): a score write that omits the rep players must NOT
 // wipe a previously-recorded pick, but an explicit value always overrides.

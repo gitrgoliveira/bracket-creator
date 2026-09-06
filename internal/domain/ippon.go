@@ -213,6 +213,25 @@ func AttributeWinnerSide(a WinnerAttribution) MatchSide {
 	}
 }
 
+// BothSideIDsKnown reports whether a match record has BOTH participant ids
+// stamped. This is the ONE gate for whether a stored/incoming WinnerID can be
+// authoritatively checked against SideAID/SideBID at all: with only one
+// side's id known, a WinnerID that matches neither known field is not
+// necessarily a contradiction — it may simply be the OTHER side's (still
+// absent) id, e.g. a client inventing an id from a name for an id-less side.
+// Only when BOTH ids are known does "matches neither" prove the WinnerID
+// names nobody on this row.
+//
+// Mirrors the gate domain.AttributeWinnerSide's id branch uses (all three of
+// WinnerID/SideAID/SideBID non-empty): the two disagreed once (one used OR,
+// the other AND), which is what let a partially-stamped pool row reject a
+// legitimate score (PR #416 finding 6). Every WinnerID-vs-side-id consistency
+// check in the codebase should call this rather than re-deriving its own
+// non-empty test, so the two can never drift again.
+func BothSideIDsKnown(sideAID, sideBID string) bool {
+	return sideAID != "" && sideBID != ""
+}
+
 // HanteiTiedScoreline reports whether two ippon arrays hold an equal number of
 // scoring ippons, which is the precondition a hantei verdict rests on
 // (FIK 7-5 / 29-6). Encho is NOT a precondition; a tied scoreline is.

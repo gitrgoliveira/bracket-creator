@@ -462,6 +462,16 @@ function normalizeCompetitionDetail(data) {
                 return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
             });
         }
+        // bc-pnum ruling 1e follow-up: dataIssues is a SIBLING of config on
+        // the detail response (handlers_viewer.go's viewerDataIssues, the
+        // same builder + same key the aggregate uses), because it is about
+        // the FILES, not about the record inside one of them -- exactly the
+        // reasoning normalizeViewerCompItem's own `dataIssues: item.dataIssues`
+        // already applies to the aggregate's per-item shape. admin.jsx renders
+        // the competition Overview off `detail?.config || c`, so it is
+        // `config.dataIssues` (not the response's own top-level key) that the
+        // banner actually reads; map it here so the two loading paths agree.
+        config.dataIssues = result.dataIssues;
         result.config = config;
     }
 

@@ -361,13 +361,12 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// participants.csv that predates the id-minting write path loads fine (no
 	// parse error) but leaves some rows with no stable id, which is exactly
 	// the kind of operator-actionable, per-competition data problem this list
-	// exists for. missingParticipantIDsIssue reports it the same way a corrupt
-	// file is reported, distinguished by "kind" so the console renders
-	// different, accurate copy (nothing failed to parse, no write is refused).
-	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
-	if mi := missingParticipantIDsIssue(players); mi != nil {
-		issues = append(issues, *mi)
-	}
+	// exists for. viewerDataIssues folds that in alongside the corrupt-file
+	// errors, and is the ONE place both this aggregate and the single-
+	// competition detail endpoint build the list from (bc-pnum ruling 1e
+	// follow-up), so the two surfaces never disagree about what a given
+	// competition's issues are.
+	issues := viewerDataIssues(players, pmErr, brErr, poolsErr)
 	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
@@ -423,6 +422,37 @@ func missingParticipantIDsIssue(players []domain.Player) *gin.H {
 		"file":   "participants.csv",
 		"detail": detail,
 	}
+}
+
+// viewerDataIssues is the ONE place that assembles a competition's
+// dataIssues list: the corrupt-file errors among pmErr/brErr/poolsErr,
+// folded together with the missing-participant-ids advisory. Both public
+// viewer payload builders call it with the identical three-error shape --
+// the aggregate (buildViewerCompetitionPayload, above) and the single-
+// competition detail endpoint (GET /api/viewer/competitions/:id, below) --
+// so a given competition's issues read the same on the dashboard list and
+// on the competition overview, never present on one and silently dropped
+// on the other (bc-pnum ruling 1e follow-up: the overview reads
+// detail.config.dataIssues once the detail has loaded, which used to have
+// no such field at all because the detail endpoint never computed one).
+//
+// Deliberately takes only pmErr/brErr/poolsErr, not every error a caller
+// might have: the detail endpoint's own playersErr and standingsErr are
+// NOT passed in, even though standingsErr can carry the identical
+// underlying fault as poolsErr (engine.CalculatePoolStandings's own
+// internal LoadPools reads the same pools.csv) -- reporting both would
+// either double the entry or require a dedup rule this function would then
+// own alone. Passing exactly the three-error shape keeps the two callers'
+// output IDENTICAL by construction for the same on-disk state, which is
+// the property this extraction exists for; a caller with an error source
+// the other builder does not have is a caller that has drifted from the
+// contract, not one that needs a wider signature.
+func viewerDataIssues(players []domain.Player, pmErr, brErr, poolsErr error) []gin.H {
+	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
+	if mi := missingParticipantIDsIssue(players); mi != nil {
+		issues = append(issues, *mi)
+	}
+	return issues
 }
 
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {
@@ -539,10 +569,26 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				return nil, p
 			}
 
+			// bc-pnum ruling 1e follow-up: a corrupt-file error (pools.csv,
+			// pool-matches.csv, bracket.json, participants.csv, or one
+			// engine.CalculatePoolStandings' own reads surfaces, e.g.
+			// overrides.json) DEGRADES rather than failing the whole
+			// detail request -- the aggregate has never failed the whole
+			// payload for this class of fault, and the detail endpoint
+			// failing here was exactly why the corrupt-pools-csv case
+			// this pin covers never reached the operator: the request
+			// 500'd before dataIssues (below) ever got a chance to name
+			// it. Any OTHER error (a genuine I/O fault the operator
+			// cannot fix by editing a file) still aborts, unchanged from
+			// before.
 			for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr} {
-				if e != nil {
-					return nil, e
+				if e == nil {
+					continue
 				}
+				if _, ok := state.AsCorruptFile(e); ok {
+					continue
+				}
+				return nil, e
 			}
 
 			// FR-025, T036: derive per-court queue position at serve time,
@@ -552,8 +598,11 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// mp-13y: merge assigned competitor Number from pools.csv onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
-			// on the TV display, streaming overlay, and viewer card. (A pools
-			// read error has already returned above, so pools is trustworthy.)
+			// on the TV display, streaming overlay, and viewer card. A pools
+			// read error degrades (above) rather than aborting, so `pools`
+			// may be empty here; mergePoolNumbersIntoPlayers is a no-op over
+			// an empty slice, matching the aggregate's own tolerance for the
+			// same fault.
 			mergePoolNumbersIntoPlayers(comp, pools)
 			comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 
@@ -561,13 +610,24 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			stripMatchesAudit(poolMatches)
 			stripBracketAudit(bracket)
 
-			return json.Marshal(gin.H{
+			// viewerDataIssues (above) is the SAME function and the SAME
+			// three-error shape buildViewerCompetitionPayload calls, so this
+			// competition's dataIssues read identically here and on the
+			// aggregate. Sibling of "config", exactly like the aggregate's
+			// own payload shape; the SPA maps it onto detail.config.dataIssues
+			// (api_client.jsx normalizeCompetitionDetail) since that is the
+			// object AdminCompetitionOverview actually renders.
+			payload := gin.H{
 				"config":      comp,
 				"pools":       pools,
 				"poolMatches": poolMatches,
 				"standings":   standings,
 				"bracket":     bracket,
-			})
+			}
+			if issues := viewerDataIssues(comp.Players, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
+				payload["dataIssues"] = issues
+			}
+			return json.Marshal(payload)
 		})
 
 		if errors.Is(err, errNotFound) {

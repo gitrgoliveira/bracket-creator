@@ -374,7 +374,8 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	if err := validateMaxLen("name", comp.Name, MaxLenCompetitionName); err != nil {
 		return err
 	}
-	if err := validateMaxLen("numberPrefix", comp.NumberPrefix, MaxLenCompetitionNumberPrefix); err != nil {
+	// H13-app: rune count, not byte count -- see validateMaxRunes.
+	if err := validateMaxRunes("numberPrefix", comp.NumberPrefix, MaxLenCompetitionNumberPrefix); err != nil {
 		return err
 	}
 	if err := validateMaxLen("startTime", comp.StartTime, MaxLenCompetitionStartTime); err != nil {
@@ -467,34 +468,73 @@ func assignDefaultNumberPrefix(eng *engine.Engine, comp *state.Competition, excl
 // subsequent engine action then fails still knows config.md/pools.csv may
 // have already changed and must broadcast EventTournamentUpdated even on the
 // error path.
+//
+// G7: the read (LoadCompetition) and the write (SaveCompetition) used to be
+// two separate calls, coordinated only by compRenameMu -- a DIFFERENT mutex
+// from the per-competition lock every other writer takes (SaveCompetition,
+// UpdateCompetitionChanged, ...). A concurrent per-comp writer that does not
+// also take the rename lock (flipHasParticipantIDs via
+// UpdateCompetitionChanged, swiss.go, competition.go status writes) landing
+// between the read and the write was silently overwritten by this call's
+// stale whole-struct save. Routing the assignment itself through
+// store.UpdateCompetitionChanged closes that: load, mutate, and save now run
+// as one atomic sequence under the per-competition lock, so a concurrent
+// writer can only land wholly before or wholly after it, never inside it.
+//
+// The derivation (assignDefaultNumberPrefix -> eng.DefaultNumberPrefixFor)
+// and the tolerant sibling check (checkUniqueCompFieldsTolerant) both
+// exclude THIS id from the siblings they load (excludeID), so calling them
+// from inside the transform cannot re-lock the lock UpdateCompetitionChanged
+// already holds for id -- there is no AB-BA or self-deadlock risk.
+// skipRenumber mirrors the old code's early "comp == nil || !allowed(status)"
+// return, which skipped RenumberCompetitors entirely, not only the
+// assignment; UpdateCompetitionChanged's own "return nil, nil" only skips
+// the SAVE, so that outcome is signalled back out of the transform instead.
 func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, allowed func(state.CompetitionStatus) bool) (bool, error) {
 	var assigned bool
+	var assignedPrefix string
+	var skipRenumber bool
 	err := store.WithCompetitionRenameLock(func() error {
-		comp, err := store.LoadCompetition(id)
-		if err != nil {
-			return fmt.Errorf("load competition %s: %w", id, err)
-		}
-		if comp == nil || !allowed(comp.Status) {
-			return nil
-		}
-		if strings.TrimSpace(comp.NumberPrefix) == "" {
-			if err := assignDefaultNumberPrefix(eng, comp, id); err != nil {
-				return err
+		_, updateErr := store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil || !allowed(current.Status) {
+				skipRenumber = true
+				return nil, nil
 			}
-			// bc-pnum A5(c): "" for name, not comp.Name -- this pre-flight
+			if strings.TrimSpace(current.NumberPrefix) != "" {
+				return nil, nil
+			}
+			if err := assignDefaultNumberPrefix(eng, current, id); err != nil {
+				return nil, err
+			}
+			// bc-pnum A5(c): "" for name, not current.Name -- this pre-flight
 			// validates only the field it introduces (the derived prefix), never
 			// an inherited duplicate name the request never sent. checkUniqueCompFields
 			// exempts an empty name the same way it exempts an empty prefix (D4).
 			// checkUniqueCompFieldsTolerant (A5(d)): an unrelated sibling's
 			// unreadable config.md must not 500 a start/generate-draw that
 			// never touches that sibling.
-			if err := checkUniqueCompFieldsTolerant(store, "", comp.NumberPrefix, id); err != nil {
-				return err
+			skippedSiblings, err := checkUniqueCompFieldsTolerant(store, "", current.NumberPrefix, id)
+			if err != nil {
+				return nil, err
 			}
-			if err := store.SaveCompetition(comp); err != nil {
-				return err
+			// T2: correlate the skip and the assignment into ONE warning. A
+			// derived prefix persisted while a sibling was unreadable (and thus
+			// possibly colliding once it loads) was otherwise untraceable: the
+			// skip logged its own line with no id back to what got assigned,
+			// and the assignment is not logged at all elsewhere. Tolerance
+			// itself is unchanged (still logged and skipped, never a 500).
+			if len(skippedSiblings) > 0 {
+				log.Printf("mobileapp: ensureNumberPrefix %s: assigned prefix %q while skipping unreadable sibling(s) %v from the uniqueness check; verify no collision once they load", id, current.NumberPrefix, skippedSiblings)
 			}
 			assigned = true
+			assignedPrefix = current.NumberPrefix
+			return current, nil
+		})
+		if updateErr != nil {
+			return updateErr
+		}
+		if skipRenumber {
+			return nil
 		}
 		// bc-pnum A5(a): renumber UNCONDITIONALLY whenever pools.csv exists, not
 		// only on the branch that just assigned a prefix. RenumberCompetitors is
@@ -510,7 +550,7 @@ func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, allow
 				// This write's own damage (G4c): the assignment just above is
 				// what made this call reachable, so a renumber failure right
 				// after it is reported, not swallowed.
-				return fmt.Errorf("competition %s: prefix %q assigned but competitors could not be numbered: %w", id, comp.NumberPrefix, err)
+				return fmt.Errorf("competition %s: prefix %q assigned but competitors could not be numbered: %w", id, assignedPrefix, err)
 			}
 			// Inherited damage: a pools.csv already broken (or a renumber that
 			// failed on an earlier call, before the prefix was saved) is not
@@ -560,6 +600,47 @@ func respondNumberPrefixPreflightError(c *gin.Context, hub *Hub, assigned bool, 
 	}
 }
 
+// runWithNumberPrefixPreflight (M14) is the shared
+// ensureNumberPrefix -> engineCall -> error-classification sequence common to
+// POST .../start and POST .../generate-draw: the pre-flight's OWN failure is
+// handled by respondNumberPrefixPreflightError (never conflated with an
+// unrelated engineCall failure's wording, see that function's own doc
+// comment); once the pre-flight succeeds, engineCall runs and any failure
+// there still broadcasts EventTournamentUpdated when the pre-flight had
+// itself assigned/saved a prefix -- those writes already landed even though
+// THIS call is now failing for an unrelated reason (an empty roster, an
+// invalid court allocation, ...), so open clients must be told to refetch
+// rather than show stale state until reload -- before classifying the error
+// through the shared NotFound/Validation/internal switch.
+//
+// Returns true only when engineCall itself succeeded, so the caller
+// continues with its own load/broadcast/response tail; on false the
+// response has already been written and the caller must return immediately.
+func runWithNumberPrefixPreflight(c *gin.Context, store *state.Store, eng *engine.Engine, hub *Hub, id string, allowed func(state.CompetitionStatus) bool, engineCall func(id string) error) bool {
+	assigned, err := ensureNumberPrefix(store, eng, id, allowed)
+	if err != nil {
+		respondNumberPrefixPreflightError(c, hub, assigned, err)
+		return false
+	}
+	if err := engineCall(id); err != nil {
+		if assigned {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
+		var notFound *engine.NotFoundError
+		var validation *engine.ValidationError
+		switch {
+		case errors.As(err, &notFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		case errors.As(err, &validation):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			internalError(c, err)
+		}
+		return false
+	}
+	return true
+}
+
 // inheritOrAssignNumberPrefix ensures target carries a non-empty NumberPrefix
 // before a competition record is saved: an omitted (empty) value inherits
 // stored, and a value still empty after that (G7's legacy shape, or an
@@ -580,6 +661,40 @@ func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, 
 	return assignDefaultNumberPrefix(eng, target, excludeID)
 }
 
+// resolvePutNumberPrefix is the PUT /competitions/:id transform's shared
+// inherit -> moved -> validate-if-moved sequence (M14), extracted from the
+// two near-identical bodies the roster-only and settings-only branches used
+// to carry: inheritOrAssignNumberPrefix mutates target's NumberPrefix in
+// place, moved reports whether THIS call actually changed it away from
+// stored (bc-pnum [blocker]: a write validates only what it moves), and the
+// uniqueness/ambiguity check runs against validateName (the roster branch
+// always passes "", since a roster-only PUT never changes Name; the
+// settings branch passes comp.Name only when it differs from current.Name)
+// and the prefix ONLY when moved is true.
+//
+// M1: when neither applies (the common already-set-prefix roster save),
+// this skips checkUniqueCompFields entirely rather than call it with two
+// empty fields to no-op on -- checkUniqueCompFieldsSiblingPolicy's own
+// early return covers any OTHER caller that reaches it with both fields
+// empty, but skipping the call altogether here also skips paying for
+// building the (empty) arguments and keeps the "nothing to validate" case
+// visible at the call site, not just inside the callee.
+func resolvePutNumberPrefix(store *state.Store, eng *engine.Engine, target *state.Competition, storedPrefix, validateName, id string) (moved bool, infraErr, validationErr error) {
+	if err := inheritOrAssignNumberPrefix(eng, target, storedPrefix, id); err != nil {
+		return false, err, nil
+	}
+	moved = target.NumberPrefix != storedPrefix
+	if !moved && validateName == "" {
+		return moved, nil, nil
+	}
+	validatePrefix := ""
+	if moved {
+		validatePrefix = target.NumberPrefix
+	}
+	infraErr, validationErr = checkUniqueCompFields(store, validateName, validatePrefix, id)
+	return moved, infraErr, validationErr
+}
+
 // checkUniqueCompFields verifies that name and prefix are both unique across all
 // competitions except excludeID in a single store pass. Returns (infraErr,
 // validationErr): infraErr is non-nil when the store cannot be queried (caller
@@ -598,7 +713,8 @@ func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, 
 // pre-flight cannot defer that way and uses checkUniqueCompFieldsTolerant
 // instead (bc-pnum A5(d)).
 func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (error, error) {
-	return checkUniqueCompFieldsSiblingPolicy(store, name, prefix, excludeID, false)
+	_, infraErr, validationErr := checkUniqueCompFieldsSiblingPolicy(store, name, prefix, excludeID, false)
+	return infraErr, validationErr
 }
 
 // checkUniqueCompFieldsTolerant is checkUniqueCompFields's pre-flight-only
@@ -608,25 +724,38 @@ func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (
 // operator is trying to start is not the broken one, and they have no
 // "retry with a different value" recourse -- and GET /competitions and
 // MigrateNumberPrefixes already apply the same log-and-skip rule to a bad
-// sibling. Returns a single error already shaped for ensureNumberPrefix's
-// caller: an infra fault as a plain error, a collision as
-// *engine.ValidationError.
-func checkUniqueCompFieldsTolerant(store *state.Store, name, prefix, excludeID string) error {
-	infraErr, validationErr := checkUniqueCompFieldsSiblingPolicy(store, name, prefix, excludeID, true)
+// sibling. Returns the ids of every sibling this call skipped (T2:
+// ensureNumberPrefix's assign branch correlates these into ONE warning
+// naming the assigned prefix alongside them, rather than leaving the skip
+// and the assignment as two untied log lines) and a single error already
+// shaped for ensureNumberPrefix's caller: an infra fault as a plain error, a
+// collision as *engine.ValidationError.
+func checkUniqueCompFieldsTolerant(store *state.Store, name, prefix, excludeID string) ([]string, error) {
+	skipped, infraErr, validationErr := checkUniqueCompFieldsSiblingPolicy(store, name, prefix, excludeID, true)
 	if infraErr != nil {
-		return infraErr
+		return skipped, infraErr
 	}
 	if validationErr != nil {
-		return &engine.ValidationError{Msg: validationErr.Error()}
+		return skipped, &engine.ValidationError{Msg: validationErr.Error()}
 	}
-	return nil
+	return skipped, nil
 }
 
-func checkUniqueCompFieldsSiblingPolicy(store *state.Store, name, prefix, excludeID string, tolerateUnreadableSibling bool) (error, error) {
+func checkUniqueCompFieldsSiblingPolicy(store *state.Store, name, prefix, excludeID string, tolerateUnreadableSibling bool) (skipped []string, infraErr, validationErr error) {
 	prefix = strings.TrimSpace(prefix)
+	// M1: nothing to validate, so nothing to list. Both fields are exempt
+	// from the check anyway (see the doc comment above); returning here
+	// before ListCompetitions/LoadCompetition means a caller that validates
+	// only what it moved (bc-pnum [blocker]) and moved neither field pays no
+	// sibling-load cost at all and cannot be 500'd by an unrelated sibling's
+	// unreadable config.md under the strict policy. Covers any future
+	// caller, not only the roster-only PUT branch this was found on.
+	if name == "" && prefix == "" {
+		return nil, nil, nil
+	}
 	ids, err := store.ListCompetitions()
 	if err != nil {
-		return fmt.Errorf("list competitions: %w", err), nil
+		return nil, fmt.Errorf("list competitions: %w", err), nil
 	}
 	for _, existingID := range ids {
 		if existingID == excludeID {
@@ -636,20 +765,21 @@ func checkUniqueCompFieldsSiblingPolicy(store *state.Store, name, prefix, exclud
 		if err != nil {
 			if tolerateUnreadableSibling {
 				log.Printf("mobileapp: checkUniqueCompFields: skipping unreadable sibling %s: %v", existingID, err)
+				skipped = append(skipped, existingID)
 				continue
 			}
-			return fmt.Errorf("load competition %s: %w", existingID, err), nil
+			return skipped, fmt.Errorf("load competition %s: %w", existingID, err), nil
 		}
 		if existing == nil {
 			continue
 		}
 		if name != "" && strings.EqualFold(existing.Name, name) {
-			return nil, fmt.Errorf("competition name %q already exists", name)
+			return skipped, nil, fmt.Errorf("competition name %q already exists", name)
 		}
 		if prefix != "" && existing.NumberPrefix != "" {
 			existingPrefix := strings.TrimSpace(existing.NumberPrefix)
 			if strings.EqualFold(existingPrefix, prefix) {
-				return nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
+				return skipped, nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
 			}
 			// bc-pnum A1: a prefix that is not EQUAL to an existing one can
 			// still be ambiguous with it (e.g. "K2" beside "K"): AssignPlayerNumbers
@@ -657,11 +787,11 @@ func checkUniqueCompFieldsSiblingPolicy(store *state.Store, name, prefix, exclud
 			// entrant and "K2"'s 1st entrant would both print "K21". Refused
 			// with the same 400 shape, naming the conflicting competition.
 			if helper.NumberPrefixesAmbiguous(existingPrefix, prefix) {
-				return nil, fmt.Errorf("number prefix %q is ambiguous with %q, already used by competition %q", prefix, existingPrefix, existing.Name)
+				return skipped, nil, fmt.Errorf("number prefix %q is ambiguous with %q, already used by competition %q", prefix, existingPrefix, existing.Name)
 			}
 		}
 	}
-	return nil, nil
+	return skipped, nil, nil
 }
 
 // resolvePoolOverrideTarget resolves the pool-rank override request's target
@@ -759,12 +889,21 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		c.JSON(http.StatusOK, comps)
 	})
 
-	// GET /competitions/number-prefix-default?name=, previews the number
-	// prefix assignDefaultNumberPrefix would pick for a NEW competition named
-	// name. Read-only, over the engine's one derivation
+	// GET /number-prefix-default?name=, previews the number prefix
+	// assignDefaultNumberPrefix would pick for a NEW competition named name.
+	// Read-only, over the engine's one derivation
 	// (engine.DefaultNumberPrefixFor, R6/R9), the same call every assigning
 	// path makes, so the value previewed here is the value a save would
 	// actually assign.
+	//
+	// T3: deliberately NOT under /competitions/ (moved from
+	// /competitions/number-prefix-default). gin v1.12 resolves a static
+	// segment before a wildcard, so a competition whose id slugs to
+	// "number-prefix-default" (e.g. name "Number Prefix Default", or an
+	// explicit id on POST /competitions) could never be fetched via
+	// GET /competitions/:id -- this static route always won the match
+	// first. Same auth posture as before: still registered on the
+	// AuthMiddleware-gated admin `r` group, just one path segment up.
 	//
 	// The CREATE form (admin_setup.jsx AdminCreateCompetition) is the only
 	// caller: the competition doesn't exist yet, so there is nothing to
@@ -775,7 +914,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// silently come back as dead residue. A blank name is a valid query (the
 	// operator hasn't typed one yet) and resolves through
 	// helper.DefaultNumberPrefix's own fallback, same as every other caller.
-	r.GET("/competitions/number-prefix-default", func(c *gin.Context) {
+	r.GET("/number-prefix-default", func(c *gin.Context) {
 		prefix, err := eng.DefaultNumberPrefixFor(c.Query("name"), "")
 		if err != nil {
 			internalError(c, err)
@@ -1575,21 +1714,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// one for the first time) on the roster-only path too, the
 					// same inherit+assign step the settings branch runs below.
 					// A no-op when current already carries a prefix
-					// (assignDefaultNumberPrefix's own guard). storedPrefix is
-					// captured BEFORE this call, which mutates current in
-					// place, so numberPrefixMoved below reflects what THIS
-					// write actually changed.
-					storedPrefix := current.NumberPrefix
-					if err := inheritOrAssignNumberPrefix(eng, current, storedPrefix, id); err != nil {
-						return nil, err
-					}
-					numberPrefixMoved = current.NumberPrefix != storedPrefix
-					// bc-pnum [blocker]: a write validates only what it moves.
-					// A roster-only PUT never changes Name (see the comment
-					// above this branch), so it is never re-validated: "" is
+					// (assignDefaultNumberPrefix's own guard). bc-pnum
+					// [blocker]/M1: a write validates only what it moves -- a
+					// roster-only PUT never changes Name (see the comment
+					// above this branch), so "" is passed for validateName,
 					// the same exemption checkUniqueCompFields already gives
-					// an untouched/empty field. The prefix is validated only
-					// when THIS write moved it (blank -> assigned): an
+					// an untouched/empty field, and resolvePutNumberPrefix
+					// validates the prefix only when THIS call moved it: an
 					// already-set stored prefix -- even one ambiguous with a
 					// sibling from before that rule existed, a legacy K/K2
 					// pair that was legal when both were saved -- is
@@ -1597,15 +1728,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// actually changes its own prefix. Re-validating an
 					// unmoved stored value on every future roster save would
 					// refuse an operator's roster edit forever over a field
-					// this write never touched.
-					validatePrefix := ""
-					if numberPrefixMoved {
-						validatePrefix = current.NumberPrefix
-					}
-					if infraErr, vErr := checkUniqueCompFields(store, "", validatePrefix, id); infraErr != nil {
+					// this write never touched. M14: shared with the settings
+					// branch below via resolvePutNumberPrefix (M1's own
+					// helper, its doc comment covers the target/excludeID
+					// choice here).
+					var infraErr error
+					numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(store, eng, current, current.NumberPrefix, "", id)
+					if infraErr != nil {
 						return nil, infraErr
-					} else if vErr != nil {
-						validationErr = vErr
+					}
+					if validationErr != nil {
 						return nil, nil
 					}
 					// Roster-only PUT, do NOT flip HasParticipantIDs
@@ -1831,41 +1963,35 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// OTHER comp IDs that checkUniqueCompFields performs can't
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
-				var infraErr error
 				// A blank/omitted numberPrefix on a settings PUT means "keep the
 				// stored value", exactly like TeamMatchType and ExtraQualifiers
 				// above -- never "this competition has no prefix". inheritOrAssignNumberPrefix
-				// inherits BEFORE assignDefaultNumberPrefix runs, so that helper
-				// only ever derives a value for a competition that truly has none
-				// stored (G7's legacy shape). Without this, any settings save that
+				// (inside resolvePutNumberPrefix) inherits BEFORE
+				// assignDefaultNumberPrefix runs, so that helper only ever
+				// derives a value for a competition that truly has none stored
+				// (G7's legacy shape). Without this, any settings save that
 				// simply omits the field would invent a NEW prefix for a
 				// competition that already had one, renumbering every competitor
 				// and invalidating printed tags for no reason the operator asked
-				// for. Shared with the roster-only branch above (bc-pnum A3).
-				if dErr := inheritOrAssignNumberPrefix(eng, &comp, current.NumberPrefix, id); dErr != nil {
-					return nil, dErr
-				}
-				// bc-pnum [blocker]: computed HERE, right after the prefix is
-				// resolved and before `current.NumberPrefix` is overwritten by
-				// the merge further down, so BOTH the validation gate below and
-				// the post-transform renumber-failure report (numberPrefixMoved's
-				// own declaration comment) read the identical answer. A write
-				// validates only what it moves: the name is checked only when
-				// this request's Name differs from the stored one, and the
-				// prefix only when it actually moved -- an already-set stored
-				// prefix (even one ambiguous with a sibling from before that
-				// rule existed) is grandfathered until one of the two
-				// competitions actually changes its own.
-				numberPrefixMoved = comp.NumberPrefix != current.NumberPrefix
+				// for. Shared with the roster-only branch above (bc-pnum A3/M14).
+				//
+				// bc-pnum [blocker]: numberPrefixMoved is computed HERE, right
+				// after the prefix is resolved and before `current.NumberPrefix`
+				// is overwritten by the merge further down, so BOTH the
+				// validation gate and the post-transform renumber-failure report
+				// (numberPrefixMoved's own declaration comment) read the
+				// identical answer. A write validates only what it moves: the
+				// name is checked only when this request's Name differs from
+				// the stored one, and the prefix only when it actually moved --
+				// an already-set stored prefix (even one ambiguous with a
+				// sibling from before that rule existed) is grandfathered until
+				// one of the two competitions actually changes its own.
 				validateName := ""
 				if comp.Name != current.Name {
 					validateName = comp.Name
 				}
-				validatePrefix := ""
-				if numberPrefixMoved {
-					validatePrefix = comp.NumberPrefix
-				}
-				infraErr, validationErr = checkUniqueCompFields(store, validateName, validatePrefix, id)
+				var infraErr error
+				numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(store, eng, &comp, current.NumberPrefix, validateName, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}
@@ -2289,9 +2415,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if numberPrefixMoved {
 				// internalError is deliberately NOT used here: it special-cases a
 				// corrupt pools.csv into a generic "corrupt_file" body, which would
-				// drop this specific "settings were saved" message the operator
-				// needs to know the retry is what fixes it, not that the save itself
-				// was refused.
+				// drop this specific "were saved" message the operator needs to
+				// know the retry is what fixes it, not that the save itself was
+				// refused.
 				log.Printf("mobileapp: PUT /api/competitions/%s: settings saved but renumber failed after a prefix change: %v", id, rErr)
 				// The settings DID land (config.md carries the new prefix), so
 				// open clients must still be told to refetch: without this
@@ -2300,9 +2426,18 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// The retry itself takes the non-fatal branch above (the prefix
 				// no longer moves) and heals pools.csv once it is repaired.
 				hub.Broadcast(EventTournamentUpdated, nil)
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"error": "settings were saved but competitors could not be renumbered; save again once pools.csv is repaired",
-				})
+				// M5: name what THIS PUT actually persisted. comp.Players != nil
+				// is the roster-only branch (bc-pnum A3's own healed-prefix case
+				// included, since numberPrefixMoved is set on BOTH branches): a
+				// "settings were saved" 500 answering a roster-only PUT told the
+				// operator the wrong thing landed. The wording is the only
+				// difference; the 500 itself, the broadcast, and the non-fatal
+				// retry on the next save are unchanged either way.
+				msg := "settings were saved but competitors could not be renumbered; save again once pools.csv is repaired"
+				if comp.Players != nil {
+					msg = "the roster was saved but competitors could not be renumbered; save again once pools.csv is repaired"
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 				return
 			}
 			log.Printf("mobileapp: competition %s: renumber failed on an unrelated settings save (prefix unchanged, retried on next save): %v", id, rErr)
@@ -2466,33 +2601,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		// bc-pnum A5(b): the pre-flight's own failure is handled separately
-		// from the engine call's, so respondNumberPrefixPreflightError's
-		// assigned-specific 500 wording is never shown for an unrelated
-		// StartCompetition failure (see its doc comment).
-		assigned, err := ensureNumberPrefix(store, eng, id, engine.CanStart)
-		if err != nil {
-			respondNumberPrefixPreflightError(c, hub, assigned, err)
-			return
-		}
-		if err := eng.StartCompetition(id); err != nil {
-			if assigned {
-				// The pre-flight's writes already landed even though THIS
-				// call is failing for an unrelated reason (an empty roster,
-				// an invalid court allocation, ...); open clients must still
-				// be told to refetch rather than show stale state until reload.
-				hub.Broadcast(EventTournamentUpdated, nil)
-			}
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+		// bc-pnum A5(b) / M14: the shared pre-flight -> engine call ->
+		// error-classification sequence, see runWithNumberPrefixPreflight's
+		// doc comment. A false return means the response is already written.
+		if !runWithNumberPrefixPreflight(c, store, eng, hub, id, engine.CanStart, eng.StartCompetition) {
 			return
 		}
 
@@ -2527,26 +2639,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		// Same shared handling as POST .../start (see there).
-		assigned, err := ensureNumberPrefix(store, eng, id, engine.CanGenerateDraw)
-		if err != nil {
-			respondNumberPrefixPreflightError(c, hub, assigned, err)
-			return
-		}
-		if err := eng.GenerateDraw(id); err != nil {
-			if assigned {
-				hub.Broadcast(EventTournamentUpdated, nil)
-			}
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+		// Same shared handling as POST .../start (see runWithNumberPrefixPreflight).
+		if !runWithNumberPrefixPreflight(c, store, eng, hub, id, engine.CanGenerateDraw, eng.GenerateDraw) {
 			return
 		}
 		comp, err := store.LoadCompetition(id)

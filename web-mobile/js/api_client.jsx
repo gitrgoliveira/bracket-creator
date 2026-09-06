@@ -2640,7 +2640,7 @@ const API = {
     async getNumberPrefixDefault(name, password, signal) {
         const params = new URLSearchParams();
         if (name) params.append('name', name);
-        const res = await fetch(`/api/competitions/number-prefix-default?${params.toString()}`, {
+        const res = await fetch(`/api/number-prefix-default?${params.toString()}`, {
             headers: { 'X-Tournament-Password': password },
             signal,
         });

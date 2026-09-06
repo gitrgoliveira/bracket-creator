@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -556,6 +558,59 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, stored)
 		assert.Equal(t, "C", stored.NumberPrefix, "NumberPrefix should be trimmed on PUT")
+	})
+
+	// H13-app: validateCompetitionLengths counted numberPrefix by BYTES
+	// (validateMaxLen), but the message says "characters", the admin UI's
+	// maxLength="3" counts UTF-16 units, and the printed Tags/Names-to-Print
+	// sheets count RUNES -- so a 2-character, 4-byte prefix like "ÖÖ" was
+	// refused as > 3 "characters" even though every other measure of it
+	// agrees it's 2. validateMaxRunes (rune count) fixes this for
+	// numberPrefix specifically; validateMaxLen itself is UNCHANGED (its
+	// other ~45 callers size a byte-cost cap on purpose).
+	t.Run("NumberPrefix accepts a 2-rune, 4-byte prefix on Create", func(t *testing.T) {
+		comp := state.Competition{ID: "prefix-runes-create", Name: "Prefix Runes Create", NumberPrefix: "ÖÖ"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusCreated, w.Code, "response: %s", w.Body.String())
+		stored, err := store.LoadCompetition("prefix-runes-create")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "ÖÖ", stored.NumberPrefix, "a 2-RUNE prefix must be stored verbatim, byte length is not the right measure")
+	})
+
+	t.Run("NumberPrefix accepts a 2-rune, 4-byte prefix on Update", func(t *testing.T) {
+		seed := state.Competition{ID: "prefix-runes-update", Name: "Prefix Runes Update"}
+		require.NoError(t, store.SaveCompetition(&seed))
+
+		// A different 2-rune prefix than the Create subtest's "ÖÖ" (shared
+		// store across subtests in this parent test): distinct values so
+		// this assertion is about the rune-length cap, not a collision.
+		update := state.Competition{ID: "prefix-runes-update", Name: "Prefix Runes Update", NumberPrefix: "ÅÅ"}
+		body, _ := json.Marshal(update)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/prefix-runes-update", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		stored, err := store.LoadCompetition("prefix-runes-update")
+		require.NoError(t, err)
+		require.NotNil(t, stored)
+		assert.Equal(t, "ÅÅ", stored.NumberPrefix)
+	})
+
+	t.Run("NumberPrefix still rejects a 4-rune prefix", func(t *testing.T) {
+		comp := state.Competition{ID: "prefix-too-long", Name: "Prefix Too Long", NumberPrefix: "ÖÖÖÖ"}
+		body, _ := json.Marshal(comp)
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("POST", "/api/competitions", bytes.NewBuffer(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "the rune cap must still refuse a genuinely too-long prefix")
+		assert.Contains(t, w.Body.String(), "numberPrefix")
 	})
 
 	// Cross-file guard symmetry with handlers_import.go. The import path
@@ -1952,6 +2007,53 @@ func TestGenerateDrawHandler(t *testing.T) {
 // single-click POST .../start and the two-step POST .../generate-draw must
 // assign one BEFORE the engine draws -- there is no numberless mode to fall
 // back to (D1), so a legacy record cannot be allowed to draw without one.
+// TestPOSTStart_PreflightAssignsThenEngineCallFails_StillBroadcasts pins
+// M14's mutation guard: runWithNumberPrefixPreflight's shared tail must
+// still broadcast EventTournamentUpdated when the pre-flight itself
+// SUCCEEDED (assigned a prefix, saved it) but the subsequent engine call
+// then fails for an UNRELATED reason (here, StartCompetition's own
+// "no participants" guard). The prefix assignment already landed in
+// config.md even though this request is now failing, so open clients must
+// still be told to refetch rather than show stale state until reload --
+// exactly the same rule respondNumberPrefixPreflightError applies to the
+// pre-flight's OWN failure, but here for the SEPARATE engine-call failure
+// path the extraction must not have dropped.
+func TestPOSTStart_PreflightAssignsThenEngineCallFails_StillBroadcasts(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "preflight-assigns-then-start-fails"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Preflight Assigns Then Start Fails", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 3, PoolWinners: 2, Status: state.CompStatusSetup,
+		// NumberPrefix intentionally blank: the pre-flight assigns it.
+		// Deliberately no participants saved: StartCompetition's own draw
+		// pipeline fails with "no participants", unrelated to the pre-flight.
+	}))
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/start", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusBadRequest, w.Code, "response: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "no participants")
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.NotEmpty(t, stored.NumberPrefix, "the pre-flight's own assignment must have landed even though StartCompetition then failed")
+
+	select {
+	case msg := <-ch:
+		env := decodeHubEvent(t, msg)
+		assert.Equal(t, EventTournamentUpdated, env.Type,
+			"the pre-flight's writes landed even though the engine call failed; open clients must be told to refetch")
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the tournament_updated broadcast after a successful pre-flight assignment followed by an unrelated engine failure")
+	}
+}
+
 func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testing.T) {
 	t.Run("POST /start assigns a prefix before drawing", func(t *testing.T) {
 		r, store, _, _, tempDir := setupTestRouter(t)
@@ -2281,6 +2383,115 @@ func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testi
 	})
 }
 
+// TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite pins G7:
+// ensureNumberPrefix used to LoadCompetition, mutate the LOCAL copy, then
+// SaveCompetition it -- a read-modify-write with no lock spanning the gap
+// (only compRenameMu, a DIFFERENT mutex from the per-competition lock every
+// other writer takes). A concurrent writer going through an atomic
+// primitive (flipHasParticipantIDs, itself store.UpdateCompetitionChanged)
+// that landed in that gap was silently overwritten by this call's stale
+// whole-struct save.
+//
+// The fix routes the assignment itself through store.UpdateCompetitionChanged,
+// so load+mutate+save now run as ONE atomic sequence under the per-comp
+// lock: a concurrent same-competition write through another atomic
+// primitive can only ever land wholly BEFORE or wholly AFTER it, never
+// inside it. Racing the two for real (no artificial delay needed post-fix)
+// must therefore land BOTH changes regardless of scheduling order -- proven
+// deterministically, not statistically, because whichever finishes second
+// reads the first's already-committed change as `current` and preserves it
+// (the transform mutates in place and returns it unchanged).
+func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testing.T) {
+	_, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "g7-concurrent-flip"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "G7 Concurrent Flip", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
+		// NumberPrefix intentionally blank (ensureNumberPrefix assigns it) and
+		// HasParticipantIDs intentionally false (the concurrent flip sets it).
+	}))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var assigned bool
+	var ensureErr, flipErr error
+	go func() {
+		defer wg.Done()
+		assigned, ensureErr = ensureNumberPrefix(store, eng, cid, engine.CanStart)
+	}()
+	go func() {
+		defer wg.Done()
+		flipErr = flipHasParticipantIDs(store, cid)
+	}()
+	wg.Wait()
+
+	require.NoError(t, ensureErr)
+	require.NoError(t, flipErr)
+	assert.True(t, assigned, "a blank stored prefix must be assigned")
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	assert.NotEmpty(t, stored.NumberPrefix, "the assigned prefix must land")
+	assert.True(t, stored.HasParticipantIDs,
+		"a concurrent flip racing ensureNumberPrefix's own read-modify-write must not be clobbered by a stale whole-struct save")
+}
+
+// TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix pins T2:
+// checkUniqueCompFieldsTolerant already logged its own "skipping unreadable
+// sibling" line, and the assignment itself was not logged anywhere -- so a
+// derived prefix that persisted while a sibling was unreadable (and thus
+// possibly colliding once that sibling's config.md is repaired) left no way
+// to correlate the two facts from the server log alone. ensureNumberPrefix's
+// assign branch now logs ONE line naming the assigned prefix, the
+// competition id, and the skipped sibling id(s) together.
+func TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	// A sibling whose config.md will not parse: the tolerant uniqueness
+	// check logs its own "skipping unreadable sibling" line and moves on.
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "broken-sibling-t2", Name: "Broken Sibling T2", NumberPrefix: "B",
+	}))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(tempDir, "competitions", "broken-sibling-t2", "config.md"),
+		[]byte("not front matter at all"), 0o600))
+
+	const cid = "t2-generate-draw"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "T2 Generate Draw", Format: state.CompFormatPlayoffs,
+		Courts: []string{"A"}, Status: state.CompStatusSetup,
+		// NumberPrefix intentionally blank: this call is what assigns it.
+	}))
+	players := make([]domain.Player, 4)
+	for i := range players {
+		players[i] = domain.Player{Name: fmt.Sprintf("P%d", i+1), Dojo: "Dojo"}
+	}
+	require.NoError(t, store.SaveParticipants(cid, players))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+cid+"/generate-draw", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	stored, err := store.LoadCompetition(cid)
+	require.NoError(t, err)
+	require.NotEmpty(t, stored.NumberPrefix, "a legacy blank prefix must still be assigned despite the unreadable sibling")
+
+	logStr := logBuf.String()
+	assert.Contains(t, logStr, "ensureNumberPrefix", "must log from ensureNumberPrefix's own assign branch, not just the tolerant check's own skip line")
+	assert.Contains(t, logStr, stored.NumberPrefix, "the log line must name the prefix THIS call assigned")
+	assert.Contains(t, logStr, cid, "the log line must name the competition")
+	assert.Contains(t, logStr, "broken-sibling-t2", "the log line must name the skipped sibling id, correlating it with the assignment")
+}
+
 // TestGETNumberPrefixDefault exercises the R9 preview endpoint (item 8): it
 // must return the exact value assignDefaultNumberPrefix would assign, since
 // the create and settings forms pre-fill from it and must never show the
@@ -2296,7 +2507,7 @@ func TestGETNumberPrefixDefault(t *testing.T) {
 	getPrefix := func(t *testing.T, query string) string {
 		t.Helper()
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/competitions/number-prefix-default"+query, nil)
+		req, _ := http.NewRequest("GET", "/api/number-prefix-default"+query, nil)
 		r.ServeHTTP(w, req)
 		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 		var got map[string]string
@@ -2332,6 +2543,51 @@ func TestGETNumberPrefixDefault(t *testing.T) {
 		// lands on the zero-padded escape, "K02".
 		assert.Equal(t, "K02", getPrefix(t, ""))
 	})
+}
+
+// TestGETCompetitionByID_IDCollidingWithFormerPreviewPath pins T3: gin v1.12
+// resolves a static route segment before a wildcard, so while the number-
+// prefix preview lived at GET /competitions/number-prefix-default, a
+// competition whose id happened to slug to "number-prefix-default" (e.g.
+// name "Number Prefix Default", or an explicit id on POST /competitions)
+// could never be fetched via GET /competitions/:id -- the static route
+// always won the match first, returning the preview's {numberPrefix: ...}
+// shape (no "id" key) instead of the competition detail. Moving the preview
+// out of the /competitions/ subtree (to GET /number-prefix-default) closes
+// the collision.
+func TestGETCompetitionByID_IDCollidingWithFormerPreviewPath(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "number-prefix-default"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Number Prefix Default", NumberPrefix: "N",
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, cid, got["id"],
+		"must be the competition detail (carries id): the old static route shadowed this and returned the preview's {numberPrefix} body with no id key at all")
+}
+
+// TestGETNumberPrefixDefault_AnswersOnNewPath is T3's companion assertion:
+// the moved preview endpoint still answers, just one path segment up.
+func TestGETNumberPrefixDefault_AnswersOnNewPath(t *testing.T) {
+	r, _, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/number-prefix-default?name=Novice%20Cup", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "N", got["numberPrefix"])
 }
 
 // TestPOSTCompetition_NoNumberPrefixStoresDerivedPrefix pins F5(a) (bc-pnum
@@ -2423,6 +2679,85 @@ func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
 		assert.Truef(t, strings.HasPrefix(pl.Number, stored.NumberPrefix),
 			"number %q should start with the assigned prefix %q", pl.Number, stored.NumberPrefix)
 	}
+}
+
+// TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix
+// pins M1: the roster-only branch used to call checkUniqueCompFields(store,
+// "", validatePrefix, id) UNCONDITIONALLY, even when validatePrefix was ""
+// (nothing to validate, the common already-prefixed case). checkUniqueCompFields
+// is the STRICT policy, so it still listed every sibling and LoadCompetition'd
+// each one, and one unreadable sibling's config.md 500'd this competition's
+// roster save even though its own prefix never moved. The fix skips the
+// call entirely when nothing moved.
+func TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cidA = "m1-roster-a"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cidA, Name: "M1 Roster A", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
+		NumberPrefix: "M", // already prefixed: this roster PUT never moves it.
+	}))
+	const cidB = "m1-roster-b"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cidB, Name: "M1 Roster B", NumberPrefix: "N"}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cidB, "config.md"), []byte("not front matter at all"), 0o600))
+
+	body, _ := json.Marshal(state.Competition{
+		ID:   cidA,
+		Name: "M1 Roster A",
+		Players: []domain.Player{
+			{ID: "p1", Name: "Alice", Dojo: "Dojo Alice"},
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cidA, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code,
+		"an unrelated sibling's unreadable config.md must not block a roster save whose own prefix never moved: %s", w.Body.String())
+
+	players, err := store.LoadParticipants(cidA, false)
+	require.NoError(t, err)
+	require.Len(t, players, 1, "participants.csv must have changed on disk")
+	assert.Equal(t, "Alice", players[0].Name)
+}
+
+// TestResolvePutNumberPrefix_MovedPrefixStillValidatedAgainstCollision is
+// M1's companion case, exercised directly against the shared primitive
+// (white-box, same package): whenever a write actually MOVES the prefix,
+// the uniqueness/ambiguity check must still run -- M1 only skips it when
+// NOTHING moved. This is tested directly against resolvePutNumberPrefix
+// rather than through the roster-only HTTP PUT because the roster branch
+// only ever reaches "moved" via auto-heal (blank -> DefaultNumberPrefix),
+// and DefaultNumberPrefix's own candidate search already avoids every
+// taken/ambiguous value in its input set by construction (see its doc
+// comment on the "exhaustion" case) -- so a NATURAL collision on that path
+// is reachable only by exhausting the entire ~107-candidate search space
+// for a one-letter stem. The settings branch (comp.NumberPrefix explicitly
+// client-supplied) already exercises this same invariant end-to-end via
+// TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues's
+// "settings PUT MOVING the prefix..." subtest; this test pins the identical
+// invariant in the ONE function (M14) both branches now share, independent
+// of which HTTP branch can reach it.
+func TestResolvePutNumberPrefix_MovedPrefixStillValidatedAgainstCollision(t *testing.T) {
+	_, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "m1-sibling", Name: "Sibling", NumberPrefix: "Z"}))
+
+	// target already carries "Z" (non-empty), so inheritOrAssignNumberPrefix's
+	// own inherit/derive steps are both no-ops (assignDefaultNumberPrefix
+	// only derives when the field is still blank) -- target.NumberPrefix
+	// stays "Z" verbatim, simulating "this write's own prefix is Z" without
+	// going through DefaultNumberPrefix's collision-avoiding search.
+	target := &state.Competition{ID: "m1-target", Name: "Target", NumberPrefix: "Z"}
+	moved, infraErr, validationErr := resolvePutNumberPrefix(store, eng, target, "" /* storedPrefix: blank -> moved */, "", "m1-target")
+
+	require.NoError(t, infraErr)
+	assert.True(t, moved, "storedPrefix was blank and target now carries \"Z\": this call DID move it")
+	require.Error(t, validationErr, "a write that moves its own prefix to a value already used by a sibling must still be refused")
+	assert.Contains(t, validationErr.Error(), "Sibling")
 }
 
 // TestPUTCompetition_RosterOnlyPUTHealsBlankNumberPrefix pins bc-pnum A3: the
@@ -2740,6 +3075,48 @@ func TestPUTCompetition_SettingsOnlyResponseCarriesProvisionalNumbers(t *testing
 	require.Len(t, resp.Players, 2, "a settings-only PUT response must still carry the on-disk roster")
 	assert.Equal(t, []string{"X1", "X2"}, resp.ProvisionalNumbers,
 		"the settings-only response must carry provisionalNumbers aligned with the roster it returns")
+}
+
+// TestPUTCompetition_SwissResponseProvisionalNumbersKeyIsNullNotAbsent pins
+// M8: a Swiss competition's ProvisionalNumbers is always nil
+// (provisionalCompetitorNumbers' own guard: Swiss numbers nothing before the
+// draw, mp-swnm), but the JSON key must still be PRESENT (serialised as
+// `null`), not omitted. admin.jsx's list-merge does
+// `{ ...c, ...updatedComp }`: an omitted key (the `omitempty` shape) leaves
+// whatever same-length stale array the list entry already held in place,
+// while an explicit `null` clears it -- the only two options that behave
+// differently across a format switch (e.g. mixed -> swiss) where the OLD
+// response carried real provisional numbers and the NEW one must not.
+func TestPUTCompetition_SwissResponseProvisionalNumbersKeyIsNullNotAbsent(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "swiss-no-provisional"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Swiss No Provisional", Format: state.CompFormatSwiss, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusSetup, NumberPrefix: "S", SwissRounds: 3,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "p1-uuid", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "p2-uuid", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+
+	body, _ := json.Marshal(map[string]any{
+		"id": cid, "name": "Swiss No Provisional", "format": state.CompFormatSwiss,
+		"kind": "individual", "courts": []string{"A"}, "numberPrefix": "S", "swissRounds": 3,
+		// players deliberately OMITTED: this is a settings-only PUT.
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	val, present := raw["provisionalNumbers"]
+	require.True(t, present, "the provisionalNumbers KEY must always be present in the response, even when nil, so the SPA's spread-merge can clear a stale array rather than leave it in place")
+	assert.Nil(t, val, "a Swiss competition's provisionalNumbers must serialise as JSON null, not an array")
 }
 
 // TestCreateCompetitionEngiTeamExclusion pins Copilot #326: engi (individual
@@ -3354,15 +3731,16 @@ func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fine", Name: "Fine Comp", NumberPrefix: "F"}))
 
 	t.Run("an unreadable sibling is logged and skipped, not surfaced as an error", func(t *testing.T) {
-		err := checkUniqueCompFieldsTolerant(store, "NewComp", "K", "")
+		skipped, err := checkUniqueCompFieldsTolerant(store, "NewComp", "K", "")
 		assert.NoError(t, err, "the pre-flight variant must never fail over a sibling it cannot even read")
+		assert.Equal(t, []string{"broken"}, skipped, "T2: the skipped sibling id must be surfaced so a caller can correlate it with what it assigned")
 	})
 
 	// D4(b): a REAL collision the tolerant variant CAN see is still refused,
 	// as an *engine.ValidationError so the pre-flight's caller maps it to 400
 	// exactly like the engine's own refusals.
 	t.Run("a real collision is still refused as a ValidationError", func(t *testing.T) {
-		err := checkUniqueCompFieldsTolerant(store, "NewComp2", "F", "")
+		_, err := checkUniqueCompFieldsTolerant(store, "NewComp2", "F", "")
 		require.Error(t, err)
 		var validation *engine.ValidationError
 		assert.ErrorAs(t, err, &validation, "must be an *engine.ValidationError so the caller's switch maps it to 400")
@@ -4171,15 +4549,19 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		assert.Len(t, players, 2, "participants.csv must have landed despite the broken pools.csv")
 	})
 
-	// bc-pnum [review]: the sibling of "prefix moved: 500..." above, but on
-	// the ROSTER-only branch. A roster-only PUT CAN move the prefix -- when
-	// it heals a blank stored one (bc-pnum A3) -- and when it does, a
+	// bc-pnum [review] / M5: the sibling of "prefix moved: 500..." above, but
+	// on the ROSTER-only branch. A roster-only PUT CAN move the prefix --
+	// when it heals a blank stored one (bc-pnum A3) -- and when it does, a
 	// renumber failure right after is this write's own damage exactly like
-	// the settings branch, not inherited. Before this fix numberPrefixMoved
-	// stayed false on the roster branch unconditionally, so this case
-	// silently took the "inherited, 200" path and swallowed the half-landed
-	// prefix with no error and no broadcast.
-	t.Run("roster PUT that assigns a blank prefix, then fails to renumber: 500 like settings", func(t *testing.T) {
+	// the settings branch, not inherited. Before bc-pnum's numberPrefixMoved
+	// fix, this case silently took the "inherited, 200" path and swallowed
+	// the half-landed prefix with no error and no broadcast. M5: the 500's
+	// WORDING must also name what THIS PUT actually persisted (a roster),
+	// not the settings branch's wording -- what landed on disk here is
+	// participants.csv (+ the healed prefix in config.md), never a settings
+	// change, and telling the operator "settings were saved" when they PUT a
+	// roster is a wrong-surface error message.
+	t.Run("roster PUT that assigns a blank prefix, then fails to renumber: 500 naming the ROSTER, not settings", func(t *testing.T) {
 		r, store, _, hub, dir := setupTestRouter(t)
 		ch := hub.Subscribe()
 		defer hub.Unsubscribe(ch)
@@ -4207,8 +4589,10 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 
 		assert.Equalf(t, http.StatusInternalServerError, w.Code,
 			"a roster PUT that itself assigned the prefix, then failed to renumber, is this write's own fault: %s", w.Body.String())
-		assert.Contains(t, w.Body.String(), "settings were saved",
-			"the 500 body must use the same saved-but-not-renumbered wording as the settings branch")
+		assert.Contains(t, w.Body.String(), "the roster was saved",
+			"M5: a roster-only PUT's 500 must say ROSTER, not settings -- that is what this write actually persisted")
+		assert.NotContains(t, w.Body.String(), "settings were saved",
+			"M5: the settings-branch wording must not leak onto a roster-only PUT's error")
 
 		stored, err := store.LoadCompetition(cid)
 		require.NoError(t, err)

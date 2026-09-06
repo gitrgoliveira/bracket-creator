@@ -969,7 +969,7 @@ paths:
         `numberPrefix` is never left empty: when omitted or blank, the server
         derives one from `name` (initials, disambiguated against every other
         competition's prefix, e.g. `"K"`, then `"KO"`, then `"KO2"`), the same
-        derivation `GET /api/competitions/number-prefix-default` previews.
+        derivation `GET /api/number-prefix-default` previews.
         Every competitor's number is `numberPrefix` + a sequence counter
         running through the drawn pools in order (e.g. `K1`, `K2`, ...).
       security:
@@ -990,7 +990,7 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
-  /api/competitions/number-prefix-default:
+  /api/number-prefix-default:
     get:
       tags: [competitions]
       summary: Preview the default number prefix for a competition name
@@ -1101,7 +1101,7 @@ paths:
         the competition has NO prefix stored yet (a legacy record written
         before this rule existed, see below) does the server assign a derived
         default instead of inheriting nothing (see `GET
-        /api/competitions/number-prefix-default` for the same derivation).
+        /api/number-prefix-default` for the same derivation).
         EVERY successful save then re-derives every competitor's number from
         the EFFECTIVE `numberPrefix`, unconditionally, whether or not that
         save changed the prefix or was a roster-only save with the settings
@@ -1241,15 +1241,20 @@ paths:
         '500':
           description: |
             Internal error. Includes the partial-success renumber case: the
-            settings save itself landed (config.md already holds the new
+            save itself landed (config.md already holds the new
             `numberPrefix`, and a `tournament_updated` event was broadcast
             so open clients refetch it) but the subsequent renumber of
-            `pools.csv` failed -- "settings were saved but competitors could
-            not be renumbered; save again once pools.csv is repaired".
-            Re-issuing the same PUT is the remedy once pools.csv is fixed:
-            the renumber is idempotent and unconditional (see the
-            settings-update description above), so the retry is what heals
-            it.
+            `pools.csv` failed. The message names what THIS PUT actually
+            persisted: a settings-only PUT gets "settings were saved but
+            competitors could not be renumbered; save again once pools.csv
+            is repaired", and a ROSTER PUT (non-null `players`, including one
+            that healed a previously-blank `numberPrefix`) gets "the roster
+            was saved but competitors could not be renumbered; save again
+            once pools.csv is repaired" -- the settings wording would
+            otherwise tell the operator the wrong thing landed. Re-issuing
+            the same PUT is the remedy once pools.csv is fixed: the renumber
+            is idempotent and unconditional (see the settings-update
+            description above), so the retry is what heals it.
           content:
             application/json:
               schema:
@@ -1335,7 +1340,7 @@ paths:
         competition has a number prefix: a legacy competition saved before the
         never-empty-prefix rule (empty `numberPrefix`) has one derived and
         PERSISTED to `config.md` (the same derivation `GET
-        /api/competitions/number-prefix-default` previews). A competition that
+        /api/number-prefix-default` previews). A competition that
         already has a prefix skips only this assignment step; `pools.csv` is
         renumbered UNCONDITIONALLY whenever a draw already exists on disk,
         whether or not this request is what assigned the prefix (a cheap no-op
@@ -1471,7 +1476,7 @@ paths:
         competition has a number prefix: a legacy competition saved before the
         never-empty-prefix rule (empty `numberPrefix`) has one derived and
         PERSISTED to `config.md` (the same derivation `GET
-        /api/competitions/number-prefix-default` previews). A competition that
+        /api/number-prefix-default` previews). A competition that
         already has a prefix skips only this assignment step; `pools.csv` is
         renumbered UNCONDITIONALLY whenever a draw already exists on disk,
         whether or not this request is what assigned the prefix -- this is what
@@ -4322,6 +4327,7 @@ components:
             $ref: '#/components/schemas/Player'
         provisionalNumbers:
           type: array
+          nullable: true
           description: >
             One entry per `players`, in the same order, holding the registration-order
             number the check-in desk calls before the draw. A different fact from
@@ -4331,10 +4337,16 @@ components:
             `players` above (viewer responses and the settings and roster PUT
             responses), and only for a competition a draw can still be generated from
             (status `setup` or the legacy empty status) that has a number prefix.
-            Absent for a Swiss competition (its draw never writes pools.csv, so it
-            carries no number at all) and for an effective-playoffs competition (its
-            number is already final -- participant order -- so there is nothing
-            "provisional" about it, see `Player.number`). Absent in every other status.
+            `null` (M8: the KEY is always present, never omitted) for a Swiss
+            competition (its draw never writes pools.csv, so it carries no number at
+            all) and for an effective-playoffs competition (its number is already
+            final -- participant order -- so there is nothing "provisional" about it,
+            see `Player.number`). `null` in every other status too. The key is
+            deliberately never omitted: the admin console merges a PUT response over
+            its cached list entry with a plain object spread, and a dropped key would
+            leave a same-length stale array in place instead of clearing it -- e.g.
+            switching an existing competition's format to `swiss` must clear the
+            array the previous format's response carried, not silently keep it.
           items:
             type: string
 
@@ -4398,7 +4410,7 @@ components:
             participant order, composed on every read (that draw never
             writes pools.csv), so it is present from `setup` onward, not
             only after a draw -- there is nothing "provisional" about it and
-            `provisionalNumbers` is correspondingly absent for this format
+            `provisionalNumbers` is correspondingly `null` for this format
             (see that field). Also absent on the participants endpoint, and
             absent when the draw on disk cannot be read.
         checkedIn:

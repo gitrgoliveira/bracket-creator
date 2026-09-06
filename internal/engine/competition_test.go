@@ -614,8 +614,9 @@ func setupDrawReadyPlayoffs(t *testing.T, names []string) (*Engine, *state.Store
 // for tests driving ReplaceParticipantInDraw's id-aware matching directly
 // (bc-idfx): SaveParticipants mints a real id for every id-less row on
 // write, so by the time GenerateDraw has run, every pools.csv/pool-matches.csv
-// row DOES carry an id, and the id-carrying branch of matchesParticipant(Side)
-// requires the real pid to match, not "".
+// row DOES carry an id, and the id-carrying match (matchesParticipant, and
+// the inlined id check in ReplaceParticipantInDraw's applySide) requires the
+// real pid to match, not "".
 func participantID(t *testing.T, store *state.Store, compID, name string) string {
 	t.Helper()
 	players, err := store.LoadParticipants(compID, false)

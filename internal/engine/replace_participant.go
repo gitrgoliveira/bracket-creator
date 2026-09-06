@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 
@@ -122,60 +123,14 @@ func (e *Engine) ReplaceParticipantInDraw(
 			}
 		}
 
-		// oldNameAmbiguous reports whether the FULL current roster holds
-		// ANOTHER participant (excluding the one being renamed) still named
-		// oldName. bracket.json (no per-side id OR dojo) and an id-less
-		// pool-matches.csv row (no per-side dojo) both have to fall back to
-		// a plain name match, which is unresolvable whenever another CURRENT
-		// participant still answers to oldName -- e.g. two "Tanaka Kenji"
-		// from different dojos. the bc-pnum review: this scan used to live
-		// ONLY inside the bracket branch, gated on oldName already
-		// appearing in the bracket; hoisted here as ONE shared, lazily-
-		// computed (and cached) check so the pool-matches branch below can
-		// consult the SAME answer instead of trusting an id-less row's name
-		// match unconditionally.
-		//
-		// The candidate pool is the FULL current roster, NOT filterCheckedIn's
-		// narrower one (second-Opus-pass finding: an earlier version of this
-		// scoped to filterCheckedIn(participants), which is wrong in BOTH
-		// directions here). check-in PUT/DELETE and POST /participants are all
-		// legal while a competition sits in draw-ready -- the bracket was
-		// drawn from whatever check-in state held AT THAT TIME, which is not
-		// necessarily today's. filterCheckedIn(participants) answers "would
-		// today's roster be placed in a FRESH draw", not "who is actually
-		// sitting in THIS bracket" -- the two diverge the moment check-in
-		// state changes after the draw, and diverging the wrong way silently
-		// corrupts data: a namesake who WAS placed in the bracket and has
-		// since been checked OUT drops out of filterCheckedIn's pool, so
-		// oldNameAmbiguous goes false and her bracket rows get silently
-		// rewritten too -- exactly the corruption this guard exists to stop.
-		// The full roster has no such blind spot: checking a participant out
-		// doesn't remove her from participants.csv, only from the check-in
-		// snapshot.
-		//
-		// Exclusion of the target herself (the bc-pnum review) checks BOTH:
-		// the id-aware path (pid is her real participant id, matches p.ID
-		// directly) and the (name, dojo)-identity path via
-		// helper.CompetitorKey with id forced empty on both sides. The
-		// second form is needed for a legacy id-less roster: SaveParticipants
-		// mints a fresh id for ANY id-less row the instant it is next
-		// written (marshalParticipantsCSV), so a row that was id-less when
-		// the caller captured pid (a "name|dojo" composite key,
-		// state.resolveParticipantIndex's own fallback) can carry a
-		// brand-new, unrelated real id by the time this scan runs -- an
-		// id-to-id comparison against the OLD synthetic pid would then never
-		// match her own row, and a dojo-only edit would warn about itself as
-		// an "ambiguous namesake". Comparing by (name, dojo) with ids forced
-		// empty recognises her regardless of whether a real id has since
-		// landed on her row.
-		var (
-			oldNameAmbiguousComputed bool
-			oldNameAmbiguousCached   bool
-		)
-		oldNameAmbiguous := func() (bool, error) {
-			if oldNameAmbiguousComputed {
-				return oldNameAmbiguousCached, nil
-			}
+		// oldNameAmbiguous reports whether the FULL current roster -- never
+		// filterCheckedIn's narrower one, since the bracket may have been
+		// drawn from a check-in state that has since changed -- holds ANOTHER
+		// participant still named oldName, excluded by id (pid) or by
+		// (name, dojo) identity. Memoized via sync.OnceValues: bracket.json
+		// and the id-less pool-matches branch below both may need the same
+		// answer.
+		oldNameAmbiguous := sync.OnceValues(func() (bool, error) {
 			participants, perr := tx.LoadParticipants(compID, current.EffectiveWithZekkenName())
 			if perr != nil {
 				return false, fmt.Errorf("loading participants for rename ambiguity check: %w", perr)
@@ -191,12 +146,10 @@ func (e *Engine) ReplaceParticipantInDraw(
 				if helper.CompetitorKey("", p.Name, p.Dojo) == targetKey {
 					continue // the participant being renamed herself, by (name, dojo)
 				}
-				oldNameAmbiguousCached = true
-				break
+				return true, nil
 			}
-			oldNameAmbiguousComputed = true
-			return oldNameAmbiguousCached, nil
-		}
+			return false, nil
+		})
 
 		// --- bracket.json + pool-matches.csv (WAL-staged) ---
 		bracket, err := tx.LoadBracket(compID)
@@ -274,8 +227,8 @@ func (e *Engine) ReplaceParticipantInDraw(
 		for i, m := range poolMatches {
 			// the bc-pnum review: an id-less side falls back to matching by
 			// NAME ALONE (MatchResult carries no per-side dojo). Two guards
-			// gate that fallback, on top of the identity check
-			// matchesParticipantSide already applies:
+			// gate that fallback, on top of the id-carrying identity check
+			// applySide already applies below:
 			//  1. The row's own pool must be one the pools.csv pass above
 			//     actually touched for THIS rename (affectedPools) -- a
 			//     same-named row in an UNRELATED pool (e.g. a different
@@ -295,7 +248,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 
 			applySide := func(rowID, rowName string, setName func(string)) error {
 				if rowID != "" {
-					if matchesParticipantSide(rowID, rowName, pid, oldName) {
+					if pid != "" && rowID == pid {
 						setName(newName)
 						matchesChanged = true
 						matchesFound = true
@@ -420,16 +373,4 @@ func poolHasNamesake(pools []helper.Pool, poolName, name string) bool {
 		}
 	}
 	return false
-}
-
-// matchesParticipantSide is matchesParticipant's counterpart for a single
-// side of a pool-matches.csv row (SideA/SideB/Winner + their *ID sibling).
-// MatchResult carries a per-side id but no per-side dojo, so an id-carrying
-// side matches only by id; an id-less side falls back to name alone (there
-// is no dojo on the row left to disambiguate with).
-func matchesParticipantSide(rowID, rowName, pid, oldName string) bool {
-	if rowID != "" {
-		return pid != "" && rowID == pid
-	}
-	return rowName == oldName
 }

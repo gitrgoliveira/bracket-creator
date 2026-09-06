@@ -2963,6 +2963,13 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
+			// ChusenCandidates loads overrides.json directly. A corrupt file
+			// is operator-recoverable state (repair via DELETE .../overrides),
+			// not a server fault, so it gets the same terminal 422 every other
+			// LoadOverrides-reaching endpoint answers with.
+			if respondIfCorruptOverrides(c, err) {
+				return
+			}
 			// Recorded on the context (not returned to the caller) so the
 			// root cause is still visible in server logs, consistent with the
 			// other opaque-500 handlers in this PR.
@@ -3001,6 +3008,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		changed, err := store.ResetOverridesChanged(id)
 		if err != nil {
+			// ResetOverridesChanged goes through modifyOverridesChanged, which
+			// LOADS the file first -- so it fails identically on the very
+			// corrupt overrides.json this endpoint exists to repair. This IS
+			// that repair door: fall back to Store.ResetOverridesForce, the
+			// load-free primitive (state/overrides.go) that writes a fresh
+			// empty value directly, and treat it as a change (an unreadable
+			// file is never "already empty"). Any OTHER load/save error still
+			// falls through to internalError below.
+			if errors.Is(err, state.ErrCorruptOverrides) {
+				if forceErr := store.ResetOverridesForce(id); forceErr != nil {
+					internalError(c, forceErr)
+					return
+				}
+				hub.Broadcast(EventTournamentUpdated, nil)
+				c.Status(http.StatusNoContent)
+				return
+			}
 			internalError(c, err)
 			return
 		}

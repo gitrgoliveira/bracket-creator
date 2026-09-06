@@ -1064,6 +1064,69 @@ func TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable(t *testing.T)
 	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
 }
 
+// TestBulkScoreHandler_CorruptOverrides_ReasonEnriched is bc-pnum gap 3's
+// bulk-score mirror of TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable.
+// Unlike every single-match write endpoint, POST .../matches/bulk-score never
+// fails the WHOLE request: every result is processed independently and the
+// response is always HTTP 200 with a per-entry {matchId, error, reason}
+// breakdown, so there is no terminal 422 to give a corrupt-overrides entry
+// here. Before this fix the per-entry `reason` field was populated only for
+// "superseded"; a corrupt overrides.json fell into the untagged free-text
+// `error` bucket, indistinguishable from an arbitrary rejection an importer
+// would otherwise retry verbatim. The fix tags it "corrupt_overrides" (like
+// the machine-readable code the single-match endpoints return), so an
+// importer can route the operator to DELETE .../overrides instead.
+func TestBulkScoreHandler_CorruptOverrides_ReasonEnriched(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-bulk"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	body, _ := json.Marshal([]state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	// Always 200, partial success: the endpoint never fails the whole batch.
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+			Reason  string `json:"reason"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded)
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "Pool A-0", resp.Errors[0].MatchID)
+	assert.Equal(t, "corrupt_overrides", resp.Errors[0].Reason)
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
+}
+
 // TestScoreHandler_ContradictoryWinnerNameAndIDRejected is PR #416 finding
 // 5's mobileapp-level repro: a payload whose winner NAME names one side
 // while winnerId names the OTHER is a client-introduced contradiction that

@@ -282,6 +282,26 @@ func TestLeagueTiebreakCandidates_EngineError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+// TestLeagueTiebreakCandidates_CorruptOverrides is bc-pnum gap 3:
+// LeagueTiebreakCandidates calls CalculatePoolStandings, which loads
+// overrides.json. Before this fix a wrapped state.ErrCorruptOverrides fell
+// through to this handler's generic 500 branch alongside every other engine
+// error; the fix maps it to the same terminal 422 corrupt_overrides every
+// other LoadOverrides-reaching endpoint answers with, via the shared
+// respondIfCorruptOverrides helper (errors.go).
+func TestLeagueTiebreakCandidates_CorruptOverrides(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{candidatesErr: fmt.Errorf("compute standings: %w", state.ErrCorruptOverrides)}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+}
+
 func TestLeagueTiebreakCandidates_Finalized(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{candidates: nil}
 	comp := makeTeamLeagueComp(state.CompStatusPools)
@@ -887,6 +907,28 @@ func TestLeagueTiebreakPost_CandidatesNotFound(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestLeagueTiebreakPost_CandidatesCorruptOverrides is the POST-validation
+// sibling of TestLeagueTiebreakCandidates_CorruptOverrides: this handler also
+// calls LeagueTiebreakCandidates (to validate the selection before
+// generating), reaching the identical LoadOverrides call. Same fix, same
+// mapping.
+func TestLeagueTiebreakPost_CandidatesCorruptOverrides(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
+		candidatesErr: fmt.Errorf("compute standings: %w", state.ErrCorruptOverrides),
+	}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
 }
 
 // POST, GenerateLeagueTiebreakMatches returns *engine.NotFoundError (404).

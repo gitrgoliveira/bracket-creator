@@ -254,6 +254,11 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
 			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
+			case respondIfCorruptOverrides(c, engErr):
+				// A corrupt overrides.json makes computeStandingsFrom (reached
+				// here via RecordDecisionTx -> RecordMatchResultWithIneligibilityTx's
+				// mp-e2k1 mixed-pool guard) fail closed. respondIfCorruptOverrides
+				// already wrote the terminal 422; nothing left to do.
 			default:
 				internalError(c, engErr)
 			}

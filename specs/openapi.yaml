@@ -1577,6 +1577,15 @@ paths:
       description: |
         Clears all manual rank and bracket-winner overrides for this competition.
 
+        This is also the repair door for a corrupt `overrides.json`: other
+        writes to this file (rank overrides, decision/score writes that read
+        standings) load and parse the existing file before saving, so a
+        corrupt file makes them fail identically and answer `422
+        corrupt_overrides` (see that response schema on the affected
+        endpoints). This endpoint recovers from that state by writing a
+        fresh empty overrides file WITHOUT first parsing the corrupt one, so
+        it always succeeds regardless of what the file currently contains.
+
         Also requires `X-Admin-Password` when the destructive-ops gate is active
         (see the AdminPassword security scheme); 503 if locked mode is active
         without `TOURNAMENT_ADMIN_PASSWORD_HASH`.
@@ -2755,19 +2764,26 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew]
+                          enum: [superseded, clock_skew, corrupt_overrides]
                           description: >
-                            Machine-readable discriminator, present only for the two
-                            timestamp-guard verdicts and omitted for every other failure,
-                            so its presence always means the same thing. `superseded`: a
+                            Machine-readable discriminator, present only for the three
+                            classes named here and omitted for every other failure, so
+                            its presence always means the same thing. `superseded`: a
                             newer result for that match is already stored. `clock_skew`:
                             that entry's `modifiedAt` is implausibly far in the future, so
                             the sending device's clock is wrong; nothing was written for
                             it and re-running the import will not help until the clock is
-                            resynced. Both carry the same meaning as in the RefusedWrite
-                            schema, and in both cases the entry is excluded from
-                            `succeeded` and never broadcast. Other entries in the batch
-                            are unaffected.
+                            resynced. `corrupt_overrides`: this competition's
+                            overrides.json could not be parsed, so pool standings needed
+                            to score this entry could not be computed; repair via
+                            `DELETE /api/competitions/{id}/overrides` and resubmit. The
+                            first two carry the same meaning as in the RefusedWrite
+                            schema; unlike them, this endpoint never fails the whole
+                            request over a corrupt overrides file (no terminal 422 the
+                            way the single-result endpoints answer with, since bulk-score
+                            is always HTTP 200 with partial success). In all three cases
+                            the entry is excluded from `succeeded` and never broadcast.
+                            Other entries in the batch are unaffected.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -2894,6 +2910,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `corrupt_overrides`: this competition's overrides.json could not
+            be parsed, so pool standings (needed by the mixed-pool
+            displaced-finisher guard) cannot be computed. Same
+            operator-recoverable shape as `PUT .../score`'s 422 response:
+            repair via `DELETE /api/competitions/{id}/overrides`, then
+            resubmit the same decision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable detail.
+                  code:
+                    type: string
+                    enum: [corrupt_overrides]
+                    description: Machine-readable code.
 
   /api/competitions/{id}/matches/{mid}/daihyosen:
     post:

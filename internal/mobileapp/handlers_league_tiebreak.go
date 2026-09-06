@@ -274,6 +274,14 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 				return
 			}
+			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
+			// overrides.json (computeStandingsFrom). A corrupt file is an
+			// operator-recoverable state (repair via DELETE .../overrides), not
+			// an opaque server fault, so it gets the same terminal 422 every
+			// other LoadOverrides-reaching endpoint answers with.
+			if respondIfCorruptOverrides(c, err) {
+				return
+			}
 			// Public endpoint: opaque 500, log the real cause server-side.
 			log.Printf("league-tiebreak candidates LeagueTiebreakCandidates(%s): %v", id, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
@@ -354,6 +362,11 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			var notFound *engine.NotFoundError
 			if errors.As(err, &notFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			// See the GET candidates handler's identical guard above: a corrupt
+			// overrides.json is operator-recoverable state, not a server fault.
+			if respondIfCorruptOverrides(c, err) {
 				return
 			}
 			log.Printf("league-tiebreak POST LeagueTiebreakCandidates(%s): %v", id, err)

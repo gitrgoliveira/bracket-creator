@@ -591,8 +591,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				return nil
 			}); err != nil {
 				bulkErr := scoreError{MatchID: results[i].ID, Error: err.Error()}
-				if errors.Is(err, engine.ErrMatchSuperseded) {
+				switch {
+				case errors.Is(err, engine.ErrMatchSuperseded):
 					bulkErr.Reason = "superseded"
+				case errors.Is(err, state.ErrCorruptOverrides):
+					// mp-e2k1's mixed-pool guard reaches computeStandingsFrom,
+					// which loads overrides.json -- reachable per-entry here the
+					// same way it is on the single-match write endpoints. This
+					// endpoint never fails the whole request (always 200, partial
+					// success), so there is no terminal-422 status to give this
+					// entry the way respondIfCorruptOverrides does elsewhere;
+					// the Reason still lets an importer tell this apart from an
+					// arbitrary rejection and route the operator to
+					// DELETE .../overrides rather than retrying the same bytes.
+					bulkErr.Reason = "corrupt_overrides"
 				}
 				errs = append(errs, bulkErr)
 				continue
@@ -2295,22 +2307,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// guard) fail closed, correctly, but an unmapped error here falls
 			// through to internalError's 500 -- and the SPA's offline write
 			// queue retries 5xx forever (mp-q8c6), so a genuinely corrupt file
-			// on disk would poison the queue rather than surface once. This is
-			// state on disk the operator can repair -- Store.ResetOverridesForce
-			// is the load-free repair primitive (state/overrides.go) -- so it
-			// is answered the same way respondUnexportableCompetitionError
-			// answers its own "state conflict, not a server fault" cases: a
-			// terminal 422 naming the file, never a 500. NOTE: the
-			// reset-overrides HTTP endpoint itself (handlers_competition.go)
-			// still calls the ordinary load-then-save ResetOverridesChanged as
-			// of this change; wiring it to ResetOverridesForce so it can
-			// actually repair a corrupt file is a follow-up in that file,
-			// outside this pass's scope.
-			if errors.Is(engErr, state.ErrCorruptOverrides) {
-				c.JSON(http.StatusUnprocessableEntity, gin.H{
-					"error": "overrides.json could not be read; ask an administrator to reset overrides for this competition",
-					"code":  "corrupt_overrides",
-				})
+			// on disk would poison the queue rather than surface once.
+			// respondIfCorruptOverrides (errors.go) is the shared mapping to a
+			// terminal 422, also used by the decision/daihyosen/league-tiebreak/
+			// chusen-candidates handlers, which can reach the same LoadOverrides
+			// call through their own engine entry points. DELETE .../overrides
+			// (handlers_competition.go) is the repair door, wired to the
+			// load-free Store.ResetOverridesForce.
+			if respondIfCorruptOverrides(c, engErr) {
 				return
 			}
 			internalError(c, engErr)

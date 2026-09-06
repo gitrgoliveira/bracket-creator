@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -569,4 +570,48 @@ func TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds(t *testing.T) {
 	for _, sub := range m.SubResults {
 		assert.NotEqual(t, state.DaihyosenSubPosition, sub.Position, "daihyosen sub must be removed")
 	}
+}
+
+// TestRemoveDaihyosen_CorruptOverrides_TerminalError is bc-pnum gap 3: DELETE
+// .../daihyosen writes through RecordMatchResultWithIneligibilityTx, exactly
+// as the previous test's pool-match removal does. When the parent match is a
+// POOL match under a MIXED competition (reachable only via a legacy/hand-
+// edited row carrying a Position=-1 sub, per that write's own doc comment --
+// AddDaihyosen itself rejects a pool id, so POST can never build this shape),
+// the mp-e2k1 mixed-pool guard's computeStandingsFrom call reaches the same
+// LoadOverrides call the score/decision endpoints already handle. Before this
+// fix that fell through to internalError's 500; the fix adds the shared
+// respondIfCorruptOverrides check between respondIfValidationError and the
+// default 500 arm.
+func TestRemoveDaihyosen_CorruptOverrides_TerminalError(t *testing.T) {
+	r, store, _, _, dir := setupDaihyosenTestRouter(t)
+	compID := "corrupt-ov-rm-daihyosen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, TeamSize: 3,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB",
+			Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", Decision: "daihyosen"},
+			},
+		},
+	}))
+
+	overridesPath := filepath.Join(dir, "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/competitions/"+compID+"/matches/Pool%20A-0/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 1, "the rejected write must not have landed")
+	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
 }

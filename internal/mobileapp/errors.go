@@ -55,6 +55,43 @@ func internalError(c *gin.Context, err error, publicMsg ...string) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 }
 
+// respondIfCorruptOverrides answers a corrupt overrides.json
+// (state.ErrCorruptOverrides) with a terminal 422 and reports that it
+// handled it, so the caller can return without falling through to its own
+// internalError (500) arm.
+//
+// Every override writer except the load-free repair primitive
+// (Store.ResetOverridesForce, used by DELETE .../overrides) loads and
+// parses the existing file before saving, so a corrupt file makes them fail
+// identically -- and every engine call that reads standings
+// (computeStandingsFrom, reached via the mp-e2k1 mixed-pool guard,
+// LeagueTiebreakCandidates, ChusenCandidates) hits the same LoadOverrides
+// call underneath. Left unmapped, that surfaces as an opaque 500, which the
+// SPA's offline write queue retries forever for the write endpoints
+// (mp-q8c6 poisoned-queue pattern) -- a genuinely corrupt file on disk
+// would poison the queue rather than surface once. This is state on disk
+// the operator CAN repair (DELETE .../overrides, wired to
+// Store.ResetOverridesForce), so it is answered the same way
+// respondUnexportableCompetitionError answers its own "state conflict, not
+// a server fault" cases: a terminal 422 naming the file, never a 500.
+//
+// Shared by every handler whose engine call can reach LoadOverrides: the
+// score handler, the decision handler, the daihyosen add/remove handlers,
+// the league-tiebreak candidates/generate handlers, and the chusen-
+// candidates handler. Before this was extracted, only the score handler
+// had this mapping and every sibling call site fell through to a 500 for
+// the identical failure.
+func respondIfCorruptOverrides(c *gin.Context, err error) bool {
+	if !errors.Is(err, state.ErrCorruptOverrides) {
+		return false
+	}
+	c.JSON(http.StatusUnprocessableEntity, gin.H{
+		"error": "overrides.json could not be read; ask an administrator to reset overrides for this competition",
+		"code":  "corrupt_overrides",
+	})
+	return true
+}
+
 // respondUnexportableCompetitionError asks engine.IsUnexportable whether err
 // is one of the sentinels a workbook-export path can fail with (today: Swiss
 // has no static bracket to export, or the stored bracket no longer matches

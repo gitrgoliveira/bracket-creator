@@ -5849,3 +5849,63 @@ func TestUpdateCompetition_KindGuard(t *testing.T) {
 		assert.Equal(t, "10:30", stored.StartTime, "the unrelated edit must land")
 	})
 }
+
+// TestDeleteOverridesHandler_CorruptOverrides_ForceRepairs is bc-pnum gap 2:
+// DELETE /api/competitions/:id/overrides is documented (specs/openapi.yaml)
+// as the repair door for a corrupt overrides.json, but before this fix it
+// called Store.ResetOverridesChanged, which -- like every other override
+// writer -- loads and parses the existing file before saving, so it failed
+// identically against the very file it was supposed to repair (500, and the
+// operator had no way to clear it short of deleting the file by hand). The
+// fix falls back to Store.ResetOverridesForce (the load-free repair
+// primitive, internal/state/overrides.go) whenever ResetOverridesChanged
+// reports state.ErrCorruptOverrides, so the endpoint now always succeeds
+// (204) and leaves overrides.json parsing as a fresh empty value.
+func TestDeleteOverridesHandler_CorruptOverrides_ForceRepairs(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-reset"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/api/competitions/"+compID+"/overrides", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusNoContent, w.Code, "body: %s", w.Body.String())
+
+	// The file must now parse as a fresh, empty Overrides value -- the repair
+	// actually landed, not just "the handler didn't crash".
+	repaired, err := store.LoadOverrides(compID)
+	require.NoError(t, err, "overrides.json must parse cleanly after the repair")
+	assert.Empty(t, repaired.PoolRanks)
+	assert.Empty(t, repaired.Winners)
+}
+
+// TestChusenCandidatesHandler_CorruptOverrides_TerminalError is bc-pnum gap 3:
+// GET /api/competitions/:id/chusen-candidates calls engine.ChusenCandidates,
+// which loads overrides.json directly (and also indirectly via
+// CalculatePoolStandings). Before this fix an unmapped state.ErrCorruptOverrides
+// fell through to the handler's own opaque-500 branch; the fix maps it to the
+// same terminal 422 the score/decision endpoints answer with via the shared
+// respondIfCorruptOverrides helper.
+func TestChusenCandidatesHandler_CorruptOverrides_TerminalError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-chusen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, TeamSize: 3, Status: state.CompStatusPools,
+	}))
+
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/competitions/"+compID+"/chusen-candidates", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+}

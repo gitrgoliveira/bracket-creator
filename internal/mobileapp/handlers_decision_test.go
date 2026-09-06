@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,4 +202,63 @@ func TestDecisionHandler_NonEngiUnaffected(t *testing.T) {
 	// The guard must NOT fire for non-engi; expect 404 (match not found), not 400.
 	assert.Equal(t, http.StatusNotFound, w.Code,
 		"non-engi competition must not be blocked by engi guard; expected 404 from engine")
+}
+
+// TestDecisionHandler_CorruptOverrides_TerminalError is bc-pnum gap 3, the
+// decision-endpoint sibling of TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable
+// (handlers_match_test.go): RecordDecisionTx writes through
+// RecordMatchResultWithIneligibilityTx, which for a MIXED competition's pool
+// match re-score runs the mp-e2k1 guard's computeStandingsFrom call -- the
+// same LoadOverrides call the score handler's corrupt-overrides fix already
+// covered. Before this fix the decision handler's error switch had no branch
+// for state.ErrCorruptOverrides, so it fell through to the default
+// internalError (500) arm; the SPA's offline write queue retries 5xx
+// forever, so a genuinely corrupt file would poison the queue rather than
+// surface once. The fix adds a case calling the shared
+// respondIfCorruptOverrides helper (errors.go), matching the mapping every
+// other LoadOverrides-reaching handler now has.
+func TestDecisionHandler_CorruptOverrides_TerminalError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-decision"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	// Corrupt overrides.json directly: the competition directory must already
+	// exist, which SaveCompetition above guaranteed.
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	body, _ := json.Marshal(DecisionRequest{Decision: "kiken", DecisionBy: "aka"})
+	// http.NewRequest (not httptest.NewRequest): the match id "Pool A-0"
+	// contains a literal space, and httptest.NewRequest builds the request by
+	// parsing a raw "METHOD target HTTP/1.0" line, where an unescaped space
+	// in target breaks the line into the wrong number of fields. http.NewRequest
+	// goes through url.Parse instead, which tolerates the literal space,
+	// matching TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable's
+	// identical request construction (handlers_match_test.go).
+	req, err := http.NewRequest(http.MethodPost,
+		"/api/competitions/"+compID+"/matches/Pool A-0/decision",
+		bytes.NewBuffer(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
 }

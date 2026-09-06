@@ -871,20 +871,36 @@ func resolvePoolOverrideTarget(players []domain.Player, playerID, playerName, pl
 	return "", "", fmt.Errorf("playerName %q is ambiguous in pool: multiple competitors share this name; include playerId or playerDojo to disambiguate", playerName)
 }
 
+// loadAllCompetitions lists every competition id on disk and loads its
+// config, skipping (not failing on) an id whose own load errors -- one
+// unreadable competition record must not blank the whole list, matching
+// the viewer aggregate's own per-competition degrade-and-log policy
+// (buildViewerCompetitionPayload, handlers_viewer.go). Shared by the admin
+// GET /competitions listing below and the tournament response builder
+// (buildTournamentResponse, handlers_tournament.go) so both surfaces list
+// competitions the same way rather than reimplementing the id-then-load
+// loop twice.
+func loadAllCompetitions(store *state.Store) ([]*state.Competition, error) {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		return nil, err
+	}
+	comps := make([]*state.Competition, 0, len(ids))
+	for _, id := range ids {
+		comp, err := store.LoadCompetition(id)
+		if err == nil && comp != nil {
+			comps = append(comps, comp)
+		}
+	}
+	return comps, nil
+}
+
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
-		ids, err := store.ListCompetitions()
+		comps, err := loadAllCompetitions(store)
 		if err != nil {
 			internalError(c, err)
 			return
-		}
-
-		comps := make([]*state.Competition, 0)
-		for _, id := range ids {
-			comp, err := store.LoadCompetition(id)
-			if err == nil && comp != nil {
-				comps = append(comps, comp)
-			}
 		}
 		c.JSON(http.StatusOK, comps)
 	})

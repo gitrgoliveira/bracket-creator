@@ -1,16 +1,19 @@
-// Regression test: state.Tournament has no Competitions field, so
-// POST /api/tournament's response carries no `competitions` key. app.jsx's
-// onCreated handler used to store that body verbatim
-// (`onCreated={(t, p) => setTournament(t)}`), and AdminSchedulePage indexed
-// `tournament.competitions[0]` at component init (before any of its other
-// `tournament.competitions || []` guards), so opening the "Tournament
-// schedule" card on a wizard-fresh tournament threw a TypeError.
+// bc-pnum ruling 3: the server now guarantees every tournament object it
+// returns to the SPA carries a "competitions" key (buildTournamentResponse,
+// handlers_tournament.go), so a wizard-fresh tournament is
+// `{ ...fields, competitions: [] }`, never a bare object missing the key
+// (that used to be the gap: state.Tournament itself has no Competitions
+// field, so POST /api/tournament's raw response carried none, and
+// AdminSchedulePage indexed `tournament.competitions[0]` at component init
+// before any of its other `tournament.competitions || []` guards ran,
+// throwing a TypeError the moment the "Tournament schedule" card opened on
+// a freshly created tournament).
 //
-// This test mounts AdminSchedulePage directly with a tournament object that
-// has no `competitions` key at all (the shape a raw create-tournament
-// response has), proving the component is self-sufficient regardless of
-// what app.jsx does upstream. See also app_normalize_created_tournament.test.jsx
-// for the cheaper unit pin on the app.jsx ingress itself.
+// This test mounts AdminSchedulePage directly with the GUARANTEED shape
+// (competitions: []) as the pin that the page renders correctly with zero
+// competitions -- the schedule-page init guard below stays regardless (it
+// matches the file's siblings' own defensive `|| []` pattern), this is no
+// longer defending against a missing key, since the server never omits one.
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
@@ -55,19 +58,21 @@ afterAll(() => {
 
 const noop = () => {};
 
-// The shape a raw POST /api/tournament response has: no `competitions` key
-// at all (not even `competitions: []`).
-const TOURNAMENT_WITHOUT_COMPETITIONS_KEY = {
+// The guaranteed shape every tournament response now carries (bc-pnum
+// ruling 3): a fresh tournament has zero competitions, and the key is
+// always present as an empty array, never omitted.
+const FRESH_TOURNAMENT_WITH_NO_COMPETITIONS = {
   id: 't1',
   name: 'Wizard Fresh Tournament',
   courts: ['A'],
+  competitions: [],
 };
 
-describe('AdminSchedulePage with a tournament missing the competitions key', () => {
-  it('mounts without throwing (red before the fix: TypeError on tournament.competitions[0])', () => {
+describe('AdminSchedulePage with a freshly created tournament (zero competitions)', () => {
+  it('renders the schedule card with no competitions, competitions: [] guaranteed by the server', () => {
     render(
       React.createElement(AdminSchedulePage, {
-        tournament:   TOURNAMENT_WITHOUT_COMPETITIONS_KEY,
+        tournament:   FRESH_TOURNAMENT_WITH_NO_COMPETITIONS,
         onBack:       noop,
         onMoveCourt:  noop,
         onLogout:     noop,

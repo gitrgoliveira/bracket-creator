@@ -337,11 +337,15 @@ paths:
               $ref: '#/components/schemas/Tournament'
       responses:
         '201':
-          description: Tournament created.
+          description: >
+            Tournament created. Carries `competitions` (empty for a fresh
+            bootstrap) so the client never has to special-case this response
+            against the shape a later `GET /api/viewer/tournament` +
+            `GET /api/viewer/competitions` pair reconciles it to.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Tournament'
+                $ref: '#/components/schemas/TournamentWithCompetitions'
         '400':
           $ref: '#/components/responses/BadRequest'
     put:
@@ -404,11 +408,11 @@ paths:
               $ref: '#/components/schemas/Tournament'
       responses:
         '200':
-          description: Tournament updated.
+          description: Tournament updated. Carries `competitions`, see the POST response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Tournament'
+                $ref: '#/components/schemas/TournamentWithCompetitions'
         '400':
           $ref: '#/components/responses/BadRequest'
 
@@ -4150,6 +4154,26 @@ components:
             (rotation is done via `PUT /api/auth/admin-password`). In locked mode this
             field is accepted but silently ignored; the `TOURNAMENT_ADMIN_PASSWORD_HASH`
             env var is the authoritative elevated credential.
+
+    TournamentWithCompetitions:
+      description: >
+        The response shape for POST and PUT /api/tournament: every Tournament
+        field, plus `competitions`. Tournament itself carries no such field
+        (competitions are a separate on-disk collection, not tournament.md
+        front matter); a fresh tournament created via POST has an empty
+        `competitions` array (never omitted), and a PUT against an existing
+        record carries whatever competitions already exist. The key is
+        always present, so a client can safely read `competitions.length`
+        off either response without checking for `undefined` first.
+      allOf:
+        - $ref: '#/components/schemas/Tournament'
+        - type: object
+          required: [competitions]
+          properties:
+            competitions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Competition'
 
     Competition:
       type: object

@@ -462,6 +462,14 @@ func (e *Engine) EnsureNumberPrefix(compID string, allowed func(state.Competitio
 // lock costs nothing and keeps the invariant local to this function. Only a
 // failure to LIST the competitions is returned, since then nothing at all can
 // be migrated.
+// prefixedCompetition pairs a competition id with the prefix it carries
+// once this pass is done with it (already prefixed on load, or just
+// assigned), so the final renumbering loop can name WHICH prefix a rewrite
+// happened under without a second, parallel id->prefix map to keep in sync.
+type prefixedCompetition struct {
+	id, prefix string
+}
+
 func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 	var migrated []string
 	err := e.store.WithCompetitionRenameLock(func() error {
@@ -471,12 +479,7 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 		}
 		var taken []string
 		var pending []*state.Competition
-		var prefixed []string
-		// PR #416 finding 9: prefixByID lets the final renumbering loop name
-		// WHICH prefix a rewrite happened under, so the log correlates the
-		// assignment with its effect instead of reporting the two facts with
-		// nothing tying them together.
-		prefixByID := make(map[string]string)
+		var prefixed []prefixedCompetition
 		for _, id := range ids {
 			comp, err := e.store.LoadCompetition(id)
 			if err != nil {
@@ -491,8 +494,7 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 				continue
 			}
 			taken = append(taken, comp.NumberPrefix)
-			prefixed = append(prefixed, id)
-			prefixByID[id] = comp.NumberPrefix
+			prefixed = append(prefixed, prefixedCompetition{id: id, prefix: comp.NumberPrefix})
 		}
 		for _, comp := range pending {
 			prefix := helper.DefaultNumberPrefix(comp.Name, taken)
@@ -521,15 +523,14 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 				continue
 			}
 			migrated = append(migrated, comp.ID)
-			prefixed = append(prefixed, comp.ID)
-			prefixByID[comp.ID] = prefix
+			prefixed = append(prefixed, prefixedCompetition{id: comp.ID, prefix: prefix})
 		}
-		for _, id := range prefixed {
-			renumbered, err := e.RenumberCompetitors(id)
+		for _, pc := range prefixed {
+			renumbered, err := e.RenumberCompetitors(pc.id)
 			if err != nil {
-				log.Printf("engine: number-prefix migration: %s: competitors not numbered: %v (retried on the next start; a settings save heals it too)", id, err)
+				log.Printf("engine: number-prefix migration: %s: competitors not numbered: %v (retried on the next start; a settings save heals it too)", pc.id, err)
 			} else if renumbered {
-				log.Printf("engine: number-prefix migration: %s: competitor numbers rewritten under prefix %q", id, prefixByID[id])
+				log.Printf("engine: number-prefix migration: %s: competitor numbers rewritten under prefix %q", pc.id, pc.prefix)
 			}
 		}
 		return nil

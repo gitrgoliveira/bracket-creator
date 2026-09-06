@@ -1715,7 +1715,13 @@ func chooseDojoTreePool(root *dojoNode, id int, qualifierSlots [][]int, dojoPool
 // same bypass), root.dojoCount[dojo] is no longer 0 and every later member
 // of that dojo genuinely does have a branch to avoid, so the tree descent
 // takes over from there.
-func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, id int, qualifierSlots [][]int, keys dojoKeyCache) int {
+// dojoPoolIndicesBuf is the caller's reusable scratch buffer for the
+// dojo-occupied-pool-index list built below (bc-pnum review): reset to
+// length 0, keeping its backing array, rather than allocated fresh on every
+// one of the up-to-len(unseeded) calls assignUnseededByDojoTree's loop
+// makes -- same reset-and-refill shape as sortedSameDojoPairs' pairsBuf
+// (seed.go).
+func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, id int, qualifierSlots [][]int, keys dojoKeyCache, dojoPoolIndicesBuf *[]int) int {
 	// id is the caller's already-resolved dense dojo id (dojoIDCache,
 	// bc-pnum), matching recordDojoOccupancy's own write. dojo (the raw
 	// string) is still needed alongside it: leastConflictedPool and
@@ -1729,12 +1735,13 @@ func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo
 	if root == nil || root.dojoCount[id] == 0 {
 		return leastConflictedPool(pools, targetSizes, dojo, keys)
 	}
-	dojoPoolIndices := make([]int, 0, 4)
+	dojoPoolIndices := (*dojoPoolIndicesBuf)[:0]
 	for idx := range pools {
 		if countDojoInPool(pools[idx], dojo, keys) > 0 {
 			dojoPoolIndices = append(dojoPoolIndices, idx)
 		}
 	}
+	*dojoPoolIndicesBuf = dojoPoolIndices
 	if best := chooseDojoTreePool(root, id, qualifierSlots, dojoPoolIndices); best >= 0 {
 		return best
 	}
@@ -1823,9 +1830,14 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 	// are not in `pools` yet.
 	dojoOptimum := dojoFootprintOptimum(pools, unseeded, numPools, ids)
 
+	// dojoPoolIndicesBuf/maskedBuf are per-player scratch, reused across
+	// every iteration below rather than allocated fresh per placement (see
+	// pickDojoTreeAwarePool's and poolUnderDojoCap's own doc comments).
+	var dojoPoolIndicesBuf []int
+	var maskedBuf []int
 	for _, p := range unseeded {
 		id := ids.of(p.Dojo)
-		best := pickDojoTreeAwarePool(pools, targetSizes, root, p.Dojo, id, qualifierSlots, keys)
+		best := pickDojoTreeAwarePool(pools, targetSizes, root, p.Dojo, id, qualifierSlots, keys, &dojoPoolIndicesBuf)
 		if best < 0 {
 			// Cannot happen when sum(targetSizes) == len(players), which
 			// realTargetSizes guarantees; kept as a defensive error rather
@@ -1833,7 +1845,7 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 			return fmt.Errorf("cannot place player %s: no pool has room", p.Name)
 		}
 		if countDojoInPool(pools[best], p.Dojo, keys) >= dojoOptimum(id) {
-			if alt := poolUnderDojoCap(pools, targetSizes, p.Dojo, dojoOptimum(id), keys); alt >= 0 {
+			if alt := poolUnderDojoCap(pools, targetSizes, p.Dojo, dojoOptimum(id), keys, &maskedBuf); alt >= 0 {
 				best = alt
 			}
 		}
@@ -1854,8 +1866,15 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 // candidates while still returning a true original index. Returns -1 when
 // no pool is both under cap and has room, matching leastConflictedPool's
 // own sentinel.
-func poolUnderDojoCap(pools []Pool, targetSizes []int, dojo string, dojoCap int, keys dojoKeyCache) int {
-	masked := append([]int(nil), targetSizes...)
+//
+// maskedBuf is the caller's reusable scratch buffer (bc-pnum review),
+// reset and refilled from targetSizes on every call rather than allocated
+// fresh via append([]int(nil), targetSizes...) -- the values still have to
+// be recopied every call (a prior call may have masked entries this one
+// must not), only the backing-array allocation is what reuse avoids.
+func poolUnderDojoCap(pools []Pool, targetSizes []int, dojo string, dojoCap int, keys dojoKeyCache, maskedBuf *[]int) int {
+	masked := append((*maskedBuf)[:0], targetSizes...)
+	*maskedBuf = masked
 	for i := range pools {
 		if countDojoInPool(pools[i], dojo, keys) >= dojoCap {
 			masked[i] = len(pools[i].Players)

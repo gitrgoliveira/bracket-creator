@@ -79,7 +79,8 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 		}
 	}
 
-	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", ids.of("MUMEISHI"), qualifierSlots, keys)
+	var dojoPoolIndicesBuf []int
+	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", ids.of("MUMEISHI"), qualifierSlots, keys, &dojoPoolIndicesBuf)
 	assert.Equal(t, 2, best,
 		"a third, differently-cased member of the same dojo must be routed to the only dojo-free pool")
 }

@@ -67,7 +67,7 @@ func newCreatePoolCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute pools across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
 	cmd.Flags().StringVarP(&o.seedsPath, "seeds", "", "", "CSV file mapping exact participant names to their initial seed rank")
-	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", numberPrefixFlagHelp)
 	cmd.Flags().StringVarP(&o.extraQualifiers, "extra-qualifiers", "", "", "how many finishers each pool sends to the knockout: \"\" (standard, default), \"larger-pools\" (a pool larger than the minimum sends one extra qualifier, crossed to a neighbouring shiaijo), or \"fill-bracket\" (pools are cut so winners plus a handful of drafted 2nd places exactly fill the knockout with no byes); requires minimum-players-per-pool sizing (--players, not --max-players) and --pool-winners 1")
 	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
@@ -169,6 +169,24 @@ func (o *poolOptions) createPools(entries []string) error {
 	// accessor rather than a local `if <= 0 { 2 }`, so the CLI and the app
 	// cannot disagree about what an unset pool-winners count means.
 	effectivePoolWinners := (state.Competition{PoolWinners: o.poolWinners}).EffectivePoolWinners()
+	// bc-drwx item 9: reject an out-of-range --pool-winners flag HERE,
+	// before it can reach EffectivePoolWinners' own "<=0 means unset,
+	// default to 2" resolution. That resolution exists for the app's
+	// state.Competition, whose zero value genuinely means "the operator
+	// has not configured this yet" -- but this CLI flag already carries an
+	// explicit default of 2 (newCreatePoolCmd), so an operator who types
+	// `-w 0` (or a negative value) almost certainly made a mistake and
+	// deserves a clear "pool-winners must be at least 1" error, not a
+	// silent substitution. Without this, `-w 0` sailed past every check
+	// below (0 < activePoolSize, len(entries) < 0 is never true) and
+	// reached helper.BuildPoolPhaseTreeAwareWithMode with an unresolved
+	// poolWinners of 0, which collapses the dojo-tree skeleton
+	// (poolQualifierPaths returns nil for poolWinners <= 0) and later
+	// fails with the generic "could not build a knockout draw" error
+	// instead of naming the actual problem.
+	if o.poolWinners < 1 {
+		return fmt.Errorf("--pool-winners must be at least 1, got %d", o.poolWinners)
+	}
 	if err := state.ValidateExtraQualifiers(o.extraQualifiers, poolSizeModeForValidation, effectivePoolWinners); err != nil {
 		return err
 	}
@@ -239,17 +257,23 @@ func (o *poolOptions) createPools(entries []string) error {
 	// The standard/larger-pools branch calls
 	// helper.BuildPoolPhaseTreeAwareWithMode, not plain helper.BuildPoolPhase
 	// (bc-dojo Phase 4): this command has a REAL pool-winners count
-	// (o.poolWinners) and extra-qualifiers mode (o.extraQualifiers, "" or
-	// "larger-pools" here) to hand it, and BuildPoolPhase's own poolWinners
-	// is FIXED at its documented default (2) -- calling it here would score
-	// every candidate placement against the WRONG knockout tree whenever
-	// either real value differs from that default.
+	// (effectivePoolWinners) and extra-qualifiers mode (o.extraQualifiers,
+	// "" or "larger-pools" here) to hand it, and BuildPoolPhase's own
+	// poolWinners is FIXED at its documented default (2) -- calling it here
+	// would score every candidate placement against the WRONG knockout tree
+	// whenever either real value differs from that default.
+	//
+	// effectivePoolWinners, not o.poolWinners (bc-drwx item 9): the range
+	// guard above already makes the two equal for a real CLI invocation,
+	// but this is the same resolved value ValidateExtraQualifiers was
+	// already handed, so the distributor can never see a different,
+	// unresolved view of pool-winners than validation did.
 	var pools []helper.Pool
 	var drawCourts int
 	if o.extraQualifiers == state.ExtraQualifiersFillBracket {
 		pools, drawCourts, err = helper.BuildPoolPhaseFillBracket(players, activePoolSize, o.courts)
 	} else {
-		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, o.poolWinners, o.extraQualifiers)
+		pools, drawCourts, err = helper.BuildPoolPhaseTreeAwareWithMode(players, activePoolSize, isMax, o.courts, effectivePoolWinners, o.extraQualifiers)
 	}
 	if err != nil {
 		return err
@@ -272,12 +296,15 @@ func (o *poolOptions) createPools(entries []string) error {
 	// argument -- would silently title a two-shiaijo draw "Shiaijo A-D".
 	courtNames := helper.CourtLabels(o.courts)
 
-	if o.numberPrefix != "" {
-		counter := 1
-		for i := range pools {
-			counter = helper.AssignPlayerNumbers(pools[i].Players, o.numberPrefix, counter)
-		}
+	// resolveNumberPrefix (bc-pnum A10, cmd/shared.go) is the ONE derivation
+	// shared with create-playoffs: trims an explicit value, derives from
+	// --title-prefix when omitted, and refuses one over the length cap
+	// rather than accepting it verbatim.
+	o.numberPrefix, err = resolveNumberPrefix(o.numberPrefix, o.titlePrefix)
+	if err != nil {
+		return err
 	}
+	helper.NumberPools(pools, o.numberPrefix)
 
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
@@ -407,9 +434,9 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords, o.numberPrefix)
 
-	if err := helper.CreateTagsSheet(f, pools, ""); err != nil {
+	if err := helper.CreateTagsSheet(f, pools, "", o.numberPrefix); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
 	}
 

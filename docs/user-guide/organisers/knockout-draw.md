@@ -143,6 +143,14 @@ This matters most for a **Knockout only** competition, where there is no pool ph
 
 Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
 
+## Competitor numbers
+
+A **Knockout only** competition numbers its competitors differently from a pooled one. See [Competitor numbers](pool-draw.md#competitor-numbers) for the pooled-format rule (mixed and league), which this section does not repeat.
+
+There is no pool draw to wait for, so a knockout-only competition's numbers are **final from setup**: each competitor's number is their prefix plus their position in the registration order, and it is shown that way from the moment the roster is entered. It changes only when the roster itself changes (an entry added, removed or reordered) or when you change the number prefix; generating or discarding the draw does not touch it, because there is no pool draw to fix an order at.
+
+Everything else about the prefix works the same as the pooled-format rule: you can set your own or leave it blank to derive one, change it at any time, and the printed tags carry these numbers the same way, with a reprint needed after a prefix change. When the prefix is more than one character, the printed tags and the Names to Print cards show the prefix above the rest of the number, for example KO above 20; a one-character prefix stays on one line, for example K20.
+
 ## Byes
 
 Byes are decided **inside each block**, never across the draw as a whole.

@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	excelize "github.com/xuri/excelize/v2"
 )
 
 func TestPlayoffOptionsRun_Success(t *testing.T) {
@@ -105,6 +107,106 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 
 	// Buffer should contain excel data
 	assert.Greater(t, b.Len(), 0)
+}
+
+// TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering is the playoffs
+// analogue of create-pools_test.go's TestCreatePools_NumberPrefix_ByteIdenticalNumbering
+// (bc-pnum D1): an explicit --number-prefix numbers byte-identically to how
+// it always has, prefix plus one counter running straight through the
+// participant order. Mutation: gating helper.AssignPlayerNumbers on a
+// non-empty prefix would be a no-op here (the default is never empty), so
+// this pins the wiring itself, not just the composition helper.
+func TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+	o := &playoffOptions{
+		outputWriter: writer,
+		outputPath:   "prefix.xlsx",
+		determined:   true, // no shuffle: roster order must match expected numbering
+		numberPrefix: "K",
+	}
+	entries := []string{
+		"Alice,DojoA",
+		"Bob,DojoB",
+		"Carol,DojoC",
+		"Dave,DojoD",
+	}
+	require.NoError(t, o.createPlayoffs(entries))
+	require.NoError(t, writer.Flush())
+
+	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, f.Close()) }()
+
+	rows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	var got []string
+	for i, row := range rows {
+		if i < 2 || len(row) < 4 { // rows 1-2 are the title/header block
+			continue
+		}
+		got = append(got, row[3]) // column D: Player Number (non-sanitized layout)
+	}
+	assert.Equal(t, []string{"K1", "K2", "K3", "K4"}, got,
+		"an explicit --number-prefix must number straight through the roster with no gap, duplicate or reordering")
+}
+
+// TestCreatePlayoffs_NumberPrefix_OverLongExplicit_Errors pins bc-pnum A10:
+// an over-long explicit --number-prefix must be refused, not accepted
+// verbatim.
+func TestCreatePlayoffs_NumberPrefix_OverLongExplicit_Errors(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+	o := &playoffOptions{
+		outputWriter: writer,
+		outputPath:   "dummy.xlsx",
+		numberPrefix: "SENIORS1",
+	}
+	err := o.createPlayoffs([]string{"Alice,DojoA", "Bob,DojoB"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SENIORS1")
+}
+
+// TestCreatePlayoffs_TitlePrefixDerivation pins bc-pnum A10/D2: with no
+// explicit --number-prefix, the CLI derives one from --title-prefix through
+// the shared resolveNumberPrefix. "Senior Men" has two words (initials "SM"),
+// but with nothing else taken the initials loop returns the bare first
+// initial "S" immediately -- the shortest non-taken candidate, not the full
+// initials. Mutation: replacing o.titlePrefix with "" here must go red (the
+// fallback "K" would print instead).
+func TestCreatePlayoffs_TitlePrefixDerivation(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+	o := &playoffOptions{
+		outputWriter: writer,
+		outputPath:   "titleprefix.xlsx",
+		determined:   true,
+		titlePrefix:  "Senior Men",
+	}
+	entries := []string{
+		"Alice,DojoA",
+		"Bob,DojoB",
+		"Carol,DojoC",
+		"Dave,DojoD",
+	}
+	require.NoError(t, o.createPlayoffs(entries))
+	require.NoError(t, writer.Flush())
+
+	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, f.Close()) }()
+
+	rows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	var got []string
+	for i, row := range rows {
+		if i < 2 || len(row) < 4 {
+			continue
+		}
+		got = append(got, row[3])
+	}
+	assert.Equal(t, []string{"S1", "S2", "S3", "S4"}, got,
+		"derivation from --title-prefix 'Senior Men' must give S1.., not SM1..")
 }
 
 func TestCreatePlayoffs_MissingSeed(t *testing.T) {

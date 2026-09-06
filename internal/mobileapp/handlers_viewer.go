@@ -3,7 +3,6 @@ package mobileapp
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -16,54 +15,77 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// mergePoolNumbersIntoPlayersSlice, copy the assigned competitor Number
-// (e.g. "K1") from pools.csv onto the given players slice in place.
-// participants.csv does NOT persist Number, it is assigned at draw time by
-// AssignPlayerNumbers and only persisted into pools.csv. Without this merge
-// the viewer API never carries the numberPrefix-derived numbers, so
-// TV/overlay/viewer surfaces can't render them (mp-13y). No-op when
-// numberPrefix is empty or either slice is empty. Match by id first
-// (HasParticipantIDs case), fall back to name.
+// mergePoolNumbersIntoPlayersSlice fills each player's ASSIGNED Number (e.g.
+// "K1") in place. participants.csv never persists Number: the draw assigns it
+// and persists it only in pools.csv, so every payload that shows a number
+// derives it here at read time (mp-13y).
 //
-// For playoffs-only competitions (format == "playoffs") the engine assigns
-// numbers in-memory but has no pools.csv to persist them. In that case assign
-// numbers sequentially (1-N in participant order), matching generatePlayoffs.
+// Two sources, both "assigned by the draw":
+//   - a pools.csv exists: the number is the one it holds, matched by id first
+//     (HasParticipantIDs case) and by (name, dojo) -- the identity rule this
+//     whole codebase uses, never bare name -- as the legacy fallback for
+//     rosters drawn before ids existed;
+//   - the competition is playoffs-only: its draw never writes pools.csv and
+//     its number IS participant order under the prefix, composed through the
+//     same helper the draw uses.
 //
-// format must be the competition's EFFECTIVE format (comp.EffectiveFormat()),
-// not comp.Format directly: an unset Format ("") is standalone playoffs too
-// (generation's default case falls to generatePlayoffs for it identically),
-// so a caller passing the raw stored value would silently skip number
-// assignment for those entrants.
-func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Player, pools []helper.Pool, format string) {
-	if numberPrefix == "" || len(players) == 0 {
+// comp supplies both NumberPrefix and the EFFECTIVE format
+// (comp.EffectiveFormat(), never comp.Format directly: an unset Format ("")
+// is standalone playoffs too, generation's default case falls to
+// generatePlayoffs for it identically), so every caller derives the same
+// answer from the same source instead of restating the caveat locally.
+// players is still explicit -- separate from comp.Players -- because the
+// court-overlay caller (currentMatchPlayers) loads its OWN roster slice
+// rather than mutating the competition's.
+//
+// The playoffs-only branch below calls engine.NumberPlayoffsOnlyParticipants
+// directly, the SAME function the blank-template export's
+// NumberedParticipantsFor calls -- ONE derivation, not two independent call
+// sites invoking the shared helper.AssignPlayerNumbers primitive, which is
+// what actually prevents the public payload and the printed
+// Tags/Names-to-Print sheets from silently disagreeing.
+//
+// Any other format with no pools is left WITHOUT numbers: before the draw a
+// pooled competition's competitors show no number anywhere (bc-pnum operator
+// ruling), and a public surface never shows a number the draw has not
+// assigned. Callers pass pools only from a SUCCESSFUL read:
+// an unreadable pools.csv is reported, not treated as "no draw yet", so a
+// corrupt file cannot make this compose numbers that contradict the draw on
+// disk. No-op when comp is nil, its NumberPrefix is empty, or the roster is
+// empty.
+func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.Player, pools []helper.Pool) {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" || len(players) == 0 {
 		return
 	}
 	if len(pools) == 0 {
-		if format != state.CompFormatPlayoffs {
+		if comp.EffectiveFormat() != state.CompFormatPlayoffs {
 			return
 		}
-		// Playoffs-only: numbers were assigned in memory by generatePlayoffs
-		// but never written to disk. Re-derive them from participant order.
-		for i := range players {
-			if players[i].Number == "" {
-				players[i].Number = fmt.Sprintf("%s%d", numberPrefix, i+1)
-			}
-		}
+		// Playoffs-only: nothing on disk carries a number, so derive it from
+		// participant order under the current prefix. A prefix change is
+		// therefore reflected on the next read with no file write.
+		engine.NumberPlayoffsOnlyParticipants(comp, players)
 		return
 	}
 	byID := make(map[string]string)
-	byName := make(map[string]string)
 	for _, pool := range pools {
 		for _, pp := range pool.Players {
-			if pp.Number == "" {
-				continue
-			}
-			if pp.ID != "" {
+			if pp.Number != "" && pp.ID != "" {
 				byID[pp.ID] = pp.Number
 			}
-			byName[pp.Name] = pp.Number
 		}
 	}
+	// byNameDojo is built LAZILY, on the first roster row that misses
+	// byID, rather than unconditionally up front. The vast majority of
+	// payload builds are for a roster where every row carries an id (the
+	// common, ids-everywhere case), so byID alone resolves every row and
+	// this second pass over every pool -- plus two helper.CompetitorKey
+	// normalisations per row -- was pure waste on every single payload
+	// build. Deliberately NOT gated on "the roster has ids": a pool row may
+	// carry a blank id while the roster row has one (or vice versa), and
+	// that legacy (name, dojo) fallback must still be reachable per row, not
+	// switched off for the whole call based on one row's shape.
+	var byNameDojo map[string]string
 	for i := range players {
 		if players[i].Number != "" {
 			continue
@@ -72,22 +94,82 @@ func mergePoolNumbersIntoPlayersSlice(numberPrefix string, players []domain.Play
 			players[i].Number = n
 			continue
 		}
-		if n, ok := byName[players[i].Name]; ok && n != "" {
+		if byNameDojo == nil {
+			// bc-pnum A4: keyed on (name, dojo) via the shared identity
+			// primitive, not bare name -- two legal namesakes from
+			// DIFFERENT dojos (allowed everywhere per this repo's identity
+			// rule) used to collide in a name-only map, so the SECOND one
+			// written silently overwrote the FIRST's number and both
+			// entrants in the public payload showed the second's number.
+			//
+			// Accepted degradation, id-less legacy rosters only: a
+			// competitor edited (dojo corrected/transferred) AFTER a legacy
+			// draw with no participant IDs shows NO number rather than a
+			// WRONG one. Neither key can survive the edit -- ID is blank on
+			// both sides for legacy data, and the (name, dojo) key below is
+			// now the participant's NEW dojo against the pool row's OLD one
+			// -- so the lookup misses cleanly and the fall-through below
+			// leaves Number empty. That is the correct failure direction: a
+			// silent match on the wrong dojo (or on bare name, the exact A4
+			// bug this key replaced) would misattribute someone else's
+			// number instead.
+			byNameDojo = make(map[string]string)
+			for _, pool := range pools {
+				for _, pp := range pool.Players {
+					if pp.Number == "" {
+						continue
+					}
+					byNameDojo[helper.CompetitorKey("", pp.Name, pp.Dojo)] = pp.Number
+				}
+			}
+		}
+		if n, ok := byNameDojo[helper.CompetitorKey("", players[i].Name, players[i].Dojo)]; ok && n != "" {
 			players[i].Number = n
 		}
 	}
 }
 
-// mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
-// pointer. Existing call sites that hold a *Competition keep their idiomatic
-// form; the work happens in the slice-typed helper below.
-func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
-	if comp == nil {
-		return
+// numbersFromPools is the ONE owner of "numbers come from pools.csv": a
+// caller that wants players' Number field filled from the draw's assignment
+// calls this rather than hand-copying the prefix/no-draw-yet skip and its
+// own store.LoadPools call (PR #416 finding 3).
+//
+// No-ops with no I/O at all when comp has no configured NumberPrefix
+// (mergePoolNumbersIntoPlayersSlice's own no-op condition, checked here too
+// so callers never pay for a read whose result would be discarded).
+//
+// Skips the READ (but still merges, against an empty pools slice) when the
+// competition has no draw yet (engine.CanGenerateDraw(comp.Status), i.e.
+// status "setup" or the legacy empty status): pools.csv cannot exist for a
+// competition that has never drawn, so the read is a guaranteed-empty stat --
+// and, more importantly, any bytes found at that path for such a competition
+// are noise (a stray fixture/leftover from another run), not an operator-
+// actionable file, so they must never surface as a data issue or a log line.
+// Merging against an empty slice regardless keeps this a pure optimization,
+// never a behaviour change: mergePoolNumbersIntoPlayersSlice already treats
+// an empty pools slice as "no draw" for every format (playoffs-only still
+// derives its number from participant order; every other format shows none,
+// per the bc-pnum operator ruling on its own doc comment).
+//
+// On a genuine read/parse error the merge is skipped (numbers are never
+// composed from a partial/corrupt read, matching mergePoolNumbersIntoPlayersSlice's
+// own doc comment) and the error is returned so a caller that maintains a
+// dataIssues list (the aggregate payload builder) can fold it in; other
+// callers log it directly.
+func numbersFromPools(store *state.Store, comp *state.Competition, players []domain.Player) error {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" {
+		return nil
 	}
-	// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs too,
-	// see mergePoolNumbersIntoPlayersSlice's doc comment.
-	mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, comp.Players, pools, comp.EffectiveFormat())
+	if engine.CanGenerateDraw(comp.Status) {
+		mergePoolNumbersIntoPlayersSlice(comp, players, nil)
+		return nil
+	}
+	pools, err := store.LoadPools(comp.ID)
+	if err != nil {
+		return err
+	}
+	mergePoolNumbersIntoPlayersSlice(comp, players, pools)
+	return nil
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
@@ -207,14 +289,20 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
 	}
 	comp.Players = players
-	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
-	// pools.csv read entirely when no prefix is configured (the common case).
-	if comp.NumberPrefix != "" {
-		pools, poolsErr := store.LoadPools(compID)
-		if poolsErr != nil {
-			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
-		}
-		mergePoolNumbersIntoPlayers(comp, pools)
+	// mp-13y: merge numberPrefix-derived numbers from pools.csv, via the one
+	// owner of that read (numbersFromPools, PR #416 finding 3) so the
+	// prefix/no-draw-yet skip can't drift from the other two callers.
+	poolsErr := numbersFromPools(store, comp, players)
+	if poolsErr != nil {
+		// Reported, not merged: an unreadable pools.csv must show as
+		// MISSING numbers, never as composed ones (D1). bc-pnum C4: only a
+		// PARSE failure joins the payload's dataIssues below (dataIssuesFrom
+		// -> state.AsCorruptFile, which corruptCSV populates from a
+		// csv.ParseError specifically). A raw READ error (permissions, I/O)
+		// is not something an operator repairs with a text editor, and its
+		// message names the absolute path on disk, which must never reach
+		// this PUBLIC payload -- it is logged server-side only, here.
+		log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
 	}
 
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
@@ -247,8 +335,19 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// identical. This is the aggregate the admin SPA renders AdminCompetition
 	// off (see the comment above the participant load), which is why it is the
 	// right place for it despite the endpoint being public: the audience gate
-	// is at render time, and the detail is parser syntax, never competitor data.
-	if issues := dataIssuesFrom(pmErr, brErr); len(issues) > 0 {
+	// is at render time.
+	//
+	// bc-pnum ruling 1b widened this beyond parser syntax: a legacy
+	// participants.csv that predates the id-minting write path loads fine (no
+	// parse error) but leaves some rows with no stable id, which is exactly
+	// the kind of operator-actionable, per-competition data problem this list
+	// exists for. viewerDataIssues folds that in alongside the corrupt-file
+	// errors, and is the ONE place both this aggregate and the single-
+	// competition detail endpoint build the list from (bc-pnum ruling 1e
+	// follow-up), so the two surfaces never disagree about what a given
+	// competition's issues are.
+	issues := viewerDataIssues(players, pmErr, brErr, poolsErr)
+	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
 	return payload
@@ -257,6 +356,11 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 // dataIssuesFrom collects the located file failures among errs, dropping
 // everything else: a missing file, a permissions problem or a nil is not
 // something an operator repairs with a text editor, so it gets no banner.
+// Each entry carries "kind": "corrupt-file" explicitly (PR #416 finding 9),
+// alongside missingParticipantIDsIssue's own "missing-ids" kind below, so a
+// consumer partitions the list by reading the field rather than by an
+// absent-vs-present convention (the SPA still reads an absent kind as
+// corrupt-file too, for an older payload's sake; see data_integrity.jsx).
 func dataIssuesFrom(errs ...error) []gin.H {
 	var issues []gin.H
 	for _, err := range errs {
@@ -265,11 +369,72 @@ func dataIssuesFrom(errs ...error) []gin.H {
 			continue
 		}
 		issues = append(issues, gin.H{
+			"kind":   "corrupt-file",
 			"file":   cf.File,
 			"line":   cf.Line,
 			"column": cf.Column,
 			"detail": cf.Detail,
 		})
+	}
+	return issues
+}
+
+// missingParticipantIDsIssue reports a loaded roster that still has id-less
+// rows (bc-pnum ruling 1b). Every roster WRITE mints a UUID for an id-less row
+// (marshalParticipantsCSV is the one chokepoint every persistence path
+// funnels through); a row that still has none was loaded from a legacy
+// participants.csv that predates that write and has simply never been
+// re-saved since ids existed. Nothing is broken and no write is refused --
+// the remedy is a re-save, not a repair -- so this is reported with its own
+// "kind" rather than folded into the corrupt-file entries dataIssuesFrom
+// builds, which the console renders with "a file could not be read" framing
+// that would misdescribe this case.
+//
+// The message itself is composed by helper.MissingParticipantIDsMessage, the
+// SAME function the draw pre-flight (helper.ValidateNoMissingParticipantIDs,
+// called from internal/engine's runDrawPipeline, bc-pnum ruling 1c) uses to
+// build its refusal: this is advance warning of the same condition the draw
+// later hard-refuses, so the two surfaces must say the exact same thing
+// about it. Returns nil when every row already has an id.
+func missingParticipantIDsIssue(players []domain.Player) *gin.H {
+	detail := helper.MissingParticipantIDsMessage(players)
+	if detail == "" {
+		return nil
+	}
+	return &gin.H{
+		"kind":   "missing-ids",
+		"file":   "participants.csv",
+		"detail": detail,
+	}
+}
+
+// viewerDataIssues is the ONE place that assembles a competition's
+// dataIssues list: the corrupt-file errors among pmErr/brErr/poolsErr,
+// folded together with the missing-participant-ids advisory. Both public
+// viewer payload builders call it with the identical three-error shape --
+// the aggregate (buildViewerCompetitionPayload, above) and the single-
+// competition detail endpoint (GET /api/viewer/competitions/:id, below) --
+// so a given competition's issues read the same on the dashboard list and
+// on the competition overview, never present on one and silently dropped
+// on the other (bc-pnum ruling 1e follow-up: the overview reads
+// detail.config.dataIssues once the detail has loaded, which used to have
+// no such field at all because the detail endpoint never computed one).
+//
+// Deliberately takes only pmErr/brErr/poolsErr, not every error a caller
+// might have: the detail endpoint's own playersErr and standingsErr are
+// NOT passed in, even though standingsErr can carry the identical
+// underlying fault as poolsErr (engine.CalculatePoolStandings's own
+// internal LoadPools reads the same pools.csv) -- reporting both would
+// either double the entry or require a dedup rule this function would then
+// own alone. Passing exactly the three-error shape keeps the two callers'
+// output IDENTICAL by construction for the same on-disk state, which is
+// the property this extraction exists for; a caller with an error source
+// the other builder does not have is a caller that has drifted from the
+// contract, not one that needs a wider signature.
+func viewerDataIssues(players []domain.Player, pmErr, brErr, poolsErr error) []gin.H {
+	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
+	if mi := missingParticipantIDsIssue(players); mi != nil {
+		issues = append(issues, *mi)
 	}
 	return issues
 }
@@ -388,10 +553,26 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				return nil, p
 			}
 
+			// bc-pnum ruling 1e follow-up: a corrupt-file error (pools.csv,
+			// pool-matches.csv, bracket.json, participants.csv, or one
+			// engine.CalculatePoolStandings' own reads surfaces, e.g.
+			// overrides.json) DEGRADES rather than failing the whole
+			// detail request -- the aggregate has never failed the whole
+			// payload for this class of fault, and the detail endpoint
+			// failing here was exactly why the corrupt-pools-csv case
+			// this pin covers never reached the operator: the request
+			// 500'd before dataIssues (below) ever got a chance to name
+			// it. Any OTHER error (a genuine I/O fault the operator
+			// cannot fix by editing a file) still aborts, unchanged from
+			// before.
 			for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr} {
-				if e != nil {
-					return nil, e
+				if e == nil {
+					continue
 				}
+				if _, ok := state.AsCorruptFile(e); ok {
+					continue
+				}
+				return nil, e
 			}
 
 			// FR-025, T036: derive per-court queue position at serve time,
@@ -401,20 +582,39 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// mp-13y: merge assigned competitor Number from pools.csv onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
-			// on the TV display, streaming overlay, and viewer card.
-			mergePoolNumbersIntoPlayers(comp, pools)
+			// on the TV display, streaming overlay, and viewer card. `pools`
+			// is already loaded above (it is also this payload's own "pools"
+			// field), so this calls the Slice form directly rather than
+			// numbersFromPools (PR #416 finding 3), which would re-read
+			// pools.csv a second time. A pools read error degrades (above)
+			// rather than aborting, so `pools` may be empty here;
+			// mergePoolNumbersIntoPlayersSlice is a no-op over an empty
+			// slice, matching the aggregate's own tolerance for the same
+			// fault.
+			mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 
 			// Redact operator-only audit fields before this PUBLIC payload.
 			stripMatchesAudit(poolMatches)
 			stripBracketAudit(bracket)
 
-			return json.Marshal(gin.H{
+			// viewerDataIssues (above) is the SAME function and the SAME
+			// three-error shape buildViewerCompetitionPayload calls, so this
+			// competition's dataIssues read identically here and on the
+			// aggregate. Sibling of "config", exactly like the aggregate's
+			// own payload shape; the SPA maps it onto detail.config.dataIssues
+			// (api_client.jsx normalizeCompetitionDetail) since that is the
+			// object AdminCompetitionOverview actually renders.
+			payload := gin.H{
 				"config":      comp,
 				"pools":       pools,
 				"poolMatches": poolMatches,
 				"standings":   standings,
 				"bracket":     bracket,
-			})
+			}
+			if issues := viewerDataIssues(comp.Players, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
+				payload["dataIssues"] = issues
+			}
+			return json.Marshal(payload)
 		})
 
 		if errors.Is(err, errNotFound) {

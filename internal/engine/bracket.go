@@ -42,10 +42,20 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 		}
 	}
 
-	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
-	}
-
+	// No AssignPlayerNumbers call here (bc-pnum review, F11): traced end to
+	// end and confirmed dead. Only p.Name is read below to build the tree's
+	// leaves; buildBracketFromDraw works entirely off those leaf STRINGS
+	// (helper.CreateBalancedTree(names), SlotArray, ...), never off the
+	// players slice or its Number field, and the bracket it saves stores
+	// competitor NAMES on each side (state.BracketMatch.SideA/SideB), not a
+	// Number. Because players is a slice parameter, mutating players[i].Number
+	// here would also alias back into the caller's own slice (runDrawPipeline
+	// in competition.go), but that caller never reads it again either -- the
+	// generation-relevant re-validation after this call checks comp fields
+	// only. A playoffs competitor's Number is composed once, at read time, by
+	// mobileapp.mergePoolNumbersIntoPlayersSlice (G8), which re-derives from
+	// the CURRENT NumberPrefix and CURRENT participant order and therefore
+	// cannot desync from a value drawn here and never used.
 	seededPlayers := helper.StandardSeeding(players)
 	names := make([]string, len(seededPlayers))
 	for i, p := range seededPlayers {

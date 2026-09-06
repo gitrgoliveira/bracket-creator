@@ -28,6 +28,20 @@ await import('./js/admin_helpers.jsx');
 // mounted admin components have those globals, mirroring the admin_helpers load.
 await import('./js/viewer_utils.jsx');
 
+// data.jsx publishes window.checkinPid (and other data helpers), which admin
+// surfaces call at render time to key participant/roster identity (e.g.
+// admin_participants.jsx's row keys and check-in handlers). index.html loads
+// data.jsx well before any admin_*.js bundle; import it here so a mounted
+// admin component sees the same global, mirroring that browser load order.
+// (admin_pools.jsx's chusen rank inputs and admin_registration_desk.jsx's
+// rdPid both ES-import checkinPid directly from data.jsx rather than
+// reading window.checkinPid, so this side-effect import is not load-bearing
+// for either of those two -- ESM resolves their own `import` statement
+// regardless of what runs first here -- but it is still correct
+// general-purpose setup for any admin surface that reads window.checkinPid
+// at render time, e.g. admin_participants.jsx.)
+await import('./js/data.jsx');
+
 // ui.jsx publishes window.EmptyState (and other shared UI primitives) that
 // consumer components alias at module-eval time. Load it so render tests see
 // the real component, mirroring the browser's index.html load order.

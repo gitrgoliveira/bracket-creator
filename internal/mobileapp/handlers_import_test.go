@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/engine"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -71,6 +73,15 @@ Player 2,Dojo B
 		assert.Equal(t, 2, resp["results"][0].ParticipantCount)
 		assert.Equal(t, 2, resp["results"][0].SeedCount)
 		assert.Empty(t, resp["results"][0].Error)
+
+		// bc-pnum ruling 1a: the uploaded players.csv above carries no id
+		// column ("Player 1,Dojo A"); the import path (SaveParticipantsRestored)
+		// must mint one on write, same as every other roster-write path.
+		saved, err := store.LoadParticipants("comp-1", false)
+		require.NoError(t, err)
+		require.Len(t, saved, 2)
+		assert.NotEmpty(t, saved[0].ID, "imported id-less row must be minted an id")
+		assert.NotEmpty(t, saved[1].ID, "imported id-less row must be minted an id")
 	})
 
 	t.Run("Import with Base Name Matching", func(t *testing.T) {
@@ -622,10 +633,26 @@ competitions:
 			"existing comp's name must be untouched by the colliding-ID import")
 	})
 
-	// mp-yin4: the import path must enforce number-prefix uniqueness just like
-	// POST/PUT, a manifest row with a duplicate NumberPrefix must land a
-	// per-row error and not be persisted.
-	t.Run("Duplicate Number Prefix Across Import And Existing Comp Rejected", func(t *testing.T) {
+	// mp-yin4 originally required this to reject, matching POST/PUT's
+	// uniqueness gate. bc-pnum A1 ([review] nit d) narrowed that at the
+	// IMPORT boundary specifically: a restored archive can legally carry a
+	// prefix pair that predates the ambiguity/uniqueness rule (this bead's
+	// own governing rule: on legacy data we ASSIGN, never reject), so a
+	// manifest row must now land with a freshly re-derived prefix instead of
+	// being refused. See TestImportCompetition_AssignsFreshPrefixOnRestoredCollision
+	// for the focused unit coverage (including the ambiguous, not just
+	// exact-duplicate, case) below the HTTP layer.
+	//
+	// [review] round 2, nit (b): this reassignment PRESERVES mp-yin4's
+	// invariant rather than abandoning it -- prefix+number stays globally
+	// unique across every competition, which is what lets the viewer's
+	// `?playerNumber=` deep link (mp-yin4 tag QR, viewer_home.jsx) resolve
+	// to exactly one competitor. Rejecting the row would also have
+	// preserved it, just by refusing the collision instead of resolving it;
+	// re-validating the re-derived prefix ([review] round 2, item 1) is
+	// what keeps a SUCCESSFUL reassignment from silently reintroducing the
+	// exact ambiguity this invariant forbids.
+	t.Run("Duplicate Number Prefix Across Import And Existing Comp Reassigned, Not Rejected", func(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: "pfx-import-existing", Name: "Pfx Import Existing", NumberPrefix: "I",
 		}))
@@ -655,11 +682,29 @@ competitions:
 		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		require.Len(t, resp.Results, 1)
-		assert.Contains(t, resp.Results[0].Error, "number prefix",
-			"duplicate prefix should land in ImportResult.Error")
+		assert.Emptyf(t, resp.Results[0].Error, "a restored archive's colliding prefix must ASSIGN, not reject: %s", resp.Results[0].Error)
 
-		stored, _ := store.LoadCompetition("pfx-import-dup")
-		assert.Nil(t, stored, "pfx-import-dup must not have been persisted")
+		stored, err := store.LoadCompetition("pfx-import-dup")
+		require.NoError(t, err)
+		require.NotNil(t, stored, "pfx-import-dup must have been persisted")
+		assert.NotEqual(t, "I", stored.NumberPrefix, "the colliding prefix must have been reassigned, not saved as-is")
+		assert.NotEmpty(t, stored.NumberPrefix, "a reassignment must still leave the competition WITH a prefix")
+
+		// [review] round 2, item 2: the wire payload (raw JSON over the
+		// real HTTP endpoint, not just the Go struct) must carry the
+		// warning, or the SPA never sees it. Asserted on the RAW body too,
+		// not only the decoded struct, since json:",omitempty" silently
+		// dropping the field on an empty string would still round-trip
+		// through Unmarshal into a Go zero value indistinguishable from
+		// "never set".
+		require.NotEmptyf(t, resp.Results[0].Warning, "a reassigned prefix must surface a warning on the wire payload")
+		assert.Contains(t, resp.Results[0].Warning, "reprint")
+		var rawBody map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &rawBody))
+		rawResults, _ := rawBody["results"].([]any)
+		require.Len(t, rawResults, 1)
+		rawRow, _ := rawResults[0].(map[string]any)
+		assert.Contains(t, rawRow, "warning", "the raw JSON response must carry the \"warning\" key for a reassigned row")
 	})
 
 	// Date must be DD-MM-YYYY. Non-canonical formats (e.g. ISO YYYY-MM-DD)
@@ -966,7 +1011,7 @@ func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
 
 	t.Run("omitted courts inherit the tournament's courts", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-no-courts", Name: "No Courts", Date: "11-06-2026"}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-no-courts")
 		require.NoError(t, err)
@@ -975,7 +1020,7 @@ func TestImportCompetition_InheritsTournamentCourts(t *testing.T) {
 
 	t.Run("explicit manifest courts are preserved", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-one-court", Name: "One Court", Date: "11-06-2026", Courts: []string{"B"}}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-one-court")
 		require.NoError(t, err)
@@ -1000,7 +1045,7 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 
 	t.Run("a manifest court the tournament does not have is refused", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-orphan", Name: "Orphan", Date: "11-06-2026", Courts: []string{"C"}}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.NotEmpty(t, res.Error, "a competition on shiaijo C cannot run at a venue with only A and B")
 		assert.Contains(t, res.Error, "courts:")
 		// Refused means NOT written: a row that fails validation must leave no
@@ -1014,12 +1059,223 @@ func TestImportCompetition_RefusesCourtsTheVenueLacks(t *testing.T) {
 
 	t.Run("a subset of the tournament's shiaijo still imports", func(t *testing.T) {
 		entry := ImportManifestComp{ID: "imp-subset", Name: "Subset", Date: "11-06-2026", Courts: []string{"B"}}
-		res := importCompetition(store, entry, map[string][]byte{})
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		comp, err := store.LoadCompetition("imp-subset")
 		require.NoError(t, err)
 		assert.Equal(t, []string{"B"}, comp.Courts)
 	})
+}
+
+// TestImportCompetition_AssignsDefaultNumberPrefix pins item 4's import half
+// (bc-pnum G2): a manifest row is as capable of omitting number_prefix as any
+// other create path (POST /competitions, settings PUT), and this competition
+// must not end up without one either. Subtests run in order against one
+// store so the second import observes the first's derived "K" as taken.
+func TestImportCompetition_AssignsDefaultNumberPrefix(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+	}))
+
+	t.Run("omitted number_prefix is derived from the name", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-kendo-open", Name: "Kendo Open", Date: "11-06-2026"}
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-kendo-open")
+		require.NoError(t, err)
+		require.NotNil(t, comp)
+		assert.Equal(t, "K", comp.NumberPrefix)
+	})
+
+	t.Run("a taken prefix is avoided (escalates to two initials)", func(t *testing.T) {
+		// "K" is already taken by the competition imported above, so this
+		// name's bare initial collides and DefaultNumberPrefix escalates.
+		entry := ImportManifestComp{ID: "imp-kendo-open-2", Name: "Kendo Open 2", Date: "11-06-2026"}
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-kendo-open-2")
+		require.NoError(t, err)
+		require.NotNil(t, comp)
+		assert.Equal(t, "KO", comp.NumberPrefix)
+	})
+
+	t.Run("an explicit number_prefix in the manifest is preserved", func(t *testing.T) {
+		entry := ImportManifestComp{ID: "imp-explicit-prefix", Name: "Explicit Prefix", Date: "11-06-2026", NumberPrefix: "Z"}
+		res := importCompetition(store, engine.New(store), entry, map[string][]byte{})
+		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
+		comp, err := store.LoadCompetition("imp-explicit-prefix")
+		require.NoError(t, err)
+		require.NotNil(t, comp)
+		assert.Equal(t, "Z", comp.NumberPrefix)
+	})
+}
+
+// TestImportCompetition_AssignsFreshPrefixOnRestoredCollision pins bc-pnum
+// A1's import-boundary rule ([review] nit d): a restored archive with two
+// competitions whose explicit number_prefix values collide -- either an
+// EXACT duplicate, or an AMBIGUOUS pair like "K"/"K2" that was legal before
+// the ambiguity rule existed -- must not fail the second row. The governing
+// rule is explicit for this bead: on legacy data we ASSIGN, never reject.
+// Both rows must land, and the second competition ends up with a FRESH
+// prefix (re-derived via the same DefaultNumberPrefixFor every other
+// assignment path uses) that collides with neither the first's stored
+// prefix nor -- for the ambiguous case -- is merely different, but is
+// actually unambiguous with it too, or the reassignment would just recreate
+// the bug it was meant to fix.
+func TestImportCompetition_AssignsFreshPrefixOnRestoredCollision(t *testing.T) {
+	t.Run("ambiguous pair (K, K2) both land, the second row reassigned", func(t *testing.T) {
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+		}))
+		eng := engine.New(store)
+
+		first := ImportManifestComp{ID: "imp-k", Name: "Kendo Cup", Date: "11-06-2026", NumberPrefix: "K"}
+		res1 := importCompetition(store, eng, first, map[string][]byte{})
+		require.Emptyf(t, res1.Error, "the first row of a restored archive must import cleanly: %s", res1.Error)
+
+		// "K2" is ambiguous with "K" (helper.NumberPrefixesAmbiguous: stem +
+		// digit-run collision, "K"'s 2nd entrant and "K2"'s 1st would both
+		// print "K2") -- legal when this data was originally saved, refused
+		// as a NEW pairing today. The restore must not refuse it either.
+		second := ImportManifestComp{ID: "imp-k2", Name: "Kendo Cup 2", Date: "11-06-2026", NumberPrefix: "K2"}
+		res2 := importCompetition(store, eng, second, map[string][]byte{})
+		require.Emptyf(t, res2.Error, "a restored archive's ambiguous-but-legacy prefix pair must ASSIGN, not reject: %s", res2.Error)
+
+		comp1, err := store.LoadCompetition("imp-k")
+		require.NoError(t, err)
+		require.NotNil(t, comp1)
+		assert.Equal(t, "K", comp1.NumberPrefix, "the first row's own prefix must be untouched")
+
+		comp2, err := store.LoadCompetition("imp-k2")
+		require.NoError(t, err)
+		require.NotNil(t, comp2)
+		assert.NotEqual(t, "K2", comp2.NumberPrefix, "the collided prefix must have been reassigned, not saved as-is")
+		assert.NotEmpty(t, comp2.NumberPrefix, "a reassignment must still leave the competition WITH a prefix")
+		assert.False(t, helper.NumberPrefixesAmbiguous(comp1.NumberPrefix, comp2.NumberPrefix),
+			"the reassigned prefix %q must not be ambiguous with the sibling's %q either, or the fix just relocated the bug", comp2.NumberPrefix, comp1.NumberPrefix)
+	})
+
+	t.Run("exact duplicate prefix also lands, reassigned rather than rejected", func(t *testing.T) {
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+		}))
+		eng := engine.New(store)
+
+		first := ImportManifestComp{ID: "imp-z1", Name: "Zen Cup", Date: "11-06-2026", NumberPrefix: "Z"}
+		res1 := importCompetition(store, eng, first, map[string][]byte{})
+		require.Emptyf(t, res1.Error, "import should succeed: %s", res1.Error)
+
+		second := ImportManifestComp{ID: "imp-z2", Name: "Zen Cup Reserve", Date: "11-06-2026", NumberPrefix: "Z"}
+		res2 := importCompetition(store, eng, second, map[string][]byte{})
+		require.Emptyf(t, res2.Error, "an exact duplicate prefix on restore must ASSIGN, not reject: %s", res2.Error)
+
+		comp2, err := store.LoadCompetition("imp-z2")
+		require.NoError(t, err)
+		require.NotNil(t, comp2)
+		assert.NotEqual(t, "Z", comp2.NumberPrefix, "the duplicate prefix must have been reassigned")
+	})
+
+	t.Run("a genuine name collision on restore is still rejected", func(t *testing.T) {
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+		}))
+		eng := engine.New(store)
+
+		first := ImportManifestComp{ID: "imp-name-1", Name: "Same Name Cup", Date: "11-06-2026"}
+		res1 := importCompetition(store, eng, first, map[string][]byte{})
+		require.Emptyf(t, res1.Error, "import should succeed: %s", res1.Error)
+
+		second := ImportManifestComp{ID: "imp-name-2", Name: "Same Name Cup", Date: "11-06-2026"}
+		res2 := importCompetition(store, eng, second, map[string][]byte{})
+		require.NotEmptyf(t, res2.Error, "a genuine NAME collision is an identity conflict, not a cosmetic tag, and must still reject")
+		assert.Contains(t, res2.Error, "already exists")
+	})
+
+	// [review] round 2, item 1: DefaultNumberPrefixFor's own contract
+	// (helper/numbers.go) is a best-effort SUGGESTION, not a uniqueness
+	// guarantee -- once every candidate up to the length cap is exhausted it
+	// returns the LAST one tried, unmodified, which can itself already be
+	// taken. Every other caller (create, settings, the start/generate-draw
+	// pre-flight) re-validates that suggestion before trusting it; import's
+	// reassign branch did not. This reproduces the exact exhaustion the
+	// review named: a sibling holds "K" and another 98 siblings hold every
+	// zero-padded two-digit suffix "K02".."K99", so DefaultNumberPrefixFor's
+	// width-2 loop finds every candidate already taken and falls off the end
+	// returning "K99" -- which collides EXACTLY with the sibling that
+	// already holds it, and is ambiguous with "K" too.
+	t.Run("exhaustion: a re-derived prefix that still collides is refused, not silently persisted", func(t *testing.T) {
+		store, err := state.NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.SaveTournament(&state.Tournament{
+			Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+		}))
+		eng := engine.New(store)
+
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: "sib-k", Name: "Sib K", NumberPrefix: "K"}))
+		for n := 2; n <= 99; n++ {
+			prefix := fmt.Sprintf("K%02d", n)
+			id := fmt.Sprintf("sib-k%02d", n)
+			require.NoError(t, store.SaveCompetition(&state.Competition{ID: id, Name: "Sib " + prefix, NumberPrefix: prefix}))
+		}
+
+		// Its own requested prefix ("K") collides outright, entering the
+		// reassign branch; a SINGLE-WORD name gives nameInitials exactly "K"
+		// (not "KE" or similar), which is what walks DefaultNumberPrefixFor
+		// into the exact exhausted numeric-suffix space set up above rather
+		// than escaping onto a second, untaken initial.
+		entry := ImportManifestComp{ID: "imp-exhausted", Name: "Kendo", Date: "11-06-2026", NumberPrefix: "K"}
+		res := importCompetition(store, eng, entry, map[string][]byte{})
+
+		require.NotEmptyf(t, res.Error, "an unresolvable collision must refuse the row, not silently persist a colliding prefix")
+		assert.Contains(t, res.Error, "K")
+
+		comp, err := store.LoadCompetition("imp-exhausted")
+		require.NoError(t, err)
+		assert.Nil(t, comp, "a refused row must not have been persisted, exactly like the genuine-name-collision case")
+	})
+}
+
+// TestImportCompetition_ReassignmentSetsWarning pins [review] round 2, item
+// 2: a reassigned prefix invalidates every tag the archive's competition
+// already had printed under the OLD prefix (mp-yin4's prefix+number
+// global-uniqueness invariant is PRESERVED by the reassignment, see the
+// updated comment above TestRegisterImportHandlers' duplicate-prefix
+// subtest, but the operator restoring the archive has no way to know a tag
+// is now wrong unless told). ImportResult.Warning surfaces that without
+// failing the row.
+func TestImportCompetition_ReassignmentSetsWarning(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "T", Date: "11-06-2026", Courts: []string{"A"},
+	}))
+	eng := engine.New(store)
+
+	first := ImportManifestComp{ID: "imp-warn-1", Name: "Warn Cup", Date: "11-06-2026", NumberPrefix: "K"}
+	res1 := importCompetition(store, eng, first, map[string][]byte{})
+	require.Emptyf(t, res1.Error, "import should succeed: %s", res1.Error)
+	assert.Empty(t, res1.Warning, "the first, non-colliding row must carry no warning")
+
+	second := ImportManifestComp{ID: "imp-warn-2", Name: "Warn Cup Reserve", Date: "11-06-2026", NumberPrefix: "K"}
+	res2 := importCompetition(store, eng, second, map[string][]byte{})
+	require.Emptyf(t, res2.Error, "a reassigned row must still succeed: %s", res2.Error)
+
+	comp2, err := store.LoadCompetition("imp-warn-2")
+	require.NoError(t, err)
+	require.NotNil(t, comp2)
+
+	require.NotEmptyf(t, res2.Warning, "a reassigned prefix must surface a warning so the operator knows to reprint tags")
+	assert.Contains(t, res2.Warning, `"K"`, "the warning must name the ORIGINAL colliding prefix")
+	assert.Contains(t, res2.Warning, comp2.NumberPrefix, "the warning must name the prefix actually assigned")
+	assert.Contains(t, res2.Warning, "reprint", "the warning must tell the operator to reprint this competition's tags")
 }
 
 // The importer runs the SAME seeds-roster gate PUT /seeds runs
@@ -1049,7 +1305,7 @@ func TestImportCompetition_RejectsSeedsOffRoster(t *testing.T) {
 			Participants: "participants.csv",
 			Seeds:        "seeds.csv",
 		}
-		res := importCompetition(store, entry, files)
+		res := importCompetition(store, engine.New(store), entry, files)
 		require.NotEmpty(t, res.Error, "a seed naming Alice under the wrong dojo must not import cleanly")
 		assert.Contains(t, res.Error, "not on this competition's roster")
 		assert.Contains(t, res.Error, `"Alice" (rank 1)`)
@@ -1075,7 +1331,7 @@ func TestImportCompetition_RejectsSeedsOffRoster(t *testing.T) {
 			Participants: "participants.csv",
 			Seeds:        "seeds.csv",
 		}
-		res := importCompetition(store, entry, okFiles)
+		res := importCompetition(store, engine.New(store), entry, okFiles)
 		require.Emptyf(t, res.Error, "import should succeed: %s", res.Error)
 		assert.Equal(t, 2, res.SeedCount)
 		assert.Equal(t, 2, res.ParticipantCount)

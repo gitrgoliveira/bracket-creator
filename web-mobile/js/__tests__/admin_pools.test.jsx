@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { enrichPoolMatchWithComp, poolMatchesForPool } from '../admin_pools.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../admin_pools.jsx';
+// admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
+// (chusenMemberKey was deleted, the banner now delegates to the one
+// owner of the id-else-name|dojo rule). Imported directly so the tests below
+// exercise the real function, in addition to (not instead of) the full-mount
+// coverage in __tests__/render/admin_pools_chusen.render.test.jsx, which does
+// mount AdminPools.
+import { checkinPid } from '../data.jsx';
 
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
@@ -310,5 +317,122 @@ describe('poolMatchesForPool', () => {
     const result = poolMatchesForPool(mixed, 'Pool A');
     expect(result[0].status).toBe('completed');
     expect(result[1].status).toBe('scheduled');
+  });
+});
+
+// checkinPid, as used to key the chusen banner's rank inputs, pins two
+// contracts (chusenMemberKey was deleted; the banner now delegates to
+// checkinPid, the one owner of this identity rule):
+//   * bc-appx item 2/3: chusen rank inputs must be keyed by a team member's
+//     stable IDENTITY, never by that member's position in the candidates
+//     array. The GET .../chusen-candidates `teams` order is the server's
+//     live standings order, which reorders after ANY partial write (a
+//     member carrying a rank override sorts ahead of one without,
+//     regardless of the override's value -- engine/scoring.go), so an
+//     index-keyed input map re-attaches the operator's typed value to the
+//     WRONG team on a retry after a mid-loop failure.
+//   * bc-appx item 1 (blocker, now fixed in checkinPid itself): that identity
+//     must be the member's id when NON-EMPTY, else "name|dojo" -- checked
+//     with a truthy test, not `??`. The chusen-candidates handler always
+//     emits an "id" key (handlers_competition.go: `gin.H{"id": t.Player.ID,
+//     ...}`), which is "" -- not null/undefined -- for a competitor with no
+//     UUID; see data.test.jsx for the focused pin on that empty-id fallback.
+describe('checkinPid (chusen usage)', () => {
+  it('keys by the member id when present', () => {
+    const member = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
+    expect(checkinPid(member)).toBe('p-alpha');
+  });
+
+  it('falls back to the "name|dojo" composite when id is absent (legacy roster)', () => {
+    const member = { name: 'Team Beta', dojo: 'Gyokusen' };
+    expect(checkinPid(member)).toBe('Team Beta|Gyokusen');
+  });
+
+  it('gives two different teams distinct keys even when their names collide', () => {
+    // Team names are supposed to be unique even across dojos, but
+    // checkNewTeamNameCollisions has one documented enforcement hole (an
+    // unreadable config.md write), so a same-name pair can exist on disk.
+    // The id-preferred key must still tell them apart.
+    const a = { id: 'p-1', name: 'Shudokan', dojo: 'HQ' };
+    const b = { id: 'p-2', name: 'Shudokan', dojo: 'HQ' };
+    expect(checkinPid(a)).not.toBe(checkinPid(b));
+  });
+
+  it('is a pure function of member identity: independent of array position', () => {
+    // Simulates the exact bug report: the candidates payload reorders a
+    // still-tied group from [Alpha,Beta,Gamma] to [Beta,Alpha,Gamma] after
+    // two of three sequential writes land (a member with ANY override sorts
+    // ahead of one without). An index-keyed input map (chusenInputs keyed by
+    // `${groupKey}::${idx}`, the pre-fix scheme) would read the operator's
+    // Alpha-typed value back for Beta after this reorder. A key derived from
+    // checkinPid does not, because it never depends on idx.
+    const alpha = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
+    const beta = { id: 'p-beta', name: 'Team Beta', dojo: 'Gyokusen' };
+    const gamma = { id: 'p-gamma', name: 'Team Gamma', dojo: 'Suigetsu' };
+
+    const before = [alpha, beta, gamma];
+    const after = [beta, alpha, gamma]; // reordered by the server, same members
+
+    // Build the input map the way admin_pools.jsx now does: by identity.
+    const inputs = {};
+    before.forEach((member) => { inputs[checkinPid(member)] = '2'; }); // operator typed "2" for Alpha, Beta, Gamma alike in this contrived case
+
+    // Regardless of the array's new order, each member's own typed value is
+    // still reachable under its own identity key.
+    after.forEach((member) => {
+      expect(inputs[checkinPid(member)]).toBe('2');
+    });
+
+    // Sharper check: give each member a DISTINCT typed value, then confirm
+    // the reordered array still resolves each member back to ITS OWN value,
+    // not the value typed for whichever member used to sit at that index.
+    const distinct = {};
+    distinct[checkinPid(alpha)] = 'alpha-value';
+    distinct[checkinPid(beta)] = 'beta-value';
+    distinct[checkinPid(gamma)] = 'gamma-value';
+
+    // after[0] is Beta (was at index 1 pre-reorder); an index-keyed map built
+    // from `before` at index 0 would have stored Alpha's value there, so a
+    // naive `distinctByIndex[0]` lookup after reordering would wrongly
+    // return Alpha's value for Beta. The identity-keyed lookup does not:
+    expect(distinct[checkinPid(after[0])]).toBe('beta-value');
+    expect(distinct[checkinPid(after[1])]).toBe('alpha-value');
+    expect(distinct[checkinPid(after[2])]).toBe('gamma-value');
+  });
+});
+
+// groupTeamIds pins the second-Opus-pass nit 7 fix: the league-tiebreak
+// candidates payload's `teams` array must convert to a teamIds array to send
+// alongside teamNames -- present when every team carries a real id,
+// omitted entirely for a legacy id-less group (the server rejects a blank
+// entry outright, second-Opus-pass item 4, so padding with "" is not an
+// option).
+describe('groupTeamIds', () => {
+  const names = ['Team X', 'Team X'];
+
+  it('returns the ids array when every team carries a real id', () => {
+    const teams = [
+      { id: 'id-team-x-a', name: 'Team X', dojo: 'Dojo A' },
+      { id: 'id-team-x-b', name: 'Team X', dojo: 'Dojo B' },
+    ];
+    expect(groupTeamIds(teams, names)).toEqual(['id-team-x-a', 'id-team-x-b']);
+  });
+
+  it('returns undefined when teams is absent (legacy id-less group / older server)', () => {
+    expect(groupTeamIds(undefined, names)).toBeUndefined();
+    expect(groupTeamIds(null, names)).toBeUndefined();
+  });
+
+  it('returns undefined when any team is missing its id', () => {
+    const teams = [
+      { id: 'id-team-x-a', name: 'Team X', dojo: 'Dojo A' },
+      { id: '', name: 'Team X', dojo: 'Dojo B' },
+    ];
+    expect(groupTeamIds(teams, names)).toBeUndefined();
+  });
+
+  it('returns undefined when teams and names have mismatched lengths', () => {
+    const teams = [{ id: 'id-a', name: 'Team X', dojo: 'Dojo A' }];
+    expect(groupTeamIds(teams, names)).toBeUndefined();
   });
 });

@@ -374,8 +374,12 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	if err := validateMaxLen("name", comp.Name, MaxLenCompetitionName); err != nil {
 		return err
 	}
-	if err := validateMaxLen("numberPrefix", comp.NumberPrefix, MaxLenCompetitionNumberPrefix); err != nil {
-		return err
+	// rune count, not byte count -- see helper.ValidateNumberPrefix.
+	if _, err := helper.ValidateNumberPrefix(comp.NumberPrefix); err != nil {
+		return &ValidationError{
+			Field:   "numberPrefix",
+			Message: fmt.Sprintf("must be <= %d characters", MaxLenCompetitionNumberPrefix),
+		}
 	}
 	if err := validateMaxLen("startTime", comp.StartTime, MaxLenCompetitionStartTime); err != nil {
 		return err
@@ -386,37 +390,222 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	return nil
 }
 
-// checkUniqueCompFields verifies that name and prefix are both unique across all
-// competitions except excludeID in a single store pass. Returns (infraErr,
-// validationErr): infraErr is non-nil when the store cannot be queried (caller
-// should 500); validationErr is non-nil when a collision is detected (caller
-// should 400). Empty prefix is exempt from the uniqueness check.
-func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (error, error) {
-	prefix = strings.TrimSpace(prefix)
-	ids, err := store.ListCompetitions()
+// assignDefaultNumberPrefix gives comp a number prefix when the request did not
+// carry one, derived from the competition's name and avoiding every prefix
+// already in use. It is the app-side twin of the CLI's own defaulting (see
+// cmd/create-pools.go): the field is optional to SEND, but a competition never
+// ends up without one, because an unprefixed draw would mint bare "1", "2"
+// that collide with every sibling competition's numbers and are not tags
+// anyone can call at the desk.
+//
+// Assigning rather than rejecting is deliberate. A 400 would block an operator
+// editing an unrelated setting on a competition created before this rule, which
+// is precisely when they can least afford to be blocked. The create and
+// settings forms pre-fill the same suggestion, so in practice the operator sees
+// the value before it is saved rather than having it appear behind them.
+//
+// Returns an infrastructure error only; a derived prefix is always within the
+// length cap (helper.MaxNumberPrefixLen matches MaxLenCompetitionNumberPrefix).
+func assignDefaultNumberPrefix(eng *engine.Engine, comp *state.Competition, excludeID string) error {
+	if strings.TrimSpace(comp.NumberPrefix) != "" {
+		return nil
+	}
+	prefix, err := eng.DefaultNumberPrefixFor(comp.Name, excludeID)
 	if err != nil {
-		return fmt.Errorf("list competitions: %w", err), nil
+		return err
 	}
-	for _, existingID := range ids {
-		if existingID == excludeID {
-			continue
-		}
-		existing, err := store.LoadCompetition(existingID)
-		if err != nil {
-			return fmt.Errorf("load competition %s: %w", existingID, err), nil
-		}
-		if existing == nil {
-			continue
-		}
-		if strings.EqualFold(existing.Name, name) {
-			return nil, fmt.Errorf("competition name %q already exists", name)
-		}
-		if prefix != "" && existing.NumberPrefix != "" &&
-			strings.EqualFold(strings.TrimSpace(existing.NumberPrefix), prefix) {
-			return nil, fmt.Errorf("number prefix %q already used by competition %q", prefix, existing.Name)
-		}
+	comp.NumberPrefix = prefix
+	return nil
+}
+
+// ensureNumberPrefix is the R7 pre-flight for POST .../start and
+// POST .../generate-draw: either can be reached by a legacy competition that
+// predates this rule and still carries an empty NumberPrefix on disk (G7),
+// and G2 requires the app never draw one without a prefix.
+//
+// allowed is the engine's OWN precondition for the action (engine.CanStart or
+// engine.CanGenerateDraw), so the gate cannot drift from the switch it
+// guards: a competition in any other status is left completely untouched
+// (no assignment, no renumber) and the caller's engine call, immediately
+// after, rejects it on the engine's own terms.
+//
+// A competition that already has a prefix skips only the assignment step;
+// the renumber still always runs (a cheap read-compare-discard when nothing
+// differs), so a retry after an earlier renumber failure actually retries.
+//
+// Returns (assigned, err): assigned is true only once a NEW prefix has
+// actually been SAVED this call, so a caller whose subsequent engine action
+// then fails still knows config.md/pools.csv may have already changed and
+// must broadcast EventTournamentUpdated even on the error path.
+//
+// The whole derive -> validate -> persist -> renumber sequence, including
+// the rename-lock + atomic-update mechanics and the uniqueness check against
+// sibling competitions, is engine.EnsureNumberPrefix (PR #416 finding 1):
+// runDrawPipeline's own backstop for non-HTTP callers shares that same
+// function, so the two paths cannot drift. Always tolerant of an unreadable
+// sibling here: a start/generate-draw request has no "retry with a
+// different value" recourse the way create/import do.
+func ensureNumberPrefix(eng *engine.Engine, id string, allowed func(state.CompetitionStatus) bool) (bool, error) {
+	return eng.EnsureNumberPrefix(id, allowed, true)
+}
+
+// respondNumberPrefixPreflightError renders ensureNumberPrefix's OWN failure
+// for the start/generate-draw handlers (bc-pnum A5(b)). assigned is true
+// only once a prefix has actually been SAVED this call, so config.md (and
+// possibly pools.csv, via the unconditional renumber) may have already
+// changed even though this request is failing: a broadcast fires so open
+// clients refetch rather than show stale state until reload.
+//
+// The default branch's special wording is scoped correctly BECAUSE it only
+// ever fires from ensureNumberPrefix's own error, never a later engine call:
+// the one way to reach `default` with `assigned` true here is
+// RenumberCompetitors failing right after the save it just made (see
+// ensureNumberPrefix's own comment), so naming that explicitly is accurate,
+// not a guess. It replaces internalError, which would classify a corrupt
+// pools.csv into a generic "corrupt_file" body and drop this specific
+// message, the same reason the settings PUT handler avoids internalError for
+// its own renumber-failure branch.
+func respondNumberPrefixPreflightError(c *gin.Context, hub *Hub, assigned bool, err error) {
+	if assigned {
+		hub.Broadcast(EventTournamentUpdated, nil)
 	}
-	return nil, nil
+	var notFound *engine.NotFoundError
+	var validation *engine.ValidationError
+	if assigned && !errors.As(err, &notFound) && !errors.As(err, &validation) {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "a number prefix was assigned but competitors could not be renumbered; retry once pools.csv is repaired",
+		})
+		return
+	}
+	respondEngineError(c, err)
+}
+
+// runWithNumberPrefixPreflight is the shared
+// ensureNumberPrefix -> engineCall -> error-classification sequence common to
+// POST .../start and POST .../generate-draw: the pre-flight's OWN failure is
+// handled by respondNumberPrefixPreflightError (never conflated with an
+// unrelated engineCall failure's wording, see that function's own doc
+// comment); once the pre-flight succeeds, engineCall runs and any failure
+// there still broadcasts EventTournamentUpdated when the pre-flight had
+// itself assigned/saved a prefix -- those writes already landed even though
+// THIS call is now failing for an unrelated reason (an empty roster, an
+// invalid court allocation, ...), so open clients must be told to refetch
+// rather than show stale state until reload -- before classifying the error
+// through the shared NotFound/Validation/internal switch.
+//
+// Returns true only when engineCall itself succeeded, so the caller
+// continues with its own load/broadcast/response tail; on false the
+// response has already been written and the caller must return immediately.
+func runWithNumberPrefixPreflight(c *gin.Context, eng *engine.Engine, hub *Hub, id string, allowed func(state.CompetitionStatus) bool, engineCall func(id string) error) bool {
+	assigned, err := ensureNumberPrefix(eng, id, allowed)
+	if err != nil {
+		respondNumberPrefixPreflightError(c, hub, assigned, err)
+		return false
+	}
+	if err := engineCall(id); err != nil {
+		if assigned {
+			hub.Broadcast(EventTournamentUpdated, nil)
+		}
+		respondEngineError(c, err)
+		return false
+	}
+	return true
+}
+
+// inheritOrAssignNumberPrefix ensures target carries a non-empty NumberPrefix
+// before a competition record is saved: an omitted (empty) value inherits
+// stored, and a value still empty after that (G7's legacy shape, or an
+// out-of-band edit that left the field blank) is assigned the derived
+// default via assignDefaultNumberPrefix.
+//
+// Shared by BOTH branches of the settings/roster PUT (bc-pnum A3): the
+// roster-only branch used to skip this step entirely and return `current`
+// straight to save, so a competition whose stored prefix was blank reached
+// the unconditional RenumberCompetitors call below with an empty prefix and
+// wrote bare "1","2","3" (no letters at all) into pools.csv. RenumberCompetitors
+// also now refuses an empty prefix outright as a second line of defense, but
+// this is what actually heals the record instead of merely failing loudly.
+func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, stored, excludeID string) error {
+	if target.NumberPrefix == "" {
+		target.NumberPrefix = stored
+	}
+	return assignDefaultNumberPrefix(eng, target, excludeID)
+}
+
+// resolvePutNumberPrefix is the PUT /competitions/:id transform's shared
+// inherit -> moved -> validate-if-moved sequence, extracted from the
+// two near-identical bodies the roster-only and settings-only branches used
+// to carry: inheritOrAssignNumberPrefix mutates target's NumberPrefix in
+// place, moved reports whether THIS call actually changed it away from
+// stored (bc-pnum [blocker]: a write validates only what it moves), and the
+// uniqueness/ambiguity check runs against validateName (the roster branch
+// always passes "", since a roster-only PUT never changes Name; the
+// settings branch passes comp.Name only when it differs from current.Name)
+// and the prefix ONLY when moved is true.
+//
+// when neither applies (the common already-set-prefix roster save),
+// this skips checkUniqueCompFields entirely rather than call it with two
+// empty fields to no-op on -- engine.CheckUniqueCompFields's own early
+// return covers any OTHER caller that reaches it with both fields empty,
+// but skipping the call altogether here also skips paying for building the
+// (empty) arguments and keeps the "nothing to validate" case visible at the
+// call site, not just inside the callee.
+func resolvePutNumberPrefix(store *state.Store, eng *engine.Engine, target *state.Competition, storedPrefix, validateName, id string) (moved bool, infraErr, validationErr error) {
+	if err := inheritOrAssignNumberPrefix(eng, target, storedPrefix, id); err != nil {
+		return false, err, nil
+	}
+	moved = target.NumberPrefix != storedPrefix
+	if !moved && validateName == "" {
+		return moved, nil, nil
+	}
+	validatePrefix := ""
+	if moved {
+		validatePrefix = target.NumberPrefix
+	}
+	err := checkUniqueCompFields(eng, validateName, validatePrefix, id)
+	var validation *engine.ValidationError
+	if errors.As(err, &validation) {
+		return moved, nil, validation
+	}
+	return moved, err, nil
+}
+
+// checkUniqueCompFields verifies that name and prefix are both unique across all
+// competitions except excludeID. Returns a single error: nil on success, a
+// *engine.ValidationError on a detected collision (caller should 400, via
+// errors.As), or any other error when the store could not be queried (caller
+// should 500). Empty prefix is exempt from the uniqueness check, and so is an
+// empty name (bc-pnum A5(c)/D4): the start/generate-draw pre-flight passes ""
+// for the name deliberately, since it validates only the field IT introduces
+// (the derived prefix), never an inherited duplicate name the request never
+// sent -- without this exemption a blank-named record already on disk (an
+// out-of-band copy/restore) would refuse the empty-name caller's OWN
+// competition on a field it never touched.
+//
+// A thin wrapper over engine.CheckUniqueCompFields (PR #416 finding 1),
+// which owns the sibling walk; this is the STRICT policy (an unreadable
+// sibling is a hard failure): create and import can be retried by the
+// operator, so silently skipping a sibling and letting a genuine collision
+// through is the wrong trade. The start/generate-draw pre-flight cannot
+// defer that way and uses checkUniqueCompFieldsTolerant instead (bc-pnum
+// A5(d)).
+func checkUniqueCompFields(eng *engine.Engine, name, prefix, excludeID string) error {
+	_, err := eng.CheckUniqueCompFields(name, prefix, excludeID, false)
+	return err
+}
+
+// checkUniqueCompFieldsTolerant is checkUniqueCompFields's pre-flight-only
+// variant (bc-pnum A5(d)): an unreadable sibling config.md is logged and
+// SKIPPED rather than turned into a 500. A start/generate-draw request
+// cannot be deferred the way create/import can -- the competition the
+// operator is trying to start is not the broken one, and they have no
+// "retry with a different value" recourse -- and GET /competitions and
+// MigrateNumberPrefixes already apply the same log-and-skip rule to a bad
+// sibling. Returns the ids of every sibling this call skipped and a single
+// error already shaped for the caller: an infra fault as a plain error, a
+// collision as *engine.ValidationError.
+func checkUniqueCompFieldsTolerant(eng *engine.Engine, name, prefix, excludeID string) ([]string, error) {
+	return eng.CheckUniqueCompFields(name, prefix, excludeID, true)
 }
 
 // resolvePoolOverrideTarget resolves the pool-rank override request's target
@@ -496,22 +685,72 @@ func resolvePoolOverrideTarget(players []domain.Player, playerID, playerName, pl
 	return "", "", fmt.Errorf("playerName %q is ambiguous in pool: multiple competitors share this name; include playerId or playerDojo to disambiguate", playerName)
 }
 
+// loadAllCompetitions lists every competition id on disk and loads its
+// config, skipping (not failing on) an id whose own load errors -- one
+// unreadable competition record must not blank the whole list, matching
+// the viewer aggregate's own per-competition degrade-and-log policy
+// (buildViewerCompetitionPayload, handlers_viewer.go). Shared by the admin
+// GET /competitions listing below and the tournament response builder
+// (buildTournamentResponse, handlers_tournament.go) so both surfaces list
+// competitions the same way rather than reimplementing the id-then-load
+// loop twice.
+func loadAllCompetitions(store *state.Store) ([]*state.Competition, error) {
+	ids, err := store.ListCompetitions()
+	if err != nil {
+		return nil, err
+	}
+	comps := make([]*state.Competition, 0, len(ids))
+	for _, id := range ids {
+		comp, err := store.LoadCompetition(id)
+		if err == nil && comp != nil {
+			comps = append(comps, comp)
+		}
+	}
+	return comps, nil
+}
+
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
-		ids, err := store.ListCompetitions()
+		comps, err := loadAllCompetitions(store)
 		if err != nil {
 			internalError(c, err)
 			return
 		}
-
-		comps := make([]*state.Competition, 0)
-		for _, id := range ids {
-			comp, err := store.LoadCompetition(id)
-			if err == nil && comp != nil {
-				comps = append(comps, comp)
-			}
-		}
 		c.JSON(http.StatusOK, comps)
+	})
+
+	// GET /number-prefix-default?name=, previews the number prefix
+	// assignDefaultNumberPrefix would pick for a NEW competition named name.
+	// Read-only, over the engine's one derivation
+	// (engine.DefaultNumberPrefixFor, R6/R9), the same call every assigning
+	// path makes, so the value previewed here is the value a save would
+	// actually assign.
+	//
+	// deliberately NOT under /competitions/ (moved from
+	// /competitions/number-prefix-default). gin v1.12 resolves a static
+	// segment before a wildcard, so a competition whose id slugs to
+	// "number-prefix-default" (e.g. name "Number Prefix Default", or an
+	// explicit id on POST /competitions) could never be fetched via
+	// GET /competitions/:id -- this static route always won the match
+	// first. Same auth posture as before: still registered on the
+	// AuthMiddleware-gated admin `r` group, just one path segment up.
+	//
+	// The CREATE form (admin_setup.jsx AdminCreateCompetition) is the only
+	// caller: the competition doesn't exist yet, so there is nothing to
+	// exclude from the taken set. bc-pnum B5: an `exclude` query param used
+	// to exist for a settings-screen pre-fill caller that was built (20edcb0f)
+	// and retired (bf0a4635) before this endpoint's first release; it never
+	// had a second caller and is removed, not merely unused, so it cannot
+	// silently come back as dead residue. A blank name is a valid query (the
+	// operator hasn't typed one yet) and resolves through
+	// helper.DefaultNumberPrefix's own fallback, same as every other caller.
+	r.GET("/number-prefix-default", func(c *gin.Context) {
+		prefix, err := eng.DefaultNumberPrefixFor(c.Query("name"), "")
+		if err != nil {
+			internalError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"numberPrefix": prefix})
 	})
 
 	r.POST("/competitions", func(c *gin.Context) {
@@ -790,13 +1029,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
-			var infraErr error
-			infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, "")
-			if infraErr != nil {
-				return infraErr
+			if dErr := assignDefaultNumberPrefix(eng, &comp, ""); dErr != nil {
+				return dErr
 			}
-			if validationErr != nil {
-				return nil
+			if err := checkUniqueCompFields(eng, comp.Name, comp.NumberPrefix, ""); err != nil {
+				var validation *engine.ValidationError
+				if errors.As(err, &validation) {
+					validationErr = validation
+					return nil
+				}
+				return err
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
 			return saveErr
@@ -900,17 +1142,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		estimate, err := eng.EstimateScheduleForCompetition(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.As(err, &validation) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			internalError(c, err)
+			respondEngineError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, estimate)
@@ -929,12 +1161,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		clashes, err := eng.DetectClashesForCompetition(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
-			internalError(c, err)
+			respondEngineError(c, err)
 			return
 		}
 		c.JSON(http.StatusOK, clashes)
@@ -1249,6 +1476,24 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// them is that same refusal, not a validation error.
 		var formatOrKindStartedFlag bool
 		var changed bool
+		// numberPrefixMoved records whether THIS PUT actually changed the
+		// stored NumberPrefix (computed inside the transform below, comparing
+		// the post-inheritance EFFECTIVE prefix against the on-disk value
+		// captured before inheritOrAssignNumberPrefix ran). It drives two
+		// things: the uniqueness/ambiguity check below validates the prefix
+		// ONLY when it moved (a write validates only what it moves; an
+		// already-set stored prefix, even one ambiguous with a sibling from
+		// before that rule existed, is grandfathered until one of the two
+		// competitions actually changes its own), and it drives the
+		// RenumberCompetitors error policy after the transform commits: a
+		// renumber failure following a prefix THIS write moved is damage this
+		// write caused (500, the operator must retry); a renumber failure
+		// with the prefix unchanged is inherited damage from something else
+		// (logged, 200, healed by the next save). Set on BOTH branches (bc-pnum
+		// [blocker]): a roster-only PUT that just healed a blank stored prefix
+		// is as much "this write moved it" as a settings PUT that retypes the
+		// field.
+		var numberPrefixMoved bool
 		err := store.WithCompetitionRenameLock(func() error {
 			var updateErr error
 			changed, updateErr = store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
@@ -1278,6 +1523,36 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				if comp.Players != nil {
 					if current.Status == state.CompStatusDrawReady {
 						drawReadyFlag = true
+						return nil, nil
+					}
+					// bc-pnum A3: heal a blank stored NumberPrefix (or assign
+					// one for the first time) on the roster-only path too, the
+					// same inherit+assign step the settings branch runs below.
+					// A no-op when current already carries a prefix
+					// (assignDefaultNumberPrefix's own guard). bc-pnum
+					// [blocker]: a write validates only what it moves -- a
+					// roster-only PUT never changes Name (see the comment
+					// above this branch), so "" is passed for validateName,
+					// the same exemption checkUniqueCompFields already gives
+					// an untouched/empty field, and resolvePutNumberPrefix
+					// validates the prefix only when THIS call moved it: an
+					// already-set stored prefix -- even one ambiguous with a
+					// sibling from before that rule existed, a legacy K/K2
+					// pair that was legal when both were saved -- is
+					// grandfathered until one of the two competitions
+					// actually changes its own prefix. Re-validating an
+					// unmoved stored value on every future roster save would
+					// refuse an operator's roster edit forever over a field
+					// this write never touched. Shared with the settings
+					// branch below via resolvePutNumberPrefix (the roster branch's own
+					// helper, its doc comment covers the target/excludeID
+					// choice here).
+					var infraErr error
+					numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(store, eng, current, current.NumberPrefix, "", id)
+					if infraErr != nil {
+						return nil, infraErr
+					}
+					if validationErr != nil {
 						return nil, nil
 					}
 					// Roster-only PUT, do NOT flip HasParticipantIDs
@@ -1428,8 +1703,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// StartCompetition runs. Fields that do NOT reach the Excel
 				// generator (Name, Date, StartTime, CheckInEnabled) stay
 				// editable in draw-ready and are applied below. NOTE:
-				// NumberPrefix and WithZekkenName DO reach the generator
-				// (player numbers / name columns) and are gated below.
+				// WithZekkenName reaches the generator (name columns) and IS
+				// gated below (outputAffectingChanged). NumberPrefix
+				// deliberately is NOT: it only labels competitors, and
+				// RenumberCompetitors rewrites pools.csv in place after the
+				// save, so changing it is always editable, at any status,
+				// and never trips this gate (bc-pnum G4b).
 				// Naginata and Engi are NOT editable in draw-ready either: the
 				// `started` guard below (current.Status != setup) treats
 				// draw-ready as started, so a change to them is rejected. This
@@ -1476,11 +1755,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 							// sameTeamMatchType is the normalized effective-value comparison
 							// computed above (omitted keeps stored; legacy "" equals fixed).
 							!sameTeamMatchType ||
-							// NumberPrefix and WithZekkenName reach the Excel generator
-							// (POST /create: numberPrefix → player numbers, withZekkenName
-							// → name columns), so changing them while draw-ready desyncs
-							// config from the generated output.
-							comp.NumberPrefix != current.NumberPrefix ||
+							// WithZekkenName reaches the Excel generator (name
+							// columns), so changing it while draw-ready desyncs config
+							// from the generated output. NumberPrefix deliberately is
+							// NOT in this set: it only labels competitors, and
+							// RenumberCompetitors rewrites pools.csv in place after the
+							// save, so changing it never invalidates the draw (bc-pnum).
 							comp.WithZekkenName != current.WithZekkenName
 					if outputAffectingChanged {
 						drawReadyFlag = true
@@ -1498,8 +1778,35 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// OTHER comp IDs that checkUniqueCompFields performs can't
 				// race a concurrent rename of those comps (see store.go
 				// "Lock ordering note" on WithCompetitionRenameLock).
+				// A blank/omitted numberPrefix on a settings PUT means "keep the
+				// stored value", exactly like TeamMatchType and ExtraQualifiers
+				// above -- never "this competition has no prefix". inheritOrAssignNumberPrefix
+				// (inside resolvePutNumberPrefix) inherits BEFORE
+				// assignDefaultNumberPrefix runs, so that helper only ever
+				// derives a value for a competition that truly has none stored
+				// (the legacy shape). Without this, any settings save that
+				// simply omits the field would invent a NEW prefix for a
+				// competition that already had one, renumbering every competitor
+				// and invalidating printed tags for no reason the operator asked
+				// for. Shared with the roster-only branch above (bc-pnum A3).
+				//
+				// bc-pnum [blocker]: numberPrefixMoved is computed HERE, right
+				// after the prefix is resolved and before `current.NumberPrefix`
+				// is overwritten by the merge further down, so BOTH the
+				// validation gate and the post-transform renumber-failure report
+				// (numberPrefixMoved's own declaration comment) read the
+				// identical answer. A write validates only what it moves: the
+				// name is checked only when this request's Name differs from
+				// the stored one, and the prefix only when it actually moved --
+				// an already-set stored prefix (even one ambiguous with a
+				// sibling from before that rule existed) is grandfathered until
+				// one of the two competitions actually changes its own.
+				validateName := ""
+				if comp.Name != current.Name {
+					validateName = comp.Name
+				}
 				var infraErr error
-				infraErr, validationErr = checkUniqueCompFields(store, comp.Name, comp.NumberPrefix, id)
+				numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(store, eng, &comp, current.NumberPrefix, validateName, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}
@@ -1611,6 +1918,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				current.RoundRobin = comp.RoundRobin
 				current.WithZekkenName = comp.WithZekkenName
 				current.TeamSize = comp.TeamSize
+				// numberPrefixMoved already computed above, against the SAME
+				// still-stored current.NumberPrefix this overwrites; nothing
+				// between there and here touches either side of that
+				// comparison, so recomputing it would only restate it.
 				current.NumberPrefix = comp.NumberPrefix
 				// started is computed here, ahead of the Format/Kind gate that
 				// needs it, rather than down by the Naginata/Engi guards below
@@ -1789,7 +2100,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if drawReadyFlag {
-			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, mirror, team size, kind, team match type, number prefix, zekken display) while a draw is pending; discard the draw first"})
+			c.JSON(http.StatusConflict, gin.H{"error": "cannot modify output-affecting settings (format, courts, pool size/winners/mode, extra qualifiers, pool format, round-robin, mirror, team size, kind, team match type, zekken display) while a draw is pending; discard the draw first"})
 			return
 		}
 		if teamMatchTypeStartedFlag {
@@ -1880,7 +2191,74 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			}
 			participantsChanged = true
 		}
-		if changed || participantsChanged {
+		// Runs after EVERY successful settings save, not only when the prefix
+		// moved (G4): RenumberCompetitors is idempotent (it writes pools.csv
+		// only when a number actually differs), so a save that didn't touch
+		// the prefix costs one no-op read-compare here, and a save that DID
+		// move it is what makes the change take effect. Unconditional also
+		// makes every later save a retry of a renumber that failed on a prior
+		// save, and heals a legacy pools.csv whose Number column was never
+		// populated (G7) with no extra code.
+		//
+		// It runs AFTER the settings transaction (and after the participants
+		// save above) rather than inside the transform: UpdateCompetitionChanged
+		// already holds the per-competition lock and the locked pool helpers
+		// are unexported, so the rewrite takes its own lock through the engine
+		// (which is the layer that owns numbering). It runs after participants
+		// so that whatever the PUT actually asked to persist (settings, or a
+		// roster) lands regardless of what this derived, secondary rewrite
+		// does. Between the settings save and this there is a brief window
+		// where config.md carries the new prefix and pools.csv still holds the
+		// old numbers; the broadcast below is emitted after both, so no
+		// surface is told to repaint until they agree.
+		//
+		// A failure here is reported by whether THIS PUT is the one that moved
+		// the prefix (numberPrefixMoved, computed above where `current` was
+		// known): if it did, the operator's save is only half landed --
+		// config.md carries the new prefix but pools.csv does not reflect it
+		// -- and that is worth a 500 naming the situation so they know to
+		// retry rather than assume the change took. If it did not, the
+		// failure is INHERITED damage (an already-broken pools.csv, or a
+		// prefix change from an earlier save that never healed) that this
+		// unrelated save just happened to notice; reporting it as though this
+		// save broke something would block an operator editing e.g. the
+		// competition date from a competition whose pools.csv was already
+		// corrupt. It is logged instead, and the very next save retries
+		// (RenumberCompetitors is idempotent and unconditional, G4).
+		renumbered, rErr := eng.RenumberCompetitors(id)
+		if rErr != nil {
+			if numberPrefixMoved {
+				// internalError is deliberately NOT used here: it special-cases a
+				// corrupt pools.csv into a generic "corrupt_file" body, which would
+				// drop this specific "were saved" message the operator needs to
+				// know the retry is what fixes it, not that the save itself was
+				// refused.
+				log.Printf("mobileapp: PUT /api/competitions/%s: settings saved but renumber failed after a prefix change: %v", id, rErr)
+				// The settings DID land (config.md carries the new prefix), so
+				// open clients must still be told to refetch: without this
+				// broadcast they keep showing the old prefix until a reload, and
+				// the operator's own retry would look like it changed nothing.
+				// The retry itself takes the non-fatal branch above (the prefix
+				// no longer moves) and heals pools.csv once it is repaired.
+				hub.Broadcast(EventTournamentUpdated, nil)
+				// name what THIS PUT actually persisted. comp.Players != nil
+				// is the roster-only branch (bc-pnum A3's own healed-prefix case
+				// included, since numberPrefixMoved is set on BOTH branches): a
+				// "settings were saved" 500 answering a roster-only PUT told the
+				// operator the wrong thing landed. The wording is the only
+				// difference; the 500 itself, the broadcast, and the non-fatal
+				// retry on the next save are unchanged either way.
+				msg := "settings were saved but competitors could not be renumbered; save again once pools.csv is repaired"
+				if comp.Players != nil {
+					msg = "the roster was saved but competitors could not be renumbered; save again once pools.csv is repaired"
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+				return
+			}
+			log.Printf("mobileapp: competition %s: renumber failed on an unrelated settings save (prefix unchanged, retried on next save): %v", id, rErr)
+			renumbered = false
+		}
+		if changed || participantsChanged || renumbered {
 			hub.Broadcast(EventTournamentUpdated, nil)
 		}
 		// Re-load to return the actual on-disk state (with non-settings
@@ -2032,17 +2410,10 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		if err := eng.StartCompetition(id); err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+		// bc-pnum A5(b): the shared pre-flight -> engine call ->
+		// error-classification sequence, see runWithNumberPrefixPreflight's
+		// doc comment. A false return means the response is already written.
+		if !runWithNumberPrefixPreflight(c, eng, hub, id, engine.CanStart, eng.StartCompetition) {
 			return
 		}
 
@@ -2077,17 +2448,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		if err := eng.GenerateDraw(id); err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+		// Same shared handling as POST .../start (see runWithNumberPrefixPreflight).
+		if !runWithNumberPrefixPreflight(c, eng, hub, id, engine.CanGenerateDraw, eng.GenerateDraw) {
 			return
 		}
 		comp, err := store.LoadCompetition(id)
@@ -2116,16 +2478,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		if err := eng.DiscardDraw(id); err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+			respondEngineError(c, err)
 			return
 		}
 		hub.Broadcast(EventDrawDiscarded, gin.H{"competitionId": id})
@@ -2143,21 +2496,12 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		res, err := eng.QuarantineCorruptBracket(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			switch {
-			case errors.As(err, &notFound):
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-			case errors.As(err, &validation):
-				// Covers both "there is nothing wrong with this bracket" and
-				// the refusal for a competition that draws its bracket
-				// directly, whose message explains why rebuilding would invent
-				// a draw rather than restore one. Both are
-				// answerable by the operator, so both are a 400 with the reason.
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			default:
-				internalError(c, err)
-			}
+			// A validation failure here covers both "there is nothing wrong
+			// with this bracket" and the refusal for a competition that draws
+			// its bracket directly, whose message explains why rebuilding
+			// would invent a draw rather than restore one -- both are
+			// operator-answerable, hence respondEngineError's 400.
+			respondEngineError(c, err)
 			return
 		}
 		hub.Broadcast(EventBracketQuarantined, gin.H{"competitionId": id})
@@ -2405,38 +2749,36 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		candidates, err := eng.ChusenCandidates(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			// ChusenCandidates loads overrides.json directly. A corrupt file
+			// is operator-recoverable state (repair via DELETE .../overrides),
+			// not a server fault, so it gets the same terminal 422 every other
+			// LoadOverrides-reaching endpoint answers with.
+			if respondIfCorruptOverrides(c, err) {
 				return
 			}
-			// Recorded on the context (not returned to the caller) so the
-			// root cause is still visible in server logs, consistent with the
-			// other opaque-500 handlers in this PR.
-			_ = c.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 		out := make([]gin.H, 0, len(candidates))
 		for _, g := range candidates {
 			names := make([]string, len(g.Teams))
-			// teams carries id/dojo alongside each name (bc-cse) so the SPA's
-			// chusen resolver can call PUT .../override-rank with playerId
-			// (falling back to playerDojo), the same identity disambiguation
-			// the operator rule requires. Team names are supposed to be
-			// unique even across dojos (checkNewTeamNameCollisions), but that
-			// check has one documented hole -- an unreadable config.md
-			// disables it for that write, logged and allowed through
-			// (engine/chusen.go) -- so a same-name collision can exist on
-			// disk. teamNames alone (kept for older clients) cannot tell
-			// such a pair apart; this hardens the wire format for that hole
-			// and keeps it consistent with the individual override path.
-			teams := make([]gin.H, len(g.Teams))
 			for i, t := range g.Teams {
 				names[i] = t.Player.Name
-				teams[i] = gin.H{"id": t.Player.ID, "name": t.Player.Name, "dojo": t.Player.Dojo}
 			}
-			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "teams": teams, "minPosition": g.MinPosition})
+			// teams carries id/dojo alongside each name (bc-cse), via the
+			// same competitorRef shape GET /league-tiebreak/candidates emits
+			// (PR #416 finding 6), so the SPA's chusen resolver can call
+			// PUT .../override-rank with playerId (falling back to
+			// playerDojo), the same identity disambiguation the operator
+			// rule requires. Team names are supposed to be unique even
+			// across dojos (checkNewTeamNameCollisions), but that check has
+			// one documented hole -- an unreadable config.md disables it for
+			// that write, logged and allowed through (engine/chusen.go) --
+			// so a same-name collision can exist on disk. teamNames alone
+			// (kept for older clients) cannot tell such a pair apart; this
+			// hardens the wire format for that hole and keeps it consistent
+			// with the individual override path.
+			out = append(out, gin.H{"poolName": g.PoolName, "teamNames": names, "teams": competitorRefsFrom(g.Teams), "minPosition": g.MinPosition})
 		}
 		c.JSON(http.StatusOK, gin.H{"candidates": out})
 	})
@@ -2448,6 +2790,23 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		changed, err := store.ResetOverridesChanged(id)
 		if err != nil {
+			// ResetOverridesChanged goes through modifyOverridesChanged, which
+			// LOADS the file first -- so it fails identically on the very
+			// corrupt overrides.json this endpoint exists to repair. This IS
+			// that repair door: fall back to Store.ResetOverridesForce, the
+			// load-free primitive (state/overrides.go) that writes a fresh
+			// empty value directly, and treat it as a change (an unreadable
+			// file is never "already empty"). Any OTHER load/save error still
+			// falls through to internalError below.
+			if errors.Is(err, state.ErrCorruptOverrides) {
+				if forceErr := store.ResetOverridesForce(id); forceErr != nil {
+					internalError(c, forceErr)
+					return
+				}
+				hub.Broadcast(EventTournamentUpdated, nil)
+				c.Status(http.StatusNoContent)
+				return
+			}
 			internalError(c, err)
 			return
 		}

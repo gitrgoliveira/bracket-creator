@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
@@ -393,6 +394,42 @@ func TestValidateMaxLen(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateMaxLen("field", tt.val, tt.max)
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestValidateCompetitionLengths_NumberPrefixRunesNotBytes pins the same
+// rune-count behaviour TestValidateMaxRunes used to pin directly against the
+// (now deleted) validateMaxRunes: validateCompetitionLengths must measure
+// numberPrefix in RUNES via helper.ValidateNumberPrefix (PR #416 finding 4),
+// not bytes, so a multi-byte-but-few-character string like "ÖÖ" (2 runes, 4
+// bytes) passes even though it exceeds 3 BYTES. helper's own
+// TestValidateNumberPrefix pins the primitive itself; this pins that the
+// mobileapp boundary still calls into it with the numberPrefix field name.
+func TestValidateCompetitionLengths_NumberPrefixRunesNotBytes(t *testing.T) {
+	tests := []struct {
+		name      string
+		val       string
+		wantField string
+	}{
+		{name: "empty: ok", val: ""},
+		{name: "ASCII exactly at cap: ok", val: "ABC"},
+		{name: "ASCII one over cap: rejected", val: "ABCD", wantField: "numberPrefix"},
+		{name: "2-rune, 4-byte value under the 3-rune cap: ok (the  fix)", val: "ÖÖ"},
+		{name: "3-rune, 6-byte value exactly at cap: ok", val: "ÖÖÖ"},
+		{name: "4-rune value over cap: rejected even though runes, not bytes, are counted", val: "ÖÖÖÖ", wantField: "numberPrefix"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCompetitionLengths(&state.Competition{Name: "OK", NumberPrefix: tt.val})
 			if tt.wantField == "" {
 				assert.NoError(t, err)
 				return
@@ -947,7 +984,11 @@ func TestValidateHanteiMarkPlacement_IDsOverrideNames(t *testing.T) {
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Contains(t, verr.Message, "hantei mark belongs in the winner's ippon list")
+		// bc-idfx: validateWinnerIDMatchesSide now catches this shape FIRST,
+		// with a more direct diagnosis than the downstream hantei-placement
+		// check used to give (the winnerId is itself invalid data, not just
+		// a misplaced mark) -- same rejected request, sharper message.
+		assert.Contains(t, verr.Message, "must equal sideAId or sideBId")
 	})
 }
 
@@ -1838,4 +1879,18 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "daihyosen representative bout")
 	})
+}
+
+// TestMaxLenCompetitionNumberPrefixMatchesHelper pins F12 (bc-pnum review):
+// helper.DefaultNumberPrefix's own length cap (helper.MaxNumberPrefixLen)
+// must never propose a value MaxLenCompetitionNumberPrefix (this package's
+// length validator, validateMaxLen("numberPrefix", ...)) would then reject --
+// helper cannot import mobileapp to share one constant, so the two are
+// documented as matching (assignDefaultNumberPrefix's doc comment,
+// helper.MaxNumberPrefixLen's doc comment) rather than defined once. A
+// constant-equality assertion is what keeps a future edit to either one from
+// silently drifting the pair apart.
+func TestMaxLenCompetitionNumberPrefixMatchesHelper(t *testing.T) {
+	assert.Equal(t, helper.MaxNumberPrefixLen, MaxLenCompetitionNumberPrefix,
+		"helper.MaxNumberPrefixLen and mobileapp.MaxLenCompetitionNumberPrefix must stay in lockstep: a derived prefix must never exceed the length this package's own validator enforces")
 }

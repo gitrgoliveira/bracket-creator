@@ -9,6 +9,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// earliestDojoMeeting returns the earliest knockout round two of dojo's pools
+// are drawn to meet, or math.MaxInt when dojo occupies fewer than two pools.
+// pairRound is the precomputed pool-pair meeting matrix (poolPairRounds):
+// the repair loop evaluates hundreds of thousands of candidate exchanges,
+// and recomputing each pool pair's slot pairing per candidate multiplied the
+// whole test suite's runtime by three before the matrix existed.
+//
+// A thin wrapper over earliestDojoMeetingScan (bc-pnum) with a fresh,
+// throwaway scratch slice: kept as its own entry point because every OTHER
+// caller (this file's own tests, the reference oracles) already calls it by
+// this exact signature, and none of them run often enough for the scratch
+// allocation to matter. improveDojoMeetings' own exchange loop -- the hot
+// candidate scan, on the order of numPools^2*poolSize^2 calls per pass --
+// calls earliestDojoMeetingScan directly instead, with a buffer it reuses
+// across the whole function; that same shared buffer is also what
+// improveDojoMeetings' objective() closure uses (objective runs only at the
+// TOP of a pass, before the exchange scan below it starts, so the two never
+// have the buffer in flight at once) -- see that function's own doc comment
+// for why.
+//
+// Moved here from the production file (bc-pnum review): this wrapper is
+// called only from this test file, never from production code, which calls
+// earliestDojoMeetingScan directly wherever the wrapper's throwaway scratch
+// slice would matter.
+func earliestDojoMeeting(pools []Pool, pairRound [][]int, id int, count dojoCounter) int {
+	var occupied []int
+	return earliestDojoMeetingScan(pools, pairRound, id, count, &occupied)
+}
+
 // TestReorderPositionsIsAValidPermutation sanity-checks reorderPositions'
 // output shape.
 //
@@ -76,7 +105,16 @@ func TestSeedPlacementEquality_OldVsTreeAware(t *testing.T) {
 	total := 0
 	for numPools := 3; numPools <= 7; numPools++ {
 		for poolSize := 3; poolSize <= 5; poolSize++ {
-			for nSeeds := 2; nSeeds <= 4 && nSeeds <= numPools; nSeeds++ {
+			// bc-drwx item 4: the nSeeds <= numPools bound used to exclude
+			// every wrapped-seed config (nSeeds > numPools) entirely, so
+			// placeSeedIndices' wrapped-seed pool-avoidance passes had no
+			// old-vs-new coverage at all. Both sides call the identical
+			// shared placeSeedIndices, so this remains byte-identical by
+			// construction; the point of widening it is to catch a FUTURE
+			// divergence between the two entry points in that range, not
+			// to re-verify the fix itself (see
+			// TestPlaceSeedIndices_WrappedSeedAvoidsDojoMatePool for that).
+			for nSeeds := 2; nSeeds <= 4; nSeeds++ {
 				for dojoExtra := 0; dojoExtra <= 4; dojoExtra++ {
 					n := numPools * poolSize
 					if nSeeds+dojoExtra > n {
@@ -130,7 +168,15 @@ func TestSeedPlacementEquality_MultiDojo(t *testing.T) {
 			for _, isMax := range []bool{false, true} {
 				for nDojos := 2; nDojos <= 4; nDojos++ {
 					for dojoGroupSize := 2; dojoGroupSize <= numPools+2; dojoGroupSize++ {
-						for nSeeds := 1; nSeeds <= 4 && nSeeds < numPools; nSeeds++ {
+						// bc-drwx item 4: was `nSeeds < numPools`, which never
+						// reached a wrapped seed (nSeeds > numPools) at all.
+						// Both sides call the identical shared
+						// placeSeedIndices, so widening this stays
+						// byte-identical by construction; see
+						// TestSeedPlacementEquality_OldVsTreeAware's own
+						// comment for why the equality itself is not what
+						// verifies the fix.
+						for nSeeds := 1; nSeeds <= 4; nSeeds++ {
 							// nSeeds starts at 1: a seedless config has no
 							// placement to compare, and the seedless sweep
 							// burned most of this test's former 23-second
@@ -285,7 +331,7 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo_MultipleNames(t *testi
 }
 
 // TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo pins
-// validateNoBlankDojo's TrimSpace alignment with state.ErrBlankDojo's own
+// ValidateNoBlankDojo's TrimSpace alignment with state.ErrBlankDojo's own
 // write-floor check (saveParticipantsNoLock): a Dojo of "   " is exactly as
 // blank as "" and must be refused at the draw too, not just at the
 // participant-write floor, so a future in-memory producer that skips that
@@ -309,14 +355,14 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo(t *testing.T)
 // exactly the shape earliestDojoMeeting had before bc-dojo-least-conflicted-pool's
 // P3 speedup. Any behavioural drift between this and the real function is a
 // bug in the speedup, not a matter of style.
-func referenceEarliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string) int {
+func referenceEarliestDojoMeeting(pools []Pool, pairRound [][]int, dojo string, keys dojoKeyCache) int {
 	earliest := math.MaxInt
 	for i := range pools {
-		if countDojoInPool(pools[i], dojo) == 0 || i >= len(pairRound) {
+		if countDojoInPool(pools[i], dojo, keys) == 0 || i >= len(pairRound) {
 			continue
 		}
 		for j := i + 1; j < len(pools); j++ {
-			if countDojoInPool(pools[j], dojo) == 0 || j >= len(pairRound) {
+			if countDojoInPool(pools[j], dojo, keys) == 0 || j >= len(pairRound) {
 				continue
 			}
 			if r := pairRound[i][j]; r < earliest {
@@ -429,8 +475,17 @@ func TestEarliestDojoMeeting_MatchesReference(t *testing.T) {
 			} else {
 				pairRound = buildPairRound(len(tc.pools))
 			}
-			want := referenceEarliestDojoMeeting(tc.pools, pairRound, tc.dojo)
-			got := earliestDojoMeeting(tc.pools, pairRound, tc.dojo)
+			keys := make(dojoKeyCache)
+			want := referenceEarliestDojoMeeting(tc.pools, pairRound, tc.dojo, keys)
+			// count ignores its id argument and always resolves back to
+			// tc.dojo directly: earliestDojoMeeting only ever calls it with
+			// the ONE id this test case resolves below, so there is nothing
+			// to translate an id back to a dojo string FOR.
+			count := dojoCounter(func(poolIdx int, id int) int {
+				return countDojoInPool(tc.pools[poolIdx], tc.dojo, keys)
+			})
+			ids := newDojoIDCache(keys, 0)
+			got := earliestDojoMeeting(tc.pools, pairRound, ids.of(tc.dojo), count)
 			assert.Equal(t, want, got)
 		})
 	}
@@ -447,7 +502,7 @@ func TestEarliestDojoMeeting_MatchesReference(t *testing.T) {
 // change with it.
 func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, baseTargetSizes []int, numCourts, poolWinners int) ([]Pool, []int, [][]int) {
 	t.Helper()
-	require.NoError(t, validateNoBlankDojo(players))
+	require.NoError(t, ValidateNoBlankDojo(players))
 
 	drawCourts := EffectiveDrawCourts(numPools, numCourts)
 	pools := make([]Pool, numPools)
@@ -471,10 +526,11 @@ func buildPreRepairPoolsForTest(t *testing.T, players []Player, numPools int, ba
 			seedPoolIdx[p.Seed] = poolIdx
 		}
 	}
-	mode := qualifierMode{ExtraQualifiers: qualifierModeStandard, SeedPoolIndex: seedPoolIdx}
+	mode := qualifierMode{ExtraQualifiers: QualifierModeStandard, SeedPoolIndex: seedPoolIdx}
 
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
-	require.NoError(t, assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots))
+	ids, _ := newDojoIDCacheFor(players)
+	require.NoError(t, assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, ids))
 	return pools, targetSizes, qualifierSlots
 }
 
@@ -499,7 +555,7 @@ func clonePools(pools []Pool) []Pool {
 // the acceptance rule, tie-break order, objective and scan-restart-after-
 // accept semantics are copied unchanged, so any drift from the real
 // (cached) function can only be attributed to the caching itself.
-func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int, roster []Player) {
+func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlots [][]int, roster []Player, keys dojoKeyCache) {
 	winnerSlots := make([][]int, len(qualifierSlots))
 	for i, s := range qualifierSlots {
 		if len(s) > 0 {
@@ -508,13 +564,32 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 	}
 	pairRound := poolPairRounds(winnerSlots)
 	allQualPairRound := poolPairRounds(qualifierSlots)
+	// ids/idOfID exist only to translate the (bc-pnum) int-id interface
+	// earliestDojoMeeting/dojoCounter now take back into the raw dojo
+	// string this reference's own count closure needs -- the reference
+	// itself stays string-keyed throughout, on purpose (see below).
+	ids := newDojoIDCache(keys, len(roster))
+	idOfID := make(map[int]string, len(roster))
+	for _, p := range roster {
+		idOfID[ids.of(p.Dojo)] = p.Dojo
+	}
+	// count wraps countDojoInPool directly (unlike the real function's own
+	// incrementally-maintained `counts` map): this reference exists to pin
+	// the P2 caching optimisation alone, so its own dojo-count source stays
+	// the pre-P2 (and pre-bc-drwx-item-1) O(poolSize) scan on purpose.
+	count := dojoCounter(func(poolIdx int, id int) int {
+		return countDojoInPool(pools[poolIdx], idOfID[id], keys)
+	})
+	// Normalized via dojoKey (bc-drwx item 3), matching the real function,
+	// so this reference's only remaining difference from it is the caching
+	// this test exists to isolate (see this function's own doc comment).
 	footprint := make(map[string]int, len(roster))
 	for _, p := range roster {
-		footprint[p.Dojo]++
+		footprint[keys.of(p.Dojo)]++
 	}
 	numPools := len(pools)
 	optimum := func(dojo string) int {
-		return (footprint[dojo] + numPools - 1) / numPools
+		return (footprint[keys.of(dojo)] + numPools - 1) / numPools
 	}
 	excessOf := func(dojo string, count int) int {
 		if over := count - optimum(dojo); over > 0 {
@@ -530,7 +605,7 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 				delete(counts, k)
 			}
 			for _, pl := range pools[i].Players {
-				counts[pl.Dojo]++
+				counts[keys.of(pl.Dojo)]++
 			}
 			for d, c := range counts {
 				total += excessOf(d, c)
@@ -543,17 +618,18 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 		seen := map[string]bool{}
 		for i := range pools {
 			for _, pl := range pools[i].Players {
-				if seen[pl.Dojo] {
+				if seen[keys.of(pl.Dojo)] {
 					continue
 				}
-				seen[pl.Dojo] = true
-				if m := earliestDojoMeeting(pools, pairRound, pl.Dojo); m != math.MaxInt {
+				seen[keys.of(pl.Dojo)] = true
+				plID := ids.of(pl.Dojo)
+				if m := earliestDojoMeeting(pools, pairRound, plID, count); m != math.MaxInt {
 					if m <= 1 {
 						roundOnes++
 					}
 					negSum -= m
 				}
-				if m := earliestDojoMeeting(pools, allQualPairRound, pl.Dojo); m != math.MaxInt {
+				if m := earliestDojoMeeting(pools, allQualPairRound, plID, count); m != math.MaxInt {
 					allQualNegSum -= m
 				}
 			}
@@ -582,8 +658,9 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 				if a.Seed > 0 {
 					continue
 				}
-				hasMeetingSignal := earliestDojoMeeting(pools, pairRound, a.Dojo) != math.MaxInt
-				hasExcessSignal := excessOf(a.Dojo, countDojoInPool(pools[i], a.Dojo)) > 0
+				aID := ids.of(a.Dojo)
+				hasMeetingSignal := earliestDojoMeeting(pools, pairRound, aID, count) != math.MaxInt
+				hasExcessSignal := excessOf(a.Dojo, countDojoInPool(pools[i], a.Dojo, keys)) > 0
 				if !hasMeetingSignal && !hasExcessSignal {
 					continue
 				}
@@ -593,28 +670,29 @@ func referenceImproveDojoMeetings(pools []Pool, targetSizes []int, qualifierSlot
 					}
 					for bi := 0; bi < len(pools[j].Players) && !improved; bi++ {
 						b := pools[j].Players[bi]
-						if b.Seed > 0 || b.Dojo == a.Dojo {
+						if b.Seed > 0 || keys.of(b.Dojo) == keys.of(a.Dojo) {
 							continue
 						}
-						cAi := countDojoInPool(pools[i], a.Dojo)
-						cAj := countDojoInPool(pools[j], a.Dojo)
-						cBj := countDojoInPool(pools[j], b.Dojo)
-						cBi := countDojoInPool(pools[i], b.Dojo)
+						bID := ids.of(b.Dojo)
+						cAi := countDojoInPool(pools[i], a.Dojo, keys)
+						cAj := countDojoInPool(pools[j], a.Dojo, keys)
+						cBj := countDojoInPool(pools[j], b.Dojo, keys)
+						cBi := countDojoInPool(pools[i], b.Dojo, keys)
 						beforeExc := excessOf(a.Dojo, cAi) + excessOf(a.Dojo, cAj) + excessOf(b.Dojo, cBi) + excessOf(b.Dojo, cBj)
 						afterExc := excessOf(a.Dojo, cAi-1) + excessOf(a.Dojo, cAj+1) + excessOf(b.Dojo, cBi+1) + excessOf(b.Dojo, cBj-1)
 						deltaExc := afterExc - beforeExc
 						if deltaExc > 0 {
 							continue
 						}
-						beforeA := earliestDojoMeeting(pools, pairRound, a.Dojo)
-						beforeB := earliestDojoMeeting(pools, pairRound, b.Dojo)
-						beforeAQA := earliestDojoMeeting(pools, allQualPairRound, a.Dojo)
-						beforeAQB := earliestDojoMeeting(pools, allQualPairRound, b.Dojo)
+						beforeA := earliestDojoMeeting(pools, pairRound, aID, count)
+						beforeB := earliestDojoMeeting(pools, pairRound, bID, count)
+						beforeAQA := earliestDojoMeeting(pools, allQualPairRound, aID, count)
+						beforeAQB := earliestDojoMeeting(pools, allQualPairRound, bID, count)
 						pools[i].Players[ai], pools[j].Players[bi] = b, a
-						afterA := earliestDojoMeeting(pools, pairRound, a.Dojo)
-						afterB := earliestDojoMeeting(pools, pairRound, b.Dojo)
-						afterAQA := earliestDojoMeeting(pools, allQualPairRound, a.Dojo)
-						afterAQB := earliestDojoMeeting(pools, allQualPairRound, b.Dojo)
+						afterA := earliestDojoMeeting(pools, pairRound, aID, count)
+						afterB := earliestDojoMeeting(pools, pairRound, bID, count)
+						afterAQA := earliestDojoMeeting(pools, allQualPairRound, aID, count)
+						afterAQB := earliestDojoMeeting(pools, allQualPairRound, bID, count)
 						newExc, newR1, newNS := curExc+deltaExc, curR1, curNS
 						for _, d := range [2][2]int{{beforeA, afterA}, {beforeB, afterB}} {
 							bef, aft := d[0], d[1]
@@ -715,6 +793,31 @@ func TestImproveDojoMeetings_MatchesUncachedReference(t *testing.T) {
 		// the shapes above, which the dojo-tree descent alone already
 		// solves without any accepted exchange.
 		{"deep-oversubscription (forces repair passes)", drawGoldenDojoRoster(24, 12, drawGoldenDojoName), drawGoldenPoolSize, drawGoldenDojoPoolWinners, 2},
+		// bc-pnum review (G1), belt and braces: the case above only ever
+		// fires tier (a) ONCE (confirmed by instrumenting improveDojoMeetings
+		// during review: exactly one accepted swap), so it can pin the P2
+		// cache but cannot exercise a SECOND accepted exchange re-reading
+		// poolDojoIDs/counts after the first one already moved them. That
+		// gap mattered for the OLD hand-mirrored swap/revert (two
+		// independently typed-out call sites): a half-update there could
+		// stay latent through a REJECTED candidate (whose own revert
+		// happens to re-assert the correct values regardless) and only
+		// surface once an ACCEPTED swap's corruption was read back by a
+		// later pass. Doubling the same shape (48 entrants, still exactly
+		// half from one dojo, zero slack) reaches two accepted swaps
+		// (confirmed the same way) and is kept as this belt-and-braces
+		// case even though the exchange closure below turned out to make
+		// the corruption MUCH louder than that: a half-update inside the
+		// shared `exchange` closure corrupts poolDojoIDs on the very FIRST
+		// candidate it is ever called for, accepted or rejected (the
+		// closure's revert is a second call to itself, so it reads back
+		// the already-wrong value rather than independently re-asserting
+		// the right one) -- verified by mutation (dropping exchange's
+		// poolDojoIDs[j][bi] write): this case fails, ALONGSIDE the
+		// single-swap case above and several others, since the corruption
+		// is no longer confined to the accepted-swap-then-reused-later
+		// path the old architecture had.
+		{"deep-oversubscription, two accepted swaps", drawGoldenDojoRoster(48, 24, drawGoldenDojoName), drawGoldenPoolSize, drawGoldenDojoPoolWinners, 2},
 	}
 
 	runCase := func(t *testing.T, players []Player, poolSize, poolWinners, numCourts int) {
@@ -727,8 +830,9 @@ func TestImproveDojoMeetings_MatchesUncachedReference(t *testing.T) {
 		poolsCached := clonePools(pools)
 		poolsRef := clonePools(pools)
 
-		improveDojoMeetings(poolsCached, targetSizes, qualifierSlots, players)
-		referenceImproveDojoMeetings(poolsRef, targetSizes, qualifierSlots, players)
+		cachedIDs, _ := newDojoIDCacheFor(players)
+		improveDojoMeetings(poolsCached, qualifierSlots, cachedIDs)
+		referenceImproveDojoMeetings(poolsRef, targetSizes, qualifierSlots, players, make(dojoKeyCache))
 
 		require.Len(t, poolsCached, len(poolsRef))
 		for i := range poolsCached {

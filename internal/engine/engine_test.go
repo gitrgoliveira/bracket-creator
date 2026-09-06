@@ -2,6 +2,8 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -22,6 +24,18 @@ func setupTestEngine(t *testing.T) (*Engine, *state.Store, string) {
 
 	eng := New(store)
 	return eng, store, dir
+}
+
+// writeRawParticipantsCSV writes csv verbatim as compID's participants.csv,
+// creating the competition's directory first. The one place a test writes a
+// hand-spelled roster straight to disk, bypassing SaveParticipants, to
+// exercise a legacy/hand-edited shape (no ids, a blank dojo, ...) the normal
+// write path would never produce on its own.
+func writeRawParticipantsCSV(t *testing.T, dir, compID, csv string) {
+	t.Helper()
+	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
+	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
 }
 
 // createTestCompetition saves a canonical individual competition. opts mutate
@@ -173,6 +187,42 @@ func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {
 		assert.Equal(t, state.MatchStatusScheduled, m.Status)
 		assert.NotEmpty(t, m.SideA)
 		assert.NotEmpty(t, m.SideB)
+	}
+}
+
+// TestStartCompetition_BlankNumberPrefix_AssignsDefaultInsteadOfBareDigits is
+// the bc-pnum review: the never-empty-prefix invariant was enforced only by
+// the HTTP handler's ensureNumberPrefix, so a NON-HTTP caller of
+// StartCompetition/GenerateDraw (createTestCompetition here mirrors any
+// caller that saves a Competition directly, bypassing that handler) numbers
+// pools with whatever prefix is stored -- an empty one composes bare
+// "1","2",... with no letters at all, which RenumberCompetitors' OWN blank-
+// prefix guard would refuse outright as a rewrite target. The fix assigns a
+// default (never refuses) the same way the HTTP handler would have,
+// directly inside runDrawPipeline, so every caller gets a usable draw.
+func TestStartCompetition_BlankNumberPrefix_AssignsDefaultInsteadOfBareDigits(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "blank-prefix-comp"
+
+	createTestCompetition(t, store, compID, "mixed", 3) // NumberPrefix left "" (zero value)
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, comp.NumberPrefix, "a default prefix must be assigned and persisted, never left blank")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, pools)
+	numberRe := regexp.MustCompile(`^\D`)
+	for _, p := range pools {
+		for _, player := range p.Players {
+			assert.Regexp(t, numberRe, player.Number, "every competitor number must start with a non-digit prefix character, never bare digits")
+		}
 	}
 }
 

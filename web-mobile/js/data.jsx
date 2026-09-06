@@ -147,6 +147,28 @@ function diffMinutes(t1, t2) {
   return (h1 * 60 + m1) - (h2 * 60 + m2);
 }
 
+// poolLetterName mirrors internal/helper/tournament.go's poolPositionName
+// (bc-drwx item 9): Excel-style BIJECTIVE base-26 (A, B, ... Z, AA, AB, ...
+// AZ, BA, ..., ZZ, AAA, ...), not a bare String.fromCharCode(65+i), which
+// this function replaces -- that raw form never wrapped at all (position 26
+// printed "Pool [", one past "Z" in ASCII, and it only gets worse from
+// there), a different failure mode from the Go side's old doubled-letter
+// collision but the same root cause: naming a pool from a single
+// ASCII-arithmetic letter instead of the bijective base-26 sequence. i is
+// 0-based, matching the Go owner. Keep the two in lockstep: a change on
+// either side without the matching change on the other reintroduces the
+// exact class of bug bc-drwx item 6 closed on the Go side.
+function poolLetterName(i) {
+  let n = i + 1; // bijective base-26 is naturally 1-based; see poolPositionName.
+  let letters = "";
+  while (n > 0) {
+    n--;
+    letters = String.fromCharCode(65 + (n % 26)) + letters;
+    n = Math.floor(n / 26);
+  }
+  return letters;
+}
+
 // ---------- Pools ----------
 // poolMode: "max" => poolSize is a maximum (never more than N per pool: flex pool count to fit)
 //           "min" => poolSize is a minimum (try to keep at least N per pool: fewer, larger pools)
@@ -160,7 +182,7 @@ function buildPools(players, opts = {}) {
     numPools = Math.max(1, Math.ceil(players.length / poolSize));
   }
   const pools = [];
-  for (let i = 0; i < numPools; i++) pools.push({ id: `pool-${String.fromCharCode(65 + i)}-${_matchSeq++}`, name: `Pool ${String.fromCharCode(65 + i)}`, court: assignCourt(i, courts), players: [], matches: [], standings: [], winnersPerPool });
+  for (let i = 0; i < numPools; i++) pools.push({ id: `pool-${poolLetterName(i)}-${_matchSeq++}`, name: `Pool ${poolLetterName(i)}`, court: assignCourt(i, courts), players: [], matches: [], standings: [], winnersPerPool });
   // snake distribute by seed so each pool gets a balanced spread
   const sorted = [...players].sort((a, b) => (a.seed || 99) - (b.seed || 99));
   sorted.forEach((p, idx) => {
@@ -410,17 +432,27 @@ function arraysEqual(a, b) {
 // legacy UUID-less rosters (a participants.csv never re-saved through the app)
 // have no id, so we fall back to the composite "name|dojo" key the server
 // resolves on (pidPairKey / resolveParticipantIndex in
-// internal/state/participants.go). The dojo is included because (name, dojo): 
+// internal/state/participants.go). The dojo is included because (name, dojo):
 // not name alone: is the uniqueness invariant: the same name at a different
 // dojo is two distinct people. Keep in sync with the Go resolver.
+//
+// `p.id ? p.id : fallback`, NOT `p.id ?? fallback`: the
+// chusen-candidates handler (handlers_competition.go) always emits an "id"
+// key, which is "" -- not null/undefined -- for a competitor with no UUID.
+// "" ?? fallback still returns "" (nullish coalescing only substitutes on
+// null/undefined), so every legacy member would key to the SAME empty
+// string. "" is never a valid participant id, so the truthiness check closes
+// that gap for every caller, not just chusen's (this is the ONE owner of the
+// id-else-name|dojo rule; see admin_pools.jsx's former chusenMemberKey and
+// admin_registration_desk.jsx's former rdPid, both now delegating here).
 function checkinPid(p) {
-  return p.id ?? `${p.name}|${p.dojo ?? ""}`;
+  return p.id ? p.id : `${p.name}|${p.dojo ?? ""}`;
 }
 
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
-  buildPools, simulatePools, computeStandings, poolWinners,
+  buildPools, poolLetterName, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
   assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid

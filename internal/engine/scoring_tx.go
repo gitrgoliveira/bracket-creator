@@ -26,8 +26,15 @@
 // tx-shaped orchestration, not duplicated persistence.
 //
 // A follow-up pass collapsed four more twins the same way: lookupMatchSides,
-// checkConcurrentIneligibility, hasDownstreamMatchStarted, and
-// restoreCompetitorEligibility (all live in eligibility.go now, taking `h`).
+// checkConcurrentIneligibility, hasDownstreamMatchStarted, and (at the time)
+// restoreCompetitorEligibility, all taking `h`. restoreCompetitorEligibility
+// itself was later removed outright (second-Opus-pass item 3):
+// RecordDecisionTx's restore-on-rescore no longer re-derives the prior
+// loser's identity from the match's side names/ids at all -- it restores
+// whichever competitor-status entry carries this exact MatchID and is still
+// Eligible:false, which is exact by construction and needs no roster lookup.
+// lookupMatchSides, checkConcurrentIneligibility and hasDownstreamMatchStarted
+// remain, living in eligibility.go, taking `h`.
 // RecordDecisionTx below is the last of the original hand-copied pairs to be
 // resolved — unlike the others it keeps ITS name (mobileapp's ScoringEngine
 // interface calls it directly), and RecordDecision (eligibility.go) is now
@@ -45,6 +52,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
+	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -658,10 +667,22 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	if decisionBy != "shiro" && decisionBy != "aka" {
 		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
 	}
-	sideA, sideB, err := e.lookupMatchSides(tx, compID, matchID)
+	// T103: look up the prior result FIRST (ahead of the T105 concurrent
+	// check below, which needs it): for a pool match this already carries
+	// the generation-time SideAID/SideBID (stamped once at draw time,
+	// present even before the match is ever scored, mirrors pools.go), which
+	// is the identity data every id-based resolution below needs -- the
+	// concurrent-kiken check, the eligibility write, and the undo-path
+	// restore. A bracket match carries none (BracketMatch persists no
+	// per-side id), so every id below is simply "" there and each
+	// consumer's documented name-only fallback applies unchanged.
+	prior, err := e.lookupExistingResult(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err
 	}
+	sideA, sideB := prior.SideA, prior.SideB
+	sideAID, sideBID := prior.SideAID, prior.SideBID
+
 	// T105/CHK047: reject concurrent kiken, if the intended loser is
 	// already ineligible from a *different* match, two operators are
 	// trying to kiken the same player simultaneously. Return 409 so the
@@ -671,30 +692,40 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// fusensho/daihyosen this check would surface a misleading
 	// "already_ineligible" 409, the StartMatch eligibility gate is the
 	// right place to reject those cases.
+	//
+	// loserID is resolved from the match's OWN side ids (never a name-based
+	// roster scan): the shiro/aka choice already tells us definitively
+	// WHICH side is withdrawing, so there is no ambiguity left to resolve --
+	// unlike a name-only lookup, which would pick the first roster namesake
+	// regardless of which one is actually in this match (bc-idfx repro:
+	// roster Tanaka@DojoB registered before Tanaka@DojoA; Tanaka@DojoA
+	// withdraws here, but a name-only check would inspect Tanaka@DojoB's
+	// status instead).
 	loserName := sideB
+	loserID := sideBID
 	if decisionBy == "aka" {
 		loserName = sideA
+		loserID = sideAID
 	}
 	if domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai) {
-		if cerr := e.checkConcurrentIneligibility(tx, compID, matchID, loserName); cerr != nil {
+		if cerr := e.checkConcurrentIneligibility(tx, compID, matchID, loserID, loserName); cerr != nil {
 			return nil, nil, cerr
 		}
 	}
-	// T103: look up the prior result so we know whether this is an
-	// overwrite of a kiken/fusenpai (the "undo" path).
-	prior, err := e.lookupExistingResult(tx, compID, matchID)
-	if err != nil {
-		return nil, nil, err
-	}
-	priorLoser := ""
-	if prior != nil && (domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai)) {
-		priorLoser = loserSideName(prior)
+	hadPriorLoser := false
+	if domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai) {
+		// losingSide (not the narrower loserSideName) so a prior decision
+		// that itself came through RecordDecisionTx -- and so already
+		// carries WinnerSide -- is attributed by that authoritative hint
+		// rather than an ambiguous name/ippon guess (PR #416 findings 4/5).
+		_, name, ok := losingSide(prior)
+		hadPriorLoser = ok && name != ""
 	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been
 	// started or completed since the kiken/fusenpai, refuse the undo
 	// unless force is set.
-	if priorLoser != "" && !force {
+	if hadPriorLoser && !force {
 		started, err := e.hasDownstreamMatchStarted(tx, compID, []string{sideA, sideB}, matchID)
 		if err != nil {
 			return nil, nil, err
@@ -711,6 +742,8 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		ID:             matchID,
 		SideA:          sideA,
 		SideB:          sideB,
+		SideAID:        sideAID,
+		SideBID:        sideBID,
 		Decision:       decision,
 		DecisionBy:     decisionBy,
 		DecisionReason: decisionReason,
@@ -718,32 +751,134 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		Status:         state.MatchStatusCompleted,
 	}
 	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
-	// gets the ○ default-win fill and becomes Winner.
+	// gets the ○ default-win fill and becomes Winner. WinnerSide/WinnerID are
+	// set DIRECTLY from decisionBy/the side's own id -- never inferred from
+	// name or scoreline comparison -- so a same-name pairing (two "Tanaka
+	// Kenji" from different dojos) is attributed by SIDE, not by a name or
+	// ippon-count heuristic that goes ambiguous the instant both sides share
+	// a display name (repro: Tokyo vs Osaka, 1-1 into encho, Tokyo withdraws;
+	// the winner's default-win maru and the loser's one preserved struck
+	// point tie the inferred ippon counts, so the old name/scoreline
+	// inference credited Tokyo, the WITHDRAWER, with the win).
 	if decisionBy == "shiro" {
 		result.IpponsA = winIppons
 		result.Winner = sideA
+		result.WinnerSide = "A"
+		result.WinnerID = sideAID
 	} else {
 		result.IpponsB = winIppons
 		result.Winner = sideB
+		result.WinnerSide = "B"
+		result.WinnerID = sideBID
 	}
 	preserveLoserScore(result, prior, decisionBy)
 	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result)
 	if err != nil {
 		return nil, nil, err
 	}
-	// T103: when the prior loser is no longer the new loser (decision
-	// type changed away from kiken/fusenpai, or decisionBy flipped),
-	// restore the prior loser's eligibility and surface the resulting
-	// status so the handler can broadcast it. If the write above just
-	// wrote a *new* ineligibility for the same player, that wins (the
-	// player is still ineligible). Only restore when the prior loser is
-	// no longer the current loser.
-	if priorLoser != "" {
-		newLoser := loserSideName(result)
-		if priorLoser != newLoser {
-			restored, rerr := e.restoreCompetitorEligibility(tx, compID, priorLoser, matchID)
-			if rerr == nil && restored != nil {
-				status = restored
+	// T103 undo: restore eligibility for whichever competitor-status ENTRY
+	// this exact match wrote (st.MatchID == matchID, st.Eligible == false)
+	// that the write above did NOT just (re)confirm. Restoring by the
+	// record's own MatchID -- not by re-deriving identity from the match's
+	// side names/ids the way the prior version of this block did -- is
+	// exact for every shape the write can take, including a same-name
+	// pairing: recordIneligibilityFromDecision already resolved and wrote
+	// this exact entry once, correctly, at kiken/fusenpai time (or refused
+	// to, for a row it could not resolve), so there is nothing left here to
+	// re-derive or guess. This also closes a starvation bug the old
+	// name/id-comparison version had: for a same-name pairing, the old
+	// ambiguity skip fired on every rescore of that match (not just the
+	// one that mattered), so the prior loser stayed permanently ineligible
+	// -- ReinstateCompetitor refuses unless Reinstateable, and neither
+	// kiken-voluntary nor fusenpai ever are.
+	//
+	// currentLoserID is the player the write above just confirmed
+	// ineligible for THIS match, if any (status is nil when the new
+	// decision no longer causes ineligibility at all, e.g. rescored as
+	// "fought", or when recordIneligibilityFromDecision's own write was a
+	// non-fatal no-op). Every OTHER MatchID==matchID/Eligible==false entry
+	// is stale by construction (recordIneligibilityFromDecision's K2
+	// check-and-set only ever adds one such entry per call) and is restored.
+	//
+	// PR #416 finding 1: status==nil does NOT always mean "this match no
+	// longer makes anyone ineligible" -- RecordMatchResultWithIneligibilityTx
+	// also returns (nil, nil) when recordIneligibilityFromDecision could not
+	// RESOLVE the loser (its *ValidationError is logged and swallowed a few
+	// lines above) or hit a non-fatal load error. Re-recording the SAME
+	// kiken/fusenpai on a match whose side name has drifted from the roster
+	// would otherwise flip the STILL-withdrawn competitor back to
+	// Eligible:true: the loop below would see status==nil, treat every
+	// MatchID==matchID entry as stale, and restore it. Gate the restore on
+	// the write having actually SETTLED the loser: when the new decision is
+	// itself a withdrawal and the write resolved no status at all, no
+	// MatchID==matchID record is provably stale, so skip the restore
+	// outright and log why, rather than silently un-revoking eligibility the
+	// operator never rescinded. Restoring proceeds as before whenever the
+	// new decision is NOT a withdrawal (the "fought"/undo path this loop
+	// exists for) or when a status WAS resolved (the write settled who,
+	// this match, is currently the loser).
+	newIsWithdrawal := domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai)
+	switch {
+	case newIsWithdrawal && status == nil:
+		log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: new decision %q is a withdrawal but recordIneligibilityFromDecision did not resolve/write a loser; skipping the stale-eligibility restore (no MatchID==%s record is provably stale)",
+			compID, matchID, decision, matchID)
+	default:
+		if statuses, serr := tx.LoadCompetitorStatus(compID); serr != nil {
+			log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: LoadCompetitorStatus for restore: %v", compID, matchID, serr)
+		} else {
+			var currentLoserID string
+			if status != nil {
+				currentLoserID = status.PlayerID
+			}
+			// PR #416 finding 2: iterate in sorted playerID order so the
+			// outcome is deterministic rather than depending on Go's
+			// randomized map iteration order -- matters once more than one
+			// stale entry needs restoring in the same call, which previously
+			// left BOTH which player's restore landed last (irrelevant, every
+			// resolved restore below is written unconditionally) and, more
+			// importantly, which one this function RETURNS to depend on map
+			// iteration order.
+			//
+			// This intentionally preserves the existing single-status
+			// priority (documented in the loop below by the fact that a
+			// restore, when one fires, still overwrites `status`), the same
+			// shape TestRecordDecision_KikenUndo and
+			// TestRecordDecisionTx_KikenUndoSucceeds already pin for a
+			// decisionBy flip (kiken moves from Alice to Bob): the RESTORED
+			// player's re-earned eligibility is what the operator's UI most
+			// needs surfaced from this single-value return -- the new
+			// loser's withdrawal is already conveyed by the returned
+			// MatchResult's own Decision/DecisionBy/Winner fields, while the
+			// restoration has no other channel. Changing that priority (or
+			// broadcasting every touched status individually) needs either a
+			// wider return shape or handler-side fan-out, both out of this
+			// change's scope; the sentence above is the deliberate, narrower
+			// slice of finding 2 this pass implements.
+			playerIDs := make([]string, 0, len(statuses))
+			for playerID := range statuses {
+				playerIDs = append(playerIDs, playerID)
+			}
+			sort.Strings(playerIDs)
+			for _, playerID := range playerIDs {
+				st := statuses[playerID]
+				if st.MatchID != matchID || st.Eligible || playerID == currentLoserID {
+					continue
+				}
+				// A fresh minimal status, not the stale record with Eligible
+				// flipped: Reason/Reinstateable describe why the player WAS
+				// ineligible, which no longer applies once restored (mirrors the
+				// removed restoreCompetitorEligibility's own construction).
+				restored := domain.CompetitorStatus{
+					PlayerID:   playerID,
+					Eligible:   true,
+					MatchID:    matchID,
+					RecordedAt: time.Now().UTC(),
+				}
+				if werr := tx.SetCompetitorStatus(compID, restored); werr != nil {
+					log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: restoring stale eligibility for playerId=%s: %v", compID, matchID, playerID, werr)
+					continue
+				}
+				status = &restored
 			}
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -517,4 +518,100 @@ func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
 	var resp map[string]string
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	assert.Equal(t, "pool_match", resp["error"])
+}
+
+// TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds is the round-2 Opus
+// review's finding 3: DELETE /daihyosen's `u := *match` inherits the stored
+// match's WinnerID/WinnerSide verbatim. POST can never reach a match with
+// real side ids (AddDaihyosen rejects any "Pool "-prefixed id with
+// ErrPoolMatch before its own `u := *match`, and a bracket-sourced match
+// carries no id fields at all -- BracketMatch has none), but DELETE has no
+// such gate: findMatchForDaihyosenTx dispatches purely on ID shape, so a
+// legacy/hand-edited POOL match row that has picked up an unscored
+// Position=-1 placeholder sub (this handler's normal removal target) CAN
+// carry real SideAID/SideBID plus a stale match-level WinnerID left over from
+// an unrelated prior result. Before the fix, that stale WinnerID failed
+// backfillMatchIdentity's forward-write validation (bc-idfx finding 10) and
+// the write was rejected -- surfacing as an opaque 500 with no
+// ValidationError branch to catch it, for a fault that is the STORED DATA's,
+// not the operator's daihyosen-removal action. The fix clears WinnerID/
+// WinnerSide alongside Winner, so the write succeeds; the ValidationError->400
+// branch is defense-in-depth this test does not need to explicitly trigger
+// (nothing wrong reaches it once the fields are cleared).
+func TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds(t *testing.T) {
+	r, store, _, _, _ := setupDaihyosenTestRouter(t)
+	compID := "rm-dh-stale-winnerid"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "TeamA", SideAID: "id-team-a", SideB: "TeamB", SideBID: "id-team-b",
+			Status: state.MatchStatusRunning,
+			// Stale match-level WinnerID from an unrelated prior result --
+			// matches neither SideAID nor SideBID.
+			WinnerID: "id-from-a-different-match",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Alice", SideB: "Bob", Winner: "Alice"},
+				{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", Decision: "daihyosen"},
+			},
+		},
+	}))
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/competitions/"+compID+"/matches/Pool%20A-0/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	m := matches[0]
+	assert.Empty(t, m.WinnerID, "the stale inherited WinnerID must be cleared, not merely tolerated")
+	for _, sub := range m.SubResults {
+		assert.NotEqual(t, state.DaihyosenSubPosition, sub.Position, "daihyosen sub must be removed")
+	}
+}
+
+// TestRemoveDaihyosen_CorruptOverrides_TerminalError is bc-pnum gap 3: DELETE
+// .../daihyosen writes through RecordMatchResultWithIneligibilityTx, exactly
+// as the previous test's pool-match removal does. When the parent match is a
+// POOL match under a MIXED competition (reachable only via a legacy/hand-
+// edited row carrying a Position=-1 sub, per that write's own doc comment --
+// AddDaihyosen itself rejects a pool id, so POST can never build this shape),
+// the mp-e2k1 mixed-pool guard's computeStandingsFrom call reaches the same
+// LoadOverrides call the score/decision endpoints already handle. Before this
+// fix that fell through to internalError's 500; the fix adds the shared
+// respondIfCorruptOverrides check between respondIfValidationError and the
+// default 500 arm.
+func TestRemoveDaihyosen_CorruptOverrides_TerminalError(t *testing.T) {
+	r, store, _, _, dir := setupDaihyosenTestRouter(t)
+	compID := "corrupt-ov-rm-daihyosen"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, TeamSize: 3,
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB",
+			Status: state.MatchStatusRunning,
+			SubResults: []state.SubMatchResult{
+				{Position: state.DaihyosenSubPosition, SideA: "RepA", SideB: "RepB", Decision: "daihyosen"},
+			},
+		},
+	}))
+
+	overridesPath := filepath.Join(dir, "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/competitions/"+compID+"/matches/Pool%20A-0/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	require.Len(t, matches[0].SubResults, 1, "the rejected write must not have landed")
+	assert.Equal(t, state.MatchStatusRunning, matches[0].Status)
 }

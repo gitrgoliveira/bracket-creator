@@ -50,7 +50,7 @@ func setupTestRouter(t testing.TB) (*gin.Engine, *state.Store, *engine.Engine, *
 	// Admin API
 	admin := r.Group("/api")
 	RegisterTournamentHandlers(admin, store, hub, NewFileVerifier(store))
-	RegisterImportHandlers(admin, store, hub, NewFileElevatedVerifier(store))
+	RegisterImportHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
 	RegisterCompetitionHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
 	RegisterParticipantHandlers(admin, store, eng, hub, NewFileElevatedVerifier(store))
 	RegisterMatchHandlers(admin, eng, store, store, hub, NewFileVerifier(store), store)
@@ -166,6 +166,17 @@ func TestTournamentHandlers(t *testing.T) {
 	assert.Equal(t, "Posted Tournament", t4.Name)
 	assert.Equal(t, "Some Venue", t4.Venue)
 	assert.Equal(t, "20-07-2026", t4.Date, "Date should be trimmed on POST")
+
+	// bc-pnum ruling 3: state.Tournament itself has no Competitions field,
+	// so the raw struct never carries the key. The POST response must, so
+	// a fresh CreateTournament flow that hands this response straight to
+	// setTournament never sees tournament.competitions as undefined
+	// before the next full load() reconciles it.
+	var created map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &created))
+	comps, present := created["competitions"]
+	require.True(t, present, "POST /api/tournament response must carry a \"competitions\" key")
+	assert.Equal(t, []any{}, comps, "a freshly created tournament has no competitions yet")
 
 	// Whitespace-only name must be rejected after trim. Persisting an
 	// empty Name produces a blank tournament title in the admin UI and
@@ -492,6 +503,28 @@ func TestTournamentHandlers(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.Contains(t, w.Body.String(), "publicURL")
 	})
+}
+
+// TestViewerCompetitions_EmptyForFreshTournamentIsAnArrayNotNull is the
+// other half of bc-pnum ruling 3's test pair: the SPA's load() builds
+// tournament.competitions from a SEPARATE fetch, GET /api/viewer/competitions
+// (fetchCompetitions in api_client.jsx), not from the tournament object
+// itself. That endpoint already returns a non-nil, pre-allocated slice
+// (buildViewerCompetitionPayloads: `make([]any, 0, len(ids))`), so for a
+// fresh tournament with zero competitions it must serialise as JSON `[]`,
+// never `null` -- a `null` would ALSO make tournament.competitions.length
+// throw, the same crash class ruling 3 fixes for the POST response.
+func TestViewerCompetitions_EmptyForFreshTournamentIsAnArrayNotNull(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Fresh Tournament", Password: "secret", Courts: []string{"A"}}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, "[]", w.Body.String(),
+		"a fresh tournament's competitions list must serialise as an empty array, not null")
 }
 
 // TestTournamentHandlers_LockedMode_PUTRejectsPasswordChange pins the

@@ -337,11 +337,15 @@ paths:
               $ref: '#/components/schemas/Tournament'
       responses:
         '201':
-          description: Tournament created.
+          description: >
+            Tournament created. Carries `competitions` (empty for a fresh
+            bootstrap) so the client never has to special-case this response
+            against the shape a later `GET /api/viewer/tournament` +
+            `GET /api/viewer/competitions` pair reconciles it to.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Tournament'
+                $ref: '#/components/schemas/TournamentWithCompetitions'
         '400':
           $ref: '#/components/responses/BadRequest'
     put:
@@ -404,11 +408,11 @@ paths:
               $ref: '#/components/schemas/Tournament'
       responses:
         '200':
-          description: Tournament updated.
+          description: Tournament updated. Carries `competitions`, see the POST response.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Tournament'
+                $ref: '#/components/schemas/TournamentWithCompetitions'
         '400':
           $ref: '#/components/responses/BadRequest'
 
@@ -632,7 +636,12 @@ paths:
             partial success is allowed (one row's `error` doesn't abort
             the others). `name` is the trimmed value (matches what's
             saved to disk; the manifest's raw padded value is normalized
-            before save and before this response is constructed).
+            before save and before this response is constructed). A row
+            can also carry `warning` (see below) instead of `error`: the
+            row succeeded, but needs the operator's attention before they
+            leave the import page -- a client must not treat the whole
+            import as a silent, no-action-needed success while any row
+            carries a `warning`, even when no row carries an `error`.
           content:
             application/json:
               schema:
@@ -666,6 +675,24 @@ paths:
                             `seeds file "...": Seeding is incomplete: ...`
                             and rolls the competition back off disk, so the
                             file can be fixed and the import retried.
+                        warning:
+                          type: string
+                          description: |
+                            Non-empty when the row imported successfully
+                            (`error` empty) but needs the operator's
+                            attention. Currently the only producer is an
+                            import-boundary `number_prefix` reassignment: a
+                            restored archive can legally carry a prefix
+                            collision that predates the ambiguity/uniqueness
+                            rule (e.g. two competitions holding `K` and `K2`),
+                            so the row is ASSIGNED a fresh prefix rather than
+                            rejected -- but every tag this competition
+                            already had printed under the OLD prefix now
+                            names a number it no longer has. Example:
+                            `number prefix "K" was already in use: assigned
+                            "K3"; reprint this competition's tags`. Absent
+                            (omitted, not empty string) on every row that
+                            imported without a caveat.
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
 
@@ -942,6 +969,13 @@ paths:
 
         String fields are trimmed server-side: `name`, `numberPrefix`, `kind`,
         `format`, `poolSizeMode`, `startTime`, `date`.
+
+        `numberPrefix` is never left empty: when omitted or blank, the server
+        derives one from `name` (initials, disambiguated against every other
+        competition's prefix, e.g. `"K"`, then `"KO"`, then `"KO2"`), the same
+        derivation `GET /api/number-prefix-default` previews.
+        Every competitor's number is `numberPrefix` + a sequence counter
+        running through the drawn pools in order (e.g. `K1`, `K2`, ...).
       security:
         - TournamentPassword: []
       requestBody:
@@ -959,6 +993,49 @@ paths:
                 $ref: '#/components/schemas/Competition'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /api/number-prefix-default:
+    get:
+      tags: [competitions]
+      summary: Preview the default number prefix for a competition name
+      description: |
+        Returns the number prefix a save with the field left blank would
+        actually assign (the same derivation `POST /api/competitions` and a
+        settings `PUT` apply server-side): initials of `name`'s words,
+        disambiguated against every OTHER competition's stored
+        `numberPrefix` (case-insensitive AND against a stem+digits shape that
+        would collide once counters are appended, e.g. `"K"` and `"K2"`
+        would both eventually produce `"K21"`), falling back to `"K"` when
+        `name` yields no ASCII letters. `"Kendo Open"` derives `"K"`; if
+        `"K"` is already taken, `"KO"`; if that collides too, a numeric
+        suffix on the shortest available stem, preferring one that avoids
+        the ambiguity above (`"K02"`, `"K03"`, ...). Always within the
+        3-character prefix cap.
+
+        Read-only and side-effect free: it previews a value, it does not
+        assign or store one. The CREATE form is the only caller, calling it
+        as the operator types the name: the competition doesn't exist yet,
+        so nothing needs excluding from the taken set.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+          description: Competition name to derive from. Empty is valid; resolves via the fallback.
+      responses:
+        '200':
+          description: The prefix a save would assign.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  numberPrefix:
+                    type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   /api/competitions/{id}:
     parameters:
@@ -1008,14 +1085,38 @@ paths:
         leagueTwoThirdPlaces can only be changed before the competition
         starts`, respectively). Every other field in the list above
         (including `poolMatchDurationSeconds` / `playoffMatchDurationSeconds`,
-        `checkInEnabled`, and `swissRounds`) is editable regardless of
-        status through this endpoint; `poolSize`, `poolWinners`,
+        `checkInEnabled`, `swissRounds` and `numberPrefix`) is editable
+        regardless of status through this endpoint; `poolSize`, `poolWinners`,
         `poolSizeMode`, `poolFormat`, `extraQualifiers`, `courts`,
-        `roundRobin`, `teamSize`, `numberPrefix`, `withZekkenName` and
+        `roundRobin`, `teamSize`, `withZekkenName` and
         `mirror` are additionally subject to the draw-ready
         output-affecting 409 (see below) while status is exactly
         `draw-ready`, but are not blocked once the competition has moved
         past it.
+
+        `numberPrefix` is deliberately outside the output-affecting set: it
+        only labels competitors, not what the draw generated, so changing it
+        in ANY status (including `draw-ready`, `running` and `completed`)
+        returns 200. An omitted or blank `numberPrefix` in the request is
+        never treated as "clear it": exactly like `teamMatchType` and
+        `extraQualifiers` above, it INHERITS the competition's currently
+        stored value, so a settings save that never mentions the field cannot
+        invent a new prefix for a competition that already has one. Only when
+        the competition has NO prefix stored yet (a legacy record written
+        before this rule existed, see below) does the server assign a derived
+        default instead of inheriting nothing (see `GET
+        /api/number-prefix-default` for the same derivation).
+        EVERY successful save then re-derives every competitor's number from
+        the EFFECTIVE `numberPrefix`, unconditionally, whether or not that
+        save changed the prefix or was a roster-only save with the settings
+        fields untouched -- this is what heals a legacy `pools.csv` whose
+        Number column was never populated, on the very next save, with no
+        extra client action. It rewrites `pools.csv` only when at least one
+        re-derived number actually differs from what is stored; a save under
+        which every re-derived number already matches the stored one makes no
+        write at all. The same default assignment happens the first time
+        `POST .../start` or `POST .../generate-draw` reaches a competition
+        that still has no prefix.
 
         Rejected with 400 if `name` is empty after trim, if `name`
         collides (case-insensitive) with another competition's name,
@@ -1122,9 +1223,12 @@ paths:
 
             * Output-affecting settings (format, courts, pool
               size/winners/mode, extra qualifiers, pool format, round-robin,
-              mirror, team size, kind, team match type, number prefix, zekken
+              mirror, team size, kind, team match type, zekken
               display) were changed while the competition is in `draw-ready`
-              state; discard the draw first.
+              state; discard the draw first. `numberPrefix` is NOT one of
+              these: it can be changed in any status, including `draw-ready`
+              and after the competition has started, see the settings-update
+              description above.
             * `format` or `kind` was changed after the competition STARTED
               (status past `setup`). Both repoint generation and scoring while
               results already exist, so neither can change after the fact.
@@ -1139,7 +1243,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: |
+            Internal error. Includes the partial-success renumber case: the
+            save itself landed (config.md already holds the new
+            `numberPrefix`, and a `tournament_updated` event was broadcast
+            so open clients refetch it) but the subsequent renumber of
+            `pools.csv` failed. The message names what THIS PUT actually
+            persisted: a settings-only PUT gets "settings were saved but
+            competitors could not be renumbered; save again once pools.csv
+            is repaired", and a ROSTER PUT (non-null `players`, including one
+            that healed a previously-blank `numberPrefix`) gets "the roster
+            was saved but competitors could not be renumbered; save again
+            once pools.csv is repaired" -- the settings wording would
+            otherwise tell the operator the wrong thing landed. Re-issuing
+            the same PUT is the remedy once pools.csv is fixed: the renumber
+            is idempotent and unconditional (see the settings-update
+            description above), so the retry is what heals it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            The ROSTER-save path (non-null `players`) requires
+            `X-Admin-Password` when the destructive-ops gate is active (see
+            the "Elevated password" note above); returned when locked mode
+            is active without `TOURNAMENT_ADMIN_PASSWORD_HASH` configured.
     delete:
       tags: [competitions]
       summary: Delete competition
@@ -1210,6 +1339,25 @@ paths:
         transitions the competition to `draw-ready` status without starting it.
         The operator can inspect the draw, discard it, and regenerate before calling
         `/start`. Participant edits are blocked while a draw is pending.
+
+        **Number-prefix pre-flight.** Before generating, a pre-flight ensures the
+        competition has a number prefix: a legacy competition saved before the
+        never-empty-prefix rule (empty `numberPrefix`) has one derived and
+        PERSISTED to `config.md` (the same derivation `GET
+        /api/number-prefix-default` previews). A competition that
+        already has a prefix skips only this assignment step; `pools.csv` is
+        renumbered UNCONDITIONALLY whenever a draw already exists on disk,
+        whether or not this request is what assigned the prefix (a cheap no-op
+        when every number already matches). A derived prefix that collides
+        with, or is ambiguous with, another competition's is refused with 400,
+        naming the conflict, and NOTHING is persisted; an already-stored prefix
+        is never re-validated, so two competitions saved before this rule
+        existed stay usable until one of them actually changes its own prefix.
+        If the prefix IS assigned and saved but the subsequent renumber then
+        fails, 500 is returned (see below); `config.md` already carries the new
+        prefix in that case and a `tournament_updated` event is broadcast even
+        though this request failed, so open clients refetch it rather than show
+        stale state until reload.
       security:
         - TournamentPassword: []
       parameters:
@@ -1227,11 +1375,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/Competition'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Validation error, including the number-prefix pre-flight's own
+            collision refusal (a derived prefix already used by another
+            competition) and the underlying draw generator's own refusals
+            (e.g. an empty roster, an invalid court allocation).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: |
+            Internal error, including the pre-flight's own partial-success
+            case: a number prefix was assigned and saved but competitors
+            could not be renumbered -- "a number prefix was assigned but
+            competitors could not be renumbered; retry once pools.csv is
+            repaired". Retrying is the remedy once pools.csv is fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/draw-warnings:
     get:
@@ -1310,6 +1475,27 @@ paths:
         seeded into the (already-scheduled) knockout bracket automatically, and a
         knockout match becomes scoreable as soon as both its feeder pools are done.
         The competition moves to `playoffs` once the final pool has been seeded.
+
+        **Number-prefix pre-flight.** Before starting, a pre-flight ensures the
+        competition has a number prefix: a legacy competition saved before the
+        never-empty-prefix rule (empty `numberPrefix`) has one derived and
+        PERSISTED to `config.md` (the same derivation `GET
+        /api/number-prefix-default` previews). A competition that
+        already has a prefix skips only this assignment step; `pools.csv` is
+        renumbered UNCONDITIONALLY whenever a draw already exists on disk,
+        whether or not this request is what assigned the prefix -- this is what
+        numbers a `draw-ready` legacy competition's existing draw when it is
+        finally started under this rule, a cheap no-op once every number
+        already matches. A derived prefix that collides with, or is ambiguous
+        with, another competition's is refused with 400, naming the conflict,
+        and NOTHING is persisted; an already-stored prefix is never
+        re-validated, so two competitions saved before this rule existed stay
+        usable until one of them actually changes its own prefix. If the
+        prefix IS assigned and saved but the subsequent renumber then fails,
+        500 is returned (see below); `config.md` already carries the new
+        prefix in that case and a `tournament_updated` event is broadcast
+        even though this request failed, so open clients refetch it rather
+        than show stale state until reload.
       security:
         - TournamentPassword: []
       parameters:
@@ -1318,11 +1504,30 @@ paths:
         '200':
           description: Competition started.
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Validation error, including the number-prefix pre-flight's own
+            collision refusal (a derived prefix already used by another
+            competition), the status guard ("competition ... already
+            started"), and the underlying draw generator's own refusals
+            (e.g. an empty roster, an invalid court allocation) for a
+            competition started directly from `setup`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
-          $ref: '#/components/responses/InternalError'
+          description: |
+            Internal error, including the pre-flight's own partial-success
+            case: a number prefix was assigned and saved but competitors
+            could not be renumbered -- "a number prefix was assigned but
+            competitors could not be renumbered; retry once pools.csv is
+            repaired". Retrying is the remedy once pools.csv is fixed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/complete:
     post:
@@ -1375,6 +1580,15 @@ paths:
       summary: Reset all overrides
       description: |
         Clears all manual rank and bracket-winner overrides for this competition.
+
+        This is also the repair door for a corrupt `overrides.json`: other
+        writes to this file (rank overrides, decision/score writes that read
+        standings) load and parse the existing file before saving, so a
+        corrupt file makes them fail identically and answer `422
+        corrupt_overrides` (see that response schema on the affected
+        endpoints). This endpoint recovers from that state by writing a
+        fresh empty overrides file WITHOUT first parsing the corrupt one, so
+        it always succeeds regardless of what the file currently contains.
 
         Also requires `X-Admin-Password` when the destructive-ops gate is active
         (see the AdminPassword security scheme); 503 if locked mode is active
@@ -1437,7 +1651,11 @@ paths:
     put:
       tags: [competitions]
       summary: Override pool rank
-      description: Manually set a player's rank within a pool, overriding the computed value.
+      description: >
+        Manually set a player's rank within a pool, overriding the computed
+        value. Used, among other callers, by the chusen (drawing-lots)
+        resolver (see `GET .../chusen-candidates`) to record a team's
+        finishing position once the operator has drawn lots.
       security:
         - TournamentPassword: []
       parameters:
@@ -1458,11 +1676,93 @@ paths:
                 playerName:
                   type: string
                   maxLength: 100
+                playerId:
+                  type: string
+                  description: >
+                    Optional. Pins the override to one competitor's stable id
+                    instead of resolving by name alone, so two pool members
+                    who share a display name from different dojos (competitor
+                    identity is (name, dojo), never bare name) can each be
+                    overridden individually. An older client that only ever
+                    sends playerName still works whenever the name is unique
+                    within this pool.
+                playerDojo:
+                  type: string
+                  description: >
+                    Optional. Narrows the playerName match to one dojo when
+                    playerId is not supplied and the name collides with
+                    another pool member's.
                 rank:
                   type: integer
+                  description: >
+                    1-based finishing rank within the pool; rejected if it
+                    exceeds the pool's player count.
       responses:
         '200':
           description: Rank override saved.
+        '400':
+          description: >
+            playerName is missing, blank, or exceeds the length cap; rank is
+            not a positive integer, exceeds the pool's player count, or
+            exceeds the absolute override cap; or playerName/playerId/
+            playerDojo could not be resolved to exactly one competitor in
+            this pool (e.g. two same-name, different-dojo members and no
+            playerId/playerDojo to tell them apart).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: >
+            Competition not found, or poolId does not name a pool in this
+            competition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Rank overrides are only accepted while the competition is in the pools stage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/competitions/{id}/chusen-candidates:
+    get:
+      tags: [competitions]
+      summary: List consequential team-pool ties needing chusen (drawing lots)
+      description: >
+        Returns the team-pool ties that the daihyosen (representative bout)
+        left undetermined; a true win/loss cycle, an all-drawn round, or any
+        other partial tie on daihyosen wins; and that therefore need the
+        operator to draw lots and record each team's finishing position via
+        `PUT .../pools/{poolId}/override-rank`. Only consequential ties (ones
+        that affect advancement/seeding) are returned. Admin-gated, unlike
+        the public league-tiebreak candidates endpoint. Empty (not an error)
+        for a non-team competition, a competition not in the pools stage, or
+        when no group currently needs chusen.
+      security:
+        - TournamentPassword: []
+      parameters:
+        - $ref: '#/components/parameters/CompetitionId'
+      responses:
+        '200':
+          description: Still-tied groups needing an operator lots-draw.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChusenCandidateGroup'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 
   # ── Participants & Seeds (Admin, requires auth) ────────────────────────────
 
@@ -1976,6 +2276,28 @@ paths:
                   finisher:
                     type: string
                     description: Name of the pool finisher whose bracket placement is locked (downstream_knockout_scored only).
+        '422':
+          description: |
+            `corrupt_overrides`: this competition's overrides.json could not
+            be parsed, so pool standings (needed to check whether the write
+            would displace an already-scored bracket qualifier) cannot be
+            computed. This is a terminal, operator-recoverable state, not a
+            transient failure: repair it via the reset-overrides endpoint
+            (which resets overrides WITHOUT first parsing the corrupt file),
+            then resubmit the same write.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable detail.
+                  code:
+                    type: string
+                    enum: [corrupt_overrides]
+                    description: Machine-readable code.
 
   /api/competitions/{id}/matches/{mid}/revert-to-queue:
     post:
@@ -2446,19 +2768,26 @@ paths:
                             classes `reason` names below.
                         reason:
                           type: string
-                          enum: [superseded, clock_skew]
+                          enum: [superseded, clock_skew, corrupt_overrides]
                           description: >
-                            Machine-readable discriminator, present only for the two
-                            timestamp-guard verdicts and omitted for every other failure,
-                            so its presence always means the same thing. `superseded`: a
+                            Machine-readable discriminator, present only for the three
+                            classes named here and omitted for every other failure, so
+                            its presence always means the same thing. `superseded`: a
                             newer result for that match is already stored. `clock_skew`:
                             that entry's `modifiedAt` is implausibly far in the future, so
                             the sending device's clock is wrong; nothing was written for
                             it and re-running the import will not help until the clock is
-                            resynced. Both carry the same meaning as in the RefusedWrite
-                            schema, and in both cases the entry is excluded from
-                            `succeeded` and never broadcast. Other entries in the batch
-                            are unaffected.
+                            resynced. `corrupt_overrides`: this competition's
+                            overrides.json could not be parsed, so pool standings needed
+                            to score this entry could not be computed; repair via
+                            `DELETE /api/competitions/{id}/overrides` and resubmit. The
+                            first two carry the same meaning as in the RefusedWrite
+                            schema; unlike them, this endpoint never fails the whole
+                            request over a corrupt overrides file (no terminal 422 the
+                            way the single-result endpoints answer with, since bulk-score
+                            is always HTTP 200 with partial success). In all three cases
+                            the entry is excluded from `succeeded` and never broadcast.
+                            Other entries in the batch are unaffected.
 
   /api/competitions/{id}/matches/{mid}/quick-score:
     put:
@@ -2585,6 +2914,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '422':
+          description: |
+            `corrupt_overrides`: this competition's overrides.json could not
+            be parsed, so pool standings (needed by the mixed-pool
+            displaced-finisher guard) cannot be computed. Same
+            operator-recoverable shape as `PUT .../score`'s 422 response:
+            repair via `DELETE /api/competitions/{id}/overrides`, then
+            resubmit the same decision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable detail.
+                  code:
+                    type: string
+                    enum: [corrupt_overrides]
+                    description: Machine-readable code.
 
   /api/competitions/{id}/matches/{mid}/daihyosen:
     post:
@@ -3013,7 +3363,11 @@ paths:
         Generates the round-robin daihyosen (representative-bout) matches for one
         consequential tied group. Admin-gated. `teamNames` must match exactly one
         group from `GET .../league-tiebreak/candidates` (order-independent, no
-        duplicates).
+        duplicates). Optional `teamIds` selects the group by participant id
+        instead of name, needed to disambiguate a tied group holding two
+        same-named teams (a namesake collision reachable through the
+        documented `checkNewTeamNameCollisions` restore hole); when present it
+        takes priority over `teamNames` for matching the candidate group.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3047,8 +3401,13 @@ paths:
       summary: Remove unscored league tie-breaker matches for a group
       description: >
         Removes the unscored daihyosen matches for one tied group. Admin-gated.
-        `teamNames` must cover a complete tie-breaker group (no duplicates, no
-        partial selection).
+        `teamNames` must cover a complete tie-breaker group (no duplicates
+        unless `teamIds` is also present, no partial selection). Optional
+        `teamIds` selects and matches the group's daihyosen rows by
+        participant id instead of name, needed to remove a tied group holding
+        two same-named teams (the same namesake collision `POST` disambiguates
+        with `teamIds`) -- such a group can only ever be created via
+        `teamIds`, so this must accept it too.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3796,6 +4155,26 @@ components:
             field is accepted but silently ignored; the `TOURNAMENT_ADMIN_PASSWORD_HASH`
             env var is the authoritative elevated credential.
 
+    TournamentWithCompetitions:
+      description: >
+        The response shape for POST and PUT /api/tournament: every Tournament
+        field, plus `competitions`. Tournament itself carries no such field
+        (competitions are a separate on-disk collection, not tournament.md
+        front matter); a fresh tournament created via POST has an empty
+        `competitions` array (never omitted), and a PUT against an existing
+        record carries whatever competitions already exist. The key is
+        always present, so a client can safely read `competitions.length`
+        off either response without checking for `undefined` first.
+      allOf:
+        - $ref: '#/components/schemas/Tournament'
+        - type: object
+          required: [competitions]
+          properties:
+            competitions:
+              type: array
+              items:
+                $ref: '#/components/schemas/Competition'
+
     Competition:
       type: object
       properties:
@@ -3945,6 +4324,20 @@ components:
           type: boolean
         numberPrefix:
           type: string
+          description: |
+            Prefix (up to three characters) for competitor numbers (e.g. `"K"` produces `K1`,
+            `K2`, ...). Never stored empty on a competition the app has saved
+            or drawn: `POST /api/competitions`, a settings `PUT`, import,
+            `POST .../start` and `POST .../generate-draw` all assign a
+            derived default the first time they reach a competition that has
+            NO prefix stored yet, before persisting or drawing. A request
+            that omits or blanks the field on an existing competition
+            INHERITS the stored value rather than triggering that
+            derivation (a settings `PUT` never has to echo the field back to
+            keep it). A legacy record written before this rule existed may
+            still load with it blank; its next save or draw assigns one. Can
+            be changed in any status, including after a draw exists; see the
+            `PUT` endpoint's description.
         hasParticipantIDs:
           type: boolean
         teamMatchType:
@@ -4005,8 +4398,14 @@ components:
         players:
           type: array
           description: >
-            Player list. Populated only in viewer responses (`GET /api/viewer/competitions` and
-            `GET /api/viewer/competitions/{id}`). Always empty in admin competition responses.
+            Player list. Populated on the viewer responses (`GET /api/viewer/competitions` and
+            `GET /api/viewer/competitions/{id}`) and on the SETTINGS and ROSTER PUT
+            responses (`PUT /api/competitions/{id}`, both branches: a settings-only PUT
+            re-loads the on-disk roster for its response even though the request body
+            didn't send one, and a roster-save PUT returns the fresh roster it just
+            wrote; see that endpoint's Settings-update and Roster-save descriptions).
+            Empty on every OTHER admin competition response (`GET /api/competitions`,
+            `GET /api/competitions/{id}`).
           items:
             $ref: '#/components/schemas/Player'
 
@@ -4059,7 +4458,18 @@ components:
           description: Seed rank (0 = unseeded).
         number:
           type: string
-          description: The competitor's "tag"; assigned number = prefix + sequence (e.g. "K1"). Only present when numberPrefix is set.
+          description: |
+            The competitor's ASSIGNED number: prefix + sequence (e.g. "K1").
+            Present only on the viewer and display payloads. For a POOLED
+            format (mixed/league) it appears once the draw has assigned it,
+            pool by pool, from pools.csv (draw order, e.g. K1-K4 for the
+            first pool); before that draw, it is absent entirely -- a pooled
+            competition's competitors carry no number at all until the draw
+            runs. For an EFFECTIVE-PLAYOFFS competition it is different: the
+            number IS participant order, composed on every read (that draw
+            never writes pools.csv), so it is present from `setup` onward,
+            not only after a draw. Also absent on the participants endpoint,
+            and absent when the draw on disk cannot be read.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.
@@ -4845,6 +5255,54 @@ components:
         ceremonyMinutes:
           type: integer
 
+    ChusenCandidateGroup:
+      type: object
+      description: >
+        One consequential team-pool tie that the daihyosen (representative
+        bout) could not settle, so the operator must draw lots (chusen) and
+        record the finishing order via `PUT .../pools/{poolId}/override-rank`.
+      properties:
+        poolName:
+          type: string
+          description: Name of the pool this tied group belongs to.
+        teamNames:
+          type: array
+          description: >
+            Names of the still-tied teams, in current standings order. Kept
+            for older clients; teamNames[i] and teams[i] describe the same
+            team.
+          items:
+            type: string
+        teams:
+          type: array
+          description: >
+            Full identity of each still-tied team, positionally parallel to
+            teamNames. Present so the client can call
+            `PUT .../override-rank` with playerId (falling back to
+            playerDojo) rather than a bare name, which disambiguates two
+            teams that share a display name from different dojos (team names
+            are supposed to be unique even across dojos, but one documented
+            enforcement hole in that check can still let a collision reach
+            disk).
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                description: >
+                  Always present. The competitor's stable UUID, or "" (empty
+                  string, not omitted/null) for a competitor with no UUID
+                  (a legacy or mixed roster). A client must not treat "" as
+                  absent: fall back to the name/dojo pair for that entry
+                  specifically, rather than to id being unset in general.
+              name:
+                type: string
+              dojo:
+                type: string
+        minPosition:
+          type: integer
+          description: 1-based finishing position of the best-placed member of this tied group.
+
     LeagueTiebreakCandidateGroup:
       type: object
       description: >
@@ -4853,9 +5311,22 @@ components:
       properties:
         teamNames:
           type: array
-          description: Names of the tied teams, in standings order.
+          description: >
+            Names of the tied teams, in standings order. Kept for backward
+            compatibility; a namesake collision (two teams sharing a display
+            name across dojos) cannot be told apart by this array alone,
+            use `teams`.
           items:
             type: string
+        teams:
+          type: array
+          description: >
+            The same tied teams as `teamNames`, with identity (id, name, dojo)
+            per team, mirroring the `teams` array `GET .../chusen-candidates`
+            already returns. Lets an operator select a namesake-holding group
+            unambiguously via POST `.../league-tiebreak`'s `teamIds`.
+          items:
+            $ref: '#/components/schemas/LeagueTiebreakTeamRef'
         minPosition:
           type: integer
           description: 1-based best finishing rank among the tied teams.
@@ -4863,14 +5334,40 @@ components:
           type: integer
           description: 1-based worst finishing rank among the tied teams.
 
+    LeagueTiebreakTeamRef:
+      type: object
+      description: Identity of one team in a tied group.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        dojo:
+          type: string
+
     LeagueTiebreakRequest:
       type: object
       description: >
-        Selects exactly one tied group (by team name set) for the league
-        tie-breaker POST/DELETE endpoints. Order-independent; duplicates rejected.
+        Selects exactly one tied group for the league tie-breaker POST/DELETE
+        endpoints. `teamNames` is always required (order-independent,
+        duplicates rejected unless `teamIds` is also present -- a namesake
+        pair legitimately repeats a name). `teamIds` is optional and, when
+        present, must be the same length as `teamNames`; it is honoured by
+        both `POST .../league-tiebreak` (matching the candidate group and
+        resolving it) and `DELETE .../league-tiebreak` (matching the group's
+        daihyosen rows by `SideAID`/`SideBID` instead of by name), letting a
+        namesake-holding group be selected, created, and removed where
+        `teamNames` alone is ambiguous. A namesake group can only be created
+        via `teamIds` in the first place, so `DELETE` must accept it too or
+        such a group could never be removed again.
       required: [teamNames]
       properties:
         teamNames:
+          type: array
+          minItems: 2
+          items:
+            type: string
+        teamIds:
           type: array
           minItems: 2
           items:

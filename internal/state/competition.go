@@ -194,6 +194,11 @@ func (s *Store) saveCompetitionChangedLocked(c *Competition, write writeFn) (boo
 	cache.data = s.copyCompetition(c)
 	cache.mtime = s.FileMtime(c.ID, "config.md")
 	cache.mu.Unlock()
+	// Bumped AFTER the bytes land and the cache is refreshed: the standings
+	// cache keys on config.md too (the competition record selects the scoring
+	// mode and the format), and mtime alone cannot tell two saves inside one
+	// clock tick apart.
+	s.bumpFileVersion(c.ID, "config.md")
 
 	// mp-p7n / Copilot PR #185 round-9: the participant loader derives
 	// its id-strip decision from Competition.HasParticipantIDs, so a

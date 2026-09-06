@@ -1749,6 +1749,7 @@ func TestBackfillMatchIdentity(t *testing.T) {
 		name       string
 		result     state.MatchResult
 		wantWinner string
+		wantErr    bool
 	}{
 		{
 			name:       "WinnerSide A hint wins over everything",
@@ -1791,9 +1792,18 @@ func TestBackfillMatchIdentity(t *testing.T) {
 			wantWinner: idA,
 		},
 		{
-			name:       "explicit WinnerID preserved (early return, no inference)",
-			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "explicit-id", IpponsA: []string{"M", "K"}},
-			wantWinner: "explicit-id",
+			name:       "explicit WinnerID matching a side preserved (early return, no inference)",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: idA, IpponsA: []string{"M", "K"}},
+			wantWinner: idA,
+		},
+		{
+			// bc-idfx: a client-supplied WinnerID that names NEITHER side is
+			// invalid data (it used to be persisted verbatim by the old
+			// unconditional early return and counted for nobody in
+			// standings). Rejected once the row's own ids are known.
+			name:    "explicit WinnerID matching neither side is rejected",
+			result:  state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "not-a-side-id", IpponsA: []string{"M", "K"}},
+			wantErr: true,
 		},
 		{
 			name:       "draw (empty Winner) leaves WinnerID empty",
@@ -1808,8 +1818,13 @@ func TestBackfillMatchIdentity(t *testing.T) {
 			// `stored` carries the generation-time ids; `result` (the incoming
 			// score) starts without them, mirrors the real write path.
 			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
-			backfillMatchIdentity(&result, stored)
+			err := backfillMatchIdentity(&result, stored, matchWriteForward)
 
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tc.wantWinner, result.WinnerID, "WinnerID")
 			// Side ids are always backfilled from `stored` (runs before the
 			// WinnerID early-return), even in the explicit-WinnerID case.
@@ -1819,6 +1834,62 @@ func TestBackfillMatchIdentity(t *testing.T) {
 	}
 }
 
+// TestBackfillMatchIdentity_OneSideIDKnown was PR #416 finding 6's repro: a
+// partially-stamped pool row (only SideB has a real participant id, reachable
+// via the mixed-id participants.csv format, TestStore_ParticipantsCSV_MixedIDs,
+// and pools.go stamping SideAID only from a Player.ID that exists). The SPA
+// used to invent an id from the winning side's NAME when that side had none
+// (api_serializers.jsx buildPlayerMap: `id: norm.id || norm.name`) and send
+// it as winnerId; since the invented id could never match the one real
+// stamped id, an OR-gated check once rejected every such score outright.
+//
+// bc-pnum ruling 1c closed the underlying gap this tolerated: the draw itself
+// now refuses to run over a roster with an id-less row
+// (helper.ValidateNoMissingParticipantIDs), so a partially-stamped pool row
+// like this one can no longer be produced by a real draw, and the SPA no
+// longer invents an id at all (it sends winnerId only when the server
+// supplied that side's real id, api_serializers.jsx). The DROP-rather-than-
+// reject tolerance this test used to pin (bc-pnum ruling 1d) is gone: a
+// WinnerID naming neither side is rejected unconditionally now, one side id
+// known or not, so a stale/rogue client that still invents one gets a 400
+// instead of a silently dropped verdict.
+func TestBackfillMatchIdentity_OneSideIDKnown(t *testing.T) {
+	const idB = "22222222-2222-4222-8222-222222222222"
+
+	// stored carries the generation-time ids: SideA (Bob) was never stamped
+	// (legacy/mixed-id roster), SideB (Alice) has a real id.
+	stored := &state.MatchResult{SideAID: "", SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "Bob", // invented from the id-less side's own name
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.Error(t, err, "a winnerId naming neither side is rejected even when only one side id is known")
+	assert.Equal(t, "", result.SideAID, "SideAID stays empty; stored never had one to backfill")
+	assert.Equal(t, idB, result.SideBID, "SideBID backfilled from stored")
+}
+
+// TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide covers the
+// companion path: when the one known side id DOES match winnerId, the write
+// must still succeed as a normal, unambiguous attribution (no dropping, no
+// rejection) -- only an UNRECOGNIZED winnerId is special-cased.
+func TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide(t *testing.T) {
+	const idB = "22222222-2222-4222-8222-222222222222"
+
+	stored := &state.MatchResult{SideAID: "", SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Alice",
+		WinnerID: idB, // correctly names the one known side
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.NoError(t, err)
+	assert.Equal(t, idB, result.WinnerID, "a winnerId matching the one known side is trusted outright")
+}
+
 // TestBackfillMatchIdentity_RepPlayers pins the daihyosen rep-player preserve-
 // on-empty rule (mp-62vr): a score write that omits the rep players must NOT
 // wipe a previously-recorded pick, but an explicit value always overrides.
@@ -1826,7 +1897,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("empty result preserves stored rep players", func(t *testing.T) {
 		result := state.MatchResult{} // a re-score that only re-sends the ippons
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		backfillMatchIdentity(&result, stored)
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Sato Ren", result.RepPlayerA, "preserved on empty")
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "preserved on empty")
 	})
@@ -1834,7 +1905,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("explicit rep players override stored", func(t *testing.T) {
 		result := state.MatchResult{RepPlayerA: "Ito Kenji", RepPlayerB: "Mori Aki"}
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		backfillMatchIdentity(&result, stored)
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA, "operator change wins")
 		assert.Equal(t, "Mori Aki", result.RepPlayerB, "operator change wins")
 	})
@@ -1842,7 +1913,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("one side set, other preserved", func(t *testing.T) {
 		result := state.MatchResult{RepPlayerA: "Ito Kenji"} // only Aka changed
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		backfillMatchIdentity(&result, stored)
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA)
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "untouched side preserved")
 	})

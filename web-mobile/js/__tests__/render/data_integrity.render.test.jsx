@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { DataIssueBanner } from '../../data_integrity.jsx';
+import { DataIssueBanner, MissingParticipantIDsNotice } from '../../data_integrity.jsx';
 
 // The banner is the LOUD-class surface: a whole file will not parse, every
 // write to it is refused, and the operator has to choose between repairing it
@@ -87,5 +87,44 @@ describe('DataIssueBanner', () => {
     render(<DataIssueBanner issues={bracketBroken} competition={{ format: 'league' }} onReset={vi.fn()} resetting />);
     expect(screen.queryByRole('button', { name: /Resetting/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Moving/ }).disabled).toBe(true);
+  });
+
+  // bc-pnum ruling 1b: a legacy roster with id-less rows is neither loud
+  // (nothing failed to parse) nor blocking (nothing is refused), so it must
+  // read differently from the corrupt-file banner above.
+  const missingIDs = [{ kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file. Save the roster once and the ids are assigned.' }];
+
+  it('renders the missing-ids notice, not the corrupt-file banner, for a missing-ids-only list', () => {
+    render(<DataIssueBanner issues={missingIDs} competition={{ format: 'mixed' }} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    const notice = screen.getByRole('status');
+    expect(notice.textContent).toContain('Save the roster once and the ids are assigned.');
+  });
+
+  it('renders both notices when a file is also corrupt', () => {
+    render(<DataIssueBanner issues={[...bracketBroken, ...missingIDs]} competition={{ format: 'mixed' }} onReset={vi.fn()} />);
+    // The corrupt-file banner still only lists the corrupt entry, not the
+    // missing-ids one.
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('bracket.json, line 47, column 12');
+    expect(alert.textContent).not.toContain('Save the roster once');
+    expect(screen.getByRole('status').textContent).toContain('Save the roster once and the ids are assigned.');
+  });
+
+  it('renders nothing when there are no issues at all (missing-ids absent too)', () => {
+    const { container } = render(<DataIssueBanner issues={[]} competition={{ format: 'mixed' }} />);
+    expect(container.firstChild).toBeNull();
+  });
+});
+
+describe('MissingParticipantIDsNotice', () => {
+  it('renders the server-supplied sentence verbatim', () => {
+    render(<MissingParticipantIDsNotice issue={{ detail: 'Alice (Dojo A): no id on file. Save the roster once and the ids are assigned.' }} />);
+    expect(screen.getByRole('status').textContent).toContain('Alice (Dojo A)');
+  });
+
+  it('renders nothing without an issue', () => {
+    const { container } = render(<MissingParticipantIDsNotice issue={null} />);
+    expect(container.firstChild).toBeNull();
   });
 });

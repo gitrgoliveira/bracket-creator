@@ -45,6 +45,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -1725,14 +1726,29 @@ func setupNamesToPrintLayout(f *excelize.File, sheetName string) {
 		Top: &margin, Bottom: &margin, Left: &margin, Right: &margin,
 		Header: &margin, Footer: &margin,
 	}))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 30))
-	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "B", 160))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", namesToPrintNumberColWidth))
+	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "B", "B", namesToPrintNameColWidth))
 }
 
-type nameEntry struct {
-	player      Player
-	fallbackTag interface{}
-}
+// Names to Print column widths, in Excel width units. Operator ruling: both
+// columns ALWAYS fit one page side by side and never change size; only the
+// text shrinks to fit. That holds for the name cell and the SINGLE-LINE
+// position cell (both set ShrinkToFit); the STACKED position cell (a
+// multi-letter prefix, bc-pnum) is the one exception -- it WRAPS a
+// letters-over-digits value instead, sized per letter count so the wrap
+// never grows past two lines (see buildNameIDPositionStackedStyle,
+// excel_styles.go). A3 landscape at this sheet's 0.1in margins offers about
+// 1176pt of printable width, which LibreOffice renders at roughly 6.3pt per
+// width unit, so the two widths must sum to at most
+// namesToPrintPageWidthUnits or the page breaks between the columns and the
+// sheet prints as a run of number-only pages followed by a run of name-only
+// pages (the previous 30 + 160 did exactly that, three units over). Pinned
+// by TestNamesToPrintColumnsFitOnePage.
+const (
+	namesToPrintNumberColWidth = 40
+	namesToPrintNameColWidth   = 140
+	namesToPrintPageWidthUnits = 186
+)
 
 // courtSheetName names the per-shiaijo "Names to Print" sheet after the shiaijo
 // the competition actually runs on, not after the band's position.
@@ -1779,7 +1795,7 @@ func courtsPrefix(courts []string, n int) []string {
 	return out
 }
 
-func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, courts []string, pCoords map[string]playerCellCoord) {
+func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, courts []string, pCoords map[string]playerCellCoord, numberPrefix string) {
 	numCourts := clampCourts(len(courts))
 
 	base := len(players) / numCourts
@@ -1798,16 +1814,11 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 			continue
 		}
 
-		entries := make([]nameEntry, len(courtPlayers))
-		for i, p := range courtPlayers {
-			entries[i] = nameEntry{player: p, fallbackTag: p.PoolPosition}
-		}
-
 		sheetName := courtSheetName(courts, c)
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entries, sanitized, pCoords)
+		printNameEntries(f, sheetName, courtPlayers, sanitized, pCoords, numberPrefix)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1816,7 +1827,12 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 }
 
 // CreateNamesWithPoolToPrint writes one "Names to Print <Shiaijo>" sheet per
-// court, holding that court's competitors tagged "<pool letter><position>".
+// court, holding that court's competitors. Column A holds the competitor
+// number, formula-linked to the Data sheet cell AddPoolDataToSheet wrote
+// (via pCoords); it is empty for a competitor with no number cell (D1: no
+// pool-letter/position fallback is composed here). The "<pool
+// letter><position>" tag this doc used to describe was removed outright,
+// not just superseded, so it must not be reintroduced.
 //
 // numCourts is clamped to the count the pool phase actually runs on
 // (EffectiveDrawCourts), for the same reason PrintPoolMatches clamps: a sheet
@@ -1825,7 +1841,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 // sheets and another on its pool sheets and tree pages. Derived here rather
 // than by the caller so no call site can pass a count that disagrees with the
 // Pool Matches skeleton.
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord) {
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord, numberPrefix string) {
 	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
 	// clamp needed here; a clampCourts in front of it would be a no-op.
 	// Same bands and same grouping the Pool Matches skeleton uses, so a
@@ -1833,17 +1849,10 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	courts, poolsByCourt := PoolsByCourt(pools, courts, courtOfPool)
 	numCourts := len(courts)
 
-	entriesByCourt := make([][]nameEntry, numCourts)
+	entriesByCourt := make([][]Player, numCourts)
 	for court, poolIdxs := range poolsByCourt {
 		for _, poolIdx := range poolIdxs {
-			pool := pools[poolIdx]
-			poolLetter := strings.TrimPrefix(pool.PoolName, "Pool ")
-			for _, player := range pool.Players {
-				entriesByCourt[court] = append(entriesByCourt[court], nameEntry{
-					player:      player,
-					fallbackTag: fmt.Sprintf("%s%d", poolLetter, player.PoolPosition),
-				})
-			}
+			entriesByCourt[court] = append(entriesByCourt[court], pools[poolIdx].Players...)
 		}
 	}
 
@@ -1855,7 +1864,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords)
+		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords, numberPrefix)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1863,26 +1872,63 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	}
 }
 
-func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, sanitized bool, pCoords map[string]playerCellCoord) {
+func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord, numberPrefix string) {
 	setupNamesToPrintLayout(f, sheetName)
+
+	// The sheet's number layout is decided from the competition's own
+	// number prefix, not by re-scanning players for one (bc-pnum operator
+	// ruling -- a prefix of more than one CHARACTER prints as two stacked
+	// lines, "KO" over "20"; a one-character prefix keeps the plain
+	// cross-sheet reference on one line, "K20"; bc-pnum review -- see
+	// splitNumberLines, numbers.go, for why re-deriving this from a
+	// representative player's Number breaks on a digit-bearing prefix like
+	// "KO2").
+	//
+	// prefixLen is a rune COUNT, not a byte length (bc-pnum review): Excel's
+	// LEFT/MID formulas below count characters, and a byte length disagrees
+	// with that for any multi-byte prefix letter (e.g. "Ö" is one character
+	// but two UTF-8 bytes), which split the formula's output at the wrong
+	// character while the Tags sheet -- which just slices the Go string, not
+	// an Excel formula -- showed the correct letters. utf8.RuneCountInString
+	// is what keeps the two print sites agreeing.
+	prefixLen := utf8.RuneCountInString(numberPrefix)
+	stacked := stackedNumberPrefix(numberPrefix)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
+	if stacked {
+		nameIDPositionStyle = getNameIDPositionStackedStyle(f, prefixLen)
+	}
 	nameIDStyle := getNameIDStyle(f)
 
-	for i, entry := range entries {
+	for i, player := range players {
 		row := i + 1
 		positionCell := fmt.Sprintf("A%d", row)
 		nameCell := fmt.Sprintf("B%d", row)
 		handleExcelError("SetRowHeight", f.SetRowHeight(sheetName, row, 270))
 
-		coord := pCoords[playerCoordKey(entry.player)]
+		// D1 (bc-pnum): no fallback. A player with no number cell (a
+		// competition that hasn't been numbered) gets an EMPTY position cell,
+		// never a substitute composed here -- the pool-letter tag this branch
+		// used to write has been removed outright, not just made unreachable,
+		// so it cannot silently come back.
+		coord := pCoords[playerCoordKey(player)]
 		if coord.numberCell != "" {
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, sheetRef(coord.sheetName, coord.numberCell)))
-		} else {
-			handleExcelError("SetCellValue", f.SetCellValue(sheetName, positionCell, entry.fallbackTag))
+			ref := sheetRef(coord.sheetName, coord.numberCell)
+			formula := ref
+			if stacked {
+				// LIVE formula, not a static split: the referenced Data-sheet
+				// cell is the number's one source of truth (bc-pnum), so the
+				// stacked display recomputes from it rather than caching a
+				// value that could drift. prefixLen is the competition's own
+				// prefix rune count; every player's own number shares that
+				// same prefix, so splitting THIS player's reference at that
+				// offset is correct for every player on the sheet.
+				formula = fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, prefixLen, ref, prefixLen+1)
+			}
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 
-		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(entry.player.Name, sanitized, coord)))
+		handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, nameCell, buildNameFormula(player.Name, sanitized, coord)))
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, nameCell, nameCell, nameIDStyle))
 
 		if row%3 == 0 {
@@ -1890,8 +1936,8 @@ func printNameEntries(f *excelize.File, sheetName string, entries []nameEntry, s
 		}
 	}
 
-	if len(entries) > 0 {
-		SetPrintArea(f, sheetName, 2, len(entries))
+	if len(players) > 0 {
+		SetPrintArea(f, sheetName, 2, len(players))
 	}
 }
 

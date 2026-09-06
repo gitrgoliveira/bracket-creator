@@ -167,28 +167,80 @@ describe('API Utils', () => {
     // the backend unable to pick a side and the league matrix marks BOTH rows
     // as winners. The scoring modal sets patch.winner to the winning SIDE object.
     it('forwards winnerId from the winning side object', () => {
-      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      // Flat sideAId/sideBId alongside the resolved objects: what a real
+      // normalizeMatch output looks like when the server supplied real ids
+      // for both sides (: winnerId is only forwarded when it matches
+      // one of these flat, server-supplied fields).
+      const match = { sideAId: 'id-a', sideBId: 'id-b', sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
       const result = toBackendMatchResult({ winner: { id: 'id-a', name: 'Player A' }, status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
       expect(result.winnerId).toBe('id-a');
     });
 
     it('forwards the correct winnerId for a same-name head-to-head (object winner)', () => {
-      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      // Flat sideAId/sideBId present: this is what a real same-name pool
+      // match looks like on the wire (: the flat fields are the
+      // server-supplied signal that gates winnerId).
+      const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
       // Mumeishi won; even on a tied scoreline the id disambiguates the side.
       const result = toBackendMatchResult({ winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' }, status: 'complete', ipponsA: ['M'], ipponsB: ['M'], score: { type: 'ippon' }, decidedByHantei: true }, match);
       expect(result.winnerId).toBe('id-mumeishi');
     });
 
     it('omits winnerId when same-name and the winner is a bare name (ambiguous)', () => {
-      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
       const result = toBackendMatchResult({ winner: 'Tanaka Kenji', status: 'complete', ipponsA: ['M'], ipponsB: ['M'] }, match);
       expect('winnerId' in result).toBe(false); // backend infers from scoreline / name fallback
     });
 
     it('derives winnerId from the match sides for a distinct-name bare-name winner', () => {
-      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      const match = { sideAId: 'id-a', sideBId: 'id-b', sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
       const result = toBackendMatchResult({ winner: 'Player B', status: 'complete', ipponsA: [], ipponsB: ['K'] }, match);
       expect(result.winnerId).toBe('id-b');
+    });
+
+    // buildPlayerMap invents `id: norm.id || norm.name` for a
+    // participant with no real id, and resolveSide (normalizeMatch) carries
+    // that invented id onto the resolved side object. For a
+    // partially-stamped legacy roster -- one side has a real server id, the
+    // other has NONE at all (no flat sideAId on the wire) -- the id-less
+    // side's resolved object ends up with its OWN NAME as `.id`. Sending
+    // that name as winnerId tells the engine's forward-write gate a name
+    // string is a participant UUID, and the write is rejected, so the match
+    // could never be scored.
+    describe('does not send an invented (name-as-id) winnerId', () => {
+      it('omits winnerId when the winning side carries no server-supplied flat id', () => {
+        // sideB has a real flat id; sideA has none at all -- match.sideAId is
+        // absent, exactly like a wire payload that never had that column.
+        // sideA's resolved object nonetheless carries an id: resolveSide's
+        // `{ id: flatId || name }` fallback, buildPlayerMap's `id: norm.id
+        // || norm.name` copied through unchanged.
+        const match = {
+          sideBId: 'id-b',
+          sideA: { id: 'Player A', name: 'Player A' }, // invented: id === name
+          sideB: { id: 'id-b', name: 'Player B' },
+        };
+        const result = toBackendMatchResult({
+          winner: { id: 'Player A', name: 'Player A' }, // sideA (id-less) won
+          status: 'complete', ipponsA: ['M'], ipponsB: [],
+        }, match);
+        expect('winnerId' in result).toBe(false);
+      });
+
+      it('still sends winnerId when the winning side DOES carry a server-supplied flat id, even though its opponent has none', () => {
+        // Same partially-stamped roster, but this time the side WITH a real
+        // id wins: winnerId must still reach the wire, because it is exactly
+        // what the server itself supplied for that side.
+        const match = {
+          sideBId: 'id-b',
+          sideA: { id: 'Player A', name: 'Player A' },
+          sideB: { id: 'id-b', name: 'Player B' },
+        };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-b', name: 'Player B' }, // sideB (real id) won
+          status: 'complete', ipponsA: [], ipponsB: ['M'],
+        }, match);
+        expect(result.winnerId).toBe('id-b');
+      });
     });
 
     // bc-dmsr follow-up: the Ht mark's side ATTRIBUTION (which array the "Ht"
@@ -200,7 +252,7 @@ describe('API Utils', () => {
     // but was discarded for mark placement - this is the fix and its pin.
     describe('Ht mark placement attributes by id, not name (bc-dmsr follow-up)', () => {
       it('same-name pair: places the mark on sideB when the id says so (the bug, now fixed)', () => {
-        const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+        const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
         const result = toBackendMatchResult({
           winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
           status: 'complete',

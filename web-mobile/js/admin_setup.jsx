@@ -146,7 +146,7 @@ import {
   HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, LABEL_COURTS,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
@@ -859,6 +859,42 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
     return () => { controller.abort(); };
   }, [date, tournament.competitions, password]);
 
+  // bc-pnum G2/R6: pre-fill the prefix field with the SAME value a save
+  // left blank would actually assign server-side (assignDefaultNumberPrefix),
+  // fetched from GET number-prefix-default (R9) rather than derived here --
+  // nothing is derived in JS, so this preview can never drift from what a
+  // save would land. Uses the EFFECTIVE name (deriveCompetitionName, the
+  // same call create() below makes) so the preview tracks the kind-based
+  // default too when the name field is left blank.
+  //
+  // Same touched-ref shape as the start-time auto-stack effect above: once
+  // the operator types into the prefix field, numberPrefixTouchedRef
+  // latches and this effect stops applying its result, so a later name edit
+  // cannot silently overwrite a value the operator chose.
+  const numberPrefixTouchedRef = useRefA(false);
+  useEffectA(() => {
+    if (numberPrefixTouchedRef.current) return;
+    const controller = new AbortController();
+    // Debounced (~250ms): this effect's deps include `name`, which changes on
+    // every keystroke, so an undebounced version fired one fetch per
+    // character typed. 250ms is long enough to coalesce a normal typing
+    // burst into one request, short enough that the pre-fill still lands
+    // right after the operator pauses. The timer (not yet fetched) and the
+    // controller (fetch in flight) are both cancelled on cleanup, so a fast
+    // typist or an unmount never leaves a stray request racing to call
+    // setNumberPrefix after the component has moved on.
+    const timer = setTimeout(() => {
+      window.API.getNumberPrefixDefault(deriveCompetitionName(name, kind), password, controller.signal)
+        .then((res) => {
+          if (!controller.signal.aborted && !numberPrefixTouchedRef.current) {
+            setNumberPrefix(res && res.numberPrefix || "");
+          }
+        })
+        .catch(() => {});
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [name, kind, password]);
+
   const toggleCourt = (cc) => {
     // Clear a stale banner (client-side guard or server rejection) the moment
     // the operator changes the allocation, same as every other field's
@@ -976,7 +1012,18 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       // decision anywhere on the form.
       courts: selectedCourts,
       poolMode, poolSize, winnersPerPool: winners,
-      numberPrefix: numberPrefix.trim().substring(0, 3),
+      // bc-pnum A6: the field is a SERVER-DERIVED PREVIEW until the operator
+      // actually types into it (numberPrefixTouchedRef), so an untouched
+      // value is not this request's to send: the debounced pre-fill effect's
+      // deps ([name, kind, password]) never re-run when tournament.competitions
+      // moves, so a prefix another device or an import claimed in the
+      // meantime could sit stale in the preview and get submitted as a REAL
+      // value here, refusing this save 400 over a field the operator never
+      // touched. "" defers to the server's own derivation
+      // (WithCompetitionRenameLock, the same one this preview echoes), which
+      // reads the taken set at save time instead of at the moment this form
+      // last fetched a preview.
+      numberPrefix: numberPrefixTouchedRef.current ? cutNumberPrefix(numberPrefix) : "",
       // zekkenApplies, not a `kind === "individual"` literal: the rule has
       // one owner (competition_shape.jsx) and the render gate below already
       // reads it, so a payload line spelling it out by hand is the half that
@@ -1392,7 +1439,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
-            value={numberPrefix} onChange={setNumberPrefix}
+            value={numberPrefix} onChange={(raw) => { numberPrefixTouchedRef.current = true; setNumberPrefix(cutNumberPrefix(raw)); }}
             hint={HINT_NUMBER_PREFIX} width={80} />
 
           {zekkenApplies(kind) && (
@@ -1530,7 +1577,15 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       if (!mountedRef.current) return;
       setResults(body.results || []);
       const hasErrors = (body.results || []).some(r => r.error);
-      if (!hasErrors) {
+      // bc-pnum [review] round 2, item 2: a row can land with a WARNING
+      // (currently only the import-boundary prefix reassignment) rather
+      // than an error -- the row succeeded, but every tag this
+      // competition already had printed under the old prefix now names a
+      // number it no longer has. Auto-navigating away here is exactly as
+      // wrong as it would be for an error: the operator has not yet seen
+      // the caveat, let alone acted on it.
+      const hasWarnings = (body.results || []).some(r => r.warning);
+      if (!hasErrors && !hasWarnings) {
         importedTimerRef.current = setTimeout(() => {
           importedTimerRef.current = null;
           // onImported is async (admin.jsx wires it to fetchCompetitions
@@ -1563,6 +1618,12 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   // previewed rows would be refused for their shiaijo count.
   const venueCourts = (tournament && tournament.courts) || [];
   const previewShiaijoProblems = (preview || []).filter(comp => previewRowShiaijoError(comp, venueCourts)).length;
+
+  // Computed once and reused by both post-import banners below (the success
+  // banner and its warning-needs-attention sibling), rather than each
+  // re-scanning results itself.
+  const anyError = !!results && results.some(r => r.error);
+  const anyWarning = !!results && results.some(r => r.warning);
 
   return (
     <div className="app">
@@ -1668,17 +1729,42 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                     </div>
                     {r.error
                       ? <span className="tag-badge tag-badge--warn">✕ not imported</span>
-                      : <span className="tag-badge">✓ imported</span>}
+                      : r.warning
+                        ? <span className="tag-badge tag-badge--warn">⚠ imported</span>
+                        : <span className="tag-badge">✓ imported</span>}
                   </div>
                   {r.error && (
                     <div className="import-result__error" role="alert" data-testid="import-result-error">
                       {importRowErrorText(r.error)}
                     </div>
                   )}
+                  {/* bc-pnum [review] round 2, item 2: the row succeeded (no
+                      .import-result__error, no "not imported" badge), but
+                      needs the operator's attention -- currently only the
+                      import-boundary prefix reassignment, whose already-
+                      printed tags for this competition are now wrong. role
+                      "status" not "alert": this is a caveat on a success,
+                      not a failure. */}
+                  {r.warning && (
+                    <div className="import-result__warning" role="status" data-testid="import-result-warning">
+                      {r.warning}
+                    </div>
+                  )}
                 </div>
               ))}
-              {!results.some(r => r.error) && (
+              {/* bc-pnum [review] round 2, item 2: the auto-navigate banner
+                  only fires when nothing needs a second look. A row can
+                  succeed with a warning (currently only a reassigned
+                  import-boundary prefix), and navigating away then would
+                  carry the operator past the one place that warning is
+                  shown before they could act on it. */}
+              {!anyError && !anyWarning && (
                 <div className="alert alert--success" style={{ marginTop: 12 }}>All competitions imported successfully. Returning to dashboard…</div>
+              )}
+              {!anyError && anyWarning && (
+                <div className="alert alert--warn" style={{ marginTop: 12 }}>
+                  All competitions imported, but one or more need attention above before you leave this page.
+                </div>
               )}
             </div>
           </div>

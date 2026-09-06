@@ -284,3 +284,61 @@ func TestMpN6keOverridesSaveInvalidatesStandings(t *testing.T) {
 	assert.Greater(t, store.FileVersion(compID, "overrides.json"), mid,
 		"a same-millisecond second overrides write must advance the version again")
 }
+
+// TestSampleStandingsTokensCarriesPoolsVersion pins bc-pnum A2's engine-side
+// half: pools.csv joined standingsTokens (poolsMtime/poolsVersion) because
+// RenumberCompetitors is a pools.csv WRITER -- the first one that runs after
+// a pool phase already has standings -- and the mp-n6ke class of bug (a
+// same-tick write invisible to mtime alone) applies to it exactly as it does
+// to pool-matches.csv and overrides.json above. Without poolsVersion in the
+// token, a standings read cached just before a same-millisecond renumber
+// would keep validating afterwards.
+//
+// White-box (package engine): sampleStandingsTokens and standingsTokens are
+// both unexported, and this is the one place that can observe the token
+// actually reads pools.csv's LIVE FileVersion rather than a value fixed at
+// some earlier point (e.g. a constant, or one sampled before this call).
+func TestSampleStandingsTokensCarriesPoolsVersion(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "n6ke-pools-version"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{ID: "p1", Name: "A1", Dojo: "D"}}},
+	}))
+
+	before := eng.sampleStandingsTokens(compID)
+
+	// A second SavePools with no sleep: the same shape RenumberCompetitors's
+	// read-compare-save produces when a prefix change moves every Number.
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{ID: "p1", Name: "A1", Dojo: "D", Number: "K1"}}},
+	}))
+	after := eng.sampleStandingsTokens(compID)
+
+	assert.Equal(t, store.FileVersion(compID, "pools.csv"), after.poolsVersion,
+		"sampleStandingsTokens.poolsVersion must equal the store's CURRENT pools.csv FileVersion, not a stale or hardcoded value")
+	assert.NotEqual(t, before.poolsVersion, after.poolsVersion,
+		"a pools.csv rewrite must move the sampled poolsVersion, or a standings cache entry stamped before a renumber would keep validating against post-renumber reads")
+}
+
+// TestSampleStandingsTokensCarriesConfigVersion pins the config.md half of
+// the cache key: computeStandingsFrom reads the competition record for the
+// scoring mode (Engi, TeamSize) and markTiedStandings for the format, so a
+// settings save must move the sampled token exactly as a pools.csv rewrite
+// does, or a live entry keeps serving standings computed under the old mode.
+func TestSampleStandingsTokensCarriesConfigVersion(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "n6ke-config-version"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Format: state.CompFormatMixed}))
+
+	before := eng.sampleStandingsTokens(compID)
+
+	// A second save with no sleep: the same shape a settings PUT produces.
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: compID, Format: state.CompFormatLeague}))
+	after := eng.sampleStandingsTokens(compID)
+
+	assert.Equal(t, store.FileVersion(compID, "config.md"), after.configVersion,
+		"sampleStandingsTokens.configVersion must equal the store's CURRENT config.md FileVersion")
+	assert.NotEqual(t, before.configVersion, after.configVersion,
+		"a config.md save must move the sampled configVersion, or a standings cache entry stamped before a settings change would keep validating after it")
+}

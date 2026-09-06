@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -739,6 +740,16 @@ func (c Competition) EffectivePoolWinners() int {
 	return 2
 }
 
+// EffectiveNumberPrefix returns NumberPrefix trimmed of surrounding
+// whitespace, the ONE fold every reader of the field compares/composes
+// under (PR #416 finding 2): a stored prefix is always assigned already
+// trimmed, but a boundary that only trims on WRITE leaves every reader
+// exposed to a record written before that boundary existed, or edited by
+// hand. Readers route through this rather than comp.NumberPrefix directly.
+func (c Competition) EffectiveNumberPrefix() string {
+	return strings.TrimSpace(c.NumberPrefix)
+}
+
 // Competition.ExtraQualifiers values (bc-qual). Only meaningful under
 // minimum-players-per-pool sizing (PoolSizeMode != "max"); see
 // ValidateExtraQualifiers.
@@ -867,15 +878,21 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 // at all).
 func (c Competition) QualifiersForPool(pool helper.Pool) int {
 	base := c.EffectivePoolWinners()
-	// PoolSize <= 0 means there is no minimum to be over: without a baseline
-	// the oversized test would mark EVERY pool oversized, so degrade to the
-	// uniform count instead. Unreachable for a started competition (the
-	// engine rejects starting with an unset PoolSize) but cheap to make safe
-	// against drifted or hand-edited config.md data.
-	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
-		return base + 1
+	if c.ExtraQualifiers != ExtraQualifiersLargerPools {
+		return base
 	}
-	return base
+	// helper.QualifiersForOversizedPool (bc-drwx item 13) owns the
+	// "oversized pool sends one extra qualifier" rule itself, shared with
+	// extraQualifierOverridesFromSizes (internal/helper/
+	// pool_distribution_tree_aware.go), which used to be a second,
+	// independent implementation of the identical arithmetic. PoolSize <= 0
+	// means there is no minimum to be over -- without a baseline the
+	// oversized test would mark EVERY pool oversized, so
+	// QualifiersForOversizedPool degrades to the uniform count instead.
+	// Unreachable for a started competition (the engine rejects starting
+	// with an unset PoolSize) but cheap to make safe against drifted or
+	// hand-edited config.md data.
+	return helper.QualifiersForOversizedPool(len(pool.Players), c.PoolSize, base)
 }
 
 // MatchWinnerRanksNeeded returns the highest per-pool qualifier rank the

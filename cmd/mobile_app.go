@@ -165,6 +165,18 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
 	eng := engine.New(store)
 
+	// Data written by a version that predates the never-empty number prefix
+	// rule is migrated as it is LOADED, here, before a single request is
+	// served: every competition with an empty prefix gets the derived default
+	// and its pools.csv is numbered under it (engine.MigrateNumberPrefixes).
+	migrated, err := eng.MigrateNumberPrefixes()
+	if err != nil {
+		return fmt.Errorf("migrate competitor number prefixes in %q: %w", o.folder, err)
+	}
+	if len(migrated) > 0 {
+		slog.Info("mobile-app: assigned number prefixes to competitions saved by an earlier version", "competitions", migrated)
+	}
+
 	// SSE subscriber cap is configurable via SSE_MAX_CLIENTS to handle
 	// deployments with unusually high viewer counts; non-numeric values
 	// silently fall back to the default rather than failing startup,

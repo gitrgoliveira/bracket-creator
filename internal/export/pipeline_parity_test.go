@@ -181,6 +181,13 @@ func TestExportPipelineSheetParity(t *testing.T) {
 				comp.Status = state.CompStatusSetup
 				comp.Courts = []string{"A"}
 				comp.StartTime = "09:00"
+				// Set explicitly (rather than relying on the draw pipeline's own
+				// default-prefix assignment on start) so this case pins the
+				// "Names to Print A" sheet on a fixture that does not depend on
+				// that separate derivation: any knockout-only competition
+				// carries a prefix once started, and this is testing THAT shape,
+				// not the default-assignment behavior itself.
+				comp.NumberPrefix = "P"
 				require.NoError(t, store.SaveCompetition(comp))
 
 				players := make([]domain.Player, 4)
@@ -196,7 +203,10 @@ func TestExportPipelineSheetParity(t *testing.T) {
 				require.NoError(t, store.SaveParticipants(compID, players))
 				require.NoError(t, eng.StartCompetition(compID))
 			},
-			mustAppearInBoth: []string{"Tree 1"},
+			// "Names to Print A" pins GAP 1's fix directly: a pure playoffs
+			// competition (no pools.csv) with a number prefix must get the
+			// sheet from BOTH builders, not just the blank-template export.
+			mustAppearInBoth: []string{"Tree 1", "Names to Print A"},
 		},
 	}
 

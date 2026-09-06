@@ -49,7 +49,7 @@ import {
   HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, LABEL_COURTS,
+  LABEL_NUMBER_PREFIX, cutNumberPrefix, numberPrefixHint, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
@@ -309,15 +309,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
     }
 
-    // Trim numberPrefix: the input does substring(0, 3) per keystroke
-    // but doesn't trim, so typing "  A" stores "  A" in local state and
-    // (without this) lands "  A" on the server. The CREATE flow
-    // (AdminCreateCompetition.create's deriveCompetitionName + trim
-    // chain in admin_setup.jsx) already trims at create time; this
-    // mirrors that for the SETTINGS edit flow so participant numbers
-    // generated from the prefix can't end up like "  A1" / "  A2".
-    // Cross-file guard symmetry: same shape as the comp.Name trim above.
-    const trimmedPrefix = (effective.numberPrefix || "").trim();
+    // cutNumberPrefix (competition_shape.jsx,): the TextField's
+    // onChange already runs this per keystroke, so `effective.numberPrefix`
+    // should already be trimmed and character-safe-capped -- this is a
+    // defensive re-application at the payload boundary, the same posture
+    // normalizeConfigForFormat/normalizeConfigForKind take (only ever
+    // called here, never a second time from the control's own onChange).
+    // Historically this line only trimmed (`.trim()`), because the
+    // per-keystroke cut used `.substring(0, 3)` and never trimmed, so
+    // typing "  A" stored "  A" in local state and (without this) landed
+    // "  A" on the server; the CREATE flow (AdminCreateCompetition.create's
+    // deriveCompetitionName + trim chain in admin_setup.jsx) already
+    // trimmed at create time, so this mirrored that for the SETTINGS edit
+    // flow. cutNumberPrefix now does both jobs in one call.
+    const trimmedPrefix = cutNumberPrefix(effective.numberPrefix);
     // Build the PUT payload from settings fields ONLY: do NOT spread the
     // full `c` snapshot or the full `next` snapshot. Pre-fix this was
     // `{ ...c, ...next, ... }`, which carried `local.status` and
@@ -732,15 +737,24 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
   };
 
   // draw-ready lock: output-affecting fields: those that reach the Excel
-  // generator (pools, courts, format, kind, team size, mirror, numberPrefix,
+  // generator (pools, courts, format, kind, team size, mirror,
   // withZekkenName): are disabled while a draw exists. Fields that do NOT
-  // affect the generated workbook (name, date, startTime, checkInEnabled,
-  // naginata) remain editable. Discard the draw from the competition header to
-  // unlock everything.
+  // affect the generated workbook (name, date, startTime, checkInEnabled)
+  // remain editable. Discard the draw from the competition header to
+  // unlock everything. numberPrefix is deliberately NOT in the disabled set
+  // (bc-pnum G4b): it only labels competitors, and RenumberCompetitors
+  // rewrites pools.csv in place after every save, so it stays editable in
+  // every status; see its own field below for the inline reprint warning.
+  // (bc-pnum C5: naginata is NOT on this "remain editable" list -- it has
+  // its own lock, `lockedAfterDraw` below, which the Engi/Naginata comment
+  // right after this one describes.)
   const isDrawReady = local.status === "draw-ready";
-  // Engi and Naginata are locked once the competition has started (pools, playoffs,
-  // completed, or any future status beyond draw-ready): flipping engi mid-tournament
-  // changes the scoring paradigm; flipping naginata affects the bronze match.
+  // Engi and Naginata are locked from draw-ready onward (lockedAfterDraw =
+  // isDrawReady || isStarted, both checkboxes below use it directly):
+  // flipping engi mid-tournament changes the scoring paradigm; flipping
+  // naginata affects the bronze match, and both would desync from a draw
+  // already generated on the OLD value, the same reason format/courts/pool
+  // sizing lock at draw-ready above.
   const isStarted = !!(local.status && local.status !== "setup" && local.status !== "draw-ready");
 
   // The draw-lock condition and its copy, named once. Both were repeated
@@ -1504,9 +1518,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           })()}
         </div>
       )}
+      {/* bc-pnum C5: unlike the OUTPUT-AFFECTING fields (format, courts, pool
+          sizing, ...), which lock once a draw exists, the prefix is NEVER
+          disabled (bc-pnum G4b): RenumberCompetitors
+          rewrites pools.csv in place after a save, so changing it never
+          invalidates the draw the way format/courts/pool sizing would.
+          A change while a draw already exists is still consequential enough
+          to call out inline, so the hint grows a warning (R10's reuse of
+          this same append-to-hint pattern, without actually locking the
+          input); numberPrefixHint (competition_shape.jsx, PR #416 finding
+          13) owns the full gating rule. */}
       <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
-        value={local.numberPrefix} onChange={(raw) => update("numberPrefix", raw.substring(0, 3))}
-        disabled={isDrawReady} hint={HINT_NUMBER_PREFIX} width={80} />
+        value={local.numberPrefix} onChange={(raw) => update("numberPrefix", cutNumberPrefix(raw))}
+        hint={numberPrefixHint(local.numberPrefix, c.numberPrefix, local.format, lockedAfterDraw)}
+        width={80} />
       <div style={{ display: "flex", flexDirection: "column" }}>
         {/* zekkenApplies/engiApplies express the RULE (competition_shape.jsx);
             this screen keeps its own PRESENTATION of it -- render both

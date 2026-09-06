@@ -58,8 +58,12 @@ const (
 	// 30 days covers the longest conceivable multi-day open tournament.
 	MaxTournamentDurationDays = 30
 
-	MaxLenCompetitionName         = 200
-	MaxLenCompetitionNumberPrefix = 3 // matches admin UI maxLength="3"
+	MaxLenCompetitionName = 200
+	// MaxLenCompetitionNumberPrefix is an alias of helper.MaxNumberPrefixLen,
+	// not a second copy of the cap (PR #416 finding 4): the dependency runs
+	// mobileapp -> helper, so this package imports the one constant rather
+	// than restating it.
+	MaxLenCompetitionNumberPrefix = helper.MaxNumberPrefixLen
 	MaxLenCompetitionStartTime    = 8 // "HH:MM"
 	MaxLenCompetitionDate         = 10
 
@@ -582,14 +586,14 @@ func validateMatchHantei(r *state.MatchResult) error {
 
 // validateBulkScoreLengths enforces persisted-string caps on a single
 // MatchResult before it lands in the engine. Used by the bulk-score
-// endpoint, which writes through RecordMatchResult and so bypasses
+// endpoint, which writes through RecordMatchResultWithIneligibilityTx and so bypasses
 // ScoreRequest.Validate's checks. Same caps as ScoreRequest.Validate
 // so the per-result and per-endpoint enforcement stays in lockstep.
 // allowNumberedEncho mirrors validateSubBout's kachinuki exception; the
 // bulk handler derives it from the competition it already loads.
 func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) error {
 	// Same legacy fold + FULL hantei rule set as validateWithOptions (via the
-	// shared validateMatchHantei): this path writes through RecordMatchResult
+	// shared validateMatchHantei): this path writes through RecordMatchResultWithIneligibilityTx
 	// and nothing downstream re-checks, so a misplaced judges'-decision mark
 	// (or a pre-ruling decidedByHantei flag), an incompatible decision, or a
 	// withdrawal-audit field alongside a hantei verdict must be caught here
@@ -629,6 +633,25 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 		return err
 	}
 	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
+		return err
+	}
+	// bc-idfx: the id twin of the wire-level winner==sideA/sideB check
+	// (validateWithOptions) -- bulk-score bypasses that path entirely (it
+	// writes through RecordMatchResultWithIneligibilityTx, never ScoreRequest.Validate), so a
+	// crafted batch entry naming a winnerId that matches neither side id was
+	// persisted verbatim and counted for nobody in standings.
+	if err := validateWinnerIDMatchesSide(r.WinnerID, r.SideAID, r.SideBID); err != nil {
+		return err
+	}
+	// PR #416 finding 5: the name-vs-id cross-check the two single-dimension
+	// checks above cannot catch on their own.
+	if err := validateWinnerNameIDConsistent(r.Winner, r.WinnerID, r.SideA, r.SideAID, r.SideB, r.SideBID); err != nil {
+		return err
+	}
+	// PR #416 finding 3: a kiken/fusenpai batch entry on a same-name pairing
+	// must name the surviving side via winnerId, or the engine cannot tell
+	// who withdrew and the write silently records no ineligibility at all.
+	if err := validateWithdrawalNamesDisambiguated(r.Decision, r.SideA, r.SideB, r.WinnerID, r.SideAID, r.SideBID); err != nil {
 		return err
 	}
 	if r.FlagsA < 0 {
@@ -869,6 +892,25 @@ func (r *ScoreRequest) validateWithOptions(allowNumberedEncho bool) error {
 			}
 		}
 	}
+	// The id twin of the check above: a client-supplied winnerId naming
+	// NEITHER side id is invalid data, caught here whenever the payload
+	// itself carries enough to check (see validateWinnerIDMatchesSide's own
+	// comment for why a payload that omits the side ids has nothing to
+	// check yet, and where the authoritative check lives for that case).
+	if err := validateWinnerIDMatchesSide(r.WinnerID, r.SideAID, r.SideBID); err != nil {
+		return err
+	}
+	// PR #416 finding 5: the name-vs-id cross-check the two single-dimension
+	// checks above cannot catch on their own.
+	if err := validateWinnerNameIDConsistent(r.Winner, r.WinnerID, r.SideA, r.SideAID, r.SideB, r.SideBID); err != nil {
+		return err
+	}
+	// PR #416 finding 3: a kiken/fusenpai write on a same-name pairing must
+	// name the surviving side via winnerId, or the engine cannot tell who
+	// withdrew and the write silently records no ineligibility at all.
+	if err := validateWithdrawalNamesDisambiguated(r.Decision, r.SideA, r.SideB, r.WinnerID, r.SideAID, r.SideBID); err != nil {
+		return err
+	}
 	// Best-of-3 ippon invariants on the top-level scoreline.
 	if err := validateIppons("", r.IpponsA, r.IpponsB); err != nil {
 		return err
@@ -951,6 +993,112 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 	a := len(ipponsA)
 	b := len(ipponsB)
 	return (a == n && b == 0) || (a == 0 && b == n)
+}
+
+// validateWinnerIDMatchesSide is the id twin of the wire winner==sideA/sideB
+// name check: a WinnerID that names NEITHER SideAID nor SideBID is invalid
+// data (a client cannot declare a winner who isn't one of the two
+// competitors), and shared by both score-writing HTTP paths (validateWithOptions,
+// validateBulkScoreLengths) so the check cannot drift between them.
+//
+// bc-pnum ruling 1d: checked via domain.WinnerIDNamesASide, which passes
+// whenever winnerID is empty (nothing to check) and otherwise requires it to
+// equal one of sideAID/sideBID -- unconditionally, with no "only when both
+// are already known" exemption (that used to tolerate a winnerId matching
+// neither side when only one side id was on the wire, PR #416 finding 6; see
+// domain.WinnerIDNamesASide's own doc comment for why that tolerance no
+// longer holds). SideAID/SideBID are NOT required BY THE WIRE FORMAT
+// (specs/openapi.yaml) -- the caller (backfillMatchIdentityForHantei,
+// internal/mobileapp/handlers_match.go) backfills them from the STORED match
+// whenever the payload names a WinnerID, specifically so this check always
+// has the real pairing to validate against, not just whatever the client
+// happened to send. The engine's backfillMatchIdentity (internal/engine/
+// scoring.go) re-runs the identical check as a second, authoritative gate
+// once its own stored-id backfill has run, so a write that somehow reaches
+// this point without the caller's backfill (e.g. a stored match not found)
+// is still caught there.
+func validateWinnerIDMatchesSide(winnerID, sideAID, sideBID string) error {
+	if domain.WinnerIDNamesASide(winnerID, sideAID, sideBID) {
+		return nil
+	}
+	return &ValidationError{
+		Field:   "winnerId",
+		Message: fmt.Sprintf("must equal sideAId or sideBId, got %q", winnerID),
+	}
+}
+
+// validateWinnerNameIDConsistent rejects a payload whose winner NAME names
+// one side while winnerId names the OTHER side (PR #416 finding 5): a
+// client-introduced contradiction neither validateWithOptions's own
+// winner==sideA/sideB check nor validateWinnerIDMatchesSide catches alone,
+// since each is validated only within its own dimension (name-vs-name,
+// id-vs-id). Skipped when sideA==sideB (a same-name pairing, legal, two
+// competitors from different dojos): the name is then uninformative -- it
+// "matches" both sides simultaneously -- so it carries nothing to contradict
+// the id with, and domain.AttributeWinnerSide already prefers the id over
+// the name for exactly that row shape.
+func validateWinnerNameIDConsistent(winner, winnerID, sideA, sideAID, sideB, sideBID string) error {
+	// Unlike validateWinnerIDMatchesSide (bc-pnum ruling 1d), this needs BOTH
+	// side ids known: it asks WHICH side winnerId names (idIsA/idIsB below),
+	// not merely whether it names a side at all, and with only one id known
+	// there is no way to tell whether the missing side's (still absent) id
+	// would have been the match -- domain.WinnerIDNamesASide's looser "names
+	// a side, or empty" predicate does not express this, so this stays its
+	// own inline check rather than sharing that one.
+	if winner == "" || winnerID == "" || sideAID == "" || sideBID == "" || sideA == sideB {
+		return nil
+	}
+	winnerIsA := winner == sideA
+	winnerIsB := winner == sideB
+	if !winnerIsA && !winnerIsB {
+		return nil // caught by the plain winner==sideA/sideB check instead
+	}
+	idIsA := winnerID == sideAID
+	idIsB := winnerID == sideBID
+	if (winnerIsA && idIsB) || (winnerIsB && idIsA) {
+		return &ValidationError{
+			Field:   "winnerId",
+			Message: fmt.Sprintf("winnerId %q names a different side than winner %q", winnerID, winner),
+		}
+	}
+	return nil
+}
+
+// validateWithdrawalNamesDisambiguated rejects a kiken/fusenpai score write
+// whose sides share a display name (sideA == sideB, a legal same-name
+// pairing, two competitors from different dojos) unless winnerId names one
+// of the two known side ids (PR #416 finding 3). Without it, the engine
+// cannot tell which of the two same-named competitors withdrew:
+// recordIneligibilityFromDecision's own ambiguity guard rejects with a
+// *ValidationError, but both engine write paths (RecordMatchResultWithIneligibilityTx,
+// scoring.go/scoring_tx.go) log and swallow that error as inherited-data
+// depth rather than fail the primary write ("a write answers for what it
+// introduces, not for what it inherited") -- so today the score is persisted
+// at 200 with NO CompetitorStatus recorded at all, and the withdrawal
+// silently never takes effect. The SPA always sends winnerId (bc-idfx); this
+// closes the gap for a legacy/non-SPA payload that sends only names.
+//
+// Only fires when both sides are present and equal, and the decision is a
+// withdrawal; an empty pairing has nothing to disambiguate and is left to
+// the engine's own name/id backfill from the stored match.
+func validateWithdrawalNamesDisambiguated(decision, sideA, sideB, winnerID, sideAID, sideBID string) error {
+	if sideA == "" || sideB == "" || sideA != sideB {
+		return nil
+	}
+	if !domain.IsKikenDecisionStr(decision) && decision != string(domain.DecisionFusenpai) {
+		return nil
+	}
+	// domain.WinnerIDNamesASide treats an EMPTY winnerID as trivially
+	// acceptable (nothing to check); the explicit winnerID != "" guard here
+	// keeps this function's own rule that an empty winnerId does NOT
+	// disambiguate a same-name withdrawal.
+	if winnerID != "" && domain.WinnerIDNamesASide(winnerID, sideAID, sideBID) {
+		return nil
+	}
+	return &ValidationError{
+		Field:   "winnerId",
+		Message: fmt.Sprintf("%s on a same-name pairing (%q) requires winnerId naming the surviving side", decision, sideA),
+	}
 }
 
 // validateIppons is the ONE gate every ippon slice crosses on its way in, from

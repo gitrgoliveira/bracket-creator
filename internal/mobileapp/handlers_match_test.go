@@ -287,6 +287,152 @@ func TestBulkScoreHandler_HanteiValidation(t *testing.T) {
 	})
 }
 
+// TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide is the bead's
+// repro (bc-idfx finding 10): a bulk-score entry whose winnerId names
+// NEITHER sideAId nor sideBId is invalid data. Before the fix, nothing at
+// the HTTP boundary or in the engine's backfillMatchIdentity checked this,
+// so the row was persisted verbatim as a "completed" match with a winner
+// that counts for nobody in standings (resolveWinnerSide's id branch also
+// silently fails open in that shape). It must now land in `errors`, never
+// in `succeeded`, and the stored match must be left untouched.
+func TestBulkScoreHandler_RejectsWinnerIDMatchingNeitherSide(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+	store.SaveCompetition(&state.Competition{ID: "wid"})
+	require.NoError(t, store.SavePoolMatches("wid", []state.MatchResult{
+		{ID: "PoolA-1", SideA: "P1", SideAID: idA, SideB: "P2", SideBID: idB, Status: state.MatchStatusScheduled},
+	}))
+
+	body, _ := json.Marshal([]state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "P1", SideAID: idA, SideB: "P2", SideBID: idB,
+			Winner: "P1", WinnerID: "not-a-side-id",
+			IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/wid/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "bulk-score's partial-success shape returns 200 with per-item errors")
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded, "a winnerId matching neither side must not be counted as succeeded")
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+	// The exact phrase from validateWinnerIDMatchesSide (validation.go), not
+	// just "winnerId": backfillMatchIdentity (internal/engine/scoring.go)
+	// rejects the identical shape one layer downstream with a DIFFERENTLY
+	// worded message ("winnerId %q does not match sideAId..."), which also
+	// contains "winnerId" -- a bare substring check here would stay green
+	// even if validateBulkScoreLengths's own call to
+	// validateWinnerIDMatchesSide were removed, so it would not actually pin
+	// THIS boundary check.
+	assert.Contains(t, resp.Errors[0].Error, "must equal sideAId or sideBId")
+
+	stored, err := store.LoadPoolMatches("wid")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Empty(t, stored[0].Winner, "the rejected write must not have landed")
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the match must remain unscored")
+}
+
+// TestBulkScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected pins PR #416
+// finding 3, superseding the bc-idfx review's item 7 fix (formerly
+// ...RejectedNotMisattributed, which pinned "accept but record nothing" as
+// the correct outcome for this exact shape).
+//
+// bulk-score writes a decision straight through RecordMatchResultWithIneligibilityTx
+// (validateBulkScoreLengths runs no validateDecision), so a kiken entry can
+// reach here with SideAID/SideBID stamped but no Winner/WinnerID at all -- a
+// shape RecordDecisionTx's own decisionBy-based resolution never produces,
+// but a bulk-imported/corrected batch legally can. The two competitors here
+// share the display name "Tanaka" from different dojos.
+//
+// Before finding 3, this ambiguous row was silently ACCEPTED at 200 with no
+// CompetitorStatus written at all: item 7 stopped the wrong namesake being
+// misattributed, but "accept and record nothing" still means the withdrawal
+// the operator entered never takes effect, with no error surfaced anywhere
+// in the response. validateWithdrawalNamesDisambiguated (validation.go) now
+// rejects this shape at the HTTP boundary instead: a same-name pairing
+// deciding a kiken/fusenpai must name the surviving side via winnerId, so
+// the operator is told to disambiguate rather than have the decision
+// silently no-op.
+func TestBulkScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const (
+		idTanakaDojoB = "33333333-3333-4333-8333-333333333333"
+		idTanakaDojoA = "44444444-4444-4444-8444-444444444444"
+	)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "knm"}))
+	require.NoError(t, store.SaveParticipants("knm", []domain.Player{
+		{ID: idTanakaDojoB, Name: "Tanaka", Dojo: "DojoB"},
+		{ID: idTanakaDojoA, Name: "Tanaka", Dojo: "DojoA"},
+	}))
+	require.NoError(t, store.SavePoolMatches("knm", []state.MatchResult{
+		{
+			ID:    "PoolA-1",
+			SideA: "Tanaka", SideAID: idTanakaDojoA,
+			SideB: "Tanaka", SideBID: idTanakaDojoB,
+			Status: state.MatchStatusScheduled,
+		},
+	}))
+
+	// Kiken decision, no Winner and no WinnerID at all: the row's own sides
+	// share a name, so nothing on this payload names WHICH Tanaka withdrew.
+	body, _ := json.Marshal([]state.MatchResult{
+		{
+			ID:    "PoolA-1",
+			SideA: "Tanaka", SideAID: idTanakaDojoA,
+			SideB: "Tanaka", SideBID: idTanakaDojoB,
+			Decision: string(domain.DecisionKikenVoluntary),
+			IpponsA:  []string{"M"},
+			Status:   state.MatchStatusCompleted,
+		},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/knm/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "bulk-score's partial-success shape returns 200 with per-item errors")
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded, "an ambiguous same-name withdrawal with no winnerId must be rejected, not silently accepted")
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "PoolA-1", resp.Errors[0].MatchID)
+	assert.Contains(t, resp.Errors[0].Error, "winnerId")
+
+	stored, err := store.LoadPoolMatches("knm")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
+
+	statuses, err := store.LoadCompetitorStatus("knm")
+	require.NoError(t, err)
+	assert.Empty(t, statuses, "neither namesake may be marked ineligible from a rejected write")
+}
+
 // TestScoreHandler_SidesLessLegacyHanteiRecordsVerdict pins the bc-qual
 // review fix: a legacy client may send a score payload that omits
 // sideA/sideB (specs/openapi.yaml does not require them; the engine's
@@ -611,6 +757,38 @@ func TestBackfillMatchIdentityForHantei(t *testing.T) {
 			wantStoreCall: false,
 		},
 		{
+			// PR #416 finding 7: a WinnerID-only trigger (no hantei flag, no
+			// mark) narrows to the two id fields, not all four -- once both
+			// ids are already on the wire, validateWinnerIDMatchesSide has
+			// everything it needs and the store is never consulted, even
+			// though sideA/sideB (names) are NOT present here. This is the
+			// case that differentiates the narrowed gate from the pre-PR
+			// #416-finding-7 one: with names empty and only ids present, the
+			// OLD gate (WinnerID != "" alone) would still have read the
+			// store (the old "all four present" skip never applied, since
+			// names were empty); the new gate does not, because it looks
+			// only at the two id fields for a WinnerID-only trigger.
+			name:          "winnerId set, both ids already present, sides absent, no hantei: store is never consulted",
+			req:           state.MatchResult{SideAID: "client-a", SideBID: "client-b", Winner: "Alice", WinnerID: "client-a"},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", sideAID: "someone-else", sideBID: "and-else", found: true},
+			wantSideAID:   "client-a",
+			wantSideBID:   "client-b",
+			wantStoreCall: false,
+		},
+		{
+			// Mirror of the case above with only ONE id present: the
+			// narrowed WinnerID-only trigger still fires (SideBID is empty),
+			// so the store IS consulted.
+			name:          "winnerId set, only one id present, no hantei: store is consulted to fill the missing id",
+			req:           state.MatchResult{SideAID: "client-a", Winner: "Alice", WinnerID: "client-a"},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "someone-else", sideBID: "id-b", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "client-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
 			name:          "all four fields already present: store is never consulted",
 			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", SideAID: "client-a", SideBID: "client-b", DecidedByHantei: trueFlag},
 			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", sideAID: "someone-else", sideBID: "and-else", found: true},
@@ -810,6 +988,343 @@ func TestScoreHandler_NameDriftedSameNamePairHanteiNow400s(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	assert.NotEqual(t, state.MatchStatusCompleted, stored[0].Status)
+}
+
+// TestScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected is PR #416
+// finding 3's single-score (PUT /score) counterpart to
+// TestBulkScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected: the same
+// same-name-pairing-without-winnerId shape must be rejected identically
+// through validateWithOptions (the ScoreRequest.Validate() path), not only
+// through validateBulkScoreLengths.
+func TestScoreHandler_KikenSameNameNamesakesNoWinnerIDRejected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "knm2"})
+	require.NoError(t, store.SavePoolMatches("knm2", []state.MatchResult{
+		{ID: "P1-1", SideA: "Tanaka", SideAID: "id-tanaka-a", SideB: "Tanaka", SideBID: "id-tanaka-b", Status: state.MatchStatusScheduled},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Tanaka", SideAID: "id-tanaka-a", SideB: "Tanaka", SideBID: "id-tanaka-b",
+		Decision:   string(domain.DecisionKikenVoluntary),
+		DecisionBy: "aka",
+		IpponsA:    []string{"○", "○"},
+		Status:     state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/knm2/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "winnerId")
+
+	stored, err := store.LoadPoolMatches("knm2")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
+}
+
+// TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable is PR #416
+// finding 10: a corrupt overrides.json makes computeStandingsFrom (reached
+// during a mixed-format pool score write via the mp-e2k1 guard) fail closed,
+// correctly -- but before this fix the error was unmapped and fell through
+// to internalError's 500, which the SPA's offline write queue retries
+// forever (mp-q8c6 poisoned-queue pattern), with no way to repair the file
+// short of an operator deleting it by hand (every override writer, reset
+// included, loads-then-saves and so fails identically against the same
+// corrupt file). The fix maps state.ErrCorruptOverrides to a terminal 422
+// naming the file, and Store.ResetOverridesForce (called here directly,
+// since the reset-overrides HTTP handler in handlers_competition.go is
+// outside this change's scope) is the load-free repair door.
+func TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-score"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	// Corrupt overrides.json directly (mirrors engine's corruptOverridesFile
+	// test helper, package-private there): the competition directory must
+	// already exist, which SaveCompetition above guaranteed.
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+		IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
+
+	// Repair: the load-free reset door.
+	require.NoError(t, store.ResetOverridesForce(compID))
+
+	// Re-score now succeeds.
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/Pool A-0/score", bytes.NewBuffer(payload))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code, "body: %s", w2.Body.String())
+
+	stored, err = store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+}
+
+// TestBulkScoreHandler_CorruptOverrides_ReasonEnriched is bc-pnum gap 3's
+// bulk-score mirror of TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable.
+// Unlike every single-match write endpoint, POST .../matches/bulk-score never
+// fails the WHOLE request: every result is processed independently and the
+// response is always HTTP 200 with a per-entry {matchId, error, reason}
+// breakdown, so there is no terminal 422 to give a corrupt-overrides entry
+// here. Before this fix the per-entry `reason` field was populated only for
+// "superseded"; a corrupt overrides.json fell into the untagged free-text
+// `error` bucket, indistinguishable from an arbitrary rejection an importer
+// would otherwise retry verbatim. The fix tags it "corrupt_overrides" (like
+// the machine-readable code the single-match endpoints return), so an
+// importer can route the operator to DELETE .../overrides instead.
+func TestBulkScoreHandler_CorruptOverrides_ReasonEnriched(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "corrupt-ov-bulk"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+	}))
+
+	overridesPath := filepath.Join(store.GetFolder(), "competitions", compID, "overrides.json")
+	require.NoError(t, os.WriteFile(overridesPath, []byte("{not valid json"), 0o600))
+
+	body, _ := json.Marshal([]state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+			IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted},
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	// Always 200, partial success: the endpoint never fails the whole batch.
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+			Reason  string `json:"reason"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded)
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "Pool A-0", resp.Errors[0].MatchID)
+	assert.Equal(t, "corrupt_overrides", resp.Errors[0].Reason)
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
+}
+
+// TestScoreHandler_ContradictoryWinnerNameAndIDRejected is PR #416 finding
+// 5's mobileapp-level repro: a payload whose winner NAME names one side
+// while winnerId names the OTHER is a client-introduced contradiction that
+// neither the plain winner==sideA/sideB check nor validateWinnerIDMatchesSide
+// catches alone (each is checked only within its own dimension). Distinct
+// side names (unlike the same-name-pair tests above) are used so there is no
+// ambiguity to trade against: Winner=="Alice" unambiguously names sideA,
+// WinnerID names sideB's id, so the two disagree outright.
+func TestScoreHandler_ContradictoryWinnerNameAndIDRejected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "contra1"})
+	require.NoError(t, store.SavePoolMatches("contra1", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob"},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideB: "Bob", SideAID: "id-alice", SideBID: "id-bob",
+		Winner: "Alice", WinnerID: "id-bob", // name says Alice, id says Bob
+		IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/contra1/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "winnerId")
+
+	stored, err := store.LoadPoolMatches("contra1")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.NotEqual(t, state.MatchStatusCompleted, stored[0].Status, "the contradictory write must not have landed")
+}
+
+// TestScoreHandler_MixedIDRosterInventedWinnerIDSucceeds is PR #416 finding
+// 6's mobileapp-level repro: a pool match generated over a mixed-id roster
+// (TestStore_ParticipantsCSV_MixedIDs) stamps SideAID for the side whose
+// participant carries a real UUID and leaves SideBID empty for the side that
+// doesn't. The SPA invents an id from the id-less side's own NAME when
+// building its player map (api_serializers.jsx buildPlayerMap: `id: norm.id
+// || norm.name`) and sends that as winnerId when the id-less side wins.
+// Before the fix, backfillMatchIdentity's OR-gated id check treated "one
+// side id known" as enough to demand the invented winnerId match a real
+// stored id, and 400'd every such score outright -- the match could never be
+// completed at all. The fix requires BOTH ids to be known before an
+// unrecognized winnerId is treated as a contradiction; with only SideAID
+// known here, the invented winnerId is dropped (never persisted) and the
+// write proceeds via the name-based winner inference.
+// TestScoreHandler_MixedIDRosterInventedWinnerIDRejected was
+// TestScoreHandler_MixedIDRosterInventedWinnerIDSucceeds. bc-pnum ruling 1c
+// closed the underlying gap this scenario exercised: the draw now refuses to
+// run over a roster with an id-less row (helper.ValidateNoMissingParticipantIDs),
+// so a real draw can no longer stamp a mixed-id pool row like the one this
+// test writes directly, and the SPA no longer invents a winnerId from a name
+// (api_serializers.jsx sends winnerId only when the server supplied that
+// side's real id). bc-pnum ruling 1d removed the tolerance that used to drop
+// (rather than reject) an unattributable winnerId whenever only one side id
+// was known -- see domain.WinnerIDNamesASide's doc comment -- so this same
+// payload must now be refused as a 400, naming the field, not silently
+// completed with the invented string persisted as WinnerID.
+func TestScoreHandler_MixedIDRosterInventedWinnerIDRejected(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "mixedid1"})
+	require.NoError(t, store.SavePoolMatches("mixedid1", []state.MatchResult{
+		// SideA (Alice) has a real stamped id; SideB (Bob) does not, mirroring
+		// a mixed-id participants.csv roster.
+		{ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "", Status: state.MatchStatusScheduled},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideB: "Bob",
+		Winner: "Bob", WinnerID: "Bob", // invented from the id-less side's own name
+		IpponsB: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/mixedid1/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "winnerId")
+
+	stored, err := store.LoadPoolMatches("mixedid1")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "a rejected write must not land")
+	assert.Empty(t, stored[0].Winner)
+}
+
+// TestScoreHandler_MixedIDRosterWinnerIDMatchingKnownSideSucceeds is the
+// companion control for the rejection above, same mixed-id roster shape, but
+// the winnerId genuinely names the one stamped side: this must still write
+// cleanly, matching TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide's
+// engine-level pin of the identical rule.
+func TestScoreHandler_MixedIDRosterWinnerIDMatchingKnownSideSucceeds(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "mixedid2"})
+	require.NoError(t, store.SavePoolMatches("mixedid2", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "", Status: state.MatchStatusScheduled},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideB: "Bob",
+		Winner: "Alice", WinnerID: "id-alice", // correctly names the one stamped side
+		IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/mixedid2/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("mixedid2")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+	assert.Equal(t, "Alice", stored[0].Winner)
+	assert.Equal(t, "id-alice", stored[0].WinnerID)
+}
+
+// TestScoreHandler_BothSideIDsPresentMatchingWinnerIDSucceeds is PR #416
+// finding 7's HTTP-level pin: a completion write whose payload already
+// carries BOTH sideAId and sideBId, plus a winnerId correctly naming one of
+// them, must succeed without needing backfillMatchIdentityForHantei's store
+// read at all (see TestBackfillMatchIdentityForHantei's "winnerId set, both
+// ids already present, no hantei" case for the read-skip itself) --
+// validateWinnerIDMatchesSide already has everything it needs from the wire
+// payload.
+func TestScoreHandler_BothSideIDsPresentMatchingWinnerIDSucceeds(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "bothids1"})
+	require.NoError(t, store.SavePoolMatches("bothids1", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "id-bob", Status: state.MatchStatusScheduled},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "id-bob",
+		Winner: "Alice", WinnerID: "id-alice",
+		IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/bothids1/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("bothids1")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+	assert.Equal(t, "Alice", stored[0].Winner)
+	assert.Equal(t, "id-alice", stored[0].WinnerID)
 }
 
 func TestQuickScoreHandler(t *testing.T) {

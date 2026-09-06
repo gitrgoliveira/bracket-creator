@@ -34,6 +34,15 @@ import (
 // cmd already imports internal/engine and internal/state. Neither side is
 // re-implemented. The CLI's draw is read back out of the workbook it actually
 // wrote, and the engine's out of the files it actually persisted.
+//
+// helper.PoolSeeding, named above as the function this drift was found in, no
+// longer exists (bc-drwx item 11): both paths now delegate to the tree-aware
+// distributor (buildPoolPhaseTreeAwareCore, pool_distribution_tree_aware.go),
+// which places seeds via the same placeSeedIndices arithmetic PoolSeeding
+// used and reorders for courts unconditionally, so the two defects this file
+// was written to catch cannot recur through that seam. The history above
+// stays as a record of what the ORIGINAL drift was; every present-tense
+// comment below describes today's distributor, not PoolSeeding.
 
 // parityEntrant is one competitor, fed to the CLI as a CSV line and to the
 // engine as a domain.Player.
@@ -58,19 +67,22 @@ func parityRoster(n int) []parityEntrant {
 	return roster
 }
 
-// parityClusteredRoster builds n competitors sharing `dojos` clubs, dealt round
-// robin so club-mates start out SPREAD across the roster (Kendoka 01 and
+// parityClusteredRoster builds n competitors sharing `dojos` dojos, dealt round
+// robin so dojo-mates start out SPREAD across the roster (Kendoka 01 and
 // Kendoka 05 are both Dojo 01 when dojos=4).
 //
-// It exists because parityRoster cannot detect an unseeded PoolSeeding call at
-// all. With one dojo per competitor every dojoCount is 1, so PoolSeeding's
-// cluster sort - (count descending, then dojo name) over a roster already in
-// dojo-name order - is a stable no-op, and the function is the IDENTITY on an
-// unseeded roster. A no-seeds subtest built on parityRoster therefore passes
-// whether the engine calls PoolSeeding or skips it, which is exactly the
-// regression it claims to pin. Dealing club-mates round robin makes the cluster
-// sort move competitors (all of Dojo 01 first, then Dojo 02, ...), so skipping
-// the call changes pool composition and the parity assertion bites.
+// It exists because parityRoster cannot detect a broken unseeded
+// dojo-avoidance pass at all: with one dojo per competitor, every dojo has
+// exactly one member, so the tree-aware distributor's own bypass
+// (pickDojoTreeAwarePool falls back to leastConflictedPool whenever a dojo
+// has nobody placed yet) fires for EVERY placement, and the draw is the
+// IDENTITY on an unseeded roster whether or not dojo-avoidance runs at all.
+// A no-seeds subtest built on parityRoster therefore passes whether the
+// engine's distribution step runs its full dojo-aware descent or an
+// equivalent flat fill, which is exactly the regression it claims to pin.
+// Dealing dojo-mates round robin gives the descent real work to do (routing
+// Dojo 01's repeats apart, then Dojo 02's, ...), so skipping it changes pool
+// composition and the parity assertion bites.
 func parityClusteredRoster(n, dojos int) []parityEntrant {
 	roster := make([]parityEntrant, n)
 	for i := range roster {
@@ -211,9 +223,27 @@ func cliPoolDraw(t *testing.T, roster []parityEntrant, seeds []domain.SeedAssign
 	}
 	require.Len(t, draw.playerPool, len(roster), "every competitor should appear on the data sheet")
 
-	// Each shiaijo gets its own "Names to Print <label>" sheet whose column A
-	// holds "<pool letter><position>" tags (helper.CreateNamesWithPoolToPrint).
-	// That is the workbook's own statement of which pools run where.
+	// Each shiaijo gets its own "Names to Print <label>" sheet
+	// (helper.CreateNamesWithPoolToPrint). That is the workbook's own
+	// statement of which pools run where: column B on each row is a
+	// cross-sheet formula naming one competitor (buildNameFormula), and
+	// draw.playerPool (built off the data sheet above) already says which
+	// pool that competitor is in.
+	//
+	// bc-pnum: this used to read the tag in column A ("<pool letter>
+	// <position>", e.g. "A1"), which was only ever a bare fallback VALUE
+	// written when the workbook carried no competitor numbers at all
+	// (helper.printNameEntries). Numbering is unconditional now (every CLI
+	// run resolves a --number-prefix default), so column A is unconditionally
+	// a formula referencing the competitor's real Number cell (e.g. "K1"),
+	// which does not encode the pool the way the old fallback tag did. Column
+	// B's name formula still identifies the row's competitor either way, so
+	// reading through it (rather than the tag) works whether or not the
+	// workbook has numbers.
+	//
+	// Formula cells excelize just wrote carry no cached value, so GetRows
+	// (used only here to learn each sheet's row count) returns "" for both
+	// columns; CalcCellValue evaluates the formula for real.
 	//
 	// The sheets are DISCOVERED, never derived from the requested court count.
 	// A --courts value the pool count cannot carry is clamped
@@ -228,11 +258,16 @@ func cliPoolDraw(t *testing.T, roster []parityEntrant, seeds []domain.SeedAssign
 		}
 		nameRows, err := f.GetRows(sheet)
 		require.NoErrorf(t, err, "reading sheet %q", sheet)
-		for _, row := range nameRows {
-			if len(row) == 0 || row[0] == "" {
+		for r := range nameRows {
+			nameCell := fmt.Sprintf("B%d", r+1)
+			name, err := f.CalcCellValue(sheet, nameCell)
+			require.NoErrorf(t, err, "calc %s!%s", sheet, nameCell)
+			if name == "" {
 				continue
 			}
-			draw.poolCourt["Pool "+strings.TrimRight(row[0], "0123456789")] = label
+			pool, ok := draw.playerPool[name]
+			require.Truef(t, ok, "sheet %q names competitor %q not found on the data sheet", sheet, name)
+			draw.poolCourt[pool] = label
 		}
 	}
 	require.Len(t, draw.poolCourt, len(draw.poolSize), "every pool should be claimed by exactly one shiaijo")
@@ -317,9 +352,10 @@ func TestPoolDrawParity_CLIAndEngine(t *testing.T) {
 		isMax    bool
 		// clustered draws the roster from parityClusteredRoster (several
 		// competitors per dojo) instead of parityRoster (one dojo each). Only
-		// the no-seeds cases need it, and they NEED it: PoolSeeding is the
-		// identity on a one-dojo-per-competitor roster, so nothing else can
-		// tell an unseeded PoolSeeding call from a skipped one.
+		// the no-seeds cases need it, and they NEED it: the distributor's
+		// dojo-avoidance pass is the identity on a one-dojo-per-competitor
+		// roster (see parityClusteredRoster's own doc comment), so nothing
+		// else can tell an unseeded distribution call from a skipped one.
 		clustered bool
 	}{
 		// 26 / 4 in max mode is the worked example from the bead: 7 pools,
@@ -328,11 +364,12 @@ func TestPoolDrawParity_CLIAndEngine(t *testing.T) {
 		// Same roster in min mode: 6 pools of 4 with the two leftovers pushed
 		// to the ends by forcePoolSize.
 		{"min_mode_2_courts_4_seeds", 26, 4, 2, 4, false, false},
-		// No seeds at all. PoolSeeding still runs (it clusters by dojo), which
-		// is the behaviour the engine used to skip entirely when seeds were
-		// absent, i.e. in most real app competitions. Both use a CLUSTERED
-		// roster: on a roster with a dojo each, the clustering sort has nothing
-		// to move and both paths agree even with the call skipped.
+		// No seeds at all. The distributor's dojo-avoidance descent still
+		// runs (it routes unseeded competitors apart by dojo), which is the
+		// behaviour the engine used to skip entirely when seeds were absent,
+		// i.e. in most real app competitions. Both use a CLUSTERED roster:
+		// on a roster with a dojo each, the descent has nothing to move and
+		// both paths agree even with the call skipped.
 		{"max_mode_4_courts_no_seeds", 24, 4, 4, 0, true, true},
 		{"min_mode_2_courts_no_seeds", 24, 4, 2, 0, false, true},
 		// Single shiaijo: the deinterleave is a no-op, so this pins that the
@@ -355,9 +392,9 @@ func TestPoolDrawParity_CLIAndEngine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			roster := parityRoster(tc.players)
 			if tc.clustered {
-				// 6 dojos of 4 club-mates each: big enough groups that the
+				// 6 dojos of 4 dojo-mates each: big enough groups that the
 				// cluster sort reorders most of the roster, small enough that
-				// CreatePools can still keep club-mates apart.
+				// CreatePools can still keep dojo-mates apart.
 				roster = parityClusteredRoster(tc.players, 6)
 			}
 

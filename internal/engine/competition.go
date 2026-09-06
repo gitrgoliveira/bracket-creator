@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -253,7 +255,10 @@ func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, err
 		if standErr != nil {
 			return AutoCompleteNoChange, standErr
 		}
-		overridesObj, _ := e.store.LoadOverrides(compID)
+		overridesObj, oerr := e.store.LoadOverrides(compID)
+		if oerr != nil {
+			return AutoCompleteNoChange, oerr
+		}
 		var poolRanks map[string]map[string]int
 		if overridesObj != nil {
 			poolRanks = overridesObj.PoolRanks
@@ -416,8 +421,10 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 // matches are injected only for advancement-affecting groups, so a below-cut
 // group has no DH bouts and groupNeedsChusen returns false. When it does return
 // true the operator resolves the group via the chusen (drawing lots) panel,
-// which writes poolRanks (pool name -> team name -> rank); a group whose every
-// member has an override is resolved and no longer blocks completion.
+// which writes poolRanks (pool name -> helper.CompetitorKey(id, name, dojo) ->
+// rank; lookupPoolRankOverride also honours a legacy bare-name key for
+// pre-identity overrides.json data, see its own doc comment); a group whose
+// every member has an override is resolved and no longer blocks completion.
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {
@@ -428,6 +435,23 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 		}
 	}
 	return false
+}
+
+// CanStart reports whether StartCompetition accepts a competition in status:
+// setup (and the legacy empty status) take the one-click draw-then-run path,
+// draw-ready only flips status over an already-generated draw. It is the ONE
+// statement of that precondition: StartCompetition gates on it, and so does
+// the mobileapp start handler's pre-flight (ensureNumberPrefix), which must
+// act on exactly the statuses the engine will then accept and on no other.
+func CanStart(status state.CompetitionStatus) bool {
+	return status == state.CompStatusDrawReady || CanGenerateDraw(status)
+}
+
+// CanGenerateDraw reports whether GenerateDraw accepts a competition in
+// status: only setup (and the legacy empty status). Shared with the mobileapp
+// generate-draw pre-flight for the same reason as CanStart.
+func CanGenerateDraw(status state.CompetitionStatus) bool {
+	return status == state.CompStatusSetup || status == ""
 }
 
 // StartCompetition starts a competition. When called on a draw-ready
@@ -444,19 +468,18 @@ func (e *Engine) StartCompetition(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	switch comp.Status {
-	case state.CompStatusDrawReady:
-		// Draw already exists; only flip status.
-		return e.transitionDrawToRunning(id)
-	case state.CompStatusSetup, "":
-		// One-click path: generate draw then transition.
-		if err := e.runDrawPipeline(id); err != nil {
-			return err
-		}
-		return e.transitionDrawToRunning(id)
-	default:
+	if !CanStart(comp.Status) {
 		return validationErrorf("competition %s already started", id)
 	}
+	if comp.Status == state.CompStatusDrawReady {
+		// Draw already exists; only flip status.
+		return e.transitionDrawToRunning(id)
+	}
+	// One-click path: generate draw then transition.
+	if err := e.runDrawPipeline(id); err != nil {
+		return err
+	}
+	return e.transitionDrawToRunning(id)
 }
 
 // GenerateDraw generates pools/bracket/Swiss-r1 for a Setup competition
@@ -471,10 +494,10 @@ func (e *Engine) GenerateDraw(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	switch comp.Status {
-	case state.CompStatusSetup, "":
+	switch {
+	case CanGenerateDraw(comp.Status):
 		return e.runDrawPipeline(id)
-	case state.CompStatusDrawReady:
+	case comp.Status == state.CompStatusDrawReady:
 		return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
 	default:
 		return validationErrorf("competition %s cannot generate draw (status: %s)", id, comp.Status)
@@ -804,6 +827,48 @@ func (e *Engine) runDrawPipeline(id string) error {
 		}
 	}
 
+	// runDrawPipeline is the ONE path every non-HTTP caller of
+	// StartCompetition/GenerateDraw reaches too (a future CLI/import
+	// auto-start, and the many engine-level tests that build a Competition
+	// directly), so the never-empty-prefix invariant (G2) is enforced here as
+	// well as at the HTTP handler's own pre-flight (mobileapp.
+	// ensureNumberPrefix): both now route through the same
+	// engine.EnsureNumberPrefix (PR #416 finding 1), so this backstop
+	// validates a derived prefix against sibling competitions exactly like
+	// the HTTP path does, rather than deriving and persisting inline with no
+	// such check.
+	//
+	// This runs OUTSIDE any transaction/lock (see the pipeline-limitations
+	// note on this function: pool/bracket generation runs outside the
+	// comp-config lock, and the only lock this function ever takes is the
+	// brief one inside the atomic commit below), so EnsureNumberPrefix's own
+	// WithCompetitionRenameLock acquire here cannot deadlock against
+	// anything this function already holds.
+	//
+	// allowed is CanGenerateDraw: by the time execution reaches this point,
+	// both StartCompetition's one-click path and GenerateDraw have already
+	// confirmed CanGenerateDraw(comp.Status) against their own outer load, so
+	// this restates the same precondition rather than introducing a new one.
+	//
+	// comp.NumberPrefix is re-read after the call rather than assumed,
+	// because EnsureNumberPrefix operates on its OWN freshly loaded copy: a
+	// concurrent assignment (e.g. two draws racing on the same never-yet-
+	// prefixed competition) may land a different prefix than this call
+	// derived, and comp (and the loadedNumberPrefix snapshot captured just
+	// below) must reflect whichever prefix is actually now on disk.
+	if strings.TrimSpace(comp.NumberPrefix) == "" {
+		if _, err := e.EnsureNumberPrefix(id, CanGenerateDraw, true); err != nil {
+			return fmt.Errorf("assign default number prefix for %s: %w", id, err)
+		}
+		current, err := e.store.LoadCompetition(id)
+		if err != nil {
+			return fmt.Errorf("reload number prefix for %s: %w", id, err)
+		}
+		if current != nil {
+			comp.NumberPrefix = current.NumberPrefix
+		}
+	}
+
 	// Snapshot the loaded config BEFORE the pipeline mutates anything.
 	// The atomic-commit transform below compares `current` (freshly
 	// reloaded under the lock) to THESE snapshots, not to the
@@ -914,6 +979,33 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// review) so ApplySeeds doesn't fail on an absent seeded player. Remaining
 	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
 	seeds = dropSeedAssignments(fullRoster, seeds, excludedByCheckIn)
+
+	// Blank-dojo pre-flight (bc-drwx item 8). helper.ValidateNoBlankDojo used
+	// to be reachable only through the pool distributor (generatePools ->
+	// BuildPoolPhaseTreeAware*), so a standalone playoffs or Swiss
+	// competition over a legacy blank-dojo roster drew silently: neither
+	// generatePlayoffs (helper.StandardSeeding has no dojo opinion at all)
+	// nor GenerateSwissRound goes anywhere near the distributor. This is the
+	// ONE roster pre-flight, ahead of the format switch below, that covers
+	// every format runDrawPipeline can generate -- the distributor's own
+	// call to the same function (buildPoolPhaseTreeAwareCore) becomes the
+	// assert its doc comment always claimed it was for every caller that
+	// reaches it through here.
+	if err := helper.ValidateNoBlankDojo(players); err != nil {
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
+
+	// Missing-id pre-flight (bc-pnum ruling 1c). Ids are the roster's stable
+	// identity for the draw's own output (pools.csv's ID column,
+	// SideAID/SideBID on every match, sub-bout winner attribution); the draw
+	// is a one-time roster snapshot, so drawing over an id-less row would
+	// stamp a blank into those columns permanently. A legacy roster only
+	// reaches this state when it predates the id-minting write path and has
+	// never been re-saved (helper.ValidateNoMissingParticipantIDs's own doc
+	// comment); the remedy is exactly that re-save, named in the message.
+	if err := helper.ValidateNoMissingParticipantIDs(players); err != nil {
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
 
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all
@@ -1028,7 +1120,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 		// generatePools / generatePlayoffs read:
 		//   - Format (decides which generator)
 		//   - PoolSize, PoolSizeMode, RoundRobin (pools structure)
-		//   - NumberPrefix (player numbering in both generators)
+		//   - NumberPrefix (player numbering in generatePools; generatePlayoffs
+		//     composes none, its tree is built from names alone)
 		//   - StartTime (initial ScheduledAt for generated matches)
 		//   - Courts (court labels assigned to generated matches)
 		//   - Kind / WithZekkenName (participants loading)

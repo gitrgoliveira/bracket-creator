@@ -100,7 +100,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
 
   const tournament = t || (c ? { competitions: [c] } : { competitions: [] });
   const allMatches = useMemoA(
-    () => tournament.competitions.flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
+    () => (tournament.competitions || []).flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
     [tournament]
   );
   // Resolved against allMatches, NOT the filtered list: a match that completes
@@ -146,7 +146,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         {!restrictToCompId && (
           <select className="input" style={{ width: "auto", minWidth: 160 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
             <option value="all">All competitions</option>
-            {tournament.competitions.map((cc) => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+            {(tournament.competitions || []).map((cc) => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
           </select>
         )}
         <div className="seg">
@@ -263,7 +263,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // window.enrichPoolMatchWithComp is assigned by admin_pools.jsx at module
         // evaluation time, before this component renders.
         const enrichedOpenMatch = (window.isSupplementaryBout && window.isSupplementaryBout(openMatch.id) && window.enrichPoolMatchWithComp)
-          ? window.enrichPoolMatchWithComp(openMatch, tournament.competitions.find(cc => cc.id === openMatch.compId))
+          ? window.enrichPoolMatchWithComp(openMatch, (tournament.competitions || []).find(cc => cc.id === openMatch.compId))
           : openMatch;
         // Chained nav (Prev/Next/Finish+Start Next/←/→) must stay on the same
         // shiaijo. Operators run matches per-court; jumping courts mid-flow

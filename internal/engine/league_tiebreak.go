@@ -170,11 +170,28 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 // it has validated the selection against LeagueTiebreakCandidates (this function
 // does NOT re-validate consequentiality, the handler is the gate).
 //
+// tiedTeamIDs is the id-aware selection (bc-idfx): when non-empty, group
+// membership is resolved by participant id, which is unambiguous even when
+// two tied teams share a display name -- a namesake collision is reachable
+// through the documented checkNewTeamNameCollisions restore hole (an
+// unreadable config.md disables the uniqueness check for that write, logged
+// and allowed through), so name-based selection alone cannot always
+// disambiguate. tiedTeamNames is used ONLY as the fallback group-resolution
+// input when tiedTeamIDs is empty (kept for callers/clients that predate the
+// id-aware path) -- with tiedTeamIDs non-empty this method never reads
+// tiedTeamNames at all. Idempotency dedup against existing DH rows is done
+// downstream by generatePoolDaihyosenMatches, which resolves existing rows
+// against tiedGroup (the resolved standings entries), not against the raw
+// name/id request parameters, so it works identically regardless of which
+// selection produced tiedGroup. The HTTP handler still requires and
+// length-validates tiedTeamNames on every request (see
+// handlers_league_tiebreak.go), independent of what this method itself uses.
+//
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.
 // Idempotent: pairs that already exist in the store are skipped. For league
 // competitions it operates on the single league pool.
-func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string, tiedTeamIDs []string) ([]state.MatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -191,52 +208,80 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 		return nil, err
 	}
 
-	// Resolve the standings for the requested team names. The HTTP handler is the
-	// consequentiality gate, but this method must still defend itself when called
-	// directly: reject duplicate names and any name that doesn't resolve to a
-	// standing, so it can never build a partial/garbled group (e.g. [A,B,X] with
-	// X missing would otherwise silently generate a 2-team round-robin).
-	nameSet := make(map[string]bool, len(tiedTeamNames))
-	for _, n := range tiedTeamNames {
-		if nameSet[n] {
-			return nil, validationErrorf("duplicate team %q in tie-break request for competition %s", n, compID)
-		}
-		nameSet[n] = true
-	}
-
-	// Locate the pool and build the group. matchCount tracks how many
-	// standings entries matched each requested name, so a mismatch between
-	// len(tiedGroup) and len(nameSet) below can be diagnosed precisely
-	// rather than reported as one generic "not found": a requested name
-	// matching ZERO entries is genuinely missing, but a name matching TWO OR
-	// MORE (a namesake collision -- team names must be unique by rule, but
-	// checkNewTeamNameCollisions has documented enforcement holes) WAS
-	// found, just ambiguously. Reporting "not found" for that case sends the
-	// operator hunting for a team that was actually on the sheet, twice.
 	var poolName string
 	var tiedGroup []state.PlayerStanding
-	matchCount := make(map[string]int, len(nameSet))
-	for pn, ps := range standings {
-		poolName = pn
-		for _, s := range ps {
-			if nameSet[s.Player.Name] {
-				tiedGroup = append(tiedGroup, s)
-				matchCount[s.Player.Name]++
+
+	if len(tiedTeamIDs) > 0 {
+		// ID-aware selection: unambiguous by construction (a participant id
+		// names exactly one competitor), so no ambiguity diagnostic is
+		// needed -- a missing id is simply "not found".
+		idSet := make(map[string]bool, len(tiedTeamIDs))
+		for _, id := range tiedTeamIDs {
+			if id == "" {
+				continue
+			}
+			if idSet[id] {
+				return nil, validationErrorf("duplicate team id %q in tie-break request for competition %s", id, compID)
+			}
+			idSet[id] = true
+		}
+		for pn, ps := range standings {
+			for _, s := range ps {
+				if idSet[s.Player.ID] {
+					poolName = pn
+					tiedGroup = append(tiedGroup, s)
+				}
 			}
 		}
-	}
-	if len(tiedGroup) != len(nameSet) {
-		var ambiguous []string
-		for n := range nameSet {
-			if matchCount[n] > 1 {
-				ambiguous = append(ambiguous, n)
+		if len(tiedGroup) != len(idSet) {
+			return nil, validationErrorf("one or more requested team ids not found in standings for competition %s", compID)
+		}
+	} else {
+		// Resolve the standings for the requested team names. The HTTP handler is the
+		// consequentiality gate, but this method must still defend itself when called
+		// directly: reject duplicate names and any name that doesn't resolve to a
+		// standing, so it can never build a partial/garbled group (e.g. [A,B,X] with
+		// X missing would otherwise silently generate a 2-team round-robin).
+		nameSet := make(map[string]bool, len(tiedTeamNames))
+		for _, n := range tiedTeamNames {
+			if nameSet[n] {
+				return nil, validationErrorf("duplicate team %q in tie-break request for competition %s", n, compID)
+			}
+			nameSet[n] = true
+		}
+
+		// Locate the pool and build the group. matchCount tracks how many
+		// standings entries matched each requested name, so a mismatch between
+		// len(tiedGroup) and len(nameSet) below can be diagnosed precisely
+		// rather than reported as one generic "not found": a requested name
+		// matching ZERO entries is genuinely missing, but a name matching TWO OR
+		// MORE (a namesake collision -- team names must be unique by rule, but
+		// checkNewTeamNameCollisions has documented enforcement holes) WAS
+		// found, just ambiguously. Reporting "not found" for that case sends the
+		// operator hunting for a team that was actually on the sheet, twice.
+		matchCount := make(map[string]int, len(nameSet))
+		for pn, ps := range standings {
+			poolName = pn
+			for _, s := range ps {
+				if nameSet[s.Player.Name] {
+					tiedGroup = append(tiedGroup, s)
+					matchCount[s.Player.Name]++
+				}
 			}
 		}
-		if len(ambiguous) > 0 {
-			sort.Strings(ambiguous)
-			return nil, validationErrorf("team name(s) %s match more than one standings entry (a namesake across dojos); name-based tie-break selection cannot disambiguate them for competition %s", strings.Join(ambiguous, ", "), compID)
+		if len(tiedGroup) != len(nameSet) {
+			var ambiguous []string
+			for n := range nameSet {
+				if matchCount[n] > 1 {
+					ambiguous = append(ambiguous, n)
+				}
+			}
+			if len(ambiguous) > 0 {
+				sort.Strings(ambiguous)
+				return nil, validationErrorf("team name(s) %s match more than one standings entry (a namesake across dojos); name-based tie-break selection cannot disambiguate them for competition %s -- retry with teamIds", strings.Join(ambiguous, ", "), compID)
+			}
+			return nil, validationErrorf("one or more requested teams not found in standings for competition %s", compID)
 		}
-		return nil, validationErrorf("one or more requested teams not found in standings for competition %s", compID)
 	}
 	if len(tiedGroup) < 2 {
 		return nil, validationErrorf("a tie-break group needs at least two teams (competition %s)", compID)

@@ -456,27 +456,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
-  // The draw assigns the final, pool-interleaved numbers (player.number);
-  // before that there is none. We surface a stable registration-order number
-  // (numberPrefix + position in c.players) so operators can call competitors
-  // by number during check-in. Keyed off the unfiltered roster so the number
-  // doesn't jump when the list is searched/sorted. Rendered as provisional
-  // (muted, dotted) since the final numbers may differ after the draw.
-  const provisionalNumberById = useMemoA(() => {
-    // Null-prototype object: keys are user-controlled (window.checkinPid(p)), so
-    // a participant named "__proto__" or "constructor" against a plain `{}` map
-    // could pollute the prototype chain or return inherited values on lookup.
-    // `Object.create(null)` removes both risks and keeps the `map[key]` /
-    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
-    const map = Object.create(null);
-    if (c.numberPrefix) {
-      (c.players || []).forEach((p, i) => {
-        map[window.checkinPid(p)] = `${c.numberPrefix}${i + 1}`;
-      });
-    }
-    return map;
-  }, [c.players, c.numberPrefix]);
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
@@ -1141,8 +1120,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
                           {p.number ? (
                             <span className="num-prefix">{p.number}</span>
-                          ) : provisionalNumberById[window.checkinPid(p)] ? (
-                            <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
                           ) : null}
                           {p.name}
                         </div>
@@ -1150,6 +1127,22 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       </div>
                       <div className="seed-row__dojo">
                         {p.dojo}
+                        {/* bc-pnum ruling 1e: the roster PUT re-serialises the saved
+                            roster, so p.id is the server-minted UUID once the roster
+                            has been applied at least once. Shown WHOLE when it is 12
+                            characters or fewer (a short slug id, e.g. "ids-cup-p1":
+                            truncating to 8 would show "ids-cup-" for every row in a
+                            roster sharing that prefix, telling the operator nothing),
+                            otherwise the first 8 characters (a UUID). The full id is
+                            always on hover regardless of which form is shown, in the
+                            same muted weight as the dojo line beside it so the row
+                            stays compact and the number/name columns never shift. A
+                            row with no id (not yet applied, or a load failure) shows
+                            nothing in this slot -- 1b's data-issues banner is what
+                            names an id-less row, not this per-row display. */}
+                        {p.id && (
+                          <span className="seed-row__id" title={p.id}> · {p.id.length <= 12 ? p.id : p.id.slice(0, 8)}</span>
+                        )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"
                             className="btn--link"

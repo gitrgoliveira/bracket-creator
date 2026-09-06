@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,6 +79,34 @@ func TestFileVersionAdvancesOnDeleteCompetitionFile(t *testing.T) {
 		"discarding a draw artifact changes derived state just as a write does, so the version must advance")
 }
 
+// TestFileVersionAdvancesOnSavePools pins bc-pnum A2's VERSION half: the
+// standings cache key (standingsTokens, engine/scoring.go) validates BOTH
+// pools.csv's mtime AND its FileVersion, because mtime alone (kernel coarse
+// clock, ~1ms granularity) cannot distinguish two writes inside one tick.
+// SavePools must therefore call bumpFileVersion("pools.csv") like every other
+// writer this file's sibling tests already pin for pool-matches.csv and
+// bracket.json -- pools.csv was the one writer with no test of its own.
+func TestFileVersionAdvancesOnSavePools(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	const compID = "renumbered"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Renumbered"}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{ID: "p1", Name: "Ann", Dojo: "D", Number: "K1"}}},
+	}))
+
+	before := store.FileVersion(compID, "pools.csv")
+
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{ID: "p1", Name: "Ann", Dojo: "D", Number: "K2"}}},
+	}))
+
+	assert.Greater(t, store.FileVersion(compID, "pools.csv"), before,
+		"a second SavePools (e.g. RenumberCompetitors rewriting Numbers) must advance pools.csv's version, or a standings/export cache keyed on it would serve pre-renumber data")
+}
+
 // TestFileVersionAdvancesOnBracketWrite pins that the bracket writers advance
 // FileVersion("bracket.json") exactly like the pool writers advance the pool
 // token (mp-gmcg review R4). No version-keyed consumer reads the bracket token
@@ -115,4 +144,19 @@ func TestFileVersionAdvancesOnBracketWrite(t *testing.T) {
 	require.False(t, found)
 	assert.Equal(t, v2, store.FileVersion(compID, "bracket.json"),
 		"a not-found update writes nothing, so it must not bump the version")
+}
+
+// TestFileVersionAdvancesOnSaveCompetition pins that saving the competition
+// record bumps config.md's version counter: the standings cache derives its
+// scoring mode and format from that record, and a writer for a file a cache
+// derives from must bump after the bytes land.
+func TestFileVersionAdvancesOnSaveCompetition(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	compID := "config-version"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: compID}))
+	before := store.FileVersion(compID, "config.md")
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: compID, Courts: []string{"A"}}))
+	after := store.FileVersion(compID, "config.md")
+	require.Greater(t, after, before, "SaveCompetition must bump config.md's FileVersion after the write")
 }

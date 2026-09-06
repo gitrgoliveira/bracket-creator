@@ -25,9 +25,17 @@ import (
 //
 // Per NFR-002 the handler depends on the *state.Store concrete type (the
 // same boundary handlers_viewer.go uses); there is no snug-fit interface
-// in deps.go that covers the read methods we need here, and inventing one
-// for a single consumer would be premature. If a second polled surface
-// lands later we can hoist a DisplayStore interface then.
+// in deps.go that covers the OTHER read methods we need here, and inventing
+// one for a single consumer would be premature. If a second polled surface
+// lands later we can hoist a DisplayStore interface then. Number merging
+// (currentMatchPlayers) reaches engine.NumberPlayoffsOnlyParticipants
+// through mergePoolNumbersIntoPlayersSlice (handlers_viewer.go, same
+// package) exactly as the viewer payload does (that shared helper
+// calls the engine function directly -- a plain package-level function, not
+// threaded through as a parameter -- so this file needs no engine
+// reference of its own), the SAME derivation the blank-template export
+// uses, so this surface's numbers cannot silently disagree with either of
+// those.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
@@ -298,13 +306,21 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // can include "number" in the polled OBS/vMix overlay payload; the pools.csv
 // read is skipped entirely otherwise (the common case).
 func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
-	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
-	if comp.NumberPrefix != "" {
-		pools, _ := store.LoadPools(comp.ID)
-		// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs
-		// too, and mergePoolNumbersIntoPlayersSlice's playoffs-only branch must
-		// see that or it silently skips number assignment for those entrants.
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.EffectiveFormat())
+	// the load error used to be discarded outright (`players, _ :=...`)
+	// while the pools load just below already logs its own. Logged, not
+	// returned/surfaced: the overlay must not vanish over an unreadable
+	// participants.csv, it degrades to whatever LoadParticipantsOpt still
+	// managed to return (possibly nil/empty), same contract as the pools
+	// branch below.
+	players, plErr := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
+	if plErr != nil {
+		log.Printf("mobileapp: court current %s: load participants: %v", comp.ID, plErr)
+	}
+	// numbersFromPools (PR #416 finding 3) owns the prefix/no-draw-yet skip
+	// and the pools.csv read; an unreadable pools.csv is reported, not
+	// merged, so the overlay shows MISSING numbers, never composed ones (D1).
+	if err := numbersFromPools(store, comp, players); err != nil {
+		log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
 	}
 	return players
 }

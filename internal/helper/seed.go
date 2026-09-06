@@ -1,9 +1,12 @@
 package helper
 
 import (
+	"cmp"
 	"fmt"
 	"math/bits"
+	"slices"
 	"sort"
+	"strconv"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"golang.org/x/text/cases"
@@ -63,9 +66,12 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 // is then treated as unseeded too (appended after the genuine unseeded players,
 // so a displaced seed's exact slot is unspecified; these are degenerate inputs).
 //
-// Unlike StandardSeeding (which returns a dense len(players) slice and leaves the
-// caller to pad byes at the end of the leaf array), the byes here are interleaved
-// at their standard positions: a bracket of N players in a 2^k draw gives the top
+// Unlike StandardSeeding (which returns a dense len(players) slice; a caller
+// that needs the real bracket geometry runs it through CreateBalancedTree and
+// TreeToLeafArray, whose recursive per-side padding does NOT put every bye at
+// the tail of the leaf array -- see dojoMeetRound's own doc comment), the
+// byes here are interleaved at their standard positions: a bracket of N
+// players in a 2^k draw gives the top
 // 2^k, N seeds a first-round bye, and because every bye rank pairs with a
 // distinct low (top-seed) rank in round 1, the draw never contains an
 // empty-vs-empty match. Used by the live-playoffs leaf builder so the knockout
@@ -254,100 +260,57 @@ func StandardSeeding(players []Player) []Player {
 // the seeding contract, and a dojo is not a reason to break it. Two seeds from
 // one dojo therefore keep whatever pairing their ranks produced.
 func delayDojoMeetings(result []Player, occupied map[int]bool) {
+	// slots translates every DENSE index this function works in into the
+	// real, padded tree-slot space dojoMeetRound's XOR arithmetic requires
+	// (bc-drwx item 1; see denseSlotMap's and dojoMeetRound's own doc
+	// comments). Built once: the mapping is a property of len(result) alone
+	// and does not change as players are swapped between dense positions.
+	slots := denseSlotMap(len(result))
+
+	// ids[i] is dojoIDCache.of(result[i].Dojo) -- a dense int, interned ONCE
+	// up front via newDojoIDCacheFor rather than resolved fresh inside every
+	// comparison, so every comparison below (ids[cand] == ids[x], etc.) is
+	// an int compare rather than a normalized-string compare. ids is kept
+	// in lockstep with result: whenever result[i]/result[j] are swapped
+	// (the accepted swap below, and dojoSwapGain's own temporary
+	// swap-and-revert), ids[i]/ids[j] are swapped too, so it is always
+	// exactly the id of result[i].Dojo without ever resolving it again.
+	idCache, _ := newDojoIDCacheFor(result)
+	ids := make([]int, len(result))
+	for i := range result {
+		ids[i] = idCache.of(result[i].Dojo)
+	}
+
+	// pairsBuf (bc-pnum review(d)) is sortedSameDojoPairs' reusable
+	// scratch buffer, hoisted out of the generation loop below so its
+	// backing array survives across calls instead of being reallocated
+	// from nil every generation.
+	var pairsBuf []dojoMeetPair
+
 	movable := func(i int) bool {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
 
-	// excluded holds same-dojo pairs (slot indices i<j) the current scan
-	// generation has already picked as "worst" and found unfixable --
-	// either both slots are seeded (occupied, permanently immovable, e.g.
-	// two seed ranks from one dojo landing adjacent by the seeding
-	// contract) or no available relocation currently improves the total.
-	// Without this, the worst-pair scan below always re-selects the SAME
-	// globally-worst pair, and an immovable one stops the whole climb dead
-	// (bc-dojo-least-conflicted-pool FIX 3: an 8-player draw with seed
-	// ranks 4 and 5 sharing a dojo lands them adjacent and immovable, while
-	// an entirely separate, fixable unseeded same-dojo pair at round 1
-	// elsewhere in the same draw was left untouched because the scan never
-	// got past the immovable pair). Excluding a stuck pair lets the scan
-	// fall through to the next-worst REMAINING pair instead.
-	//
-	// The set only grows within one generation (between accepted swaps):
-	// a swap changes dojoSwapGain for every other pair too (a pair excluded
-	// a moment ago may now have a fixable relocation, or may no longer even
-	// be the worst), so it is reset to empty whenever a swap IS accepted,
-	// giving the next generation a clean look at everything. Monotonic
-	// growth within a generation plus a bounded number of same-dojo pairs
-	// is what keeps a generation itself finite; the outer iteration cap
-	// below is unchanged and remains the belt-and-braces bound.
-	//
-	// Performance note (bc-dojo-least-conflicted-pool wave 2): this
-	// continuation means the outer loop below can run many more iterations
-	// than accepted swaps -- a handful of dojos each contributing one worst
-	// pair per generation, discovered and excluded one at a time -- and
-	// every one of those iterations re-pays the worst-pair rescan (O(N^2),
-	// unaffected by dojoSumMeetRounds' P1 speedup). CORRECTION to an
-	// earlier version of this note, which blamed that rescan as the
-	// dominant cost: instrumented directly (sum of time spent in the
-	// rescan vs. the candidate-relocation scan, over the whole climb), the
-	// rescan is only 6-22% of the pre-memo total at 256 entrants across
-	// four measured shapes -- the O(N) candidates * O(N) dojoSwapGain =
-	// O(N^2) candidate-CONFIRMATION scan below (run once per outer
-	// iteration for worstA and worstB alike, even when neither slot's
-	// landscape changed since the last time it was checked) was the
-	// dominant term, at 78-94%. That confirmation is exactly what the
-	// slotBest memo below now caches per slot for the life of a
-	// generation; see its own doc comment for why that is safe. Re-measured
-	// end-to-end (delayDojoMeetings alone, unmemoized reference vs. the
-	// real memoized function, this machine, 256 entrants):
-	//   16 dojos of 16:                7.88s -> 1.44s (5.5x)
-	//   32 dojos of 8:                 3.81s -> 1.06s (3.6x)
-	//   2 dojos of 96 + 64 singletons: 20.9s -> 6.29s (3.3x)
-	//   2 dojos of 128 (no singletons): 35.8s -> 12.4s (2.9x)
-	// The lopsided (few oversized dojos) shapes remain the most expensive
-	// in absolute terms -- the same few slots recur as worstA/worstB across
-	// the most stuck-and-excluded iterations of a generation, which is
-	// both why they were the slowest before the memo and why the memo
-	// buys proportionally less there (a larger share of their remaining
-	// cost is the worst-pair rescan itself, unmemoized, at 22% vs. 6-7%
-	// for the evenly-clustered shapes).
-	type pairKey struct{ i, j int }
-	excluded := map[pairKey]bool{}
-
-	// slotBest memoizes bestRelocation's result (the best (gain, y) found
-	// scanning every candidate partner for one slot) for the life of a
-	// GENERATION -- cleared in the exact same place and for the exact same
-	// reason as excluded: dojoSwapGain(result, x, .) is a pure function of
-	// x and the current `result`, and `result` (and `occupied`, and hence
-	// movable()) do not change between accepted swaps, so a slot recomputed
-	// against the identical draw twice in one generation is guaranteed to
-	// get the identical answer. This matters because worstA/worstB recur:
-	// once a same-dojo pair is excluded as stuck, the NEXT-worst pair often
-	// shares one of its two slots (the other dojo-mate of an already-seen
-	// slot, or the same immovable seed reappearing against a new partner),
-	// so without this memo the O(N) confirmation scan for that slot would
-	// be repeated once per stuck iteration it recurs in, whereas the
-	// answer -- the same `result`, so the same swap-gain landscape -- never
-	// changed underneath it.
-	type slotCandidate struct{ gain, y int }
-	slotBest := map[int]slotCandidate{}
-	bestRelocation := func(x int) (gain, y int) {
-		if c, ok := slotBest[x]; ok {
-			return c.gain, c.y
-		}
-		gain, y = 0, -1
-		if movable(x) {
-			for cand := range result {
-				if cand == x || !movable(cand) || result[cand].Dojo == result[x].Dojo {
-					continue
-				}
-				if g := dojoSwapGain(result, x, cand); g > gain {
-					gain, y = g, cand
-				}
+	// Early-out (bc-drwx item 2): a swap only ever happens between two
+	// movable slots of DIFFERENT dojos (dojoSwapGain's own candidate filter,
+	// below), so with fewer than two distinct dojos among the movable
+	// (unseeded) players NO swap can EVER exist, whatever the roster size --
+	// the whole climb below is provably a no-op before it examines a single
+	// pair. A single-dojo roster (or one the CLI's legacy no-dojo-column
+	// parser defaulted every blank dojo to "NA") used to pay for that
+	// discovery the slow way: see this function's own "Performance note"
+	// below for the O(N^4) it used to cost. This check is O(N).
+	movableDojos := map[int]bool{}
+	for i := range result {
+		if movable(i) {
+			movableDojos[ids[i]] = true
+			if len(movableDojos) >= 2 {
+				break
 			}
 		}
-		slotBest[x] = slotCandidate{gain, y}
-		return gain, y
+	}
+	if len(movableDojos) < 2 {
+		return
 	}
 
 	// A hill climb on the total of every same-dojo pair's meeting round: the
@@ -355,60 +318,140 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// scores the minimum, so removing one is always the largest single gain
 	// available, which is why "never first" falls out of maximising this
 	// rather than needing a rule of its own.
+	//
+	// Invariants this loop relies on: the early-out above makes the whole
+	// climb an O(N) no-op below two movable dojos; each GENERATION (the
+	// span between accepted swaps) pays exactly one stable sort of the
+	// same-dojo pairs, walked worst-round-first, instead of an O(N^2)
+	// rescan per stuck pair; the per-slot memo (slotBest, below) is safe
+	// because dojoSwapGain/dojoSwapGainAfter are pure functions of (slot,
+	// result) for the life of a generation, unaffected by which pair asks;
+	// and the stable sort keeps ties at the same round in scan order.
 	for iter := 0; iter < len(result)*len(result); iter++ {
-		worstA, worstB, worstRound := -1, -1, 1<<30
-		for i := range result {
-			for j := i + 1; j < len(result); j++ {
-				if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
-					continue
-				}
-				if result[i].Dojo != result[j].Dojo {
-					continue
-				}
-				if excluded[pairKey{i, j}] {
-					continue
-				}
-				if r := dojoMeetRound(i, j); r < worstRound {
-					worstA, worstB, worstRound = i, j, r
-				}
-			}
-		}
-		if worstA < 0 {
+		pairs := sortedSameDojoPairs(result, ids, slots, &pairsBuf)
+		if len(pairs) == 0 {
 			return // no selectable dojo pair remains: nothing left to delay
 		}
 
-		// Try relocating either member of the worst pair. Accept the swap
-		// that improves the overall total by the most; ties keep the
-		// earlier candidate so the result does not depend on scan order.
-		// bestRelocation(worstA) is evaluated (and, on a cache hit,
-		// answered) strictly before bestRelocation(worstB), and only a
-		// STRICT '>' replaces the running best, so a worstB tying worstA's
-		// gain never displaces it -- exactly the order and tie-break the
-		// unmemoized double loop produced, since the memo only changes
-		// whether a given slot's own scan is recomputed or looked up, never
-		// what it returns or the order these two calls happen in.
-		bestGain, bestX, bestY := 0, -1, -1
-		for _, x := range []int{worstA, worstB} {
-			if gain, y := bestRelocation(x); gain > bestGain {
-				bestGain, bestX, bestY = gain, x, y
-			}
+		// slotSum[v] is dojoSlotMeetSum(v), the same-dojo-pair-round sum
+		// touching v alone: a per-generation constant (result/ids do not
+		// change until an accepted swap ends the generation), computed once
+		// here so bestRelocation's candidate loop can build `before` as
+		// slotSum[x]+slotSum[cand] instead of re-walking x's dojo-mates for
+		// every candidate.
+		slotSum := make([]int, len(result))
+		for i := range result {
+			slotSum[i] = dojoSlotMeetSum(result, ids, slots, i)
 		}
-		if bestGain <= 0 {
-			// This worst pair is stuck: exclude it so the next iteration
-			// retries against the next-worst REMAINING pair, rather than
-			// abandoning every other dojo's meeting untouched (see the
-			// excluded map's own doc comment above).
-			excluded[pairKey{worstA, worstB}] = true
+
+		// slotBest memoizes bestRelocation's result (the best (gain, y)
+		// found scanning every candidate partner for one slot) for the life
+		// of THIS generation -- see the doc comment above for why that
+		// reuse is safe. Rebuilt fresh every generation, exactly as before.
+		type slotCandidate struct{ gain, y int }
+		slotBest := map[int]slotCandidate{}
+		bestRelocation := func(x int) (gain, y int) {
+			if c, ok := slotBest[x]; ok {
+				return c.gain, c.y
+			}
+			gain, y = 0, -1
+			if movable(x) {
+				for cand := range result {
+					if cand == x || !movable(cand) || ids[cand] == ids[x] {
+						continue
+					}
+					// x and cand are guaranteed different dojos by the guard
+					// above, so slotSum[x]+slotSum[cand] is exactly
+					// dojoSumMeetRounds(result, ids, slots, x, cand) (see
+					// dojoSlotMeetSum's doc comment) without re-walking x's
+					// dojo-mates on every one of the O(N) candidates.
+					before := slotSum[x] + slotSum[cand]
+					if g := dojoSwapGainAfter(result, ids, slots, x, cand, before); g > gain {
+						gain, y = g, cand
+					}
+				}
+			}
+			slotBest[x] = slotCandidate{gain, y}
+			return gain, y
+		}
+
+		swapped := false
+		for _, p := range pairs {
+			// Try relocating either member of this pair. Accept the swap
+			// that improves the overall total by the most; ties keep the
+			// earlier candidate so the result does not depend on scan
+			// order. bestRelocation(p.i) is evaluated (and, on a cache
+			// hit, answered) strictly before bestRelocation(p.j), and only
+			// a STRICT '>' replaces the running best, so p.j tying p.i's
+			// gain never displaces it -- the exact order and tie-break the
+			// pre-rewrite double loop produced.
+			bestGain, bestX, bestY := 0, -1, -1
+			for _, x := range []int{p.i, p.j} {
+				if gain, y := bestRelocation(x); gain > bestGain {
+					bestGain, bestX, bestY = gain, x, y
+				}
+			}
+			if bestGain <= 0 {
+				// This pair is stuck: move on to the next-worst pair in
+				// sorted order, rather than abandoning every other dojo's
+				// meeting untouched.
+				continue
+			}
+			result[bestX], result[bestY] = result[bestY], result[bestX]
+			ids[bestX], ids[bestY] = ids[bestY], ids[bestX]
+			swapped = true
+			break
+		}
+		if !swapped {
+			return // every same-dojo pair in this generation is stuck
+		}
+		// The landscape changed for every pair, stuck or not: the next
+		// generation's sortedSameDojoPairs call (top of the next outer
+		// iteration) gives it a fresh look, exactly as the original's reset
+		// `excluded`/`slotBest` did.
+	}
+}
+
+// dojoMeetPair is one same-dojo pair of DENSE indices i<j, together with the
+// real-tree meeting round (bc-drwx item 1) they are currently drawn to meet
+// in -- sortedSameDojoPairs' own output, and delayDojoMeetings' unit of work
+// for one generation of its hill climb.
+type dojoMeetPair struct{ i, j, round int }
+
+// sortedSameDojoPairs lists every unseeded, non-blank, same-dojo pair of
+// DENSE indices in `result`, worst (earliest) meeting round first. Pairs are
+// appended in (i ascending, j ascending) order -- the same order the
+// pre-rewrite nested loop scanned them in -- and then STABLY sorted by
+// round, so pairs tied at the same round keep that exact relative order:
+// this is what makes delayDojoMeetings' single sorted pass reproduce the
+// original repeated-rescan's worst-first, first-found-on-a-tie selection
+// exactly, just without repaying the O(N^2) scan once per stuck pair (see
+// delayDojoMeetings' own "Performance note").
+//
+// pairs (bc-pnum review(d)) is a scratch buffer the caller reuses
+// across generations rather than a fresh slice grown from nil on every one
+// of the up-to-len(result)^2 calls delayDojoMeetings' outer loop can make:
+// reset to length 0 (keeping its capacity) here, same reset-and-refill
+// shape as earliestDojoMeetingScan's own *occupied parameter
+// (pool_distribution_tree_aware.go). slices.SortStableFunc/cmp.Compare
+// (bc-pnum review(d)) replace sort.SliceStable: same stability
+// guarantee, without a closure indexing back into the slice being sorted.
+func sortedSameDojoPairs(result []Player, ids []int, slots []int, pairs *[]dojoMeetPair) []dojoMeetPair {
+	buf := (*pairs)[:0]
+	for i := range result {
+		if result[i].Name == "" || result[i].Dojo == "" {
 			continue
 		}
-		result[bestX], result[bestY] = result[bestY], result[bestX]
-		// The landscape changed for every pair, stuck or not: give the next
-		// generation a fresh look. slotBest is cleared in lockstep with
-		// excluded (see slotBest's own doc comment) -- both are scoped to
-		// exactly one generation and reset together whenever a swap lands.
-		excluded = map[pairKey]bool{}
-		slotBest = map[int]slotCandidate{}
+		for j := i + 1; j < len(result); j++ {
+			if result[j].Name == "" || ids[i] != ids[j] {
+				continue
+			}
+			buf = append(buf, dojoMeetPair{i, j, dojoMeetRound(slots[i], slots[j])})
+		}
 	}
+	*pairs = buf
+	slices.SortStableFunc(buf, func(a, b dojoMeetPair) int { return cmp.Compare(a.round, b.round) })
+	return buf
 }
 
 // dojoMeetRound returns the bracket round in which slots i and j would meet,
@@ -417,6 +460,19 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 // halving, so the round is the position of the highest bit in which the two
 // slot numbers differ: adjacent slots (differing only in bit 0) meet in round
 // 1, slots in opposite halves meet in the last round.
+//
+// i and j MUST already be real, padded TREE SLOT numbers -- the space
+// TreeToLeafArray/SlotArray produce over a CreateBalancedTree, where every
+// junction's two sides have already been padded to a common power of two
+// before being concatenated (see TreeToLeafArray's own doc comment). A bare
+// StandardSeeding DENSE index (0..len(players)-1, no padding at all) is NOT
+// that space for a non-power-of-two player count: CreateBalancedTree's
+// recursion splits the leaf list in half at every level rather than padding
+// byes onto the tail, so dense-index adjacency does not correspond to real
+// tree-leaf adjacency once any level of the recursion is uneven. Calling this
+// directly on dense indices silently scores pairs that are not real matches
+// and misses real round-1 pairs (bc-drwx item 1) -- delayDojoMeetings uses
+// denseSlotMap to translate before ever reaching this function.
 func dojoMeetRound(i, j int) int {
 	// Slot numbers are indexes into the draw, so the XOR is non-negative and
 	// the conversion below cannot wrap. Checked rather than asserted, both to
@@ -428,139 +484,170 @@ func dojoMeetRound(i, j int) int {
 	return bits.Len(uint(d))
 }
 
+// denseSlotMap maps a StandardSeeding DENSE index (0..n-1, no padding) to the
+// real, padded knockout leaf slot that entrant lands on in the tree every
+// production consumer actually builds from that same dense array
+// (cmd/create-playoffs.go, internal/engine/bracket.go,
+// internal/engine/playoff_skeleton.go all run
+// CreateBalancedTree(namesInDenseOrder)). It builds a tree over placeholder
+// labels ("0".."n-1") the identical way -- CreateBalancedTree, then
+// TreeToLeafArray to reproduce that tree's real, per-level-padded slot
+// geometry -- and reads back which slot each dense index landed on, which is
+// the one mapping dojoMeetRound needs to XOR on the tree's actual geometry
+// rather than the dense index space it used to be handed directly (see
+// dojoMeetRound's own doc comment). Computed ONCE per delayDojoMeetings call
+// (the mapping never changes across a swap: swapping the PLAYERS at two dense
+// positions does not change which slot either position maps to), never
+// per-pair.
+func denseSlotMap(n int) []int {
+	if n <= 0 {
+		return nil
+	}
+	labels := make([]string, n)
+	for i := range labels {
+		labels[i] = strconv.Itoa(i)
+	}
+	leaves := TreeToLeafArray(CreateBalancedTree(labels))
+	slots := make([]int, n)
+	for slot, label := range leaves {
+		if label == "" {
+			continue // bye slot: no dense index maps here
+		}
+		idx, err := strconv.Atoi(label)
+		if err != nil {
+			continue // unreachable: labels are always "0".."n-1"
+		}
+		slots[idx] = slot
+	}
+	return slots
+}
+
 // dojoSumMeetRounds totals the meeting round of every same-dojo pair that
 // includes slot x or slot y (each such pair counted exactly once, including
 // the {x, y} pair itself when both are members of the same dojo). Only
-// slots x and y can change when those two are swapped, so dojoSwapGain --
-// its sole caller, always with x != y -- never needs the sum over every
-// OTHER pair in the draw: those are unaffected by the swap and would cancel
-// out of the before/after delta anyway. Walking only the pairs that touch
-// {x, y} turns this from an O(N^2) whole-draw scan into O(N) per call, an
-// ~100x cut on THIS function alone at N=256 (measured), which is what made
-// the O(N) candidates * O(N) dojoSwapGain = O(N^2) candidate-confirmation
-// scan in delayDojoMeetings affordable per call. That confirmation scan
-// remained delayDojoMeetings' own dominant cost afterwards (it recurs once
-// per outer iteration, and wave-1's stuck-pair continuation can run many
-// iterations per accepted swap) until the wave-2 slotBest memo cached it
-// per slot for the life of a generation. See delayDojoMeetings' own
-// "Performance note" for the current measured cost breakdown and
-// end-to-end numbers -- kept in that ONE place rather than restated here,
-// since a previous version of this note tried to restate it and drifted
-// into misattributing the dominant cost to the wrong sub-loop.
-func dojoSumMeetRounds(result []Player, x, y int) int {
-	pairScore := func(i, j int) int {
-		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
-			return 0
-		}
-		if result[i].Dojo != result[j].Dojo {
-			return 0
-		}
-		return dojoMeetRound(i, j)
-	}
+// slots x and y can change when those two are swapped, so its callers --
+// dojoSwapGain (before the swap) and dojoSwapGainAfter (after it), always
+// with x != y -- never need the sum over every OTHER pair in the draw:
+// those are unaffected by the swap and would cancel out of the before/after
+// delta anyway. Walking only the pairs that touch {x, y} turns this from an
+// O(N^2) whole-draw scan into O(N) per call, an ~100x cut on THIS function
+// alone at N=256 (measured), which is what made the O(N) candidates * O(N)
+// dojoSwapGain = O(N^2) candidate-confirmation scan in delayDojoMeetings
+// affordable per call. That confirmation scan remained delayDojoMeetings'
+// own dominant cost afterwards (it recurs once per outer iteration, and
+// wave-1's stuck-pair continuation can run many iterations per accepted
+// swap) until the wave-2 slotBest memo cached it per slot for the life of a
+// generation. See delayDojoMeetings' own "Performance note" for the current
+// measured cost breakdown and end-to-end numbers -- kept in that ONE place
+// rather than restated here, since a previous version of this note tried to
+// restate it and drifted into misattributing the dominant cost to the wrong
+// sub-loop.
+//
+// x, y and every index this walks are DENSE indices into result; slots is
+// denseSlotMap(len(result)), translating each pair to real tree-slot space
+// before it reaches dojoMeetRound (bc-drwx item 1).
+func dojoSumMeetRounds(result []Player, ids []int, slots []int, x, y int) int {
+	// bc-pnum review(c-safe): result[i]/ids[i]'s side of pairScore's
+	// guard is FIXED across the whole inner loop (i is x, then y, never j),
+	// so re-checking result[x].Name/Dojo and re-reading ids[x] on every one
+	// of the O(N) j iterations was pure waste -- hoisted to once per side.
+	// The j-side guard (result[j].Name, ids[j] != id) still runs per
+	// candidate, unchanged: only ONE side's Dojo was ever checked here
+	// (see the original pairScore, which never inspected result[j].Dojo,
+	// relying on ids[j] mismatching a non-blank ids[i] instead), so this
+	// hoist changes nothing about which pairs score zero.
 	sum := 0
-	for j := range result {
-		if j == x {
-			continue
+	if result[x].Name != "" && result[x].Dojo != "" {
+		xID := ids[x]
+		for j := range result {
+			if j == x || result[j].Name == "" || ids[j] != xID {
+				continue
+			}
+			sum += dojoMeetRound(slots[x], slots[j])
 		}
-		sum += pairScore(x, j)
 	}
 	if y == x {
 		return sum
 	}
 	// The {x, y} pair itself was already scored above (j == y in the loop
 	// over x); skip both here so it is never counted twice.
+	if result[y].Name != "" && result[y].Dojo != "" {
+		yID := ids[y]
+		for j := range result {
+			if j == y || j == x || result[j].Name == "" || ids[j] != yID {
+				continue
+			}
+			sum += dojoMeetRound(slots[y], slots[j])
+		}
+	}
+	return sum
+}
+
+// dojoSlotMeetSum is dojoSumMeetRounds' single-slot component: the sum over
+// x's own same-dojo pairs alone, with no partner slot involved. Whenever x
+// and y are NOT dojo-mates (ids[x] != ids[y]), the {x, y} pair never
+// satisfies either side's same-dojo filter, so
+// dojoSumMeetRounds(result, ids, slots, x, y) == dojoSlotMeetSum(x) +
+// dojoSlotMeetSum(y) exactly -- there is no cross term to double-count or
+// miss. delayDojoMeetings' bestRelocation relies on this: its candidate
+// loop only ever calls this decomposition for a movable x against a
+// candidate of a DIFFERENT dojo (dojoIDCache guarantees the guard), so the
+// per-candidate "before" sum can be built by adding two once-per-generation
+// numbers instead of re-walking x's own dojo-mates on every candidate.
+func dojoSlotMeetSum(result []Player, ids []int, slots []int, x int) int {
+	if result[x].Name == "" || result[x].Dojo == "" {
+		return 0
+	}
+	xID := ids[x]
+	sum := 0
 	for j := range result {
-		if j == y || j == x {
+		if j == x || result[j].Name == "" || ids[j] != xID {
 			continue
 		}
-		sum += pairScore(y, j)
+		sum += dojoMeetRound(slots[x], slots[j])
 	}
 	return sum
 }
 
 // dojoSwapGain reports how much later same-dojo competitors would meet if the
 // occupants of slots x and y traded places. Positive means an improvement.
-func dojoSwapGain(result []Player, x, y int) int {
-	before := dojoSumMeetRounds(result, x, y)
+// x, y are DENSE indices; slots is denseSlotMap(len(result)) (see
+// dojoSumMeetRounds' own doc comment).
+func dojoSwapGain(result []Player, ids []int, slots []int, x, y int) int {
+	before := dojoSumMeetRounds(result, ids, slots, x, y)
+	return dojoSwapGainAfter(result, ids, slots, x, y, before)
+}
+
+// dojoSwapGainAfter is dojoSwapGain's swap/after/revert half, taking an
+// already-computed `before` rather than deriving it from dojoSumMeetRounds
+// itself. dojoSwapGain calls it with the honest (freshly computed) sum, so
+// it stays correct for any x, y including dojo-mates; delayDojoMeetings'
+// bestRelocation calls it directly with a `before` built from the
+// per-generation dojoSlotMeetSum decomposition (see that function's own
+// doc comment), which is only valid for the different-dojo x/y pairs
+// bestRelocation's own candidate filter already restricts it to.
+func dojoSwapGainAfter(result []Player, ids []int, slots []int, x, y, before int) int {
 	result[x], result[y] = result[y], result[x]
-	after := dojoSumMeetRounds(result, x, y)
+	ids[x], ids[y] = ids[y], ids[x]
+	after := dojoSumMeetRounds(result, ids, slots, x, y)
 	result[x], result[y] = result[y], result[x]
+	ids[x], ids[y] = ids[y], ids[x]
 	return after - before
 }
 
-// PoolSeeding reorders players for pool distribution so that top seeds land
-// in pools that are appropriately spread across the given number of courts.
-//
-// It assigns each seed to a court by seedCourtOrder (D6) and uses a per-court
-// priority to ensure correct bracket placement (e.g., top and bottom of the
-// court's bracket) after the pools are deinterleaved by ReorderPoolsForCourts.
-//
-// Placement is keyed on each player's RANK, never on its position among the
-// seeded players, and the set handed in does NOT have to be contiguous: seeds
-// {1, 3, 4} place rank 3 in rank 3's quarter, leaving rank 2's empty. That is
-// the same promise StandardSeedingFull makes, and it is what engine.SeedWarnings
-// reports against, so a caller that renumbers a gapped set before calling would
-// silently move seeds. engine.dropSeedAssignments produces exactly such a set
-// when a seeded competitor does not check in.
-//
-// numCourts must be the count the DRAW will run on (helper.EffectiveDrawCourts),
-// not the operator's raw allocation: it is the modulus the spread is computed
-// against, and the pool deinterleave and pool-to-shiaijo allocation have to
-// agree with it.
-func PoolSeeding(players []Player, numPools int, numCourts int) []Player {
-	if numPools <= 0 {
-		return players
-	}
-	// Both ends, through the one owner: numCourts is the spread modulus below.
-	numCourts = clampCourts(numCourts)
-
-	seeded, unseeded := partitionSeeded(players)
-	sortUnseededByDojoCluster(unseeded)
-
-	// We want to interleave players such that CreatePools (which fills linearly)
-	// puts them in the correct pools.
-	result, occupied := placeSeedsForPools(seeded, numPools, numCourts, len(players))
-
-	unIdx := 0
-	for i := 0; i < len(players); i++ {
-		if !occupied[i] {
-			if unIdx < len(unseeded) {
-				result[i] = unseeded[unIdx]
-				unIdx++
-			}
-		}
-	}
-
-	return result
-}
-
-// sortUnseededByDojoCluster sorts unseeded IN PLACE by dojo (largest groups
-// first, then dojo name) so that players from the same dojo occupy
-// consecutive result slots. Consecutive slots map to distinct start-pool
-// indices mod numPools, preventing the leastConflictedPool fallback from
-// landing same-dojo players in the same pool.
-//
-// PoolSeeding-private: PoolSeeding is its only caller. The tree-aware path
-// (assignUnseededByDojoTree, pool_distribution_tree_aware.go) deliberately
-// does NOT re-sort the unseeded roster -- it processes players in the
-// caller's own (pre-shuffled) order, since re-sorting there would fight
-// that upstream decision rather than help it.
-func sortUnseededByDojoCluster(unseeded []Player) {
-	dojoCount := make(map[string]int)
-	for _, p := range unseeded {
-		dojoCount[p.Dojo]++
-	}
-	sort.SliceStable(unseeded, func(i, j int) bool {
-		ci, cj := dojoCount[unseeded[i].Dojo], dojoCount[unseeded[j].Dojo]
-		if ci != cj {
-			return ci > cj
-		}
-		if unseeded[i].Dojo != unseeded[j].Dojo {
-			return unseeded[i].Dojo < unseeded[j].Dojo
-		}
-		return false
-	})
-}
+// PoolSeeding, its sortUnseededByDojoCluster helper and its
+// placeSeedsForPools helper were removed as dead code (bc-drwx item 11): no
+// production caller has reached them since bc-dojo Phase 4 made
+// BuildPoolPhase delegate to the tree-aware distributor
+// (buildPoolPhaseTreeAwareCore, pool_distribution_tree_aware.go) instead of
+// PoolSeeding -> CreatePools -> ReorderPoolsForCourts. placeSeedIndices
+// below is the one piece of that trio that IS still live -- it is what the
+// tree-aware distributor's own seed placement (buildPoolPhaseTreeAwareCore)
+// calls -- and was kept exactly as it was; the many pre-existing tests that
+// used to call PoolSeeding directly now call referencePoolSeeding
+// (pool_distribution_gate_test.go), a test-only reconstruction of
+// PoolSeeding's exact former body built from placeSeedIndices, so they keep
+// pinning the same properties under their new name.
 
 // placeSeedIndices computes, for each seeded player in `seeded` (already
 // sorted by Seed rank ascending, as partitionSeeded returns it), the index it
@@ -574,7 +661,8 @@ func sortUnseededByDojoCluster(unseeded []Player) {
 // placement avoids whatever index an earlier seed already claimed
 // (`occupied`), so processing order matters and must stay `seeded`'s order.
 //
-// numCourts must already be clamped by the caller (clampCourts); PoolSeeding
+// numCourts must already be clamped by the caller (clampCourts); the live
+// caller, buildPoolPhaseTreeAwareCore (pool_distribution_tree_aware.go),
 // clamps once before calling this. totalLen is the FULL roster length (every
 // player, not just the seeded ones) -- a seed's target index is computed
 // against that whole slot space.
@@ -605,6 +693,21 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 
 	occupied := make(map[int]bool, len(seeded))
 
+	// poolSeedDojos tracks, per pool, the (normalized) dojos of every seed
+	// already placed there -- bc-drwx item 4. A WRAPPED seed (rankIdx >=
+	// numPools, i.e. beyond D6's own half/quarter structure) has no further
+	// halves/quarters to relax and seedPoolRank's out-of-range fallback
+	// (`rankIdx % numPools`) gives it the EXACT SAME remainder as the
+	// unwrapped rank it wraps onto (rank 5 and rank 1 both land on
+	// remainder 0 at numPools=4), so without this it silently doubles up on
+	// whichever pool that coincidence points at -- even when the doubled-up
+	// seed is a DOJO-MATE of the seed already there and a different,
+	// equally valid pool was available. See dojoNode/pass loop below.
+	poolSeedDojos := make([]map[string]bool, numPools)
+	for i := range poolSeedDojos {
+		poolSeedDojos[i] = map[string]bool{}
+	}
+
 	for si, p := range seeded {
 		// si is p's POSITION in `seeded` (this function's own output index);
 		// rankIdx is p's RANK minus one, which is what the placement
@@ -619,28 +722,71 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 		poolRank := seedPoolRank(rankIdx, numPools, numCourts)
 		posInPool := rankIdx / numPools // which slot within the pool
 
-		placed := false
-		for offset := 0; offset < numPools && !placed; offset++ {
-			// calculate the court and local pool index for (poolRank+offset)
+		// candidateGlobalPool is the natural arithmetic's own answer for a
+		// given offset (0..numPools-1) -- unchanged from before this fix,
+		// just factored out so both the new wrapped-seed passes below and
+		// the original single pass can share it.
+		candidateGlobalPool := func(offset int) int {
 			currentRank := (poolRank + offset) % numPools
 			courtIdx := currentRank % numCourts
 			posInCourt := currentRank / numCourts
-
-			var globalPoolIdx int
 			if courtPoolCounts[courtIdx] > 0 {
 				localPoolIdx := courtPriorities[courtIdx][posInCourt%courtPoolCounts[courtIdx]]
-				globalPoolIdx = localPoolIdx*numCourts + courtIdx
-			} else {
-				// Fallback if a court has 0 pools (shouldn't happen if numCourts <= numPools)
-				globalPoolIdx = currentRank
+				return localPoolIdx*numCourts + courtIdx
 			}
+			// Fallback if a court has 0 pools (shouldn't happen if numCourts <= numPools)
+			return currentRank
+		}
 
+		tryPlace := func(globalPoolIdx int) bool {
 			targetIdx := posInPool*numPools + globalPoolIdx
 			if targetIdx < totalLen && !occupied[targetIdx] {
 				indices[si] = targetIdx
 				occupied[targetIdx] = true
-				placed = true
+				if globalPoolIdx >= 0 && globalPoolIdx < numPools {
+					poolSeedDojos[globalPoolIdx][dojoKey(p.Dojo)] = true
+				}
+				return true
 			}
+			return false
+		}
+
+		// scan walks the candidates in rank-priority order and places at the
+		// first one accept approves, stopping as soon as tryPlace succeeds.
+		scan := func(accept func(gp int) bool) bool {
+			for offset := 0; offset < numPools; offset++ {
+				gp := candidateGlobalPool(offset)
+				if gp < 0 || gp >= numPools || !accept(gp) {
+					continue
+				}
+				if tryPlace(gp) {
+					return true
+				}
+			}
+			return false
+		}
+
+		// Placement is three ordered passes, each tried only when the one
+		// before it placed nothing:
+		//
+		//  1. A WRAPPED seed (posInPool > 0, i.e. rankIdx >= numPools: this
+		//     seed is beyond D6's first full round) prefers the first
+		//     candidate pool holding no seed at all.
+		//  2. Failing that, the first candidate whose existing seed(s) are
+		//     not this seed's dojo-mate.
+		//  3. Any pool with room, regardless of what it already holds. Every
+		//     unwrapped seed (posInPool == 0) reaches this pass immediately;
+		//     a wrapped seed reaches it only when every pool already holds a
+		//     dojo-mate of this seed.
+		placed := false
+		if posInPool > 0 {
+			placed = scan(func(gp int) bool { return len(poolSeedDojos[gp]) == 0 })
+			if !placed && p.Dojo != "" {
+				placed = scan(func(gp int) bool { return !poolSeedDojos[gp][dojoKey(p.Dojo)] })
+			}
+		}
+		if !placed {
+			placed = scan(func(int) bool { return true })
 		}
 		if !placed {
 			// Last resort: take the first available slot.
@@ -648,6 +794,7 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 				if !occupied[j] {
 					indices[si] = j
 					occupied[j] = true
+					poolSeedDojos[j%numPools][dojoKey(p.Dojo)] = true
 					break
 				}
 			}
@@ -655,35 +802,6 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 	}
 
 	return indices
-}
-
-// placeSeedsForPools is PoolSeeding's seed-placement half. PoolSeeding-private:
-// PoolSeeding is its only caller. It wraps placeSeedIndices (this file),
-// which IS shared with BuildPoolPhaseTreeAware so the two pipelines can
-// never drift on the seedPoolRank/seedCourtOrder arithmetic; this function
-// just converts that shared index list into PoolSeeding's own
-// `result`/`occupied` pair: a dense slice of length totalLen with each
-// seeded player at its target index and every other index left zero, and
-// the set of indices a seed claims.
-//
-// Deriving the pool a seed ends up in from an index here is a SEPARATE step
-// (index i lands in pool i%numPools once CreatePools' straight fill runs
-// over the full permuted roster, absent a dojo conflict against an
-// already-placed unseeded dojo-mate) -- verified byte-identical against the
-// real fill across 24000+ seeded/dojo configurations during bc-dojo Phase 2
-// (see the seed-equality pin test), never assumed.
-func placeSeedsForPools(seeded []Player, numPools, numCourts, totalLen int) (result []Player, occupied map[int]bool) {
-	result = make([]Player, totalLen)
-	occupied = make(map[int]bool, len(seeded))
-	indices := placeSeedIndices(seeded, numPools, numCourts, totalLen)
-	for si, idx := range indices {
-		if idx < 0 {
-			continue
-		}
-		result[idx] = seeded[si]
-		occupied[idx] = true
-	}
-	return result, occupied
 }
 
 // generatePoolPriority returns an ordering of pool indices (0..n-1) designed

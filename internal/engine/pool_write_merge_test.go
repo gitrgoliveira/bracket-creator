@@ -17,7 +17,7 @@ import (
 // rather than through this helper — the whole point of bc-lww1 being that a
 // dropped write must not be indistinguishable from an applied one.
 func poolMismatch(stored, result *state.MatchResult, policy matchWritePolicy) bool {
-	mismatch, _ := applyPoolWrite(stored, result, policy)
+	mismatch, _, _ := applyPoolWrite(stored, result, policy)
 	return mismatch
 }
 
@@ -411,7 +411,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("a strictly older write is dropped, in the pool too", func(t *testing.T) {
 		p := poolStored()
-		mismatch, superseded := applyPoolWrite(p, incoming(older), matchWriteForward)
+		mismatch, superseded, _ := applyPoolWrite(p, incoming(older), matchWriteForward)
 		require.False(t, mismatch, "the payload names the right pairing; it is merely late")
 		// bc-lww1: the drop has to be REPORTED, not just performed. A `false,
 		// false` here is exactly the bug — indistinguishable from a clean write,
@@ -430,7 +430,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("a newer write applies on both", func(t *testing.T) {
 		p := poolStored()
-		mismatch, superseded := applyPoolWrite(p, incoming(newer), matchWriteForward)
+		mismatch, superseded, _ := applyPoolWrite(p, incoming(newer), matchWriteForward)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a write that landed must never report itself superseded")
 		assert.Equal(t, "Osaka", p.Winner)
@@ -444,7 +444,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 
 	t.Run("an unstamped write still applies, so legacy clients are unaffected", func(t *testing.T) {
 		p := poolStored()
-		mismatch, superseded := applyPoolWrite(p, incoming(0), matchWriteForward)
+		mismatch, superseded, _ := applyPoolWrite(p, incoming(0), matchWriteForward)
 		require.False(t, mismatch)
 		require.False(t, superseded)
 		assert.Equal(t, "Osaka", p.Winner, "0 means unstamped, which never loses")
@@ -455,7 +455,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 	t.Run("an unstamped STORED value accepts anything, so legacy files are unaffected", func(t *testing.T) {
 		p := poolStored()
 		p.ModifiedAt = 0 // a row written before the column existed
-		mismatch, superseded := applyPoolWrite(p, incoming(older), matchWriteForward)
+		mismatch, superseded, _ := applyPoolWrite(p, incoming(older), matchWriteForward)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a legacy file must not start reporting supersedes")
 		assert.Equal(t, "Osaka", p.Winner)
@@ -472,7 +472,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		p := poolStored()
 		corr := incoming(older)
 		corr.CorrectionReason = "scoreboard misread"
-		mismatch, superseded := applyPoolWrite(p, corr, matchWriteForward)
+		mismatch, superseded, _ := applyPoolWrite(p, corr, matchWriteForward)
 		require.False(t, mismatch)
 		require.True(t, superseded,
 			"a correction older than the stored result is a replay, not an override")
@@ -486,7 +486,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		p := poolStored()
 		corr := incoming(newer)
 		corr.CorrectionReason = "scoreboard misread"
-		mismatch, superseded := applyPoolWrite(p, corr, matchWriteForward)
+		mismatch, superseded, _ := applyPoolWrite(p, corr, matchWriteForward)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a fresh correction is not a replay")
 		assert.Equal(t, "Osaka", p.Winner,
@@ -509,7 +509,7 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 		snap := incoming(older)
 		snap.Winner = "Kyoto"
 		snap.Status = state.MatchStatusScheduled
-		mismatch, superseded := applyPoolWrite(p, snap, matchWriteRestore)
+		mismatch, superseded, _ := applyPoolWrite(p, snap, matchWriteRestore)
 		require.False(t, mismatch)
 		require.False(t, superseded, "a restore is exempt, so it can never report a supersede")
 		assert.Equal(t, state.MatchStatusScheduled, p.Status, "the rollback landed")

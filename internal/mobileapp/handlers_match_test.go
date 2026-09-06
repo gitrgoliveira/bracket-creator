@@ -757,6 +757,38 @@ func TestBackfillMatchIdentityForHantei(t *testing.T) {
 			wantStoreCall: false,
 		},
 		{
+			// PR #416 finding 7: a WinnerID-only trigger (no hantei flag, no
+			// mark) narrows to the two id fields, not all four -- once both
+			// ids are already on the wire, validateWinnerIDMatchesSide has
+			// everything it needs and the store is never consulted, even
+			// though sideA/sideB (names) are NOT present here. This is the
+			// case that differentiates the narrowed gate from the pre-PR
+			// #416-finding-7 one: with names empty and only ids present, the
+			// OLD gate (WinnerID != "" alone) would still have read the
+			// store (the old "all four present" skip never applied, since
+			// names were empty); the new gate does not, because it looks
+			// only at the two id fields for a WinnerID-only trigger.
+			name:          "winnerId set, both ids already present, sides absent, no hantei: store is never consulted",
+			req:           state.MatchResult{SideAID: "client-a", SideBID: "client-b", Winner: "Alice", WinnerID: "client-a"},
+			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", sideAID: "someone-else", sideBID: "and-else", found: true},
+			wantSideAID:   "client-a",
+			wantSideBID:   "client-b",
+			wantStoreCall: false,
+		},
+		{
+			// Mirror of the case above with only ONE id present: the
+			// narrowed WinnerID-only trigger still fires (SideBID is empty),
+			// so the store IS consulted.
+			name:          "winnerId set, only one id present, no hantei: store is consulted to fill the missing id",
+			req:           state.MatchResult{SideAID: "client-a", Winner: "Alice", WinnerID: "client-a"},
+			store:         &fixedSidesCompetitionStore{sideA: "Alice", sideB: "Bob", sideAID: "someone-else", sideBID: "id-b", found: true},
+			wantSideA:     "Alice",
+			wantSideB:     "Bob",
+			wantSideAID:   "client-a",
+			wantSideBID:   "id-b",
+			wantStoreCall: true,
+		},
+		{
 			name:          "all four fields already present: store is never consulted",
 			req:           state.MatchResult{SideA: "Alice", SideB: "Bob", SideAID: "client-a", SideBID: "client-b", DecidedByHantei: trueFlag},
 			store:         &fixedSidesCompetitionStore{sideA: "Someone", sideB: "Else", sideAID: "someone-else", sideBID: "and-else", found: true},
@@ -1250,6 +1282,44 @@ func TestScoreHandler_MixedIDRosterWinnerIDMatchingKnownSideSucceeds(t *testing.
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 
 	stored, err := store.LoadPoolMatches("mixedid2")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
+	assert.Equal(t, "Alice", stored[0].Winner)
+	assert.Equal(t, "id-alice", stored[0].WinnerID)
+}
+
+// TestScoreHandler_BothSideIDsPresentMatchingWinnerIDSucceeds is PR #416
+// finding 7's HTTP-level pin: a completion write whose payload already
+// carries BOTH sideAId and sideBId, plus a winnerId correctly naming one of
+// them, must succeed without needing backfillMatchIdentityForHantei's store
+// read at all (see TestBackfillMatchIdentityForHantei's "winnerId set, both
+// ids already present, no hantei" case for the read-skip itself) --
+// validateWinnerIDMatchesSide already has everything it needs from the wire
+// payload.
+func TestScoreHandler_BothSideIDsPresentMatchingWinnerIDSucceeds(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "bothids1"})
+	require.NoError(t, store.SavePoolMatches("bothids1", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "id-bob", Status: state.MatchStatusScheduled},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "id-bob",
+		Winner: "Alice", WinnerID: "id-alice",
+		IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/bothids1/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("bothids1")
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
 	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)

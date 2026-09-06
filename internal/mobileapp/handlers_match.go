@@ -370,11 +370,16 @@ func backfillMatchIdentityForHantei(store CompetitionStore, compID, matchID stri
 	// against -- the SPA sends winnerId alone (api_serializers.jsx), never
 	// sideAId/sideBId, so without this the wire payload would otherwise
 	// carry no side ids at all and every ordinary completed-match write
-	// would fail that check. Only a WRITE THAT NAMES A WINNER pays the
-	// extra read (a "running"/in-progress update carries no WinnerID), so
-	// the hot in-progress-score path stays free of it, matching the
-	// original hantei-only rationale below for that path specifically.
-	if !hanteiAttributionNeedsBackfill(req) && req.WinnerID == "" {
+	// would fail that check. Narrowed to the two id fields specifically
+	// (PR #416 finding 7), not sideA/sideB too: once both ids are already on
+	// the wire, validateWinnerIDMatchesSide has everything it needs without
+	// a store round-trip, and the engine's own gate inside the transaction
+	// remains the authoritative check either way. Only a WRITE THAT NAMES A
+	// WINNER pays the extra read at all (a "running"/in-progress update
+	// carries no WinnerID), so the hot in-progress-score path stays free of
+	// it, matching the original hantei-only rationale below for that path
+	// specifically.
+	if !hanteiAttributionNeedsBackfill(req) && !(req.WinnerID != "" && (req.SideAID == "" || req.SideBID == "")) {
 		return
 	}
 	if req.SideA != "" && req.SideB != "" && req.SideAID != "" && req.SideBID != "" {

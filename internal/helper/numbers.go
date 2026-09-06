@@ -47,11 +47,8 @@ func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 
 // splitNumberLines splits a competitor number into the sheet's own known
 // prefix and the remaining digits, and reports whether the pair should be
-// PRINTED as two stacked lines rather than one: only when the prefix itself
-// is more than one CHARACTER (rune, not byte -- bc-pnum review: "Ö20" is a
-// ONE-letter prefix and must stay single-line, but len("Ö") is 2 bytes in
-// UTF-8, so a byte-length check wrongly stacked it) AND number actually
-// carries that prefix.
+// PRINTED as two stacked lines rather than one (stackedNumberPrefix) AND
+// number actually carries that prefix.
 //
 // The split is prefix-DRIVEN, not guessed from number's own shape (bc-pnum
 // review): number was previously cut at its first ASCII digit, which
@@ -70,15 +67,25 @@ func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 //
 // This is the ONE place that decides the split, for both print sites (the
 // Tags sheet, internal/helper/excel_tags.go, and the Names to Print number
-// cell, printNameEntries in excel.go): a change to what counts as "stacked"
-// only has to change here.
+// cell, printNameEntries in excel.go): a change to what counts as a valid
+// split only has to change here.
 func splitNumberLines(number, prefix string) (letters, digits string, stacked bool) {
 	if prefix == "" || !strings.HasPrefix(number, prefix) || number == prefix {
 		return "", "", false
 	}
 	letters, digits = prefix, number[len(prefix):]
-	stacked = utf8.RuneCountInString(prefix) > 1
+	stacked = stackedNumberPrefix(prefix)
 	return letters, digits, stacked
+}
+
+// stackedNumberPrefix reports whether a number prefix is more than one
+// CHARACTER (rune, not byte -- bc-pnum review: "Ö20" is a ONE-letter prefix
+// and must stay single-line, but len("Ö") is 2 bytes in UTF-8, so a
+// byte-length check wrongly stacked it). This is the ONE place that decides
+// that layout question; every site laying out a prefix+digits number across
+// one or two lines calls it rather than re-spelling the rune-count check.
+func stackedNumberPrefix(prefix string) bool {
+	return utf8.RuneCountInString(prefix) > 1
 }
 
 // NumberPools numbers every competitor across pools with a single counter that

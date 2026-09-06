@@ -1892,7 +1892,7 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	// an Excel formula -- showed the correct letters. utf8.RuneCountInString
 	// is what keeps the two print sites agreeing.
 	prefixLen := utf8.RuneCountInString(numberPrefix)
-	stacked := prefixLen > 1
+	stacked := stackedNumberPrefix(numberPrefix)
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	if stacked {
 		nameIDPositionStyle = getNameIDPositionStackedStyle(f, prefixLen)

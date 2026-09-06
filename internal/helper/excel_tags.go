@@ -2,7 +2,6 @@ package helper
 
 import (
 	"fmt"
-	"unicode/utf8"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -58,7 +57,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPre
 	// prefix stays on one line, "K20"), not by re-scanning players for one
 	// (bc-pnum review -- see splitNumberLines, numbers.go, for why
 	// that guess breaks on a digit-bearing prefix like "KO2").
-	stacked := utf8.RuneCountInString(numberPrefix) > 1
+	stacked := stackedNumberPrefix(numberPrefix)
 	style, err := tagNumberStyle(f, stacked)
 	if err != nil {
 		return fmt.Errorf("failed to create style: %w", err)

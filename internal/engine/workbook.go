@@ -80,20 +80,25 @@ import (
 // that consume them have run, so returning them would be dead weight at
 // every call site.
 //
-// namesToPrintPlayers is bc-pnum A8/[review]'s single guarded branch for a
-// playoffs-only competition (never has a pools.csv, so nothing above would
-// otherwise populate the Data / Names-to-Print sheets at all): non-nil only
-// for the blank-template export's numbered roster
-// (Engine.NumberedParticipantsFor), nil for every other caller and every
-// other format. Before this parameter existed, the blank-template export
-// called helper.AddPoolDataToSheet here (over the empty pools slice, writing
-// only headers) and THEN called helper.AddPlayerDataToSheet a second time,
+// namesToPrintPlayers is derived internally, via e.PlayoffsNamesToPrint(comp,
+// pools) -- bc-pnum A8/[review]'s single guarded branch for a playoffs-only
+// competition (never has a pools.csv, so nothing above would otherwise
+// populate the Data / Names-to-Print sheets at all): non-nil only for that
+// one shape, nil for every other competition. Unlike draw and
+// kachinukiMatches (see above), both callers derived this identically from
+// arguments this function already takes (comp, pools), so there was nothing
+// caller-specific left to preserve by keeping it a parameter -- deriving it
+// here instead is what makes it impossible for the two callers' Data /
+// Names-to-Print sheets to disagree on whether this shape applies. Before
+// this branch existed at all, the blank-template export called
+// helper.AddPoolDataToSheet here (over the empty pools slice, writing only
+// headers) and THEN called helper.AddPlayerDataToSheet a second time,
 // itself, after this function returned -- two writers of the same sheet,
 // which is why "Data added to spreadsheet" used to print twice for the one
 // playoffs-only shape that needed the second writer at all. Steps 1 and 6
 // below are now the ONE place that decides which writer runs, so the sheet
 // is written exactly once regardless of caller.
-func RenderCompetitionWorkbook(
+func (e *Engine) RenderCompetitionWorkbook(
 	f *excelize.File,
 	comp *state.Competition,
 	pools []helper.Pool,
@@ -102,8 +107,12 @@ func RenderCompetitionWorkbook(
 	courtOfPool map[string]string,
 	draw *helper.KnockoutDraw,
 	kachinukiMatches []helper.KachinukiMatchDetail,
-	namesToPrintPlayers []helper.Player,
 ) ([][]int, error) {
+	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools)
+	if err != nil {
+		return nil, err
+	}
+
 	// 1. Data sheet (Player Name, Dojo, Display Name). AddDataToSheetForExport
 	//    is the ONE writer of this sheet: it picks AddPlayerDataToSheet over
 	//    the numbered roster when namesToPrintPlayers is non-empty (the

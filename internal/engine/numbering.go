@@ -37,31 +37,33 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition) ([]domain.Play
 	return players, nil
 }
 
-// PlayoffsNamesToPrint is the ONE derivation of RenderCompetitionWorkbook's
-// namesToPrintPlayers argument (see that parameter's own doc comment in
-// workbook.go): a playoffs-only competition never has a pools.csv, so
-// nothing else populates the shared pipeline's Data / Names-to-Print sheets
-// for it, and a prefix is what tells the pipeline there is a numbered
-// roster worth printing at all.
+// PlayoffsNamesToPrint is the ONE derivation of the numbered roster
+// RenderCompetitionWorkbook itself derives internally as namesToPrintPlayers
+// (see that field's own doc comment in workbook.go): a playoffs-only
+// competition never has a pools.csv, so nothing else populates the shared
+// pipeline's Data / Names-to-Print sheets for it, and a prefix is what tells
+// the pipeline there is a numbered roster worth printing at all.
 //
-// Shared by both workbook builders -- Engine.ExportCompetitionXlsx
-// (blank-template) and export.BuildResultsWorkbook (results archive) -- so
-// the two exports of one competition agree on whether the Names to Print
-// sheet exists. Before this was extracted, only the blank-template export
-// derived it and the results export always passed nil, so a knockout-only
-// competition's results workbook was silently missing the sheet the
-// blank-template export had -- every such competition carries a prefix
-// (comp.NumberPrefix is never left blank once a competition is created), so
-// the gap was not a rare edge case but the ordinary shape.
+// RenderCompetitionWorkbook calls this directly now, so both of its callers
+// -- Engine.ExportCompetitionXlsx (blank-template) and
+// export.BuildResultsWorkbook (results archive) -- get it without deriving
+// it themselves; ExportCompetitionXlsx also calls it a second time, on its
+// own, for its Tags-sheet extra, which needs the identical numbered roster
+// after the shared pipeline has already returned. Before this was
+// extracted, only the blank-template export derived it and the results
+// export always passed nil, so a knockout-only competition's results
+// workbook was silently missing the sheet the blank-template export had --
+// every such competition carries a prefix (comp.NumberPrefix is never left
+// blank once a competition is created), so the gap was not a rare edge case
+// but the ordinary shape.
 //
-// pools is the caller's own already-loaded roster, not re-read here: both
-// callers load it earlier for their own needs (rendering the pool sheets),
+// pools is the caller's own already-loaded roster, not re-read here: every
+// caller loads it earlier for its own needs (rendering the pool sheets),
 // and passing it in keeps this function pure over its inputs rather than
 // hitting the store a second time.
 //
 // Returns (nil, nil) -- not an error -- when the competition is not this
-// shape, so a caller can feed the result straight into
-// RenderCompetitionWorkbook without a branch of its own.
+// shape, so a caller can use the result without a branch of its own.
 func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Pool) ([]helper.Player, error) {
 	if comp.EffectiveFormat() != state.CompFormatPlayoffs || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
 		return nil, nil

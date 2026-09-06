@@ -114,29 +114,17 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
-	// bc-pnum A8: a playoffs-only competition never has a pools.csv (its
-	// numbers are participant order under the prefix, composed on read, see
-	// NumberedParticipantsFor), so feeding the shared pipeline below the
-	// (empty) pools slice alone would make its Data and Names-to-Print steps
-	// no-ops -- a knockout-only competition's printed materials would be
-	// silently blank. Computed HERE, before the pipeline call, and threaded
-	// through as namesToPrintPlayers so RenderCompetitionWorkbook's own
-	// step 1/step 6 branch is the ONE place that decides which writer runs
-	// for each sheet (see that function's doc comment): this used to be a
-	// SECOND write of the Data sheet, run here after the pipeline returned,
-	// which is why "Data added to spreadsheet" printed twice for this one
-	// shape. PlayoffsNamesToPrint (numbering.go) is the shared derivation:
-	// export.BuildResultsWorkbook calls the same function so the two
-	// exports of one competition agree on whether this sheet exists at all.
-	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools)
-	if err != nil {
-		return nil, err
-	}
-
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
 	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
 	// steps and order to internal/export.BuildResultsWorkbook.
-	if _, err := RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, namesToPrintPlayers); err != nil {
+	// RenderCompetitionWorkbook derives its own namesToPrintPlayers via
+	// PlayoffsNamesToPrint (numbering.go, bc-pnum A8/[review]: a
+	// playoffs-only competition never has a pools.csv, so feeding it the
+	// empty pools slice alone would make its Data and Names-to-Print steps
+	// no-ops) -- internal/export.BuildResultsWorkbook resolves through the
+	// SAME derivation, so the two exports of one competition agree on
+	// whether that sheet exists at all.
+	if _, err := e.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches); err != nil {
 		return nil, err
 	}
 
@@ -148,6 +136,14 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	var publicURL string
 	if tourn != nil {
 		publicURL = tourn.PublicURL
+	}
+	// namesToPrintPlayers is re-derived here (not threaded out of the call
+	// above, which now computes its own copy internally): CreateTagsSheet
+	// needs the SAME numbered roster the Names-to-Print sheet just used, for
+	// the identical playoffs-only shape.
+	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools)
+	if err != nil {
+		return nil, err
 	}
 	tagsPools := pools
 	if namesToPrintPlayers != nil {

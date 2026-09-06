@@ -136,19 +136,6 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		return nil, fmt.Errorf("export: collect kachinuki detail: %w", err)
 	}
 
-	// A playoffs-only competition (no pools.csv) needs its numbered roster
-	// threaded into the shared pipeline below, exactly as the blank-template
-	// export does, or its Data / Names to Print sheets are silently absent
-	// from this results workbook. engine.PlayoffsNamesToPrint is the ONE
-	// shared derivation (numbering.go) -- before it existed this builder
-	// always passed nil here, so every knockout-only competition's results
-	// download was missing the Names to Print sheet the blank-template
-	// export had for the identical competition.
-	namesToPrintPlayers, err := eng.PlayoffsNamesToPrint(comp, pools)
-	if err != nil {
-		return nil, fmt.Errorf("export: derive names to print: %w", err)
-	}
-
 	f, err := excel.NewFileFromScratch()
 	if err != nil {
 		return nil, fmt.Errorf("export: create workbook: %w", err)
@@ -162,16 +149,17 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// steps and order to Engine.ExportCompetitionXlsx. poolsByCourt is the one
 	// artifact the overlays below need (PrintPoolMatches's pool-index grouping
 	// per shiaijo band); everything else PrintPoolMatches/AddPoolDataToSheet
-	// return is consumed entirely inside the shared pipeline. namesToPrintPlayers
-	// (derived above) still gets a SEPARATE overlay below for a playoffs-only
-	// competition: the pipeline's own Names-to-Print/Data writers use it for the
-	// sheets that read straight off a numbered roster, but the elimination
-	// entrant NAMES in the bracket sheets still need literal overlaying from the
-	// stored bracket further down (see the len(pools) == 0 branch below),
-	// because this workbook is a results snapshot and the pool-oriented
-	// renderer's formula references have nowhere valid to point without a pool
-	// data sheet.
-	poolsByCourt, err := engine.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches, namesToPrintPlayers)
+	// return is consumed entirely inside the shared pipeline. The pipeline
+	// derives its own numbered-roster (namesToPrintPlayers) internally for a
+	// playoffs-only competition (bc-pnum A8, PlayoffsNamesToPrint in
+	// numbering.go): its Names-to-Print/Data writers use it for the sheets
+	// that read straight off a numbered roster, but the elimination entrant
+	// NAMES in the bracket sheets are a SEPARATE concern -- they still need
+	// literal overlaying from the stored bracket further down (see the
+	// len(pools) == 0 branch below), because this workbook is a results
+	// snapshot and the pool-oriented renderer's formula references have
+	// nowhere valid to point without a pool data sheet.
+	poolsByCourt, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}

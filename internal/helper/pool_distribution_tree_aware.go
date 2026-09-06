@@ -439,15 +439,6 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// over the mode's own knockout skeleton. See assignUnseededByDojoTree's
 	// own doc comment for the placement mechanism.
 	//
-	// keys memoizes dojoKey by raw dojo string for the whole of this draw
-	// (bc-drwx review fix): both this step and the exchange pass below
-	// compare dojo identity in loops that scale with roster/pool size, and
-	// NormalizeParticipantName (what dojoKey calls) is expensive real work
-	// (NFD decompose, strip marks, re-NFC, lowercase, whitespace collapse)
-	// that a draw's hot paths used to redo on every single comparison --
-	// see dojoKeyCache's own doc comment (tournament.go) for the measured
-	// cost.
-	//
 	// ids interns every distinct normalized dojo key across the WHOLE
 	// roster to a dense int id, ONCE, here -- BEFORE assignUnseededByDojoTree
 	// or improveDojoMeetings allocate a single []int/[][]int sized by it
@@ -459,9 +450,11 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// be minted before that sizing happens, and its own callers for the
 	// measured before/after numbers. newDojoIDCacheFor is the one shared
 	// body for this "intern the whole roster up front" block (tournament.go).
-	ids, keys := newDojoIDCacheFor(players)
+	// Its dojoKeyCache half is not needed here: both this step and the
+	// exchange pass below are entirely dense-id based (bc-pnum review(d)).
+	ids, _ := newDojoIDCacheFor(players)
 	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, mode)
-	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, keys, ids); err != nil {
+	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, ids); err != nil {
 		return nil, 0, err
 	}
 
@@ -1693,51 +1686,76 @@ func chooseDojoTreePool(root *dojoNode, id int, qualifierSlots [][]int, dojoPool
 	return node.poolIdx
 }
 
-// pickDojoTreeAwarePool chooses a pool for a new member of dojo: the tree
+// leastConflictedPoolByID is leastConflictedPool's dense-id sibling
+// (bc-pnum review(d)): the exact same room check and tie-break (fewest of
+// dojo, fewest players, lowest index), but reading counts[i][id] --
+// maintained incrementally by the caller -- instead of countDojoInPool's
+// per-player string-key rescan. Used only by the tree-aware descent
+// (pickDojoTreeAwarePool, poolUnderDojoCap), which already carries a dense
+// per-pool count array; leastConflictedPool itself is untouched and still
+// serves assignPlayersToPools' legacy greedy-fill path, which has no such
+// array.
+func leastConflictedPoolByID(pools []Pool, targetSizes []int, id int, counts [][]int) int {
+	best := -1
+	bestDojo, bestSize := 0, 0
+	for i, pool := range pools {
+		if len(pool.Players) >= targetSizes[i] {
+			continue
+		}
+		n := counts[i][id]
+		if best < 0 || n < bestDojo || (n == bestDojo && len(pool.Players) < bestSize) {
+			best, bestDojo, bestSize = i, n, len(pool.Players)
+		}
+	}
+	return best
+}
+
+// pickDojoTreeAwarePool chooses a pool for a new member of dojo id: the tree
 // descent (chooseDojoTreePool) when the tree has something to say, plain
-// leastConflictedPool otherwise.
+// leastConflictedPoolByID otherwise.
 //
 // A dojo with NOBODY placed anywhere yet (root == nil, or
-// root.dojoCount[dojo] == 0 -- no seed and no earlier unseeded member of
-// this dojo) has no tree signal to route on at all: every branch would tie
+// root.dojoCount[id] == 0 -- no seed and no earlier unseeded member of this
+// dojo) has no tree signal to route on at all: every branch would tie
 // 0-vs-0 at every level, all the way down, and the decision would then rest
 // entirely on branch CAPACITY -- which tracks winner-SLOT-number branching,
 // not pool INDEX, and is uneven whenever the knockout draw's own byes make
 // one branch hold more real pools than the other (the common case for a
-// non-power-of-two pool count). Falling through to leastConflictedPool
+// non-power-of-two pool count). Falling through to leastConflictedPoolByID
 // instead (fewest of dojo -- tied at 0 -- then fewest players, then lowest
 // index, scanning pools in INDEX order) is what keeps
 // TestPoolDistribution_UniqueDojoIdentity's round-robin deal intact: an
 // all-unique-dojo roster has EVERY placement hit this exact bypass, so the
-// deal is produced by leastConflictedPool's own index-ordered scan, exactly
-// as it always has been, never by the tree. Once a dojo has at least one
-// member placed somewhere (a seed, or an earlier unseeded member via this
-// same bypass), root.dojoCount[dojo] is no longer 0 and every later member
-// of that dojo genuinely does have a branch to avoid, so the tree descent
-// takes over from there.
+// deal is produced by that index-ordered scan, exactly as it always has
+// been, never by the tree. Once a dojo has at least one member placed
+// somewhere (a seed, or an earlier unseeded member via this same bypass),
+// root.dojoCount[id] is no longer 0 and every later member of that dojo
+// genuinely does have a branch to avoid, so the tree descent takes over
+// from there.
+//
+// counts[i][id] is the caller's dense per-pool dojo count, maintained in
+// lockstep with `pools` (assignUnseededByDojoTree's own doc comment) --
+// this reads it rather than rescanning a pool's players and re-normalizing
+// every one of their dojo strings (countDojoInPool).
+//
 // dojoPoolIndicesBuf is the caller's reusable scratch buffer for the
 // dojo-occupied-pool-index list built below (bc-pnum review): reset to
 // length 0, keeping its backing array, rather than allocated fresh on every
 // one of the up-to-len(unseeded) calls assignUnseededByDojoTree's loop
 // makes -- same reset-and-refill shape as sortedSameDojoPairs' pairsBuf
 // (seed.go).
-func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo string, id int, qualifierSlots [][]int, keys dojoKeyCache, dojoPoolIndicesBuf *[]int) int {
-	// id is the caller's already-resolved dense dojo id (dojoIDCache,
-	// bc-pnum), matching recordDojoOccupancy's own write. dojo (the raw
-	// string) is still needed alongside it: leastConflictedPool and
-	// countDojoInPool below stay string-based, since they are not on this
-	// bead's hot path (see those functions' own doc comments).
-	//
-	// No `dojo == ""` guard (bc-drwx item 11): every caller is reached only
-	// after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has
-	// already refused a roster with any blank dojo, so a blank dojo here is
-	// unreachable -- see ErrBlankDojoInDraw's own doc comment.
+//
+// No `dojo == ""` guard (bc-drwx item 11): every caller is reached only
+// after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has
+// already refused a roster with any blank dojo, so a blank dojo here is
+// unreachable -- see ErrBlankDojoInDraw's own doc comment.
+func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, id int, qualifierSlots [][]int, counts [][]int, dojoPoolIndicesBuf *[]int) int {
 	if root == nil || root.dojoCount[id] == 0 {
-		return leastConflictedPool(pools, targetSizes, dojo, keys)
+		return leastConflictedPoolByID(pools, targetSizes, id, counts)
 	}
 	dojoPoolIndices := (*dojoPoolIndicesBuf)[:0]
 	for idx := range pools {
-		if countDojoInPool(pools[idx], dojo, keys) > 0 {
+		if counts[idx][id] > 0 {
 			dojoPoolIndices = append(dojoPoolIndices, idx)
 		}
 	}
@@ -1747,9 +1765,9 @@ func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo
 	}
 	// The tree found no room (a bye-heavy corner, or a pool this roster's
 	// mode left out of the tree entirely, per buildDojoTree's own doc
-	// comment) -- leastConflictedPool still has the full, real pool list to
-	// fall back on.
-	return leastConflictedPool(pools, targetSizes, dojo, keys)
+	// comment) -- leastConflictedPoolByID still has the full, real pool
+	// list to fall back on.
+	return leastConflictedPoolByID(pools, targetSizes, id, counts)
 }
 
 // assignUnseededByDojoTree places every unseeded player, IN ROSTER ORDER --
@@ -1804,7 +1822,16 @@ func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, dojo
 // hoisting already used throughout this file) and threaded into
 // pickDojoTreeAwarePool/recordDojoOccupancy/dojoOptimum instead of each of
 // those re-resolving it from the raw string.
-func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player, qualifierSlots [][]int, keys dojoKeyCache, ids dojoIDCache) error {
+//
+// counts[i][id] (bc-pnum review(d)) is this function's own dense per-pool
+// dojo tally, built once from `pools`' pre-existing (seeded) members and
+// then incremented in lockstep with every placement below -- the descent's
+// analogue of improveDojoMeetings' own `counts`, letting
+// pickDojoTreeAwarePool/poolUnderDojoCap index a slice instead of
+// rescanning a pool's players and re-normalizing every one of their dojo
+// strings (countDojoInPool) on every candidate. Nothing else mutates
+// `pools`' membership while this function runs, so the two never drift.
+func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player, qualifierSlots [][]int, ids dojoIDCache) error {
 	placed := make([]int, len(pools))
 	for i := range pools {
 		placed[i] = len(pools[i].Players)
@@ -1830,6 +1857,15 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 	// are not in `pools` yet.
 	dojoOptimum := dojoFootprintOptimum(pools, unseeded, numPools, ids)
 
+	counts := make([][]int, numPools)
+	numDojos := ids.numDojos()
+	for i := range pools {
+		counts[i] = make([]int, numDojos)
+		for _, pl := range pools[i].Players {
+			counts[i][ids.of(pl.Dojo)]++
+		}
+	}
+
 	// dojoPoolIndicesBuf/maskedBuf are per-player scratch, reused across
 	// every iteration below rather than allocated fresh per placement (see
 	// pickDojoTreeAwarePool's and poolUnderDojoCap's own doc comments).
@@ -1837,20 +1873,21 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 	var maskedBuf []int
 	for _, p := range unseeded {
 		id := ids.of(p.Dojo)
-		best := pickDojoTreeAwarePool(pools, targetSizes, root, p.Dojo, id, qualifierSlots, keys, &dojoPoolIndicesBuf)
+		best := pickDojoTreeAwarePool(pools, targetSizes, root, id, qualifierSlots, counts, &dojoPoolIndicesBuf)
 		if best < 0 {
 			// Cannot happen when sum(targetSizes) == len(players), which
 			// realTargetSizes guarantees; kept as a defensive error rather
 			// than a panic or a silently dropped player.
 			return fmt.Errorf("cannot place player %s: no pool has room", p.Name)
 		}
-		if countDojoInPool(pools[best], p.Dojo, keys) >= dojoOptimum(id) {
-			if alt := poolUnderDojoCap(pools, targetSizes, p.Dojo, dojoOptimum(id), keys, &maskedBuf); alt >= 0 {
+		if counts[best][id] >= dojoOptimum(id) {
+			if alt := poolUnderDojoCap(pools, targetSizes, id, dojoOptimum(id), counts, &maskedBuf); alt >= 0 {
 				best = alt
 			}
 		}
 		p.PoolPosition = int64(len(pools[best].Players) + 1)
 		pools[best].Players = append(pools[best].Players, p)
+		counts[best][id]++
 		if root != nil && best < len(qualifierSlots) && len(qualifierSlots[best]) > 0 {
 			recordDojoOccupancy(root, id, qualifierSlots[best][0], totalBits, -1)
 		}
@@ -1858,27 +1895,31 @@ func assignUnseededByDojoTree(pools []Pool, targetSizes []int, unseeded []Player
 	return nil
 }
 
-// poolUnderDojoCap is leastConflictedPool restricted to pools that hold
-// FEWER than dojoCap of dojo already: every pool at or over the cap is
+// poolUnderDojoCap is leastConflictedPoolByID restricted to pools that hold
+// FEWER than dojoCap of dojo id already: every pool at or over the cap is
 // masked as already full (its target size set to its current length), so
-// leastConflictedPool's own room check and tie-break (fewest of dojo,
+// leastConflictedPoolByID's own room check and tie-break (fewest of dojo,
 // fewest players, lowest index) narrows the search to the capped
 // candidates while still returning a true original index. Returns -1 when
-// no pool is both under cap and has room, matching leastConflictedPool's
+// no pool is both under cap and has room, matching leastConflictedPoolByID's
 // own sentinel.
+//
+// counts[i][id] is the caller's dense per-pool dojo count (see
+// assignUnseededByDojoTree's own doc comment), read here instead of
+// countDojoInPool's per-player rescan.
 //
 // maskedBuf is the caller's reusable scratch buffer (bc-pnum review),
 // reset and refilled from targetSizes on every call rather than allocated
 // fresh via append([]int(nil), targetSizes...) -- the values still have to
 // be recopied every call (a prior call may have masked entries this one
 // must not), only the backing-array allocation is what reuse avoids.
-func poolUnderDojoCap(pools []Pool, targetSizes []int, dojo string, dojoCap int, keys dojoKeyCache, maskedBuf *[]int) int {
+func poolUnderDojoCap(pools []Pool, targetSizes []int, id int, dojoCap int, counts [][]int, maskedBuf *[]int) int {
 	masked := append((*maskedBuf)[:0], targetSizes...)
 	*maskedBuf = masked
 	for i := range pools {
-		if countDojoInPool(pools[i], dojo, keys) >= dojoCap {
+		if counts[i][id] >= dojoCap {
 			masked[i] = len(pools[i].Players)
 		}
 	}
-	return leastConflictedPool(pools, masked, dojo, keys)
+	return leastConflictedPoolByID(pools, masked, id, counts)
 }

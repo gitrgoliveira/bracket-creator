@@ -70,7 +70,7 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 		roster = append(roster, pools[i].Players...)
 	}
 	roster = append(roster, Player{Dojo: "MUMEISHI"})
-	ids, keys := newDojoIDCacheFor(roster)
+	ids, _ := newDojoIDCacheFor(roster)
 	root, totalBits := buildDojoTree(qualifierSlots, targetSizes, placed, ids.numDojos())
 	require.NotNil(t, root)
 	for i := range pools {
@@ -79,8 +79,19 @@ func TestDojoTreeDescent_NormalizesSpelling(t *testing.T) {
 		}
 	}
 
+	// counts mirrors assignUnseededByDojoTree's own dense per-pool dojo
+	// tally (bc-pnum review(d)): pickDojoTreeAwarePool now reads pool
+	// membership from this rather than rescanning pools[i].Players itself.
+	counts := make([][]int, len(pools))
+	for i := range pools {
+		counts[i] = make([]int, ids.numDojos())
+		for _, pl := range pools[i].Players {
+			counts[i][ids.of(pl.Dojo)]++
+		}
+	}
+
 	var dojoPoolIndicesBuf []int
-	best := pickDojoTreeAwarePool(pools, targetSizes, root, "MUMEISHI", ids.of("MUMEISHI"), qualifierSlots, keys, &dojoPoolIndicesBuf)
+	best := pickDojoTreeAwarePool(pools, targetSizes, root, ids.of("MUMEISHI"), qualifierSlots, counts, &dojoPoolIndicesBuf)
 	assert.Equal(t, 2, best,
 		"a third, differently-cased member of the same dojo must be routed to the only dojo-free pool")
 }

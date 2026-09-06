@@ -58,21 +58,17 @@ func TestPlaceSeedIndices_WrappedSeedAvoidsDojoMatePool(t *testing.T) {
 	}
 }
 
-// TestPlaceSeedIndices_DistinctDojoWrappedSeedStaysNatural pins bc-pnum
-// review: a wrapped seed relocates ONLY to avoid landing on a DOJO-MATE's
-// pool (bc-drwx item 4's exact scope), never merely because a seed-free pool
-// happens to exist elsewhere. Seeds 1, 2, 3 and 5 over 4 pools with FOUR
-// DISTINCT dojos: nothing here is a dojo-mate of anything else, so seed 5
-// (wrapped, rankIdx 4, si 3) must land on its own NATURAL slot -- raw index
-// 4 (posInPool 1 * numPools 4 + its own candidateGlobalPool(0) of 0) --
-// unperturbed by any relocation pass, for every court count. A "Pass 0"
-// that preferred any seed-free pool regardless of dojo (removed by this
-// fix) used to relocate seed 5 onto pool 2, 3 and 3 respectively for
-// numCourts 1, 2 and 4 (verified by reverting this fix and re-running this
-// exact scenario) solely because those pools were seed-free -- reaching
-// past bc-drwx item 4's dojo-mate scope and turning the accurate "two seeds
-// must never share a pool" warning into a spurious D7 halves complaint.
-func TestPlaceSeedIndices_DistinctDojoWrappedSeedStaysNatural(t *testing.T) {
+// TestPlaceSeedIndices_WrappedSeedTakesTheSeedFreePool pins the recorded
+// contract for more seeds than pools (operator ruling, bc-pnum): the extra
+// (wrapped) seed takes the next pool with room holding NO seed and NO
+// dojo-mate, and stays there -- it is never moved by a later pass. Seeds 1,
+// 2, 3 and 5 over 4 pools with FOUR DISTINCT dojos: seeds 1-3 land on their
+// own natural (unwrapped) slots, unaffected by any wrapped-seed pass, and
+// wrapped seed 5 lands in whichever of the 4 pools none of seeds 1-3
+// occupies -- the one genuinely seed-free pool -- not merely a pool that
+// happens not to hold a DOJO-MATE (every pool here qualifies on that
+// narrower test alone, since none of the four dojos repeat).
+func TestPlaceSeedIndices_WrappedSeedTakesTheSeedFreePool(t *testing.T) {
 	seeded := []Player{
 		{Name: "S1", Dojo: "DojoA", Seed: 1},
 		{Name: "S2", Dojo: "DojoB", Seed: 2},
@@ -85,10 +81,23 @@ func TestPlaceSeedIndices_DistinctDojoWrappedSeedStaysNatural(t *testing.T) {
 			totalLen := 16
 			idx := placeSeedIndices(seeded, numPools, numCourts, totalLen)
 
-			require.GreaterOrEqualf(t, idx[3], 0, "seed 5 was never placed")
-			assert.Equalf(t, 4, idx[3],
-				"numCourts=%d: seed 5 (wrapped, dojo-mate-free) must land at its own natural slot "+
-					"(raw index 4), not be relocated to a different pool just because it was seed-free", numCourts)
+			poolOf := make([]int, len(seeded))
+			for si, ti := range idx {
+				require.GreaterOrEqualf(t, ti, 0, "seed %d was never placed", seeded[si].Seed)
+				poolOf[si] = ti % numPools
+			}
+
+			seedFree := map[int]bool{0: true, 1: true, 2: true, 3: true}
+			for _, p := range poolOf[:3] {
+				delete(seedFree, p)
+			}
+			require.Lenf(t, seedFree, 1, "numCourts=%d: seeds 1-3 must occupy exactly 3 distinct pools, leaving exactly one free", numCourts)
+			var wantPool int
+			for p := range seedFree {
+				wantPool = p
+			}
+			assert.Equalf(t, wantPool, poolOf[3],
+				"numCourts=%d: wrapped seed 5 must take the one seed-free pool, not merely a non-dojo-mate one", numCourts)
 		})
 	}
 }

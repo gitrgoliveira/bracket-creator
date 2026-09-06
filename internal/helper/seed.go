@@ -1,8 +1,10 @@
 package helper
 
 import (
+	"cmp"
 	"fmt"
 	"math/bits"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -290,6 +292,12 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 		ids[i] = idCache.of(result[i].Dojo)
 	}
 
+	// pairsBuf (bc-pnum review H14(d)) is sortedSameDojoPairs' reusable
+	// scratch buffer, hoisted out of the generation loop below so its
+	// backing array survives across calls instead of being reallocated
+	// from nil every generation.
+	var pairsBuf []dojoMeetPair
+
 	movable := func(i int) bool {
 		return !occupied[i] && result[i].Name != "" && result[i].Dojo != ""
 	}
@@ -405,7 +413,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// number, including the poolDojoIDs follow-up this file's own bk/ak
 	// fix has a direct analogue in).
 	for iter := 0; iter < len(result)*len(result); iter++ {
-		pairs := sortedSameDojoPairs(result, ids, slots)
+		pairs := sortedSameDojoPairs(result, ids, slots, &pairsBuf)
 		if len(pairs) == 0 {
 			return // no selectable dojo pair remains: nothing left to delay
 		}
@@ -487,8 +495,17 @@ type dojoMeetPair struct{ i, j, round int }
 // original repeated-rescan's worst-first, first-found-on-a-tie selection
 // exactly, just without repaying the O(N^2) scan once per stuck pair (see
 // delayDojoMeetings' own "Performance note").
-func sortedSameDojoPairs(result []Player, ids []int, slots []int) []dojoMeetPair {
-	var pairs []dojoMeetPair
+//
+// pairs (bc-pnum review H14(d)) is a scratch buffer the caller reuses
+// across generations rather than a fresh slice grown from nil on every one
+// of the up-to-len(result)^2 calls delayDojoMeetings' outer loop can make:
+// reset to length 0 (keeping its capacity) here, same reset-and-refill
+// shape as earliestDojoMeetingScan's own *occupied parameter
+// (pool_distribution_tree_aware.go). slices.SortStableFunc/cmp.Compare
+// (bc-pnum review H14(d)) replace sort.SliceStable: same stability
+// guarantee, without a closure indexing back into the slice being sorted.
+func sortedSameDojoPairs(result []Player, ids []int, slots []int, pairs *[]dojoMeetPair) []dojoMeetPair {
+	buf := (*pairs)[:0]
 	for i := range result {
 		if result[i].Name == "" || result[i].Dojo == "" {
 			continue
@@ -497,11 +514,12 @@ func sortedSameDojoPairs(result []Player, ids []int, slots []int) []dojoMeetPair
 			if result[j].Name == "" || ids[i] != ids[j] {
 				continue
 			}
-			pairs = append(pairs, dojoMeetPair{i, j, dojoMeetRound(slots[i], slots[j])})
+			buf = append(buf, dojoMeetPair{i, j, dojoMeetRound(slots[i], slots[j])})
 		}
 	}
-	sort.SliceStable(pairs, func(a, b int) bool { return pairs[a].round < pairs[b].round })
-	return pairs
+	*pairs = buf
+	slices.SortStableFunc(buf, func(a, b dojoMeetPair) int { return cmp.Compare(a.round, b.round) })
+	return buf
 }
 
 // dojoMeetRound returns the bracket round in which slots i and j would meet,
@@ -596,32 +614,38 @@ func denseSlotMap(n int) []int {
 // denseSlotMap(len(result)), translating each pair to real tree-slot space
 // before it reaches dojoMeetRound (bc-drwx item 1).
 func dojoSumMeetRounds(result []Player, ids []int, slots []int, x, y int) int {
-	pairScore := func(i, j int) int {
-		if result[i].Name == "" || result[j].Name == "" || result[i].Dojo == "" {
-			return 0
-		}
-		if ids[i] != ids[j] {
-			return 0
-		}
-		return dojoMeetRound(slots[i], slots[j])
-	}
+	// bc-pnum review H14(c-safe): result[i]/ids[i]'s side of pairScore's
+	// guard is FIXED across the whole inner loop (i is x, then y, never j),
+	// so re-checking result[x].Name/Dojo and re-reading ids[x] on every one
+	// of the O(N) j iterations was pure waste -- hoisted to once per side.
+	// The j-side guard (result[j].Name, ids[j] != id) still runs per
+	// candidate, unchanged: only ONE side's Dojo was ever checked here
+	// (see the original pairScore, which never inspected result[j].Dojo,
+	// relying on ids[j] mismatching a non-blank ids[i] instead), so this
+	// hoist changes nothing about which pairs score zero.
 	sum := 0
-	for j := range result {
-		if j == x {
-			continue
+	if result[x].Name != "" && result[x].Dojo != "" {
+		xID := ids[x]
+		for j := range result {
+			if j == x || result[j].Name == "" || ids[j] != xID {
+				continue
+			}
+			sum += dojoMeetRound(slots[x], slots[j])
 		}
-		sum += pairScore(x, j)
 	}
 	if y == x {
 		return sum
 	}
 	// The {x, y} pair itself was already scored above (j == y in the loop
 	// over x); skip both here so it is never counted twice.
-	for j := range result {
-		if j == y || j == x {
-			continue
+	if result[y].Name != "" && result[y].Dojo != "" {
+		yID := ids[y]
+		for j := range result {
+			if j == y || j == x || result[j].Name == "" || ids[j] != yID {
+				continue
+			}
+			sum += dojoMeetRound(slots[y], slots[j])
 		}
-		sum += pairScore(y, j)
 	}
 	return sum
 }

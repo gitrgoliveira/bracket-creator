@@ -699,11 +699,19 @@ func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int, ids dojoID
 	for _, p := range extra {
 		footprint[ids.of(p.Dojo)]++
 	}
-	return func(id int) int {
-		if numPools <= 0 {
-			return 0
+	// bc-pnum review H14(b): the ceil-divide was recomputed on every call
+	// (improveDojoMeetings' exchange scan calls this closure on the order
+	// of numPools^2*poolSize^2 times per pass), even though its answer
+	// depends only on id and never changes once footprint is built.
+	// Precompute once per dojo instead.
+	opt := make([]int, len(footprint))
+	if numPools > 0 {
+		for id, f := range footprint {
+			opt[id] = (f + numPools - 1) / numPools
 		}
-		return (footprint[id] + numPools - 1) / numPools
+	}
+	return func(id int) int {
+		return opt[id]
 	}
 }
 

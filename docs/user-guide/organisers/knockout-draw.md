@@ -145,7 +145,11 @@ Two things it never does. It does not move a **seeded** competitor: seed places 
 
 ## Competitor numbers
 
-Numbers work the same way in every format that carries them; see [Competitor numbers](pool-draw.md#competitor-numbers) for the rule. In short: a competitor's number is the prefix plus their position in the participants list, created when the list is applied and shown in the check-in list from then on. Generating or discarding the knockout draw never changes it, and neither does a competitor's place in the bracket.
+A **Knockout only** competition numbers its competitors differently from a pooled one. See [Competitor numbers](pool-draw.md#competitor-numbers) for the pooled-format rule (mixed and league), which this section does not repeat.
+
+There is no pool draw to wait for, so a knockout-only competition's numbers are **final from setup**: each competitor's number is their prefix plus their position in the registration order, and it is shown that way from the moment the roster is entered. It changes only when the roster itself changes (an entry added, removed or reordered) or when you change the number prefix; generating or discarding the draw does not touch it, because there is no pool draw to fix an order at.
+
+Everything else about the prefix works the same as the pooled-format rule: you can set your own or leave it blank to derive one, change it at any time, and the printed tags carry these numbers the same way, with a reprint needed after a prefix change. When the prefix is more than one character, the printed tags and the Names to Print cards show the prefix above the rest of the number, for example KO above 20; a one-character prefix stays on one line, for example K20.
 
 ## Byes
 

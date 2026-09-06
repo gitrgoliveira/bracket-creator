@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -471,9 +472,11 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// create/PUT. Checked separately from the prefix below (prefix
 		// exempted with "" here) so a name collision and a prefix collision
 		// can be told apart without parsing the error text.
-		if infraErr, nameErr := checkUniqueCompFields(eng, comp.Name, "", comp.ID); infraErr != nil {
-			return infraErr
-		} else if nameErr != nil {
+		if err := checkUniqueCompFields(eng, comp.Name, "", comp.ID); err != nil {
+			var nameErr *engine.ValidationError
+			if !errors.As(err, &nameErr) {
+				return err
+			}
 			res.Error = nameErr.Error()
 			return nil
 		}
@@ -496,8 +499,9 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		// manifest format has no pools file to restore, but the pairing
 		// keeps import consistent with every other place a prefix is
 		// (re)assigned, and covers a manifest extended with pools later).
-		if infraErr, prefixErr := checkUniqueCompFields(eng, "", comp.NumberPrefix, comp.ID); infraErr != nil {
-			return infraErr
+		var prefixErr *engine.ValidationError
+		if err := checkUniqueCompFields(eng, "", comp.NumberPrefix, comp.ID); err != nil && !errors.As(err, &prefixErr) {
+			return err
 		} else if prefixErr != nil {
 			oldPrefix := comp.NumberPrefix
 			newPrefix, deriveErr := eng.DefaultNumberPrefixFor(comp.Name, comp.ID)
@@ -519,8 +523,9 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 			// the honest outcome -- exactly like the name-collision branch
 			// above, which also refuses rather than silently landing bad
 			// data.
-			if infraErr, reErr := checkUniqueCompFields(eng, "", newPrefix, comp.ID); infraErr != nil {
-				return infraErr
+			var reErr *engine.ValidationError
+			if err := checkUniqueCompFields(eng, "", newPrefix, comp.ID); err != nil && !errors.As(err, &reErr) {
+				return err
 			} else if reErr != nil {
 				res.Error = fmt.Sprintf("number prefix %q collided on restore and no replacement prefix could be derived: %v", oldPrefix, reErr)
 				return nil

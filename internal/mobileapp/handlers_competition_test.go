@@ -3615,27 +3615,24 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	t.Run("empty prefix is always exempt", func(t *testing.T) {
 		seed("pfx-empty-1", "EmptyPfx1", "")
 		seed("pfx-empty-2", "EmptyPfx2", "")
-		infraErr, valErr := checkUniqueCompFields(eng, "NewComp", "", "")
-		require.NoError(t, infraErr)
-		assert.NoError(t, valErr)
+		err := checkUniqueCompFields(eng, "NewComp", "", "")
+		require.NoError(t, err)
 	})
 
 	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
-		infraErr, valErr := checkUniqueCompFields(eng, "AnotherNewComp", "  ", "")
-		require.NoError(t, infraErr)
-		assert.NoError(t, valErr)
+		err := checkUniqueCompFields(eng, "AnotherNewComp", "  ", "")
+		require.NoError(t, err)
 	})
 
 	t.Run("no collision for distinct prefixes", func(t *testing.T) {
 		seed("pfx-k", "KendoComp", "K")
-		infraErr, valErr := checkUniqueCompFields(eng, "DistinctName", "M", "")
-		require.NoError(t, infraErr)
-		assert.NoError(t, valErr)
+		err := checkUniqueCompFields(eng, "DistinctName", "M", "")
+		require.NoError(t, err)
 	})
 
 	t.Run("collision detected (exact prefix match)", func(t *testing.T) {
 		seed("pfx-collision", "CollisionComp", "X")
-		_, err := checkUniqueCompFields(eng, "UniqueName", "X", "")
+		err := checkUniqueCompFields(eng, "UniqueName", "X", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "CollisionComp")
@@ -3643,7 +3640,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("collision detected (case-insensitive prefix)", func(t *testing.T) {
 		seed("pfx-case", "CaseComp", "Y")
-		_, err := checkUniqueCompFields(eng, "AnotherUnique", "y", "")
+		err := checkUniqueCompFields(eng, "AnotherUnique", "y", "")
 		assert.Error(t, err)
 	})
 
@@ -3654,7 +3651,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	// competition.
 	t.Run("collision detected (ambiguous prefix, K vs K2)", func(t *testing.T) {
 		seed("pfx-ambiguous-k", "KendoAmbiguous", "K")
-		_, err := checkUniqueCompFields(eng, "KendoAmbiguousChallenger", "K2", "")
+		err := checkUniqueCompFields(eng, "KendoAmbiguousChallenger", "K2", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "KendoAmbiguous")
@@ -3662,14 +3659,13 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
 		seed("pfx-self", "SelfComp", "Z")
-		infraErr, valErr := checkUniqueCompFields(eng, "SelfComp", "Z", "pfx-self")
-		require.NoError(t, infraErr)
-		assert.NoError(t, valErr)
+		err := checkUniqueCompFields(eng, "SelfComp", "Z", "pfx-self")
+		require.NoError(t, err)
 	})
 
 	t.Run("collision detected (duplicate name)", func(t *testing.T) {
 		seed("name-col", "DuplicateName", "Q")
-		_, err := checkUniqueCompFields(eng, "DuplicateName", "W", "")
+		err := checkUniqueCompFields(eng, "DuplicateName", "W", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "competition name")
 	})
@@ -3682,9 +3678,8 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	// empty-name caller's OWN competition on a field it never touched.
 	t.Run("empty name is always exempt, even against a stored blank-named competition", func(t *testing.T) {
 		seed("blank-named", "", "BLK")
-		infraErr, valErr := checkUniqueCompFields(eng, "", "SomethingElse", "")
-		require.NoError(t, infraErr)
-		assert.NoError(t, valErr, "an empty name must never collide, even against a stored blank name")
+		err := checkUniqueCompFields(eng, "", "SomethingElse", "")
+		require.NoError(t, err, "an empty name must never collide, even against a stored blank name")
 	})
 }
 

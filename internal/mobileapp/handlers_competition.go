@@ -562,19 +562,23 @@ func resolvePutNumberPrefix(store *state.Store, eng *engine.Engine, target *stat
 	if moved {
 		validatePrefix = target.NumberPrefix
 	}
-	infraErr, validationErr = checkUniqueCompFields(eng, validateName, validatePrefix, id)
-	return moved, infraErr, validationErr
+	err := checkUniqueCompFields(eng, validateName, validatePrefix, id)
+	var validation *engine.ValidationError
+	if errors.As(err, &validation) {
+		return moved, nil, validation
+	}
+	return moved, err, nil
 }
 
 // checkUniqueCompFields verifies that name and prefix are both unique across all
-// competitions except excludeID. Returns (infraErr, validationErr): infraErr
-// is non-nil when the store cannot be queried (caller should 500);
-// validationErr is non-nil when a collision is detected (caller should 400).
-// Empty prefix is exempt from the uniqueness check, and so is an empty name
-// (bc-pnum A5(c)/D4): the start/generate-draw pre-flight passes "" for the
-// name deliberately, since it validates only the field IT introduces (the
-// derived prefix), never an inherited duplicate name the request never sent
-// -- without this exemption a blank-named record already on disk (an
+// competitions except excludeID. Returns a single error: nil on success, a
+// *engine.ValidationError on a detected collision (caller should 400, via
+// errors.As), or any other error when the store could not be queried (caller
+// should 500). Empty prefix is exempt from the uniqueness check, and so is an
+// empty name (bc-pnum A5(c)/D4): the start/generate-draw pre-flight passes ""
+// for the name deliberately, since it validates only the field IT introduces
+// (the derived prefix), never an inherited duplicate name the request never
+// sent -- without this exemption a blank-named record already on disk (an
 // out-of-band copy/restore) would refuse the empty-name caller's OWN
 // competition on a field it never touched.
 //
@@ -585,16 +589,9 @@ func resolvePutNumberPrefix(store *state.Store, eng *engine.Engine, target *stat
 // through is the wrong trade. The start/generate-draw pre-flight cannot
 // defer that way and uses checkUniqueCompFieldsTolerant instead (bc-pnum
 // A5(d)).
-func checkUniqueCompFields(eng *engine.Engine, name, prefix, excludeID string) (error, error) {
+func checkUniqueCompFields(eng *engine.Engine, name, prefix, excludeID string) error {
 	_, err := eng.CheckUniqueCompFields(name, prefix, excludeID, false)
-	if err == nil {
-		return nil, nil
-	}
-	var validation *engine.ValidationError
-	if errors.As(err, &validation) {
-		return nil, validation
-	}
-	return err, nil
+	return err
 }
 
 // checkUniqueCompFieldsTolerant is checkUniqueCompFields's pre-flight-only
@@ -1032,16 +1029,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				idErr = fmt.Errorf("competition ID %q already exists", comp.ID)
 				return nil
 			}
-			var infraErr error
 			if dErr := assignDefaultNumberPrefix(eng, &comp, ""); dErr != nil {
 				return dErr
 			}
-			infraErr, validationErr = checkUniqueCompFields(eng, comp.Name, comp.NumberPrefix, "")
-			if infraErr != nil {
-				return infraErr
-			}
-			if validationErr != nil {
-				return nil
+			if err := checkUniqueCompFields(eng, comp.Name, comp.NumberPrefix, ""); err != nil {
+				var validation *engine.ValidationError
+				if errors.As(err, &validation) {
+					validationErr = validation
+					return nil
+				}
+				return err
 			}
 			_, saveErr := saveCompetitionWithPlayers(&comp, store)
 			return saveErr

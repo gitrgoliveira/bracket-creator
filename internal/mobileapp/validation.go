@@ -1088,7 +1088,11 @@ func validateWithdrawalNamesDisambiguated(decision, sideA, sideB, winnerID, side
 	if !domain.IsKikenDecisionStr(decision) && decision != string(domain.DecisionFusenpai) {
 		return nil
 	}
-	if winnerID != "" && (winnerID == sideAID || winnerID == sideBID) {
+	// domain.WinnerIDNamesASide treats an EMPTY winnerID as trivially
+	// acceptable (nothing to check); the explicit winnerID != "" guard here
+	// keeps this function's own rule that an empty winnerId does NOT
+	// disambiguate a same-name withdrawal.
+	if winnerID != "" && domain.WinnerIDNamesASide(winnerID, sideAID, sideBID) {
 		return nil
 	}
 	return &ValidationError{

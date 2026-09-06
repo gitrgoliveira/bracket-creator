@@ -1780,14 +1780,14 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 	}
 	statusFor := make(map[string]*compStatus, len(sorted))
 	for _, s := range sorted {
-		statusFor[helper.CompetitorKey(s.Player.ID, s.Player.Name, s.Player.Dojo)] = &compStatus{}
+		statusFor[helper.PlayerKey(s.Player)] = &compStatus{}
 	}
 	tally := func(id, name string) *compStatus {
 		st := lookupStandingsPlayer(rosterIndex, id, name)
 		if st == nil {
 			return nil
 		}
-		return statusFor[helper.CompetitorKey(st.Player.ID, st.Player.Name, st.Player.Dojo)]
+		return statusFor[helper.PlayerKey(st.Player)]
 	}
 	for _, m := range regularMatches {
 		if cs := tally(m.SideAID, m.SideA); cs != nil {
@@ -1807,7 +1807,7 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 	// Check if ANY top-N competitor has completed all their own fights.
 	triggerFired := false
 	for i := 0; i < topN; i++ {
-		cs := statusFor[helper.CompetitorKey(sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo)]
+		cs := statusFor[helper.PlayerKey(sorted[i].Player)]
 		if cs != nil && cs.total > 0 && cs.completed == cs.total {
 			triggerFired = true
 			break

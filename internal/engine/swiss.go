@@ -85,7 +85,7 @@ func buildSwissRosterIndex(roster []domain.Player) (byID map[string]string, byNa
 	byID = make(map[string]string, len(roster))
 	byName = make(map[string][]string, len(roster))
 	for _, p := range roster {
-		k := helper.CompetitorKey(p.ID, p.Name, p.Dojo)
+		k := helper.PlayerKey(p)
 		if p.ID != "" {
 			byID[p.ID] = k
 		}
@@ -294,7 +294,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		field := swissFieldKeysFromMatches(priorMatches, rosterByID, rosterByName)
 		frozen := make([]domain.Player, 0, len(participants))
 		for _, p := range participants {
-			if field[helper.CompetitorKey(p.ID, p.Name, p.Dojo)] {
+			if field[helper.PlayerKey(p)] {
 				frozen = append(frozen, p)
 			}
 		}
@@ -323,7 +323,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// SideA/SideB/SideAID/SideBID once pairing has settled on identities.
 	keyToPlayer := make(map[string]domain.Player, len(active))
 	for _, p := range active {
-		keyToPlayer[helper.CompetitorKey(p.ID, p.Name, p.Dojo)] = p
+		keyToPlayer[helper.PlayerKey(p)] = p
 	}
 
 	// Build the prior-pairings set (for rematch avoidance) and the
@@ -415,7 +415,7 @@ func buildRankByKey(players []domain.Player) map[string]int {
 	}
 	rs := make([]ranked, len(players))
 	for i, p := range players {
-		rs[i] = ranked{key: helper.CompetitorKey(p.ID, p.Name, p.Dojo), name: p.Name, seed: p.Seed}
+		rs[i] = ranked{key: helper.PlayerKey(p), name: p.Name, seed: p.Seed}
 	}
 	sort.SliceStable(rs, func(i, j int) bool {
 		si, sj := rs[i].seed, rs[j].seed
@@ -497,7 +497,7 @@ func (e *Engine) firstRoundPairings(
 	// (fold) or as a starting permutation (random).
 	keys := make([]string, len(active))
 	for i, p := range active {
-		keys[i] = helper.CompetitorKey(p.ID, p.Name, p.Dojo)
+		keys[i] = helper.PlayerKey(p)
 	}
 	sort.SliceStable(keys, func(i, j int) bool {
 		return rankByKey[keys[i]] < rankByKey[keys[j]]
@@ -594,7 +594,7 @@ func (e *Engine) subsequentRoundPairings(
 	// Sort all active players by (-wins, rank).
 	ordered := make([]string, len(active))
 	for i, p := range active {
-		ordered[i] = helper.CompetitorKey(p.ID, p.Name, p.Dojo)
+		ordered[i] = helper.PlayerKey(p)
 	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		wi, wj := wins[ordered[i]], wins[ordered[j]]

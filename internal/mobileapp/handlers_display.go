@@ -316,15 +316,11 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	if plErr != nil {
 		log.Printf("mobileapp: court current %s: load participants: %v", comp.ID, plErr)
 	}
-	if comp.EffectiveNumberPrefix() != "" {
-		pools, err := store.LoadPools(comp.ID)
-		if err != nil {
-			// Reported, not merged: an unreadable pools.csv must show as
-			// MISSING numbers on the overlay, never as composed ones (D1).
-			log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
-		} else {
-			mergePoolNumbersIntoPlayersSlice(comp, players, pools)
-		}
+	// numbersFromPools (PR #416 finding 3) owns the prefix/no-draw-yet skip
+	// and the pools.csv read; an unreadable pools.csv is reported, not
+	// merged, so the overlay shows MISSING numbers, never composed ones (D1).
+	if err := numbersFromPools(store, comp, players); err != nil {
+		log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
 	}
 	return players
 }

@@ -129,14 +129,47 @@ func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.
 	}
 }
 
-// mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
-// pointer's own roster. Existing call sites that hold a *Competition keep
-// their idiomatic form; the work happens in the slice-typed helper above.
-func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
-	if comp == nil {
-		return
+// numbersFromPools is the ONE owner of "numbers come from pools.csv": a
+// caller that wants players' Number field filled from the draw's assignment
+// calls this rather than hand-copying the prefix/no-draw-yet skip and its
+// own store.LoadPools call (PR #416 finding 3).
+//
+// No-ops with no I/O at all when comp has no configured NumberPrefix
+// (mergePoolNumbersIntoPlayersSlice's own no-op condition, checked here too
+// so callers never pay for a read whose result would be discarded).
+//
+// Skips the READ (but still merges, against an empty pools slice) when the
+// competition has no draw yet (engine.CanGenerateDraw(comp.Status), i.e.
+// status "setup" or the legacy empty status): pools.csv cannot exist for a
+// competition that has never drawn, so the read is a guaranteed-empty stat --
+// and, more importantly, any bytes found at that path for such a competition
+// are noise (a stray fixture/leftover from another run), not an operator-
+// actionable file, so they must never surface as a data issue or a log line.
+// Merging against an empty slice regardless keeps this a pure optimization,
+// never a behaviour change: mergePoolNumbersIntoPlayersSlice already treats
+// an empty pools slice as "no draw" for every format (playoffs-only still
+// derives its number from participant order; every other format shows none,
+// per the bc-pnum operator ruling on its own doc comment).
+//
+// On a genuine read/parse error the merge is skipped (numbers are never
+// composed from a partial/corrupt read, matching mergePoolNumbersIntoPlayersSlice's
+// own doc comment) and the error is returned so a caller that maintains a
+// dataIssues list (the aggregate payload builder) can fold it in; other
+// callers log it directly.
+func numbersFromPools(store *state.Store, comp *state.Competition, players []domain.Player) error {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" {
+		return nil
 	}
-	mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
+	if engine.CanGenerateDraw(comp.Status) {
+		mergePoolNumbersIntoPlayersSlice(comp, players, nil)
+		return nil
+	}
+	pools, err := store.LoadPools(comp.ID)
+	if err != nil {
+		return err
+	}
+	mergePoolNumbersIntoPlayersSlice(comp, players, pools)
+	return nil
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
@@ -256,28 +289,20 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
 	}
 	comp.Players = players
-	// mp-13y: merge numberPrefix-derived numbers from pools.csv. Skip the
-	// pools.csv read entirely when no prefix is configured -- bc-pnum G2
-	// means that is now the rare case (a legacy competition that predates
-	// the never-empty-prefix rule and has not yet had a chance to heal it,
-	// see RenumberCompetitors/G7), not the common one.
-	var poolsErr error
-	if comp.EffectiveNumberPrefix() != "" {
-		var pools []helper.Pool
-		pools, poolsErr = store.LoadPools(compID)
-		if poolsErr != nil {
-			// Reported, not merged: an unreadable pools.csv must show as
-			// MISSING numbers, never as composed ones (D1). bc-pnum C4: only a
-			// PARSE failure joins the payload's dataIssues below (dataIssuesFrom
-			// -> state.AsCorruptFile, which corruptCSV populates from a
-			// csv.ParseError specifically). A raw READ error (permissions, I/O)
-			// is not something an operator repairs with a text editor, and its
-			// message names the absolute path on disk, which must never reach
-			// this PUBLIC payload -- it is logged server-side only, here.
-			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
-		} else {
-			mergePoolNumbersIntoPlayers(comp, pools)
-		}
+	// mp-13y: merge numberPrefix-derived numbers from pools.csv, via the one
+	// owner of that read (numbersFromPools, PR #416 finding 3) so the
+	// prefix/no-draw-yet skip can't drift from the other two callers.
+	poolsErr := numbersFromPools(store, comp, players)
+	if poolsErr != nil {
+		// Reported, not merged: an unreadable pools.csv must show as
+		// MISSING numbers, never as composed ones (D1). bc-pnum C4: only a
+		// PARSE failure joins the payload's dataIssues below (dataIssuesFrom
+		// -> state.AsCorruptFile, which corruptCSV populates from a
+		// csv.ParseError specifically). A raw READ error (permissions, I/O)
+		// is not something an operator repairs with a text editor, and its
+		// message names the absolute path on disk, which must never reach
+		// this PUBLIC payload -- it is logged server-side only, here.
+		log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
 	}
 
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
@@ -553,12 +578,16 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 
 			// mp-13y: merge assigned competitor Number from pools.csv onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
-			// on the TV display, streaming overlay, and viewer card. A pools
-			// read error degrades (above) rather than aborting, so `pools`
-			// may be empty here; mergePoolNumbersIntoPlayers is a no-op over
-			// an empty slice, matching the aggregate's own tolerance for the
-			// same fault.
-			mergePoolNumbersIntoPlayers(comp, pools)
+			// on the TV display, streaming overlay, and viewer card. `pools`
+			// is already loaded above (it is also this payload's own "pools"
+			// field), so this calls the Slice form directly rather than
+			// numbersFromPools (PR #416 finding 3), which would re-read
+			// pools.csv a second time. A pools read error degrades (above)
+			// rather than aborting, so `pools` may be empty here;
+			// mergePoolNumbersIntoPlayersSlice is a no-op over an empty
+			// slice, matching the aggregate's own tolerance for the same
+			// fault.
+			mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 
 			// Redact operator-only audit fields before this PUBLIC payload.
 			stripMatchesAudit(poolMatches)

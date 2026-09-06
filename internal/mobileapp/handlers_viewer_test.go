@@ -1,7 +1,9 @@
 package mobileapp
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,13 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMergePoolNumbersIntoPlayers, mp-13y: numbers from pools.csv must be
+// TestMergePoolNumbersIntoPlayersSlice, mp-13y: numbers from pools.csv must be
 // merged onto comp.Players so the viewer API carries the numberPrefix-derived
 // "K1", "K2", … on every player. The merge is the bridge that lets the TV
 // display / streaming overlay / viewer card render the prefix at all
 // (participants.csv does NOT persist Number).
-func TestMergePoolNumbersIntoPlayers(t *testing.T) {
-	// mergePoolNumbersIntoPlayers no longer threads an engine parameter
+func TestMergePoolNumbersIntoPlayersSlice(t *testing.T) {
+	// mergePoolNumbersIntoPlayersSlice no longer threads an engine parameter
 	// through -- its playoffs-only branch calls the package-level
 	// engine.NumberPlayoffsOnlyParticipants directly, the SAME function the
 	// viewer handler and the blank-template export reach, so there is no
@@ -31,7 +33,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players: []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
@@ -45,7 +47,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Format:       state.CompFormatMixed,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, nil)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 
@@ -59,7 +61,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p3", Name: "Santos Ana", Dojo: "Dojo Santos Ana"},
 			},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number)
 		assert.Equal(t, "D2", comp.Players[1].Number)
 		assert.Equal(t, "D3", comp.Players[2].Number)
@@ -79,7 +81,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
 			},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number)
 		assert.Equal(t, "D2", comp.Players[1].Number)
 	})
@@ -103,7 +105,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Format:       state.CompFormatPlayoffs,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "STALE", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, nil)
 		assert.Equal(t, "D1", comp.Players[0].Number, "must overwrite a stale Number with the current prefix, not preserve it")
 	})
 
@@ -125,7 +127,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Suzuki", Number: "K3", Dojo: "Dojo Suzuki"},
 			}},
 		}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K3", comp.Players[1].Number)
 		assert.Equal(t, "K2", comp.Players[2].Number)
@@ -143,7 +145,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			{Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"},
 			{Name: "Suzuki", Number: "K2", Dojo: "Dojo Suzuki"},
 		}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K2", comp.Players[1].Number)
 	})
@@ -154,7 +156,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
 	})
 
@@ -175,7 +177,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			{Name: "Taro", Dojo: "Dojo Kyoto", Number: "K3"},
 			{Name: "Taro", Dojo: "Dojo Osaka", Number: "K11"},
 		}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "K3", comp.Players[0].Number, "the Kyoto Taro must get his own number, not the Osaka Taro's")
 		assert.Equal(t, "K11", comp.Players[1].Number, "the Osaka Taro must get his own number, not the Kyoto Taro's")
 	})
@@ -186,7 +188,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "", comp.Players[0].Number)
 	})
 }
@@ -440,6 +442,56 @@ func TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers(t *testing.T) {
 			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable pools.csv, got %q", p.Name, p.Number)
 		}
 		assert.Contains(t, w.Body.String(), `"file":"pools.csv"`, "the unreadable file must be named in the item's dataIssues, not only in the server log")
+	}
+	assert.True(t, found, "the competition must still be listed")
+}
+
+// TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins numbersFromPools'
+// setup-status skip (PR #416 finding 3): a competition that has never drawn
+// cannot legitimately have a pools.csv, so the read must not even be
+// attempted -- garbage bytes left at that path (a stray fixture/leftover, not
+// an operator-actionable file) must surface as neither a dataIssue nor a log
+// line, unlike TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers's DRAWN
+// competition, where the identical bytes DO produce both.
+func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "setup-skips-pools-read"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Setup Skips Pools Read", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusSetup, NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.NotContains(t, w.Body.String(), "pools.csv", "a setup competition must never attempt the pools.csv read, so garbage bytes there produce no dataIssues entry")
+	assert.NotContains(t, logBuf.String(), "load pools", "a setup competition must never attempt the pools.csv read, so garbage bytes there produce no log line either")
+
+	var items []struct {
+		Config state.Competition `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+	var found bool
+	for _, item := range items {
+		if item.Config.ID != cid {
+			continue
+		}
+		found = true
+		require.NotEmpty(t, item.Config.Players, "the roster must still be served")
+		assert.Empty(t, item.Config.Players[0].Number, "pre-draw: no number even though a NumberPrefix is configured")
 	}
 	assert.True(t, found, "the competition must still be listed")
 }

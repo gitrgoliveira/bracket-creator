@@ -49,7 +49,7 @@ import {
   HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, LABEL_COURTS,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
@@ -309,15 +309,20 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
     }
 
-    // Trim numberPrefix: the input does substring(0, 3) per keystroke
-    // but doesn't trim, so typing "  A" stores "  A" in local state and
-    // (without this) lands "  A" on the server. The CREATE flow
-    // (AdminCreateCompetition.create's deriveCompetitionName + trim
-    // chain in admin_setup.jsx) already trims at create time; this
-    // mirrors that for the SETTINGS edit flow so participant numbers
-    // generated from the prefix can't end up like "  A1" / "  A2".
-    // Cross-file guard symmetry: same shape as the comp.Name trim above.
-    const trimmedPrefix = (effective.numberPrefix || "").trim();
+    // cutNumberPrefix (competition_shape.jsx, H13-js): the TextField's
+    // onChange already runs this per keystroke, so `effective.numberPrefix`
+    // should already be trimmed and character-safe-capped -- this is a
+    // defensive re-application at the payload boundary, the same posture
+    // normalizeConfigForFormat/normalizeConfigForKind take (only ever
+    // called here, never a second time from the control's own onChange).
+    // Historically this line only trimmed (`.trim()`), because the
+    // per-keystroke cut used `.substring(0, 3)` and never trimmed, so
+    // typing "  A" stored "  A" in local state and (without this) landed
+    // "  A" on the server; the CREATE flow (AdminCreateCompetition.create's
+    // deriveCompetitionName + trim chain in admin_setup.jsx) already
+    // trimmed at create time, so this mirrored that for the SETTINGS edit
+    // flow. cutNumberPrefix now does both jobs in one call.
+    const trimmedPrefix = cutNumberPrefix(effective.numberPrefix);
     // Build the PUT payload from settings fields ONLY: do NOT spread the
     // full `c` snapshot or the full `next` snapshot. Pre-fix this was
     // `{ ...c, ...next, ... }`, which carried `local.status` and
@@ -1529,7 +1534,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           so warning a Swiss operator about a renumber describes something
           that can never happen. */}
       <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
-        value={local.numberPrefix} onChange={(raw) => update("numberPrefix", raw.substring(0, 3))}
+        value={local.numberPrefix} onChange={(raw) => update("numberPrefix", cutNumberPrefix(raw))}
         hint={lockedAfterDraw && competitorsCarryNumbers(local.format) && (local.numberPrefix || "").trim() !== "" && (local.numberPrefix || "").trim() !== (c.numberPrefix || "").trim()
           ? `${HINT_NUMBER_PREFIX} Every competitor will be renumbered and any tags already printed must be reprinted.`
           : HINT_NUMBER_PREFIX}

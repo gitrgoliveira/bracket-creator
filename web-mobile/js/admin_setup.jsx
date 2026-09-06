@@ -146,7 +146,7 @@ import {
   HINT_ZEKKEN, HINT_ENGI, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, LABEL_COURTS,
+  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { DurationInput } from './duration.jsx';
@@ -1023,7 +1023,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
       // (WithCompetitionRenameLock, the same one this preview echoes), which
       // reads the taken set at save time instead of at the moment this form
       // last fetched a preview.
-      numberPrefix: numberPrefixTouchedRef.current ? numberPrefix.trim().substring(0, 3) : "",
+      numberPrefix: numberPrefixTouchedRef.current ? cutNumberPrefix(numberPrefix) : "",
       // zekkenApplies, not a `kind === "individual"` literal: the rule has
       // one owner (competition_shape.jsx) and the render gate below already
       // reads it, so a payload line spelling it out by hand is the half that

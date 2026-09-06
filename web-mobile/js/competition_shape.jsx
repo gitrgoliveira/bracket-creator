@@ -504,6 +504,33 @@ export const LABEL_NUMBER_PREFIX = "Player number prefix";
 // handler). Also states the 3-character cap the TextField's maxLength
 // enforces, which the old copy didn't mention at all.
 export const HINT_NUMBER_PREFIX = "Up to 3 characters for competitor numbers (e.g. K produces K1, K2…). Leave blank: on create, one is derived from the competition's name; in settings, the current prefix is kept.";
+
+// MAX_NUMBER_PREFIX_CHARS: the 3-character cap HINT_NUMBER_PREFIX describes
+// and the TextField's own maxLength enforces (H13-js). Named so
+// cutNumberPrefix below and any future caller share the one number rather
+// than a bare "3" appearing at each cut site.
+export const MAX_NUMBER_PREFIX_CHARS = 3;
+
+// cutNumberPrefix: the ONE owner of "trim, then keep at most
+// MAX_NUMBER_PREFIX_CHARS CHARACTERS" for the player-number-prefix field
+// (H13-js). Both the create form (admin_setup.jsx) and the settings form
+// (admin_competition_settings.jsx) used to call `.trim().substring(0, 3)`
+// directly, which counts UTF-16 CODE UNITS, not characters: an astral
+// character (anything outside the Basic Multilingual Plane, e.g. most emoji)
+// is TWO code units, so substring(0, 3) can slice one in half, keeping a lone
+// unpaired surrogate. `Array.from` iterates by Unicode code point, so
+// spreading through it and slicing counts actual characters -- a
+// non-BMP-heavy prefix like "\u{1F600}\u{1F600}" (2 emoji) keeps both emoji
+// whole instead of being cut to "\u{1F600}" plus a broken surrogate half.
+// The HTML `maxLength` attribute on the input has the SAME code-unit
+// behaviour, so it stays as a soft browser-side limit (it still stops most
+// typing well short of a problem) while this function is the one place that
+// produces the value actually stored and sent to the server, mirroring the
+// server's own move to a rune count for this field.
+export function cutNumberPrefix(v) {
+  return Array.from((v || "").trim()).slice(0, MAX_NUMBER_PREFIX_CHARS).join("");
+}
+
 // HINT_KIND_ONLY_INDIVIDUAL: settings shows this in place of the zekken /
 // engi hint when the competition is a team one, standing in for the hint
 // rather than sitting beside it (see zekkenApplies above for why settings

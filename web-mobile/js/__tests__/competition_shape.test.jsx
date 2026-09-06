@@ -23,6 +23,7 @@ import {
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
+  cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS,
 } from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
@@ -922,5 +923,63 @@ describe('shapeConfigForSave', () => {
     expect(named, 'it should still name what the format change really does clear').toEqual(
       expect.arrayContaining(['poolSize', 'poolWinners'])
     );
+  });
+});
+
+// cutNumberPrefix (H13-js): the create form (admin_setup.jsx) and the
+// settings form (admin_competition_settings.jsx) both used to cut the
+// player-number-prefix field with `.trim().substring(0, 3)`, which counts
+// UTF-16 CODE UNITS. An astral character (outside the Basic Multilingual
+// Plane -- most emoji) is TWO code units, so substring(0, 3) can slice one
+// in half, keeping a lone unpaired surrogate on the wire. Array.from
+// iterates by Unicode code point, so cutNumberPrefix counts actual
+// characters instead.
+describe('cutNumberPrefix', () => {
+  it('keeps a 2-character non-ASCII string whole', () => {
+    expect(cutNumberPrefix('ÖÖ')).toBe('ÖÖ');
+  });
+
+  it('keeps a 3-character non-ASCII string whole (exactly at the cap)', () => {
+    expect(cutNumberPrefix('ÖÖÖ')).toBe('ÖÖÖ');
+  });
+
+  it('cuts a 4-character non-ASCII string to MAX_NUMBER_PREFIX_CHARS characters', () => {
+    const cut = cutNumberPrefix('ÖÖÖÖ');
+    expect(cut).toBe('ÖÖÖ');
+    expect(Array.from(cut).length).toBe(MAX_NUMBER_PREFIX_CHARS);
+  });
+
+  it('does not split an astral (surrogate-pair) character mid-pair', () => {
+    // U+1F600 (😀) is a single character but TWO UTF-16 code units.
+    // `.substring(0, 3)` on "😀😀" (4 code units total) would keep code
+    // units [0,1,2] -- the whole first emoji plus the leading (high)
+    // surrogate of the second, an unpaired/invalid surrogate half.
+    const twoEmoji = '\u{1F600}\u{1F600}';
+    expect(twoEmoji.length).toBe(4); // sanity: 2 code units per emoji
+    const cut = cutNumberPrefix(twoEmoji);
+    // Array.from-based slicing keeps whole characters: 3-char cap means
+    // both emoji are kept (2 characters < 3), never a broken third.
+    expect(cut).toBe(twoEmoji);
+    expect(Array.from(cut).length).toBe(2);
+    // The critical assertion: no lone surrogate anywhere in the result.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false);
+  });
+
+  it('cuts three astral characters down to MAX_NUMBER_PREFIX_CHARS whole characters, never a lone surrogate', () => {
+    const threeEmoji = '\u{1F600}\u{1F601}\u{1F602}\u{1F603}'; // 4 emoji, 8 code units
+    const cut = cutNumberPrefix(threeEmoji);
+    expect(Array.from(cut).length).toBe(MAX_NUMBER_PREFIX_CHARS);
+    expect(cut).toBe('\u{1F600}\u{1F601}\u{1F602}');
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false);
+  });
+
+  it('trims leading/trailing whitespace before cutting', () => {
+    expect(cutNumberPrefix('  A  ')).toBe('A');
+  });
+
+  it('treats null/undefined/empty as an empty prefix', () => {
+    expect(cutNumberPrefix(null)).toBe('');
+    expect(cutNumberPrefix(undefined)).toBe('');
+    expect(cutNumberPrefix('')).toBe('');
   });
 });

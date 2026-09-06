@@ -207,7 +207,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix)
 
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)

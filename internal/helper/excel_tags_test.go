@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	excelize "github.com/xuri/excelize/v2"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestCreateTagsSheetQR verifies that when publicURL and player.Number are set,
@@ -19,18 +22,11 @@ func TestCreateTagsSheetQR(t *testing.T) {
 			},
 		},
 	}
-	if err := CreateTagsSheet(f, pools, "https://example.com"); err != nil {
-		t.Fatalf("CreateTagsSheet: %v", err)
-	}
+	require.NoError(t, CreateTagsSheet(f, pools, "https://example.com", "K"))
 	for _, cell := range []string{"A1", "A2"} {
 		pics, err := f.GetPictures(SheetTags, cell)
-		if err != nil {
-			t.Errorf("GetPictures(%s): %v", cell, err)
-			continue
-		}
-		if len(pics) == 0 {
-			t.Errorf("expected QR picture in cell %s, got none", cell)
-		}
+		require.NoError(t, err)
+		assert.NotEmptyf(t, pics, "expected QR picture in cell %s, got none", cell)
 	}
 }
 
@@ -53,37 +49,22 @@ func TestCreateTagsSheet(t *testing.T) {
 	}
 
 	// 2. Execution
-	err := CreateTagsSheet(f, pools, "")
-	if err != nil {
-		t.Fatalf("CreateTagsSheet failed: %v", err)
-	}
+	require.NoError(t, CreateTagsSheet(f, pools, "", "K"))
 
 	sheetName := SheetTags
 
 	// 3. Verification - Page Layout (A4 portrait)
 	opts, err := f.GetPageLayout(sheetName)
-	if err != nil {
-		t.Fatalf("Failed to get page layout: %v", err)
-	}
-	if opts.Size == nil {
-		t.Error("Page Size is nil")
-	} else if *opts.Size != 9 {
-		t.Errorf("Expected Page Size 9 (A4), got %d", *opts.Size)
-	}
-	if opts.Orientation == nil {
-		t.Error("Orientation is nil")
-	} else if *opts.Orientation != "portrait" {
-		t.Errorf("Expected orientation 'portrait', got '%s'", *opts.Orientation)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, opts.Size)
+	assert.Equal(t, 9, *opts.Size, "expected Page Size 9 (A4)")
+	require.NotNil(t, opts.Orientation)
+	assert.Equal(t, "portrait", *opts.Orientation)
 
 	// 4. Verification - Row Height (409pt = excelize max, ~half A4 portrait)
 	height, err := f.GetRowHeight(sheetName, 1)
-	if err != nil {
-		t.Fatalf("Failed to get row height: %v", err)
-	}
-	if height != 409 {
-		t.Errorf("Expected row height 409, got %f", height)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, float64(409), height)
 
 	// 5. Verification - each tag appears twice consecutively (same A4 page)
 	// Player 1 (K1): rows 1 and 2
@@ -96,13 +77,8 @@ func TestCreateTagsSheet(t *testing.T) {
 	}
 	for cell, want := range expected {
 		got, err := f.GetCellValue(sheetName, cell)
-		if err != nil {
-			t.Errorf("Failed to get cell %s: %v", cell, err)
-			continue
-		}
-		if got != want {
-			t.Errorf("Expected cell %s to contain %q, got %q", cell, want, got)
-		}
+		require.NoError(t, err)
+		assert.Equalf(t, want, got, "cell %s", cell)
 	}
 }
 
@@ -125,43 +101,28 @@ func TestCreateTagsSheet_ClippingFix(t *testing.T) {
 			{Name: "Player 1", PoolPosition: 1, Dojo: "Dojo Player 1", Number: "KOR19"},
 		}},
 	}
-	if err := CreateTagsSheet(f, pools, ""); err != nil {
-		t.Fatalf("CreateTagsSheet failed: %v", err)
-	}
+	require.NoError(t, CreateTagsSheet(f, pools, "", "KOR"))
 
 	width, err := f.GetColWidth(SheetTags, "A")
-	if err != nil {
-		t.Fatalf("GetColWidth: %v", err)
-	}
-	if width != 88 {
-		t.Errorf("expected column A width 88 (fits the A4-portrait printable width), got %v", width)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, float64(88), width, "expected column A width 88 (fits the A4-portrait printable width)")
 
 	styleID, err := f.GetCellStyle(SheetTags, "A1")
-	if err != nil {
-		t.Fatalf("GetCellStyle: %v", err)
-	}
+	require.NoError(t, err)
 	style, err := f.GetStyle(styleID)
-	if err != nil {
-		t.Fatalf("GetStyle: %v", err)
-	}
-	if style.Alignment == nil || !style.Alignment.WrapText {
-		t.Errorf("expected the three-letter-prefix tag style to set WrapText, got %+v", style.Alignment)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, style.Alignment)
+	assert.True(t, style.Alignment.WrapText, "expected the three-letter-prefix tag style to set WrapText")
 
 	dn := f.GetDefinedName()
 	found := false
 	for _, d := range dn {
 		if d.Name == "_xlnm.Print_Area" && d.Scope == SheetTags {
 			found = true
-			if d.RefersTo != "'Tags'!$A$1:$A$2" {
-				t.Errorf("expected print area 'Tags'!$A$1:$A$2 (one player -> 2 rows), got %q", d.RefersTo)
-			}
+			assert.Equal(t, "'Tags'!$A$1:$A$2", d.RefersTo, "one player -> 2 rows")
 		}
 	}
-	if !found {
-		t.Error("expected a _xlnm.Print_Area defined name scoped to the Tags sheet")
-	}
+	assert.True(t, found, "expected a _xlnm.Print_Area defined name scoped to the Tags sheet")
 }
 
 // TestCreateTagsSheet_ZeroPlayersNoPrintArea pins a review finding on top of
@@ -174,13 +135,10 @@ func TestCreateTagsSheet_ClippingFix(t *testing.T) {
 // written, so there is nothing to scope a print area to.
 func TestCreateTagsSheet_ZeroPlayersNoPrintArea(t *testing.T) {
 	f := excelize.NewFile()
-	if err := CreateTagsSheet(f, nil, ""); err != nil {
-		t.Fatalf("CreateTagsSheet failed: %v", err)
-	}
+	require.NoError(t, CreateTagsSheet(f, nil, "", "K"))
 	for _, d := range f.GetDefinedName() {
-		if d.Name == "_xlnm.Print_Area" && d.Scope == SheetTags {
-			t.Errorf("expected NO print area for a zero-player Tags sheet, got %q", d.RefersTo)
-		}
+		assert.Falsef(t, d.Name == "_xlnm.Print_Area" && d.Scope == SheetTags,
+			"expected NO print area for a zero-player Tags sheet, got %q", d.RefersTo)
 	}
 }
 
@@ -204,20 +162,13 @@ func TestCreateTagsSheet_EmptyNumber(t *testing.T) {
 		},
 	}
 
-	if err := CreateTagsSheet(f, pools, ""); err != nil {
-		t.Fatalf("CreateTagsSheet failed: %v", err)
-	}
+	require.NoError(t, CreateTagsSheet(f, pools, "", "K"))
 
 	sheetName := SheetTags
 	for _, cell := range []string{"A1", "A2", "A3", "A4"} {
 		got, err := f.GetCellValue(sheetName, cell)
-		if err != nil {
-			t.Errorf("Failed to get cell %s: %v", cell, err)
-			continue
-		}
-		if got != "" {
-			t.Errorf("Expected cell %s to be empty (no Number, no fallback), got %q", cell, got)
-		}
+		require.NoError(t, err)
+		assert.Emptyf(t, got, "cell %s: no Number, no fallback", cell)
 	}
 }
 
@@ -232,32 +183,22 @@ func TestCreateTagsSheet_QRSitsBelowTheNumber(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
 	pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "KOR20"}}}}
-	if err := CreateTagsSheet(f, pools, "https://example.org/viewer"); err != nil {
-		t.Fatalf("CreateTagsSheet: %v", err)
-	}
+	require.NoError(t, CreateTagsSheet(f, pools, "https://example.org/viewer", "KOR"))
 	pics, err := f.GetPictures(SheetTags, "A1")
-	if err != nil {
-		t.Fatalf("GetPictures: %v", err)
-	}
-	if len(pics) != 1 {
-		t.Fatalf("expected one QR picture on the first tag, got %d", len(pics))
-	}
+	require.NoError(t, err)
+	require.Len(t, pics, 1, "expected one QR picture on the first tag")
 	got := pics[0].Format
-	if got == nil {
-		t.Fatal("QR picture has no graphic options")
-	}
-	if got.OffsetX != 8 || got.OffsetY != 415 {
-		t.Errorf("QR must sit in the bottom-left band below the number (OffsetX 8, OffsetY 415 px), got (%d, %d)", got.OffsetX, got.OffsetY)
-	}
-	if got.ScaleX != 0.6 || got.ScaleY != 0.6 {
-		t.Errorf("QR scale must be 0.6 (about 3.2 cm on paper), got (%v, %v)", got.ScaleX, got.ScaleY)
-	}
+	require.NotNil(t, got, "QR picture has no graphic options")
+	assert.Equal(t, 8, got.OffsetX, "QR must sit in the bottom-left band below the number")
+	assert.Equal(t, 415, got.OffsetY, "QR must sit in the bottom-left band below the number")
+	assert.Equal(t, float64(0.6), got.ScaleX, "QR scale must be 0.6 (about 3.2 cm on paper)")
+	assert.Equal(t, float64(0.6), got.ScaleY, "QR scale must be 0.6 (about 3.2 cm on paper)")
 }
 
 // TestCreateTagsSheet_StackedNumberLayout pins the bc-pnum operator ruling: a
-// competition number prefix of more than one letter prints as TWO stacked
-// lines (letters over digits), decided once for the whole sheet from the
-// first numbered player, while a one-letter prefix keeps the single-line
+// competition number prefix of more than one CHARACTER prints as TWO stacked
+// lines (letters over digits), decided from the competition's own
+// numberPrefix argument, while a one-character prefix keeps the single-line
 // layout and value.
 func TestCreateTagsSheet_StackedNumberLayout(t *testing.T) {
 	t.Run("two-letter prefix stacks", func(t *testing.T) {
@@ -267,81 +208,47 @@ func TestCreateTagsSheet_StackedNumberLayout(t *testing.T) {
 			{Name: "Alice", Dojo: "Seishin", Number: "KO20"},
 			{Name: "Bob", Dojo: "Seishin", Number: "KO21"},
 		}}}
-		if err := CreateTagsSheet(f, pools, ""); err != nil {
-			t.Fatalf("CreateTagsSheet: %v", err)
-		}
+		require.NoError(t, CreateTagsSheet(f, pools, "", "KO"))
 		got, err := f.GetCellValue(SheetTags, "A1")
-		if err != nil {
-			t.Fatalf("GetCellValue: %v", err)
-		}
-		if got != "KO\n20" {
-			t.Errorf("expected stacked value %q, got %q", "KO\n20", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "KO\n20", got)
 
 		styleID, err := f.GetCellStyle(SheetTags, "A1")
-		if err != nil {
-			t.Fatalf("GetCellStyle: %v", err)
-		}
+		require.NoError(t, err)
 		style, err := f.GetStyle(styleID)
-		if err != nil {
-			t.Fatalf("GetStyle: %v", err)
-		}
-		if style.Alignment == nil || !style.Alignment.WrapText {
-			t.Errorf("expected the stacked style to set WrapText, got %+v", style.Alignment)
-		}
-		if style.Alignment.ShrinkToFit {
-			t.Errorf("expected the stacked style NOT to shrink to fit, got %+v", style.Alignment)
-		}
-		if style.Alignment.Vertical != "top" {
-			t.Errorf("expected the stacked style to align top (free band for the QR), got %q", style.Alignment.Vertical)
-		}
-		if style.Font == nil || style.Font.Size != 160 {
-			t.Errorf("expected the stacked style at 160pt, got %+v", style.Font)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, style.Alignment)
+		assert.True(t, style.Alignment.WrapText, "expected the stacked style to set WrapText")
+		assert.False(t, style.Alignment.ShrinkToFit, "expected the stacked style NOT to shrink to fit")
+		assert.Equal(t, "top", style.Alignment.Vertical, "expected the stacked style to align top (free band for the QR)")
+		require.NotNil(t, style.Font)
+		assert.Equal(t, float64(160), style.Font.Size, "expected the stacked style at 160pt")
 
 		// The SECOND player's own digits reach the cell too: the sheet-wide
 		// decision is stacked, but each tag still carries its own number.
 		got3, err := f.GetCellValue(SheetTags, "A3")
-		if err != nil {
-			t.Fatalf("GetCellValue: %v", err)
-		}
-		if got3 != "KO\n21" {
-			t.Errorf("expected stacked value %q, got %q", "KO\n21", got3)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "KO\n21", got3)
 	})
 
 	t.Run("one-letter prefix stays single-line", func(t *testing.T) {
 		f := excelize.NewFile()
 		defer func() { _ = f.Close() }()
 		pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "K20"}}}}
-		if err := CreateTagsSheet(f, pools, ""); err != nil {
-			t.Fatalf("CreateTagsSheet: %v", err)
-		}
+		require.NoError(t, CreateTagsSheet(f, pools, "", "K"))
 		got, err := f.GetCellValue(SheetTags, "A1")
-		if err != nil {
-			t.Fatalf("GetCellValue: %v", err)
-		}
-		if got != "K20" {
-			t.Errorf("expected single-line value %q, got %q", "K20", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "K20", got)
 
 		styleID, err := f.GetCellStyle(SheetTags, "A1")
-		if err != nil {
-			t.Fatalf("GetCellStyle: %v", err)
-		}
+		require.NoError(t, err)
 		style, err := f.GetStyle(styleID)
-		if err != nil {
-			t.Fatalf("GetStyle: %v", err)
-		}
-		if style.Alignment == nil || style.Alignment.WrapText {
-			t.Errorf("expected the single-line style NOT to set WrapText, got %+v", style.Alignment)
-		}
-		if style.Alignment == nil || !style.Alignment.ShrinkToFit {
-			t.Errorf("expected the single-line style to shrink to fit, got %+v", style.Alignment)
-		}
-		if style.Font == nil || style.Font.Size != 250 {
-			t.Errorf("expected the single-line style at 250pt, got %+v", style.Font)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, style.Alignment)
+		assert.False(t, style.Alignment.WrapText, "expected the single-line style NOT to set WrapText")
+		assert.True(t, style.Alignment.ShrinkToFit, "expected the single-line style to shrink to fit")
+		require.NotNil(t, style.Font)
+		assert.Equal(t, float64(250), style.Font.Size, "expected the single-line style at 250pt")
 	})
 
 	// bc-pnum review: "Ö" is ONE character but two UTF-8 bytes, so a
@@ -351,27 +258,51 @@ func TestCreateTagsSheet_StackedNumberLayout(t *testing.T) {
 		f := excelize.NewFile()
 		defer func() { _ = f.Close() }()
 		pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "Ö20"}}}}
-		if err := CreateTagsSheet(f, pools, ""); err != nil {
-			t.Fatalf("CreateTagsSheet: %v", err)
-		}
+		require.NoError(t, CreateTagsSheet(f, pools, "", "Ö"))
 		got, err := f.GetCellValue(SheetTags, "A1")
-		if err != nil {
-			t.Fatalf("GetCellValue: %v", err)
-		}
-		if got != "Ö20" {
-			t.Errorf("expected single-line value %q, got %q", "Ö20", got)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, "Ö20", got)
 
 		styleID, err := f.GetCellStyle(SheetTags, "A1")
-		if err != nil {
-			t.Fatalf("GetCellStyle: %v", err)
-		}
+		require.NoError(t, err)
 		style, err := f.GetStyle(styleID)
-		if err != nil {
-			t.Fatalf("GetStyle: %v", err)
-		}
-		if style.Alignment == nil || style.Alignment.WrapText {
-			t.Errorf("expected the single-line style NOT to set WrapText, got %+v", style.Alignment)
-		}
+		require.NoError(t, err)
+		require.NotNil(t, style.Alignment)
+		assert.False(t, style.Alignment.WrapText, "expected the single-line style NOT to set WrapText")
 	})
+}
+
+// TestCreateTagsSheet_DigitBearingPrefixSplitsAtThePrefix pins bc-pnum
+// review H1/H2: DefaultNumberPrefix can legitimately derive a digit-bearing
+// prefix ("KO2", from DefaultNumberPrefix("Kendo Open", []string{"K","KO5"})
+// -- see TestDefaultNumberPrefix_DigitBearingPrefix in numbers_test.go), and
+// under it competitor 1's number is "KO21". The split must be driven by the
+// SHEET's own known prefix ("KO2"), not guessed from the first ASCII digit
+// in the number itself -- the old first-digit rule misread this as prefix
+// "KO" over counter "21" (competitor 21 of "KO"), when the correct read is
+// prefix "KO2" over counter "1".
+func TestCreateTagsSheet_DigitBearingPrefixSplitsAtThePrefix(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "KO21"}}}}
+	require.NoError(t, CreateTagsSheet(f, pools, "", "KO2"))
+	got, err := f.GetCellValue(SheetTags, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, "KO2\n1", got, "must split at the sheet's own prefix (KO2/1), not the first digit (KO/21)")
+}
+
+// TestCreateTagsSheet_NumberNotCarryingPrefixStaysSingleLine pins the
+// report-over-fabricate rule (D1, extended by bc-pnum review H1/H2 to the
+// print split itself): a hand-edited or legacy number that does not
+// actually start with the sheet's own prefix is never guessed at with a
+// fabricated cut -- it renders whole, on one line, even though the sheet's
+// prefix would otherwise call for a stacked layout.
+func TestCreateTagsSheet_NumberNotCarryingPrefixStaysSingleLine(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Seishin", Number: "XYZ"}}}}
+	require.NoError(t, CreateTagsSheet(f, pools, "", "KO"))
+	got, err := f.GetCellValue(SheetTags, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, "XYZ", got, "a number not carrying the sheet's prefix must never be split")
 }

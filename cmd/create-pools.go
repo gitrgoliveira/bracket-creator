@@ -434,9 +434,9 @@ func (o *poolOptions) createPools(entries []string) error {
 	}
 	finishKnockoutPages(f, numPages, eliminationMatchRounds)
 
-	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords)
+	helper.CreateNamesWithPoolToPrint(f, pools, o.withZekkenName, courtNames, nil, playerCoords, o.numberPrefix)
 
-	if err := helper.CreateTagsSheet(f, pools, ""); err != nil {
+	if err := helper.CreateTagsSheet(f, pools, "", o.numberPrefix); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating tags sheet: %v\n", err)
 	}
 

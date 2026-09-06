@@ -1795,7 +1795,7 @@ func courtsPrefix(courts []string, n int) []string {
 	return out
 }
 
-func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, courts []string, pCoords map[string]playerCellCoord) {
+func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, courts []string, pCoords map[string]playerCellCoord, numberPrefix string) {
 	numCourts := clampCourts(len(courts))
 
 	base := len(players) / numCourts
@@ -1818,7 +1818,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, courtPlayers, sanitized, pCoords)
+		printNameEntries(f, sheetName, courtPlayers, sanitized, pCoords, numberPrefix)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1841,7 +1841,7 @@ func CreateNamesToPrint(f *excelize.File, players []Player, sanitized bool, cour
 // sheets and another on its pool sheets and tree pages. Derived here rather
 // than by the caller so no call site can pass a count that disagrees with the
 // Pool Matches skeleton.
-func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord) {
+func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, courts []string, courtOfPool map[string]string, pCoords map[string]playerCellCoord, numberPrefix string) {
 	// EffectiveDrawCourts already coerces 0/negative to 1, so it is the only
 	// clamp needed here; a clampCourts in front of it would be a no-op.
 	// Same bands and same grouping the Pool Matches skeleton uses, so a
@@ -1864,7 +1864,7 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 		if _, err := f.NewSheet(sheetName); err != nil {
 			handleExcelError("NewSheet", err)
 		}
-		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords)
+		printNameEntries(f, sheetName, entriesByCourt[c], sanitized, pCoords, numberPrefix)
 	}
 
 	if err := f.DeleteSheet(SheetNamesToPrint); err != nil {
@@ -1872,16 +1872,17 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 	}
 }
 
-func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord) {
+func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord, numberPrefix string) {
 	setupNamesToPrintLayout(f, sheetName)
 
-	// The sheet's number layout is decided ONCE, from the first numbered
-	// player on it: every competitor on this sheet shares the competition's
-	// one prefix (bc-pnum operator ruling -- a prefix of more than one
-	// letter prints as two stacked lines, "KO" over "20"; a one-letter
-	// prefix keeps the plain cross-sheet reference on one line, "K20"). See
-	// splitNumberLines/firstNumberedSplit (numbers.go) for the single owner
-	// of that decision.
+	// The sheet's number layout is decided from the competition's own
+	// number prefix, not by re-scanning players for one (bc-pnum operator
+	// ruling -- a prefix of more than one CHARACTER prints as two stacked
+	// lines, "KO" over "20"; a one-character prefix keeps the plain
+	// cross-sheet reference on one line, "K20"; bc-pnum review H1/H2 -- see
+	// splitNumberLines, numbers.go, for why re-deriving this from a
+	// representative player's Number breaks on a digit-bearing prefix like
+	// "KO2").
 	//
 	// prefixLen is a rune COUNT, not a byte length (bc-pnum review): Excel's
 	// LEFT/MID formulas below count characters, and a byte length disagrees
@@ -1890,8 +1891,8 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	// character while the Tags sheet -- which just slices the Go string, not
 	// an Excel formula -- showed the correct letters. utf8.RuneCountInString
 	// is what keeps the two print sites agreeing.
-	letters, stacked := firstNumberedSplit(players)
-	prefixLen := utf8.RuneCountInString(letters)
+	prefixLen := utf8.RuneCountInString(numberPrefix)
+	stacked := prefixLen > 1
 	nameIDPositionStyle := getNameIDPositionStyle(f)
 	if stacked {
 		nameIDPositionStyle = getNameIDPositionStackedStyle(f, prefixLen)
@@ -1917,11 +1918,10 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 				// LIVE formula, not a static split: the referenced Data-sheet
 				// cell is the number's one source of truth (bc-pnum), so the
 				// stacked display recomputes from it rather than caching a
-				// value that could drift. prefixLen is the sheet-wide
-				// decision's letter count; every player's own number shares
-				// that same prefix, so splitting THIS player's reference at
-				// the same offset is correct even though prefixLen was read
-				// off a different (the first numbered) player.
+				// value that could drift. prefixLen is the competition's own
+				// prefix rune count; every player's own number shares that
+				// same prefix, so splitting THIS player's reference at that
+				// offset is correct for every player on the sheet.
 				formula = fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, prefixLen, ref, prefixLen+1)
 			}
 			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))

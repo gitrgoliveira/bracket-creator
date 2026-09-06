@@ -36,59 +36,40 @@ func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 	return start + len(players)
 }
 
-// splitNumberLines splits a competitor number into its leading non-digit
-// prefix run (letters) and the remaining digits, and reports whether the
-// pair should be PRINTED as two stacked lines rather than one: only when the
-// prefix is more than one CHARACTER (rune, not byte -- bc-pnum review: "Ö20"
-// is a ONE-letter prefix and must stay single-line, but len("Ö") is 2 bytes
-// in UTF-8, so a byte-length check wrongly stacked it) AND there are digits
-// to put below it (operator ruling, bc-pnum: "KO" over "20", "KOR" over
-// "120", but "K20" stays on one line). A bare digit string (no prefix, the
-// empty-prefix numbering AssignPlayerNumbers also supports) and a prefix
-// with no digits at all (unreachable via AssignPlayerNumbers, which always
-// appends a counter, but guarded here rather than assumed) both stay
-// single-line too. The split itself (the letters/digits byte slices) is
-// unaffected by the rune-vs-byte distinction: an ASCII digit byte never
-// appears inside a multi-byte UTF-8 sequence, so cutting at the first digit
-// BYTE always lands on a rune boundary.
+// splitNumberLines splits a competitor number into the sheet's own known
+// prefix and the remaining digits, and reports whether the pair should be
+// PRINTED as two stacked lines rather than one: only when the prefix itself
+// is more than one CHARACTER (rune, not byte -- bc-pnum review: "Ö20" is a
+// ONE-letter prefix and must stay single-line, but len("Ö") is 2 bytes in
+// UTF-8, so a byte-length check wrongly stacked it) AND number actually
+// carries that prefix.
+//
+// The split is prefix-DRIVEN, not guessed from number's own shape (bc-pnum
+// review H1/H2): number was previously cut at its first ASCII digit, which
+// silently mistook a digit-bearing prefix (DefaultNumberPrefix can legitimately
+// derive "K2" or "KO2") for the boundary -- competitor 1 under prefix "KO2" is
+// "KO21", which the old first-digit rule split as "KO"/"21" (reading as
+// competitor 21 of "KO") instead of the correct "KO2"/"1". Knowing the actual
+// prefix removes the guess.
+//
+// A number that does NOT carry the sheet's own prefix is hand-edited or
+// legacy data: this is never guessed at with a fabricated cut (the same
+// report-over-fabricate rule D1 applies to the printed number itself) -- it
+// renders single-line, letters=="" digits=="". A bare digit string (no
+// prefix, the empty-prefix numbering AssignPlayerNumbers also supports) and
+// an empty prefix both fall into this case too.
 //
 // This is the ONE place that decides the split, for both print sites (the
 // Tags sheet, internal/helper/excel_tags.go, and the Names to Print number
 // cell, printNameEntries in excel.go): a change to what counts as "stacked"
-// only has to change here. printNameEntries additionally needs the letters'
-// rune COUNT of its own, to hand Excel's character-counting LEFT/MID
-// functions the right split point; see firstNumberedSplit below.
-func splitNumberLines(number string) (letters, digits string, stacked bool) {
-	i := 0
-	for i < len(number) && (number[i] < '0' || number[i] > '9') {
-		i++
+// only has to change here.
+func splitNumberLines(number, prefix string) (letters, digits string, stacked bool) {
+	if prefix == "" || !strings.HasPrefix(number, prefix) || number == prefix {
+		return "", "", false
 	}
-	letters, digits = number[:i], number[i:]
-	stacked = utf8.RuneCountInString(letters) > 1 && digits != ""
+	letters, digits = prefix, number[len(prefix):]
+	stacked = utf8.RuneCountInString(prefix) > 1
 	return letters, digits, stacked
-}
-
-// firstNumberedSplit decides a SHEET's entire number layout from a single
-// representative player: every competitor on one sheet shares the
-// competition's one prefix (AssignPlayerNumbers/NumberPools assign exactly
-// one prefix for the whole draw), so scanning every player for the same
-// answer would be redundant work for the same result. letters is "" and
-// stacked is false when no player in players carries a Number at all (an
-// unnumbered competition, or an empty sheet), in which case callers keep
-// the single-line layout; that is indistinguishable from a genuine
-// bare-digit number ("no prefix at all" also has letters==""), but both
-// cases want the identical single-line behaviour, so callers do not need to
-// tell them apart. digits and the found/not-found flag are dropped from the
-// signature: no caller reads them (narrowed per bc-pnum review).
-func firstNumberedSplit(players []Player) (letters string, stacked bool) {
-	for _, p := range players {
-		if p.Number == "" {
-			continue
-		}
-		letters, _, stacked = splitNumberLines(p.Number)
-		return letters, stacked
-	}
-	return "", false
 }
 
 // NumberPools numbers every competitor across pools with a single counter that

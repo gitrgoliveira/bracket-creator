@@ -142,7 +142,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// never read by this sheet.
 		tagsPools = []helper.Pool{{Players: namesToPrintPlayers}}
 	}
-	if err := helper.CreateTagsSheet(f, tagsPools, publicURL); err != nil {
+	if err := helper.CreateTagsSheet(f, tagsPools, publicURL, comp.NumberPrefix); err != nil {
 		return nil, err
 	}
 

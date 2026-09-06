@@ -182,6 +182,23 @@ func TestDefaultNumberPrefix(t *testing.T) {
 	}
 }
 
+// TestDefaultNumberPrefix_DigitBearingPrefix pins bc-pnum review H1/H2's
+// premise directly: DefaultNumberPrefix can legitimately derive a prefix
+// that itself carries a digit. "K" and "KO5" are both taken, so both
+// initials-based candidates ("K", "KO") are rejected -- "KO" is ambiguous
+// with the taken "KO5" (NumberPrefixesAmbiguous: "KO5" is "KO" followed by
+// a non-zero-leading digit run) -- and the derivation falls to the
+// numeric-suffix band on "KO", landing on "KO2" (unambiguous with both "K"
+// and "KO5"). The print-layout split (splitNumberLines, excel_tags.go,
+// printNameEntries) must treat "KO2" as the whole prefix, not stop at its
+// own embedded digit.
+func TestDefaultNumberPrefix_DigitBearingPrefix(t *testing.T) {
+	got := DefaultNumberPrefix("Kendo Open", []string{"K", "KO5"})
+	assert.Equal(t, "KO2", got)
+	assert.False(t, NumberPrefixesAmbiguous(got, "K"))
+	assert.False(t, NumberPrefixesAmbiguous(got, "KO5"))
+}
+
 // TestDefaultNumberPrefix_ExhaustedSuffixesNeverPanics pins F8 (bc-pnum
 // review) as extended by A1: the numeric-suffix fallback groups candidates by
 // digit WIDTH (plain, then zero-padded), bounded at MaxNumberPrefixLen-1 so
@@ -284,80 +301,51 @@ func TestNameInitials_AccentedAndOtherScripts(t *testing.T) {
 	assert.Equal(t, DefaultNumberPrefixFallback, DefaultNumberPrefix("剣道", nil), "no Latin letters: the fallback")
 }
 
-// TestSplitNumberLines pins the bc-pnum operator ruling: a competitor number
-// prints as two stacked lines only when its prefix is MORE THAN ONE
-// CHARACTER (a rune count, not a byte count -- bc-pnum review) AND there are
-// digits to put below it. A one-letter prefix, a bare digit string (the
-// empty-prefix numbering AssignPlayerNumbers also supports), and a prefix
-// with no digits at all each stay single-line. The Unicode cases pin the
-// rune-vs-byte fix directly: "Ö" is ONE character but two UTF-8 bytes, so a
-// byte-length check would wrongly stack "Ö20"; "劃" is one character at
-// three UTF-8 bytes, same wrong-by-byte-count trap. The legacy
-// digit-bearing cases document a pre-existing, accepted limitation: a
-// digit inside the STORED prefix itself ("K2", "KO2") is indistinguishable
-// from that digit being the counter's first digit, so "K220" reads as
-// prefix "K" + counter "220", and "KO220" as prefix "KO" + counter "220" --
-// both already correct under the leading-non-digit-run rule, kept here as
-// regression coverage rather than new behaviour.
+// TestSplitNumberLines pins the bc-pnum operator ruling as sharpened by
+// review H1/H2: a competitor number prints as two stacked lines only when
+// the SHEET's own known prefix is MORE THAN ONE CHARACTER (a rune count,
+// not a byte count -- bc-pnum review) AND the number actually carries that
+// prefix. The split is prefix-DRIVEN, not guessed from the number's own
+// shape: the old rule cut at the first ASCII digit, which misread a
+// digit-bearing prefix like "KO2" (DefaultNumberPrefix can legitimately
+// derive one, see TestDefaultNumberPrefix_DigitBearingPrefix below) --
+// "KO21" under prefix "KO2" is competitor 1, not competitor 21 of "KO". A
+// number that does NOT carry the sheet's prefix (hand-edited/legacy data)
+// is never guessed at with a fabricated cut -- it reports stacked=false
+// with empty letters/digits, the same report-over-fabricate rule D1 applies
+// elsewhere. The Unicode cases pin the rune-vs-byte fix directly: "Ö" is
+// ONE character but two UTF-8 bytes, so a byte-length check would wrongly
+// stack a one-letter accented prefix; "劃" is one character at three UTF-8
+// bytes, the same trap.
 func TestSplitNumberLines(t *testing.T) {
 	tests := []struct {
 		name        string
 		number      string
+		prefix      string
 		wantLetters string
 		wantDigits  string
 		wantStacked bool
 	}{
-		{"one-letter prefix stays single-line", "K20", "K", "20", false},
-		{"two-letter prefix stacks", "KO20", "KO", "20", true},
-		{"three-letter prefix stacks with a three-digit number", "KOR120", "KOR", "120", true},
-		{"bare digits, no prefix", "20", "", "20", false},
-		{"one-letter prefix, no digits", "K", "K", "", false},
-		{"multi-letter prefix, no digits, stays single-line", "KO", "KO", "", false},
-		{"empty number", "", "", "", false},
-		{"single accented letter is ONE character, stays single-line", "Ö20", "Ö", "20", false},
-		{"accented letter plus a second letter is two characters, stacks", "ÖZ20", "ÖZ", "20", true},
-		{"single multi-byte CJK-style letter is ONE character, stays single-line", "劃20", "劃", "20", false},
-		{"legacy digit-bearing one-letter prefix stays single-line", "K220", "K", "220", false},
-		{"legacy digit-bearing two-letter prefix stacks", "KO220", "KO", "220", true},
+		{"one-letter prefix stays single-line", "K20", "K", "K", "20", false},
+		{"two-letter prefix stacks", "KO20", "KO", "KO", "20", true},
+		{"three-letter prefix stacks with a three-digit number", "KOR120", "KOR", "KOR", "120", true},
+		{"digit-bearing two-letter prefix splits at the PREFIX, not the first digit", "KO21", "KO2", "KO2", "1", true},
+		{"legacy digit-bearing one-letter prefix stays single-line", "K220", "K", "K", "220", false},
+		{"bare digits, no prefix configured", "20", "", "", "", false},
+		{"one-letter prefix, no digits (number equals prefix)", "K", "K", "", "", false},
+		{"multi-letter prefix, no digits (number equals prefix), stays single-line", "KO", "KO", "", "", false},
+		{"empty number", "", "KO", "", "", false},
+		{"number does not carry the sheet's prefix: never a guessed cut", "XYZ", "KO", "", "", false},
+		{"single accented letter is ONE character, stays single-line", "Ö20", "Ö", "Ö", "20", false},
+		{"accented letter plus a second letter is two characters, stacks", "ÖZ20", "ÖZ", "ÖZ", "20", true},
+		{"single multi-byte CJK-style letter is ONE character, stays single-line", "劃20", "劃", "劃", "20", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			letters, digits, stacked := splitNumberLines(tc.number)
+			letters, digits, stacked := splitNumberLines(tc.number, tc.prefix)
 			assert.Equal(t, tc.wantLetters, letters)
 			assert.Equal(t, tc.wantDigits, digits)
 			assert.Equal(t, tc.wantStacked, stacked)
 		})
 	}
-}
-
-// TestFirstNumberedSplit pins the "decide once per sheet" rule: the first
-// player carrying a Number stands for every player on the sheet, and an
-// unnumbered slice (or one with no players at all) reports stacked=false so
-// callers keep the single-line layout rather than mis-reading a zero value
-// as "single-letter prefix". Narrowed to (letters, stacked): no caller reads
-// digits or a separate found/not-found flag (bc-pnum review).
-func TestFirstNumberedSplit(t *testing.T) {
-	t.Run("skips unnumbered players and uses the first numbered one", func(t *testing.T) {
-		players := []Player{
-			{Name: "Unnumbered"},
-			{Name: "Alice", Number: "KO20"},
-			{Name: "Bob", Number: "KO21"},
-		}
-		letters, stacked := firstNumberedSplit(players)
-		assert.Equal(t, "KO", letters)
-		assert.True(t, stacked)
-	})
-
-	t.Run("no numbered player reports stacked=false and empty letters", func(t *testing.T) {
-		players := []Player{{Name: "Alice"}, {Name: "Bob"}}
-		letters, stacked := firstNumberedSplit(players)
-		assert.Equal(t, "", letters)
-		assert.False(t, stacked)
-	})
-
-	t.Run("empty slice reports stacked=false and empty letters", func(t *testing.T) {
-		letters, stacked := firstNumberedSplit(nil)
-		assert.Equal(t, "", letters)
-		assert.False(t, stacked)
-	})
 }

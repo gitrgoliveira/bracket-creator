@@ -768,7 +768,7 @@ func TestCreateNamesToPrint(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "")
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -802,7 +802,7 @@ func TestCreateNamesToPrint_WithNumberCell(t *testing.T) {
 		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "K")
 
 	sheet := "Names to Print A"
 	valA1, err := f.CalcCellValue(sheet, "A1")
@@ -850,7 +850,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 			playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 		}
 
-		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO")
 
 		sheet := "Names to Print A"
 		formula, err := f.GetCellFormula(sheet, "A1")
@@ -886,7 +886,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 		}
 
-		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "K")
 
 		sheet := "Names to Print A"
 		formula, err := f.GetCellFormula(sheet, "A1")
@@ -914,7 +914,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 			playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 		}
 
-		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+		CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KOR")
 
 		sheet := "Names to Print A"
 		valA1, err := f.CalcCellValue(sheet, "A1")
@@ -945,7 +945,7 @@ func TestCreateNamesToPrint_StackedNumberLayout(t *testing.T) {
 					playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 				}
 
-				CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+				CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, prefix)
 
 				sheet := "Names to Print A"
 				styleID, err := f.GetCellStyle(sheet, "A1")
@@ -977,12 +977,43 @@ func TestCreateNamesToPrint_StackedFormulaCountsRunesNotBytes(t *testing.T) {
 		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords)
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "ÖZ")
 
 	sheet := "Names to Print A"
 	formula, err := f.GetCellFormula(sheet, "A1")
 	require.NoError(t, err)
 	assert.Equal(t, `LEFT('Pool1'!$A$2,2)&CHAR(10)&MID('Pool1'!$A$2,3,99)`, formula, "the split point must count the TWO characters Ö and Z, not their three UTF-8 bytes")
+}
+
+// TestCreateNamesToPrint_DigitBearingPrefixSplitsAtThePrefix pins bc-pnum
+// review H1/H2: prefixLen is driven by the competition's own numberPrefix
+// argument, not re-derived from the number's own first digit. Under prefix
+// "KO2" competitor 1 is "KO21"; the split must be LEFT(ref,3)/MID(ref,4,99)
+// (letters "KO2" over digits "1"), not the wrong LEFT(ref,2)/MID(ref,3,99)
+// a first-digit guess would produce (reading "KO" over "21").
+func TestCreateNamesToPrint_DigitBearingPrefixSplitsAtThePrefix(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet(SheetNamesToPrint)
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "KO21"))
+
+	players := []Player{{Name: "Player1", PoolPosition: 1, Number: "KO21"}}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+	}
+
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO2")
+
+	sheet := "Names to Print A"
+	formula, err := f.GetCellFormula(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, `LEFT('Pool1'!$A$2,3)&CHAR(10)&MID('Pool1'!$A$2,4,99)`, formula,
+		"must split at the sheet's own 3-character prefix (KO2/1), not the first digit (KO/21)")
+
+	valA1, err := f.CalcCellValue(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, "KO2\n1", valA1)
 }
 
 func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
@@ -998,7 +1029,7 @@ func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(players[i])] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: fmt.Sprintf("B%d", i+2)}}
 	}
 
-	CreateNamesToPrint(f, players, false, CourtLabels(2), pCoords)
+	CreateNamesToPrint(f, players, false, CourtLabels(2), pCoords, "")
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)
@@ -1038,7 +1069,7 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords, "")
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
@@ -1077,7 +1108,7 @@ func TestCreateNamesWithPoolToPrint_WithNumberCell(t *testing.T) {
 		playerCoordKey(pools[0].Players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(1), nil, pCoords, "K")
 
 	sheet := "Names to Print A"
 	valA1, err := f.CalcCellValue(sheet, "A1")
@@ -1125,7 +1156,7 @@ func TestCreateNamesWithPoolToPrint_MultiCourt(t *testing.T) {
 		pCoords[playerCoordKey(p)] = playerCellCoord{cellCoord: cellCoord{sheetName: "data", cell: cells[i]}}
 	}
 
-	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(2), nil, pCoords)
+	CreateNamesWithPoolToPrint(f, pools, false, CourtLabels(2), nil, pCoords, "")
 
 	rowsA, err := f.GetRows("Names to Print A")
 	assert.NoError(t, err)

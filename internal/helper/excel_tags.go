@@ -2,6 +2,7 @@ package helper
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	excelize "github.com/xuri/excelize/v2"
 )
@@ -10,8 +11,13 @@ import (
 // A4 page (one tag per half-page, two copies per player). When publicURL is
 // non-empty and a player has a Number, a QR code is embedded in the
 // bottom-left corner of each tag linking to the public viewer pre-filtered to
-// that competitor.
-func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
+// that competitor. numberPrefix is the competition's own number prefix
+// (helper.AssignPlayerNumbers/NumberPools's prefix argument), the single
+// source of truth this sheet's layout is driven from -- see splitNumberLines
+// (numbers.go, bc-pnum review H1/H2) for why re-deriving it by scanning a
+// representative player's Number is wrong whenever the prefix itself carries
+// a digit.
+func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPrefix string) error {
 	sheetName := SheetTags
 	index, err := f.NewSheet(sheetName)
 	if err != nil {
@@ -46,13 +52,13 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 	// into blank overflow pages. 88 units fits the printable width.
 	handleExcelError("SetColWidth", f.SetColWidth(sheetName, "A", "A", 88))
 
-	// The sheet's number layout is decided ONCE, from the first numbered
-	// player: every competitor on this sheet shares the competition's one
-	// prefix (bc-pnum operator ruling -- a prefix of more than one letter
-	// prints as two stacked lines, "KO" over "20"; a one-letter prefix stays
-	// on one line, "K20"). See splitNumberLines/firstNumberedSplit
-	// (numbers.go) for the single owner of that decision.
-	stacked := firstNumberedSplitInPools(pools)
+	// The sheet's number layout is decided from the competition's own
+	// number prefix (bc-pnum operator ruling -- a prefix of more than one
+	// CHARACTER prints as two stacked lines, "KO" over "20"; a one-character
+	// prefix stays on one line, "K20"), not by re-scanning players for one
+	// (bc-pnum review H1/H2 -- see splitNumberLines, numbers.go, for why
+	// that guess breaks on a digit-bearing prefix like "KO2").
+	stacked := utf8.RuneCountInString(numberPrefix) > 1
 	style, err := tagNumberStyle(f, stacked)
 	if err != nil {
 		return fmt.Errorf("failed to create style: %w", err)
@@ -74,13 +80,15 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 			// Stacked layout (sheet-wide decision above) writes this
 			// PLAYER's own letters/digits split as two lines; the prefix
 			// is the same for every player on the sheet, only the digits
-			// differ. An unnumbered player's tag stays empty either way
-			// (splitNumberLines("") yields no digits, so nothing is
-			// stacked onto it).
+			// differ. An unnumbered player's tag stays empty either way.
+			// A tag that does NOT actually carry the sheet's prefix
+			// (hand-edited/legacy data) falls back to single-line rather
+			// than a fabricated cut -- splitNumberLines' own D1 rule.
 			cellValue := tag
 			if stacked && tag != "" {
-				letters, digits, _ := splitNumberLines(tag)
-				cellValue = letters + "\n" + digits
+				if letters, digits, tagStacked := splitNumberLines(tag, numberPrefix); tagStacked {
+					cellValue = letters + "\n" + digits
+				}
 			}
 
 			// Generate QR once per player; reuse PNG for both tag copies.
@@ -157,30 +165,6 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string) error {
 
 	f.SetActiveSheet(index)
 	return nil
-}
-
-// firstNumberedSplitInPools walks every pool's players, in order, for the
-// FIRST one carrying a Number, and reports whether splitNumberLines calls
-// that one stacked: the Tags sheet holds every pool's players in one sheet,
-// so that single representative player decides the whole sheet's layout
-// (bc-pnum). It calls splitNumberLines directly rather than going through
-// firstNumberedSplit (numbers.go): that helper's "not found" case also
-// reports letters=="", which is indistinguishable from a genuine
-// bare-digit number and so cannot be used as a per-pool "keep looking"
-// signal -- this loop needs that signal to move to the next pool, so it
-// does its own p.Number=="" check instead. Narrowed to the one value the
-// caller reads (bc-pnum review).
-func firstNumberedSplitInPools(pools []Pool) bool {
-	for _, pool := range pools {
-		for _, p := range pool.Players {
-			if p.Number == "" {
-				continue
-			}
-			_, _, stacked := splitNumberLines(p.Number)
-			return stacked
-		}
-	}
-	return false
 }
 
 // tagNumberStyle builds the Tags sheet's number-cell style: stacked (a

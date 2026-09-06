@@ -237,9 +237,9 @@ func RenderCompetitionWorkbook(
 	//    CreateNamesWithPoolToPrint's empty-pools no-op (which used to leave
 	//    this sheet missing entirely, see bc-pnum A8).
 	if len(namesToPrintPlayers) > 0 {
-		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords)
+		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords, comp.NumberPrefix)
 	} else {
-		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords)
+		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.NumberPrefix)
 	}
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted

@@ -135,8 +135,19 @@ func NormalizeNumberPrefix(s string) string {
 // DefaultNumberPrefix's own normalized-equality check); this function
 // covers only the stem+digits shape those checks miss.
 func NumberPrefixesAmbiguous(a, b string) bool {
-	a = NormalizeNumberPrefix(a)
-	b = NormalizeNumberPrefix(b)
+	return numberPrefixesAmbiguousNormalized(NormalizeNumberPrefix(a), NormalizeNumberPrefix(b))
+}
+
+// numberPrefixesAmbiguousNormalized is NumberPrefixesAmbiguous' comparison,
+// over a pair the CALLER has already run through NormalizeNumberPrefix
+// (bc-pnum review): DefaultNumberPrefix's own acceptable closure below
+// normalizes `taken` once, up front, and each candidate once per call, so
+// routing its per-(candidate, taken) comparisons through this rather than
+// NumberPrefixesAmbiguous itself skips a re-normalization NumberPrefixesAmbiguous
+// would otherwise repeat on every one of those comparisons.
+// NumberPrefixesAmbiguous is unchanged for external callers, which do not
+// have a pre-normalized pair to hand it.
+func numberPrefixesAmbiguousNormalized(a, b string) bool {
 	if a == "" || b == "" || a == b {
 		return false
 	}
@@ -182,15 +193,24 @@ func DefaultNumberPrefix(name string, taken []string) string {
 	// separate upper-cased `used` map -- exact equality and ambiguity are
 	// both decided under the same NormalizeNumberPrefix fold, so a
 	// candidate can never pass one check under a fold the other rejects.
+	// Each entry is stored already normalized (bc-pnum review(d)) so
+	// `acceptable` below never re-normalizes it.
 	normalized := make([]string, 0, len(taken))
 	for _, t := range taken {
 		if t = strings.TrimSpace(t); t != "" {
-			normalized = append(normalized, t)
+			normalized = append(normalized, NormalizeNumberPrefix(t))
 		}
 	}
 	acceptable := func(candidate string) bool {
+		// candidateNorm is computed once per candidate rather than once per
+		// (candidate, taken) comparison in the loop below (bc-pnum
+		// review(d)); numberPrefixesAmbiguousNormalized then compares the
+		// already-normalized pair directly instead of paying
+		// NumberPrefixesAmbiguous' own re-normalization on every one of
+		// those comparisons.
+		candidateNorm := NormalizeNumberPrefix(candidate)
 		for _, t := range normalized {
-			if NormalizeNumberPrefix(t) == NormalizeNumberPrefix(candidate) || NumberPrefixesAmbiguous(candidate, t) {
+			if t == candidateNorm || numberPrefixesAmbiguousNormalized(candidateNorm, t) {
 				return false
 			}
 		}

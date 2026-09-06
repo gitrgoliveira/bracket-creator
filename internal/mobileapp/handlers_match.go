@@ -379,7 +379,7 @@ func backfillMatchIdentityForHantei(store CompetitionStore, compID, matchID stri
 	// carries no WinnerID), so the hot in-progress-score path stays free of
 	// it, matching the original hantei-only rationale below for that path
 	// specifically.
-	if !hanteiAttributionNeedsBackfill(req) && !(req.WinnerID != "" && (req.SideAID == "" || req.SideBID == "")) {
+	if !hanteiAttributionNeedsBackfill(req) && (req.WinnerID == "" || (req.SideAID != "" && req.SideBID != "")) {
 		return
 	}
 	if req.SideA != "" && req.SideB != "" && req.SideAID != "" && req.SideBID != "" {

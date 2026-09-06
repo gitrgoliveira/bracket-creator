@@ -94,4 +94,20 @@ func TestResolveNumberPrefix(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "K", got)
 	})
+
+	// bc-pnum review H13-cli: the length check counted BYTES while the error
+	// message says "characters", so a 2-character multi-byte prefix like
+	// "ÖÖ" (4 UTF-8 bytes) was wrongly refused as too long even though
+	// MaxNumberPrefixLen is 3 CHARACTERS.
+	t.Run("a multi-byte prefix is measured in characters, not bytes", func(t *testing.T) {
+		got, err := resolveNumberPrefix("ÖÖ", "")
+		require.NoError(t, err)
+		assert.Equal(t, "ÖÖ", got)
+	})
+
+	t.Run("a multi-byte prefix over the character cap is still refused", func(t *testing.T) {
+		_, err := resolveNumberPrefix("ÖÖÖÖ", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ÖÖÖÖ")
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	excelize "github.com/xuri/excelize/v2"
@@ -36,7 +37,11 @@ func resolveNumberPrefix(numberPrefix, titlePrefix string) (string, error) {
 	if trimmed == "" {
 		return helper.DefaultNumberPrefix(titlePrefix, nil), nil
 	}
-	if len(trimmed) > helper.MaxNumberPrefixLen {
+	// utf8.RuneCountInString, not len (bc-pnum review H13-cli): the error
+	// message says "characters", but len counts BYTES, so a 2-character
+	// multi-byte prefix like "ÖÖ" (4 UTF-8 bytes) was wrongly refused as
+	// too long.
+	if utf8.RuneCountInString(trimmed) > helper.MaxNumberPrefixLen {
 		return "", fmt.Errorf("--number-prefix %q is too long: must be at most %d characters", trimmed, helper.MaxNumberPrefixLen)
 	}
 	return trimmed, nil

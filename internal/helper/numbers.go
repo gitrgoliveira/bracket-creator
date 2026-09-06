@@ -20,6 +20,17 @@ const DefaultNumberPrefixFallback = "K"
 // would then reject, and helper cannot import mobileapp.
 const MaxNumberPrefixLen = 3
 
+// CompetitorNumber composes a single competitor number: prefix concatenated
+// with n, no separator (e.g. CompetitorNumber("K", 3) == "K3"). This is the
+// ONE composition of the number string; AssignPlayerNumbers below calls it
+// in its own loop so a caller that needs just one number (e.g. a
+// provisional preview computed without loading/copying a whole roster,
+// G10) uses the identical primitive rather than a second hand-spelled
+// `prefix + strconv(n)`.
+func CompetitorNumber(prefix string, n int) string {
+	return fmt.Sprintf("%s%d", prefix, n)
+}
+
 // AssignPlayerNumbers sets Number on each player to prefix+counter, where counter
 // starts at start and increments by one. Returns the next counter value so callers
 // can chain across multiple slices (e.g. pools).
@@ -31,7 +42,7 @@ const MaxNumberPrefixLen = 3
 // change to the number's shape cannot reach one surface and miss another.
 func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 	for i := range players {
-		players[i].Number = fmt.Sprintf("%s%d", prefix, start+i)
+		players[i].Number = CompetitorNumber(prefix, start+i)
 	}
 	return start + len(players)
 }

@@ -1439,7 +1439,7 @@ function AdminCreateCompetition({ tournament, onCancel, onCreate, onLogout, onVi
           )}
 
           <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
-            value={numberPrefix} onChange={(raw) => { numberPrefixTouchedRef.current = true; setNumberPrefix(raw); }}
+            value={numberPrefix} onChange={(raw) => { numberPrefixTouchedRef.current = true; setNumberPrefix(cutNumberPrefix(raw)); }}
             hint={HINT_NUMBER_PREFIX} width={80} />
 
           {zekkenApplies(kind) && (

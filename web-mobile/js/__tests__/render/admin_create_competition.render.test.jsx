@@ -419,6 +419,28 @@ describe('AdminCreateCompetition number-prefix pre-fill latch (bc-pnum F5c)', ()
   });
 });
 
+// bc-pnum: an owner review thread on this form found the create form's
+// prefix field passing the raw keystroke straight through
+// (setNumberPrefix(raw)) while the settings form (admin_competition_
+// settings.jsx) already cuts on every keystroke via
+// onChange={(raw) => update("numberPrefix", cutNumberPrefix(raw))}. The two
+// forms must behave the same (create/settings parity): before this fix, a
+// four-character paste or fast-typed value sat in the create form's field
+// uncut, and only the submit-time truncation (bc-pnum A6, below) ever cut it
+// back down -- so the operator briefly saw a value the field itself would
+// never let them keep typing on the settings screen.
+describe('AdminCreateCompetition number-prefix keystroke parity with settings', () => {
+  const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');
+
+  it('cuts a pasted/typed value to 3 characters in the field itself, not just at submit', async () => {
+    const { container } = await mountForm();
+    await act(async () => {
+      fireEvent.change(prefixInput(container), { target: { value: 'ABCD' } });
+    });
+    expect(prefixInput(container).value).toBe('ABC');
+  });
+});
+
 // bc-pnum A6: the field is a server-derived PREVIEW until the operator
 // actually types into it. Submitting it untouched used to send it as a REAL
 // value: the pre-fill effect's deps ([name, kind, password]) never re-run

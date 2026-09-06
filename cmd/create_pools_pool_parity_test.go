@@ -67,8 +67,8 @@ func parityRoster(n int) []parityEntrant {
 	return roster
 }
 
-// parityClusteredRoster builds n competitors sharing `dojos` clubs, dealt round
-// robin so club-mates start out SPREAD across the roster (Kendoka 01 and
+// parityClusteredRoster builds n competitors sharing `dojos` dojos, dealt round
+// robin so dojo-mates start out SPREAD across the roster (Kendoka 01 and
 // Kendoka 05 are both Dojo 01 when dojos=4).
 //
 // It exists because parityRoster cannot detect a broken unseeded
@@ -80,7 +80,7 @@ func parityRoster(n int) []parityEntrant {
 // A no-seeds subtest built on parityRoster therefore passes whether the
 // engine's distribution step runs its full dojo-aware descent or an
 // equivalent flat fill, which is exactly the regression it claims to pin.
-// Dealing club-mates round robin gives the descent real work to do (routing
+// Dealing dojo-mates round robin gives the descent real work to do (routing
 // Dojo 01's repeats apart, then Dojo 02's, ...), so skipping it changes pool
 // composition and the parity assertion bites.
 func parityClusteredRoster(n, dojos int) []parityEntrant {
@@ -392,9 +392,9 @@ func TestPoolDrawParity_CLIAndEngine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			roster := parityRoster(tc.players)
 			if tc.clustered {
-				// 6 dojos of 4 club-mates each: big enough groups that the
+				// 6 dojos of 4 dojo-mates each: big enough groups that the
 				// cluster sort reorders most of the roster, small enough that
-				// CreatePools can still keep club-mates apart.
+				// CreatePools can still keep dojo-mates apart.
 				roster = parityClusteredRoster(tc.players, 6)
 			}
 

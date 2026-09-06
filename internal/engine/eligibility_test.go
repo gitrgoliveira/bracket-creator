@@ -532,7 +532,6 @@ func TestLosingSide(t *testing.T) {
 	tests := []struct {
 		name     string
 		result   state.MatchResult
-		wantSide domain.MatchSide
 		wantID   string
 		wantName string
 		wantOK   bool
@@ -543,7 +542,7 @@ func TestLosingSide(t *testing.T) {
 				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
 				Winner: "Bob", WinnerSide: "A", // WinnerSide says A won despite Winner naming Bob
 			},
-			wantSide: domain.MatchSideB, wantID: "idB", wantName: "Bob", wantOK: true,
+			wantID: "idB", wantName: "Bob", wantOK: true,
 		},
 		{
 			name: "id-only: no WinnerSide, ids disambiguate via AttributeWinnerSide",
@@ -551,14 +550,14 @@ func TestLosingSide(t *testing.T) {
 				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
 				WinnerID: "idB",
 			},
-			wantSide: domain.MatchSideA, wantID: "idA", wantName: "Alice", wantOK: true,
+			wantID: "idA", wantName: "Alice", wantOK: true,
 		},
 		{
 			name: "name-only: no ids at all, resolved by Winner name",
 			result: state.MatchResult{
 				SideA: "Alice", SideB: "Bob", Winner: "Bob",
 			},
-			wantSide: domain.MatchSideA, wantID: "", wantName: "Alice", wantOK: true,
+			wantID: "", wantName: "Alice", wantOK: true,
 		},
 		{
 			name: "contradictory Winner/WinnerID: ids win over the name (AttributeWinnerSide's own rule)",
@@ -566,25 +565,24 @@ func TestLosingSide(t *testing.T) {
 				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
 				Winner: "Alice", WinnerID: "idB", // name says Alice, id says Bob
 			},
-			wantSide: domain.MatchSideA, wantID: "idA", wantName: "Alice", wantOK: true,
+			wantID: "idA", wantName: "Alice", wantOK: true,
 		},
 		{
 			name: "ippon-emptiness fallback: no Winner, no WinnerSide, no ids",
 			result: state.MatchResult{
 				SideA: "Alice", SideB: "Bob", IpponsA: []string{"M"},
 			},
-			wantSide: domain.MatchSideB, wantID: "", wantName: "Bob", wantOK: true,
+			wantID: "", wantName: "Bob", wantOK: true,
 		},
 		{
-			name:     "wholly unresolved: nothing to go on",
-			result:   state.MatchResult{SideA: "Alice", SideB: "Bob"},
-			wantSide: domain.MatchSideNone, wantID: "", wantName: "", wantOK: false,
+			name:   "wholly unresolved: nothing to go on",
+			result: state.MatchResult{SideA: "Alice", SideB: "Bob"},
+			wantID: "", wantName: "", wantOK: false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			side, id, name, ok := losingSide(&tc.result)
-			assert.Equal(t, tc.wantSide, side, "side")
+			id, name, ok := losingSide(&tc.result)
 			assert.Equal(t, tc.wantID, id, "id")
 			assert.Equal(t, tc.wantName, name, "name")
 			assert.Equal(t, tc.wantOK, ok, "ok")

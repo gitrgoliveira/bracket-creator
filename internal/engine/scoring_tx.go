@@ -718,7 +718,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		// that itself came through RecordDecisionTx -- and so already
 		// carries WinnerSide -- is attributed by that authoritative hint
 		// rather than an ambiguous name/ippon guess (PR #416 findings 4/5).
-		_, _, priorLoser, _ = losingSide(prior)
+		_, priorLoser, _ = losingSide(prior)
 	}
 	// T103: downstream-match check. The contract scope is "either
 	// participant", if any subsequent match for either side has been

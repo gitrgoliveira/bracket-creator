@@ -706,7 +706,7 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
 		return nil, nil
 	}
-	_, playerID, loser, ok := losingSide(result)
+	playerID, loser, ok := losingSide(result)
 	if !ok {
 		if result.SideAID != "" || result.SideBID != "" {
 			// The row DOES carry side ids, but losingSide could not tell
@@ -855,31 +855,31 @@ func loserSideName(result *state.MatchResult) string {
 // result.SideAID/SideBID directly, exactly as before -- that distinction is
 // about what the CALLER does with an unresolved loss, not about how the loss
 // itself is attributed, so it stays out of this function.
-func losingSide(result *state.MatchResult) (side domain.MatchSide, id, name string, ok bool) {
+func losingSide(result *state.MatchResult) (id, name string, ok bool) {
 	switch result.WinnerSide {
 	case "A":
-		return domain.MatchSideB, result.SideBID, result.SideB, true
+		return result.SideBID, result.SideB, true
 	case "B":
-		return domain.MatchSideA, result.SideAID, result.SideA, true
+		return result.SideAID, result.SideA, true
 	}
 	switch domain.AttributeWinnerSide(domain.WinnerAttribution{
 		WinnerID: result.WinnerID, SideAID: result.SideAID, SideBID: result.SideBID,
 		Winner: result.Winner, SideA: result.SideA, SideB: result.SideB,
 	}) {
 	case domain.MatchSideA:
-		return domain.MatchSideB, result.SideBID, result.SideB, true
+		return result.SideBID, result.SideB, true
 	case domain.MatchSideB:
-		return domain.MatchSideA, result.SideAID, result.SideA, true
+		return result.SideAID, result.SideA, true
 	}
 	switch loser := loserSideName(result); loser {
 	case "":
-		return domain.MatchSideNone, "", "", false
+		return "", "", false
 	case result.SideA:
-		return domain.MatchSideA, result.SideAID, result.SideA, true
+		return result.SideAID, result.SideA, true
 	case result.SideB:
-		return domain.MatchSideB, result.SideBID, result.SideB, true
+		return result.SideBID, result.SideB, true
 	default:
-		return domain.MatchSideNone, "", "", false
+		return "", "", false
 	}
 }
 

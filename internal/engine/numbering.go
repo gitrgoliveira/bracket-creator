@@ -121,7 +121,19 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 		// outright rather than trusting that invariant silently: a bug state
 		// upstream (a stored blank prefix an inherit step missed) must never
 		// WRITE, it must surface.
-		if strings.TrimSpace(comp.NumberPrefix) == "" {
+		// PR #416 finding 11: bind the TRIMMED value once and use it for both
+		// the guard and the actual call below. The guard used to check the
+		// trimmed value while NumberPools was handed the raw, untrimmed
+		// comp.NumberPrefix -- a whitespace-only prefix ("  ") passed the
+		// guard (TrimSpace != "" is false for pure whitespace... actually it
+		// IS blank once trimmed, so the guard already caught that case) but a
+		// prefix with LEADING/TRAILING whitespace around real characters
+		// (" A") would pass the guard on its trimmed form yet still be
+		// stamped verbatim (with the stray space) onto every competitor
+		// number, since the untrimmed value was what actually reached
+		// NumberPools. Guarding and using the SAME variable closes that gap.
+		prefix := strings.TrimSpace(comp.NumberPrefix)
+		if prefix == "" {
 			return fmt.Errorf("renumber %s: competition has no number prefix", compID)
 		}
 
@@ -136,7 +148,7 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 			}
 		}
 
-		helper.NumberPools(pools, comp.NumberPrefix)
+		helper.NumberPools(pools, prefix)
 
 		i := 0
 		for _, pool := range pools {
@@ -179,12 +191,21 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 // start/generate-draw pre-flight, which cannot defer the way create/import
 // can. GET /competitions and MigrateNumberPrefixes already apply the same
 // "one bad cell cannot stop a tournament" rule; this matches it.
-func (e *Engine) takenNumberPrefixes(excludeID string) ([]string, error) {
+// skipped carries the ids takenNumberPrefixes could not read (a stray
+// folder, an unparseable config.md), so DefaultNumberPrefixFor can log a
+// warning correlating an assignment with the exact siblings that were
+// invisible to it when it derived that assignment (PR #416 finding T2):
+// before this, the skip and the assignment were two independent,
+// uncorrelated log lines (or, for a sibling skipped silently, no line naming
+// the assignment as suspect at all), so an operator had no way to tell a
+// clean assignment from one made blind to a sibling that might already hold
+// the same prefix.
+func (e *Engine) takenNumberPrefixes(excludeID string) (taken []string, skipped []string, err error) {
 	ids, err := e.store.ListCompetitions()
 	if err != nil {
-		return nil, fmt.Errorf("list competitions: %w", err)
+		return nil, nil, fmt.Errorf("list competitions: %w", err)
 	}
-	taken := make([]string, 0, len(ids))
+	taken = make([]string, 0, len(ids))
 	for _, id := range ids {
 		if id == excludeID {
 			continue
@@ -192,13 +213,14 @@ func (e *Engine) takenNumberPrefixes(excludeID string) ([]string, error) {
 		comp, err := e.store.LoadCompetition(id)
 		if err != nil {
 			log.Printf("engine: takenNumberPrefixes: skipping unreadable competition %s: %v", id, err)
+			skipped = append(skipped, id)
 			continue
 		}
 		if comp != nil {
 			taken = append(taken, comp.NumberPrefix)
 		}
 	}
-	return taken, nil
+	return taken, skipped, nil
 }
 
 // DefaultNumberPrefixFor is the ONE server-side derivation of a competition's
@@ -208,12 +230,27 @@ func (e *Engine) takenNumberPrefixes(excludeID string) ([]string, error) {
 // here, so what any of them assigns is what the others would have; the
 // load-time migration applies the same helper over its own in-pass set (see
 // MigrateNumberPrefixes).
+//
+// The tolerance for an unreadable sibling (log-and-skip, never refuse -- see
+// takenNumberPrefixes) is unchanged; when it actually happened for THIS
+// derivation, the returned prefix is a best-effort suggestion made blind to
+// that sibling's own prefix, so it is logged as ONE correlated warning
+// naming the assignment and the skipped ids together, rather than leaving
+// the two facts to land as unconnected log lines an operator has to
+// manually cross-reference (PR #416 finding T2). The exported signature is
+// unchanged: every caller (mobileapp's create/settings/import/preview
+// handlers) needs no adaptation.
 func (e *Engine) DefaultNumberPrefixFor(name, excludeID string) (string, error) {
-	taken, err := e.takenNumberPrefixes(excludeID)
+	taken, skipped, err := e.takenNumberPrefixes(excludeID)
 	if err != nil {
 		return "", err
 	}
-	return helper.DefaultNumberPrefix(name, taken), nil
+	prefix := helper.DefaultNumberPrefix(name, taken)
+	if len(skipped) > 0 {
+		log.Printf("engine: DefaultNumberPrefixFor: assigned prefix %q to %q while siblings %v were unreadable; check for a collision once they load",
+			prefix, name, skipped)
+	}
+	return prefix, nil
 }
 
 // MigrateNumberPrefixes brings a tournament-data folder written before the
@@ -256,6 +293,11 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 		var taken []string
 		var pending []*state.Competition
 		var prefixed []string
+		// PR #416 finding 9: prefixByID lets the final renumbering loop name
+		// WHICH prefix a rewrite happened under, so the log correlates the
+		// assignment with its effect instead of reporting the two facts with
+		// nothing tying them together.
+		prefixByID := make(map[string]string)
 		for _, id := range ids {
 			comp, err := e.store.LoadCompetition(id)
 			if err != nil {
@@ -271,20 +313,44 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 			}
 			taken = append(taken, comp.NumberPrefix)
 			prefixed = append(prefixed, id)
+			prefixByID[id] = comp.NumberPrefix
 		}
 		for _, comp := range pending {
-			comp.NumberPrefix = helper.DefaultNumberPrefix(comp.Name, taken)
-			taken = append(taken, comp.NumberPrefix)
-			if err := e.store.SaveCompetition(comp); err != nil {
-				log.Printf("engine: number-prefix migration: %s: prefix %q not saved: %v (retried on the next start)", comp.ID, comp.NumberPrefix, err)
+			prefix := helper.DefaultNumberPrefix(comp.Name, taken)
+			taken = append(taken, prefix)
+			// PR #416 finding G7: LoadCompetition (in the scan loop above) +
+			// a later whole-struct SaveCompetition left a load/save race
+			// window a concurrent writer could land a DIFFERENT field change
+			// into, which this save would then clobber with the stale
+			// snapshot. UpdateCompetitionChanged re-reads under the
+			// per-competition lock and writes back the SAME loaded value it
+			// mutated, closing that window; the no-op guard (current==nil or
+			// already prefixed) mirrors the "pending" gate the caller already
+			// applied, in case that raced too.
+			changed, err := e.store.UpdateCompetitionChanged(comp.ID, func(current *state.Competition) (*state.Competition, error) {
+				if current == nil || strings.TrimSpace(current.NumberPrefix) != "" {
+					return nil, nil
+				}
+				current.NumberPrefix = prefix
+				return current, nil
+			})
+			if err != nil {
+				log.Printf("engine: number-prefix migration: %s: prefix %q not saved: %v (retried on the next start)", comp.ID, prefix, err)
+				continue
+			}
+			if !changed {
 				continue
 			}
 			migrated = append(migrated, comp.ID)
 			prefixed = append(prefixed, comp.ID)
+			prefixByID[comp.ID] = prefix
 		}
 		for _, id := range prefixed {
-			if _, err := e.RenumberCompetitors(id); err != nil {
+			renumbered, err := e.RenumberCompetitors(id)
+			if err != nil {
 				log.Printf("engine: number-prefix migration: %s: competitors not numbered: %v (retried on the next start; a settings save heals it too)", id, err)
+			} else if renumbered {
+				log.Printf("engine: number-prefix migration: %s: competitor numbers rewritten under prefix %q", id, prefixByID[id])
 			}
 		}
 		return nil

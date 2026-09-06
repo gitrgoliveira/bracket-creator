@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -54,6 +56,38 @@ func TestRenumberCompetitors_RewritesUnderNewPrefix(t *testing.T) {
 	assert.Equal(t, "p1", pools[0].Players[0].ID)
 	assert.EqualValues(t, 1, pools[0].Players[0].PoolPosition)
 	assert.Equal(t, "Carol", pools[1].Players[0].Name)
+}
+
+// TestRenumberCompetitors_TrimsPaddedPrefix is PR #416 finding 11: the
+// blank-prefix guard checked strings.TrimSpace(comp.NumberPrefix), but
+// helper.NumberPools was handed the RAW, untrimmed comp.NumberPrefix -- so a
+// prefix padded with real (non-whitespace-only) surrounding whitespace, e.g.
+// " X" (a value a hand-edited config.md or an upstream trim gap could leave
+// behind), passed the guard on its trimmed form yet still stamped the
+// untrimmed value, whitespace and all, onto every competitor number.
+func TestRenumberCompetitors_TrimsPaddedPrefix(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "renumber-padded-prefix"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Renumber Padded Prefix", Kind: "individual", Format: "mixed",
+		Status: "draw-ready", NumberPrefix: " X ",
+	}))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: "p1", Name: "Alice", Dojo: "Dojo Alice", PoolPosition: 1, Number: "Y1"},
+		}},
+	}))
+
+	changed, err := eng.RenumberCompetitors(compID)
+	require.NoError(t, err)
+	assert.True(t, changed)
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 1)
+	assert.Equal(t, "X1", pools[0].Players[0].Number, "the number must be composed from the TRIMMED prefix, not the raw padded one")
 }
 
 // TestRenumberCompetitors_Idempotent_SecondCallDoesNotRewriteTheFile pins G4's
@@ -322,6 +356,71 @@ func TestMigrateNumberPrefixes_ResumesNumberingOnTheNextStart(t *testing.T) {
 	assert.Equal(t, []string{"H1", "H2"}, []string{pools[0].Players[0].Number, pools[0].Players[1].Number})
 }
 
+// TestDefaultNumberPrefixFor_LogsCorrelatedWarningOnSkippedSibling is PR #416
+// finding T2: an unreadable sibling (unparseable config.md) is tolerated by
+// takenNumberPrefixes (log-and-skip, never refuse), but the resulting
+// assignment was logged, if at all, with no link back to WHICH sibling(s)
+// were invisible to it -- an operator investigating a possible prefix
+// collision after the fact had two independent log lines to manually
+// cross-reference instead of one that already named both.
+func TestDefaultNumberPrefixFor_LogsCorrelatedWarningOnSkippedSibling(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "readable", Name: "Readable", Format: state.CompFormatMixed, NumberPrefix: "R"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken", Name: "Broken", Format: state.CompFormatMixed, NumberPrefix: "B"}))
+	corruptCompetitionConfig(t, store, "broken")
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+
+	prefix, err := eng.DefaultNumberPrefixFor("New Competition", "")
+	require.NoError(t, err)
+	require.NotEmpty(t, prefix)
+
+	logged := logBuf.String()
+	assert.Contains(t, logged, "New Competition", "the warning must name the assignment it applies to")
+	assert.Contains(t, logged, "broken", "the warning must name the skipped sibling id")
+	assert.Contains(t, logged, prefix, "the warning must name the prefix that was assigned")
+}
+
+// TestMigrateNumberPrefixes_LogsWhichCompetitionWasRenumbered is PR #416
+// finding 9: MigrateNumberPrefixes's final loop discarded RenumberCompetitors'
+// bool (whether it actually rewrote pools.csv) entirely, so nothing in the
+// log correlated a competitor-numbering rewrite with the competition it
+// happened to. A competition with an ALREADY-VALID prefix but a pools.csv
+// Number column holding the wrong values (mirrors ...ResumesNumberingOnThe
+// NextStart above) is renumbered on this pass, and that must now be logged
+// by id and prefix.
+func TestMigrateNumberPrefixes_LogsWhichCompetitionWasRenumbered(t *testing.T) {
+	store, err := state.NewStore(t.TempDir())
+	require.NoError(t, err)
+	eng := New(store)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "half-migrated-2", Name: "Half Two", Format: state.CompFormatMixed, Status: state.CompStatusPools, NumberPrefix: "H",
+	}))
+	require.NoError(t, store.SavePools("half-migrated-2", []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "A", Dojo: "D"}, {Name: "B", Dojo: "D"}}},
+	}))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	prevFlags := log.Flags()
+	log.SetOutput(&logBuf)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+
+	migrated, err := eng.MigrateNumberPrefixes()
+	require.NoError(t, err)
+	assert.Empty(t, migrated, "no NEW prefix was assigned, only an existing one applied")
+
+	assert.Contains(t, logBuf.String(), "half-migrated-2", "the log must name the competition whose competitor numbers were rewritten")
+	assert.Contains(t, logBuf.String(), `"H"`, "the log must name the prefix the rewrite happened under")
+}
+
 // TestRenumberCompetitors_InvalidatesStandingsCache pins bc-pnum A2:
 // RenumberCompetitors is a pools.csv writer, and CalculatePoolStandings's
 // result carries each player's Number (Player.Number rides inside
@@ -387,9 +486,10 @@ func TestTakenNumberPrefixesAndDefaultFor(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "a", Name: "Kendo", Format: state.CompFormatMixed, NumberPrefix: "K"}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "b", Name: "Kendo Open", Format: state.CompFormatMixed, NumberPrefix: "KO"}))
 
-	taken, err := eng.takenNumberPrefixes("b")
+	taken, skipped, err := eng.takenNumberPrefixes("b")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"K"}, taken, "excludeID's own prefix is not taken")
+	assert.Empty(t, skipped, "no unreadable siblings in this fixture")
 
 	// K and KO are both taken, so every plain digit suffix on "KO" ("KO2"..)
 	// is ambiguous with "KO" itself (bc-pnum A1); the derivation falls to the

@@ -1302,16 +1302,12 @@ func (e *Engine) cachedStandingsIfValid(compId string, tokens standingsTokens) (
 // Callers must sample ONCE and reuse the snapshot: re-reading per comparison
 // would let a write slip between two reads of the same logical check.
 func (e *Engine) sampleStandingsTokens(compId string) standingsTokens {
-	return standingsTokens{
-		poolMatchesMtime:   e.store.FileMtime(compId, "pool-matches.csv"),
-		overridesMtime:     e.store.FileMtime(compId, "overrides.json"),
-		poolsMtime:         e.store.FileMtime(compId, "pools.csv"),
-		configMtime:        e.store.FileMtime(compId, "config.md"),
-		poolMatchesVersion: e.store.FileVersion(compId, "pool-matches.csv"),
-		overridesVersion:   e.store.FileVersion(compId, "overrides.json"),
-		poolsVersion:       e.store.FileVersion(compId, "pools.csv"),
-		configVersion:      e.store.FileVersion(compId, "config.md"),
-	}
+	var t standingsTokens
+	t.poolMatchesMtime, t.poolMatchesVersion = e.store.FileToken(compId, "pool-matches.csv")
+	t.overridesMtime, t.overridesVersion = e.store.FileToken(compId, "overrides.json")
+	t.poolsMtime, t.poolsVersion = e.store.FileToken(compId, "pools.csv")
+	t.configMtime, t.configVersion = e.store.FileToken(compId, "config.md")
+	return t
 }
 
 // poolStandingsLoader is the read surface computeStandingsFrom needs. Both

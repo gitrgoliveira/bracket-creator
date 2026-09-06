@@ -364,6 +364,14 @@ func (s *Store) FileVersion(compID, filename string) uint64 {
 	return s.getFileCache(compID, filename).version.Load()
 }
 
+// FileToken returns both cache-validity tokens for a file inside a
+// competition directory in one call -- its FileMtime and FileVersion, always
+// sampled as a pair (see FileVersion's own doc comment) -- so a caller
+// building a multi-file cache key issues one call per file instead of two.
+func (s *Store) FileToken(compID, filename string) (mtime int64, version uint64) {
+	return s.FileMtime(compID, filename), s.FileVersion(compID, filename)
+}
+
 // discardCompCacheBodies drops every cached file body for a competition while
 // KEEPING the per-file version counters alive, then bumps each one.
 //

@@ -275,6 +275,48 @@ func TestDefaultNumberPrefix_KendoWithKTakenDerivesSomethingUnambiguous(t *testi
 	assert.False(t, NumberPrefixesAmbiguous(got, "K"), "the derived prefix must not be ambiguous with the taken one")
 }
 
+// TestDefaultNumberPrefix_CaseInsensitiveExactMatch pins bc-pnum review
+// H10/H12: before NormalizeNumberPrefix existed, DefaultNumberPrefix's own
+// exact-match check was a SEPARATE strings.ToUpper fold from
+// NumberPrefixesAmbiguous' -- two independent case folds that happened to
+// agree, but nothing forced them to. A lower-case taken value must still be
+// rejected as an exact match (not merely caught as "ambiguous"), forcing
+// the SAME escalation to the zero-padded numeric suffix as the equivalent
+// upper-case taken set.
+func TestDefaultNumberPrefix_CaseInsensitiveExactMatch(t *testing.T) {
+	got := DefaultNumberPrefix("Kendo Open", []string{"k", "ko"})
+	assert.Equal(t, "K02", got, "must match the upper-case-taken equivalent (K, KO) exactly")
+}
+
+// TestNumberPrefixFold_DefaultAndAmbiguousAgree drives DefaultNumberPrefix
+// and NumberPrefixesAmbiguous over the SAME taken values at different
+// cases and with incidental whitespace, pinning bc-pnum review H10/H12:
+// both now derive from the single NormalizeNumberPrefix fold, so they can
+// no longer drift on what "the same prefix" means.
+func TestNumberPrefixFold_DefaultAndAmbiguousAgree(t *testing.T) {
+	tests := []struct {
+		name  string
+		taken []string
+	}{
+		{"upper-case taken", []string{"K", "KO"}},
+		{"lower-case taken", []string{"k", "ko"}},
+		{"mixed-case taken", []string{"K", "Ko"}},
+		{"padded whitespace taken", []string{" K ", " KO "}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DefaultNumberPrefix("Kendo Open", tc.taken)
+			assert.Equal(t, "K02", got, "every case/whitespace variant of the same taken set must derive identically")
+			for _, taken := range tc.taken {
+				assert.NotEqual(t, NormalizeNumberPrefix(got), NormalizeNumberPrefix(taken),
+					"the derived prefix must never exactly match a taken one under the shared fold")
+				assert.False(t, NumberPrefixesAmbiguous(got, taken),
+					"the derived prefix must never be ambiguous with a taken one")
+			}
+		})
+	}
+}
+
 // TestNameInitials_AccentedAndOtherScripts pins the word-initial rule: a Latin
 // letter with diacritics folds to its base, a letter from another script
 // starts a word but contributes no initial, and non-letters separate words.

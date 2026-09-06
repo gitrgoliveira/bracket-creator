@@ -93,22 +93,34 @@ func NumberPools(pools []Pool, prefix string) {
 	}
 }
 
+// NormalizeNumberPrefix is the ONE case/whitespace fold every number-prefix
+// uniqueness decision compares under (bc-pnum review H10/H12): before this,
+// the fold was spelled three times independently -- strings.EqualFold at the
+// mobileapp handler boundary, strings.ToUpper here in
+// NumberPrefixesAmbiguous, and a second strings.ToUpper building
+// DefaultNumberPrefix's own `used` map -- three call sites that could in
+// principle drift out of agreement on what "the same prefix" means.
+func NormalizeNumberPrefix(s string) string {
+	return strings.ToUpper(strings.TrimSpace(s))
+}
+
 // NumberPrefixesAmbiguous reports whether two number prefixes can produce an
 // identical competitor tag once AssignPlayerNumbers appends a counter to
-// each: compared case-insensitively, one is ambiguous with the other when it
-// equals the other followed by a run of digits whose first digit is not '0'.
-// "K" and "K2" are ambiguous because K's own counter reaches "K21" (its 21st
-// entrant) at the same string K2's 1st entrant gets ("K2"+"1"). A leading
-// zero breaks the ambiguity on purpose: AssignPlayerNumbers's
-// fmt.Sprintf("%s%d", ...) never left-pads its counter, so a prefix like
-// "K02" can never coincide with "K"'s own sequence (which only ever produces
-// "K1".."K9","K10",... -- never "K02"). Two genuinely equal prefixes are NOT
-// reported here: that collision is the pre-existing exact-match check
-// (checkUniqueCompFields, DefaultNumberPrefix's own `used` set); this
-// function covers only the stem+digits shape those checks miss.
+// each: compared under NormalizeNumberPrefix, one is ambiguous with the
+// other when it equals the other followed by a run of digits whose first
+// digit is not '0'. "K" and "K2" are ambiguous because K's own counter
+// reaches "K21" (its 21st entrant) at the same string K2's 1st entrant gets
+// ("K2"+"1"). A leading zero breaks the ambiguity on purpose:
+// AssignPlayerNumbers's fmt.Sprintf("%s%d", ...) never left-pads its
+// counter, so a prefix like "K02" can never coincide with "K"'s own sequence
+// (which only ever produces "K1".."K9","K10",... -- never "K02"). Two
+// genuinely equal prefixes are NOT reported here: that collision is the
+// pre-existing exact-match check (checkUniqueCompFields,
+// DefaultNumberPrefix's own normalized-equality check); this function
+// covers only the stem+digits shape those checks miss.
 func NumberPrefixesAmbiguous(a, b string) bool {
-	a = strings.ToUpper(strings.TrimSpace(a))
-	b = strings.ToUpper(strings.TrimSpace(b))
+	a = NormalizeNumberPrefix(a)
+	b = NormalizeNumberPrefix(b)
 	if a == "" || b == "" || a == b {
 		return false
 	}
@@ -150,24 +162,23 @@ func isDigitExtension(long, short string) bool {
 // produce the same prefix, which is what lets the create form show the operator
 // the value the server would pick.
 func DefaultNumberPrefix(name string, taken []string) string {
-	used := make(map[string]bool, len(taken))
+	// bc-pnum review H10/H12: ONE loop over the trimmed taken slice, no
+	// separate upper-cased `used` map -- exact equality and ambiguity are
+	// both decided under the same NormalizeNumberPrefix fold, so a
+	// candidate can never pass one check under a fold the other rejects.
 	normalized := make([]string, 0, len(taken))
 	for _, t := range taken {
 		if t = strings.TrimSpace(t); t != "" {
-			used[strings.ToUpper(t)] = true
 			normalized = append(normalized, t)
 		}
 	}
-	ambiguousWithTaken := func(candidate string) bool {
+	acceptable := func(candidate string) bool {
 		for _, t := range normalized {
-			if NumberPrefixesAmbiguous(candidate, t) {
-				return true
+			if NormalizeNumberPrefix(t) == NormalizeNumberPrefix(candidate) || NumberPrefixesAmbiguous(candidate, t) {
+				return false
 			}
 		}
-		return false
-	}
-	acceptable := func(candidate string) bool {
-		return !used[candidate] && !ambiguousWithTaken(candidate)
+		return true
 	}
 
 	initials := nameInitials(name)

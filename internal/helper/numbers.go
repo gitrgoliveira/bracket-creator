@@ -15,9 +15,12 @@ import (
 const DefaultNumberPrefixFallback = "K"
 
 // MaxNumberPrefixLen bounds a derived prefix. It matches the admin UI's
-// maxLength="3" and mobileapp's MaxLenCompetitionNumberPrefix; stated here too
-// because DefaultNumberPrefix must never propose a value its own validator
-// would then reject, and helper cannot import mobileapp.
+// maxLength="3"; mobileapp's MaxLenCompetitionNumberPrefix is an alias of
+// this constant, not a second copy -- the dependency runs mobileapp ->
+// helper (presentation depends on business logic, never the reverse), so
+// this is the ONE place the cap is stated and every other layer imports it,
+// including ValidateNumberPrefix below, which DefaultNumberPrefix must never
+// propose a value that validator would then reject.
 const MaxNumberPrefixLen = 3
 
 // CompetitorNumber is the one composition of a competitor number: prefix

@@ -406,27 +406,30 @@ func TestValidateMaxLen(t *testing.T) {
 	}
 }
 
-// TestValidateMaxRunes pins : unlike validateMaxLen (byte length),
-// validateMaxRunes counts RUNES, so a multi-byte-but-few-character string
-// like "ÖÖ" (2 runes, 4 bytes) must pass a cap of 3 even though it exceeds
-// 3 BYTES.
-func TestValidateMaxRunes(t *testing.T) {
+// TestValidateCompetitionLengths_NumberPrefixRunesNotBytes pins the same
+// rune-count behaviour TestValidateMaxRunes used to pin directly against the
+// (now deleted) validateMaxRunes: validateCompetitionLengths must measure
+// numberPrefix in RUNES via helper.ValidateNumberPrefix (PR #416 finding 4),
+// not bytes, so a multi-byte-but-few-character string like "ÖÖ" (2 runes, 4
+// bytes) passes even though it exceeds 3 BYTES. helper's own
+// TestValidateNumberPrefix pins the primitive itself; this pins that the
+// mobileapp boundary still calls into it with the numberPrefix field name.
+func TestValidateCompetitionLengths_NumberPrefixRunesNotBytes(t *testing.T) {
 	tests := []struct {
 		name      string
 		val       string
-		max       int
 		wantField string
 	}{
-		{name: "empty under cap: ok", val: "", max: 3},
-		{name: "ASCII exactly at cap: ok", val: "ABC", max: 3},
-		{name: "ASCII one over cap: rejected", val: "ABCD", max: 3, wantField: "numberPrefix"},
-		{name: "2-rune, 4-byte value under a 3-rune cap: ok (the  fix)", val: "ÖÖ", max: 3},
-		{name: "3-rune, 6-byte value exactly at cap: ok", val: "ÖÖÖ", max: 3},
-		{name: "4-rune value over cap: rejected even though runes, not bytes, are counted", val: "ÖÖÖÖ", max: 3, wantField: "numberPrefix"},
+		{name: "empty: ok", val: ""},
+		{name: "ASCII exactly at cap: ok", val: "ABC"},
+		{name: "ASCII one over cap: rejected", val: "ABCD", wantField: "numberPrefix"},
+		{name: "2-rune, 4-byte value under the 3-rune cap: ok (the  fix)", val: "ÖÖ"},
+		{name: "3-rune, 6-byte value exactly at cap: ok", val: "ÖÖÖ"},
+		{name: "4-rune value over cap: rejected even though runes, not bytes, are counted", val: "ÖÖÖÖ", wantField: "numberPrefix"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateMaxRunes("numberPrefix", tt.val, tt.max)
+			err := validateCompetitionLengths(&state.Competition{Name: "OK", NumberPrefix: tt.val})
 			if tt.wantField == "" {
 				assert.NoError(t, err)
 				return

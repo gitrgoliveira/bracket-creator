@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	excelize "github.com/xuri/excelize/v2"
@@ -33,16 +32,18 @@ const numberPrefixFlagHelp = "Letter prefix for competitor numbers (e.g. 'K' pro
 // has no tournament to be unique within, so nothing is taken (nil) when
 // deriving from titlePrefix.
 func resolveNumberPrefix(numberPrefix, titlePrefix string) (string, error) {
-	trimmed := strings.TrimSpace(numberPrefix)
+	// helper.ValidateNumberPrefix (PR #416 finding 4) owns the trim and the
+	// RUNE-count cap check (not len/BYTES: a 2-character multi-byte prefix
+	// like "ÖÖ" is 4 UTF-8 bytes but must not be refused as too long); it
+	// returns "" on failure, so the CLI's own wording -- which names the
+	// flag and echoes the offending value back to the operator -- trims the
+	// input itself for the error message rather than reusing that result.
+	trimmed, err := helper.ValidateNumberPrefix(numberPrefix)
+	if err != nil {
+		return "", fmt.Errorf("--number-prefix %q is too long: must be at most %d characters", strings.TrimSpace(numberPrefix), helper.MaxNumberPrefixLen)
+	}
 	if trimmed == "" {
 		return helper.DefaultNumberPrefix(titlePrefix, nil), nil
-	}
-	// utf8.RuneCountInString, not len (bc-pnum review): the error
-	// message says "characters", but len counts BYTES, so a 2-character
-	// multi-byte prefix like "ÖÖ" (4 UTF-8 bytes) was wrongly refused as
-	// too long.
-	if utf8.RuneCountInString(trimmed) > helper.MaxNumberPrefixLen {
-		return "", fmt.Errorf("--number-prefix %q is too long: must be at most %d characters", trimmed, helper.MaxNumberPrefixLen)
 	}
 	return trimmed, nil
 }

@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -59,8 +58,12 @@ const (
 	// 30 days covers the longest conceivable multi-day open tournament.
 	MaxTournamentDurationDays = 30
 
-	MaxLenCompetitionName         = 200
-	MaxLenCompetitionNumberPrefix = 3 // matches admin UI maxLength="3"
+	MaxLenCompetitionName = 200
+	// MaxLenCompetitionNumberPrefix is an alias of helper.MaxNumberPrefixLen,
+	// not a second copy of the cap (PR #416 finding 4): the dependency runs
+	// mobileapp -> helper, so this package imports the one constant rather
+	// than restating it.
+	MaxLenCompetitionNumberPrefix = helper.MaxNumberPrefixLen
 	MaxLenCompetitionStartTime    = 8 // "HH:MM"
 	MaxLenCompetitionDate         = 10
 
@@ -113,26 +116,6 @@ const (
 // trimming first if trimming applies.
 func validateMaxLen(field, val string, max int) error {
 	if len(val) > max {
-		return &ValidationError{
-			Field:   field,
-			Message: fmt.Sprintf("must be <= %d characters", max),
-		}
-	}
-	return nil
-}
-
-// validateMaxRunes returns a ValidationError when val exceeds max RUNES
-// (display characters), not bytes. : numberPrefix's own message says
-// "characters", the admin UI's maxLength="3" counts UTF-16 units, and the
-// printed Tags/Names-to-Print sheets count runes -- so a byte-length check
-// refused a 2-character, 4-byte prefix like "ÖÖ" as too long, contradicting
-// every other measure of it. Scoped to numberPrefix ONLY: validateMaxLen's
-// ~45 other callers (name, dojo, free-text audit fields, ...) size their cap
-// against disk/parse cost, which scales with BYTES, and switching them to
-// runes would silently loosen those caps. Caller is responsible for
-// trimming first if trimming applies.
-func validateMaxRunes(field, val string, max int) error {
-	if utf8.RuneCountInString(val) > max {
 		return &ValidationError{
 			Field:   field,
 			Message: fmt.Sprintf("must be <= %d characters", max),

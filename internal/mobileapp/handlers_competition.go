@@ -374,9 +374,12 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	if err := validateMaxLen("name", comp.Name, MaxLenCompetitionName); err != nil {
 		return err
 	}
-	// rune count, not byte count -- see validateMaxRunes.
-	if err := validateMaxRunes("numberPrefix", comp.NumberPrefix, MaxLenCompetitionNumberPrefix); err != nil {
-		return err
+	// rune count, not byte count -- see helper.ValidateNumberPrefix.
+	if _, err := helper.ValidateNumberPrefix(comp.NumberPrefix); err != nil {
+		return &ValidationError{
+			Field:   "numberPrefix",
+			Message: fmt.Sprintf("must be <= %d characters", MaxLenCompetitionNumberPrefix),
+		}
 	}
 	if err := validateMaxLen("startTime", comp.StartTime, MaxLenCompetitionStartTime); err != nil {
 		return err

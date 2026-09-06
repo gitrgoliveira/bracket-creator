@@ -565,7 +565,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	// maxLength="3" counts UTF-16 units, and the printed Tags/Names-to-Print
 	// sheets count RUNES -- so a 2-character, 4-byte prefix like "ÖÖ" was
 	// refused as > 3 "characters" even though every other measure of it
-	// agrees it's 2. validateMaxRunes (rune count) fixes this for
+	// agrees it's 2. helper.ValidateNumberPrefix (rune count) fixes this for
 	// numberPrefix specifically; validateMaxLen itself is UNCHANGED (its
 	// other ~45 callers size a byte-cost cap on purpose).
 	t.Run("NumberPrefix accepts a 2-rune, 4-byte prefix on Create", func(t *testing.T) {

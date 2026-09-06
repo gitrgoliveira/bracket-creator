@@ -89,41 +89,11 @@ import (
 // whichever tree that dispatch selects, so mode-awareness is unchanged by
 // this bead.
 //
-// bc-pnum (int-id rewrite): the bijective pool-label fix
-// (bc-dojo-least-conflicted-pool) restored 12 previously collided pools to
-// improveDojoMeetings' own exchange pass, which is legitimate extra work,
-// not a regression -- but a CPU profile of that pass afterwards showed
-// improveDojoMeetings at 99.34% cumulative, earliestDojoMeeting at 86.86%,
-// and mapaccess2_faststr (a map[string]* lookup) at 51%: the per-pool `counts`
-// this pass and the descent's dojoNode.dojoCount both used were
-// map[string]int keyed by the normalized dojo string, looked up on every
-// candidate evaluated. dojoIDCache (tournament.go) interns each distinct
-// normalized key to a dense int ONCE per draw, up front, so both structures
-// became a plain []int/[][]int indexed by that id instead -- see
-// dojoIDCache's own doc comment for the measured before/after numbers, and
-// earliestDojoMeetingScan's (below) for the buffer-reuse fix that removed
-// the remaining per-call allocation once the map lookup itself was gone.
-//
-// Follow-up (bc-pnum review): the id-conversion above still left every
-// candidate's ak/bk resolved via ids.of(a.Dojo)/ids.of(b.Dojo) -- two map
-// probes each (dojoKeyCache's raw->normalized lookup, then dojoIDCache's own
-// normalized->id lookup) -- so a re-profile after the first pass still
-// showed a measurable mapaccess2_faststr share. poolDojoIDs (a [][]int kept
-// in lockstep with `counts` at the same two swap sites, improveDojoMeetings)
-// removed that too: ak/bk are now a plain slice index. A CPU profile of
-// BuildPoolPhaseTreeAware_256_16x16_Interleaved after BOTH fixes shows
-// mapaccess2_faststr, dojoIDCache.of and dojoKeyCache.of absent entirely
-// from a full (nodefraction=0) node listing -- not merely small, genuinely
-// not sampled. What remains (~86% cumulative) is earliestDojoMeetingScan
-// itself: the O(numPools) countIn scan collecting a dojo's occupied pools,
-// plus the O(occupied^2) pairRound comparison over them -- real arithmetic
-// over the extra pools the bijective-label fix legitimately restored to the
-// exchange pass, not a lookup cost left to remove. See dojoIDCache's own
-// doc comment for the measured before/after benchmark numbers this left.
-//
-// Output is unchanged: this only touches HOW the existing objective is
-// computed, never what it computes, and `make examples` was re-run and
-// diffed byte-identical after every pass of this rewrite.
+// Dojo keys are interned once per draw to dense ints (dojoIDCache,
+// tournament.go), and pools carry a parallel poolDojoIDs kept in lockstep
+// with counts, so the descent and the exchange pass index into a slice
+// rather than hash a string. Output is unchanged: this only changes how the
+// existing objective is computed, never what it computes.
 
 // BuildPoolPhaseTreeAware is BuildPoolPhase's region-aware sibling. It
 // returns the same (pools, drawCourts, error) shape, for the same reasons
@@ -1116,39 +1086,31 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 						if deltaExc > 0 {
 							continue
 						}
-						// Only the two exchanged dojos' meetings can move,
-						// so the objective is updated by their delta rather
+						// Only the two exchanged dojos' meetings can move, so
+						// the objective is updated by their delta rather
 						// than recomputed over every dojo (which made the
 						// 2048-config sweep ~6x slower for no extra
-						// information). Both the winner-path pair (tiers
-						// b/c) and the all-qualifier pair (tier d) are
-						// captured before AND after, since the "no dojo
-						// gets earlier" guard applies to BOTH -- the
-						// best-effort crossing tier must never backfire by
-						// accepting a swap that makes an all-qualifier
-						// meeting earlier even while tiers (a)-(c) look
-						// neutral or better. beforeA/beforeAQA are the
-						// ai-level hoisted values (a.Dojo and the pool
-						// contents are both unchanged since then); beforeB/
-						// beforeAQB come from the pass-scoped cache, since
-						// b.Dojo recurs across many (i, ai, j, bi)
-						// candidates within one pass.
+						// information). beforeA/beforeAQA are the ai-level
+						// hoisted values (a.Dojo and the pool contents are
+						// both unchanged since then); beforeB/beforeAQB
+						// come from the pass-scoped cache, since b.Dojo
+						// recurs across many (i, ai, j, bi) candidates
+						// within one pass.
 						beforeB := cachedDojoMeeting(pools, pairRound, bk, winnerMeetKnown, winnerMeetCache, countIn, &scanBuf)
 						beforeAQB := cachedDojoMeeting(pools, allQualPairRound, bk, allQualMeetKnown, allQualMeetCache, countIn, &scanBuf)
 						// exchange moves pools/counts/poolDojoIDs together,
 						// speculatively (bc-pnum review, G1 -- see that
 						// closure's own doc comment for why this is ONE
 						// call rather than a hand-mirrored update): every
-						// read below this point (afterA/afterB/afterAQA/
-						// afterAQB, via countIn, and any LATER candidate's
-						// ak/bk read via poolDojoIDs) must see the
-						// POST-swap tally/identity, and the revert a few
-						// lines down is the SAME call, self-inverse.
+						// read below this point (afterA/afterB and, when
+						// reached, afterAQA/afterAQB, via countIn, and any
+						// LATER candidate's ak/bk read via poolDojoIDs)
+						// must see the POST-swap tally/identity, and the
+						// revert a few lines down is the SAME call,
+						// self-inverse.
 						exchange(i, ai, j, bi)
 						afterA := earliestDojoMeetingScan(pools, pairRound, ak, countIn, &scanBuf)
 						afterB := earliestDojoMeetingScan(pools, pairRound, bk, countIn, &scanBuf)
-						afterAQA := earliestDojoMeetingScan(pools, allQualPairRound, ak, countIn, &scanBuf)
-						afterAQB := earliestDojoMeetingScan(pools, allQualPairRound, bk, countIn, &scanBuf)
 						newExc, newR1, newNS := curExc+deltaExc, curR1, curNS
 						for _, d := range [2][2]int{{beforeA, afterA}, {beforeB, afterB}} {
 							bef, aft := d[0], d[1]
@@ -1165,14 +1127,30 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 								newNS -= aft
 							}
 						}
+						// Tier (d), the all-qualifier best-effort, is a PURE
+						// TIE-BREAK: better() only ever consults aqa/aqb
+						// when tiers (a)-(c) -- excess, round-1 count,
+						// meeting sum -- are EXACTLY tied (its own doc
+						// comment: "it never overrides (a)-(c): a swap tier
+						// (c) already prefers is taken regardless of what
+						// tier (d) thinks of it"). afterAQA/afterAQB are
+						// each an uncached earliestDojoMeetingScan, so they
+						// only run once that tie is confirmed rather than
+						// on every candidate; when (a)-(c) already differ,
+						// better()'s decision cannot depend on newAQ, so
+						// leaving it equal to curAQ here is unobservable.
 						newAQ := curAQ
-						for _, d := range [2][2]int{{beforeAQA, afterAQA}, {beforeAQB, afterAQB}} {
-							bef, aft := d[0], d[1]
-							if bef != math.MaxInt {
-								newAQ += bef
-							}
-							if aft != math.MaxInt {
-								newAQ -= aft
+						if newExc == curExc && newR1 == curR1 && newNS == curNS {
+							afterAQA := earliestDojoMeetingScan(pools, allQualPairRound, ak, countIn, &scanBuf)
+							afterAQB := earliestDojoMeetingScan(pools, allQualPairRound, bk, countIn, &scanBuf)
+							for _, d := range [2][2]int{{beforeAQA, afterAQA}, {beforeAQB, afterAQB}} {
+								bef, aft := d[0], d[1]
+								if bef != math.MaxInt {
+									newAQ += bef
+								}
+								if aft != math.MaxInt {
+									newAQ -= aft
+								}
 							}
 						}
 						// bc-drwx item 7: the all-qualifier (tier d) "never
@@ -1183,16 +1161,10 @@ func improveDojoMeetings(pools []Pool, qualifierSlots [][]int, ids dojoIDCache) 
 						// winner-path meeting from round 1 to 3 was refused
 						// because dojo Y's all-qualifier crossing moved
 						// from round 6 to 1, even though nothing about
-						// tiers (a)-(c) objected). Tier (d) is a PURE
-						// TIE-BREAK (this function's own doc comment: "it
-						// never overrides (a)-(c): a swap tier (c) already
-						// prefers is taken regardless of what tier (d)
-						// thinks of it") and better() already encodes that
-						// -- newAQ only ever decides a comparison where
-						// tiers (a)-(c) are EXACTLY tied. The winner-path
-						// "never earlier" guard (afterA/afterB) stays a
-						// hard precondition: that one IS the ruling,
-						// unlike the all-qualifier best-effort.
+						// tiers (a)-(c) objected). The winner-path "never
+						// earlier" guard (afterA/afterB) stays a hard
+						// precondition: that one IS the ruling, unlike the
+						// all-qualifier best-effort.
 						if afterA >= beforeA && afterB >= beforeB &&
 							better(newExc, newR1, newNS, newAQ, curExc, curR1, curNS, curAQ) {
 							improved = true

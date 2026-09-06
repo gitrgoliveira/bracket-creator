@@ -72,7 +72,7 @@ Every competition has a number prefix. You can set your own in competition setup
 
 This section covers pooled formats (mixed and league), where numbers follow the drawn pools. For a knockout-only competition, see [Competitor numbers](knockout-draw.md#competitor-numbers) instead: numbers are final from setup. A Swiss competition's competitors carry no number at all.
 
-Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. Numbers run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
+Generating the draw gives every competitor a number built from that prefix, and that number identifies them on the pool sheet, on the printed tags and at the desk. A number belongs to a position in the draw, not to a person: once the number of entrants is known the pools and the tree are fixed and their positions are numbered, and the draw then places the seeds and everyone else into those positions. Numbers therefore run in draw order straight through the pools, so with the prefix K and pools of four, K1 to K4 are the first pool, K5 to K8 the second, and so on.
 
 When a competition's number prefix is more than one character, the printed tags and the Names to Print cards show the prefix above the rest of the number, for example KO above 20. A one-character prefix stays on one line, for example K20.
 

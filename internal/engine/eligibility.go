@@ -475,7 +475,7 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 // lookupExistingResult fetches the currently-persisted MatchResult for
 // compID/matchID from either the pool-matches or bracket store. For
 // bracket matches the BracketMatch fields are projected onto a
-// MatchResult so callers (loserSideName, etc.) see a uniform shape;
+// MatchResult so callers (losingSide, etc.) see a uniform shape;
 // only the fields the kiken-undo path needs are populated. Returns a
 // *NotFoundError when the match is unknown.
 func (e *Engine) lookupExistingResult(h state.StoreTx, compID, matchID string) (*state.MatchResult, error) {
@@ -654,15 +654,16 @@ func combinedPlayerPool(compPlayers []domain.Player, participants []domain.Playe
 //
 // The losing side is resolved by losingSide, the ONE owner of "which side
 // lost" (PR #416 findings 4/5): result.WinnerSide first (the operator's own
-// explicit choice, stamped directly by RecordDecisionTx), then
-// domain.AttributeWinnerSide (id-preferred, name fallback -- the same
-// attribution every other winner-side consumer in this codebase uses), then
-// the legacy ippon-emptiness heuristic. losingSide replaced two independent,
-// narrower spellings of the same question (loserSideName's name/ippon-only
-// view and loserPlayerID's resolveWinnerSide-based id view) that never
-// consulted WinnerSide at all, so a same-name pairing whose loser was already
-// pinned by WinnerSide could still fall through to an ambiguous name/id
-// tie-break that silently assumed side A won and marked the WINNER
+// explicit choice, stamped directly by RecordDecisionTx), then a complete id
+// set (ids win over names, unambiguous even when both sides share a display
+// name), then the Winner name -- but only when the two sides are not
+// themselves a name collision -- then the legacy ippon-emptiness heuristic,
+// decided by SIDE rather than by re-matching a name. losingSide replaced two
+// independent, narrower spellings of the same question (loserSideName's
+// name/ippon-only view and loserPlayerID's resolveWinnerSide-based id view)
+// that never consulted WinnerSide at all, so a same-name pairing whose loser
+// was already pinned by WinnerSide could still fall through to an ambiguous
+// name/id tie-break that silently assumed side A won and marked the WINNER
 // ineligible instead of the loser.
 //
 // The losing player's id is preferred straight from losingSide's own id
@@ -792,34 +793,6 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	return &status, nil
 }
 
-// loserSideName returns the name of the losing side for a
-// kiken/fusenpai. It prefers result.Winner (the canonical surviving
-// side, set by the score handler after T077 validation) and falls
-// back to the ippon-count heuristic only when Winner is unset.
-//
-// Returns "" when neither path is conclusive, callers must treat
-// that as "no ineligibility recorded" and the operator will need to
-// fix the request shape before the eligibility gate works.
-func loserSideName(result *state.MatchResult) string {
-	if result.Winner != "" {
-		switch result.Winner {
-		case result.SideA:
-			return result.SideB
-		case result.SideB:
-			return result.SideA
-		}
-	}
-	aEmpty := len(result.IpponsA) == 0
-	bEmpty := len(result.IpponsB) == 0
-	switch {
-	case aEmpty && !bEmpty:
-		return result.SideA
-	case !aEmpty && bEmpty:
-		return result.SideB
-	}
-	return ""
-}
-
 // losingSide is the ONE owner of "which side lost" attribution for a
 // kiken/fusenpai/withdrawal decision (PR #416 findings 4/5). It replaces
 // three independent spellings of the same question that used to live in
@@ -833,20 +806,30 @@ func loserSideName(result *state.MatchResult) string {
 // assumed side A won, so recordIneligibilityFromDecision could mark the
 // actual WINNER ineligible instead of the loser.
 //
-// Preference order, each step trusted completely once it applies:
+// Preference order, each step trusted completely once it applies, and each
+// step decides by SIDE, never by re-matching a NAME against both sides:
 //
 //  1. result.WinnerSide ("A" or "B") -- the one explicit, unambiguous hint a
 //     producer stamps directly from the operator's own choice (e.g.
 //     RecordDecisionTx from decisionBy), never inferred. Authoritative over
 //     every other field on the row, including a contradicting Winner name
 //     or WinnerID (which would only arise from stale/inconsistent data).
-//  2. domain.AttributeWinnerSide -- the SAME id-preferred/name-fallback
-//     attribution every other winner-side consumer in this codebase uses
-//     (standings, hantei placement, team aggregation). Ids win over names
-//     when they disagree; see that function's own doc comment.
-//  3. The legacy ippon-emptiness heuristic (loserSideName's fallback: one
-//     side has struck ippons, the other has none) for a row with no
-//     winner-attribution data at all.
+//  2. A complete id set (WinnerID, SideAID and SideBID all non-empty):
+//     WinnerID is compared against the two side ids, never against a name,
+//     so it stays correct even when both sides share a display name (two
+//     competitors from different dojos, which this project allows).
+//  3. result.Winner compared against the two side names -- but ONLY when
+//     SideA != SideB. A same-name pairing makes Winner match BOTH sides
+//     identically; comparing a name against two equal strings always takes
+//     whichever branch is checked first, which is how this used to silently
+//     attribute the loss to side A regardless of who actually won.
+//  4. The legacy ippon-emptiness heuristic (one side has struck ippons, the
+//     other has none) for a row with no winner-attribution data at all. This
+//     returns the empty side's OWN id/name directly rather than a name that
+//     then has to be matched back to a side, which is exactly the mapping
+//     step that used to re-introduce the same-name ambiguity: a returned
+//     name equal to both SideA and SideB matched the first-declared case
+//     regardless of which side the heuristic actually meant.
 //
 // ok reports whether the loss could be attributed; false replaces the old
 // sideUnresolved/"" signals. A caller like recordIneligibilityFromDecision
@@ -862,25 +845,31 @@ func losingSide(result *state.MatchResult) (id, name string, ok bool) {
 	case "B":
 		return result.SideAID, result.SideA, true
 	}
-	switch domain.AttributeWinnerSide(domain.WinnerAttribution{
-		WinnerID: result.WinnerID, SideAID: result.SideAID, SideBID: result.SideBID,
-		Winner: result.Winner, SideA: result.SideA, SideB: result.SideB,
-	}) {
-	case domain.MatchSideA:
-		return result.SideBID, result.SideB, true
-	case domain.MatchSideB:
-		return result.SideAID, result.SideA, true
+	if result.WinnerID != "" && result.SideAID != "" && result.SideBID != "" {
+		switch result.WinnerID {
+		case result.SideAID:
+			return result.SideBID, result.SideB, true
+		case result.SideBID:
+			return result.SideAID, result.SideA, true
+		}
 	}
-	switch loser := loserSideName(result); loser {
-	case "":
-		return "", "", false
-	case result.SideA:
-		return result.SideAID, result.SideA, true
-	case result.SideB:
-		return result.SideBID, result.SideB, true
-	default:
-		return "", "", false
+	if result.Winner != "" && result.SideA != result.SideB {
+		switch result.Winner {
+		case result.SideA:
+			return result.SideBID, result.SideB, true
+		case result.SideB:
+			return result.SideAID, result.SideA, true
+		}
 	}
+	aEmpty := len(result.IpponsA) == 0
+	bEmpty := len(result.IpponsB) == 0
+	switch {
+	case aEmpty && !bEmpty:
+		return result.SideAID, result.SideA, true
+	case !aEmpty && bEmpty:
+		return result.SideBID, result.SideB, true
+	}
+	return "", "", false
 }
 
 // ReinstateCompetitor restores eligibility for a competitor who was

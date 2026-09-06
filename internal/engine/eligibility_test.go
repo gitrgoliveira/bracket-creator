@@ -481,51 +481,14 @@ func TestAlreadyIneligibleError_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "match-2")
 }
 
-// TestLoserSideName exercises the loserSideName helper for various
-// result shapes: winner set, winner not set but ippons asymmetric.
-func TestLoserSideName(t *testing.T) {
-	tests := []struct {
-		name   string
-		result state.MatchResult
-		want   string
-	}{
-		{
-			"winner is SideA → loser is SideB",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice"},
-			"Bob",
-		},
-		{
-			"winner is SideB → loser is SideA",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob"},
-			"Alice",
-		},
-		{
-			"no winner but SideA has ippons → SideB is loser",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", IpponsA: []string{"M"}, IpponsB: nil},
-			"Bob",
-		},
-		{
-			"no winner but SideB has ippons → SideA is loser",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", IpponsA: nil, IpponsB: []string{"M"}},
-			"Alice",
-		},
-		{
-			"both empty ippons and no winner → empty",
-			state.MatchResult{SideA: "Alice", SideB: "Bob"},
-			"",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, loserSideName(&tc.result))
-		})
-	}
-}
-
 // TestLosingSide is PR #416 findings 4/5's table test: losingSide is the ONE
-// owner of "which side lost", preferring WinnerSide, then
-// domain.AttributeWinnerSide (id-preferred, name fallback), then the legacy
-// ippon-emptiness heuristic.
+// owner of "which side lost", preferring WinnerSide, then a complete id set,
+// then the Winner name (guarded against a same-name pairing), then the
+// legacy ippon-emptiness heuristic. loserSideName used to own the last two
+// steps as a name-first helper whose return value was then re-matched
+// against SideA/SideB by the caller; that mapping step is where a same-name
+// pairing went wrong (see the "same-name pair" cases below), so those steps
+// are exercised here directly on losingSide instead.
 func TestLosingSide(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -543,7 +506,7 @@ func TestLosingSide(t *testing.T) {
 			wantID: "idB", wantName: "Bob", wantOK: true,
 		},
 		{
-			name: "id-only: no WinnerSide, ids disambiguate via AttributeWinnerSide",
+			name: "id-only: no WinnerSide, a complete id set disambiguates",
 			result: state.MatchResult{
 				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
 				WinnerID: "idB",
@@ -558,7 +521,7 @@ func TestLosingSide(t *testing.T) {
 			wantID: "", wantName: "Alice", wantOK: true,
 		},
 		{
-			name: "contradictory Winner/WinnerID: ids win over the name (AttributeWinnerSide's own rule)",
+			name: "contradictory Winner/WinnerID: ids win over the name",
 			result: state.MatchResult{
 				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
 				Winner: "Alice", WinnerID: "idB", // name says Alice, id says Bob
@@ -575,6 +538,47 @@ func TestLosingSide(t *testing.T) {
 		{
 			name:   "wholly unresolved: nothing to go on",
 			result: state.MatchResult{SideA: "Alice", SideB: "Bob"},
+			wantID: "", wantName: "", wantOK: false,
+		},
+		{
+			// Same-name pair (two competitors sharing a display name from
+			// different dojos, which this project allows), no ids at all, no
+			// WinnerSide. Winner is set to the shared name, so it matches
+			// BOTH SideA and SideB identically and must not be trusted as a
+			// name comparison; the scoreline (side A struck ippons, side B
+			// did not) is the only side-specific signal left, and it points
+			// at side B as the loser.
+			name: "same-name pair, ambiguous Winner name, scoreline says side B lost",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka", SideAID: "idA", SideBID: "idB",
+				Winner:  "Tanaka",
+				IpponsA: []string{"M", "M"}, IpponsB: nil,
+			},
+			wantID: "idB", wantName: "Tanaka", wantOK: true,
+		},
+		{
+			// Same setup, scoreline reversed: side A struck nothing, side B
+			// struck ippons, so side A lost. Before the fix, the ambiguous
+			// Winner name resolved this identically to the case above
+			// (always side B), ignoring the scoreline entirely.
+			name: "same-name pair, ambiguous Winner name, scoreline says side A lost",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka", SideAID: "idA", SideBID: "idB",
+				Winner:  "Tanaka",
+				IpponsA: nil, IpponsB: []string{"M", "M"},
+			},
+			wantID: "idA", wantName: "Tanaka", wantOK: true,
+		},
+		{
+			// Same-name pair with an equal scoreline and no other signal:
+			// nothing distinguishes the two sides, so this must report
+			// unresolved rather than guess.
+			name: "same-name pair, equal scorelines, no other signal → unresolved",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka", SideAID: "idA", SideBID: "idB",
+				Winner:  "Tanaka",
+				IpponsA: []string{"M"}, IpponsB: []string{"M"},
+			},
 			wantID: "", wantName: "", wantOK: false,
 		},
 	}

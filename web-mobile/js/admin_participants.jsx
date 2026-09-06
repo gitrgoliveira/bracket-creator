@@ -1137,6 +1137,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       </div>
                       <div className="seed-row__dojo">
                         {p.dojo}
+                        {/* bc-pnum ruling 1e: the roster PUT re-serialises the saved
+                            roster, so p.id is the server-minted UUID once the roster
+                            has been applied at least once. Shown as a short (first
+                            8 chars) fragment with the full id on hover, in the same
+                            muted weight as the dojo line beside it so the row stays
+                            compact and the number/name columns never shift. A row
+                            with no id (not yet applied, or a load failure) shows
+                            nothing in this slot -- 1b's data-issues banner is what
+                            names an id-less row, not this per-row display. */}
+                        {p.id && (
+                          <span className="seed-row__id" title={p.id}> · {p.id.slice(0, 8)}</span>
+                        )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"
                             className="btn--link"

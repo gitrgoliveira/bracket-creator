@@ -73,6 +73,15 @@ Player 2,Dojo B
 		assert.Equal(t, 2, resp["results"][0].ParticipantCount)
 		assert.Equal(t, 2, resp["results"][0].SeedCount)
 		assert.Empty(t, resp["results"][0].Error)
+
+		// bc-pnum ruling 1a: the uploaded players.csv above carries no id
+		// column ("Player 1,Dojo A"); the import path (SaveParticipantsRestored)
+		// must mint one on write, same as every other roster-write path.
+		saved, err := store.LoadParticipants("comp-1", false)
+		require.NoError(t, err)
+		require.Len(t, saved, 2)
+		assert.NotEmpty(t, saved[0].ID, "imported id-less row must be minted an id")
+		assert.NotEmpty(t, saved[1].ID, "imported id-less row must be minted an id")
 	})
 
 	t.Run("Import with Base Name Matching", func(t *testing.T) {

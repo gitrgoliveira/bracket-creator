@@ -1834,17 +1834,25 @@ func TestBackfillMatchIdentity(t *testing.T) {
 	}
 }
 
-// TestBackfillMatchIdentity_OneSideIDKnown is PR #416 finding 6's repro: a
+// TestBackfillMatchIdentity_OneSideIDKnown was PR #416 finding 6's repro: a
 // partially-stamped pool row (only SideB has a real participant id, reachable
 // via the mixed-id participants.csv format, TestStore_ParticipantsCSV_MixedIDs,
 // and pools.go stamping SideAID only from a Player.ID that exists). The SPA
-// invents an id from the winning side's NAME when that side has none
-// (api_serializers.jsx buildPlayerMap: `id: norm.id || norm.name`) and sends
-// it as winnerId. The invented id can never match the one real stamped id, so
-// the old OR-gated check rejected every such score outright and the match
-// could never be completed. The fix drops the unattributable winnerId
-// (logging, never persisting it) instead of rejecting, and falls through to
-// the name/scoreline inference exactly as if winnerId had been omitted.
+// used to invent an id from the winning side's NAME when that side had none
+// (api_serializers.jsx buildPlayerMap: `id: norm.id || norm.name`) and send
+// it as winnerId; since the invented id could never match the one real
+// stamped id, an OR-gated check once rejected every such score outright.
+//
+// bc-pnum ruling 1c closed the underlying gap this tolerated: the draw itself
+// now refuses to run over a roster with an id-less row
+// (helper.ValidateNoMissingParticipantIDs), so a partially-stamped pool row
+// like this one can no longer be produced by a real draw, and the SPA no
+// longer invents an id at all (it sends winnerId only when the server
+// supplied that side's real id, api_serializers.jsx). The DROP-rather-than-
+// reject tolerance this test used to pin (bc-pnum ruling 1d) is gone: a
+// WinnerID naming neither side is rejected unconditionally now, one side id
+// known or not, so a stale/rogue client that still invents one gets a 400
+// instead of a silently dropped verdict.
 func TestBackfillMatchIdentity_OneSideIDKnown(t *testing.T) {
 	const idB = "22222222-2222-4222-8222-222222222222"
 
@@ -1858,15 +1866,9 @@ func TestBackfillMatchIdentity_OneSideIDKnown(t *testing.T) {
 	}
 
 	err := backfillMatchIdentity(&result, stored, matchWriteForward)
-	require.NoError(t, err, "an unrecognized winnerId must be dropped, not rejected, when only one side id is known")
+	require.Error(t, err, "a winnerId naming neither side is rejected even when only one side id is known")
 	assert.Equal(t, "", result.SideAID, "SideAID stays empty; stored never had one to backfill")
 	assert.Equal(t, idB, result.SideBID, "SideBID backfilled from stored")
-	// Bob (SideA) has no id on this row, so the cleared WinnerID falls
-	// through to the name-based inference (Winner=="Bob"==SideA, !=SideB) and
-	// resolves to SideA's id -- which is itself empty here, since SideA was
-	// never stamped. The important assertion is the ABSENCE of an error and
-	// that the invented "Bob" string is never persisted as WinnerID.
-	assert.Equal(t, "", result.WinnerID, "the invented winnerId must never be persisted verbatim")
 }
 
 // TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide covers the

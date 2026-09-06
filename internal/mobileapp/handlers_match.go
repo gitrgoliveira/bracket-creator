@@ -363,7 +363,18 @@ func hanteiAttributionNeedsBackfill(req *state.MatchResult) bool {
 // extra case (a sides-only miss) where previously only the ids twin would
 // have logged. Do not "restore" the silent variant for that case.
 func backfillMatchIdentityForHantei(store CompetitionStore, compID, matchID string, req *state.MatchResult) {
-	if !hanteiAttributionNeedsBackfill(req) {
+	// bc-pnum ruling 1d: also runs whenever the payload names a WinnerID.
+	// validateWinnerIDMatchesSide now rejects a WinnerID naming neither side
+	// UNCONDITIONALLY (the old "only when both side ids are already on the
+	// wire" tolerance is gone), so it needs the real stored ids to check
+	// against -- the SPA sends winnerId alone (api_serializers.jsx), never
+	// sideAId/sideBId, so without this the wire payload would otherwise
+	// carry no side ids at all and every ordinary completed-match write
+	// would fail that check. Only a WRITE THAT NAMES A WINNER pays the
+	// extra read (a "running"/in-progress update carries no WinnerID), so
+	// the hot in-progress-score path stays free of it, matching the
+	// original hantei-only rationale below for that path specifically.
+	if !hanteiAttributionNeedsBackfill(req) && req.WinnerID == "" {
 		return
 	}
 	if req.SideA != "" && req.SideB != "" && req.SideAID != "" && req.SideBID != "" {

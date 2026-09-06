@@ -1010,6 +1010,18 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
 
+	// Missing-id pre-flight (bc-pnum ruling 1c). Ids are the roster's stable
+	// identity for the draw's own output (pools.csv's ID column,
+	// SideAID/SideBID on every match, sub-bout winner attribution); the draw
+	// is a one-time roster snapshot, so drawing over an id-less row would
+	// stamp a blank into those columns permanently. A legacy roster only
+	// reaches this state when it predates the id-minting write path and has
+	// never been re-saved (helper.ValidateNoMissingParticipantIDs's own doc
+	// comment); the remedy is exactly that re-save, named in the message.
+	if err := helper.ValidateNoMissingParticipantIDs(players); err != nil {
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
+
 	// League format: enforce the single-pool invariant so that
 	// generatePools always produces exactly one pool containing all
 	// participants, and round-robin is guaranteed. The viewer surface

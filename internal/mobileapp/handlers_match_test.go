@@ -1178,7 +1178,19 @@ func TestScoreHandler_ContradictoryWinnerNameAndIDRejected(t *testing.T) {
 // unrecognized winnerId is treated as a contradiction; with only SideAID
 // known here, the invented winnerId is dropped (never persisted) and the
 // write proceeds via the name-based winner inference.
-func TestScoreHandler_MixedIDRosterInventedWinnerIDSucceeds(t *testing.T) {
+// TestScoreHandler_MixedIDRosterInventedWinnerIDRejected was
+// TestScoreHandler_MixedIDRosterInventedWinnerIDSucceeds. bc-pnum ruling 1c
+// closed the underlying gap this scenario exercised: the draw now refuses to
+// run over a roster with an id-less row (helper.ValidateNoMissingParticipantIDs),
+// so a real draw can no longer stamp a mixed-id pool row like the one this
+// test writes directly, and the SPA no longer invents a winnerId from a name
+// (api_serializers.jsx sends winnerId only when the server supplied that
+// side's real id). bc-pnum ruling 1d removed the tolerance that used to drop
+// (rather than reject) an unattributable winnerId whenever only one side id
+// was known -- see domain.WinnerIDNamesASide's doc comment -- so this same
+// payload must now be refused as a 400, naming the field, not silently
+// completed with the invented string persisted as WinnerID.
+func TestScoreHandler_MixedIDRosterInventedWinnerIDRejected(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
@@ -1200,13 +1212,49 @@ func TestScoreHandler_MixedIDRosterInventedWinnerIDSucceeds(t *testing.T) {
 	req, _ := http.NewRequest("PUT", "/api/competitions/mixedid1/matches/P1-1/score", bytes.NewBuffer(payload))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "winnerId")
 
 	stored, err := store.LoadPoolMatches("mixedid1")
 	require.NoError(t, err)
 	require.Len(t, stored, 1)
+	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "a rejected write must not land")
+	assert.Empty(t, stored[0].Winner)
+}
+
+// TestScoreHandler_MixedIDRosterWinnerIDMatchingKnownSideSucceeds is the
+// companion control for the rejection above, same mixed-id roster shape, but
+// the winnerId genuinely names the one stamped side: this must still write
+// cleanly, matching TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide's
+// engine-level pin of the identical rule.
+func TestScoreHandler_MixedIDRosterWinnerIDMatchingKnownSideSucceeds(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	store.SaveCompetition(&state.Competition{ID: "mixedid2"})
+	require.NoError(t, store.SavePoolMatches("mixedid2", []state.MatchResult{
+		{ID: "P1-1", SideA: "Alice", SideAID: "id-alice", SideB: "Bob", SideBID: "", Status: state.MatchStatusScheduled},
+	}))
+
+	payload, err := json.Marshal(state.MatchResult{
+		ID: "P1-1", SideA: "Alice", SideB: "Bob",
+		Winner: "Alice", WinnerID: "id-alice", // correctly names the one stamped side
+		IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/mixedid2/matches/P1-1/score", bytes.NewBuffer(payload))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	stored, err := store.LoadPoolMatches("mixedid2")
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
 	assert.Equal(t, state.MatchStatusCompleted, stored[0].Status)
-	assert.Equal(t, "Bob", stored[0].Winner)
+	assert.Equal(t, "Alice", stored[0].Winner)
+	assert.Equal(t, "id-alice", stored[0].WinnerID)
 }
 
 func TestQuickScoreHandler(t *testing.T) {

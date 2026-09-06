@@ -213,23 +213,27 @@ func AttributeWinnerSide(a WinnerAttribution) MatchSide {
 	}
 }
 
-// BothSideIDsKnown reports whether a match record has BOTH participant ids
-// stamped. This is the ONE gate for whether a stored/incoming WinnerID can be
-// authoritatively checked against SideAID/SideBID at all: with only one
-// side's id known, a WinnerID that matches neither known field is not
-// necessarily a contradiction — it may simply be the OTHER side's (still
-// absent) id, e.g. a client inventing an id from a name for an id-less side.
-// Only when BOTH ids are known does "matches neither" prove the WinnerID
-// names nobody on this row.
+// WinnerIDNamesASide reports whether winnerID is either empty (nothing to
+// check) or names one of the two given side ids (bc-pnum ruling 1d). This is
+// the ONE gate for whether an incoming WinnerID is acceptable: every
+// WinnerID-vs-side-id consistency check in the codebase should call this
+// rather than re-deriving its own comparison, so the surfaces that check it
+// can never drift apart.
 //
-// Mirrors the gate domain.AttributeWinnerSide's id branch uses (all three of
-// WinnerID/SideAID/SideBID non-empty): the two disagreed once (one used OR,
-// the other AND), which is what let a partially-stamped pool row reject a
-// legitimate score (PR #416 finding 6). Every WinnerID-vs-side-id consistency
-// check in the codebase should call this rather than re-deriving its own
-// non-empty test, so the two can never drift again.
-func BothSideIDsKnown(sideAID, sideBID string) bool {
-	return sideAID != "" && sideBID != ""
+// Ids are minted for every roster row at write time (participants.csv's one
+// write chokepoint, internal/state/participants.go marshalParticipantsCSV)
+// and the draw refuses to run over a roster that still has an id-less row
+// (helper.ValidateNoMissingParticipantIDs, bc-pnum ruling 1c), so a drawn
+// match's side ids are never partially known in current data. That closes
+// the case this replaces (BothSideIDsKnown, PR #416 finding 6) tolerated: a
+// WinnerID matching neither side used to be silently DROPPED rather than
+// rejected whenever only one side id was known, on the theory that it might
+// simply be the other side's still-absent id. With ids guaranteed complete
+// by the time a match exists, that theory no longer holds — a non-empty
+// WinnerID naming neither side is invalid on its face and is rejected, not
+// inferred around.
+func WinnerIDNamesASide(winnerID, sideAID, sideBID string) bool {
+	return winnerID == "" || winnerID == sideAID || winnerID == sideBID
 }
 
 // HanteiTiedScoreline reports whether two ippon arrays hold an equal number of

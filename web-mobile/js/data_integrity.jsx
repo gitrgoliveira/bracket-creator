@@ -16,7 +16,15 @@
 //          refused, and the competition is stuck until it is repaired or moved
 //          aside. Per competition, via `dataIssues` on the aggregate.
 //
-// One module because the two share an audience and a voice, and because the
+//   ADVISORY  the file loads fine and nothing is blocked, but a data-
+//          completeness gap needs the operator's attention (e.g. a legacy
+//          roster row with no stable id, bc-pnum ruling 1b). Reported the
+//          same way as LOUD, on the same `dataIssues` list, distinguished by
+//          a "kind" field ("missing-ids") so the console renders accurate
+//          copy instead of the LOUD banner's "a file could not be read" and
+//          "every write is refused" claims, neither of which is true here.
+//
+// One module because the three share an audience and a voice, and because the
 // three surfaces that show them (the pool match list, the pool standings, the
 // competition overview) must not each invent their own wording for the same
 // state -- the way to keep a display rule consistent here is to give it one
@@ -202,21 +210,55 @@ export function bracketResetToast(quarantinedAs, rebuilt) {
       + `has no knockout stage.`;
 }
 
+// missingIDsIssue picks the ADVISORY entry (kind "missing-ids") out of a
+// dataIssues list, or null when there is none. The server emits at most one:
+// every affected roster row folds into a single detail sentence
+// (missingParticipantIDsIssue, handlers_viewer.go), so there is nothing to
+// aggregate here.
+export function missingIDsIssue(issues) {
+  return (issues || []).find((i) => i && i.kind === "missing-ids") || null;
+}
+
+// MissingParticipantIDsNotice: the ADVISORY-class notice. Deliberately NOT
+// role="alert" -- the LOUD banner reserves that interrupt for "scoring is
+// blocked", and this is neither loud nor blocking: the roster loaded, the
+// competition runs, only a re-save is needed to backfill the id. The
+// server's own sentence already names the competitors and the remedy
+// (missingParticipantIDsIssue), so this renders it verbatim rather than
+// re-composing the wording client-side.
+export function MissingParticipantIDsNotice({ issue }) {
+  if (!issue) return null;
+  return (
+    <div className="alert alert--warn data-issue data-issue--missing-ids" role="status">
+      <span aria-hidden="true">⚠</span>
+      <span>{issue.detail}</span>
+    </div>
+  );
+}
+
 // DataIssueBanner: the competition-level notice for the LOUD class, where a
-// whole file will not parse and every write to it is refused.
+// whole file will not parse and every write to it is refused. Also renders
+// the ADVISORY missing-ids notice (see MissingParticipantIDsNotice) when the
+// list carries one, as a second, separate notice, since the two classes say
+// materially different things and must not share one alert's wording.
 //
 // It states the consequences in the banner rather than hiding them behind the
 // confirm dialog, because they are what the operator is choosing between and
 // the dialog is a last gate, not a briefing.
 export function DataIssueBanner({ issues, competition, onReset, resetting }) {
-  const list = issues || [];
-  if (list.length === 0) return null;
+  const all = issues || [];
+  const missingIDs = missingIDsIssue(all);
+  const list = all.filter((i) => i !== missingIDs);
+  if (list.length === 0) {
+    return <MissingParticipantIDsNotice issue={missingIDs} />;
+  }
   const bracket = bracketIssue(list);
   // Only ask the format question when the bracket is the broken file: a corrupt
   // pool-matches.csv has no reset, whatever the format.
   const kind = bracket ? bracketRecoveryKind(competition) : BRACKET_RECOVERY_NONE;
 
   return (
+    <>
     <div className="alert alert--error data-issue data-issue--banner" role="alert">
       <span aria-hidden="true">⚠</span>
       <div>
@@ -286,5 +328,7 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
         ) : null}
       </div>
     </div>
+    <MissingParticipantIDsNotice issue={missingIDs} />
+    </>
   );
 }

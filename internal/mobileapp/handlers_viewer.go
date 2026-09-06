@@ -355,8 +355,20 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// identical. This is the aggregate the admin SPA renders AdminCompetition
 	// off (see the comment above the participant load), which is why it is the
 	// right place for it despite the endpoint being public: the audience gate
-	// is at render time, and the detail is parser syntax, never competitor data.
-	if issues := dataIssuesFrom(pmErr, brErr, poolsErr); len(issues) > 0 {
+	// is at render time.
+	//
+	// bc-pnum ruling 1b widened this beyond parser syntax: a legacy
+	// participants.csv that predates the id-minting write path loads fine (no
+	// parse error) but leaves some rows with no stable id, which is exactly
+	// the kind of operator-actionable, per-competition data problem this list
+	// exists for. missingParticipantIDsIssue reports it the same way a corrupt
+	// file is reported, distinguished by "kind" so the console renders
+	// different, accurate copy (nothing failed to parse, no write is refused).
+	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
+	if mi := missingParticipantIDsIssue(players); mi != nil {
+		issues = append(issues, *mi)
+	}
+	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
 	return payload
@@ -365,6 +377,8 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 // dataIssuesFrom collects the located file failures among errs, dropping
 // everything else: a missing file, a permissions problem or a nil is not
 // something an operator repairs with a text editor, so it gets no banner.
+// Each entry's "kind" is implicitly "corrupt-file" (the SPA defaults an
+// entry with no "kind" field to that reading; see data_integrity.jsx).
 func dataIssuesFrom(errs ...error) []gin.H {
 	var issues []gin.H
 	for _, err := range errs {
@@ -380,6 +394,35 @@ func dataIssuesFrom(errs ...error) []gin.H {
 		})
 	}
 	return issues
+}
+
+// missingParticipantIDsIssue reports a loaded roster that still has id-less
+// rows (bc-pnum ruling 1b). Every roster WRITE mints a UUID for an id-less row
+// (marshalParticipantsCSV is the one chokepoint every persistence path
+// funnels through); a row that still has none was loaded from a legacy
+// participants.csv that predates that write and has simply never been
+// re-saved since ids existed. Nothing is broken and no write is refused --
+// the remedy is a re-save, not a repair -- so this is reported with its own
+// "kind" rather than folded into the corrupt-file entries dataIssuesFrom
+// builds, which the console renders with "a file could not be read" framing
+// that would misdescribe this case.
+//
+// The message itself is composed by helper.MissingParticipantIDsMessage, the
+// SAME function the draw pre-flight (helper.ValidateNoMissingParticipantIDs,
+// called from internal/engine's runDrawPipeline, bc-pnum ruling 1c) uses to
+// build its refusal: this is advance warning of the same condition the draw
+// later hard-refuses, so the two surfaces must say the exact same thing
+// about it. Returns nil when every row already has an id.
+func missingParticipantIDsIssue(players []domain.Player) *gin.H {
+	detail := helper.MissingParticipantIDsMessage(players)
+	if detail == "" {
+		return nil
+	}
+	return &gin.H{
+		"kind":   "missing-ids",
+		"file":   "participants.csv",
+		"detail": detail,
+	}
 }
 
 func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine) {

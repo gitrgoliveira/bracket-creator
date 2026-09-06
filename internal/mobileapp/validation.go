@@ -1018,38 +1018,30 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 // competitors), and shared by both score-writing HTTP paths (validateWithOptions,
 // validateBulkScoreLengths) so the check cannot drift between them.
 //
-// Only checked when all three fields are present on the wire: SideAID/SideBID
-// are NOT required on a score write (specs/openapi.yaml) -- the engine's
-// reconcileSides/backfillMatchIdentity backfill them from the stored match so
-// a minimal payload (winner + ippons only) still writes cleanly -- so a
-// payload that omits them has nothing to check here YET. That is not a gap:
-// backfillMatchIdentity (internal/engine/scoring.go) re-runs this exact check
-// once the STORED ids are known and rejects the write at that point instead,
-// so a winnerId that only turns out to be invalid once the stored pairing is
-// known is still caught, just one layer later than a self-inconsistent
-// payload is. Both HTTP paths reach it: the single-score write and every
-// bulk-score entry both go through RecordMatchResultWithIneligibilityTx,
-// which is backfillMatchIdentity's one caller, so this later check applies
-// uniformly regardless of which endpoint the payload arrived through.
+// bc-pnum ruling 1d: checked via domain.WinnerIDNamesASide, which passes
+// whenever winnerID is empty (nothing to check) and otherwise requires it to
+// equal one of sideAID/sideBID -- unconditionally, with no "only when both
+// are already known" exemption (that used to tolerate a winnerId matching
+// neither side when only one side id was on the wire, PR #416 finding 6; see
+// domain.WinnerIDNamesASide's own doc comment for why that tolerance no
+// longer holds). SideAID/SideBID are NOT required BY THE WIRE FORMAT
+// (specs/openapi.yaml) -- the caller (backfillMatchIdentityForHantei,
+// internal/mobileapp/handlers_match.go) backfills them from the STORED match
+// whenever the payload names a WinnerID, specifically so this check always
+// has the real pairing to validate against, not just whatever the client
+// happened to send. The engine's backfillMatchIdentity (internal/engine/
+// scoring.go) re-runs the identical check as a second, authoritative gate
+// once its own stored-id backfill has run, so a write that somehow reaches
+// this point without the caller's backfill (e.g. a stored match not found)
+// is still caught there.
 func validateWinnerIDMatchesSide(winnerID, sideAID, sideBID string) error {
-	// domain.BothSideIDsKnown: the same gate domain.AttributeWinnerSide's id
-	// branch uses. With only ONE side id known, a winnerId matching neither
-	// is not proof of a contradiction, it may simply be the OTHER side's
-	// still-absent id (e.g. the SPA inventing one from a name for an id-less
-	// side, PR #416 finding 6) -- so this check has nothing to say until
-	// both are known. The engine's backfillMatchIdentity applies the SAME
-	// gate once the stored ids are known, which is what closes the gap for a
-	// payload that omits SideAID/SideBID here.
-	if winnerID == "" || !domain.BothSideIDsKnown(sideAID, sideBID) {
+	if domain.WinnerIDNamesASide(winnerID, sideAID, sideBID) {
 		return nil
 	}
-	if winnerID != sideAID && winnerID != sideBID {
-		return &ValidationError{
-			Field:   "winnerId",
-			Message: fmt.Sprintf("must equal sideAId or sideBId, got %q", winnerID),
-		}
+	return &ValidationError{
+		Field:   "winnerId",
+		Message: fmt.Sprintf("must equal sideAId or sideBId, got %q", winnerID),
 	}
-	return nil
 }
 
 // validateWinnerNameIDConsistent rejects a payload whose winner NAME names
@@ -1063,7 +1055,14 @@ func validateWinnerIDMatchesSide(winnerID, sideAID, sideBID string) error {
 // the id with, and domain.AttributeWinnerSide already prefers the id over
 // the name for exactly that row shape.
 func validateWinnerNameIDConsistent(winner, winnerID, sideA, sideAID, sideB, sideBID string) error {
-	if winner == "" || winnerID == "" || !domain.BothSideIDsKnown(sideAID, sideBID) || sideA == sideB {
+	// Unlike validateWinnerIDMatchesSide (bc-pnum ruling 1d), this needs BOTH
+	// side ids known: it asks WHICH side winnerId names (idIsA/idIsB below),
+	// not merely whether it names a side at all, and with only one id known
+	// there is no way to tell whether the missing side's (still absent) id
+	// would have been the match -- domain.WinnerIDNamesASide's looser "names
+	// a side, or empty" predicate does not express this, so this stays its
+	// own inline check rather than sharing that one.
+	if winner == "" || winnerID == "" || sideAID == "" || sideBID == "" || sideA == sideB {
 		return nil
 	}
 	winnerIsA := winner == sideA

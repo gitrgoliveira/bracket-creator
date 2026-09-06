@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -77,4 +78,90 @@ func TestDataIssuesFromKeepsOnlyRepairableFailures(t *testing.T) {
 	require.Len(t, issues, 1)
 	assert.Equal(t, "pool-matches.csv", issues[0]["file"])
 	assert.Equal(t, 9, issues[0]["line"])
+}
+
+// bc-pnum ruling 1b: a legacy participants.csv that predates the id-minting
+// write path loads fine (no parse error) but leaves rows with no stable id.
+// The viewer aggregate must still report it, distinct from a corrupt file
+// (nothing failed to parse here), naming the affected competitors and the
+// remedy.
+func TestViewerAggregateReportsParticipantsMissingIDs(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools,
+	}))
+
+	// Legacy, id-less rows: no leading UUID column.
+	legacy := "Dave, Dojo D\nEve, Dojo E\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "kendo", "participants.csv"), []byte(legacy), 0600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var payload []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload, 1)
+
+	issues, ok := payload[0]["dataIssues"].([]any)
+	require.True(t, ok, "the competition carries its data issues, got %#v", payload[0]["dataIssues"])
+	require.Len(t, issues, 1)
+	issue := issues[0].(map[string]any)
+	assert.Equal(t, "missing-ids", issue["kind"])
+	assert.Equal(t, "participants.csv", issue["file"])
+	detail, _ := issue["detail"].(string)
+	assert.Contains(t, detail, "Dave")
+	assert.Contains(t, detail, "Eve")
+	assert.Contains(t, detail, "Save the roster once and the ids are assigned.")
+}
+
+// A fully-stamped roster (every row already has a UUID from a prior save)
+// must NOT trip the missing-ids issue.
+func TestViewerAggregateNoMissingIDsIssueWhenRosterIsStamped(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
+		{Name: "Dave", Dojo: "Dojo D"},
+		{Name: "Eve", Dojo: "Dojo E"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var payload []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload, 1)
+	_, present := payload[0]["dataIssues"]
+	assert.False(t, present, "a fully-stamped roster raises no missing-ids issue")
+}
+
+func TestMissingParticipantIDsIssue_ManyRowsNamesFirstFewPlusCount(t *testing.T) {
+	players := []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A"},
+		{Name: "Bob", Dojo: "Dojo B"},
+		{Name: "Carol", Dojo: "Dojo C"},
+		{Name: "Dave", Dojo: "Dojo D"},
+		{Name: "Eve", Dojo: "Dojo E"},
+	}
+	issue := missingParticipantIDsIssue(players)
+	require.NotNil(t, issue)
+	detail, _ := (*issue)["detail"].(string)
+	assert.Contains(t, detail, "5 competitors, including")
+	assert.Contains(t, detail, "Alice")
+	assert.Contains(t, detail, "Bob")
+	assert.Contains(t, detail, "Carol")
+	assert.NotContains(t, detail, "Dave", "only the first few are named for a large roster")
+}
+
+func TestMissingParticipantIDsIssue_NilWhenEveryRowHasAnID(t *testing.T) {
+	players := []domain.Player{
+		{ID: "00000000-0000-4000-8000-000000000000", Name: "Alice", Dojo: "Dojo A"},
+	}
+	assert.Nil(t, missingParticipantIDsIssue(players))
 }

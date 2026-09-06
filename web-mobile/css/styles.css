@@ -3923,6 +3923,16 @@ button.pool-match-row {
   color: var(--ink-3);
 }
 
+/* bc-pnum ruling 1e: the short participant id shown beside the dojo line
+   after a roster save. Same muted weight as .seed-row__dojo (it is
+   secondary data, not identity the operator reads at a glance), monospace
+   because it is a hex fragment, not prose. */
+.seed-row__id {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+
 .vlist-item__icon {
   width: 36px;
   height: 36px;

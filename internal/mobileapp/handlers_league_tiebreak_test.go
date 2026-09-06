@@ -1215,6 +1215,85 @@ func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
+// TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowStillRemovable pins M4:
+// generatePoolDaihyosenMatches only began stamping SideAID/SideBID on
+// 2026-08-29, so a DH row written before that carries blank ids. Before the
+// fix, DELETE under teamIds selection judged EVERY row by id, so this
+// legacy id-less row read as out of the group on both sides (blank !=
+// either real id) and the request answered 404 no_tiebreak_matches even
+// though the SPA (which still matches by name) shows the group as present.
+// The row-level inGroup fallback makes this row visible by name while
+// teamIds is still supplied for the request as a whole.
+func TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowStillRemovable(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:     "Pool A-DH-0",
+			SideA:  "Team Alpha", // no SideAID: legacy row
+			SideB:  "Team Beta",  // no SideBID: legacy row
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team Alpha", "Team Beta"},
+		TeamIDs:   []string{"id-alpha", "id-beta"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equalf(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, float64(1), resp["deleted"])
+	assert.Empty(t, store.matches, "the legacy id-less row must actually be removed")
+}
+
+// TestLeagueTiebreakPost_TeamIDs_LegacyIDlessRowBlocksRegeneration is POST's
+// mirror of the DELETE test above (M4): the same legacy id-less DH row must
+// still be counted by pairsExist under teamIds selection, so a regenerate
+// attempt is refused 409 rather than silently creating a second, redundant
+// set of tie-breaker matches (pre-fix: 201 {"matches":null}, since the
+// stub's zero-value GenerateLeagueTiebreakMatches returns no matches and no
+// error, masking that the guard never fired at all).
+func TestLeagueTiebreakPost_TeamIDs_LegacyIDlessRowBlocksRegeneration(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-alpha", Name: "Team Alpha", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-beta", Name: "Team Beta", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	existing := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team Alpha", SideB: "Team Beta"}, // legacy row, no ids
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools), matches: existing}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team Alpha", "Team Beta"},
+		TeamIDs:   []string{"id-alpha", "id-beta"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equalf(t, http.StatusConflict, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "tiebreak_matches_exist")
+}
+
 // TestLeagueTiebreakDelete_PartialGroup, naming only part of a tie-breaker group
 // (a DH match with exactly one side in the request) must be rejected so the
 // remaining round-robin bouts aren't orphaned.

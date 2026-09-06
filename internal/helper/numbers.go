@@ -20,11 +20,8 @@ const DefaultNumberPrefixFallback = "K"
 // would then reject, and helper cannot import mobileapp.
 const MaxNumberPrefixLen = 3
 
-// CompetitorNumber composes a single competitor number: prefix concatenated
-// with n, no separator (e.g. CompetitorNumber("K", 3) == "K3"). This is the
-// ONE composition of the number string; AssignPlayerNumbers below calls it
-// in its own loop so a caller that needs just one number uses the identical
-// primitive rather than a second hand-spelled `prefix + strconv(n)`.
+// CompetitorNumber is the one composition of a competitor number: prefix
+// then counter, no separator (e.g. CompetitorNumber("K", 3) == "K3").
 func CompetitorNumber(prefix string, n int) string {
 	return fmt.Sprintf("%s%d", prefix, n)
 }

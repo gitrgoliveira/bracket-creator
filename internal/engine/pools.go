@@ -171,7 +171,7 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		// pools.
 	}
 
-	helper.NumberPools(pools, comp.NumberPrefix)
+	helper.NumberPools(pools, comp.EffectiveNumberPrefix())
 
 	hasRounds := false
 	switch comp.PoolFormat {

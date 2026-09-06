@@ -40,8 +40,8 @@ import (
 // order, a different options struct) without either side inherently
 // noticing.
 func NumberPlayoffsOnlyParticipants(comp *state.Competition, players []domain.Player) {
-	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
+	if prefix := comp.EffectiveNumberPrefix(); prefix != "" {
+		helper.AssignPlayerNumbers(players, prefix, 1)
 	}
 }
 
@@ -84,7 +84,7 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition) ([]domain.Play
 // shape, so a caller can feed the result straight into
 // RenderCompetitionWorkbook without a branch of its own.
 func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Pool) ([]helper.Player, error) {
-	if comp.EffectiveFormat() != state.CompFormatPlayoffs || len(pools) != 0 || comp.NumberPrefix == "" {
+	if comp.EffectiveFormat() != state.CompFormatPlayoffs || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
 		return nil, nil
 	}
 	return e.NumberedParticipantsFor(comp)
@@ -153,18 +153,10 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 		// outright rather than trusting that invariant silently: a bug state
 		// upstream (a stored blank prefix an inherit step missed) must never
 		// WRITE, it must surface.
-		// PR #416 finding 11: bind the TRIMMED value once and use it for both
-		// the guard and the actual call below. The guard used to check the
-		// trimmed value while NumberPools was handed the raw, untrimmed
-		// comp.NumberPrefix -- a whitespace-only prefix ("  ") passed the
-		// guard (TrimSpace != "" is false for pure whitespace... actually it
-		// IS blank once trimmed, so the guard already caught that case) but a
-		// prefix with LEADING/TRAILING whitespace around real characters
-		// (" A") would pass the guard on its trimmed form yet still be
-		// stamped verbatim (with the stray space) onto every competitor
-		// number, since the untrimmed value was what actually reached
-		// NumberPools. Guarding and using the SAME variable closes that gap.
-		prefix := strings.TrimSpace(comp.NumberPrefix)
+		// A blank or whitespace-only prefix must never reach the composition
+		// below; EffectiveNumberPrefix is the one trimmed value the guard and
+		// the call both bind, so they cannot disagree.
+		prefix := comp.EffectiveNumberPrefix()
 		if prefix == "" {
 			return fmt.Errorf("renumber %s: competition has no number prefix", compID)
 		}

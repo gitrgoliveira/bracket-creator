@@ -316,7 +316,7 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	if plErr != nil {
 		log.Printf("mobileapp: court current %s: load participants: %v", comp.ID, plErr)
 	}
-	if comp.NumberPrefix != "" {
+	if comp.EffectiveNumberPrefix() != "" {
 		pools, err := store.LoadPools(comp.ID)
 		if err != nil {
 			// Reported, not merged: an unreadable pools.csv must show as

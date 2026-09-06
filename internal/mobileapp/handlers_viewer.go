@@ -58,7 +58,7 @@ import (
 // disk. No-op when comp is nil, its NumberPrefix is empty, or the roster is
 // empty.
 func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.Player, pools []helper.Pool) {
-	if comp == nil || comp.NumberPrefix == "" || len(players) == 0 {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" || len(players) == 0 {
 		return
 	}
 	if len(pools) == 0 {
@@ -266,7 +266,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// the never-empty-prefix rule and has not yet had a chance to heal it,
 	// see RenumberCompetitors/G7), not the common one.
 	var poolsErr error
-	if comp.NumberPrefix != "" {
+	if comp.EffectiveNumberPrefix() != "" {
 		var pools []helper.Pool
 		pools, poolsErr = store.LoadPools(compID)
 		if poolsErr != nil {

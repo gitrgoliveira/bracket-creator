@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -737,6 +738,16 @@ func (c Competition) EffectivePoolWinners() int {
 		return c.PoolWinners
 	}
 	return 2
+}
+
+// EffectiveNumberPrefix returns NumberPrefix trimmed of surrounding
+// whitespace, the ONE fold every reader of the field compares/composes
+// under (PR #416 finding 2): a stored prefix is always assigned already
+// trimmed, but a boundary that only trims on WRITE leaves every reader
+// exposed to a record written before that boundary existed, or edited by
+// hand. Readers route through this rather than comp.NumberPrefix directly.
+func (c Competition) EffectiveNumberPrefix() string {
+	return strings.TrimSpace(c.NumberPrefix)
 }
 
 // Competition.ExtraQualifiers values (bc-qual). Only meaningful under

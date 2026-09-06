@@ -5,6 +5,14 @@
 // truth: ./pool_ids.jsx is a leaf module with no import chain).
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 import { nameOf } from './result_slot.jsx';
+// checkinPid (id when non-empty, else "name|dojo") is the ONE owner of the
+// id-else-name|dojo identity rule (M12); the chusen banner below used to key
+// its rank inputs with a self-contained chusenMemberKey because checkinPid's
+// old `p.id ?? fallback` only fell back on null/undefined, not the ""
+// chusen-candidates always sends for a legacy/UUID-less member. checkinPid's
+// own truthiness check now closes that gap, so the banner delegates here
+// like every other identity-keyed surface.
+import { checkinPid } from './data.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -106,32 +114,32 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   };
 }
 
-// chusenMemberKey derives the stable identity string used to key a chusen
-// (drawing-lots) rank input to a specific team member, rather than to that
-// member's position in the `members` array (bc-appx item 2). The
-// chusen-candidates payload's `teams` array is "the still-tied members in
-// current standings order" (engine.ChusenCandidates), and standings order
-// depends on which members already carry a rank override: a member with ANY
-// recorded override sorts ahead of one without, regardless of the override's
-// actual value (engine/scoring.go), so completing 2 of 3 sequential writes
-// and then re-fetching after a mid-loop failure can return the SAME group
-// with its members in a DIFFERENT order (reproduced:
-// [Alpha,Beta,Gamma] -> [Beta,Alpha,Gamma] after two of three writes). An
-// index-keyed input map then reads the operator's typed value for the WRONG
-// team on retry, silently inverting the recorded draw.
+// Identity keying for the chusen (drawing-lots) rank inputs below: each rank
+// input is keyed by the member's IDENTITY (checkinPid, imported above; id
+// when non-empty, else "name|dojo" -- the same rule helper.CompetitorKey
+// applies server-side), never by that member's position in the `members`
+// array (bc-appx item 2). The chusen-candidates payload's `teams` array is
+// "the still-tied members in current standings order"
+// (engine.ChusenCandidates), and standings order depends on which members
+// already carry a rank override: a member with ANY recorded override sorts
+// ahead of one without, regardless of the override's actual value
+// (engine/scoring.go), so completing 2 of 3 sequential writes and then
+// re-fetching after a mid-loop failure can return the SAME group with its
+// members in a DIFFERENT order (reproduced: [Alpha,Beta,Gamma] ->
+// [Beta,Alpha,Gamma] after two of three writes). An index-keyed input map
+// then reads the operator's typed value for the WRONG team on retry,
+// silently inverting the recorded draw.
 //
-// id when NON-EMPTY, else "name|dojo" -- the same identity rule
-// helper.CompetitorKey applies server-side, and the one window.checkinPid
-// (data.jsx) applies for check-in/roster state EXCEPT for one gap that
-// matters here: checkinPid's `p.id ?? fallback` only falls back on a
-// null/undefined id, but the chusen-candidates handler always emits an "id"
-// key (handlers_competition.go: `gin.H{"id": t.Player.ID, ...}`), which is
-// "" -- not null or undefined -- for a competitor with no UUID (a legacy or
-// mixed roster). "" ?? fallback still returns "", so every legacy member in
-// a group would key to the SAME empty string: duplicate React keys, duplicate
-// DOM ids, and typing into one row's input moves all of them (reproduced in
-// the render harness). This function is deliberately self-contained rather
-// than delegating to checkinPid so that gap cannot silently reopen here.
+// checkinPid's own fallback previously had a gap that mattered here
+// (`p.id ?? fallback` only fell back on a null/undefined id, but the
+// chusen-candidates handler always emits an "id" key -- handlers_competition.go:
+// `gin.H{"id": t.Player.ID, ...}` -- which is "" for a competitor with no
+// UUID, not null/undefined, so every legacy member in a group collapsed onto
+// the SAME empty-string key: duplicate React keys, duplicate DOM ids, and
+// typing into one row's input moved all of them). That gap is now closed in
+// checkinPid itself (M12: id-else-fallback via a truthiness check, not `??`),
+// so this file delegates to it rather than keeping a second, drift-prone
+// copy of the same rule.
 //
 // No positional tie-break is needed for the reachable collisions: two
 // members with the same name AND dojo are a duplicate roster row the
@@ -139,16 +147,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // CheckDuplicateEntriesByNameDojo), so that pairing cannot reach this
 // screen; the pairing that CAN -- same name, different dojo, via the
 // documented team-name-uniqueness enforcement hole -- is already separated
-// by the dojo half of the key.
-//
-// Exported for vitest at __tests__/admin_pools.test.jsx: a focused unit test
-// of the key derivation itself, in addition to (not instead of) the
-// full-mount behavioural coverage in
-// __tests__/render/admin_pools_chusen.render.test.jsx, which does mount
-// AdminPools and drives the actual chusen fetch/submit flow.
-function chusenMemberKey(member) {
-  return member.id ? member.id : `${member.name}|${member.dojo || ""}`;
-}
+// by the dojo half of the key (checkinPid's fallback).
 
 // groupTeamIds derives the teamIds array to send alongside teamNames on a
 // league-tiebreak generate/remove request (second-Opus-pass nit 7): the
@@ -204,7 +203,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
   const [chusenCandidates, setChusenCandidates] = useStateA(null);
   // Per-member input values: keys are "${groupKey}::${identity}" -> string,
   // where groupKey is "${poolName}::${minPosition}" and identity is
-  // chusenMemberKey(member) (id when non-empty, else "name|dojo") -- never
+  // checkinPid(member) (id when non-empty, else "name|dojo") -- never
   // the member's index in the group, which reorders after a partial write
   // (bc-appx item 2), and never the bare display name, which two members
   // can share.
@@ -348,7 +347,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       </div>
       {chusenCandidates.map((group) => {
         const { poolName, teamNames, minPosition } = group;
-        // Members keyed by IDENTITY (chusenMemberKey), never by name
+        // Members keyed by IDENTITY (checkinPid), never by name
         // (bc-cse follow-up) and never by index (bc-appx item 2): `teams`
         // carries the authoritative per-member identity ({id, name, dojo}),
         // positionally parallel to the legacy `teamNames` strings (server:
@@ -376,9 +375,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const groupErrMsg = chusenGroupErr[groupKey] || null;
 
         // Effective value for a member's input, by the member's IDENTITY
-        // (chusenMemberKey), never its position in `members`: the group order
+        // (checkinPid), never its position in `members`: the group order
         // comes from the server's live standings sort, which reorders after
-        // ANY partial write (see chusenMemberKey's doc comment for the
+        // ANY partial write (see the identity-keying comment above the chusen
+        // banner for the
         // mechanism and the reproduced [Alpha,Beta,Gamma] ->
         // [Beta,Alpha,Gamma] case), so an index-keyed lookup can read back a
         // DIFFERENT team's typed value after a mid-loop failure. The operator's
@@ -393,7 +393,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         // 1st/2nd and another at 3rd/4th in the SAME pool must not share one
         // input/clear per member.
         const effRank = (member, idx) => {
-          const raw = chusenInputs[`${groupKey}::${chusenMemberKey(member)}`];
+          const raw = chusenInputs[`${groupKey}::${checkinPid(member)}`];
           return parseInt(raw !== undefined ? raw : String(minPosition + idx), 10);
         };
 
@@ -430,7 +430,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             // same pool must not have its inputs wiped here too).
             setChusenInputs(prev => {
               const next = { ...prev };
-              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${chusenMemberKey(members[i])}`];
+              for (let i = 0; i < members.length; i++) delete next[`${groupKey}::${checkinPid(members[i])}`];
               return next;
             });
           } catch (e) {
@@ -462,10 +462,10 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             </div>
             {members.map((member, idx) => {
               // groupKey + member IDENTITY, not index: see the effRank/
-              // chusenMemberKey comments above -- the member array order is
+              // checkinPid comments above -- the member array order is
               // not stable across a re-fetch, so an index-keyed input can
               // silently attach to the WRONG team after a mid-loop failure.
-              const memberKey = chusenMemberKey(member);
+              const memberKey = checkinPid(member);
               const inputKey = `${groupKey}::${memberKey}`;
               const defaultVal = minPosition + idx;
               // Stable DOM id so the label is programmatically tied to its
@@ -696,4 +696,4 @@ if (typeof window !== "undefined") {
 
 // ES export for the vitest suite: pure helpers only. The component
 // stays behind window.* to match the rest of admin_*.jsx.
-export { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey, groupTeamIds };
+export { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds };

@@ -22,25 +22,42 @@
 //      index-keyed retry silently re-attaches the operator's typed value to
 //      the WRONG team (bc-appx item 2/3's finding).
 //   3. the member's stable IDENTITY (chusenMemberKey: id when non-empty,
-//      else "name|dojo") -- the current fix, which survives both a same-name
-//      pair and a reorder. Its own first cut had a further gap: delegating to
-//      window.checkinPid, whose `p.id ?? fallback` treats only a null/
-//      undefined id as absent, not the empty string a legacy/UUID-less
+//      else "name|dojo") -- the fix in step 3, which survives both a
+//      same-name pair and a reorder. Its own first cut had a further gap:
+//      delegating to window.checkinPid, whose `p.id ?? fallback` treats only
+//      a null/undefined id as absent, not the empty string a legacy/UUID-less
 //      roster's "id" field actually is on the wire -- so every legacy member
-//      in a group collapsed onto the SAME key (bc-appx item 1's blocker).
+//      in a group collapsed onto the SAME key (bc-appx item 1's blocker),
+//      which chusenMemberKey worked around by staying self-contained rather
+//      than delegating.
+//   4. checkinPid itself, fixed and delegated to directly (M12).
+//      chusenMemberKey's workaround duplicated the id-else-"name|dojo" rule
+//      already meant to live in ONE place (helper.CompetitorKey server-side,
+//      checkinPid client-side); checkinPid's own `p.id ?? fallback` is now
+//      `p.id ? p.id : fallback` (a truthy check, not `??`), closing the empty-
+//      string gap at the source, and chusenMemberKey was deleted so the
+//      banner imports checkinPid instead of keeping a second copy of the rule.
+//      (Separately, M11 changed the per-row DOM id to `idx`-based rather than
+//      identity-based -- a DOM id only needs to be unique within one render,
+//      unlike inputKey/chusenInputs, which must survive a re-fetch reorder --
+//      so the "distinct DOM ids" assertions below no longer exercise the
+//      identity collision on their own; the "does not move"/"submits all
+//      three" assertions in the legacy-members block do.)
 //
 // Each describe block below pins one part of that history against the CURRENT
 // code:
-//   * "same-name members are kept apart by identity" -- pins fix #3 closing
+//   * "same-name members are kept apart by identity" -- pins step 3/4 closing
 //     the #1 defect (a same-name pair still gets distinct keys).
 //   * "unique-name group regression guard" -- pins that an ordinary,
 //     non-colliding group is unaffected by any of the above.
 //   * "two tied groups in the same pool stay independent" -- pins groupKey
 //     scoping, orthogonal to the per-member keying scheme.
-//   * "a mid-loop failure reorders the group" -- pins fix #3 closing the #2
+//   * "a mid-loop failure reorders the group" -- pins step 3/4 closing the #2
 //     defect (the reorder reproduction).
-//   * "legacy (UUID-less) members" -- pins fix #3's own blocker fix (bc-appx
-//     item 1): three empty-id members must not collapse onto one row.
+//   * "legacy (UUID-less) members" -- pins the #3/#4 blocker fix (bc-appx
+//     item 1 / M12): three empty-id members must not collapse onto one row,
+//     now enforced by checkinPid itself rather than a self-contained
+//     workaround.
 
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
@@ -434,9 +451,12 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     await screen.findByText('Chusen (drawing lots) required');
     const inputs = screen.getAllByRole('spinbutton');
     expect(inputs.length).toBe(3);
-    // A key/id derived from `p.id ?? fallback` (checkinPid's rule) returns ""
-    // for every one of these three members (empty string is not nullish), so
-    // all three would collapse onto the SAME React key and DOM id.
+    // Since M11 the per-row DOM id is `idx`-based (chusen-${groupKey}-${idx}),
+    // so this assertion alone no longer exercises the empty-id identity
+    // collision (idx guarantees distinctness on its own regardless of
+    // checkinPid). The identity guard for these three empty-id members is
+    // pinned by the next two tests, which key off chusenInputs/checkinPid
+    // (name|dojo fallback), not the DOM id.
     expect(new Set(inputs.map((el) => el.id)).size).toBe(3);
   });
 

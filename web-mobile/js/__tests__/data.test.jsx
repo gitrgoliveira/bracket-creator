@@ -3,7 +3,7 @@ import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
   buildPools, poolLetterName, computeStandings, parseParticipantLines
 } from '../data.jsx';
-import { provisionalNumberMap } from '../data.jsx';
+import { provisionalNumberMap, checkinPid } from '../data.jsx';
 
 describe('Data Utils', () => {
   describe('standardSeedOrder', () => {
@@ -192,5 +192,39 @@ describe('provisionalNumberMap', () => {
     // this null-prototype map it must be undefined until the entry it
     // legitimately names does not exist here, never inherited.
     expect(provisionalNumberMap([{ id: 'p-1' }], ['K1'])['toString']).toBeUndefined();
+  });
+});
+
+// checkinPid (M12) is the ONE owner of the id-else-"name|dojo" identity rule
+// client-side (mirroring helper.CompetitorKey server-side). Its own first
+// cut used `p.id ?? fallback`, which only substitutes on null/undefined, so
+// an empty-string id -- what the chusen-candidates handler always emits for
+// a competitor with no UUID (handlers_competition.go:
+// `gin.H{"id": t.Player.ID, ...}`) -- fell through as "" instead of the
+// name|dojo fallback, collapsing every legacy member in a group onto the
+// SAME key. Fixed to a truthy check ("" is never a valid participant id).
+describe('checkinPid', () => {
+  it('keys by id when present', () => {
+    expect(checkinPid({ id: 'uuid-1', name: 'A', dojo: 'D' })).toBe('uuid-1');
+  });
+
+  it('falls back to "name|dojo" when id is absent (legacy roster)', () => {
+    expect(checkinPid({ name: 'A', dojo: 'D' })).toBe('A|D');
+  });
+
+  it('falls back to "name|dojo" when id is an EMPTY STRING, not just null/undefined', () => {
+    // "" is not nullish, so a `??` fallback would return "" here instead of
+    // falling through -- exactly the bug this pins.
+    expect(checkinPid({ id: '', name: 'A', dojo: 'D' })).toBe('A|D');
+  });
+
+  it('tells two empty-id members with different names/dojos apart', () => {
+    const alpha = { id: '', name: 'Alpha', dojo: 'Dojo A' };
+    const beta = { id: '', name: 'Beta', dojo: 'Dojo B' };
+    expect(checkinPid(alpha)).not.toBe(checkinPid(beta));
+  });
+
+  it('degrades a missing dojo to an empty string in the composite key', () => {
+    expect(checkinPid({ name: 'A' })).toBe('A|');
   });
 });

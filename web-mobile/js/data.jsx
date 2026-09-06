@@ -432,11 +432,21 @@ function arraysEqual(a, b) {
 // legacy UUID-less rosters (a participants.csv never re-saved through the app)
 // have no id, so we fall back to the composite "name|dojo" key the server
 // resolves on (pidPairKey / resolveParticipantIndex in
-// internal/state/participants.go). The dojo is included because (name, dojo): 
+// internal/state/participants.go). The dojo is included because (name, dojo):
 // not name alone: is the uniqueness invariant: the same name at a different
 // dojo is two distinct people. Keep in sync with the Go resolver.
+//
+// `p.id ? p.id : fallback`, NOT `p.id ?? fallback` (M12): the
+// chusen-candidates handler (handlers_competition.go) always emits an "id"
+// key, which is "" -- not null/undefined -- for a competitor with no UUID.
+// "" ?? fallback still returns "" (nullish coalescing only substitutes on
+// null/undefined), so every legacy member would key to the SAME empty
+// string. "" is never a valid participant id, so the truthiness check closes
+// that gap for every caller, not just chusen's (this is the ONE owner of the
+// id-else-name|dojo rule; see admin_pools.jsx's former chusenMemberKey and
+// admin_registration_desk.jsx's former rdPid, both now delegating here).
 function checkinPid(p) {
-  return p.id ?? `${p.name}|${p.dojo ?? ""}`;
+  return p.id ? p.id : `${p.name}|${p.dojo ?? ""}`;
 }
 
 // provisionalNumberMap keys the server's provisionalNumbers array (bc-pnum:

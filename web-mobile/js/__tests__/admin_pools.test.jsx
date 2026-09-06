@@ -1,16 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { enrichPoolMatchWithComp, poolMatchesForPool, chusenMemberKey, groupTeamIds } from '../admin_pools.jsx';
-// Imported so the tests below can assert chusenMemberKey's behaviour
-// against the REAL window.checkinPid, not to satisfy a chusenMemberKey
-// dependency: chusenMemberKey is deliberately self-contained (bc-appx item
-// 1) rather than delegating to checkinPid, precisely because checkinPid's
-// `p.id ?? fallback` does not treat an empty-string id (what the
-// chusen-candidates wire payload sends for a legacy/UUID-less competitor)
-// as absent. This unit-tests the derivation directly, in addition to (not
-// instead of) the full-mount coverage in
-// __tests__/render/admin_pools_chusen.render.test.jsx, which does mount
-// AdminPools.
-import '../data.jsx';
+import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../admin_pools.jsx';
+// admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
+// (M12: chusenMemberKey was deleted, the banner now delegates to the one
+// owner of the id-else-name|dojo rule). Imported directly so the tests below
+// exercise the real function, in addition to (not instead of) the full-mount
+// coverage in __tests__/render/admin_pools_chusen.render.test.jsx, which does
+// mount AdminPools.
+import { checkinPid } from '../data.jsx';
 
 describe('enrichPoolMatchWithComp', () => {
   const comp = { id: 'c1', name: 'Comp One', kind: 'team', teamSize: 5 };
@@ -324,7 +320,9 @@ describe('poolMatchesForPool', () => {
   });
 });
 
-// chusenMemberKey pins two contracts:
+// checkinPid, as used to key the chusen banner's rank inputs, pins two
+// contracts (M12: chusenMemberKey was deleted; the banner now delegates to
+// checkinPid, the one owner of this identity rule):
 //   * bc-appx item 2/3: chusen rank inputs must be keyed by a team member's
 //     stable IDENTITY, never by that member's position in the candidates
 //     array. The GET .../chusen-candidates `teams` order is the server's
@@ -333,43 +331,21 @@ describe('poolMatchesForPool', () => {
 //     regardless of the override's value -- engine/scoring.go), so an
 //     index-keyed input map re-attaches the operator's typed value to the
 //     WRONG team on a retry after a mid-loop failure.
-//   * bc-appx item 1 (blocker): that identity must be the member's id when
-//     NON-EMPTY, else "name|dojo" -- checked with a truthy test, not `??`.
-//     The chusen-candidates handler always emits an "id" key
-//     (handlers_competition.go: `gin.H{"id": t.Player.ID, ...}`), which is
-//     "" -- not null/undefined -- for a competitor with no UUID, so a `??`
-//     fallback (window.checkinPid's own rule) never triggers and every
-//     legacy member in a group collapses onto the SAME key "".
-describe('chusenMemberKey', () => {
-  it('keys by the member id when present (the same value window.checkinPid would give for a non-empty id)', () => {
-    // chusenMemberKey does NOT delegate to checkinPid (see the empty-id
-    // test below for why); this only asserts the two happen to agree once
-    // id is non-empty, which is the common, non-legacy case.
+//   * bc-appx item 1 (blocker, now fixed in checkinPid itself): that identity
+//     must be the member's id when NON-EMPTY, else "name|dojo" -- checked
+//     with a truthy test, not `??`. The chusen-candidates handler always
+//     emits an "id" key (handlers_competition.go: `gin.H{"id": t.Player.ID,
+//     ...}`), which is "" -- not null/undefined -- for a competitor with no
+//     UUID; see data.test.jsx for the focused pin on that empty-id fallback.
+describe('checkinPid (chusen usage)', () => {
+  it('keys by the member id when present', () => {
     const member = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
-    expect(chusenMemberKey(member)).toBe('p-alpha');
-    expect(chusenMemberKey(member)).toBe(window.checkinPid(member));
-  });
-
-  it('does NOT collapse two legacy members onto id "" the way window.checkinPid would (bc-appx item 1 blocker)', () => {
-    // Both members carry id: "" -- exactly what the chusen-candidates wire
-    // payload sends for a competitor with no UUID. window.checkinPid's
-    // `p.id ?? fallback` returns "" for both (empty string is not
-    // nullish), so it CANNOT tell them apart; chusenMemberKey must.
-    const alpha = { id: '', name: 'Team Alpha', dojo: 'Raizan' };
-    const beta = { id: '', name: 'Team Beta', dojo: 'Gyokusen' };
-
-    expect(window.checkinPid(alpha)).toBe('');
-    expect(window.checkinPid(beta)).toBe('');
-    expect(window.checkinPid(alpha)).toBe(window.checkinPid(beta)); // the bug, in checkinPid's own terms
-
-    expect(chusenMemberKey(alpha)).toBe('Team Alpha|Raizan');
-    expect(chusenMemberKey(beta)).toBe('Team Beta|Gyokusen');
-    expect(chusenMemberKey(alpha)).not.toBe(chusenMemberKey(beta));
+    expect(checkinPid(member)).toBe('p-alpha');
   });
 
   it('falls back to the "name|dojo" composite when id is absent (legacy roster)', () => {
     const member = { name: 'Team Beta', dojo: 'Gyokusen' };
-    expect(chusenMemberKey(member)).toBe('Team Beta|Gyokusen');
+    expect(checkinPid(member)).toBe('Team Beta|Gyokusen');
   });
 
   it('gives two different teams distinct keys even when their names collide', () => {
@@ -379,7 +355,7 @@ describe('chusenMemberKey', () => {
     // The id-preferred key must still tell them apart.
     const a = { id: 'p-1', name: 'Shudokan', dojo: 'HQ' };
     const b = { id: 'p-2', name: 'Shudokan', dojo: 'HQ' };
-    expect(chusenMemberKey(a)).not.toBe(chusenMemberKey(b));
+    expect(checkinPid(a)).not.toBe(checkinPid(b));
   });
 
   it('is a pure function of member identity: independent of array position', () => {
@@ -389,7 +365,7 @@ describe('chusenMemberKey', () => {
     // ahead of one without). An index-keyed input map (chusenInputs keyed by
     // `${groupKey}::${idx}`, the pre-fix scheme) would read the operator's
     // Alpha-typed value back for Beta after this reorder. A key derived from
-    // chusenMemberKey does not, because it never depends on idx.
+    // checkinPid does not, because it never depends on idx.
     const alpha = { id: 'p-alpha', name: 'Team Alpha', dojo: 'Raizan' };
     const beta = { id: 'p-beta', name: 'Team Beta', dojo: 'Gyokusen' };
     const gamma = { id: 'p-gamma', name: 'Team Gamma', dojo: 'Suigetsu' };
@@ -399,29 +375,29 @@ describe('chusenMemberKey', () => {
 
     // Build the input map the way admin_pools.jsx now does: by identity.
     const inputs = {};
-    before.forEach((member) => { inputs[chusenMemberKey(member)] = '2'; }); // operator typed "2" for Alpha, Beta, Gamma alike in this contrived case
+    before.forEach((member) => { inputs[checkinPid(member)] = '2'; }); // operator typed "2" for Alpha, Beta, Gamma alike in this contrived case
 
     // Regardless of the array's new order, each member's own typed value is
     // still reachable under its own identity key.
     after.forEach((member) => {
-      expect(inputs[chusenMemberKey(member)]).toBe('2');
+      expect(inputs[checkinPid(member)]).toBe('2');
     });
 
     // Sharper check: give each member a DISTINCT typed value, then confirm
     // the reordered array still resolves each member back to ITS OWN value,
     // not the value typed for whichever member used to sit at that index.
     const distinct = {};
-    distinct[chusenMemberKey(alpha)] = 'alpha-value';
-    distinct[chusenMemberKey(beta)] = 'beta-value';
-    distinct[chusenMemberKey(gamma)] = 'gamma-value';
+    distinct[checkinPid(alpha)] = 'alpha-value';
+    distinct[checkinPid(beta)] = 'beta-value';
+    distinct[checkinPid(gamma)] = 'gamma-value';
 
     // after[0] is Beta (was at index 1 pre-reorder); an index-keyed map built
     // from `before` at index 0 would have stored Alpha's value there, so a
     // naive `distinctByIndex[0]` lookup after reordering would wrongly
     // return Alpha's value for Beta. The identity-keyed lookup does not:
-    expect(distinct[chusenMemberKey(after[0])]).toBe('beta-value');
-    expect(distinct[chusenMemberKey(after[1])]).toBe('alpha-value');
-    expect(distinct[chusenMemberKey(after[2])]).toBe('gamma-value');
+    expect(distinct[checkinPid(after[0])]).toBe('beta-value');
+    expect(distinct[checkinPid(after[1])]).toBe('alpha-value');
+    expect(distinct[checkinPid(after[2])]).toBe('gamma-value');
   });
 });
 

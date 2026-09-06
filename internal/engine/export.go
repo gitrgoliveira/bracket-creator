@@ -125,14 +125,12 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// for each sheet (see that function's doc comment): this used to be a
 	// SECOND write of the Data sheet, run here after the pipeline returned,
 	// which is why "Data added to spreadsheet" printed twice for this one
-	// shape.
-	var namesToPrintPlayers []helper.Player
-	if comp.EffectiveFormat() == state.CompFormatPlayoffs && len(pools) == 0 && comp.NumberPrefix != "" {
-		numbered, npErr := e.NumberedParticipantsFor(comp)
-		if npErr != nil {
-			return nil, npErr
-		}
-		namesToPrintPlayers = numbered
+	// shape. PlayoffsNamesToPrint (numbering.go) is the shared derivation:
+	// export.BuildResultsWorkbook calls the same function so the two
+	// exports of one competition agree on whether this sheet exists at all.
+	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools)
+	if err != nil {
+		return nil, err
 	}
 
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,

@@ -14,6 +14,24 @@ type dataColumnLayout struct {
 	metaCols     []string
 }
 
+// poolsHaveAnyNumber reports whether ANY player anywhere in pools has a
+// Number, not just the first pool's first player (bc-pnum review H7): a
+// hand-edited/legacy pools.csv can carry unnumbered rows before a numbered
+// one, and checking only the first player used to drop the whole Player
+// Number column (and so the Names to Print number cell downstream) for
+// every player on the sheet just because the leading row happened to be
+// blank.
+func poolsHaveAnyNumber(pools []Pool) bool {
+	for i := range pools {
+		for j := range pools[i].Players {
+			if pools[i].Players[j].Number != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func setupDataSheet(f *excelize.File, sanitize bool, hasNumber bool, titlePrefix string, colAHeader string) dataColumnLayout {
 	sheetName := SheetData
 	SetSheetLayoutPortraitA4(f, sheetName)
@@ -82,36 +100,31 @@ func finishDataSheet(f *excelize.File) {
 }
 
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {
-	// hasNumber (bc-pnum review H7) is true when ANY player anywhere in
-	// pools has a Number, not just the first pool's first player: a
-	// hand-edited/legacy pools.csv can carry unnumbered rows before a
-	// numbered one, and checking only the first player used to drop the
-	// whole Player Number column (and so the Names to Print number cell
-	// downstream) for every player on the sheet just because the leading
-	// row happened to be blank.
-	hasNumber := false
-	for i := range pools {
-		for j := range pools[i].Players {
-			if pools[i].Players[j].Number != "" {
-				hasNumber = true
-				break
-			}
-		}
-		if hasNumber {
-			break
-		}
-	}
-	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Pool")
+	// hasNumber (bc-pnum review H7): see poolsHaveAnyNumber's own doc
+	// comment, factored into its own function.
+	layout := setupDataSheet(f, sanitize, poolsHaveAnyNumber(pools), titlePrefix, "Pool")
 
 	poolCoords := make(map[string]cellCoord, len(pools))
 	playerCoords := make(map[string]playerCellCoord)
 
 	row := 3
+	// range pools BY VALUE, not by index (bc-pnum review H7 lint fix):
+	// gosec (G602) flags pools[i].Players[j] as a possible out-of-range
+	// index on a double-indexed slice-of-slices -- the same class of
+	// false positive forcePoolSizeFromCounts hit (see that function's own
+	// doc comment), pre-existing here and unrelated to this bead's own
+	// change, caught only because this function was touched. Pool's
+	// Players field is itself a slice, so a per-iteration copy of the
+	// Pool struct still shares the same backing array with pools[i] --
+	// &pool.Players[j] points at the identical Player writePlayer must
+	// mutate -- and indexing the loop-local `pool` instead of re-deriving
+	// it from `pools[i]` is what gosec's analysis can actually follow.
 	for i := range pools {
-		for j := range pools[i].Players {
-			handleExcelError("SetCellValue", f.SetCellValue(SheetData, fmt.Sprintf("A%d", row), pools[i].PoolName))
-			layout.writePlayer(f, row, &pools[i].Players[j], sanitize, playerCoords)
-			poolCoords[pools[i].PoolName] = cellCoord{sheetName: SheetData, cell: fmt.Sprintf("$A$%d", row)}
+		pool := pools[i]
+		for j := range pool.Players {
+			handleExcelError("SetCellValue", f.SetCellValue(SheetData, fmt.Sprintf("A%d", row), pool.PoolName))
+			layout.writePlayer(f, row, &pool.Players[j], sanitize, playerCoords)
+			poolCoords[pool.PoolName] = cellCoord{sheetName: SheetData, cell: fmt.Sprintf("$A$%d", row)}
 			row++
 		}
 	}

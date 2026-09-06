@@ -96,15 +96,14 @@ func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Po
 // untouched: this only restates each competitor's label.
 //
 // It is idempotent and unconditional: callers run it after every successful
-// settings save, whether or not that save touched NumberPrefix. It snapshots
-// the stored Number of every competitor, runs helper.NumberPools over the
-// pools in place (the same primitive that numbers a fresh draw), and compares
-// the two -- writing pools.csv back only when at least one Number actually
-// differs. A save that left the prefix untouched is therefore a cheap
-// read-compare-discard, a save that moved it rewrites the file, and a retry
-// after a prior renumber failed (or a legacy pools.csv whose Number column
-// was never populated, see G7) is healed by the very next save with no extra
-// code.
+// settings save, whether or not that save touched NumberPrefix. It walks the
+// pools with the same counter helper.NumberPools uses (helper.CompetitorNumber),
+// comparing each competitor's wanted Number against its stored one as it
+// goes, and writes pools.csv back only when at least one differs. A save
+// that left the prefix untouched is therefore a cheap read-compare-discard,
+// a save that moved it rewrites the file, and a retry after a prior renumber
+// failed (or a legacy pools.csv whose Number column was never populated, see
+// G7) is healed by the very next save with no extra code.
 //
 // pools.csv column 7 is the only persisted home of Player.Number (BracketMatch
 // has no such field and participants.csv does not persist it), so rewriting the
@@ -161,26 +160,15 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 			return fmt.Errorf("renumber %s: competition has no number prefix", compID)
 		}
 
-		total := 0
+		counter := 1
 		for _, pool := range pools {
-			total += len(pool.Players)
-		}
-		before := make([]string, 0, total)
-		for _, pool := range pools {
-			for _, p := range pool.Players {
-				before = append(before, p.Number)
-			}
-		}
-
-		helper.NumberPools(pools, prefix)
-
-		i := 0
-		for _, pool := range pools {
-			for _, p := range pool.Players {
-				if p.Number != before[i] {
+			for i := range pool.Players {
+				want := helper.CompetitorNumber(prefix, counter)
+				if pool.Players[i].Number != want {
 					changed = true
 				}
-				i++
+				pool.Players[i].Number = want
+				counter++
 			}
 		}
 		if !changed {

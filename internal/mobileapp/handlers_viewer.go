@@ -39,15 +39,11 @@ import (
 // rather than mutating the competition's.
 //
 // The playoffs-only branch below calls engine.NumberPlayoffsOnlyParticipants
-// directly (a plain package-level function, its receiver was never
-// read; mobileapp already imports engine, so the PlayoffsNumberingEngine
-// consumer-boundary interface this used to thread through as an `eng`
-// parameter bought nothing over the direct call), the SAME function the
-// blank-template export's NumberedParticipantsFor calls -- ONE derivation,
-// not two independent call sites invoking the shared
-// helper.AssignPlayerNumbers primitive, which is what actually prevents the
-// public payload and the printed Tags/Names-to-Print sheets from silently
-// disagreeing.
+// directly, the SAME function the blank-template export's
+// NumberedParticipantsFor calls -- ONE derivation, not two independent call
+// sites invoking the shared helper.AssignPlayerNumbers primitive, which is
+// what actually prevents the public payload and the printed
+// Tags/Names-to-Print sheets from silently disagreeing.
 //
 // Any other format with no pools is left WITHOUT numbers: before the draw a
 // pooled competition's competitors show no number anywhere (bc-pnum operator

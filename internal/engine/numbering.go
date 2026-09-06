@@ -10,35 +10,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// NumberPlayoffsOnlyParticipants is the ONE derivation of an effective-
-// playoffs competition's numbers (bc-pnum A8, tightened by [review] and
-// again in the bc-pnum review): participant order under NumberPrefix, through
-// helper.AssignPlayerNumbers (R1), mutating players in place. No-op when
-// the competition has no prefix, so a caller does not have to special-case
-// that itself.
-//
-// Package-level, not a method: its body never reads the receiver, and
-// mobileapp threaded a whole consumer-boundary interface
-// (PlayoffsNumberingEngine, deps.go) plus an extra `eng` parameter through
-// six signatures (mergePoolNumbersIntoPlayersSlice and five callers) solely
-// to reach this one call. A plain function call is the same "one shared
-// derivation, not two independent call sites" guarantee the interface
-// existed for, with none of the plumbing: mobileapp already imports engine
-// directly.
-//
-// Both real callers reach it through this SAME function rather than each
-// calling helper.AssignPlayerNumbers independently: the public
-// viewer/display merge (mobileapp.mergePoolNumbersIntoPlayersSlice's
-// playoffs-only branch) and NumberedParticipantsFor below (the
-// blank-template export's caller, which has no pools.csv to read a Number
-// from for a playoffs-only competition, see RenumberCompetitors's own doc
-// comment on why "no pools file" happens for playoffs). One function, not
-// two independent call sites invoking the shared primitive, is what
-// actually prevents the two surfaces from silently disagreeing -- merely
-// routing both through the same low-level helper.AssignPlayerNumbers call
-// left room for one of the two call sites to drift (a different load
-// order, a different options struct) without either side inherently
-// noticing.
+// NumberPlayoffsOnlyParticipants is the ONE derivation of a knockout-only
+// competition's numbers: participant order under the prefix, via
+// helper.AssignPlayerNumbers, mutating players in place. No-op when the
+// competition has no prefix, so a caller does not have to special-case that
+// itself. Both callers -- mobileapp.mergePoolNumbersIntoPlayersSlice's
+// playoffs-only branch and NumberedParticipantsFor below -- go through this
+// one function rather than each calling helper.AssignPlayerNumbers
+// independently, so the two surfaces cannot silently drift apart.
 func NumberPlayoffsOnlyParticipants(comp *state.Competition, players []domain.Player) {
 	if prefix := comp.EffectiveNumberPrefix(); prefix != "" {
 		helper.AssignPlayerNumbers(players, prefix, 1)

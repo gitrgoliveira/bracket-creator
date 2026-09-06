@@ -49,16 +49,31 @@ type LeagueTiebreakStore interface {
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
-// leagueTiebreakTeamRef is the {id,name,dojo} identity shape for one team in
-// a candidate group, mirroring the "teams" array GET /chusen-candidates
-// already emits (handlers_competition.go) for the same reason: two teams may
-// share a display name across dojos (a namesake collision reachable through
-// the documented checkNewTeamNameCollisions restore hole), and TeamNames
-// alone cannot disambiguate them for the POST selection below.
-type leagueTiebreakTeamRef struct {
+// competitorRef is the {id,name,dojo} identity shape for one competitor
+// (individual or team), shared by GET /league-tiebreak/candidates' "teams"
+// array below and GET /chusen-candidates' own "teams" array
+// (handlers_competition.go), for the same reason in both: two competitors
+// may share a display name across dojos (a namesake collision -- for teams,
+// reachable through the documented checkNewTeamNameCollisions restore hole),
+// and the name alone cannot disambiguate them for a subsequent write that
+// selects one (POST .../league-tiebreak's teamIds, PUT .../override-rank's
+// playerId).
+type competitorRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Dojo string `json:"dojo"`
+}
+
+// competitorRefsFrom projects a standings slice onto its competitorRef wire
+// shape, one entry per standing, order preserved. The ONE place both
+// candidate-group endpoints build their "teams" array from (PR #416
+// finding 6), so the shape cannot drift between them.
+func competitorRefsFrom(ts []state.PlayerStanding) []competitorRef {
+	refs := make([]competitorRef, len(ts))
+	for i, t := range ts {
+		refs[i] = competitorRef{ID: t.Player.ID, Name: t.Player.Name, Dojo: t.Player.Dojo}
+	}
+	return refs
 }
 
 // leagueTiebreakCandidateGroup is the JSON shape for one tied group returned
@@ -72,7 +87,7 @@ type leagueTiebreakCandidateGroup struct {
 	// Teams holds the same tied teams as TeamNames, with id/dojo alongside
 	// each name (bc-idfx) so the operator's selection can name a team
 	// unambiguously via POST .../league-tiebreak's teamIds.
-	Teams []leagueTiebreakTeamRef `json:"teams"`
+	Teams []competitorRef `json:"teams"`
 	// MinPosition is the 1-based best rank among the tied teams.
 	MinPosition int `json:"minPosition"`
 	// MaxPosition is the 1-based worst rank among the tied teams.
@@ -283,14 +298,12 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 		out := make([]leagueTiebreakCandidateGroup, 0, len(candidates))
 		for _, g := range candidates {
 			names := make([]string, len(g.Teams))
-			teams := make([]leagueTiebreakTeamRef, len(g.Teams))
 			for i, t := range g.Teams {
 				names[i] = t.Player.Name
-				teams[i] = leagueTiebreakTeamRef{ID: t.Player.ID, Name: t.Player.Name, Dojo: t.Player.Dojo}
 			}
 			out = append(out, leagueTiebreakCandidateGroup{
 				TeamNames:   names,
-				Teams:       teams,
+				Teams:       competitorRefsFrom(g.Teams),
 				MinPosition: g.MinPosition,
 				MaxPosition: g.MaxPosition,
 			})

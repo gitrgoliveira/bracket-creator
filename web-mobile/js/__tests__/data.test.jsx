@@ -3,7 +3,7 @@ import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
   buildPools, poolLetterName, computeStandings, parseParticipantLines
 } from '../data.jsx';
-import { provisionalNumberMap, checkinPid } from '../data.jsx';
+import { checkinPid } from '../data.jsx';
 
 describe('Data Utils', () => {
   describe('standardSeedOrder', () => {
@@ -147,51 +147,6 @@ describe('parseParticipantLines', () => {
     const [p] = parseParticipantLines(['Bob Lee, Kyoto, vip'], false);
     expect(p.source).toBe('');
     expect(p.danGrade).toBe('vip');
-  });
-});
-
-// bc-pnum: the check-in list's provisional numbers are the server's
-// index-aligned provisionalNumbers array; the SPA only keys it by checkinPid
-// and refuses a misaligned array rather than mislabel the roster.
-describe('provisionalNumberMap', () => {
-  const roster = [
-    { id: 'p-1', name: 'Alice', dojo: 'Dojo Alice' },
-    { name: 'Bob', dojo: 'Dojo Bob' }, // legacy row without an id
-  ];
-
-  it('keys the aligned array by checkinPid, ids and composite keys alike', () => {
-    const map = provisionalNumberMap(roster, ['K1', 'K2']);
-    expect(map['p-1']).toBe('K1');
-    expect(map['Bob|Dojo Bob']).toBe('K2');
-  });
-
-  it('yields an empty map when the array is misaligned with the roster', () => {
-    expect(Object.keys(provisionalNumberMap(roster, ['K1']))).toEqual([]);
-    expect(Object.keys(provisionalNumberMap(roster, ['K1', 'K2', 'K3']))).toEqual([]);
-  });
-
-  it('yields an empty map when either side is absent', () => {
-    expect(Object.keys(provisionalNumberMap(roster, undefined))).toEqual([]);
-    expect(Object.keys(provisionalNumberMap(undefined, ['K1']))).toEqual([]);
-    expect(Object.keys(provisionalNumberMap([], []))).toEqual([]);
-  });
-
-  // bc-pnum D10: checkinPid is USER-CONTROLLED (a participant's own id or
-  // name|dojo), so the returned map must be prototype-pollution-safe: a
-  // participant legitimately (or maliciously) named/id'd "__proto__" must
-  // land as an OWN key holding its own number, never leak through the
-  // prototype chain, and never collide with an inherited Object method name.
-  it('is prototype-pollution-safe: a null-prototype map, "__proto__" as a plain own key', () => {
-    expect(Object.getPrototypeOf(provisionalNumberMap([], []))).toBeNull();
-
-    const map = provisionalNumberMap([{ id: '__proto__' }, { id: 'plain' }], ['K1', 'K2']);
-    expect(map['__proto__']).toBe('K1');
-    expect(map.plain).toBe('K2');
-
-    // "toString" is an inherited Object.prototype member on a plain {}; on
-    // this null-prototype map it must be undefined until the entry it
-    // legitimately names does not exist here, never inherited.
-    expect(provisionalNumberMap([{ id: 'p-1' }], ['K1'])['toString']).toBeUndefined();
   });
 });
 

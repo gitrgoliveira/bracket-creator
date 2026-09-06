@@ -4408,30 +4408,6 @@ components:
             `GET /api/competitions/{id}`).
           items:
             $ref: '#/components/schemas/Player'
-        provisionalNumbers:
-          type: array
-          nullable: true
-          description: >
-            One entry per `players`, in the same order, holding the registration-order
-            number the check-in desk calls before the draw. A different fact from
-            `Player.number` (which the draw assigns), carried separately so public
-            surfaces show only assigned numbers; the operator's roster shows these as
-            provisional until the draw replaces them. Carried on the SAME responses as
-            `players` above (viewer responses and the settings and roster PUT
-            responses), and only for a competition a draw can still be generated from
-            (status `setup` or the legacy empty status) that has a number prefix.
-            `null` (the KEY is always present, never omitted) for a Swiss
-            competition (its draw never writes pools.csv, so it carries no number at
-            all) and for an effective-playoffs competition (its number is already
-            final -- participant order -- so there is nothing "provisional" about it,
-            see `Player.number`). `null` in every other status too. The key is
-            deliberately never omitted: the admin console merges a PUT response over
-            its cached list entry with a plain object spread, and a dropped key would
-            leave a same-length stale array in place instead of clearing it -- e.g.
-            switching an existing competition's format to `swiss` must clear the
-            array the previous format's response carried, not silently keep it.
-          items:
-            type: string
 
     FightingSpiritAward:
       type: object
@@ -4486,16 +4462,14 @@ components:
             The competitor's ASSIGNED number: prefix + sequence (e.g. "K1").
             Present only on the viewer and display payloads. For a POOLED
             format (mixed/league) it appears once the draw has assigned it,
-            from pools.csv (draw order); before that draw, it is absent and
-            the competition's `provisionalNumbers` carries the check-in
-            desk's registration-order number instead. For an
-            EFFECTIVE-PLAYOFFS competition it is different: the number IS
-            participant order, composed on every read (that draw never
-            writes pools.csv), so it is present from `setup` onward, not
-            only after a draw -- there is nothing "provisional" about it and
-            `provisionalNumbers` is correspondingly `null` for this format
-            (see that field). Also absent on the participants endpoint, and
-            absent when the draw on disk cannot be read.
+            pool by pool, from pools.csv (draw order, e.g. K1-K4 for the
+            first pool); before that draw, it is absent entirely -- a pooled
+            competition's competitors carry no number at all until the draw
+            runs. For an EFFECTIVE-PLAYOFFS competition it is different: the
+            number IS participant order, composed on every read (that draw
+            never writes pools.csv), so it is present from `setup` onward,
+            not only after a draw. Also absent on the participants endpoint,
+            and absent when the draw on disk cannot be read.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.

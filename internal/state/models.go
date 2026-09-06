@@ -487,29 +487,6 @@ type Competition struct {
 	LeagueTiebreakFinalized bool `yaml:"league_tiebreak_finalized,omitempty" json:"leagueTiebreakFinalized,omitempty"`
 
 	Players []domain.Player `yaml:"-" json:"players"`
-	// ProvisionalNumbers is set on the viewer payloads AND on the settings
-	// and roster PUT /api/competitions/:id responses (bc-pnum B1: BOTH
-	// branches re-load and compose this for their response, not only the
-	// roster-save one, see D9), for a competition a
-	// draw can still be generated from (status "setup" or the legacy empty
-	// status, engine.CanGenerateDraw) that has a number prefix: one entry per
-	// Players, in the same order, holding the registration-order number the
-	// check-in desk calls BEFORE the draw. It is a separate field from
-	// Player.Number on purpose: a provisional number is a different fact from
-	// an assigned one. The public surfaces show only assigned numbers; the
-	// operator's roster shows these, styled provisional, until the draw
-	// replaces them. Absent for a Swiss competition (its draw never writes
-	// pools.csv, so it carries no number at all) and for an
-	// effective-playoffs competition (its number IS participant order,
-	// composed on every read, so it is never provisional -- see
-	// Player.Number). Never persisted; nil (not omitted) in every other
-	// status. Deliberately NO `omitempty` -- the SPA merges a PUT
-	// response over its list entry via `{ ...c, ...updatedComp }`, and a
-	// dropped key leaves a same-length stale array in place, while a nil
-	// slice serialises as JSON `null` and clears it. The key must always be
-	// present so the merge can tell "still provisional" from "the draw
-	// replaced these" apart from "this field doesn't exist yet".
-	ProvisionalNumbers []string `yaml:"-" json:"provisionalNumbers"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this

@@ -49,10 +49,10 @@ import (
 // public payload and the printed Tags/Names-to-Print sheets from silently
 // disagreeing.
 //
-// Any other format with no pools is left WITHOUT numbers: before the draw the
-// operator's roster shows the separate ProvisionalNumbers instead (see
-// provisionalCompetitorNumbers), and a public surface never shows a number
-// the draw has not assigned. Callers pass pools only from a SUCCESSFUL read:
+// Any other format with no pools is left WITHOUT numbers: before the draw a
+// pooled competition's competitors show no number anywhere (bc-pnum operator
+// ruling), and a public surface never shows a number the draw has not
+// assigned. Callers pass pools only from a SUCCESSFUL read:
 // an unreadable pools.csv is reported, not treated as "no draw yet", so a
 // corrupt file cannot make this compose numbers that contradict the draw on
 // disk. No-op when comp is nil, its NumberPrefix is empty, or the roster is
@@ -131,41 +131,6 @@ func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.
 			players[i].Number = n
 		}
 	}
-}
-
-// provisionalCompetitorNumbers composes the registration-order numbers the
-// check-in desk calls BEFORE the draw, for a competition still in setup (the
-// statuses a draw can be generated from, engine.CanGenerateDraw) that has a
-// prefix: one entry per comp.Players, in the same order, through
-// helper.CompetitorNumber -- the SAME primitive AssignPlayerNumbers'
-// own loop calls, so this stays the one composition without needing a
-// throwaway roster copy just to read Number back off it. Carried as its own
-// field (Competition.ProvisionalNumbers), not as Number, because a
-// provisional number is a different fact from an assigned one: the public
-// surfaces show only assigned numbers, the operator's roster shows these
-// styled provisional until the draw replaces them. Nil in every other
-// status, so a drawn competition, and one whose draw is on disk but would not
-// parse, never carries them. Nor does a Swiss competition: its draw assigns
-// no number at all (it never writes pools.csv), so a "provisional" number
-// that nothing ever replaces would be a promise the format cannot keep; Swiss
-// numbering is its own open question (bc-swnm). Nor does a playoffs-only
-// competition (by EFFECTIVE format, so a legacy unset Format counts): its
-// number IS participant order and the merge above already fills Player.Number
-// with it before and after the draw alike, so there is nothing provisional to
-// show beside it.
-func provisionalCompetitorNumbers(comp *state.Competition) []string {
-	if comp == nil || comp.NumberPrefix == "" || len(comp.Players) == 0 || !engine.CanGenerateDraw(comp.Status) {
-		return nil
-	}
-	switch comp.EffectiveFormat() {
-	case state.CompFormatSwiss, state.CompFormatPlayoffs:
-		return nil
-	}
-	out := make([]string, len(comp.Players))
-	for i := range comp.Players {
-		out[i] = helper.CompetitorNumber(comp.NumberPrefix, i+1)
-	}
-	return out
 }
 
 // mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
@@ -318,12 +283,6 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 			mergePoolNumbersIntoPlayers(comp, pools)
 		}
 	}
-	// Hoisted out of the guard above (bc-pnum C2): provisionalCompetitorNumbers
-	// already self-guards on an empty NumberPrefix internally, matching the
-	// single-competition detail endpoint below, which assigns unconditionally
-	// for the same reason -- two different shapes for one self-guarded call
-	// is how they drift.
-	comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
 	// with assigned times. It MUST NOT leak into the public match-list payloads
@@ -604,7 +563,6 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// an empty slice, matching the aggregate's own tolerance for the
 			// same fault.
 			mergePoolNumbersIntoPlayers(comp, pools)
-			comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 
 			// Redact operator-only audit fields before this PUBLIC payload.
 			stripMatchesAudit(poolMatches)

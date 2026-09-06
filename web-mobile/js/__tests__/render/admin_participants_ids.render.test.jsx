@@ -20,7 +20,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // the full id either way.
 //
 // Mounted for REAL, same setup as
-// admin_participants_provisional_numbers.render.test.jsx: the render setup
+// admin_participants_number_badge.render.test.jsx: the render setup
 // preloads everything admin_participants.jsx needs at module-eval time.
 
 let AdminParticipants;

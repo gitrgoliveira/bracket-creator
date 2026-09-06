@@ -6010,14 +6010,6 @@ button.pool-match-row {
   flex-shrink: 0;
 }
 
-/* Provisional (pre-draw) competitor number, muted + dotted underline so it
-   reads as "not final yet" versus the solid accent of an assigned number. */
-.num-prefix--provisional {
-  color: var(--ink-3);
-  font-weight: 600;
-  border-bottom: 1px dotted var(--ink-4);
-}
-
 /* Schedule / TW-match compact badges (A/S) */
 .tw-match__badge {
   display: inline-flex;

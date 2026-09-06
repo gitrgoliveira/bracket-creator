@@ -456,14 +456,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk):
-  // the server's provisionalNumbers, keyed by checkinPid through the shared
-  // data.jsx helper (which also guards the index alignment). Rendered as
-  // provisional (muted, dotted) since the draw replaces them.
-  const provisionalNumberById = useMemoA(
-    () => window.provisionalNumberMap(c.players, c.provisionalNumbers),
-    [c.players, c.provisionalNumbers]
-  );
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
@@ -1128,8 +1120,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
                           {p.number ? (
                             <span className="num-prefix">{p.number}</span>
-                          ) : provisionalNumberById[window.checkinPid(p)] ? (
-                            <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
                           ) : null}
                           {p.name}
                         </div>

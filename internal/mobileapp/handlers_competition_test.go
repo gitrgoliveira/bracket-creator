@@ -3003,23 +3003,22 @@ func TestPUTCompetition_HealOnlyRenumberBroadcasts(t *testing.T) {
 	}
 }
 
-// TestPUTCompetition_RosterResponseCarriesProvisionalNumbers pins that a
-// roster save's response carries provisionalNumbers alongside the fresh
-// players: the console merges that response over its list entry, and a
-// response with players but no numbers would leave the old array misaligned
-// with the new rows (the roster then shows no provisional numbers at all
-// until the next fetch, by the SPA's own length guard).
-func TestPUTCompetition_RosterResponseCarriesProvisionalNumbers(t *testing.T) {
+// TestPUTCompetition_RosterResponseCarriesNoProvisionalNumbers pins the
+// bc-pnum operator ruling ("pool by pool, after the draw, is the correct
+// way. Remove the provisional numbers, they are confusing."): a roster
+// save's response carries no provisionalNumbers key at all, and none of the
+// fresh players carry a number before the draw runs.
+func TestPUTCompetition_RosterResponseCarriesNoProvisionalNumbers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	const cid = "roster-provisional"
+	const cid = "roster-no-provisional"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "Roster Provisional", Format: state.CompFormatMixed, Kind: "individual",
+		ID: cid, Name: "Roster No Provisional", Format: state.CompFormatMixed, Kind: "individual",
 		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup, NumberPrefix: "K",
 	}))
 	body, _ := json.Marshal(state.Competition{
-		ID: cid, Name: "Roster Provisional",
+		ID: cid, Name: "Roster No Provisional",
 		Players: []domain.Player{
 			{ID: "p1-uuid", Name: "Alice", Dojo: "Dojo Alice"},
 			{ID: "p2-uuid", Name: "Bob", Dojo: "Dojo Bob"},
@@ -3032,25 +3031,31 @@ func TestPUTCompetition_RosterResponseCarriesProvisionalNumbers(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	_, present := raw["provisionalNumbers"]
+	assert.False(t, present, "the response must not carry a provisionalNumbers key at all")
+
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Players, 3)
-	assert.Equal(t, []string{"K1", "K2", "K3"}, resp.ProvisionalNumbers, "the response must carry numbers aligned with the roster it returns")
+	for _, p := range resp.Players {
+		assert.Emptyf(t, p.Number, "competitor %q must carry no number before the draw runs", p.Name)
+	}
 }
 
-// TestPUTCompetition_SettingsOnlyResponseCarriesProvisionalNumbers is the
-// settings-only twin of TestPUTCompetition_RosterResponseCarriesProvisionalNumbers
-// (bc-pnum D9): a settings-only PUT (body omits `players` entirely) ALSO
-// re-loads the on-disk roster and composes provisionalNumbers for its own
-// response, not just a roster-save PUT -- the console merges either
-// response over its list entry, so the same contract must hold for both.
-func TestPUTCompetition_SettingsOnlyResponseCarriesProvisionalNumbers(t *testing.T) {
+// TestPUTCompetition_SettingsOnlyResponseCarriesNoProvisionalNumbers is the
+// settings-only twin of TestPUTCompetition_RosterResponseCarriesNoProvisionalNumbers:
+// a settings-only PUT (body omits `players` entirely) re-loads the on-disk
+// roster for its response, and that response must show the same absence of
+// any pre-draw number.
+func TestPUTCompetition_SettingsOnlyResponseCarriesNoProvisionalNumbers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	const cid = "settings-provisional"
+	const cid = "settings-no-provisional"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "Settings Provisional", Format: state.CompFormatMixed, Kind: "individual",
+		ID: cid, Name: "Settings No Provisional", Format: state.CompFormatMixed, Kind: "individual",
 		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup, NumberPrefix: "X",
 	}))
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
@@ -3059,7 +3064,7 @@ func TestPUTCompetition_SettingsOnlyResponseCarriesProvisionalNumbers(t *testing
 	}))
 
 	body, _ := json.Marshal(map[string]any{
-		"id": cid, "name": "Settings Provisional", "format": state.CompFormatMixed,
+		"id": cid, "name": "Settings No Provisional", "format": state.CompFormatMixed,
 		"kind": "individual", "courts": []string{"A"}, "poolSize": 4, "poolWinners": 2,
 		"roundRobin": false, "mirror": false, "numberPrefix": "X",
 		// players deliberately OMITTED: this is a settings-only PUT.
@@ -3070,53 +3075,17 @@ func TestPUTCompetition_SettingsOnlyResponseCarriesProvisionalNumbers(t *testing
 	r.ServeHTTP(w, req)
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
+	_, present := raw["provisionalNumbers"]
+	assert.False(t, present, "the response must not carry a provisionalNumbers key at all")
+
 	var resp state.Competition
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Players, 2, "a settings-only PUT response must still carry the on-disk roster")
-	assert.Equal(t, []string{"X1", "X2"}, resp.ProvisionalNumbers,
-		"the settings-only response must carry provisionalNumbers aligned with the roster it returns")
-}
-
-// TestPUTCompetition_SwissResponseProvisionalNumbersKeyIsNullNotAbsent pins
-// a Swiss competition's ProvisionalNumbers is always nil
-// (provisionalCompetitorNumbers' own guard: Swiss numbers nothing before the
-// draw, mp-swnm), but the JSON key must still be PRESENT (serialised as
-// `null`), not omitted. admin.jsx's list-merge does
-// `{ ...c, ...updatedComp }`: an omitted key (the `omitempty` shape) leaves
-// whatever same-length stale array the list entry already held in place,
-// while an explicit `null` clears it -- the only two options that behave
-// differently across a format switch (e.g. mixed -> swiss) where the OLD
-// response carried real provisional numbers and the NEW one must not.
-func TestPUTCompetition_SwissResponseProvisionalNumbersKeyIsNullNotAbsent(t *testing.T) {
-	r, store, _, _, tempDir := setupTestRouter(t)
-	defer os.RemoveAll(tempDir)
-
-	const cid = "swiss-no-provisional"
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "Swiss No Provisional", Format: state.CompFormatSwiss, Kind: "individual",
-		Courts: []string{"A"}, Status: state.CompStatusSetup, NumberPrefix: "S", SwissRounds: 3,
-	}))
-	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
-		{ID: "p1-uuid", Name: "Alice", Dojo: "Dojo Alice"},
-		{ID: "p2-uuid", Name: "Bob", Dojo: "Dojo Bob"},
-	}))
-
-	body, _ := json.Marshal(map[string]any{
-		"id": cid, "name": "Swiss No Provisional", "format": state.CompFormatSwiss,
-		"kind": "individual", "courts": []string{"A"}, "numberPrefix": "S", "swissRounds": 3,
-		// players deliberately OMITTED: this is a settings-only PUT.
-	})
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PUT", "/api/competitions/"+cid, bytes.NewBuffer(body))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
-
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &raw))
-	val, present := raw["provisionalNumbers"]
-	require.True(t, present, "the provisionalNumbers KEY must always be present in the response, even when nil, so the SPA's spread-merge can clear a stale array rather than leave it in place")
-	assert.Nil(t, val, "a Swiss competition's provisionalNumbers must serialise as JSON null, not an array")
+	for _, p := range resp.Players {
+		assert.Emptyf(t, p.Number, "competitor %q must carry no number before the draw runs", p.Name)
+	}
 }
 
 // TestCreateCompetitionEngiTeamExclusion pins Copilot #326: engi (individual

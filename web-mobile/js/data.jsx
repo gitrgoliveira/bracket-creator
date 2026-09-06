@@ -449,37 +449,13 @@ function checkinPid(p) {
   return p.id ? p.id : `${p.name}|${p.dojo ?? ""}`;
 }
 
-// provisionalNumberMap keys the server's provisionalNumbers array (bc-pnum:
-// one registration-order number per c.players, same order, present only
-// while the competition is in setup) by checkinPid, for the pre-draw
-// check-in list. The array is index-aligned with the roster it was composed
-// from; if a roster write has moved the local players ahead of it (a response
-// that carried players but no numbers, merged over the entry), showing the
-// old numbers against the new rows would mislabel every competitor after the
-// change, so a length mismatch yields an EMPTY map until the next fetch
-// realigns them. Nothing is composed here: the number strings are the
-// server's (helper.AssignPlayerNumbers), never built in JS.
-function provisionalNumberMap(players, provisionalNumbers) {
-  // Null-prototype object: keys are user-controlled (checkinPid), so a
-  // participant named "__proto__" against a plain `{}` could pollute the
-  // prototype chain or return inherited values on lookup.
-  const map = Object.create(null);
-  const roster = players || [];
-  const nums = provisionalNumbers || [];
-  if (nums.length !== roster.length) return map;
-  roster.forEach((p, i) => {
-    if (nums[i]) map[checkinPid(p)] = nums[i];
-  });
-  return map;
-}
-
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
   buildPools, poolLetterName, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid, provisionalNumberMap
+  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid
 };
 
 if (typeof window !== 'undefined') {
@@ -500,5 +476,4 @@ if (typeof window !== 'undefined') {
   window.diffMinutes = diffMinutes;
   window.arraysEqual = arraysEqual;
   window.checkinPid = checkinPid;
-  window.provisionalNumberMap = provisionalNumberMap;
 }

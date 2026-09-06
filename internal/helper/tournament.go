@@ -607,17 +607,13 @@ func CreatePools(players []Player, poolSize int, isMax bool) ([]Pool, error) {
 // matching JS change reintroduces the exact class of bug bc-drwx item 6
 // closed on this side.
 func poolPositionName(i int) string {
-	// i is 0-based; bijective base-26 is naturally 1-based (there is no
-	// "digit zero" -- Z rolls over to AA the same way 9 rolls over to 10 in
-	// ordinary base-10, but the NEXT letter after Z is AA, not A0).
-	n := i + 1
-	var letters []byte
-	for n > 0 {
-		n--
-		letters = append([]byte{byte('A' + n%26)}, letters...)
-		n /= 26
-	}
-	return fmt.Sprintf("Pool %s", string(letters))
+	// i is 0-based; mustColumnName (excel.go) is the same bijective base-26
+	// sequence Excel itself uses for column letters (there is no "digit
+	// zero" -- Z rolls over to AA the same way 9 rolls over to 10 in
+	// ordinary base-10, but the NEXT letter after Z is AA, not A0), 1-based,
+	// so i+1 -- rather than a second hand-rolled copy of that conversion
+	// (bc-pnum review).
+	return fmt.Sprintf("Pool %s", mustColumnName(i+1))
 }
 
 // assignPlayersToPools is CreatePools' assignment body (bc-drwx item 11:

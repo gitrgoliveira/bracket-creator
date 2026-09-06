@@ -1,9 +1,13 @@
 package helper
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPoolPositionName_UniqueBeyond52 pins bc-drwx item 6: the old
@@ -35,4 +39,30 @@ func TestPoolPositionName_UniqueBeyond52(t *testing.T) {
 	// either side of the mirror is caught at the identical boundary).
 	assert.Equal(t, "Pool ZZ", poolPositionName(701))
 	assert.Equal(t, "Pool AAA", poolPositionName(702))
+}
+
+// TestPoolPositionName_MatchesFixture is the Go half of the shared Go/JS
+// golden table for the pool-name sequence: see the `_comment` in
+// testdata/pool_letter_names.json for why the table is shared. JS half:
+// poolLetterName in web-mobile/js/data.jsx (a later change reads this same
+// file rather than restating the sequence).
+type poolLetterNameCase struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
+}
+
+func TestPoolPositionName_MatchesFixture(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "pool_letter_names.json"))
+	require.NoError(t, err)
+	var table struct {
+		Cases []poolLetterNameCase `json:"cases"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &table))
+	// Load-bearing: ranging over an empty table produces zero assertions and
+	// no red, so a degraded file needs its own failure.
+	require.NotEmpty(t, table.Cases,
+		"testdata/pool_letter_names.json parsed to zero cases: the mirror would assert nothing")
+	for _, tc := range table.Cases {
+		assert.Equal(t, tc.Name, poolPositionName(tc.Index), "index %d", tc.Index)
+	}
 }

@@ -9,6 +9,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// earliestDojoMeeting returns the earliest knockout round two of dojo's pools
+// are drawn to meet, or math.MaxInt when dojo occupies fewer than two pools.
+// pairRound is the precomputed pool-pair meeting matrix (poolPairRounds):
+// the repair loop evaluates hundreds of thousands of candidate exchanges,
+// and recomputing each pool pair's slot pairing per candidate multiplied the
+// whole test suite's runtime by three before the matrix existed.
+//
+// A thin wrapper over earliestDojoMeetingScan (bc-pnum) with a fresh,
+// throwaway scratch slice: kept as its own entry point because every OTHER
+// caller (this file's own tests, the reference oracles) already calls it by
+// this exact signature, and none of them run often enough for the scratch
+// allocation to matter. improveDojoMeetings' own exchange loop -- the hot
+// candidate scan, on the order of numPools^2*poolSize^2 calls per pass --
+// calls earliestDojoMeetingScan directly instead, with a buffer it reuses
+// across the whole function; that same shared buffer is also what
+// improveDojoMeetings' objective() closure uses (objective runs only at the
+// TOP of a pass, before the exchange scan below it starts, so the two never
+// have the buffer in flight at once) -- see that function's own doc comment
+// for why.
+//
+// Moved here from the production file (bc-pnum review H9): this wrapper is
+// called only from this test file, never from production code, which calls
+// earliestDojoMeetingScan directly wherever the wrapper's throwaway scratch
+// slice would matter.
+func earliestDojoMeeting(pools []Pool, pairRound [][]int, id int, count dojoCounter) int {
+	var occupied []int
+	return earliestDojoMeetingScan(pools, pairRound, id, count, &occupied)
+}
+
 // TestReorderPositionsIsAValidPermutation sanity-checks reorderPositions'
 // output shape.
 //

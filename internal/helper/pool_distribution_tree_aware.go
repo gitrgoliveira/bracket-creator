@@ -533,29 +533,14 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 // (O(1) per call, indexed by the SAME id this type's caller already has).
 type dojoCounter func(poolIdx int, id int) int
 
-// earliestDojoMeeting returns the earliest knockout round two of dojo's pools
-// are drawn to meet, or math.MaxInt when dojo occupies fewer than two pools.
-// pairRound is the precomputed pool-pair meeting matrix (poolPairRounds):
-// the repair loop evaluates hundreds of thousands of candidate exchanges,
-// and recomputing each pool pair's slot pairing per candidate multiplied the
-// whole test suite's runtime by three before the matrix existed.
-//
-// A thin wrapper over earliestDojoMeetingScan (bc-pnum) with a fresh,
-// throwaway scratch slice: kept as its own entry point because every OTHER
-// caller (this file's own tests, the reference oracles) already calls it by
-// this exact signature, and none of them run often enough for the scratch
-// allocation to matter. improveDojoMeetings' own exchange loop -- the hot
-// candidate scan, on the order of numPools^2*poolSize^2 calls per pass --
-// calls earliestDojoMeetingScan directly instead, with a buffer it reuses
-// across the whole function; that same shared buffer is also what
-// improveDojoMeetings' objective() closure uses (objective runs only at the
-// TOP of a pass, before the exchange scan below it starts, so the two never
-// have the buffer in flight at once) -- see that function's own doc comment
-// for why.
-func earliestDojoMeeting(pools []Pool, pairRound [][]int, id int, count dojoCounter) int {
-	var occupied []int
-	return earliestDojoMeetingScan(pools, pairRound, id, count, &occupied)
-}
+// earliestDojoMeeting (bc-pnum review H9: moved to
+// pool_distribution_tree_aware_test.go, its one caller) is the reference
+// oracles' entry point into earliestDojoMeetingScan -- a thin,
+// throwaway-scratch-slice wrapper kept only because the tests and reference
+// oracles that call it by this signature do not run often enough for the
+// scratch allocation to matter. Every production caller
+// (improveDojoMeetings' hot exchange loop) calls earliestDojoMeetingScan
+// directly instead, with a buffer it reuses across the whole function.
 
 // earliestDojoMeetingScan is earliestDojoMeeting's body, factored out
 // (bc-pnum) so a hot caller can hand it a REUSABLE scratch slice instead of

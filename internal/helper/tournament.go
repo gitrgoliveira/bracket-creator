@@ -83,12 +83,15 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 // (each record is a slice of fields). Use this when the CSV has already
 // been parsed by encoding/csv so that quoted commas are handled correctly.
 //
-// requireDojo (bc-drwx item 10) controls whether the NON-ZEKKEN branch
-// below rejects a missing/blank dojo column (true, "entry N: missing
-// dojo", matching the zekken branch's own long-standing behaviour a few
-// lines down -- that branch is UNCONDITIONAL and always rejects,
-// regardless of this parameter) or leaves it blank (false: a tolerant
-// read, so the row still loads and can be repaired -- see below).
+// requireDojo (bc-drwx item 10, bc-pnum review) controls whether a
+// missing/blank dojo column is rejected (true, "entry N: missing dojo") or
+// left blank (false: a tolerant read, so the row still loads and can be
+// repaired -- see below), in BOTH the zekken and non-zekken branches alike.
+// The zekken branch used to reject unconditionally regardless of this
+// parameter, which meant state.LoadParticipants (requireDojo=false, see
+// below) failed outright on a zekken roster carrying one legacy blank-dojo
+// row instead of loading it tolerantly for repair, the same courtesy the
+// non-zekken branch already gave.
 //
 //   - CreatePlayers (this file) -- the CLI/web-preview/import entry point,
 //     building a roster fresh from raw text -- always passes true: docs/
@@ -144,12 +147,12 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDo
 			if len(line) == 2 {
 				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
-				if player.Dojo == "" {
+				if requireDojo && player.Dojo == "" {
 					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
 					continue
 				}
 			} else {
-				if line[2] == "" {
+				if requireDojo && line[2] == "" {
 					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
 					continue
 				}

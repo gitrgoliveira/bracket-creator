@@ -83,6 +83,43 @@ func TestCreatePlayersWithoutZekkenName_MissingDojoRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "entry 2: missing dojo")
 }
 
+// TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo pins bc-pnum
+// review H3: the zekken branch's blank-dojo checks used to be UNCONDITIONAL
+// while the non-zekken branch already honoured requireDojo, so
+// state.LoadParticipants (which always passes requireDojo=false so a
+// legacy roster still loads and can be repaired -- see this function's own
+// doc comment) failed outright on a zekken roster carrying one blank-dojo
+// legacy row instead of loading it tolerantly like every other format.
+// requireDojo=false must load the row with an empty Dojo; requireDojo=true
+// must still refuse it with the same error the non-zekken branch uses.
+func TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo(t *testing.T) {
+	t.Run("three-column (Name, DisplayName, Dojo) row", func(t *testing.T) {
+		records := [][]string{{"Alice", "A1", ""}}
+
+		players, err := CreatePlayersFromRecords(records, true, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		assert.Equal(t, "", players[0].Dojo)
+
+		_, err = CreatePlayersFromRecords(records, true, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "entry 1: missing dojo")
+	})
+
+	t.Run("two-column (Name, Dojo) row", func(t *testing.T) {
+		records := [][]string{{"Alice", ""}}
+
+		players, err := CreatePlayersFromRecords(records, true, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		assert.Equal(t, "", players[0].Dojo)
+
+		_, err = CreatePlayersFromRecords(records, true, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "entry 1: missing dojo")
+	})
+}
+
 func TestCreatePlayersZekkenTwoColumnFallback(t *testing.T) {
 	// 2-column entries in zekken mode are tolerated: second column becomes the Dojo,
 	// DisplayName is derived from the Name (same as withZekkenName=false behavior).

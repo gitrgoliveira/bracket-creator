@@ -502,8 +502,14 @@ type Competition struct {
 	// pools.csv, so it carries no number at all) and for an
 	// effective-playoffs competition (its number IS participant order,
 	// composed on every read, so it is never provisional -- see
-	// Player.Number). Never persisted; absent in every other status.
-	ProvisionalNumbers []string `yaml:"-" json:"provisionalNumbers,omitempty"`
+	// Player.Number). Never persisted; nil (not omitted) in every other
+	// status. M8: deliberately NO `omitempty` -- the SPA merges a PUT
+	// response over its list entry via `{ ...c, ...updatedComp }`, and a
+	// dropped key leaves a same-length stale array in place, while a nil
+	// slice serialises as JSON `null` and clears it. The key must always be
+	// present so the merge can tell "still provisional" from "the draw
+	// replaced these" apart from "this field doesn't exist yet".
+	ProvisionalNumbers []string `yaml:"-" json:"provisionalNumbers"`
 }
 
 // ParticipantIDsHint returns the LoadParticipantsOpts.HasIDs hint for this

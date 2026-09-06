@@ -267,26 +267,15 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// and does not change as players are swapped between dense positions.
 	slots := denseSlotMap(len(result))
 
-	// ids[i] is dojoIDCache.of(result[i].Dojo) -- a dense int, built ONCE
-	// here rather than recomputed inside every comparison (bc-drwx review
-	// fix: the original item-3 fix called dojoKey/NormalizeParticipantName
-	// fresh inside sortedSameDojoPairs, bestRelocation and
-	// dojoSumMeetRounds' pairScore, which measured 25x-200x slower than
-	// origin/main -- NormalizeParticipantName does real work (NFD
-	// decompose, strip combining marks, re-NFC, lowercase, whitespace
-	// collapse), and those functions called it on the SAME O(N) dojo
-	// strings over and over inside O(N^2)-O(N^3) loops. bc-pnum then
-	// replaced the []string this used to be with a dense []int: two
-	// spellings of one dojo already share a normalized key via dojoKey, but
-	// every comparison below (ids[cand] == ids[x], etc.) still paid a
-	// string compare per call at O(N)-O(N^2) scale -- an int compare is
-	// cheaper still. ids is kept in lockstep with result: whenever
-	// result[i]/result[j] are swapped (the accepted swap below, and
-	// dojoSwapGain's own temporary swap-and-revert), ids[i]/ids[j] are
-	// swapped too, so it is always exactly the id of result[i].Dojo without
-	// ever resolving it again.
-	keys := make(dojoKeyCache, len(result))
-	idCache := newDojoIDCache(keys, len(result))
+	// ids[i] is dojoIDCache.of(result[i].Dojo) -- a dense int, interned ONCE
+	// up front via newDojoIDCacheFor rather than resolved fresh inside every
+	// comparison, so every comparison below (ids[cand] == ids[x], etc.) is
+	// an int compare rather than a normalized-string compare. ids is kept
+	// in lockstep with result: whenever result[i]/result[j] are swapped
+	// (the accepted swap below, and dojoSwapGain's own temporary
+	// swap-and-revert), ids[i]/ids[j] are swapped too, so it is always
+	// exactly the id of result[i].Dojo without ever resolving it again.
+	idCache, _ := newDojoIDCacheFor(result)
 	ids := make([]int, len(result))
 	for i := range result {
 		ids[i] = idCache.of(result[i].Dojo)
@@ -330,92 +319,29 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 	// available, which is why "never first" falls out of maximising this
 	// rather than needing a rule of its own.
 	//
-	// Performance note (bc-drwx items 2 and 3, COMBINED). Item 2: the
-	// ORIGINAL shape of this climb re-scanned every same-dojo pair (O(N^2))
-	// on every outer iteration to find the CURRENT worst one, excluding one
-	// PAIR at a time when it turned out unfixable. That is fine when swaps
-	// land often, but a roster with few or no cross-dojo swap PARTNERS --
-	// the early-out above's exact target, plus shapes like two large dojos
-	// and nothing else -- can have O(N^2) same-dojo pairs ALL turn out
-	// unfixable before the climb gives up, each one re-paying that O(N^2)
-	// rescan: O(N^4) overall.
-	//
-	// A prior version of this note measured item 2's O(N^2)->O(N^2 log N)
-	// selection rewrite alone, on a build that predated item 3's dojoKey/
-	// NormalizeParticipantName spelling-insensitive dojo matching. That
-	// build never shipped: once item 3 landed, dojoKey was called fresh
-	// inside this very selection loop (sortedSameDojoPairs/bestRelocation/
-	// dojoSumMeetRounds' pairScore), which cost 25x-200x on its own until
-	// this session's own review fix hoisted it into `keys` above. The
-	// numbers below are the two fixes TOGETHER, measured on this machine,
-	// origin/main (neither fix) vs. this file as committed (both fixes),
-	// single run each, BenchmarkStandardSeeding_*:
-	//   single-dojo,    64 entrants: (no origin/main equivalent -- this
-	//     benchmark was added alongside the fix) -> 61.5us
-	//   single-dojo,   128 entrants: (no origin/main equivalent) -> 128.7us
-	//   single-dojo,   256 entrants: (no origin/main equivalent) -> 254.5us
-	//     (all three confirm the early-out above is an O(N) no-op
-	//     regardless of N, which is the one property this shape pins)
-	//   2 dojos of 128 (256 entrants): 12.24s    -> 889ms    (~13.8x)
-	//   2 dojos of 96 + 64 singletons: 6.13s     -> 2.30s    (~2.7x -- the
-	//     one shape that does not reach the sub-1s target: many singleton
-	//     partners mean many small accepted swaps, so many generations each
-	//     re-pay the O(N^2 log N) sort; still no longer O(N^4))
-	//   16 dojos of 16 (256 entrants): 1.39s     -> 1.00s    (~1.4x)
-	//   32 dojos of 8  (256 entrants): 1.02s     -> 907ms    (~1.1x)
-	//   16 dojos of 8  (128 entrants): 133ms     -> 113ms    (~1.2x)
-	//   32 dojos of 4  (128 entrants): 111ms     -> 102ms    (~1.1x)
-	//   16 dojos of 4   (64 entrants): 14.0ms    -> 13.6ms   (roughly
-	//     unchanged)
-	//   32 dojos of 2   (64 entrants): 11.1ms    -> 11.0ms   (roughly
-	//     unchanged: few enough pairs that the rescan was already cheap)
-	//
-	// This rewrite reduces the SELECTION cost from O(N^2) per stuck pair to
-	// one O(N^2 log N) sort per GENERATION (the span between accepted
-	// swaps), without changing which pair the climb examines or in what
-	// order: pairs are sorted by meeting round once, using a STABLE sort
-	// over a list built in (i ascending, j ascending) order, so ties at the
-	// same round keep the exact scan-discovery order the original nested
-	// loop's strict '<' comparison gave them. The list is then walked once,
-	// worst round first; a pair is "excluded" simply by not being revisited
-	// this generation, which is equivalent to the original's explicit
-	// pairKey exclusion set because bestRelocation's answer for a slot never
-	// changes within a generation (dojoSwapGain is a pure function of the
-	// slot and the current `result`, unaffected by which pair asked) -- the
-	// per-slot memo below (slotBest) is exactly what made that reuse safe
-	// before this rewrite too, this only removes the now-redundant rescan
-	// that used to sit around it. The first pair with a beneficial
-	// relocation ends the generation immediately (swap, re-sort, go again),
-	// matching the original's "accept the first improving swap found while
-	// scanning worst-first" behaviour exactly.
-	//
-	// Performance note (bc-pnum, int-id rewrite): `keys` above used to be a
-	// []string, normalized once via dojoKey/dojoKeyCache (bc-drwx item 3's
-	// own fix) but still compared by STRING equality on every candidate
-	// (keys[cand] == keys[x], etc.) inside this climb's O(N)-per-slot
-	// bestRelocation scan. Interning those keys to a dense int (ids,
-	// dojoIDCache) once up front and comparing ints instead removes that
-	// string-compare cost. MEASURED on this machine, -benchtime 1x, median
-	// of 3, this file as committed before this rewrite vs. after, same
-	// BenchmarkStandardSeeding_* shapes as the table above:
-	//   256 entrants, 16 dojos of 16 (BenchmarkStandardSeeding_256_16x16):
-	//     1096ms -> 453ms (~2.4x)
-	//   256 entrants, 2 dojos of 128 (BenchmarkStandardSeeding_256_2x128):
-	//     756ms -> 646ms (~1.2x -- a smaller win: with only 2 distinct
-	//     dojos the string comparisons this fixes are already cheap per
-	//     call, and this shape's cost is dominated by the sheer NUMBER of
-	//     candidates/generations, not each candidate's comparison cost)
-	// See dojoIDCache's own doc comment (tournament.go) for the sibling
-	// fix to the tree-aware pool distributor's own hot loops, where the
-	// SAME class of string-keyed lookup was the dominant cost by a wider
-	// margin (BuildPoolPhaseTreeAware_256_16x16_Interleaved: 3029ms ->
-	// 639ms, reproducible median of 3 -- see that comment for the fuller
-	// number, including the poolDojoIDs follow-up this file's own bk/ak
-	// fix has a direct analogue in).
+	// Invariants this loop relies on: the early-out above makes the whole
+	// climb an O(N) no-op below two movable dojos; each GENERATION (the
+	// span between accepted swaps) pays exactly one stable sort of the
+	// same-dojo pairs, walked worst-round-first, instead of an O(N^2)
+	// rescan per stuck pair; the per-slot memo (slotBest, below) is safe
+	// because dojoSwapGain/dojoSwapGainAfter are pure functions of (slot,
+	// result) for the life of a generation, unaffected by which pair asks;
+	// and the stable sort keeps ties at the same round in scan order.
 	for iter := 0; iter < len(result)*len(result); iter++ {
 		pairs := sortedSameDojoPairs(result, ids, slots, &pairsBuf)
 		if len(pairs) == 0 {
 			return // no selectable dojo pair remains: nothing left to delay
+		}
+
+		// slotSum[v] is dojoSlotMeetSum(v), the same-dojo-pair-round sum
+		// touching v alone: a per-generation constant (result/ids do not
+		// change until an accepted swap ends the generation), computed once
+		// here so bestRelocation's candidate loop can build `before` as
+		// slotSum[x]+slotSum[cand] instead of re-walking x's dojo-mates for
+		// every candidate.
+		slotSum := make([]int, len(result))
+		for i := range result {
+			slotSum[i] = dojoSlotMeetSum(result, ids, slots, i)
 		}
 
 		// slotBest memoizes bestRelocation's result (the best (gain, y)
@@ -434,7 +360,13 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 					if cand == x || !movable(cand) || ids[cand] == ids[x] {
 						continue
 					}
-					if g := dojoSwapGain(result, ids, slots, x, cand); g > gain {
+					// x and cand are guaranteed different dojos by the guard
+					// above, so slotSum[x]+slotSum[cand] is exactly
+					// dojoSumMeetRounds(result, ids, slots, x, cand) (see
+					// dojoSlotMeetSum's doc comment) without re-walking x's
+					// dojo-mates on every one of the O(N) candidates.
+					before := slotSum[x] + slotSum[cand]
+					if g := dojoSwapGainAfter(result, ids, slots, x, cand, before); g > gain {
 						gain, y = g, cand
 					}
 				}
@@ -593,22 +525,23 @@ func denseSlotMap(n int) []int {
 // dojoSumMeetRounds totals the meeting round of every same-dojo pair that
 // includes slot x or slot y (each such pair counted exactly once, including
 // the {x, y} pair itself when both are members of the same dojo). Only
-// slots x and y can change when those two are swapped, so dojoSwapGain --
-// its sole caller, always with x != y -- never needs the sum over every
-// OTHER pair in the draw: those are unaffected by the swap and would cancel
-// out of the before/after delta anyway. Walking only the pairs that touch
-// {x, y} turns this from an O(N^2) whole-draw scan into O(N) per call, an
-// ~100x cut on THIS function alone at N=256 (measured), which is what made
-// the O(N) candidates * O(N) dojoSwapGain = O(N^2) candidate-confirmation
-// scan in delayDojoMeetings affordable per call. That confirmation scan
-// remained delayDojoMeetings' own dominant cost afterwards (it recurs once
-// per outer iteration, and wave-1's stuck-pair continuation can run many
-// iterations per accepted swap) until the wave-2 slotBest memo cached it
-// per slot for the life of a generation. See delayDojoMeetings' own
-// "Performance note" for the current measured cost breakdown and
-// end-to-end numbers -- kept in that ONE place rather than restated here,
-// since a previous version of this note tried to restate it and drifted
-// into misattributing the dominant cost to the wrong sub-loop.
+// slots x and y can change when those two are swapped, so its callers --
+// dojoSwapGain (before the swap) and dojoSwapGainAfter (after it), always
+// with x != y -- never need the sum over every OTHER pair in the draw:
+// those are unaffected by the swap and would cancel out of the before/after
+// delta anyway. Walking only the pairs that touch {x, y} turns this from an
+// O(N^2) whole-draw scan into O(N) per call, an ~100x cut on THIS function
+// alone at N=256 (measured), which is what made the O(N) candidates * O(N)
+// dojoSwapGain = O(N^2) candidate-confirmation scan in delayDojoMeetings
+// affordable per call. That confirmation scan remained delayDojoMeetings'
+// own dominant cost afterwards (it recurs once per outer iteration, and
+// wave-1's stuck-pair continuation can run many iterations per accepted
+// swap) until the wave-2 slotBest memo cached it per slot for the life of a
+// generation. See delayDojoMeetings' own "Performance note" for the current
+// measured cost breakdown and end-to-end numbers -- kept in that ONE place
+// rather than restated here, since a previous version of this note tried to
+// restate it and drifted into misattributing the dominant cost to the wrong
+// sub-loop.
 //
 // x, y and every index this walks are DENSE indices into result; slots is
 // denseSlotMap(len(result)), translating each pair to real tree-slot space
@@ -650,12 +583,50 @@ func dojoSumMeetRounds(result []Player, ids []int, slots []int, x, y int) int {
 	return sum
 }
 
+// dojoSlotMeetSum is dojoSumMeetRounds' single-slot component: the sum over
+// x's own same-dojo pairs alone, with no partner slot involved. Whenever x
+// and y are NOT dojo-mates (ids[x] != ids[y]), the {x, y} pair never
+// satisfies either side's same-dojo filter, so
+// dojoSumMeetRounds(result, ids, slots, x, y) == dojoSlotMeetSum(x) +
+// dojoSlotMeetSum(y) exactly -- there is no cross term to double-count or
+// miss. delayDojoMeetings' bestRelocation relies on this: its candidate
+// loop only ever calls this decomposition for a movable x against a
+// candidate of a DIFFERENT dojo (dojoIDCache guarantees the guard), so the
+// per-candidate "before" sum can be built by adding two once-per-generation
+// numbers instead of re-walking x's own dojo-mates on every candidate.
+func dojoSlotMeetSum(result []Player, ids []int, slots []int, x int) int {
+	if result[x].Name == "" || result[x].Dojo == "" {
+		return 0
+	}
+	xID := ids[x]
+	sum := 0
+	for j := range result {
+		if j == x || result[j].Name == "" || ids[j] != xID {
+			continue
+		}
+		sum += dojoMeetRound(slots[x], slots[j])
+	}
+	return sum
+}
+
 // dojoSwapGain reports how much later same-dojo competitors would meet if the
 // occupants of slots x and y traded places. Positive means an improvement.
 // x, y are DENSE indices; slots is denseSlotMap(len(result)) (see
 // dojoSumMeetRounds' own doc comment).
 func dojoSwapGain(result []Player, ids []int, slots []int, x, y int) int {
 	before := dojoSumMeetRounds(result, ids, slots, x, y)
+	return dojoSwapGainAfter(result, ids, slots, x, y, before)
+}
+
+// dojoSwapGainAfter is dojoSwapGain's swap/after/revert half, taking an
+// already-computed `before` rather than deriving it from dojoSumMeetRounds
+// itself. dojoSwapGain calls it with the honest (freshly computed) sum, so
+// it stays correct for any x, y including dojo-mates; delayDojoMeetings'
+// bestRelocation calls it directly with a `before` built from the
+// per-generation dojoSlotMeetSum decomposition (see that function's own
+// doc comment), which is only valid for the different-dojo x/y pairs
+// bestRelocation's own candidate filter already restricts it to.
+func dojoSwapGainAfter(result []Player, ids []int, slots []int, x, y, before int) int {
 	result[x], result[y] = result[y], result[x]
 	ids[x], ids[y] = ids[y], ids[x]
 	after := dojoSumMeetRounds(result, ids, slots, x, y)

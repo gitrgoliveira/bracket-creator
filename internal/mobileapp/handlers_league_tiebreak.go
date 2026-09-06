@@ -82,11 +82,16 @@ type leagueTiebreakCandidateGroup struct {
 
 // leagueTiebreakRequest is the JSON body for POST /league-tiebreak.
 // The operator selects exactly one tied group to tie-break, by team names
-// (TeamNames, always required) or, when a namesake collision makes names
+// (TeamNames, always required at this HTTP layer -- validated and length-
+// checked on every request) or, when a namesake collision makes names
 // ambiguous, by participant id (TeamIDs, optional; bc-idfx). When TeamIDs is
-// present it is authoritative for both candidate-group matching and group
-// resolution; TeamNames is still required and used for idempotency dedup
-// against existing DH rows either way.
+// present it is authoritative for both candidate-group matching HERE and
+// group resolution in the engine (GenerateLeagueTiebreakMatches never reads
+// TeamNames at all in that case, see that method's own doc comment).
+// TeamNames being required is this HTTP layer's own rule, not a downstream
+// dependency: idempotency dedup against existing DH rows is done by
+// generatePoolDaihyosenMatches, which resolves existing rows against the
+// already-resolved tied group, not against the raw request's TeamNames.
 type leagueTiebreakRequest struct {
 	// TeamNames is the set of team names for which to generate tie-breaker
 	// matches. Must match exactly one consequential candidate group from

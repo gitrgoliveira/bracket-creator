@@ -176,9 +176,16 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 // through the documented checkNewTeamNameCollisions restore hole (an
 // unreadable config.md disables the uniqueness check for that write, logged
 // and allowed through), so name-based selection alone cannot always
-// disambiguate. tiedTeamNames is REQUIRED either way (used for idempotency
-// dedup against existing DH rows and, when tiedTeamIDs is empty, for group
-// resolution too -- kept for callers/clients that predate the id-aware path).
+// disambiguate. tiedTeamNames is used ONLY as the fallback group-resolution
+// input when tiedTeamIDs is empty (kept for callers/clients that predate the
+// id-aware path) -- with tiedTeamIDs non-empty this method never reads
+// tiedTeamNames at all. Idempotency dedup against existing DH rows is done
+// downstream by generatePoolDaihyosenMatches, which resolves existing rows
+// against tiedGroup (the resolved standings entries), not against the raw
+// name/id request parameters, so it works identically regardless of which
+// selection produced tiedGroup. The HTTP handler still requires and
+// length-validates tiedTeamNames on every request (see
+// handlers_league_tiebreak.go), independent of what this method itself uses.
 //
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.

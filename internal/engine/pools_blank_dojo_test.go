@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -36,17 +34,14 @@ func TestGenerateDraw_RefusesBlankDojoRoster(t *testing.T) {
 	// Legacy/hand-edited, UUID-less, non-zekken (2-column "Name,Dojo") CSV:
 	// a trailing empty second field parses to Dojo == "" (helper.CreatePlayersFromRecords'
 	// non-zekken branch takes line[1] verbatim, with no blank check).
-	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
-	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
-	csv := "Alice,DojoA\n" +
-		"NoDojoHere,\n" +
-		"Carol,DojoC\n" +
-		"Dave,DojoA\n" +
-		"Bob,DojoB\n" +
-		"Erin,DojoB\n" +
-		"Frank,DojoC\n" +
-		"Grace,DojoA\n"
-	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
+	writeRawParticipantsCSV(t, dir, compID, "Alice,DojoA\n"+
+		"NoDojoHere,\n"+
+		"Carol,DojoC\n"+
+		"Dave,DojoA\n"+
+		"Bob,DojoB\n"+
+		"Erin,DojoB\n"+
+		"Frank,DojoC\n"+
+		"Grace,DojoA\n")
 
 	err := eng.GenerateDraw(compID)
 	require.Error(t, err)
@@ -69,17 +64,14 @@ func TestGenerateDraw_RefusesBlankDojoRoster(t *testing.T) {
 // pipeline must supply its own refusal instead of relying on it).
 func writeBlankDojoRosterCSV(t *testing.T, dir, compID string) {
 	t.Helper()
-	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
-	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
-	csv := "Alice,DojoA\n" +
-		"NoDojoHere,\n" +
-		"Carol,DojoC\n" +
-		"Dave,DojoA\n" +
-		"Bob,DojoB\n" +
-		"Erin,DojoB\n" +
-		"Frank,DojoC\n" +
-		"Grace,DojoA\n"
-	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
+	writeRawParticipantsCSV(t, dir, compID, "Alice,DojoA\n"+
+		"NoDojoHere,\n"+
+		"Carol,DojoC\n"+
+		"Dave,DojoA\n"+
+		"Bob,DojoB\n"+
+		"Erin,DojoB\n"+
+		"Frank,DojoC\n"+
+		"Grace,DojoA\n")
 }
 
 // TestGenerateDraw_RefusesBlankDojoRoster_Playoffs and
@@ -180,17 +172,14 @@ func TestGenerateDraw_RefusesOneColumnLegacyRoster(t *testing.T) {
 
 	// Legacy, UUID-less, non-zekken, ONE-COLUMN CSV: no comma anywhere, so
 	// every row takes CreatePlayersFromRecords' len(line) < 2 branch.
-	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
-	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
-	csv := "Alice\n" +
-		"Bob\n" +
-		"Carol\n" +
-		"Dave\n" +
-		"Erin\n" +
-		"Frank\n" +
-		"Grace\n" +
-		"Heidi\n"
-	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
+	writeRawParticipantsCSV(t, dir, compID, "Alice\n"+
+		"Bob\n"+
+		"Carol\n"+
+		"Dave\n"+
+		"Erin\n"+
+		"Frank\n"+
+		"Grace\n"+
+		"Heidi\n")
 
 	err := eng.GenerateDraw(compID)
 	require.Error(t, err, "a one-column roster must be refused, not drawn as one giant \"NA\" dojo")

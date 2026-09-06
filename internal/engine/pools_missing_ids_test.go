@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -25,19 +23,16 @@ import (
 // supply its own refusal rather than relying on the write floor.
 func writeMissingIDsRosterCSV(t *testing.T, dir, compID string) {
 	t.Helper()
-	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
-	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
 	// Legacy, id-less, non-zekken (2-column "Name,Dojo") CSV: no leading
 	// UUID column.
-	csv := "Alice,DojoA\n" +
-		"NoIDHere,DojoB\n" +
-		"Carol,DojoC\n" +
-		"Dave,DojoA\n" +
-		"Bob,DojoB\n" +
-		"Erin,DojoB\n" +
-		"Frank,DojoC\n" +
-		"Grace,DojoA\n"
-	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
+	writeRawParticipantsCSV(t, dir, compID, "Alice,DojoA\n"+
+		"NoIDHere,DojoB\n"+
+		"Carol,DojoC\n"+
+		"Dave,DojoA\n"+
+		"Bob,DojoB\n"+
+		"Erin,DojoB\n"+
+		"Frank,DojoC\n"+
+		"Grace,DojoA\n")
 }
 
 func TestGenerateDraw_RefusesMissingIDsRoster(t *testing.T) {

@@ -1,9 +1,7 @@
 package engine
 
 import (
-	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -369,18 +367,14 @@ func TestDefaultNumberPrefixFor_LogsCorrelatedWarningOnSkippedSibling(t *testing
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken", Name: "Broken", Format: state.CompFormatMixed, NumberPrefix: "B"}))
 	corruptCompetitionConfig(t, store, "broken")
 
-	var logBuf bytes.Buffer
-	prevOut := log.Writer()
-	prevFlags := log.Flags()
-	log.SetOutput(&logBuf)
-	log.SetFlags(0)
-	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+	var prefix string
+	logged := captureLog(t, func() {
+		var err error
+		prefix, err = eng.DefaultNumberPrefixFor("New Competition", "")
+		require.NoError(t, err)
+		require.NotEmpty(t, prefix)
+	})
 
-	prefix, err := eng.DefaultNumberPrefixFor("New Competition", "")
-	require.NoError(t, err)
-	require.NotEmpty(t, prefix)
-
-	logged := logBuf.String()
 	assert.Contains(t, logged, "New Competition", "the warning must name the assignment it applies to")
 	assert.Contains(t, logged, "broken", "the warning must name the skipped sibling id")
 	assert.Contains(t, logged, prefix, "the warning must name the prefix that was assigned")
@@ -406,19 +400,16 @@ func TestMigrateNumberPrefixes_LogsWhichCompetitionWasRenumbered(t *testing.T) {
 		{PoolName: "Pool A", Players: []helper.Player{{Name: "A", Dojo: "D"}, {Name: "B", Dojo: "D"}}},
 	}))
 
-	var logBuf bytes.Buffer
-	prevOut := log.Writer()
-	prevFlags := log.Flags()
-	log.SetOutput(&logBuf)
-	log.SetFlags(0)
-	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
-
-	migrated, err := eng.MigrateNumberPrefixes()
-	require.NoError(t, err)
+	var migrated []string
+	logged := captureLog(t, func() {
+		var err error
+		migrated, err = eng.MigrateNumberPrefixes()
+		require.NoError(t, err)
+	})
 	assert.Empty(t, migrated, "no NEW prefix was assigned, only an existing one applied")
 
-	assert.Contains(t, logBuf.String(), "half-migrated-2", "the log must name the competition whose competitor numbers were rewritten")
-	assert.Contains(t, logBuf.String(), `"H"`, "the log must name the prefix the rewrite happened under")
+	assert.Contains(t, logged, "half-migrated-2", "the log must name the competition whose competitor numbers were rewritten")
+	assert.Contains(t, logged, `"H"`, "the log must name the prefix the rewrite happened under")
 }
 
 // TestRenumberCompetitors_InvalidatesStandingsCache pins bc-pnum A2:

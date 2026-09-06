@@ -1,9 +1,7 @@
 package engine
 
 import (
-	"bytes"
 	"errors"
-	"log"
 	"testing"
 	"time"
 
@@ -1640,18 +1638,6 @@ func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
 			{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
 		}))
 		return eng, store, compID, aliceID
-	}
-
-	// captureLog swaps the default logger's sink for the duration of fn.
-	captureLog := func(t *testing.T, fn func()) string {
-		t.Helper()
-		var buf bytes.Buffer
-		prevOut, prevFlags := log.Writer(), log.Flags()
-		log.SetOutput(&buf)
-		log.SetFlags(0)
-		t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
-		fn()
-		return buf.String()
 	}
 
 	t.Run("the production path runs K2 on a transactional handle", func(t *testing.T) {

@@ -12,9 +12,12 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// captureExportLog swaps the default logger's sink for the duration of fn
-// (same approach as TestApplyMatchWrite_LogsTheUnstampedOverwrite).
-func captureExportLog(t *testing.T, fn func()) string {
+// captureLog swaps the default logger's sink for the duration of fn and
+// returns everything logged during that call. The one log-capture helper for
+// internal/engine's tests; every test that needs to assert on a log line
+// calls this rather than hand-rolling its own log.SetOutput/log.SetFlags/
+// t.Cleanup dance.
+func captureLog(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
 	prevOut, prevFlags := log.Writer(), log.Flags()
@@ -93,7 +96,7 @@ func TestExportCompetitionXlsx_LogsUnnumberedPooledCompetitor(t *testing.T) {
 	require.NoError(t, store.SavePools(compID, pools))
 
 	var exportErr error
-	out := captureExportLog(t, func() {
+	out := captureLog(t, func() {
 		_, exportErr = eng.ExportCompetitionXlsx(compID)
 	})
 	require.NoError(t, exportErr, "a report-gap log must never fail the export")
@@ -143,7 +146,7 @@ func TestExportCompetitionXlsx_EmptyNumberPrefixNeverLogs(t *testing.T) {
 	require.Empty(t, comp.NumberPrefix, "premise: this competition is not numbered")
 
 	var exportErr error
-	out := captureExportLog(t, func() {
+	out := captureLog(t, func() {
 		_, exportErr = eng.ExportCompetitionXlsx(compID)
 	})
 	require.NoError(t, exportErr)

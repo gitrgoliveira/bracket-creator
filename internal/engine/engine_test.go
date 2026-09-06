@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -23,6 +24,18 @@ func setupTestEngine(t *testing.T) (*Engine, *state.Store, string) {
 
 	eng := New(store)
 	return eng, store, dir
+}
+
+// writeRawParticipantsCSV writes csv verbatim as compID's participants.csv,
+// creating the competition's directory first. The one place a test writes a
+// hand-spelled roster straight to disk, bypassing SaveParticipants, to
+// exercise a legacy/hand-edited shape (no ids, a blank dojo, ...) the normal
+// write path would never produce on its own.
+func writeRawParticipantsCSV(t *testing.T, dir, compID, csv string) {
+	t.Helper()
+	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
+	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
 }
 
 // createTestCompetition saves a canonical individual competition. opts mutate

@@ -1,4 +1,4 @@
-// Regression test for M10: state.Tournament has no Competitions field, so
+// Regression test: state.Tournament has no Competitions field, so
 // POST /api/tournament's response carries no `competitions` key. app.jsx's
 // onCreated handler used to store that body verbatim
 // (`onCreated={(t, p) => setTournament(t)}`), and AdminSchedulePage indexed
@@ -64,7 +64,7 @@ const TOURNAMENT_WITHOUT_COMPETITIONS_KEY = {
 };
 
 describe('AdminSchedulePage with a tournament missing the competitions key', () => {
-  it('mounts without throwing (red before the M10 fix: TypeError on tournament.competitions[0])', () => {
+  it('mounts without throwing (red before the fix: TypeError on tournament.competitions[0])', () => {
     render(
       React.createElement(AdminSchedulePage, {
         tournament:   TOURNAMENT_WITHOUT_COMPETITIONS_KEY,

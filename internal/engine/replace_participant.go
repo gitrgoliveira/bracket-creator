@@ -128,7 +128,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// pool-matches.csv row (no per-side dojo) both have to fall back to
 		// a plain name match, which is unresolvable whenever another CURRENT
 		// participant still answers to oldName -- e.g. two "Tanaka Kenji"
-		// from different dojos. PR #416 finding G1: this scan used to live
+		// from different dojos. the bc-pnum review: this scan used to live
 		// ONLY inside the bracket branch, gated on oldName already
 		// appearing in the bracket; hoisted here as ONE shared, lazily-
 		// computed (and cached) check so the pool-matches branch below can
@@ -153,7 +153,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// doesn't remove her from participants.csv, only from the check-in
 		// snapshot.
 		//
-		// Exclusion of the target herself (PR #416 finding G2) checks BOTH:
+		// Exclusion of the target herself (the bc-pnum review) checks BOTH:
 		// the id-aware path (pid is her real participant id, matches p.ID
 		// directly) and the (name, dojo)-identity path via
 		// helper.CompetitorKey with id forced empty on both sides. The
@@ -216,7 +216,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// warning below doesn't misfire), but nothing is rewritten and the
 		// operator is warned instead of a guess being made.
 		//
-		// Pass 1 below (via forEachBracketSide, PR #416 finding G3) collects
+		// Pass 1 below (via forEachBracketSide, the bc-pnum review) collects
 		// every name actually appearing in a bracket row (SideA/SideB/Winner,
 		// Rounds + ThirdPlaceMatch), purely so the ambiguity check below is
 		// only invoked when oldName is a name this bracket could possibly need
@@ -272,7 +272,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		matchesChanged := false
 		poolMatchesAmbiguous := false
 		for i, m := range poolMatches {
-			// PR #416 finding G1: an id-less side falls back to matching by
+			// the bc-pnum review: an id-less side falls back to matching by
 			// NAME ALONE (MatchResult carries no per-side dojo). Two guards
 			// gate that fallback, on top of the identity check
 			// matchesParticipantSide already applies:
@@ -366,7 +366,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 // to a DIFFERENT competitor who merely shares the old display name and dojo
 // is never rewritten. A row with NO id at all (legacy data predating
 // id-stamped generation) falls back to the pre-identity (name, dojo) match,
-// compared via helper.CompetitorKey (PR #416 finding G2) so this identity
+// compared via helper.CompetitorKey (the bc-pnum review) so this identity
 // match and the dojo-conflict warning above use ONE normalisation (case,
 // diacritics, whitespace) rather than this raw string compare disagreeing
 // with the warning's helper.NormalizeParticipantName-based one.
@@ -379,7 +379,7 @@ func matchesParticipant(rowID, rowName, rowDojo, pid, oldName, oldDojo string) b
 
 // forEachBracketSide calls fn once for each of a bracket's per-side name
 // fields: every round's SideA/SideB/Winner, plus the ThirdPlaceMatch
-// sibling's when present (PR #416 finding G3). fn receives a pointer that
+// sibling's when present (the bc-pnum review). fn receives a pointer that
 // ALIASES the stored match (indexed slice access, never a range-copy), so a
 // caller mutating through it edits the bracket in place. Shared by
 // ReplaceParticipantInDraw's name-collection pass and its rename pass, which
@@ -402,7 +402,7 @@ func forEachBracketSide(b *state.Bracket, fn func(*string)) {
 
 // poolHasNamesake reports whether pool poolName still holds a player named
 // name, evaluated AFTER the pools.csv rename pass has already run (PR #416
-// finding G1). Because the rename target's OWN pools.csv row has by this
+// the review finding). Because the rename target's OWN pools.csv row has by this
 // point already been rewritten to newName, a remaining player still named
 // `name` in the same pool is necessarily a DIFFERENT competitor, not a stale
 // read of the just-renamed row -- used by the pool-matches ambiguity guard

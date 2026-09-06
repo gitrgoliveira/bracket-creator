@@ -11,13 +11,13 @@ import (
 )
 
 // NumberPlayoffsOnlyParticipants is the ONE derivation of an effective-
-// playoffs competition's numbers (bc-pnum A8/G8, tightened by [review] and
-// again by G10): participant order under NumberPrefix, through
+// playoffs competition's numbers (bc-pnum A8, tightened by [review] and
+// again in the bc-pnum review): participant order under NumberPrefix, through
 // helper.AssignPlayerNumbers (R1), mutating players in place. No-op when
 // the competition has no prefix, so a caller does not have to special-case
 // that itself.
 //
-// Package-level, not a method (G10): its body never reads the receiver, and
+// Package-level, not a method: its body never reads the receiver, and
 // mobileapp threaded a whole consumer-boundary interface
 // (PlayoffsNumberingEngine, deps.go) plus an extra `eng` parameter through
 // six signatures (mergePoolNumbersIntoPlayersSlice and five callers) solely
@@ -226,7 +226,7 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 // skipped carries the ids takenNumberPrefixes could not read (a stray
 // folder, an unparseable config.md), so DefaultNumberPrefixFor can log a
 // warning correlating an assignment with the exact siblings that were
-// invisible to it when it derived that assignment (PR #416 finding T2):
+// invisible to it when it derived that assignment (the bc-pnum review):
 // before this, the skip and the assignment were two independent,
 // uncorrelated log lines (or, for a sibling skipped silently, no line naming
 // the assignment as suspect at all), so an operator had no way to tell a
@@ -269,7 +269,7 @@ func (e *Engine) takenNumberPrefixes(excludeID string) (taken []string, skipped 
 // that sibling's own prefix, so it is logged as ONE correlated warning
 // naming the assignment and the skipped ids together, rather than leaving
 // the two facts to land as unconnected log lines an operator has to
-// manually cross-reference (PR #416 finding T2). The exported signature is
+// manually cross-reference (the bc-pnum review). The exported signature is
 // unchanged: every caller (mobileapp's create/settings/import/preview
 // handlers) needs no adaptation.
 func (e *Engine) DefaultNumberPrefixFor(name, excludeID string) (string, error) {
@@ -350,7 +350,7 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 		for _, comp := range pending {
 			prefix := helper.DefaultNumberPrefix(comp.Name, taken)
 			taken = append(taken, prefix)
-			// PR #416 finding G7: LoadCompetition (in the scan loop above) +
+			// the bc-pnum review: LoadCompetition (in the scan loop above) +
 			// a later whole-struct SaveCompetition left a load/save race
 			// window a concurrent writer could land a DIFFERENT field change
 			// into, which this save would then clobber with the stale

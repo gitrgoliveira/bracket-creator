@@ -65,7 +65,7 @@ type CompetitionStore interface {
 
 // PlayoffsNumberingEngine existed as the consumer-boundary view over
 // engine.Engine.NumberPlayoffsOnlyParticipants (bc-pnum A8, tightened by
-// [review]). Removed by G10: that method never read its receiver, so the
+// [review]). Removed: that method never read its receiver, so the
 // engine side made it a package-level function
 // (engine.NumberPlayoffsOnlyParticipants) instead, and mobileapp calls it
 // directly -- mobileapp already imports engine, so there was nothing this

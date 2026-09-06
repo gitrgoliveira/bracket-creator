@@ -182,7 +182,7 @@ func TestDefaultNumberPrefix(t *testing.T) {
 	}
 }
 
-// TestDefaultNumberPrefix_DigitBearingPrefix pins bc-pnum review H1/H2's
+// TestDefaultNumberPrefix_DigitBearingPrefix pins bc-pnum review's
 // premise directly: DefaultNumberPrefix can legitimately derive a prefix
 // that itself carries a digit. "K" and "KO5" are both taken, so both
 // initials-based candidates ("K", "KO") are rejected -- "KO" is ambiguous
@@ -276,7 +276,7 @@ func TestDefaultNumberPrefix_KendoWithKTakenDerivesSomethingUnambiguous(t *testi
 }
 
 // TestDefaultNumberPrefix_CaseInsensitiveExactMatch pins bc-pnum review
-// H10/H12: before NormalizeNumberPrefix existed, DefaultNumberPrefix's own
+// Before NormalizeNumberPrefix existed, DefaultNumberPrefix's own
 // exact-match check was a SEPARATE strings.ToUpper fold from
 // NumberPrefixesAmbiguous' -- two independent case folds that happened to
 // agree, but nothing forced them to. A lower-case taken value must still be
@@ -290,7 +290,7 @@ func TestDefaultNumberPrefix_CaseInsensitiveExactMatch(t *testing.T) {
 
 // TestNumberPrefixFold_DefaultAndAmbiguousAgree drives DefaultNumberPrefix
 // and NumberPrefixesAmbiguous over the SAME taken values at different
-// cases and with incidental whitespace, pinning bc-pnum review H10/H12:
+// cases and with incidental whitespace, pinning bc-pnum review:
 // both now derive from the single NormalizeNumberPrefix fold, so they can
 // no longer drift on what "the same prefix" means.
 func TestNumberPrefixFold_DefaultAndAmbiguousAgree(t *testing.T) {
@@ -344,7 +344,7 @@ func TestNameInitials_AccentedAndOtherScripts(t *testing.T) {
 }
 
 // TestSplitNumberLines pins the bc-pnum operator ruling as sharpened by
-// review H1/H2: a competitor number prints as two stacked lines only when
+// review: a competitor number prints as two stacked lines only when
 // the SHEET's own known prefix is MORE THAN ONE CHARACTER (a rune count,
 // not a byte count -- bc-pnum review) AND the number actually carries that
 // prefix. The split is prefix-DRIVEN, not guessed from the number's own

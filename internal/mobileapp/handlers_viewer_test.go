@@ -21,7 +21,7 @@ import (
 // display / streaming overlay / viewer card render the prefix at all
 // (participants.csv does NOT persist Number).
 func TestMergePoolNumbersIntoPlayers(t *testing.T) {
-	// G10: mergePoolNumbersIntoPlayers no longer threads an engine parameter
+	// mergePoolNumbersIntoPlayers no longer threads an engine parameter
 	// through -- its playoffs-only branch calls the package-level
 	// engine.NumberPlayoffsOnlyParticipants directly, the SAME function the
 	// viewer handler and the blank-template export reach, so there is no
@@ -459,10 +459,10 @@ func TestProvisionalCompetitorNumbers(t *testing.T) {
 	}
 }
 
-// TestHelperCompetitorNumberMatchesAssignPlayerNumbers pins G10(b):
+// TestHelperCompetitorNumberMatchesAssignPlayerNumbers pins the one-composition primitive:
 // helper.CompetitorNumber is the ONE composition of a competitor number
 // string, the same primitive helper.AssignPlayerNumbers' own loop calls, so
-// provisionalCompetitorNumbers (rewritten by G10(b) to call
+// provisionalCompetitorNumbers (rewritten to call
 // helper.CompetitorNumber directly instead of deep-copying the whole
 // roster just to run AssignPlayerNumbers and read Number back) can never
 // silently diverge from what a real draw would assign. For each prefix,

@@ -273,7 +273,7 @@ func TestCreateTagsSheet_StackedNumberLayout(t *testing.T) {
 }
 
 // TestCreateTagsSheet_DigitBearingPrefixSplitsAtThePrefix pins bc-pnum
-// review H1/H2: DefaultNumberPrefix can legitimately derive a digit-bearing
+// review: DefaultNumberPrefix can legitimately derive a digit-bearing
 // prefix ("KO2", from DefaultNumberPrefix("Kendo Open", []string{"K","KO5"})
 // -- see TestDefaultNumberPrefix_DigitBearingPrefix in numbers_test.go), and
 // under it competitor 1's number is "KO21". The split must be driven by the
@@ -292,7 +292,7 @@ func TestCreateTagsSheet_DigitBearingPrefixSplitsAtThePrefix(t *testing.T) {
 }
 
 // TestCreateTagsSheet_NumberNotCarryingPrefixStaysSingleLine pins the
-// report-over-fabricate rule (D1, extended by bc-pnum review H1/H2 to the
+// report-over-fabricate rule (D1, extended by bc-pnum review to the
 // print split itself): a hand-edited or legacy number that does not
 // actually start with the sheet's own prefix is never guessed at with a
 // fabricated cut -- it renders whole, on one line, even though the sheet's

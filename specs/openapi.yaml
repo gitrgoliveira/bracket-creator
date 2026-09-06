@@ -4396,7 +4396,7 @@ components:
             `players` above (viewer responses and the settings and roster PUT
             responses), and only for a competition a draw can still be generated from
             (status `setup` or the legacy empty status) that has a number prefix.
-            `null` (M8: the KEY is always present, never omitted) for a Swiss
+            `null` (the KEY is always present, never omitted) for a Swiss
             competition (its draw never writes pools.csv, so it carries no number at
             all) and for an effective-playoffs competition (its number is already
             final -- participant order -- so there is nothing "provisional" about it,

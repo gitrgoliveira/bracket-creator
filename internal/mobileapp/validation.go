@@ -122,7 +122,7 @@ func validateMaxLen(field, val string, max int) error {
 }
 
 // validateMaxRunes returns a ValidationError when val exceeds max RUNES
-// (display characters), not bytes. H13-app: numberPrefix's own message says
+// (display characters), not bytes. : numberPrefix's own message says
 // "characters", the admin UI's maxLength="3" counts UTF-16 units, and the
 // printed Tags/Names-to-Print sheets count runes -- so a byte-length check
 // refused a 2-character, 4-byte prefix like "ÖÖ" as too long, contradicting

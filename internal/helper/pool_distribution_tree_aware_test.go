@@ -29,7 +29,7 @@ import (
 // have the buffer in flight at once) -- see that function's own doc comment
 // for why.
 //
-// Moved here from the production file (bc-pnum review H9): this wrapper is
+// Moved here from the production file (bc-pnum review): this wrapper is
 // called only from this test file, never from production code, which calls
 // earliestDojoMeetingScan directly wherever the wrapper's throwaway scratch
 // slice would matter.

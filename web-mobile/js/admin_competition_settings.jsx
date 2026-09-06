@@ -309,7 +309,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
       }
     }
 
-    // cutNumberPrefix (competition_shape.jsx, H13-js): the TextField's
+    // cutNumberPrefix (competition_shape.jsx,): the TextField's
     // onChange already runs this per keystroke, so `effective.numberPrefix`
     // should already be trimmed and character-safe-capped -- this is a
     // defensive re-application at the payload boundary, the same posture

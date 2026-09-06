@@ -39,7 +39,7 @@ import (
 // rather than mutating the competition's.
 //
 // The playoffs-only branch below calls engine.NumberPlayoffsOnlyParticipants
-// directly (G10: a plain package-level function, its receiver was never
+// directly (a plain package-level function, its receiver was never
 // read; mobileapp already imports engine, so the PlayoffsNumberingEngine
 // consumer-boundary interface this used to thread through as an `eng`
 // parameter bought nothing over the direct call), the SAME function the
@@ -79,7 +79,7 @@ func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.
 			}
 		}
 	}
-	// M2: byNameDojo is built LAZILY, on the first roster row that misses
+	// byNameDojo is built LAZILY, on the first roster row that misses
 	// byID, rather than unconditionally up front. The vast majority of
 	// payload builds are for a roster where every row carries an id (the
 	// common, ids-everywhere case), so byID alone resolves every row and
@@ -137,7 +137,7 @@ func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.
 // check-in desk calls BEFORE the draw, for a competition still in setup (the
 // statuses a draw can be generated from, engine.CanGenerateDraw) that has a
 // prefix: one entry per comp.Players, in the same order, through
-// helper.CompetitorNumber (G10) -- the SAME primitive AssignPlayerNumbers'
+// helper.CompetitorNumber -- the SAME primitive AssignPlayerNumbers'
 // own loop calls, so this stays the one composition without needing a
 // throwaway roster copy just to read Number back off it. Carried as its own
 // field (Competition.ProvisionalNumbers), not as Number, because a

@@ -827,7 +827,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 		}
 	}
 
-	// PR #416 finding G6: never-empty-prefix is enforced by the HTTP
+	// the bc-pnum review: never-empty-prefix is enforced by the HTTP
 	// handler's ensureNumberPrefix, but runDrawPipeline is the ONE path
 	// every non-HTTP caller of StartCompetition/GenerateDraw reaches too
 	// (231 test call sites today; a future CLI/import auto-start

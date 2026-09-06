@@ -292,7 +292,7 @@ func delayDojoMeetings(result []Player, occupied map[int]bool) {
 		ids[i] = idCache.of(result[i].Dojo)
 	}
 
-	// pairsBuf (bc-pnum review H14(d)) is sortedSameDojoPairs' reusable
+	// pairsBuf (bc-pnum review(d)) is sortedSameDojoPairs' reusable
 	// scratch buffer, hoisted out of the generation loop below so its
 	// backing array survives across calls instead of being reallocated
 	// from nil every generation.
@@ -496,13 +496,13 @@ type dojoMeetPair struct{ i, j, round int }
 // exactly, just without repaying the O(N^2) scan once per stuck pair (see
 // delayDojoMeetings' own "Performance note").
 //
-// pairs (bc-pnum review H14(d)) is a scratch buffer the caller reuses
+// pairs (bc-pnum review(d)) is a scratch buffer the caller reuses
 // across generations rather than a fresh slice grown from nil on every one
 // of the up-to-len(result)^2 calls delayDojoMeetings' outer loop can make:
 // reset to length 0 (keeping its capacity) here, same reset-and-refill
 // shape as earliestDojoMeetingScan's own *occupied parameter
 // (pool_distribution_tree_aware.go). slices.SortStableFunc/cmp.Compare
-// (bc-pnum review H14(d)) replace sort.SliceStable: same stability
+// (bc-pnum review(d)) replace sort.SliceStable: same stability
 // guarantee, without a closure indexing back into the slice being sorted.
 func sortedSameDojoPairs(result []Player, ids []int, slots []int, pairs *[]dojoMeetPair) []dojoMeetPair {
 	buf := (*pairs)[:0]
@@ -614,7 +614,7 @@ func denseSlotMap(n int) []int {
 // denseSlotMap(len(result)), translating each pair to real tree-slot space
 // before it reaches dojoMeetRound (bc-drwx item 1).
 func dojoSumMeetRounds(result []Player, ids []int, slots []int, x, y int) int {
-	// bc-pnum review H14(c-safe): result[i]/ids[i]'s side of pairScore's
+	// bc-pnum review(c-safe): result[i]/ids[i]'s side of pairScore's
 	// guard is FIXED across the whole inner loop (i is x, then y, never j),
 	// so re-checking result[x].Name/Dojo and re-reading ids[x] on every one
 	// of the O(N) j iterations was pure waste -- hoisted to once per side.

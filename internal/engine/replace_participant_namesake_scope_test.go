@@ -12,7 +12,7 @@ import (
 )
 
 // TestReplaceParticipantInDraw_IDLessCrossPoolNamesake_OnlyTargetPoolRewritten
-// is PR #416 finding G1's repro. For id-less pool-matches.csv rows, the
+// is the bc-pnum review's repro. For id-less pool-matches.csv rows, the
 // rename used to fall back to `rowName == oldName` with no dojo and no
 // per-pool scope, so renaming one of two cross-dojo namesakes rewrote the
 // OTHER namesake's pool-matches row too: pools.csv (name, dojo)-scoped by
@@ -58,7 +58,7 @@ func TestReplaceParticipantInDraw_IDLessCrossPoolNamesake_OnlyTargetPoolRewritte
 }
 
 // TestReplaceParticipantInDraw_IDLessSamePoolNamesake_SkippedWithWarning is
-// finding G1's same-pool variant: two id-less "Alice" rows IN THE SAME POOL
+// the review finding's same-pool variant: two id-less "Alice" rows IN THE SAME POOL
 // cannot be told apart by a pool-matches row that carries only a name, so
 // the rewrite must be skipped and warned about rather than guessed.
 func TestReplaceParticipantInDraw_IDLessSamePoolNamesake_SkippedWithWarning(t *testing.T) {

@@ -1879,7 +1879,7 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	// number prefix, not by re-scanning players for one (bc-pnum operator
 	// ruling -- a prefix of more than one CHARACTER prints as two stacked
 	// lines, "KO" over "20"; a one-character prefix keeps the plain
-	// cross-sheet reference on one line, "K20"; bc-pnum review H1/H2 -- see
+	// cross-sheet reference on one line, "K20"; bc-pnum review -- see
 	// splitNumberLines, numbers.go, for why re-deriving this from a
 	// representative player's Number breaks on a digit-bearing prefix like
 	// "KO2").

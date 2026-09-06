@@ -14,7 +14,7 @@ import (
 // that competitor. numberPrefix is the competition's own number prefix
 // (helper.AssignPlayerNumbers/NumberPools's prefix argument), the single
 // source of truth this sheet's layout is driven from -- see splitNumberLines
-// (numbers.go, bc-pnum review H1/H2) for why re-deriving it by scanning a
+// (numbers.go, bc-pnum review) for why re-deriving it by scanning a
 // representative player's Number is wrong whenever the prefix itself carries
 // a digit.
 func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPrefix string) error {
@@ -56,7 +56,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPre
 	// number prefix (bc-pnum operator ruling -- a prefix of more than one
 	// CHARACTER prints as two stacked lines, "KO" over "20"; a one-character
 	// prefix stays on one line, "K20"), not by re-scanning players for one
-	// (bc-pnum review H1/H2 -- see splitNumberLines, numbers.go, for why
+	// (bc-pnum review -- see splitNumberLines, numbers.go, for why
 	// that guess breaks on a digit-bearing prefix like "KO2").
 	stacked := utf8.RuneCountInString(numberPrefix) > 1
 	style, err := tagNumberStyle(f, stacked)

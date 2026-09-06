@@ -30,7 +30,7 @@ import (
 // lands later we can hoist a DisplayStore interface then. Number merging
 // (currentMatchPlayers) reaches engine.NumberPlayoffsOnlyParticipants
 // through mergePoolNumbersIntoPlayersSlice (handlers_viewer.go, same
-// package) exactly as the viewer payload does (G10: that shared helper
+// package) exactly as the viewer payload does (that shared helper
 // calls the engine function directly -- a plain package-level function, not
 // threaded through as a parameter -- so this file needs no engine
 // reference of its own), the SAME derivation the blank-template export
@@ -306,7 +306,7 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // can include "number" in the polled OBS/vMix overlay payload; the pools.csv
 // read is skipped entirely otherwise (the common case).
 func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
-	// M7: the load error used to be discarded outright (`players, _ := ...`)
+	// the load error used to be discarded outright (`players, _ :=...`)
 	// while the pools load just below already logs its own. Logged, not
 	// returned/surfaced: the overlay must not vanish over an unreadable
 	// participants.csv, it degrades to whatever LoadParticipantsOpt still

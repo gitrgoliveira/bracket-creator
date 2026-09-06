@@ -195,7 +195,7 @@ describe('provisionalNumberMap', () => {
   });
 });
 
-// checkinPid (M12) is the ONE owner of the id-else-"name|dojo" identity rule
+// checkinPid is the ONE owner of the id-else-"name|dojo" identity rule
 // client-side (mirroring helper.CompetitorKey server-side). Its own first
 // cut used `p.id ?? fallback`, which only substitutes on null/undefined, so
 // an empty-string id -- what the chusen-candidates handler always emits for

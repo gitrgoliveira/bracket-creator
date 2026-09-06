@@ -506,14 +506,14 @@ export const LABEL_NUMBER_PREFIX = "Player number prefix";
 export const HINT_NUMBER_PREFIX = "Up to 3 characters for competitor numbers (e.g. K produces K1, K2…). Leave blank: on create, one is derived from the competition's name; in settings, the current prefix is kept.";
 
 // MAX_NUMBER_PREFIX_CHARS: the 3-character cap HINT_NUMBER_PREFIX describes
-// and the TextField's own maxLength enforces (H13-js). Named so
+// and the TextField's own maxLength enforces. Named so
 // cutNumberPrefix below and any future caller share the one number rather
 // than a bare "3" appearing at each cut site.
 export const MAX_NUMBER_PREFIX_CHARS = 3;
 
 // cutNumberPrefix: the ONE owner of "trim, then keep at most
 // MAX_NUMBER_PREFIX_CHARS CHARACTERS" for the player-number-prefix field
-// (H13-js). Both the create form (admin_setup.jsx) and the settings form
+//. Both the create form (admin_setup.jsx) and the settings form
 // (admin_competition_settings.jsx) used to call `.trim().substring(0, 3)`
 // directly, which counts UTF-16 CODE UNITS, not characters: an astral
 // character (anything outside the Basic Multilingual Plane, e.g. most emoji)

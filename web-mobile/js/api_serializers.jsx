@@ -105,7 +105,7 @@ function toBackendMatchResult(patch, match) {
         if (winnerName === sideAName && winnerName !== sideBName) winnerId = sideAId || "";
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
-    // F6-JS: only put winnerId on the wire when it is an id the SERVER
+    // only put winnerId on the wire when it is an id the SERVER
     // itself supplied for the winning side (match.sideAId / match.sideBId,
     // the raw flat fields -- not sideAId/sideBId above, which are read off
     // the resolved side OBJECTS and can themselves carry the same invented

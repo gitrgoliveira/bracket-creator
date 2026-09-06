@@ -84,7 +84,7 @@ func TestCreatePlayersWithoutZekkenName_MissingDojoRejected(t *testing.T) {
 }
 
 // TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo pins bc-pnum
-// review H3: the zekken branch's blank-dojo checks used to be UNCONDITIONAL
+// review: the zekken branch's blank-dojo checks used to be UNCONDITIONAL
 // while the non-zekken branch already honoured requireDojo, so
 // state.LoadParticipants (which always passes requireDojo=false so a
 // legacy roster still loads and can be repaired -- see this function's own

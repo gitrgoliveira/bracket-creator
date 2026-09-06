@@ -196,7 +196,7 @@ func TestAddPoolDataToSheet(t *testing.T) {
 	}
 }
 
-// TestAddPoolDataToSheet_HasNumberChecksEveryPlayer pins bc-pnum review H7:
+// TestAddPoolDataToSheet_HasNumberChecksEveryPlayer pins bc-pnum review:
 // hasNumber used to be decided from the FIRST player only, so a
 // hand-edited/legacy pools.csv whose leading row is unnumbered dropped the
 // whole Player Number column (and so the Names to Print number cell that
@@ -234,7 +234,7 @@ func TestAddPoolDataToSheet_HasNumberChecksEveryPlayer(t *testing.T) {
 // value pool distribution overwrites 1-based for every pooled competition
 // but nothing ever touches for a playoffs-only one. Before the fix, row 3
 // (the first entrant) read "0" in the renamed "Entry order" column (bc-pnum
-// review H8: relabelled from "Draw order", which implied bracket slot order
+// review: relabelled from "Draw order", which implied bracket slot order
 // this column has never held -- this function runs before StandardSeeding)
 // beside a "Player Number" column reading "K1" -- two different counting
 // conventions on the same row. The fix must show "1" for the first entrant.
@@ -260,7 +260,7 @@ func TestAddPlayerDataToSheet_EntryOrderMatchesRealZeroBasedRoster(t *testing.T)
 	}
 }
 
-// TestAddDataToSheetForExport_ColumnAHeader pins bc-pnum review H8's
+// TestAddDataToSheetForExport_ColumnAHeader pins bc-pnum review's
 // relabel through the export wrapper's own branch selection: the
 // namesToPrintPlayers branch (a playoffs-only export with no pools.csv,
 // routed to AddPlayerDataToSheet) must show "Entry order", never the
@@ -371,7 +371,7 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			// column is the roster's entry order, not the "Player Number" tag
 			// column (E/D below), and the two used to read as the same concept
 			// under one label while counting from different bases. Relabelled
-			// "Entry order" (bc-pnum review H8): this sheet is written BEFORE
+			// "Entry order" (bc-pnum review): this sheet is written BEFORE
 			// StandardSeeding reorders players into bracket slot order, so the
 			// column is the entry order the roster arrived in, never a "draw"
 			// (bracket slot) order the old name implied.

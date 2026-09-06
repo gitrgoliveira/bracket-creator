@@ -986,7 +986,7 @@ func TestCreateNamesToPrint_StackedFormulaCountsRunesNotBytes(t *testing.T) {
 }
 
 // TestCreateNamesToPrint_DigitBearingPrefixSplitsAtThePrefix pins bc-pnum
-// review H1/H2: prefixLen is driven by the competition's own numberPrefix
+// review: prefixLen is driven by the competition's own numberPrefix
 // argument, not re-derived from the number's own first digit. Under prefix
 // "KO2" competitor 1 is "KO21"; the split must be LEFT(ref,3)/MID(ref,4,99)
 // (letters "KO2" over digits "1"), not the wrong LEFT(ref,2)/MID(ref,3,99)

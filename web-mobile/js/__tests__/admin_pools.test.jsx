@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { enrichPoolMatchWithComp, poolMatchesForPool, groupTeamIds } from '../admin_pools.jsx';
 // admin_pools.jsx's chusen banner keys its rank inputs by checkinPid
-// (M12: chusenMemberKey was deleted, the banner now delegates to the one
+// (chusenMemberKey was deleted, the banner now delegates to the one
 // owner of the id-else-name|dojo rule). Imported directly so the tests below
 // exercise the real function, in addition to (not instead of) the full-mount
 // coverage in __tests__/render/admin_pools_chusen.render.test.jsx, which does
@@ -321,7 +321,7 @@ describe('poolMatchesForPool', () => {
 });
 
 // checkinPid, as used to key the chusen banner's rank inputs, pins two
-// contracts (M12: chusenMemberKey was deleted; the banner now delegates to
+// contracts (chusenMemberKey was deleted; the banner now delegates to
 // checkinPid, the one owner of this identity rule):
 //   * bc-appx item 2/3: chusen rank inputs must be keyed by a team member's
 //     stable IDENTITY, never by that member's position in the candidates

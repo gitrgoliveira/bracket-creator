@@ -1257,7 +1257,7 @@ func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
-// TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowStillRemovable pins M4:
+// TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowStillRemovable pins the row-level id-or-name membership:
 // generatePoolDaihyosenMatches only began stamping SideAID/SideBID on
 // 2026-08-29, so a DH row written before that carries blank ids. Before the
 // fix, DELETE under teamIds selection judged EVERY row by id, so this
@@ -1300,7 +1300,7 @@ func TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowStillRemovable(t *testing.T
 }
 
 // TestLeagueTiebreakPost_TeamIDs_LegacyIDlessRowBlocksRegeneration is POST's
-// mirror of the DELETE test above (M4): the same legacy id-less DH row must
+// mirror of the DELETE test above: the same legacy id-less DH row must
 // still be counted by pairsExist under teamIds selection, so a regenerate
 // attempt is refused 409 rather than silently creating a second, redundant
 // set of tie-breaker matches (pre-fix: 201 {"matches":null}, since the

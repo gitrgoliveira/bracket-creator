@@ -30,14 +30,14 @@
 //      in a group collapsed onto the SAME key (bc-appx item 1's blocker),
 //      which chusenMemberKey worked around by staying self-contained rather
 //      than delegating.
-//   4. checkinPid itself, fixed and delegated to directly (M12).
+//   4. checkinPid itself, fixed and delegated to directly.
 //      chusenMemberKey's workaround duplicated the id-else-"name|dojo" rule
 //      already meant to live in ONE place (helper.CompetitorKey server-side,
 //      checkinPid client-side); checkinPid's own `p.id ?? fallback` is now
 //      `p.id ? p.id : fallback` (a truthy check, not `??`), closing the empty-
 //      string gap at the source, and chusenMemberKey was deleted so the
 //      banner imports checkinPid instead of keeping a second copy of the rule.
-//      (Separately, M11 changed the per-row DOM id to `idx`-based rather than
+//      (Separately, the review changed the per-row DOM id to `idx`-based rather than
 //      identity-based -- a DOM id only needs to be unique within one render,
 //      unlike inputKey/chusenInputs, which must survive a re-fetch reorder --
 //      so the "distinct DOM ids" assertions below no longer exercise the
@@ -55,7 +55,7 @@
 //   * "a mid-loop failure reorders the group" -- pins step 3/4 closing the #2
 //     defect (the reorder reproduction).
 //   * "legacy (UUID-less) members" -- pins the #3/#4 blocker fix (bc-appx
-//     item 1 / M12): three empty-id members must not collapse onto one row,
+//     item 1): three empty-id members must not collapse onto one row,
 //     now enforced by checkinPid itself rather than a self-contained
 //     workaround.
 
@@ -451,7 +451,7 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     await screen.findByText('Chusen (drawing lots) required');
     const inputs = screen.getAllByRole('spinbutton');
     expect(inputs.length).toBe(3);
-    // Since M11 the per-row DOM id is `idx`-based (chusen-${groupKey}-${idx}),
+    // The per-row DOM id is `idx`-based (chusen-${groupKey}-${idx}),
     // so this assertion alone no longer exercises the empty-id identity
     // collision (idx guarantees distinctness on its own regardless of
     // checkinPid). The identity guard for these three empty-id members is
@@ -504,7 +504,7 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
   });
 });
 
-describe('AdminPools chusen banner: non-ASCII member keys do not collapse the DOM id (M11)', () => {
+describe('AdminPools chusen banner: non-ASCII member keys do not collapse the DOM id', () => {
   // Two id-less members (a legacy/UUID-less roster) whose chusenMemberKey
   // ("name|dojo") is entirely non-ASCII. The DOM id used to be built as
   // `chusen-${groupKey}-${memberKey}`.replace(/[^a-zA-Z0-9_-]+/g, "-"): that

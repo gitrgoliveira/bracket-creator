@@ -162,7 +162,7 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	assert.Emptyf(t, resp.SideB.Number, "sideB must show NO number over an unreadable pools.csv, got %q", resp.SideB.Number)
 }
 
-// TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins M7:
+// TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins the logged participants error:
 // currentMatchPlayers used to discard LoadParticipantsOpt's error outright
 // (`players, _ := ...`), unlike the pools load just below it in the same
 // function, which already logs its own failure -- an unreadable
@@ -210,7 +210,7 @@ func TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames(t *testing.
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	assert.Contains(t, logBuf.String(), "load participants",
-		"M7: an unreadable participants.csv must leave a server-side log breadcrumb, matching the pools load's own logging in the same function")
+		"an unreadable participants.csv must leave a server-side log breadcrumb, matching the pools load's own logging in the same function")
 	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
 
 	var resp courtCurrentResponse

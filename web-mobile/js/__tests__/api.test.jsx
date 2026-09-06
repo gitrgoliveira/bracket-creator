@@ -169,7 +169,7 @@ describe('API Utils', () => {
     it('forwards winnerId from the winning side object', () => {
       // Flat sideAId/sideBId alongside the resolved objects: what a real
       // normalizeMatch output looks like when the server supplied real ids
-      // for both sides (F6-JS: winnerId is only forwarded when it matches
+      // for both sides (: winnerId is only forwarded when it matches
       // one of these flat, server-supplied fields).
       const match = { sideAId: 'id-a', sideBId: 'id-b', sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
       const result = toBackendMatchResult({ winner: { id: 'id-a', name: 'Player A' }, status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
@@ -178,7 +178,7 @@ describe('API Utils', () => {
 
     it('forwards the correct winnerId for a same-name head-to-head (object winner)', () => {
       // Flat sideAId/sideBId present: this is what a real same-name pool
-      // match looks like on the wire (F6-JS: the flat fields are the
+      // match looks like on the wire (: the flat fields are the
       // server-supplied signal that gates winnerId).
       const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
       // Mumeishi won; even on a tied scoreline the id disambiguates the side.
@@ -198,7 +198,7 @@ describe('API Utils', () => {
       expect(result.winnerId).toBe('id-b');
     });
 
-    // F6-JS: buildPlayerMap invents `id: norm.id || norm.name` for a
+    // buildPlayerMap invents `id: norm.id || norm.name` for a
     // participant with no real id, and resolveSide (normalizeMatch) carries
     // that invented id onto the resolved side object. For a
     // partially-stamped legacy roster -- one side has a real server id, the
@@ -207,7 +207,7 @@ describe('API Utils', () => {
     // that name as winnerId tells the engine's forward-write gate a name
     // string is a participant UUID, and the write is rejected, so the match
     // could never be scored.
-    describe('does not send an invented (name-as-id) winnerId (F6-JS)', () => {
+    describe('does not send an invented (name-as-id) winnerId', () => {
       it('omits winnerId when the winning side carries no server-supplied flat id', () => {
         // sideB has a real flat id; sideA has none at all -- match.sideAId is
         // absent, exactly like a wire payload that never had that column.

@@ -6,7 +6,7 @@
 import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 import { nameOf } from './result_slot.jsx';
 // checkinPid (id when non-empty, else "name|dojo") is the ONE owner of the
-// id-else-name|dojo identity rule (M12); the chusen banner below used to key
+// id-else-name|dojo identity rule; the chusen banner below used to key
 // its rank inputs with a self-contained chusenMemberKey because checkinPid's
 // old `p.id ?? fallback` only fell back on null/undefined, not the ""
 // chusen-candidates always sends for a legacy/UUID-less member. checkinPid's
@@ -137,7 +137,7 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 // UUID, not null/undefined, so every legacy member in a group collapsed onto
 // the SAME empty-string key: duplicate React keys, duplicate DOM ids, and
 // typing into one row's input moved all of them). That gap is now closed in
-// checkinPid itself (M12: id-else-fallback via a truthiness check, not `??`),
+// checkinPid itself (id-else-fallback via a truthiness check, not `??`),
 // so this file delegates to it rather than keeping a second, drift-prone
 // copy of the same rule.
 //

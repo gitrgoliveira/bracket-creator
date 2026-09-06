@@ -15,7 +15,7 @@ type dataColumnLayout struct {
 }
 
 // poolsHaveAnyNumber reports whether ANY player anywhere in pools has a
-// Number, not just the first pool's first player (bc-pnum review H7): a
+// Number, not just the first pool's first player (bc-pnum review): a
 // hand-edited/legacy pools.csv can carry unnumbered rows before a numbered
 // one, and checking only the first player used to drop the whole Player
 // Number column (and so the Names to Print number cell downstream) for
@@ -100,7 +100,7 @@ func finishDataSheet(f *excelize.File) {
 }
 
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {
-	// hasNumber (bc-pnum review H7): see poolsHaveAnyNumber's own doc
+	// hasNumber (bc-pnum review): see poolsHaveAnyNumber's own doc
 	// comment, factored into its own function.
 	layout := setupDataSheet(f, sanitize, poolsHaveAnyNumber(pools), titlePrefix, "Pool")
 
@@ -108,7 +108,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	playerCoords := make(map[string]playerCellCoord)
 
 	row := 3
-	// range pools BY VALUE, not by index (bc-pnum review H7 lint fix):
+	// range pools BY VALUE, not by index (bc-pnum review lint fix):
 	// gosec (G602) flags pools[i].Players[j] as a possible out-of-range
 	// index on a double-indexed slice-of-slices -- the same class of
 	// false positive forcePoolSizeFromCounts hit (see that function's own
@@ -136,7 +136,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 // AddPlayerDataToSheet is the playoffs-only (no pools) counterpart of
 // AddPoolDataToSheet, used by a pure-playoffs draw's Data sheet.
 //
-// Column A (bc-pnum A11, relabelled by bc-pnum review H8) is headed "Entry
+// Column A (bc-pnum A11, relabelled by bc-pnum review) is headed "Entry
 // order", 1-based: CreatePlayers (tournament.go) stamps each entrant's
 // PoolPosition 0-based (len(players) BEFORE the append), a value pool
 // distribution overwrites 1-based for every pooled competition but nothing
@@ -156,7 +156,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 // (unlike the "Player Number" column, which CreateNamesToPrint links to);
 // it is display-only, which is what makes a pure rename safe.
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) map[string]playerCellCoord {
-	// hasNumber (bc-pnum review H7): any player, not just the first -- see
+	// hasNumber (bc-pnum review): any player, not just the first -- see
 	// the identical rationale in AddPoolDataToSheet above.
 	hasNumber := false
 	for i := range players {

@@ -34,7 +34,7 @@ await import('./js/viewer_utils.jsx');
 // data.jsx well before any admin_*.js bundle; import it here so a mounted
 // admin component sees the same global, mirroring that browser load order.
 // (admin_pools.jsx's chusen rank inputs and admin_registration_desk.jsx's
-// rdPid both ES-import checkinPid directly from data.jsx (M12) rather than
+// rdPid both ES-import checkinPid directly from data.jsx rather than
 // reading window.checkinPid, so this side-effect import is not load-bearing
 // for either of those two -- ESM resolves their own `import` statement
 // regardless of what runs first here -- but it is still correct

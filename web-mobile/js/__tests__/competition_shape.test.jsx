@@ -926,7 +926,7 @@ describe('shapeConfigForSave', () => {
   });
 });
 
-// cutNumberPrefix (H13-js): the create form (admin_setup.jsx) and the
+// cutNumberPrefix: the create form (admin_setup.jsx) and the
 // settings form (admin_competition_settings.jsx) both used to cut the
 // player-number-prefix field with `.trim().substring(0, 3)`, which counts
 // UTF-16 CODE UNITS. An astral character (outside the Basic Multilingual

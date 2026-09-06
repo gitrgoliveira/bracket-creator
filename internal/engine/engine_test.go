@@ -178,7 +178,7 @@ func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {
 }
 
 // TestStartCompetition_BlankNumberPrefix_AssignsDefaultInsteadOfBareDigits is
-// PR #416 finding G6: the never-empty-prefix invariant was enforced only by
+// the bc-pnum review: the never-empty-prefix invariant was enforced only by
 // the HTTP handler's ensureNumberPrefix, so a NON-HTTP caller of
 // StartCompetition/GenerateDraw (createTestCompetition here mirrors any
 // caller that saves a Competition directly, bypassing that handler) numbers

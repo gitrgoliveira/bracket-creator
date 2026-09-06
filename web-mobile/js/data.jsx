@@ -436,7 +436,7 @@ function arraysEqual(a, b) {
 // not name alone: is the uniqueness invariant: the same name at a different
 // dojo is two distinct people. Keep in sync with the Go resolver.
 //
-// `p.id ? p.id : fallback`, NOT `p.id ?? fallback` (M12): the
+// `p.id ? p.id : fallback`, NOT `p.id ?? fallback`: the
 // chusen-candidates handler (handlers_competition.go) always emits an "id"
 // key, which is "" -- not null/undefined -- for a competitor with no UUID.
 // "" ?? fallback still returns "" (nullish coalescing only substitutes on

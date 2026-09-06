@@ -26,7 +26,7 @@ func captureExportLog(t *testing.T, fn func()) string {
 }
 
 // TestFirstUnnumberedPooledCompetitor pins the pure helper
-// ExportCompetitionXlsx's bc-pnum review H7 report-gap log line is built
+// ExportCompetitionXlsx's bc-pnum review report-gap log line is built
 // from: the first competitor, in pool then in-pool order, whose Number is
 // blank.
 func TestFirstUnnumberedPooledCompetitor(t *testing.T) {
@@ -60,7 +60,7 @@ func TestFirstUnnumberedPooledCompetitor(t *testing.T) {
 }
 
 // TestExportCompetitionXlsx_LogsUnnumberedPooledCompetitor pins bc-pnum
-// review H7's report-gap: AddPoolDataToSheet/AddPlayerDataToSheet degrade a
+// review's report-gap: AddPoolDataToSheet/AddPlayerDataToSheet degrade a
 // missing Number SILENTLY (D1's own report-over-fabricate rule: no
 // fabricated number is ever printed), so nothing said WHY a competitor's
 // tag/Player-Number/Names-to-Print cell came out blank. A numbered

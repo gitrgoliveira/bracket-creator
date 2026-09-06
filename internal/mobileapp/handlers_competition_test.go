@@ -560,7 +560,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, "C", stored.NumberPrefix, "NumberPrefix should be trimmed on PUT")
 	})
 
-	// H13-app: validateCompetitionLengths counted numberPrefix by BYTES
+	// validateCompetitionLengths counted numberPrefix by BYTES
 	// (validateMaxLen), but the message says "characters", the admin UI's
 	// maxLength="3" counts UTF-16 units, and the printed Tags/Names-to-Print
 	// sheets count RUNES -- so a 2-character, 4-byte prefix like "ÖÖ" was
@@ -2008,7 +2008,7 @@ func TestGenerateDrawHandler(t *testing.T) {
 // assign one BEFORE the engine draws -- there is no numberless mode to fall
 // back to (D1), so a legacy record cannot be allowed to draw without one.
 // TestPOSTStart_PreflightAssignsThenEngineCallFails_StillBroadcasts pins
-// M14's mutation guard: runWithNumberPrefixPreflight's shared tail must
+// the mutation guard for the shared tail: runWithNumberPrefixPreflight's shared tail must
 // still broadcast EventTournamentUpdated when the pre-flight itself
 // SUCCEEDED (assigned a prefix, saved it) but the subsequent engine call
 // then fails for an UNRELATED reason (here, StartCompetition's own
@@ -2383,7 +2383,7 @@ func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testi
 	})
 }
 
-// TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite pins G7:
+// TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite pins the atomic read-modify-write:
 // ensureNumberPrefix used to LoadCompetition, mutate the LOCAL copy, then
 // SaveCompetition it -- a read-modify-write with no lock spanning the gap
 // (only compRenameMu, a DIFFERENT mutex from the per-competition lock every
@@ -2407,7 +2407,7 @@ func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testi
 
 	const cid = "g7-concurrent-flip"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "G7 Concurrent Flip", Format: state.CompFormatMixed, Kind: "individual",
+		ID: cid, Name: "Concurrent Flip", Format: state.CompFormatMixed, Kind: "individual",
 		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
 		// NumberPrefix intentionally blank (ensureNumberPrefix assigns it) and
 		// HasParticipantIDs intentionally false (the concurrent flip sets it).
@@ -2438,7 +2438,7 @@ func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testi
 		"a concurrent flip racing ensureNumberPrefix's own read-modify-write must not be clobbered by a stale whole-struct save")
 }
 
-// TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix pins T2:
+// TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix pins the correlated skip warning:
 // checkUniqueCompFieldsTolerant already logged its own "skipping unreadable
 // sibling" line, and the assignment itself was not logged anywhere -- so a
 // derived prefix that persisted while a sibling was unreadable (and thus
@@ -2453,15 +2453,15 @@ func TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix(t *testin
 	// A sibling whose config.md will not parse: the tolerant uniqueness
 	// check logs its own "skipping unreadable sibling" line and moves on.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "broken-sibling-t2", Name: "Broken Sibling T2", NumberPrefix: "B",
+		ID: "broken-sibling", Name: "Broken Sibling", NumberPrefix: "B",
 	}))
 	require.NoError(t, os.WriteFile(
-		filepath.Join(tempDir, "competitions", "broken-sibling-t2", "config.md"),
+		filepath.Join(tempDir, "competitions", "broken-sibling", "config.md"),
 		[]byte("not front matter at all"), 0o600))
 
 	const cid = "t2-generate-draw"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "T2 Generate Draw", Format: state.CompFormatPlayoffs,
+		ID: cid, Name: "Generate Draw", Format: state.CompFormatPlayoffs,
 		Courts: []string{"A"}, Status: state.CompStatusSetup,
 		// NumberPrefix intentionally blank: this call is what assigns it.
 	}))
@@ -2489,7 +2489,7 @@ func TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix(t *testin
 	assert.Contains(t, logStr, "ensureNumberPrefix", "must log from ensureNumberPrefix's own assign branch, not just the tolerant check's own skip line")
 	assert.Contains(t, logStr, stored.NumberPrefix, "the log line must name the prefix THIS call assigned")
 	assert.Contains(t, logStr, cid, "the log line must name the competition")
-	assert.Contains(t, logStr, "broken-sibling-t2", "the log line must name the skipped sibling id, correlating it with the assignment")
+	assert.Contains(t, logStr, "broken-sibling", "the log line must name the skipped sibling id, correlating it with the assignment")
 }
 
 // TestGETNumberPrefixDefault exercises the R9 preview endpoint (item 8): it
@@ -2545,7 +2545,7 @@ func TestGETNumberPrefixDefault(t *testing.T) {
 	})
 }
 
-// TestGETCompetitionByID_IDCollidingWithFormerPreviewPath pins T3: gin v1.12
+// TestGETCompetitionByID_IDCollidingWithFormerPreviewPath pins the route move: gin v1.12
 // resolves a static route segment before a wildcard, so while the number-
 // prefix preview lived at GET /competitions/number-prefix-default, a
 // competition whose id happened to slug to "number-prefix-default" (e.g.
@@ -2575,7 +2575,7 @@ func TestGETCompetitionByID_IDCollidingWithFormerPreviewPath(t *testing.T) {
 		"must be the competition detail (carries id): the old static route shadowed this and returned the preview's {numberPrefix} body with no id key at all")
 }
 
-// TestGETNumberPrefixDefault_AnswersOnNewPath is T3's companion assertion:
+// TestGETNumberPrefixDefault_AnswersOnNewPath is the route move's companion assertion:
 // the moved preview endpoint still answers, just one path segment up.
 func TestGETNumberPrefixDefault_AnswersOnNewPath(t *testing.T) {
 	r, _, _, _, tempDir := setupTestRouter(t)
@@ -2682,7 +2682,7 @@ func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
 }
 
 // TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix
-// pins M1: the roster-only branch used to call checkUniqueCompFields(store,
+// pins the roster-save sibling scan: the roster-only branch used to call checkUniqueCompFields(store,
 // "", validatePrefix, id) UNCONDITIONALLY, even when validatePrefix was ""
 // (nothing to validate, the common already-prefixed case). checkUniqueCompFields
 // is the STRICT policy, so it still listed every sibling and LoadCompetition'd
@@ -2695,17 +2695,17 @@ func TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix(t *
 
 	const cidA = "m1-roster-a"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cidA, Name: "M1 Roster A", Format: state.CompFormatMixed, Kind: "individual",
+		ID: cidA, Name: "Roster A", Format: state.CompFormatMixed, Kind: "individual",
 		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
 		NumberPrefix: "M", // already prefixed: this roster PUT never moves it.
 	}))
 	const cidB = "m1-roster-b"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cidB, Name: "M1 Roster B", NumberPrefix: "N"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: cidB, Name: "Roster B", NumberPrefix: "N"}))
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cidB, "config.md"), []byte("not front matter at all"), 0o600))
 
 	body, _ := json.Marshal(state.Competition{
 		ID:   cidA,
-		Name: "M1 Roster A",
+		Name: "Roster A",
 		Players: []domain.Player{
 			{ID: "p1", Name: "Alice", Dojo: "Dojo Alice"},
 		},
@@ -2724,9 +2724,9 @@ func TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix(t *
 }
 
 // TestResolvePutNumberPrefix_MovedPrefixStillValidatedAgainstCollision is
-// M1's companion case, exercised directly against the shared primitive
+// the companion case, exercised directly against the shared primitive
 // (white-box, same package): whenever a write actually MOVES the prefix,
-// the uniqueness/ambiguity check must still run -- M1 only skips it when
+// the uniqueness/ambiguity check must still run -- the roster branch only skips it when
 // NOTHING moved. This is tested directly against resolvePutNumberPrefix
 // rather than through the roster-only HTTP PUT because the roster branch
 // only ever reaches "moved" via auto-heal (blank -> DefaultNumberPrefix),
@@ -2738,7 +2738,7 @@ func TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix(t *
 // client-supplied) already exercises this same invariant end-to-end via
 // TestPUTCompetition_GrandfathersUnmovedAmbiguousOrDuplicateStoredValues's
 // "settings PUT MOVING the prefix..." subtest; this test pins the identical
-// invariant in the ONE function (M14) both branches now share, independent
+// invariant in the ONE function both branches now share, independent
 // of which HTTP branch can reach it.
 func TestResolvePutNumberPrefix_MovedPrefixStillValidatedAgainstCollision(t *testing.T) {
 	_, store, eng, _, tempDir := setupTestRouter(t)
@@ -3078,7 +3078,7 @@ func TestPUTCompetition_SettingsOnlyResponseCarriesProvisionalNumbers(t *testing
 }
 
 // TestPUTCompetition_SwissResponseProvisionalNumbersKeyIsNullNotAbsent pins
-// M8: a Swiss competition's ProvisionalNumbers is always nil
+// a Swiss competition's ProvisionalNumbers is always nil
 // (provisionalCompetitorNumbers' own guard: Swiss numbers nothing before the
 // draw, mp-swnm), but the JSON key must still be PRESENT (serialised as
 // `null`), not omitted. admin.jsx's list-merge does
@@ -3733,7 +3733,7 @@ func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
 	t.Run("an unreadable sibling is logged and skipped, not surfaced as an error", func(t *testing.T) {
 		skipped, err := checkUniqueCompFieldsTolerant(store, "NewComp", "K", "")
 		assert.NoError(t, err, "the pre-flight variant must never fail over a sibling it cannot even read")
-		assert.Equal(t, []string{"broken"}, skipped, "T2: the skipped sibling id must be surfaced so a caller can correlate it with what it assigned")
+		assert.Equal(t, []string{"broken"}, skipped, "the skipped sibling id must be surfaced so a caller can correlate it with what it assigned")
 	})
 
 	// D4(b): a REAL collision the tolerant variant CAN see is still refused,
@@ -4549,13 +4549,13 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		assert.Len(t, players, 2, "participants.csv must have landed despite the broken pools.csv")
 	})
 
-	// bc-pnum [review] / M5: the sibling of "prefix moved: 500..." above, but
+	// bc-pnum [review]: the sibling of "prefix moved: 500..." above, but
 	// on the ROSTER-only branch. A roster-only PUT CAN move the prefix --
 	// when it heals a blank stored one (bc-pnum A3) -- and when it does, a
 	// renumber failure right after is this write's own damage exactly like
 	// the settings branch, not inherited. Before bc-pnum's numberPrefixMoved
 	// fix, this case silently took the "inherited, 200" path and swallowed
-	// the half-landed prefix with no error and no broadcast. M5: the 500's
+	// the half-landed prefix with no error and no broadcast. The 500's
 	// WORDING must also name what THIS PUT actually persisted (a roster),
 	// not the settings branch's wording -- what landed on disk here is
 	// participants.csv (+ the healed prefix in config.md), never a settings
@@ -4590,9 +4590,9 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		assert.Equalf(t, http.StatusInternalServerError, w.Code,
 			"a roster PUT that itself assigned the prefix, then failed to renumber, is this write's own fault: %s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "the roster was saved",
-			"M5: a roster-only PUT's 500 must say ROSTER, not settings -- that is what this write actually persisted")
+			"a roster-only PUT's 500 must say ROSTER, not settings -- that is what this write actually persisted")
 		assert.NotContains(t, w.Body.String(), "settings were saved",
-			"M5: the settings-branch wording must not leak onto a roster-only PUT's error")
+			"the settings-branch wording must not leak onto a roster-only PUT's error")
 
 		stored, err := store.LoadCompetition(cid)
 		require.NoError(t, err)

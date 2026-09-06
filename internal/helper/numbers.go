@@ -24,8 +24,8 @@ const MaxNumberPrefixLen = 3
 // with n, no separator (e.g. CompetitorNumber("K", 3) == "K3"). This is the
 // ONE composition of the number string; AssignPlayerNumbers below calls it
 // in its own loop so a caller that needs just one number (e.g. a
-// provisional preview computed without loading/copying a whole roster,
-// G10) uses the identical primitive rather than a second hand-spelled
+// provisional preview computed without loading/copying a whole roster)
+// uses the identical primitive rather than a second hand-spelled
 // `prefix + strconv(n)`.
 func CompetitorNumber(prefix string, n int) string {
 	return fmt.Sprintf("%s%d", prefix, n)
@@ -56,7 +56,7 @@ func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 // carries that prefix.
 //
 // The split is prefix-DRIVEN, not guessed from number's own shape (bc-pnum
-// review H1/H2): number was previously cut at its first ASCII digit, which
+// review): number was previously cut at its first ASCII digit, which
 // silently mistook a digit-bearing prefix (DefaultNumberPrefix can legitimately
 // derive "K2" or "KO2") for the boundary -- competitor 1 under prefix "KO2" is
 // "KO21", which the old first-digit rule split as "KO"/"21" (reading as
@@ -105,7 +105,7 @@ func NumberPools(pools []Pool, prefix string) {
 }
 
 // NormalizeNumberPrefix is the ONE case/whitespace fold every number-prefix
-// uniqueness decision compares under (bc-pnum review H10/H12): before this,
+// uniqueness decision compares under (bc-pnum review): before this,
 // the fold was spelled three times independently -- strings.EqualFold at the
 // mobileapp handler boundary, strings.ToUpper here in
 // NumberPrefixesAmbiguous, and a second strings.ToUpper building
@@ -173,7 +173,7 @@ func isDigitExtension(long, short string) bool {
 // produce the same prefix, which is what lets the create form show the operator
 // the value the server would pick.
 func DefaultNumberPrefix(name string, taken []string) string {
-	// bc-pnum review H10/H12: ONE loop over the trimmed taken slice, no
+	// bc-pnum review: ONE loop over the trimmed taken slice, no
 	// separate upper-cased `used` map -- exact equality and ambiguity are
 	// both decided under the same NormalizeNumberPrefix fold, so a
 	// candidate can never pass one check under a fold the other rejects.

@@ -374,7 +374,7 @@ func validateCompetitionLengths(comp *state.Competition) error {
 	if err := validateMaxLen("name", comp.Name, MaxLenCompetitionName); err != nil {
 		return err
 	}
-	// H13-app: rune count, not byte count -- see validateMaxRunes.
+	// rune count, not byte count -- see validateMaxRunes.
 	if err := validateMaxRunes("numberPrefix", comp.NumberPrefix, MaxLenCompetitionNumberPrefix); err != nil {
 		return err
 	}
@@ -469,7 +469,7 @@ func assignDefaultNumberPrefix(eng *engine.Engine, comp *state.Competition, excl
 // have already changed and must broadcast EventTournamentUpdated even on the
 // error path.
 //
-// G7: the read (LoadCompetition) and the write (SaveCompetition) used to be
+// the read (LoadCompetition) and the write (SaveCompetition) used to be
 // two separate calls, coordinated only by compRenameMu -- a DIFFERENT mutex
 // from the per-competition lock every other writer takes (SaveCompetition,
 // UpdateCompetitionChanged, ...). A concurrent per-comp writer that does not
@@ -517,7 +517,7 @@ func ensureNumberPrefix(store *state.Store, eng *engine.Engine, id string, allow
 			if err != nil {
 				return nil, err
 			}
-			// T2: correlate the skip and the assignment into ONE warning. A
+			// correlate the skip and the assignment into ONE warning. A
 			// derived prefix persisted while a sibling was unreadable (and thus
 			// possibly colliding once it loads) was otherwise untraceable: the
 			// skip logged its own line with no id back to what got assigned,
@@ -600,7 +600,7 @@ func respondNumberPrefixPreflightError(c *gin.Context, hub *Hub, assigned bool, 
 	}
 }
 
-// runWithNumberPrefixPreflight (M14) is the shared
+// runWithNumberPrefixPreflight is the shared
 // ensureNumberPrefix -> engineCall -> error-classification sequence common to
 // POST .../start and POST .../generate-draw: the pre-flight's OWN failure is
 // handled by respondNumberPrefixPreflightError (never conflated with an
@@ -662,7 +662,7 @@ func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, 
 }
 
 // resolvePutNumberPrefix is the PUT /competitions/:id transform's shared
-// inherit -> moved -> validate-if-moved sequence (M14), extracted from the
+// inherit -> moved -> validate-if-moved sequence, extracted from the
 // two near-identical bodies the roster-only and settings-only branches used
 // to carry: inheritOrAssignNumberPrefix mutates target's NumberPrefix in
 // place, moved reports whether THIS call actually changed it away from
@@ -672,7 +672,7 @@ func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, 
 // settings branch passes comp.Name only when it differs from current.Name)
 // and the prefix ONLY when moved is true.
 //
-// M1: when neither applies (the common already-set-prefix roster save),
+// when neither applies (the common already-set-prefix roster save),
 // this skips checkUniqueCompFields entirely rather than call it with two
 // empty fields to no-op on -- checkUniqueCompFieldsSiblingPolicy's own
 // early return covers any OTHER caller that reaches it with both fields
@@ -724,7 +724,7 @@ func checkUniqueCompFields(store *state.Store, name, prefix, excludeID string) (
 // operator is trying to start is not the broken one, and they have no
 // "retry with a different value" recourse -- and GET /competitions and
 // MigrateNumberPrefixes already apply the same log-and-skip rule to a bad
-// sibling. Returns the ids of every sibling this call skipped (T2:
+// sibling. Returns the ids of every sibling this call skipped (so
 // ensureNumberPrefix's assign branch correlates these into ONE warning
 // naming the assigned prefix alongside them, rather than leaving the skip
 // and the assignment as two untied log lines) and a single error already
@@ -743,7 +743,7 @@ func checkUniqueCompFieldsTolerant(store *state.Store, name, prefix, excludeID s
 
 func checkUniqueCompFieldsSiblingPolicy(store *state.Store, name, prefix, excludeID string, tolerateUnreadableSibling bool) (skipped []string, infraErr, validationErr error) {
 	prefix = strings.TrimSpace(prefix)
-	// M1: nothing to validate, so nothing to list. Both fields are exempt
+	// nothing to validate, so nothing to list. Both fields are exempt
 	// from the check anyway (see the doc comment above); returning here
 	// before ListCompetitions/LoadCompetition means a caller that validates
 	// only what it moved (bc-pnum [blocker]) and moved neither field pays no
@@ -896,7 +896,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 	// path makes, so the value previewed here is the value a save would
 	// actually assign.
 	//
-	// T3: deliberately NOT under /competitions/ (moved from
+	// deliberately NOT under /competitions/ (moved from
 	// /competitions/number-prefix-default). gin v1.12 resolves a static
 	// segment before a wildcard, so a competition whose id slugs to
 	// "number-prefix-default" (e.g. name "Number Prefix Default", or an
@@ -1715,7 +1715,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// same inherit+assign step the settings branch runs below.
 					// A no-op when current already carries a prefix
 					// (assignDefaultNumberPrefix's own guard). bc-pnum
-					// [blocker]/M1: a write validates only what it moves -- a
+					// [blocker]: a write validates only what it moves -- a
 					// roster-only PUT never changes Name (see the comment
 					// above this branch), so "" is passed for validateName,
 					// the same exemption checkUniqueCompFields already gives
@@ -1728,8 +1728,8 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// actually changes its own prefix. Re-validating an
 					// unmoved stored value on every future roster save would
 					// refuse an operator's roster edit forever over a field
-					// this write never touched. M14: shared with the settings
-					// branch below via resolvePutNumberPrefix (M1's own
+					// this write never touched. Shared with the settings
+					// branch below via resolvePutNumberPrefix (the roster branch's own
 					// helper, its doc comment covers the target/excludeID
 					// choice here).
 					var infraErr error
@@ -1969,11 +1969,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// (inside resolvePutNumberPrefix) inherits BEFORE
 				// assignDefaultNumberPrefix runs, so that helper only ever
 				// derives a value for a competition that truly has none stored
-				// (G7's legacy shape). Without this, any settings save that
+				// (the legacy shape). Without this, any settings save that
 				// simply omits the field would invent a NEW prefix for a
 				// competition that already had one, renumbering every competitor
 				// and invalidating printed tags for no reason the operator asked
-				// for. Shared with the roster-only branch above (bc-pnum A3/M14).
+				// for. Shared with the roster-only branch above (bc-pnum A3).
 				//
 				// bc-pnum [blocker]: numberPrefixMoved is computed HERE, right
 				// after the prefix is resolved and before `current.NumberPrefix`
@@ -2426,7 +2426,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				// The retry itself takes the non-fatal branch above (the prefix
 				// no longer moves) and heals pools.csv once it is repaired.
 				hub.Broadcast(EventTournamentUpdated, nil)
-				// M5: name what THIS PUT actually persisted. comp.Players != nil
+				// name what THIS PUT actually persisted. comp.Players != nil
 				// is the roster-only branch (bc-pnum A3's own healed-prefix case
 				// included, since numberPrefixMoved is set on BOTH branches): a
 				// "settings were saved" 500 answering a roster-only PUT told the
@@ -2601,7 +2601,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if !ok {
 			return
 		}
-		// bc-pnum A5(b) / M14: the shared pre-flight -> engine call ->
+		// bc-pnum A5(b): the shared pre-flight -> engine call ->
 		// error-classification sequence, see runWithNumberPrefixPreflight's
 		// doc comment. A false return means the response is already written.
 		if !runWithNumberPrefixPreflight(c, store, eng, hub, id, engine.CanStart, eng.StartCompetition) {

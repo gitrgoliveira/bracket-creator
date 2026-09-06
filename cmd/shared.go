@@ -37,7 +37,7 @@ func resolveNumberPrefix(numberPrefix, titlePrefix string) (string, error) {
 	if trimmed == "" {
 		return helper.DefaultNumberPrefix(titlePrefix, nil), nil
 	}
-	// utf8.RuneCountInString, not len (bc-pnum review H13-cli): the error
+	// utf8.RuneCountInString, not len (bc-pnum review): the error
 	// message says "characters", but len counts BYTES, so a 2-character
 	// multi-byte prefix like "ÖÖ" (4 UTF-8 bytes) was wrongly refused as
 	// too long.

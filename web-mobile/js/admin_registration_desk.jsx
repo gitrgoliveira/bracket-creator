@@ -58,7 +58,7 @@ function rdPersonKey(p) {
 // composite "name|dojo" key the server resolves on (resolveParticipantIndex in
 // internal/state/participants.go): the (name, dojo) pair, not name alone, is
 // the uniqueness invariant. This is the SAME rule as checkinPid (data.jsx),
-// which is the one owner of it (M12): delegate rather than keep a second,
+// which is the one owner of it: delegate rather than keep a second,
 // drift-prone copy. The old "kept inline so the standalone unit tests work
 // under vitest" justification was stale -- data.jsx ES-exports checkinPid, so
 // importing it works the same under vitest as any other module.

@@ -77,7 +77,7 @@ describe('AdminParticipants provisional numbers (bc-pnum D8)', () => {
     expect(container.querySelectorAll('.num-prefix--provisional').length).toBe(0);
   });
 
-  // M8-JS: the Go side can drop `omitempty` on provisionalNumbers, so a PUT
+  // the Go side can drop `omitempty` on provisionalNumbers, so a PUT
   // response whose derivation is nil serialises the key as JSON `null`
   // rather than omitting it. The SPA's update merge is `{ ...c, ...updatedComp }`
   // (a shallow spread), so a `null` in updatedComp OVERWRITES the prior
@@ -87,7 +87,7 @@ describe('AdminParticipants provisional numbers (bc-pnum D8)', () => {
   // check against a non-empty roster) is what clears the stale badges when
   // that merge happens, rather than a fallback silently keeping the old
   // numbers on screen.
-  it('clears stale provisional numbers after a merge whose provisionalNumbers is null (M8-JS)', async () => {
+  it('clears stale provisional numbers after a merge whose provisionalNumbers is null', async () => {
     const withNumbers = makeCompetition({ provisionalNumbers: ['K1', 'K2'] });
     let container, rerender;
     await act(async () => {

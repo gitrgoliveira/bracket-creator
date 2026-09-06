@@ -1,4 +1,4 @@
-// Regression test for M10 (the app.jsx onCreated ingress): state.Tournament
+// Regression test for the app.jsx onCreated ingress: state.Tournament
 // has no Competitions field, so POST /api/tournament's response body carries
 // no `competitions` key. Every other tournament producer normalises to an
 // array (load() assigns the fetched list; admin_shell's refresh spreads

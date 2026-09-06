@@ -95,7 +95,7 @@ func TestResolveNumberPrefix(t *testing.T) {
 		assert.Equal(t, "K", got)
 	})
 
-	// bc-pnum review H13-cli: the length check counted BYTES while the error
+	// bc-pnum review: the length check counted BYTES while the error
 	// message says "characters", so a 2-character multi-byte prefix like
 	// "ÖÖ" (4 UTF-8 bytes) was wrongly refused as too long even though
 	// MaxNumberPrefixLen is 3 CHARACTERS.

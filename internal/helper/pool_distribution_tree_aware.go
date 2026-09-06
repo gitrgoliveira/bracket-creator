@@ -533,7 +533,7 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 // (O(1) per call, indexed by the SAME id this type's caller already has).
 type dojoCounter func(poolIdx int, id int) int
 
-// earliestDojoMeeting (bc-pnum review H9: moved to
+// earliestDojoMeeting (bc-pnum review: moved to
 // pool_distribution_tree_aware_test.go, its one caller) is the reference
 // oracles' entry point into earliestDojoMeetingScan -- a thin,
 // throwaway-scratch-slice wrapper kept only because the tests and reference
@@ -699,7 +699,7 @@ func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int, ids dojoID
 	for _, p := range extra {
 		footprint[ids.of(p.Dojo)]++
 	}
-	// bc-pnum review H14(b): the ceil-divide was recomputed on every call
+	// bc-pnum review(b): the ceil-divide was recomputed on every call
 	// (improveDojoMeetings' exchange scan calls this closure on the order
 	// of numPools^2*poolSize^2 times per pass), even though its answer
 	// depends only on id and never changes once footprint is built.

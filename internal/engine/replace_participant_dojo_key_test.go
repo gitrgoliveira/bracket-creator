@@ -49,7 +49,7 @@ func TestReplaceParticipantInDraw_DojoConflictUsesNormalisedDojo(t *testing.T) {
 	assert.Contains(t, warnings[0], "Pool A")
 }
 
-// TestMatchesParticipant_NormalizedDojoComparison is PR #416 finding G2's
+// TestMatchesParticipant_NormalizedDojoComparison is the bc-pnum review's
 // first half: an id-less pools.csv row's identity match must use the SAME
 // dojo normalisation (case, diacritics, whitespace) as the dojo-conflict
 // warning above, rather than a raw string compare that disagrees with it.
@@ -74,7 +74,7 @@ func TestMatchesParticipant_NormalizedDojoComparison(t *testing.T) {
 }
 
 // TestReplaceParticipantInDraw_LegacyDojoOnlyEdit_NoSelfAmbiguityWarning is
-// PR #416 finding G2's second half. A legacy id-less roster's single "Alice"
+// the bc-pnum review's second half. A legacy id-less roster's single "Alice"
 // is edited on DOJO ALONE (name unchanged): SaveParticipants immediately
 // mints a fresh id for any id-less row on write (marshalParticipantsCSV), so
 // by the time the ambiguity scan re-reads participants.csv, Alice's own row

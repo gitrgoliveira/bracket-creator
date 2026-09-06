@@ -151,7 +151,7 @@ func tiebreakSelectionField(useIDs bool) string {
 }
 
 // parseTiebreakSelection binds and validates the {teamNames, teamIds}
-// selection body shared by POST and DELETE .../league-tiebreak (M4): length
+// selection body shared by POST and DELETE.../league-tiebreak: length
 // parity, blank teamIds entries, and the teamNames/teamIds duplicate checks
 // used to be three near-identical blocks, one hand-copied into each
 // handler, that had already drifted on wording between the two. This is the
@@ -207,7 +207,7 @@ func parseTiebreakSelection(c *gin.Context) (req leagueTiebreakRequest, useIDs b
 }
 
 // inGroup returns the per-DH-row membership test shared by POST's
-// pairsExist count and DELETE's group-collection loop (M4).
+// pairsExist count and DELETE's group-collection loop.
 // generatePoolDaihyosenMatches only began stamping SideAID/SideBID on
 // 2026-08-29; a DH row written before that carries blank ids. Under
 // teamIds selection, a request-level "use ids for everything" decision made
@@ -441,7 +441,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		}
 		pairsNeeded := groupSize * (groupSize - 1) / 2
 		pairsExist := 0
-		// M4: inGroup decides membership per DH ROW (id when THIS row carries
+		// inGroup decides membership per DH ROW (id when THIS row carries
 		// both ids, else the name fallback), not once for the whole request
 		// -- see inGroup's own doc comment for why a request-level decision
 		// under-counted pairsExist for a legacy id-less row.
@@ -536,7 +536,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			// selection that splits a tie-breaker group: a DH match with exactly
 			// one side in the request set means the operator named a partial
 			// group, which would orphan the remaining round-robin bouts.
-			// M4: inGroup decides membership per DH ROW (id when THIS row
+			// inGroup decides membership per DH ROW (id when THIS row
 			// carries both ids, else the name fallback), the SAME closure
 			// POST's pairsExist loop uses -- see inGroup's own doc comment.
 			var groupDH []state.MatchResult

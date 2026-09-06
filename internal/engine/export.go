@@ -34,7 +34,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 
-	// bc-pnum review H7: report, never fail, an unnumbered POOLED
+	// bc-pnum review: report, never fail, an unnumbered POOLED
 	// competitor under a numbered competition. AddPoolDataToSheet /
 	// AddPlayerDataToSheet degrade silently (that is D1's own
 	// report-over-fabricate rule -- no fabricated number is ever printed),
@@ -170,7 +170,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 
 // firstUnnumberedPooledCompetitor returns the first competitor across every
 // pool, in pool then in-pool order, whose Number is blank -- for
-// ExportCompetitionXlsx's bc-pnum review H7 report-gap log line above. ok is
+// ExportCompetitionXlsx's bc-pnum review report-gap log line above. ok is
 // false when pools is empty or every competitor carries a Number.
 func firstUnnumberedPooledCompetitor(pools []helper.Pool) (name, dojo string, ok bool) {
 	for _, pool := range pools {

@@ -503,7 +503,7 @@ type Competition struct {
 	// effective-playoffs competition (its number IS participant order,
 	// composed on every read, so it is never provisional -- see
 	// Player.Number). Never persisted; nil (not omitted) in every other
-	// status. M8: deliberately NO `omitempty` -- the SPA merges a PUT
+	// status. Deliberately NO `omitempty` -- the SPA merges a PUT
 	// response over its list entry via `{ ...c, ...updatedComp }`, and a
 	// dropped key leaves a same-length stale array in place, while a nil
 	// slice serialises as JSON `null` and clears it. The key must always be

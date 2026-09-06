@@ -357,7 +357,7 @@ func TestMigrateNumberPrefixes_ResumesNumberingOnTheNextStart(t *testing.T) {
 }
 
 // TestDefaultNumberPrefixFor_LogsCorrelatedWarningOnSkippedSibling is PR #416
-// finding T2: an unreadable sibling (unparseable config.md) is tolerated by
+// the review finding: an unreadable sibling (unparseable config.md) is tolerated by
 // takenNumberPrefixes (log-and-skip, never refuse), but the resulting
 // assignment was logged, if at all, with no link back to WHICH sibling(s)
 // were invisible to it -- an operator investigating a possible prefix

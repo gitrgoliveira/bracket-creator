@@ -59,7 +59,7 @@ func TestPlaceSeedIndices_WrappedSeedAvoidsDojoMatePool(t *testing.T) {
 }
 
 // TestPlaceSeedIndices_DistinctDojoWrappedSeedStaysNatural pins bc-pnum
-// review H6: a wrapped seed relocates ONLY to avoid landing on a DOJO-MATE's
+// review: a wrapped seed relocates ONLY to avoid landing on a DOJO-MATE's
 // pool (bc-drwx item 4's exact scope), never merely because a seed-free pool
 // happens to exist elsewhere. Seeds 1, 2, 3 and 5 over 4 pools with FOUR
 // DISTINCT dojos: nothing here is a dojo-mate of anything else, so seed 5

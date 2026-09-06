@@ -406,6 +406,39 @@ func TestValidateMaxLen(t *testing.T) {
 	}
 }
 
+// TestValidateMaxRunes pins H13-app: unlike validateMaxLen (byte length),
+// validateMaxRunes counts RUNES, so a multi-byte-but-few-character string
+// like "ÖÖ" (2 runes, 4 bytes) must pass a cap of 3 even though it exceeds
+// 3 BYTES.
+func TestValidateMaxRunes(t *testing.T) {
+	tests := []struct {
+		name      string
+		val       string
+		max       int
+		wantField string
+	}{
+		{name: "empty under cap: ok", val: "", max: 3},
+		{name: "ASCII exactly at cap: ok", val: "ABC", max: 3},
+		{name: "ASCII one over cap: rejected", val: "ABCD", max: 3, wantField: "numberPrefix"},
+		{name: "2-rune, 4-byte value under a 3-rune cap: ok (the H13-app fix)", val: "ÖÖ", max: 3},
+		{name: "3-rune, 6-byte value exactly at cap: ok", val: "ÖÖÖ", max: 3},
+		{name: "4-rune value over cap: rejected even though runes, not bytes, are counted", val: "ÖÖÖÖ", max: 3, wantField: "numberPrefix"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateMaxRunes("numberPrefix", tt.val, tt.max)
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
 // TestScoreRequestValidate_LengthCaps verifies the persisted-string
 // caps in ScoreRequest.Validate. decisionReason was previously
 // unbounded on the score endpoint (only DecisionRequest enforced

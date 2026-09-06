@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -112,6 +113,26 @@ const (
 // trimming first if trimming applies.
 func validateMaxLen(field, val string, max int) error {
 	if len(val) > max {
+		return &ValidationError{
+			Field:   field,
+			Message: fmt.Sprintf("must be <= %d characters", max),
+		}
+	}
+	return nil
+}
+
+// validateMaxRunes returns a ValidationError when val exceeds max RUNES
+// (display characters), not bytes. H13-app: numberPrefix's own message says
+// "characters", the admin UI's maxLength="3" counts UTF-16 units, and the
+// printed Tags/Names-to-Print sheets count runes -- so a byte-length check
+// refused a 2-character, 4-byte prefix like "ÖÖ" as too long, contradicting
+// every other measure of it. Scoped to numberPrefix ONLY: validateMaxLen's
+// ~45 other callers (name, dojo, free-text audit fields, ...) size their cap
+// against disk/parse cost, which scales with BYTES, and switching them to
+// runes would silently loosen those caps. Caller is responsible for
+// trimming first if trimming applies.
+func validateMaxRunes(field, val string, max int) error {
+	if utf8.RuneCountInString(val) > max {
 		return &ValidationError{
 			Field:   field,
 			Message: fmt.Sprintf("must be <= %d characters", max),

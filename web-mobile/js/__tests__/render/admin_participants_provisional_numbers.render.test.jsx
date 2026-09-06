@@ -76,4 +76,54 @@ describe('AdminParticipants provisional numbers (bc-pnum D8)', () => {
 
     expect(container.querySelectorAll('.num-prefix--provisional').length).toBe(0);
   });
+
+  // M8-JS: the Go side can drop `omitempty` on provisionalNumbers, so a PUT
+  // response whose derivation is nil serialises the key as JSON `null`
+  // rather than omitting it. The SPA's update merge is `{ ...c, ...updatedComp }`
+  // (a shallow spread), so a `null` in updatedComp OVERWRITES the prior
+  // array on `c` rather than leaving it alone. This pins that
+  // provisionalNumberMap's own length-mismatch guard (data.jsx: `provisionalNumbers
+  // || []` defaults null to an empty array, which then fails the length
+  // check against a non-empty roster) is what clears the stale badges when
+  // that merge happens, rather than a fallback silently keeping the old
+  // numbers on screen.
+  it('clears stale provisional numbers after a merge whose provisionalNumbers is null (M8-JS)', async () => {
+    const withNumbers = makeCompetition({ provisionalNumbers: ['K1', 'K2'] });
+    let container, rerender;
+    await act(async () => {
+      const result = render(
+        <AdminParticipants
+          c={withNumbers}
+          tournament={{ name: 'Spring Taikai', courts: ['A'] }}
+          onUpdate={noop}
+          password=""
+          showToast={noop}
+          onSection={noop}
+          onBack={noop}
+        />
+      );
+      container = result.container;
+      rerender = result.rerender;
+    });
+    expect(container.querySelectorAll('.num-prefix--provisional').length).toBe(2);
+
+    // Same two players, but provisionalNumbers is explicitly null: the shape
+    // `{ ...c, ...updatedComp }` produces when a nil derivation serialises
+    // without omitempty.
+    const afterNullMerge = { ...withNumbers, provisionalNumbers: null };
+    await act(async () => {
+      rerender(
+        <AdminParticipants
+          c={afterNullMerge}
+          tournament={{ name: 'Spring Taikai', courts: ['A'] }}
+          onUpdate={noop}
+          password=""
+          showToast={noop}
+          onSection={noop}
+          onBack={noop}
+        />
+      );
+    });
+    expect(container.querySelectorAll('.num-prefix--provisional').length).toBe(0);
+  });
 });

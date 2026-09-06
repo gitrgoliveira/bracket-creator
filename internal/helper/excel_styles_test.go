@@ -3,6 +3,8 @@ package helper
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -11,9 +13,7 @@ func TestGetNameIDStyle(t *testing.T) {
 	defer f.Close()
 
 	style := getNameIDStyle(f)
-	if style <= 0 {
-		t.Errorf("Expected positive style ID, got %d", style)
-	}
+	assert.Positive(t, style, "expected positive style ID")
 }
 
 func TestGetNameIDPositionStyle(t *testing.T) {
@@ -21,9 +21,7 @@ func TestGetNameIDPositionStyle(t *testing.T) {
 	defer f.Close()
 
 	style := getNameIDPositionStyle(f)
-	if style <= 0 {
-		t.Errorf("Expected positive style ID, got %d", style)
-	}
+	assert.Positive(t, style, "expected positive style ID")
 }
 
 // TestNameIDPositionStyle_ShrinkToFit pins bc-pnum A9's Names-to-Print half:
@@ -39,12 +37,9 @@ func TestNameIDPositionStyle_ShrinkToFit(t *testing.T) {
 
 	styleID := getNameIDPositionStyle(f)
 	style, err := f.GetStyle(styleID)
-	if err != nil {
-		t.Fatalf("GetStyle: %v", err)
-	}
-	if style.Alignment == nil || !style.Alignment.ShrinkToFit {
-		t.Errorf("expected the Names-to-Print position style to set ShrinkToFit, got %+v", style.Alignment)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, style.Alignment)
+	assert.True(t, style.Alignment.ShrinkToFit, "expected the Names-to-Print position style to set ShrinkToFit")
 }
 
 func TestGetTimeStyle(t *testing.T) {
@@ -52,9 +47,7 @@ func TestGetTimeStyle(t *testing.T) {
 	defer f.Close()
 
 	style := getTimeStyle(f)
-	if style <= 0 {
-		t.Errorf("Expected positive style ID, got %d", style)
-	}
+	assert.Positive(t, style, "expected positive style ID")
 }
 
 func TestGetDurationStyle(t *testing.T) {
@@ -62,9 +55,7 @@ func TestGetDurationStyle(t *testing.T) {
 	defer f.Close()
 
 	style := getDurationStyle(f)
-	if style <= 0 {
-		t.Errorf("Expected positive style ID, got %d", style)
-	}
+	assert.Positive(t, style, "expected positive style ID")
 }
 
 // TestNameIDStyle_ShrinkToFit pins the name half of the Names-to-Print ruling:
@@ -73,15 +64,10 @@ func TestNameIDStyle_ShrinkToFit(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
 	style, err := f.GetStyle(buildNameIDStyle(f))
-	if err != nil {
-		t.Fatalf("GetStyle: %v", err)
-	}
-	if style.Alignment == nil || !style.Alignment.ShrinkToFit {
-		t.Errorf("expected the Names-to-Print name style to set ShrinkToFit, got %+v", style.Alignment)
-	}
-	if style.Alignment != nil && style.Alignment.WrapText {
-		t.Errorf("the name cell must shrink, never wrap: %+v", style.Alignment)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, style.Alignment)
+	assert.True(t, style.Alignment.ShrinkToFit, "expected the Names-to-Print name style to set ShrinkToFit")
+	assert.False(t, style.Alignment.WrapText, "the name cell must shrink, never wrap")
 }
 
 // TestNamesToPrintColumnsFitOnePage pins the operator ruling that the number
@@ -91,22 +77,16 @@ func TestNamesToPrintColumnsFitOnePage(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
 	const sheet = "Names to Print A"
-	if _, err := f.NewSheet(sheet); err != nil {
-		t.Fatalf("NewSheet: %v", err)
-	}
+	_, err := f.NewSheet(sheet)
+	require.NoError(t, err)
 	setupNamesToPrintLayout(f, sheet)
 	a, err := f.GetColWidth(sheet, "A")
-	if err != nil {
-		t.Fatalf("GetColWidth A: %v", err)
-	}
+	require.NoError(t, err)
 	b, err := f.GetColWidth(sheet, "B")
-	if err != nil {
-		t.Fatalf("GetColWidth B: %v", err)
-	}
-	if a+b > namesToPrintPageWidthUnits {
-		t.Errorf("Names to Print columns A (%v) + B (%v) = %v exceed the %d units an A3 landscape page offers; the sheet would print numbers and names as separate page runs", a, b, a+b, namesToPrintPageWidthUnits)
-	}
-	if a != namesToPrintNumberColWidth || b != namesToPrintNameColWidth {
-		t.Errorf("column widths must be the fixed constants (%d, %d), got (%v, %v)", namesToPrintNumberColWidth, namesToPrintNameColWidth, a, b)
-	}
+	require.NoError(t, err)
+	assert.LessOrEqualf(t, a+b, float64(namesToPrintPageWidthUnits),
+		"Names to Print columns A (%v) + B (%v) = %v exceed the %d units an A3 landscape page offers; the sheet would print numbers and names as separate page runs",
+		a, b, a+b, namesToPrintPageWidthUnits)
+	assert.Equal(t, float64(namesToPrintNumberColWidth), a, "column A width must be the fixed constant")
+	assert.Equal(t, float64(namesToPrintNameColWidth), b, "column B width must be the fixed constant")
 }

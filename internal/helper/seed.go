@@ -757,27 +757,29 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 		}
 
 		placed := false
-		// Wrapped-seed preference passes (posInPool > 0 means rankIdx >=
+		// Wrapped-seed preference pass (posInPool > 0 means rankIdx >=
 		// numPools, i.e. this seed is beyond the first full round and would
 		// otherwise land wherever the modulo fallback happens to point).
 		// Never taken for posInPool == 0 (every seed within the first
 		// numPools ranks), so this is a no-op for every roster the
 		// pre-existing seed-equality pins already covered.
+		//
+		// Scoped EXACTLY to bc-drwx item 4's rule -- "a wrapped seed avoids
+		// a DOJO-MATE's pool" -- and no further: the first candidate
+		// (scanned in the SAME rank-priority order the natural arithmetic
+		// already defines) whose existing seed(s) are not a dojo-mate of
+		// this one. A pool already holding a DIFFERENT dojo's seed is fair
+		// game even when a seed-free pool exists elsewhere. A prior version
+		// of this code ran a "Pass 0" first that preferred any seed-free
+		// pool regardless of dojo, which reached past the dojo-mate scope
+		// and relocated a wrapped seed with no dojo conflict at all
+		// (verified: ranks {1,2,3,5} over 4 pools with four distinct dojos
+		// moved seed 5 off seed 1's pool solely because a seed-free pool
+		// existed elsewhere, producing a real D7 halves violation that the
+		// accurate "two seeds must never share a pool" warning then
+		// masked). Do not reintroduce a seed-free preference here -- that
+		// is not this rule.
 		if posInPool > 0 && p.Dojo != "" {
-			// Pass 0: the first candidate pool (scanned in the SAME
-			// rank-priority order the natural arithmetic already defines)
-			// that holds no seed at all.
-			for offset := 0; offset < numPools && !placed; offset++ {
-				gp := candidateGlobalPool(offset)
-				if gp < 0 || gp >= numPools || len(poolSeedDojos[gp]) > 0 {
-					continue
-				}
-				placed = tryPlace(gp)
-			}
-			// Pass 1: no seed-free pool existed (unavoidable once
-			// nSeeds > numPools -- every pool already holds exactly one).
-			// The first candidate whose existing seed(s) are not a
-			// dojo-mate of this one.
 			for offset := 0; offset < numPools && !placed; offset++ {
 				gp := candidateGlobalPool(offset)
 				if gp < 0 || gp >= numPools || poolSeedDojos[gp][dojoKey(p.Dojo)] {
@@ -787,12 +789,11 @@ func placeSeedIndices(seeded []Player, numPools, numCourts, totalLen int) []int 
 			}
 		}
 		// The original, unconditional pass: every seed within the first
-		// numPools ranks reaches this immediately (posInPool == 0, the two
-		// passes above never ran); a wrapped seed only reaches it when
-		// BOTH preference passes above found nothing (every pool has a
-		// seed AND every one of them is this seed's dojo-mate), the one
-		// case genuinely as constrained as this function's pre-fix
-		// behaviour always was.
+		// numPools ranks reaches this immediately (posInPool == 0, the
+		// pass above never ran); a wrapped seed only reaches it when the
+		// preference pass above found nothing (every pool already holds a
+		// dojo-mate of this seed), the one case genuinely as constrained
+		// as this function's pre-fix behaviour always was.
 		for offset := 0; offset < numPools && !placed; offset++ {
 			placed = tryPlace(candidateGlobalPool(offset))
 		}

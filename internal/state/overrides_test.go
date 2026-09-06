@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,6 +112,43 @@ func TestLoadOverrides_InvalidJSON(t *testing.T) {
 
 	_, err = store.LoadOverrides(compID)
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrCorruptOverrides), "a JSON parse failure must be wrapped in ErrCorruptOverrides so callers can recognise and repair it")
+}
+
+// TestResetOverridesForce_RepairsCorruptFile is PR #416 finding 10: every
+// OTHER override writer (SaveRankOverrideChanged, SaveWinnerOverride,
+// ResetOverridesChanged) goes through modifyOverridesChanged, which LOADS
+// the file first, so none of them can repair a corrupt overrides.json --
+// including "reset", which one might expect to be the escape hatch.
+// ResetOverridesForce is the one write that does not parse first.
+func TestResetOverridesForce_RepairsCorruptFile(t *testing.T) {
+	dir, err := os.MkdirTemp("", "overrides-repair-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "repair-comp"
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "overrides.json"), []byte("{not valid json"), 0600))
+
+	// Precondition: the file is genuinely corrupt, and the ordinary reset
+	// path (load-then-save) fails identically to a plain load.
+	_, err = store.LoadOverrides(compID)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrCorruptOverrides))
+	_, err = store.ResetOverridesChanged(compID)
+	require.Error(t, err, "the ordinary reset path loads first and must fail the same way on a corrupt file")
+
+	// The repair door succeeds without reading the corrupt bytes at all.
+	require.NoError(t, store.ResetOverridesForce(compID))
+
+	o, err := store.LoadOverrides(compID)
+	require.NoError(t, err, "the file must be readable again after the repair")
+	assert.Empty(t, o.PoolRanks)
+	assert.Empty(t, o.Winners)
 }
 
 // TestLoadOverridesLocked_NilFieldInit verifies that loading a valid but empty

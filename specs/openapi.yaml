@@ -2263,6 +2263,28 @@ paths:
                   finisher:
                     type: string
                     description: Name of the pool finisher whose bracket placement is locked (downstream_knockout_scored only).
+        '422':
+          description: |
+            `corrupt_overrides`: this competition's overrides.json could not
+            be parsed, so pool standings (needed to check whether the write
+            would displace an already-scored bracket qualifier) cannot be
+            computed. This is a terminal, operator-recoverable state, not a
+            transient failure: repair it via the reset-overrides endpoint
+            (which resets overrides WITHOUT first parsing the corrupt file),
+            then resubmit the same write.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, code]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable detail.
+                  code:
+                    type: string
+                    enum: [corrupt_overrides]
+                    description: Machine-readable code.
 
   /api/competitions/{id}/matches/{mid}/revert-to-queue:
     post:

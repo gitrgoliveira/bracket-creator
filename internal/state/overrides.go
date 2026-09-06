@@ -3,10 +3,25 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
+
+// ErrCorruptOverrides is the sentinel wrapped (via %w) around a JSON parse
+// failure reading overrides.json. Standings computation deliberately fails
+// closed on a corrupt overrides file (a silently-dropped override could
+// resurrect a broken chusen or a stale manual rank), but every override
+// writer -- SaveRankOverrideChanged, SaveWinnerOverride, ResetOverrides --
+// goes through modifyOverridesChanged, which LOADS the file first, so a
+// corrupt file has no writer that can repair it: even "reset" fails
+// identically. errors.Is(err, ErrCorruptOverrides) lets a caller (the HTTP
+// layer) recognise this specific, operator-recoverable failure and map it to
+// a terminal 4xx naming overrides.json, and route the operator to
+// ResetOverridesForceChanged, the one write that does NOT parse first.
+var ErrCorruptOverrides = errors.New("overrides.json is corrupt")
 
 // Overrides.PoolRanks is keyed PoolID -> overrideKey -> Rank. overrideKey is
 // helper.CompetitorKey(id, name, dojo) for every override written since
@@ -50,7 +65,7 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 	}
 	var o Overrides
 	if err := json.Unmarshal(data, &o); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: overrides.json: %v", ErrCorruptOverrides, err)
 	}
 	if o.PoolRanks == nil {
 		o.PoolRanks = make(map[string]map[string]int)
@@ -179,4 +194,24 @@ func (s *Store) ResetOverridesChanged(compID string) (bool, error) {
 func (s *Store) ResetOverrides(compID string) error {
 	_, err := s.ResetOverridesChanged(compID)
 	return err
+}
+
+// ResetOverridesForce clears all overrides WITHOUT first loading/parsing the
+// existing file. This is the repair door for a corrupt overrides.json
+// (ErrCorruptOverrides): every OTHER override writer, ResetOverridesChanged
+// included, goes through modifyOverridesChanged, which loads first and so
+// fails identically against the very file it would need to repair -- there
+// is otherwise no way to clear a corrupt overrides.json short of an operator
+// deleting the file by hand.
+//
+// Calls SaveOverrides directly with a fresh empty value -- the same
+// save-side primitive every other writer already uses -- so the file
+// version still bumps (saveOverridesLocked's bumpFileVersion) and the
+// standings cache correctly invalidates, exactly as any other overrides
+// write does.
+func (s *Store) ResetOverridesForce(compID string) error {
+	return s.SaveOverrides(compID, &Overrides{
+		PoolRanks: make(map[string]map[string]int),
+		Winners:   make(map[string]string),
+	})
 }

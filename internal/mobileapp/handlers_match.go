@@ -2290,6 +2290,29 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
 				return
 			}
+			// PR #416 finding 10: a corrupt overrides.json makes
+			// computeStandingsFrom (reached here via the mp-e2k1 mixed-pool
+			// guard) fail closed, correctly, but an unmapped error here falls
+			// through to internalError's 500 -- and the SPA's offline write
+			// queue retries 5xx forever (mp-q8c6), so a genuinely corrupt file
+			// on disk would poison the queue rather than surface once. This is
+			// state on disk the operator can repair -- Store.ResetOverridesForce
+			// is the load-free repair primitive (state/overrides.go) -- so it
+			// is answered the same way respondUnexportableCompetitionError
+			// answers its own "state conflict, not a server fault" cases: a
+			// terminal 422 naming the file, never a 500. NOTE: the
+			// reset-overrides HTTP endpoint itself (handlers_competition.go)
+			// still calls the ordinary load-then-save ResetOverridesChanged as
+			// of this change; wiring it to ResetOverridesForce so it can
+			// actually repair a corrupt file is a follow-up in that file,
+			// outside this pass's scope.
+			if errors.Is(engErr, state.ErrCorruptOverrides) {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{
+					"error": "overrides.json could not be read; ask an administrator to reset overrides for this competition",
+					"code":  "corrupt_overrides",
+				})
+				return
+			}
 			internalError(c, engErr)
 			return
 		}

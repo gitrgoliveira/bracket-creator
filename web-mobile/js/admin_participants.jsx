@@ -1139,15 +1139,19 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         {p.dojo}
                         {/* bc-pnum ruling 1e: the roster PUT re-serialises the saved
                             roster, so p.id is the server-minted UUID once the roster
-                            has been applied at least once. Shown as a short (first
-                            8 chars) fragment with the full id on hover, in the same
-                            muted weight as the dojo line beside it so the row stays
-                            compact and the number/name columns never shift. A row
-                            with no id (not yet applied, or a load failure) shows
+                            has been applied at least once. Shown WHOLE when it is 12
+                            characters or fewer (a short slug id, e.g. "ids-cup-p1":
+                            truncating to 8 would show "ids-cup-" for every row in a
+                            roster sharing that prefix, telling the operator nothing),
+                            otherwise the first 8 characters (a UUID). The full id is
+                            always on hover regardless of which form is shown, in the
+                            same muted weight as the dojo line beside it so the row
+                            stays compact and the number/name columns never shift. A
+                            row with no id (not yet applied, or a load failure) shows
                             nothing in this slot -- 1b's data-issues banner is what
                             names an id-less row, not this per-row display. */}
                         {p.id && (
-                          <span className="seed-row__id" title={p.id}> · {p.id.slice(0, 8)}</span>
+                          <span className="seed-row__id" title={p.id}> · {p.id.length <= 12 ? p.id : p.id.slice(0, 8)}</span>
                         )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"

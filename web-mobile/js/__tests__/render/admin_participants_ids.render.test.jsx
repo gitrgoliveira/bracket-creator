@@ -6,10 +6,18 @@ import { describe, it, expect, beforeAll } from 'vitest';
 // are created and displayed." The roster PUT response re-serialises the
 // saved roster (server-minted UUIDs included), so once a roster has been
 // applied at least once, every row's server-assigned id shows in a compact,
-// muted slot beside the dojo line: the first 8 characters, with the full id
-// available on hover via a title attribute. A row with no id (never applied,
-// or a load failure -- 1b's data-issues banner names that case separately)
-// shows nothing in that slot.
+// muted slot beside the dojo line, with the full id always available on
+// hover via a title attribute. A row with no id (never applied, or a load
+// failure -- 1b's data-issues banner names that case separately) shows
+// nothing in that slot.
+//
+// Follow-up (seen in the browser): a short slug id such as "ids-cup-p1"
+// (some rosters carry these instead of server UUIDs) truncated to 8
+// characters the same way a UUID does, showing "ids-cup-" for every row
+// sharing that prefix -- telling the operator nothing. The rule is now
+// LENGTH-gated: an id of 12 characters or fewer shows WHOLE; anything
+// longer (a UUID) still truncates to the first 8. The title always carries
+// the full id either way.
 //
 // Mounted for REAL, same setup as
 // admin_participants_provisional_numbers.render.test.jsx: the render setup
@@ -63,7 +71,7 @@ async function mount(c) {
 }
 
 describe('AdminParticipants id display (bc-pnum ruling 1e)', () => {
-  it('shows the short id, with the full id on hover, for a stamped row', async () => {
+  it('truncates a UUID id to the first 8 characters, with the full id on hover', async () => {
     const { container } = await mount(makeCompetition());
 
     const idSpans = container.querySelectorAll('.seed-row__id');
@@ -73,6 +81,24 @@ describe('AdminParticipants id display (bc-pnum ruling 1e)', () => {
     expect(span.textContent).toContain('11111111');
     expect(span.textContent).not.toContain('555555555555', 'only the first 8 characters show inline');
     expect(span.getAttribute('title')).toBe('11111111-2222-4333-8444-555555555555');
+  });
+
+  it('shows a short slug id whole (12 characters or fewer), not truncated', async () => {
+    const { container } = await mount(makeCompetition({
+      players: [
+        { id: 'ids-cup-p1', name: 'Alice', dojo: 'Dojo Alice' },
+        { id: 'ids-cup-p2', name: 'Bob', dojo: 'Dojo Bob' },
+      ],
+    }));
+
+    const idSpans = container.querySelectorAll('.seed-row__id');
+    expect(idSpans.length).toBe(2);
+    // Truncating both to 8 characters would show "ids-cup-" for every row;
+    // shown whole, the two rows are distinguishable.
+    expect(idSpans[0].textContent).toContain('ids-cup-p1');
+    expect(idSpans[1].textContent).toContain('ids-cup-p2');
+    expect(idSpans[0].getAttribute('title')).toBe('ids-cup-p1');
+    expect(idSpans[1].getAttribute('title')).toBe('ids-cup-p2');
   });
 
   it('shows no id slot at all for a roster with no ids yet', async () => {

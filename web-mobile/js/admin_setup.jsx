@@ -1619,6 +1619,12 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
   const venueCourts = (tournament && tournament.courts) || [];
   const previewShiaijoProblems = (preview || []).filter(comp => previewRowShiaijoError(comp, venueCourts)).length;
 
+  // Computed once and reused by both post-import banners below (the success
+  // banner and its warning-needs-attention sibling), rather than each
+  // re-scanning results itself.
+  const anyError = !!results && results.some(r => r.error);
+  const anyWarning = !!results && results.some(r => r.warning);
+
   return (
     <div className="app">
       <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} />
@@ -1752,10 +1758,10 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                   import-boundary prefix), and navigating away then would
                   carry the operator past the one place that warning is
                   shown before they could act on it. */}
-              {!results.some(r => r.error) && !results.some(r => r.warning) && (
+              {!anyError && !anyWarning && (
                 <div className="alert alert--success" style={{ marginTop: 12 }}>All competitions imported successfully. Returning to dashboard…</div>
               )}
-              {!results.some(r => r.error) && results.some(r => r.warning) && (
+              {!anyError && anyWarning && (
                 <div className="alert alert--warn" style={{ marginTop: 12 }}>
                   All competitions imported, but one or more need attention above before you leave this page.
                 </div>

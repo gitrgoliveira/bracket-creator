@@ -23,7 +23,7 @@ import {
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
-  cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS,
+  cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS, HINT_NUMBER_PREFIX, numberPrefixHint,
 } from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
@@ -981,5 +981,48 @@ describe('cutNumberPrefix', () => {
     expect(cutNumberPrefix(null)).toBe('');
     expect(cutNumberPrefix(undefined)).toBe('');
     expect(cutNumberPrefix('')).toBe('');
+  });
+});
+
+// numberPrefixHint (PR #416 finding 13): the settings screen's own gating
+// rule for whether the number-prefix hint grows the reprint warning,
+// extracted so the render test (numberprefix_reprint_hint.render.test.jsx)
+// isn't the only coverage of it.
+describe('numberPrefixHint', () => {
+  it('is the plain hint when not locked-after-draw', () => {
+    expect(numberPrefixHint('X', 'K', FORMAT_MIXED, false)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('is the plain hint when locked but the value is unchanged', () => {
+    expect(numberPrefixHint('K', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('is the plain hint when locked and changed but the pending value is blank', () => {
+    // Blank is inherited as the stored prefix on save (G2a), so it renumbers nothing.
+    expect(numberPrefixHint('', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+    expect(numberPrefixHint('   ', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('is the plain hint for Swiss, even locked and changed and non-blank', () => {
+    // A7: Swiss competitors carry no number at all, so a renumber can never happen.
+    expect(numberPrefixHint('X', 'K', FORMAT_SWISS, true)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('appends the reprint warning when locked, changed, non-blank, and the format renumbers', () => {
+    const hint = numberPrefixHint('X', 'K', FORMAT_MIXED, true);
+    expect(hint).toContain(HINT_NUMBER_PREFIX);
+    expect(hint).toContain('renumbered');
+    expect(hint).toContain('reprinted');
+  });
+
+  it('normalises pending and stored through cutNumberPrefix before comparing', () => {
+    // Trailing whitespace and a same-value-different-casing-of-nothing
+    // comparison must not fire the warning: cutNumberPrefix trims both
+    // sides, so "K" and "  K  " compare equal.
+    expect(numberPrefixHint('  K  ', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+    // An over-length pending value is capped the same way the TextField's
+    // own onChange already caps it, so comparing against a stored value at
+    // the cap still recognises "no real change".
+    expect(numberPrefixHint('KAB', 'KABC', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
   });
 });

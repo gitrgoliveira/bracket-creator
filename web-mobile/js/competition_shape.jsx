@@ -583,6 +583,29 @@ export function competitorsCarryNumbers(format) {
   return format !== FORMAT_SWISS;
 }
 
+// numberPrefixHint (PR #416 finding 13): the ONE owner of whether the
+// settings screen's number-prefix hint grows the reprint warning. pending
+// and stored are normalised through cutNumberPrefix -- the same
+// trim-then-cap-at-3-characters cutNumberPrefix already applies on every
+// keystroke, applied here too so a stored value that predates that
+// normalisation (or arrives with different whitespace) compares on the same
+// footing as the pending one, rather than each call site trimming ad hoc.
+//
+// The warning fires only when: the field is locked-after-draw (bc-pnum C5,
+// the prefix itself is never disabled, only the consequence is called out);
+// this format's competitors carry a number at all (competitorsCarryNumbers,
+// bc-pnum A7 -- Swiss has none to renumber); the pending value is non-blank
+// (blank is inherited as the stored prefix on save, G2a, so it renumbers
+// nothing); and the pending value actually differs from stored.
+export function numberPrefixHint(pending, stored, format, locked) {
+  const pendingCut = cutNumberPrefix(pending);
+  const storedCut = cutNumberPrefix(stored);
+  if (locked && competitorsCarryNumbers(format) && pendingCut !== "" && pendingCut !== storedCut) {
+    return `${HINT_NUMBER_PREFIX} Every competitor will be renumbered and any tags already printed must be reprinted.`;
+  }
+  return HINT_NUMBER_PREFIX;
+}
+
 // --- Pool sizing field labels (mixed format only) -----------------------
 //
 // LABEL_POOL_SIZE / LABEL_POOL_WINNERS / LABEL_EXTRA_QUALIFIERS: verbatim

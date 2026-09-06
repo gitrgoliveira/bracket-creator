@@ -37,7 +37,7 @@ import {
   LABEL_POOL_SIZE, LABEL_POOL_WINNERS, LABEL_EXTRA_QUALIFIERS,
   LABEL_TEAM_SIZE, LABEL_TEAM_MATCH_TYPE, TEAM_MATCH_TYPE_OPTIONS,
   LABEL_ZEKKEN, LABEL_ENGI,
-  teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError, competitorsCarryNumbers,
+  teamFieldsVisible, zekkenApplies, engiApplies, teamSizeError,
   shapeConfigForSave, resolveTeamSize, kindChangeBlockedReason,
   FORMAT_LEAGUE, FORMAT_MIXED, POOL_FORMAT_PARTIAL,
   MIN_TEAM_SIZE, poolSettingsError, pendingConfigClears, swissSettingsError,
@@ -49,7 +49,7 @@ import {
   HINT_ZEKKEN, HINT_ENGI, HINT_KIND_ONLY_INDIVIDUAL, HINT_TEAM_SIZE, HINT_POOL_WINNERS_LOCKED,
   LABEL_NAGINATA, HINT_NAGINATA,
   LABEL_CHECK_IN, HINT_CHECK_IN,
-  LABEL_NUMBER_PREFIX, HINT_NUMBER_PREFIX, cutNumberPrefix, LABEL_COURTS,
+  LABEL_NUMBER_PREFIX, cutNumberPrefix, numberPrefixHint, LABEL_COURTS,
 } from './competition_shape.jsx';
 import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
@@ -1526,18 +1526,11 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
           A change while a draw already exists is still consequential enough
           to call out inline, so the hint grows a warning (R10's reuse of
           this same append-to-hint pattern, without actually locking the
-          input) whenever the pending value differs from what's saved AND is
-          not blank: a blank is inherited as the stored prefix on save (G2a),
-          so it renumbers nothing and must not threaten a reprint. competitorsCarryNumbers
-          (bc-pnum A7) gates it too: Swiss competitors carry no number at all
-          (RenumberCompetitors is a permanent no-op for Swiss, see its Go doc),
-          so warning a Swiss operator about a renumber describes something
-          that can never happen. */}
+          input); numberPrefixHint (competition_shape.jsx, PR #416 finding
+          13) owns the full gating rule. */}
       <TextField label={LABEL_NUMBER_PREFIX} optional placeholder="e.g. A" maxLength="3"
         value={local.numberPrefix} onChange={(raw) => update("numberPrefix", cutNumberPrefix(raw))}
-        hint={lockedAfterDraw && competitorsCarryNumbers(local.format) && (local.numberPrefix || "").trim() !== "" && (local.numberPrefix || "").trim() !== (c.numberPrefix || "").trim()
-          ? `${HINT_NUMBER_PREFIX} Every competitor will be renumbered and any tags already printed must be reprinted.`
-          : HINT_NUMBER_PREFIX}
+        hint={numberPrefixHint(local.numberPrefix, c.numberPrefix, local.format, lockedAfterDraw)}
         width={80} />
       <div style={{ display: "flex", flexDirection: "column" }}>
         {/* zekkenApplies/engiApplies express the RULE (competition_shape.jsx);

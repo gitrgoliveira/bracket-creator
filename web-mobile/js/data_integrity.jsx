@@ -210,13 +210,26 @@ export function bracketResetToast(quarantinedAs, rebuilt) {
       + `has no knockout stage.`;
 }
 
+// isAdvisoryIssue / isLoudIssue partition a dataIssues entry by its "kind"
+// field (PR #416 finding 10), rather than by comparing object identity
+// against the one entry missingIDsIssue already picked out. An entry with NO
+// "kind" at all -- an older server payload, from before PR #416 finding 9
+// started stamping "corrupt-file" explicitly -- reads as LOUD here, matching
+// the server's own documented default for that case.
+export function isAdvisoryIssue(i) {
+  return !!(i && i.kind === "missing-ids");
+}
+export function isLoudIssue(i) {
+  return !!i && !isAdvisoryIssue(i);
+}
+
 // missingIDsIssue picks the ADVISORY entry (kind "missing-ids") out of a
 // dataIssues list, or null when there is none. The server emits at most one:
 // every affected roster row folds into a single detail sentence
 // (missingParticipantIDsIssue, handlers_viewer.go), so there is nothing to
 // aggregate here.
 export function missingIDsIssue(issues) {
-  return (issues || []).find((i) => i && i.kind === "missing-ids") || null;
+  return (issues || []).find(isAdvisoryIssue) || null;
 }
 
 // MissingParticipantIDsNotice: the ADVISORY-class notice. Deliberately NOT
@@ -248,10 +261,7 @@ export function MissingParticipantIDsNotice({ issue }) {
 export function DataIssueBanner({ issues, competition, onReset, resetting }) {
   const all = issues || [];
   const missingIDs = missingIDsIssue(all);
-  const list = all.filter((i) => i !== missingIDs);
-  if (list.length === 0) {
-    return <MissingParticipantIDsNotice issue={missingIDs} />;
-  }
+  const list = all.filter(isLoudIssue);
   const bracket = bracketIssue(list);
   // Only ask the format question when the bracket is the broken file: a corrupt
   // pool-matches.csv has no reset, whatever the format.
@@ -259,76 +269,78 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
 
   return (
     <>
-    <div className="alert alert--error data-issue data-issue--banner" role="alert">
-      <span aria-hidden="true">⚠</span>
-      <div>
-        <strong>A file for this competition could not be read.</strong>
-        <ul className="data-issue__list">
-          {list.map((i) => (
-            <li key={i.file}><code>{dataIssueText(i)}</code></li>
-          ))}
-        </ul>
-        <p>
-          Scoring is blocked for whatever that file holds. Nothing has been
-          overwritten: every write to a file that will not parse is refused, so
-          it is still exactly as it was last saved.
-        </p>
-        <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
-          position above, and reload this page. Everything recorded in it comes back,
-          results included. This is the option that loses nothing.</p>
-        {bracket && kind === BRACKET_RECOVERY_NONE ? (
-          <p>
-            There is no reset for this competition: its bracket was drawn
-            directly, so this file is the only record of who was drawn against
-            whom. Rebuilding it would produce a different set of pairings rather
-            than restoring these, and it would then disagree with the bracket you
-            have printed. Repair the file.
-          </p>
-        ) : null}
-        {kind === BRACKET_RECOVERY_DISCARD ? (
-          <>
+      {list.length > 0 ? (
+        <div className="alert alert--error data-issue data-issue--banner" role="alert">
+          <span aria-hidden="true">⚠</span>
+          <div>
+            <strong>A file for this competition could not be read.</strong>
+            <ul className="data-issue__list">
+              {list.map((i) => (
+                <li key={i.file}><code>{dataIssueText(i)}</code></li>
+              ))}
+            </ul>
             <p>
-              <strong>Or move the file aside</strong>, if it cannot be repaired. This
-              competition has no knockout stage, so this file is left over and unused:
+              Scoring is blocked for whatever that file holds. Nothing has been
+              overwritten: every write to a file that will not parse is refused, so
+              it is still exactly as it was last saved.
             </p>
-            <ul className="data-issue__list">
-              <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
-              <li>Nothing is rebuilt, because there is no knockout stage to rebuild.</li>
-              <li>Participants, standings and every result you have recorded are untouched.</li>
-            </ul>
-          </>
-        ) : null}
-        {kind === BRACKET_RECOVERY_REBUILD ? (
-          <>
-            <p><strong>Or reset the knockout stage</strong>, if the file cannot be repaired:</p>
-            <ul className="data-issue__list">
-              <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
-              <li>Pools, participants and pool results are untouched.</li>
-              <li>Every knockout bout already fought must be re-entered from the score sheets.</li>
-              <li>
-                Check the rebuilt pairings against your printed bracket. The tree is
-                rebuilt with the current draw algorithm, and the original one was
-                inside the file that will not parse.
-              </li>
-            </ul>
-          </>
-        ) : null}
-        {/* One button for both recoverable kinds: they run the same endpoint and
-            differ only in what it will find to do, so the label follows the kind
-            rather than each branch growing its own copy of the control. */}
-        {kind !== BRACKET_RECOVERY_NONE ? (
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={onReset}
-            disabled={!!resetting}
-          >
-            {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
-          </button>
-        ) : null}
-      </div>
-    </div>
-    <MissingParticipantIDsNotice issue={missingIDs} />
+            <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
+              position above, and reload this page. Everything recorded in it comes back,
+              results included. This is the option that loses nothing.</p>
+            {bracket && kind === BRACKET_RECOVERY_NONE ? (
+              <p>
+                There is no reset for this competition: its bracket was drawn
+                directly, so this file is the only record of who was drawn against
+                whom. Rebuilding it would produce a different set of pairings rather
+                than restoring these, and it would then disagree with the bracket you
+                have printed. Repair the file.
+              </p>
+            ) : null}
+            {kind === BRACKET_RECOVERY_DISCARD ? (
+              <>
+                <p>
+                  <strong>Or move the file aside</strong>, if it cannot be repaired. This
+                  competition has no knockout stage, so this file is left over and unused:
+                </p>
+                <ul className="data-issue__list">
+                  <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
+                  <li>Nothing is rebuilt, because there is no knockout stage to rebuild.</li>
+                  <li>Participants, standings and every result you have recorded are untouched.</li>
+                </ul>
+              </>
+            ) : null}
+            {kind === BRACKET_RECOVERY_REBUILD ? (
+              <>
+                <p><strong>Or reset the knockout stage</strong>, if the file cannot be repaired:</p>
+                <ul className="data-issue__list">
+                  <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
+                  <li>Pools, participants and pool results are untouched.</li>
+                  <li>Every knockout bout already fought must be re-entered from the score sheets.</li>
+                  <li>
+                    Check the rebuilt pairings against your printed bracket. The tree is
+                    rebuilt with the current draw algorithm, and the original one was
+                    inside the file that will not parse.
+                  </li>
+                </ul>
+              </>
+            ) : null}
+            {/* One button for both recoverable kinds: they run the same endpoint and
+                differ only in what it will find to do, so the label follows the kind
+                rather than each branch growing its own copy of the control. */}
+            {kind !== BRACKET_RECOVERY_NONE ? (
+              <button
+                type="button"
+                className="btn btn--danger"
+                onClick={onReset}
+                disabled={!!resetting}
+              >
+                {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <MissingParticipantIDsNotice issue={missingIDs} />
     </>
   );
 }

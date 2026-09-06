@@ -8,6 +8,8 @@ import {
   bracketResetPrompt,
   bracketResetToast,
   missingIDsIssue,
+  isAdvisoryIssue,
+  isLoudIssue,
   BRACKET_RECOVERY_REBUILD,
   BRACKET_RECOVERY_DISCARD,
   BRACKET_RECOVERY_NONE,
@@ -69,6 +71,33 @@ describe('missingIDsIssue: picking the ADVISORY entry out of dataIssues', () => 
     expect(missingIDsIssue([])).toBeNull();
     expect(missingIDsIssue(null)).toBeNull();
     expect(missingIDsIssue(undefined)).toBeNull();
+  });
+});
+
+describe('isAdvisoryIssue / isLoudIssue: partitioning a dataIssues entry by kind', () => {
+  it('an explicit kind:missing-ids entry is advisory, never loud', () => {
+    const missing = { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file.' };
+    expect(isAdvisoryIssue(missing)).toBe(true);
+    expect(isLoudIssue(missing)).toBe(false);
+  });
+
+  it('an explicit kind:corrupt-file entry is loud, never advisory', () => {
+    const corrupt = { kind: 'corrupt-file', file: 'bracket.json', line: 1, column: 1, detail: 'bad' };
+    expect(isAdvisoryIssue(corrupt)).toBe(false);
+    expect(isLoudIssue(corrupt)).toBe(true);
+  });
+
+  it('an entry with no kind at all (an older server payload) reads as loud', () => {
+    const noKind = { file: 'bracket.json', line: 1, column: 1, detail: 'bad' };
+    expect(isAdvisoryIssue(noKind)).toBe(false);
+    expect(isLoudIssue(noKind)).toBe(true);
+  });
+
+  it('is false for nothing', () => {
+    expect(isAdvisoryIssue(null)).toBe(false);
+    expect(isAdvisoryIssue(undefined)).toBe(false);
+    expect(isLoudIssue(null)).toBe(false);
+    expect(isLoudIssue(undefined)).toBe(false);
   });
 });
 

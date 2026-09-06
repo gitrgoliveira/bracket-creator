@@ -82,10 +82,22 @@ func finishDataSheet(f *excelize.File) {
 }
 
 func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {
+	// hasNumber (bc-pnum review H7) is true when ANY player anywhere in
+	// pools has a Number, not just the first pool's first player: a
+	// hand-edited/legacy pools.csv can carry unnumbered rows before a
+	// numbered one, and checking only the first player used to drop the
+	// whole Player Number column (and so the Names to Print number cell
+	// downstream) for every player on the sheet just because the leading
+	// row happened to be blank.
 	hasNumber := false
 	for i := range pools {
-		if len(pools[i].Players) > 0 && pools[i].Players[0].Number != "" {
-			hasNumber = true
+		for j := range pools[i].Players {
+			if pools[i].Players[j].Number != "" {
+				hasNumber = true
+				break
+			}
+		}
+		if hasNumber {
 			break
 		}
 	}
@@ -111,19 +123,36 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 // AddPlayerDataToSheet is the playoffs-only (no pools) counterpart of
 // AddPoolDataToSheet, used by a pure-playoffs draw's Data sheet.
 //
-// Column A (bc-pnum A11) is headed "Draw order", 1-based: CreatePlayers
-// (tournament.go) stamps each entrant's PoolPosition 0-based (len(players)
-// BEFORE the append), a value pool distribution overwrites 1-based for every
-// pooled competition but nothing ever touches for a playoffs-only one, so
-// this sheet showed row 3 (the first entrant) as "0" beside a "Player
-// Number" column already reading "K1" -- two different counting
-// conventions on the same row. Nothing reads this cell by formula reference
-// anywhere downstream (unlike the "Player Number" column, which
-// CreateNamesToPrint links to); it is display-only, which is what makes a
-// pure rename-and-reindex here safe.
+// Column A (bc-pnum A11, relabelled by bc-pnum review H8) is headed "Entry
+// order", 1-based: CreatePlayers (tournament.go) stamps each entrant's
+// PoolPosition 0-based (len(players) BEFORE the append), a value pool
+// distribution overwrites 1-based for every pooled competition but nothing
+// ever touches for a playoffs-only one, so this sheet showed row 3 (the
+// first entrant) as "0" beside a "Player Number" column already reading
+// "K1" -- two different counting conventions on the same row.
+//
+// This function runs BEFORE StandardSeeding reorders players into bracket
+// slot order (see cmd/create-playoffs.go), so column A is the ENTRY order
+// -- the shuffled order the CLI drew the roster in, or the roster order for
+// the engine's export path -- never the bracket slot order the header used
+// to imply with the now-removed "Draw order" name. Relabelled, not
+// reordered: this column stays display-only and the Data sheet stays the
+// numbering source of truth Names to Print links to by coordinate, so
+// changing what it counts (rather than what it is called) would break that
+// link. Nothing reads this cell by formula reference anywhere downstream
+// (unlike the "Player Number" column, which CreateNamesToPrint links to);
+// it is display-only, which is what makes a pure rename safe.
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) map[string]playerCellCoord {
-	hasNumber := len(players) > 0 && players[0].Number != ""
-	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Draw order")
+	// hasNumber (bc-pnum review H7): any player, not just the first -- see
+	// the identical rationale in AddPoolDataToSheet above.
+	hasNumber := false
+	for i := range players {
+		if players[i].Number != "" {
+			hasNumber = true
+			break
+		}
+	}
+	layout := setupDataSheet(f, sanitize, hasNumber, titlePrefix, "Entry order")
 
 	playerCoords := make(map[string]playerCellCoord, len(players))
 

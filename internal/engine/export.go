@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"log"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/excel"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -31,6 +32,22 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	pools, err := e.store.LoadPools(id)
 	if err != nil {
 		return nil, err
+	}
+
+	// bc-pnum review H7: report, never fail, an unnumbered POOLED
+	// competitor under a numbered competition. AddPoolDataToSheet /
+	// AddPlayerDataToSheet degrade silently (that is D1's own
+	// report-over-fabricate rule -- no fabricated number is ever printed),
+	// so nothing downstream would otherwise say WHY a competitor's Player
+	// Number / tag / Names-to-Print cell came out blank. comp.NumberPrefix
+	// == "" is excluded on purpose: a Swiss competition is unnumbered by
+	// design (see NumberPools/AssignPlayerNumbers's own doc comments), so
+	// an empty Number there is normal, not a gap to report.
+	if comp.NumberPrefix != "" {
+		if name, dojo, ok := firstUnnumberedPooledCompetitor(pools); ok {
+			log.Printf("engine: ExportCompetitionXlsx compId=%s: competitor %q (dojo %q) has no Number under prefix %q; its tag/Player-Number/Names-to-Print cells will print blank",
+				id, name, dojo, comp.NumberPrefix)
+		}
 	}
 
 	// Where each pool is ACTUALLY being fought. Best-effort for the same reason
@@ -151,4 +168,19 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// firstUnnumberedPooledCompetitor returns the first competitor across every
+// pool, in pool then in-pool order, whose Number is blank -- for
+// ExportCompetitionXlsx's bc-pnum review H7 report-gap log line above. ok is
+// false when pools is empty or every competitor carries a Number.
+func firstUnnumberedPooledCompetitor(pools []helper.Pool) (name, dojo string, ok bool) {
+	for _, pool := range pools {
+		for _, p := range pool.Players {
+			if p.Number == "" {
+				return p.Name, p.Dojo, true
+			}
+		}
+	}
+	return "", "", false
 }

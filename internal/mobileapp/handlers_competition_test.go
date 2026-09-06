@@ -2419,7 +2419,7 @@ func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testi
 	var ensureErr, flipErr error
 	go func() {
 		defer wg.Done()
-		assigned, ensureErr = ensureNumberPrefix(store, eng, cid, engine.CanStart)
+		assigned, ensureErr = ensureNumberPrefix(eng, cid, engine.CanStart)
 	}()
 	go func() {
 		defer wg.Done()
@@ -2486,7 +2486,7 @@ func TestEnsureNumberPrefix_CorrelatesSkippedSiblingWithAssignedPrefix(t *testin
 	require.NotEmpty(t, stored.NumberPrefix, "a legacy blank prefix must still be assigned despite the unreadable sibling")
 
 	logStr := logBuf.String()
-	assert.Contains(t, logStr, "ensureNumberPrefix", "must log from ensureNumberPrefix's own assign branch, not just the tolerant check's own skip line")
+	assert.Contains(t, logStr, "EnsureNumberPrefix", "must log from engine.EnsureNumberPrefix's own assign branch, not just the tolerant check's own skip line")
 	assert.Contains(t, logStr, stored.NumberPrefix, "the log line must name the prefix THIS call assigned")
 	assert.Contains(t, logStr, cid, "the log line must name the competition")
 	assert.Contains(t, logStr, "broken-sibling", "the log line must name the skipped sibling id, correlating it with the assignment")
@@ -2682,7 +2682,7 @@ func TestPUTCompetition_LegacyUnrelatedFieldChangeHealsPoolsCSV(t *testing.T) {
 }
 
 // TestPUTCompetition_RosterPUT_UnreadableSiblingDoesNotBlockUnmovedPrefix
-// pins the roster-save sibling scan: the roster-only branch used to call checkUniqueCompFields(store,
+// pins the roster-save sibling scan: the roster-only branch used to call checkUniqueCompFields(eng,
 // "", validatePrefix, id) UNCONDITIONALLY, even when validatePrefix was ""
 // (nothing to validate, the common already-prefixed case). checkUniqueCompFields
 // is the STRICT policy, so it still listed every sibling and LoadCompetition'd
@@ -3605,7 +3605,7 @@ func TestCompetitionCourtsInvariant(t *testing.T) {
 
 // TestCheckUniqueCompFields tests the checkUniqueCompFields helper directly.
 func TestCheckUniqueCompFields(t *testing.T) {
-	_, store, _, _, tempDir := setupTestRouter(t)
+	_, store, eng, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	seed := func(id, name, prefix string) {
@@ -3615,27 +3615,27 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	t.Run("empty prefix is always exempt", func(t *testing.T) {
 		seed("pfx-empty-1", "EmptyPfx1", "")
 		seed("pfx-empty-2", "EmptyPfx2", "")
-		infraErr, valErr := checkUniqueCompFields(store, "NewComp", "", "")
+		infraErr, valErr := checkUniqueCompFields(eng, "NewComp", "", "")
 		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
 	t.Run("whitespace-only prefix is exempt", func(t *testing.T) {
-		infraErr, valErr := checkUniqueCompFields(store, "AnotherNewComp", "  ", "")
+		infraErr, valErr := checkUniqueCompFields(eng, "AnotherNewComp", "  ", "")
 		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
 	t.Run("no collision for distinct prefixes", func(t *testing.T) {
 		seed("pfx-k", "KendoComp", "K")
-		infraErr, valErr := checkUniqueCompFields(store, "DistinctName", "M", "")
+		infraErr, valErr := checkUniqueCompFields(eng, "DistinctName", "M", "")
 		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
 	t.Run("collision detected (exact prefix match)", func(t *testing.T) {
 		seed("pfx-collision", "CollisionComp", "X")
-		_, err := checkUniqueCompFields(store, "UniqueName", "X", "")
+		_, err := checkUniqueCompFields(eng, "UniqueName", "X", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "CollisionComp")
@@ -3643,7 +3643,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("collision detected (case-insensitive prefix)", func(t *testing.T) {
 		seed("pfx-case", "CaseComp", "Y")
-		_, err := checkUniqueCompFields(store, "AnotherUnique", "y", "")
+		_, err := checkUniqueCompFields(eng, "AnotherUnique", "y", "")
 		assert.Error(t, err)
 	})
 
@@ -3654,7 +3654,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	// competition.
 	t.Run("collision detected (ambiguous prefix, K vs K2)", func(t *testing.T) {
 		seed("pfx-ambiguous-k", "KendoAmbiguous", "K")
-		_, err := checkUniqueCompFields(store, "KendoAmbiguousChallenger", "K2", "")
+		_, err := checkUniqueCompFields(eng, "KendoAmbiguousChallenger", "K2", "")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "number prefix")
 		assert.Contains(t, err.Error(), "KendoAmbiguous")
@@ -3662,14 +3662,14 @@ func TestCheckUniqueCompFields(t *testing.T) {
 
 	t.Run("excludeID skips own record (PUT update)", func(t *testing.T) {
 		seed("pfx-self", "SelfComp", "Z")
-		infraErr, valErr := checkUniqueCompFields(store, "SelfComp", "Z", "pfx-self")
+		infraErr, valErr := checkUniqueCompFields(eng, "SelfComp", "Z", "pfx-self")
 		require.NoError(t, infraErr)
 		assert.NoError(t, valErr)
 	})
 
 	t.Run("collision detected (duplicate name)", func(t *testing.T) {
 		seed("name-col", "DuplicateName", "Q")
-		_, err := checkUniqueCompFields(store, "DuplicateName", "W", "")
+		_, err := checkUniqueCompFields(eng, "DuplicateName", "W", "")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "competition name")
 	})
@@ -3682,7 +3682,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 	// empty-name caller's OWN competition on a field it never touched.
 	t.Run("empty name is always exempt, even against a stored blank-named competition", func(t *testing.T) {
 		seed("blank-named", "", "BLK")
-		infraErr, valErr := checkUniqueCompFields(store, "", "SomethingElse", "")
+		infraErr, valErr := checkUniqueCompFields(eng, "", "SomethingElse", "")
 		require.NoError(t, infraErr)
 		assert.NoError(t, valErr, "an empty name must never collide, even against a stored blank name")
 	})
@@ -3692,7 +3692,7 @@ func TestCheckUniqueCompFields(t *testing.T) {
 // variant logs and SKIPS an unreadable sibling rather than turning it into an
 // error, but still refuses a REAL collision it can actually see (D4(b)).
 func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
-	_, store, _, _, tempDir := setupTestRouter(t)
+	_, store, eng, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "broken", Name: "Broken", NumberPrefix: "B"}))
@@ -3700,7 +3700,7 @@ func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "fine", Name: "Fine Comp", NumberPrefix: "F"}))
 
 	t.Run("an unreadable sibling is logged and skipped, not surfaced as an error", func(t *testing.T) {
-		skipped, err := checkUniqueCompFieldsTolerant(store, "NewComp", "K", "")
+		skipped, err := checkUniqueCompFieldsTolerant(eng, "NewComp", "K", "")
 		assert.NoError(t, err, "the pre-flight variant must never fail over a sibling it cannot even read")
 		assert.Equal(t, []string{"broken"}, skipped, "the skipped sibling id must be surfaced so a caller can correlate it with what it assigned")
 	})
@@ -3709,7 +3709,7 @@ func TestCheckUniqueCompFieldsTolerant(t *testing.T) {
 	// as an *engine.ValidationError so the pre-flight's caller maps it to 400
 	// exactly like the engine's own refusals.
 	t.Run("a real collision is still refused as a ValidationError", func(t *testing.T) {
-		_, err := checkUniqueCompFieldsTolerant(store, "NewComp2", "F", "")
+		_, err := checkUniqueCompFieldsTolerant(eng, "NewComp2", "F", "")
 		require.Error(t, err)
 		var validation *engine.ValidationError
 		assert.ErrorAs(t, err, &validation, "must be an *engine.ValidationError so the caller's switch maps it to 400")

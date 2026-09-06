@@ -203,6 +203,46 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 	return changed, err
 }
 
+// siblingCompetitions loads every competition except excludeID, tolerant of
+// an unreadable one (log-and-skip) when tolerateUnreadable is true, or
+// returning the first load error otherwise. The ONE sibling walk shared by
+// takenNumberPrefixes, CheckUniqueCompFields and EnsureNumberPrefix (PR #416
+// finding 1, moved from mobileapp's checkUniqueCompFieldsSiblingPolicy): a
+// caller that needs both the taken-prefix set and the uniqueness check loads
+// the sibling set once and feeds both from the same slice, instead of
+// listing and loading every sibling twice.
+//
+// skipped carries the ids of any sibling this call could not read (only
+// reachable when tolerateUnreadable is true), so a caller correlating an
+// assignment with the exact siblings invisible to it (DefaultNumberPrefixFor,
+// EnsureNumberPrefix) can log one warning naming both facts together instead
+// of leaving them as two independent, uncorrelated log lines.
+func (e *Engine) siblingCompetitions(excludeID string, tolerateUnreadable bool) (siblings []*state.Competition, skipped []string, err error) {
+	ids, err := e.store.ListCompetitions()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list competitions: %w", err)
+	}
+	siblings = make([]*state.Competition, 0, len(ids))
+	for _, id := range ids {
+		if id == excludeID {
+			continue
+		}
+		comp, err := e.store.LoadCompetition(id)
+		if err != nil {
+			if !tolerateUnreadable {
+				return siblings, skipped, fmt.Errorf("load competition %s: %w", id, err)
+			}
+			log.Printf("engine: siblingCompetitions: skipping unreadable competition %s: %v", id, err)
+			skipped = append(skipped, id)
+			continue
+		}
+		if comp != nil {
+			siblings = append(siblings, comp)
+		}
+	}
+	return siblings, skipped, nil
+}
+
 // takenNumberPrefixes returns the number prefix of every competition except
 // excludeID, the set helper.DefaultNumberPrefix avoids. Unexported (bc-pnum
 // C6): its only caller is DefaultNumberPrefixFor in this same file, the ONE
@@ -213,44 +253,23 @@ func (e *Engine) RenumberCompetitors(compID string) (bool, error) {
 // derives over a taken set it builds itself, because that set must also grow
 // with the prefixes it assigns during its own pass.)
 //
-// An unreadable sibling (a stray folder, an unparseable config.md) is logged
-// and SKIPPED rather than returned as an error (bc-pnum A5(d)): this feeds
+// An unreadable sibling is tolerated (bc-pnum A5(d)): this feeds
 // DefaultNumberPrefix, a best-effort SUGGESTION (see its own doc comment),
-// never the uniqueness guarantee -- that is checkUniqueCompFields's job, and
+// never the uniqueness guarantee -- that is CheckUniqueCompFields's job, and
 // it still refuses a genuine collision. Propagating the first sibling's load
-// error here used to turn ONE unrelated competition's bad file into a 500 for
+// error here would turn ONE unrelated competition's bad file into a 500 for
 // every OTHER competition trying to derive a prefix, including the
 // start/generate-draw pre-flight, which cannot defer the way create/import
 // can. GET /competitions and MigrateNumberPrefixes already apply the same
 // "one bad cell cannot stop a tournament" rule; this matches it.
-// skipped carries the ids takenNumberPrefixes could not read (a stray
-// folder, an unparseable config.md), so DefaultNumberPrefixFor can log a
-// warning correlating an assignment with the exact siblings that were
-// invisible to it when it derived that assignment (the bc-pnum review):
-// before this, the skip and the assignment were two independent,
-// uncorrelated log lines (or, for a sibling skipped silently, no line naming
-// the assignment as suspect at all), so an operator had no way to tell a
-// clean assignment from one made blind to a sibling that might already hold
-// the same prefix.
 func (e *Engine) takenNumberPrefixes(excludeID string) (taken []string, skipped []string, err error) {
-	ids, err := e.store.ListCompetitions()
+	siblings, skipped, err := e.siblingCompetitions(excludeID, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list competitions: %w", err)
+		return nil, nil, err
 	}
-	taken = make([]string, 0, len(ids))
-	for _, id := range ids {
-		if id == excludeID {
-			continue
-		}
-		comp, err := e.store.LoadCompetition(id)
-		if err != nil {
-			log.Printf("engine: takenNumberPrefixes: skipping unreadable competition %s: %v", id, err)
-			skipped = append(skipped, id)
-			continue
-		}
-		if comp != nil {
-			taken = append(taken, comp.NumberPrefix)
-		}
+	taken = make([]string, 0, len(siblings))
+	for _, comp := range siblings {
+		taken = append(taken, comp.NumberPrefix)
 	}
 	return taken, skipped, nil
 }
@@ -283,6 +302,154 @@ func (e *Engine) DefaultNumberPrefixFor(name, excludeID string) (string, error) 
 			prefix, name, skipped)
 	}
 	return prefix, nil
+}
+
+// checkPrefixAgainstSiblings is the pure name/prefix collision check over an
+// already-loaded sibling list: the walk moved from mobileapp's
+// checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1), split out so a
+// caller that already has the sibling set loaded for another reason
+// (EnsureNumberPrefix's own derivation) can validate against it without a
+// second store pass. Either name or prefix may be empty to exempt that field.
+// "K2" is not EQUAL to "K", but AssignPlayerNumbers's prefix+counter
+// concatenation makes them ambiguous ("K"'s 21st entrant and "K2"'s 1st
+// entrant both print "K21"), so that is refused with the same shape as an
+// exact match.
+func checkPrefixAgainstSiblings(siblings []*state.Competition, name, prefix string) error {
+	prefix = strings.TrimSpace(prefix)
+	for _, existing := range siblings {
+		if name != "" && strings.EqualFold(existing.Name, name) {
+			return validationErrorf("competition name %q already exists", name)
+		}
+		if prefix == "" || existing.NumberPrefix == "" {
+			continue
+		}
+		existingPrefix := strings.TrimSpace(existing.NumberPrefix)
+		if strings.EqualFold(existingPrefix, prefix) {
+			return validationErrorf("number prefix %q already used by competition %q", prefix, existing.Name)
+		}
+		if helper.NumberPrefixesAmbiguous(existingPrefix, prefix) {
+			return validationErrorf("number prefix %q is ambiguous with %q, already used by competition %q", prefix, existingPrefix, existing.Name)
+		}
+	}
+	return nil
+}
+
+// CheckUniqueCompFields verifies that name and prefix are both unique across
+// every OTHER competition (excludeID excluded). Moved from mobileapp's
+// checkUniqueCompFieldsSiblingPolicy (PR #416 finding 1); mobileapp's
+// checkUniqueCompFields / checkUniqueCompFieldsTolerant are now thin wrappers
+// over this.
+//
+// Both fields may be empty to exempt them from the check; when BOTH are
+// empty nothing is validated and the sibling set is never even loaded, so a
+// caller that validates only what it moved and moved neither field pays no
+// sibling-load cost.
+//
+// tolerateUnreadableSibling selects siblingCompetitions' policy: STRICT
+// (false) is for create/import, which can be retried by the operator, so
+// silently skipping a sibling and letting a genuine collision through would
+// be the wrong trade; TOLERANT (true) is for a caller that cannot defer the
+// way create/import can (the start/generate-draw pre-flight).
+//
+// Returns the ids of any sibling this call could not read (only possible
+// under the tolerant policy) and a single error: a collision is a
+// *ValidationError, an infrastructure fault (the list/load itself failing
+// under the strict policy) is a plain error.
+func (e *Engine) CheckUniqueCompFields(name, prefix, excludeID string, tolerateUnreadableSibling bool) (skipped []string, err error) {
+	prefix = strings.TrimSpace(prefix)
+	if name == "" && prefix == "" {
+		return nil, nil
+	}
+	siblings, skipped, err := e.siblingCompetitions(excludeID, tolerateUnreadableSibling)
+	if err != nil {
+		return skipped, err
+	}
+	return skipped, checkPrefixAgainstSiblings(siblings, name, prefix)
+}
+
+// EnsureNumberPrefix is the ONE engine-level implementation of the derive ->
+// validate -> persist -> renumber sequence that guarantees a competition
+// never reaches a draw without a number prefix (G2). Both the mobileapp
+// start/generate-draw pre-flight (ensureNumberPrefix, handlers_competition.go)
+// and runDrawPipeline's own backstop for non-HTTP callers route through this
+// single function, so the two cannot drift (PR #416 finding 1).
+//
+// allowed gates the action exactly the way the caller's own subsequent
+// engine call will (CanStart/CanGenerateDraw): a competition in any other
+// status is left completely untouched -- no assignment, no renumber -- and
+// (false, nil) is returned so the caller's own action reports the refusal on
+// its own terms.
+//
+// A stored, non-blank prefix skips the assignment step; the renumber below
+// still always runs (RenumberCompetitors is a cheap read-compare-discard
+// when nothing differs), so a retry after an earlier renumber failure heals
+// itself with no extra code, whether or not THIS call assigned anything.
+//
+// tolerateUnreadableSiblings selects siblingCompetitions' policy for BOTH the
+// derivation's taken-prefix set and the post-derivation uniqueness check,
+// loaded ONCE and shared between them rather than listing and loading every
+// sibling twice: neither caller of this function can defer the way
+// create/import can, so an unrelated sibling's unreadable config.md is
+// logged and skipped rather than refused.
+//
+// Returns (assigned, err): assigned is true only once a NEW prefix has
+// actually been SAVED this call, so a caller whose subsequent action then
+// fails still knows config.md/pools.csv may have already changed.
+func (e *Engine) EnsureNumberPrefix(compID string, allowed func(state.CompetitionStatus) bool, tolerateUnreadableSiblings bool) (assigned bool, err error) {
+	var assignedPrefix string
+	var skipRenumber bool
+	err = e.store.WithCompetitionRenameLock(func() error {
+		_, updateErr := e.store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
+			if current == nil || !allowed(current.Status) {
+				skipRenumber = true
+				return nil, nil
+			}
+			if strings.TrimSpace(current.NumberPrefix) != "" {
+				return nil, nil
+			}
+			siblings, skipped, serr := e.siblingCompetitions(compID, tolerateUnreadableSiblings)
+			if serr != nil {
+				return nil, serr
+			}
+			taken := make([]string, 0, len(siblings))
+			for _, sib := range siblings {
+				taken = append(taken, sib.NumberPrefix)
+			}
+			prefix := helper.DefaultNumberPrefix(current.Name, taken)
+			if verr := checkPrefixAgainstSiblings(siblings, "", prefix); verr != nil {
+				return nil, verr
+			}
+			if len(skipped) > 0 {
+				log.Printf("engine: EnsureNumberPrefix %s: assigned prefix %q while skipping unreadable sibling(s) %v from the uniqueness check; verify no collision once they load", compID, prefix, skipped)
+			}
+			current.NumberPrefix = prefix
+			assigned = true
+			assignedPrefix = prefix
+			return current, nil
+		})
+		if updateErr != nil {
+			return updateErr
+		}
+		if skipRenumber {
+			return nil
+		}
+		if _, err := e.RenumberCompetitors(compID); err != nil {
+			if assigned {
+				// This write's own damage: the assignment just above is what
+				// made this call reachable, so a renumber failure right after
+				// it is reported, not swallowed.
+				return fmt.Errorf("competition %s: prefix %q assigned but competitors could not be numbered: %w", compID, assignedPrefix, err)
+			}
+			// Inherited damage: a pools.csv already broken (or a renumber
+			// that failed on an earlier call, before the prefix was saved) is
+			// not something THIS call introduced. Log and proceed so the
+			// caller is not blocked over pre-existing pools.csv damage; the
+			// very next settings save heals it.
+			log.Printf("engine: EnsureNumberPrefix %s: competitors not numbered (inherited damage, not this call's own): %v", compID, err)
+		}
+		return nil
+	})
+	return assigned, err
 }
 
 // MigrateNumberPrefixes brings a tournament-data folder written before the

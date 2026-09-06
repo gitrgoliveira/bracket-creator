@@ -827,61 +827,46 @@ func (e *Engine) runDrawPipeline(id string) error {
 		}
 	}
 
-	// the bc-pnum review: never-empty-prefix is enforced by the HTTP
-	// handler's ensureNumberPrefix, but runDrawPipeline is the ONE path
-	// every non-HTTP caller of StartCompetition/GenerateDraw reaches too
-	// (231 test call sites today; a future CLI/import auto-start
-	// tomorrow), and it numbers pools unconditionally with whatever prefix
-	// is stored -- an empty one writes bare "1","2" into pools.csv, which
-	// RenumberCompetitors' OWN guard (numbering.go) refuses outright. Assign,
-	// never refuse (the same rule the shiaijo-count gate above follows for
-	// the same reason: non-HTTP callers exist and must still get a usable
-	// draw): derive a default the same way the HTTP handler would have, and
-	// persist ONLY the NumberPrefix field.
+	// runDrawPipeline is the ONE path every non-HTTP caller of
+	// StartCompetition/GenerateDraw reaches too (a future CLI/import
+	// auto-start, and the many engine-level tests that build a Competition
+	// directly), so the never-empty-prefix invariant (G2) is enforced here as
+	// well as at the HTTP handler's own pre-flight (mobileapp.
+	// ensureNumberPrefix): both now route through the same
+	// engine.EnsureNumberPrefix (PR #416 finding 1), so this backstop
+	// validates a derived prefix against sibling competitions exactly like
+	// the HTTP path does, rather than deriving and persisting inline with no
+	// such check.
 	//
 	// This runs OUTSIDE any transaction/lock (see the pipeline-limitations
 	// note on this function: pool/bracket generation runs outside the
 	// comp-config lock, and the only lock this function ever takes is the
-	// brief one inside the atomic commit below), so calling
-	// DefaultNumberPrefixFor here -- itself a bare e.store read scanning
-	// every OTHER competition, id excluded -- cannot re-lock id's own mutex
-	// or deadlock against anything this function holds. The persist uses
-	// UpdateCompetitionChanged (its own brief per-comp lock acquire, not
-	// nested inside another) so a concurrent assignment (e.g. two draws
-	// racing on the same never-yet-prefixed competition) cannot silently
-	// clobber whichever prefix actually landed: the no-op branch fires if
-	// current already has one by the time this write runs, and
-	// assignedPrefix is read back from `current` either way, so comp (and
-	// the loadedNumberPrefix snapshot captured just below) reflects
-	// whichever prefix is actually now on disk, not necessarily the one this
-	// call derived. The HTTP handler's own ensureNumberPrefix (unchanged)
-	// still runs first on that path -- broadcast plus UX -- and becomes a
-	// fast no-op here since the prefix it already assigned is no longer
-	// blank.
+	// brief one inside the atomic commit below), so EnsureNumberPrefix's own
+	// WithCompetitionRenameLock acquire here cannot deadlock against
+	// anything this function already holds.
+	//
+	// allowed is CanGenerateDraw: by the time execution reaches this point,
+	// both StartCompetition's one-click path and GenerateDraw have already
+	// confirmed CanGenerateDraw(comp.Status) against their own outer load, so
+	// this restates the same precondition rather than introducing a new one.
+	//
+	// comp.NumberPrefix is re-read after the call rather than assumed,
+	// because EnsureNumberPrefix operates on its OWN freshly loaded copy: a
+	// concurrent assignment (e.g. two draws racing on the same never-yet-
+	// prefixed competition) may land a different prefix than this call
+	// derived, and comp (and the loadedNumberPrefix snapshot captured just
+	// below) must reflect whichever prefix is actually now on disk.
 	if strings.TrimSpace(comp.NumberPrefix) == "" {
-		derived, perr := e.DefaultNumberPrefixFor(comp.Name, id)
-		if perr != nil {
-			return fmt.Errorf("assign default number prefix for %s: %w", id, perr)
+		if _, err := e.EnsureNumberPrefix(id, CanGenerateDraw, true); err != nil {
+			return fmt.Errorf("assign default number prefix for %s: %w", id, err)
 		}
-		var assignedPrefix string
-		if _, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
-			if current == nil {
-				return nil, notFoundErrorf("competition %s not found", id)
-			}
-			if strings.TrimSpace(current.NumberPrefix) != "" {
-				// A concurrent writer (another draw-generation call, or a
-				// settings save) already assigned one; use theirs rather
-				// than overwrite it with ours.
-				assignedPrefix = current.NumberPrefix
-				return nil, nil
-			}
-			current.NumberPrefix = derived
-			assignedPrefix = derived
-			return current, nil
-		}); err != nil {
-			return fmt.Errorf("persist default number prefix for %s: %w", id, err)
+		current, err := e.store.LoadCompetition(id)
+		if err != nil {
+			return fmt.Errorf("reload number prefix for %s: %w", id, err)
 		}
-		comp.NumberPrefix = assignedPrefix
+		if current != nil {
+			comp.NumberPrefix = current.NumberPrefix
+		}
 	}
 
 	// Snapshot the loaded config BEFORE the pipeline mutates anything.

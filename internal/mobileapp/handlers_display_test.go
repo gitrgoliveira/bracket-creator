@@ -1,7 +1,9 @@
 package mobileapp
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,6 +160,65 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	require.NotNil(t, resp.SideB)
 	assert.Emptyf(t, resp.SideA.Number, "sideA must show NO number over an unreadable pools.csv, got %q", resp.SideA.Number)
 	assert.Emptyf(t, resp.SideB.Number, "sideB must show NO number over an unreadable pools.csv, got %q", resp.SideB.Number)
+}
+
+// TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins M7:
+// currentMatchPlayers used to discard LoadParticipantsOpt's error outright
+// (`players, _ := ...`), unlike the pools load just below it in the same
+// function, which already logs its own failure -- an unreadable
+// participants.csv left no server-side breadcrumb at all. The overlay must
+// also not vanish: buildSide falls back to the raw name
+// MatchResult.SideA/SideB carries when the (now empty) players slice can't
+// resolve it, so the response is still 200 with the match row's own names,
+// dojo/number simply blank. Both halves are asserted: the log line (the
+// actual fix; RED without it) and the non-vanishing response (already
+// correct pre-fix, asserted so a future change can't regress the fallback
+// while "fixing" the log).
+func TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory-shaped-file read errors")
+	}
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "unreadable-participants-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Unreadable Participants Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+	}))
+	// participants.csv as a DIRECTORY, not a file: LoadParticipantsOpt's
+	// underlying os.ReadFile fails with EISDIR, a read error rather than a
+	// parse error, exercising the plain `_, err := ...` path this finding is
+	// about (never a CSV-parse failure).
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "competitions", cid, "participants.csv"), 0o755))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.Contains(t, logBuf.String(), "load participants",
+		"M7: an unreadable participants.csv must leave a server-side log breadcrumb, matching the pools load's own logging in the same function")
+	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA, "the overlay must not vanish over an unreadable participants.csv")
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "Alice", resp.SideA.Name, "must fall back to the match row's own name")
+	assert.Equal(t, "Bob", resp.SideB.Name)
 }
 
 // TestCourtCurrentReturnsRunningBracketMatch, mp-9h1f follow-up. A running

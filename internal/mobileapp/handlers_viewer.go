@@ -38,11 +38,13 @@ import (
 // court-overlay caller (currentMatchPlayers) loads its OWN roster slice
 // rather than mutating the competition's.
 //
-// eng is threaded through (bc-pnum [review], the PlayoffsNumberingEngine
-// consumer-boundary interface, deps.go) so the playoffs-only branch below
-// routes through engine.Engine.NumberPlayoffsOnlyParticipants, the SAME
-// method the blank-template export's NumberedParticipantsFor calls -- ONE
-// derivation, not two independent call sites invoking the shared
+// The playoffs-only branch below calls engine.NumberPlayoffsOnlyParticipants
+// directly (G10: a plain package-level function, its receiver was never
+// read; mobileapp already imports engine, so the PlayoffsNumberingEngine
+// consumer-boundary interface this used to thread through as an `eng`
+// parameter bought nothing over the direct call), the SAME function the
+// blank-template export's NumberedParticipantsFor calls -- ONE derivation,
+// not two independent call sites invoking the shared
 // helper.AssignPlayerNumbers primitive, which is what actually prevents the
 // public payload and the printed Tags/Names-to-Print sheets from silently
 // disagreeing.
@@ -55,7 +57,7 @@ import (
 // corrupt file cannot make this compose numbers that contradict the draw on
 // disk. No-op when comp is nil, its NumberPrefix is empty, or the roster is
 // empty.
-func mergePoolNumbersIntoPlayersSlice(eng PlayoffsNumberingEngine, comp *state.Competition, players []domain.Player, pools []helper.Pool) {
+func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.Player, pools []helper.Pool) {
 	if comp == nil || comp.NumberPrefix == "" || len(players) == 0 {
 		return
 	}
@@ -66,38 +68,28 @@ func mergePoolNumbersIntoPlayersSlice(eng PlayoffsNumberingEngine, comp *state.C
 		// Playoffs-only: nothing on disk carries a number, so derive it from
 		// participant order under the current prefix. A prefix change is
 		// therefore reflected on the next read with no file write.
-		eng.NumberPlayoffsOnlyParticipants(comp, players)
+		engine.NumberPlayoffsOnlyParticipants(comp, players)
 		return
 	}
 	byID := make(map[string]string)
-	// bc-pnum A4: keyed on (name, dojo) via the shared identity primitive, not
-	// bare name -- two legal namesakes from DIFFERENT dojos (allowed
-	// everywhere per this repo's identity rule) used to collide in a
-	// name-only map, so the SECOND one written silently overwrote the
-	// FIRST's number and both entrants in the public payload showed the
-	// second's number.
-	//
-	// Accepted degradation, id-less legacy rosters only: a competitor edited
-	// (dojo corrected/transferred) AFTER a legacy draw with no participant
-	// IDs shows NO number rather than a WRONG one. Neither key can survive
-	// the edit -- ID is blank on both sides for legacy data, and the
-	// (name, dojo) key below is now the participant's NEW dojo against the
-	// pool row's OLD one -- so the lookup misses cleanly and the fall-through
-	// below leaves Number empty. That is the correct failure direction: a
-	// silent match on the wrong dojo (or on bare name, the exact A4 bug this
-	// key replaced) would misattribute someone else's number instead.
-	byNameDojo := make(map[string]string)
 	for _, pool := range pools {
 		for _, pp := range pool.Players {
-			if pp.Number == "" {
-				continue
-			}
-			if pp.ID != "" {
+			if pp.Number != "" && pp.ID != "" {
 				byID[pp.ID] = pp.Number
 			}
-			byNameDojo[helper.CompetitorKey("", pp.Name, pp.Dojo)] = pp.Number
 		}
 	}
+	// M2: byNameDojo is built LAZILY, on the first roster row that misses
+	// byID, rather than unconditionally up front. The vast majority of
+	// payload builds are for a roster where every row carries an id (the
+	// common, ids-everywhere case), so byID alone resolves every row and
+	// this second pass over every pool -- plus two helper.CompetitorKey
+	// normalisations per row -- was pure waste on every single payload
+	// build. Deliberately NOT gated on "the roster has ids": a pool row may
+	// carry a blank id while the roster row has one (or vice versa), and
+	// that legacy (name, dojo) fallback must still be reachable per row, not
+	// switched off for the whole call based on one row's shape.
+	var byNameDojo map[string]string
 	for i := range players {
 		if players[i].Number != "" {
 			continue
@@ -105,6 +97,35 @@ func mergePoolNumbersIntoPlayersSlice(eng PlayoffsNumberingEngine, comp *state.C
 		if n, ok := byID[players[i].ID]; ok && n != "" {
 			players[i].Number = n
 			continue
+		}
+		if byNameDojo == nil {
+			// bc-pnum A4: keyed on (name, dojo) via the shared identity
+			// primitive, not bare name -- two legal namesakes from
+			// DIFFERENT dojos (allowed everywhere per this repo's identity
+			// rule) used to collide in a name-only map, so the SECOND one
+			// written silently overwrote the FIRST's number and both
+			// entrants in the public payload showed the second's number.
+			//
+			// Accepted degradation, id-less legacy rosters only: a
+			// competitor edited (dojo corrected/transferred) AFTER a legacy
+			// draw with no participant IDs shows NO number rather than a
+			// WRONG one. Neither key can survive the edit -- ID is blank on
+			// both sides for legacy data, and the (name, dojo) key below is
+			// now the participant's NEW dojo against the pool row's OLD one
+			// -- so the lookup misses cleanly and the fall-through below
+			// leaves Number empty. That is the correct failure direction: a
+			// silent match on the wrong dojo (or on bare name, the exact A4
+			// bug this key replaced) would misattribute someone else's
+			// number instead.
+			byNameDojo = make(map[string]string)
+			for _, pool := range pools {
+				for _, pp := range pool.Players {
+					if pp.Number == "" {
+						continue
+					}
+					byNameDojo[helper.CompetitorKey("", pp.Name, pp.Dojo)] = pp.Number
+				}
+			}
 		}
 		if n, ok := byNameDojo[helper.CompetitorKey("", players[i].Name, players[i].Dojo)]; ok && n != "" {
 			players[i].Number = n
@@ -115,12 +136,14 @@ func mergePoolNumbersIntoPlayersSlice(eng PlayoffsNumberingEngine, comp *state.C
 // provisionalCompetitorNumbers composes the registration-order numbers the
 // check-in desk calls BEFORE the draw, for a competition still in setup (the
 // statuses a draw can be generated from, engine.CanGenerateDraw) that has a
-// prefix: one entry per comp.Players, in the same order, through the one
-// composition helper on a COPY so Player.Number itself stays empty. It is
-// carried as its own field (Competition.ProvisionalNumbers), not as Number,
-// because a provisional number is a different fact from an assigned one: the
-// public surfaces show only assigned numbers, the operator's roster shows
-// these styled provisional until the draw replaces them. Nil in every other
+// prefix: one entry per comp.Players, in the same order, through
+// helper.CompetitorNumber (G10) -- the SAME primitive AssignPlayerNumbers'
+// own loop calls, so this stays the one composition without needing a
+// throwaway roster copy just to read Number back off it. Carried as its own
+// field (Competition.ProvisionalNumbers), not as Number, because a
+// provisional number is a different fact from an assigned one: the public
+// surfaces show only assigned numbers, the operator's roster shows these
+// styled provisional until the draw replaces them. Nil in every other
 // status, so a drawn competition, and one whose draw is on disk but would not
 // parse, never carries them. Nor does a Swiss competition: its draw assigns
 // no number at all (it never writes pools.csv), so a "provisional" number
@@ -138,12 +161,9 @@ func provisionalCompetitorNumbers(comp *state.Competition) []string {
 	case state.CompFormatSwiss, state.CompFormatPlayoffs:
 		return nil
 	}
-	numbered := make([]domain.Player, len(comp.Players))
-	copy(numbered, comp.Players)
-	helper.AssignPlayerNumbers(numbered, comp.NumberPrefix, 1)
-	out := make([]string, len(numbered))
-	for i := range numbered {
-		out[i] = numbered[i].Number
+	out := make([]string, len(comp.Players))
+	for i := range comp.Players {
+		out[i] = helper.CompetitorNumber(comp.NumberPrefix, i+1)
 	}
 	return out
 }
@@ -151,11 +171,11 @@ func provisionalCompetitorNumbers(comp *state.Competition) []string {
 // mergePoolNumbersIntoPlayers, thin wrapper that operates on a Competition
 // pointer's own roster. Existing call sites that hold a *Competition keep
 // their idiomatic form; the work happens in the slice-typed helper above.
-func mergePoolNumbersIntoPlayers(eng PlayoffsNumberingEngine, comp *state.Competition, pools []helper.Pool) {
+func mergePoolNumbersIntoPlayers(comp *state.Competition, pools []helper.Pool) {
 	if comp == nil {
 		return
 	}
-	mergePoolNumbersIntoPlayersSlice(eng, comp, comp.Players, pools)
+	mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 }
 
 // viewerLoadCompetition is the store.LoadCompetition call used by the
@@ -178,7 +198,7 @@ var viewerLoadCompetition = func(store *state.Store, compID string) (*state.Comp
 // court feed GET /court/:court/matches. Non-nil payloads are returned in
 // listing order; the returned slice is non-nil even when empty so callers
 // marshal [] rather than null.
-func buildViewerCompetitionPayloads(eng PlayoffsNumberingEngine, store *state.Store, courtFilter string) ([]any, error) {
+func buildViewerCompetitionPayloads(store *state.Store, courtFilter string) ([]any, error) {
 	ids, err := store.ListCompetitions()
 	if err != nil {
 		return nil, err
@@ -194,7 +214,7 @@ func buildViewerCompetitionPayloads(eng PlayoffsNumberingEngine, store *state.St
 			// results[idx] as a nil `any` so the collect loop below skips
 			// it; assigning a nil gin.H directly would box into a non-nil
 			// interface and slip past that filter.
-			if payload := buildViewerCompetitionPayload(eng, store, compID, courtFilter); payload != nil {
+			if payload := buildViewerCompetitionPayload(store, compID, courtFilter); payload != nil {
 				results[idx] = payload
 			}
 		})
@@ -225,7 +245,7 @@ func buildViewerCompetitionPayloads(eng PlayoffsNumberingEngine, store *state.St
 // on that court (matchesPresentOnCourt). The gate runs off the same
 // poolMatches/bracket this function already loads, no second read. The
 // aggregate passes "" (no filter).
-func buildViewerCompetitionPayload(eng PlayoffsNumberingEngine, store *state.Store, compID, courtFilter string) gin.H {
+func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter string) gin.H {
 	// Per-comp read faults degrade to skipping (or thinning) the comp rather
 	// than failing the whole viewer payload — the availability trade for the
 	// public list surfaces — but every failed load below is logged so a
@@ -295,7 +315,7 @@ func buildViewerCompetitionPayload(eng PlayoffsNumberingEngine, store *state.Sto
 			// this PUBLIC payload -- it is logged server-side only, here.
 			log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
 		} else {
-			mergePoolNumbersIntoPlayers(eng, comp, pools)
+			mergePoolNumbersIntoPlayers(comp, pools)
 		}
 	}
 	// Hoisted out of the guard above (bc-pnum C2): provisionalCompetitorNumbers
@@ -401,7 +421,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 		// On panic inside the elected build, sf.Do returns an error and
 		// all waiters receive it; we map that to 500 below.
 		data, err := sf.Do("competitions", func() ([]byte, error) {
-			comps, err := buildViewerCompetitionPayloads(eng, store, "")
+			comps, err := buildViewerCompetitionPayloads(store, "")
 			if err != nil {
 				return nil, err
 			}
@@ -491,7 +511,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
 			// on the TV display, streaming overlay, and viewer card. (A pools
 			// read error has already returned above, so pools is trustworthy.)
-			mergePoolNumbersIntoPlayers(eng, comp, pools)
+			mergePoolNumbersIntoPlayers(comp, pools)
 			comp.ProvisionalNumbers = provisionalCompetitorNumbers(comp)
 
 			// Redact operator-only audit fields before this PUBLIC payload.

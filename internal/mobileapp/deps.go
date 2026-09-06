@@ -63,23 +63,15 @@ type CompetitionStore interface {
 	MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error)
 }
 
-// PlayoffsNumberingEngine is the consumer-boundary view of engine.Engine
-// used by the number-merge helper shared by the viewer and display handler
-// families (bc-pnum A8, tightened by [review]): the ONE derivation of an
-// effective-playoffs competition's numbers (participant order under the
-// prefix, engine.Engine.NumberPlayoffsOnlyParticipants), so the public
-// viewer/display payload and the exported Tags/Names-to-Print sheets
-// (engine.NumberedParticipantsFor, which routes through the SAME method)
-// read the same primitive and cannot silently disagree.
-//
-// Consumers (current): handlers_viewer.go (mergePoolNumbersIntoPlayersSlice
-// and its callers), handlers_display.go (currentMatchPlayers).
-type PlayoffsNumberingEngine interface {
-	// NumberPlayoffsOnlyParticipants numbers players in place under comp's
-	// NumberPrefix, participant order. No-op when the prefix is empty.
-	// Mirrors engine.Engine.NumberPlayoffsOnlyParticipants.
-	NumberPlayoffsOnlyParticipants(comp *state.Competition, players []domain.Player)
-}
+// PlayoffsNumberingEngine existed as the consumer-boundary view over
+// engine.Engine.NumberPlayoffsOnlyParticipants (bc-pnum A8, tightened by
+// [review]). Removed by G10: that method never read its receiver, so the
+// engine side made it a package-level function
+// (engine.NumberPlayoffsOnlyParticipants) instead, and mobileapp calls it
+// directly -- mobileapp already imports engine, so there was nothing this
+// interface bought over a plain function call, only an extra `eng`
+// parameter threaded through six signatures
+// (mergePoolNumbersIntoPlayersSlice and five callers).
 
 // ScoringEngine is the consumer-boundary view of engine.Engine used by
 // the match-score handler family. Pre-Slice-0 the handlers held a

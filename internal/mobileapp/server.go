@@ -133,7 +133,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	viewer := r.Group("/api/viewer")
 	{
 		RegisterViewerHandlers(viewer, store, eng)
-		RegisterDisplayHandlers(viewer, store, eng)
+		RegisterDisplayHandlers(viewer, store)
 	}
 
 	// Stateless schedule estimator, no auth, no state-store access.

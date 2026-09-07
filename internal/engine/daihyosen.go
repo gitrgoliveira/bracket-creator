@@ -175,7 +175,16 @@ func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStand
 	ids := groupMemberIDs(tiedGroup)
 	existingPairs := make(map[string]bool, len(existingRows))
 	for _, m := range existingRows {
-		if ids[m.SideAID] && ids[m.SideBID] && m.SideAID != m.SideBID {
+		// No m.SideAID != m.SideBID guard here (unlike the three real
+		// self-pair PREVENTION sites, groupNeedsChusen/leagueGroupHasDH/
+		// applyTiebreakSort): this scan only remembers what is already on
+		// disk, it does not decide what to generate. A self-referential
+		// stored row (SideAID == SideBID, reachable when two distinct
+		// tiedGroup entries share a corrupted/hand-edited duplicate
+		// participant id, so generation itself emitted the row) must still
+		// be recognized as existing, or re-injection over the same group
+		// regenerates it every call.
+		if ids[m.SideAID] && ids[m.SideBID] {
 			existingPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
 		}
 	}

@@ -352,6 +352,43 @@ func TestGenerateTiebreakerMatches_SkipsExistingPairs(t *testing.T) {
 	require.Len(t, matches, 2)
 }
 
+// TestGenerateTiebreakerMatches_DuplicateIDRowStaysIdempotent mirrors
+// TestGeneratePoolDaihyosenMatches_DuplicateIDRowStaysIdempotent: the
+// existingRows dedup scan must recognize a stored SELF-REFERENTIAL row
+// (SideAID == SideBID) as already existing. That shape is reachable when
+// two DISTINCT tiedGroup entries share a corrupted/hand-edited duplicate
+// participant id -- generation pairs by INDEX (i < j), not by id, so it
+// emits a row for that pair like any other, and the row's own
+// SideAID/SideBID both read the shared id back.
+//
+// The dedup scan is deliberately id-only (ids[m.SideAID] && ids[m.SideBID]),
+// with NO m.SideAID != m.SideBID guard: that guard belongs to
+// applyTiebreakSort (and chusen.go/competition.go's DH twins), which decide
+// whether a bout counts toward a win -- not whether a row already on disk
+// is remembered. Adding it here instead would make re-injection over the
+// same group regenerate the self-referential pair on every call.
+func TestGenerateTiebreakerMatches_DuplicateIDRowStaysIdempotent(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "dup-id", Name: "Alice", Dojo: "Dojo Alice"}},
+		{Player: domain.Player{ID: "bob-id", Name: "Bob", Dojo: "Dojo Bob"}},
+		{Player: domain.Player{ID: "dup-id", Name: "Alice-Clone", Dojo: "Dojo Alice"}},
+	}
+
+	first := generateTiebreakerMatches("Pool X", group, 0, "A", nil)
+	require.Len(t, first, 3, "3-way round-robin: 3 pairs")
+
+	var selfPaired int
+	for _, m := range first {
+		if m.SideAID == m.SideBID {
+			selfPaired++
+		}
+	}
+	require.Equal(t, 1, selfPaired, "premise: the (Alice, Alice-Clone) pair shares the duplicate id, so its own generated row is genuinely self-referential")
+
+	second := generateTiebreakerMatches("Pool X", group, len(first), "A", first)
+	assert.Empty(t, second, "re-injection over the same tied group must be idempotent, including the duplicate-id pair")
+}
+
 // TestGenerateTiebreakerMatches_NamesakePairGenerated is the regression guard
 // for the finding that a tied NAMESAKE pair (same display name, different
 // dojo -- legal per CheckDuplicateEntriesByNameDojo) never got its own TB

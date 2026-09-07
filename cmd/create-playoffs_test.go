@@ -151,6 +151,73 @@ func TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
 		"an explicit --number-prefix must number straight through the roster with no gap, duplicate or reordering")
 }
 
+// TestCreatePlayoffs_NumbersFollowSeededBracketOrder pins bc-pnum ruling 2
+// for the CLI: a number belongs to a position in the DRAW, not to the
+// roster's entry order. Dave is the sole seed (rank 1); StandardSeeding
+// places rank 1 at bracket slot 0 regardless of where Dave sits in the
+// input roster (last), so Dave must be numbered K1, not K4. Both the Data
+// sheet and Names to Print must agree, since both are written from the
+// same seeded, numbered slice.
+func TestCreatePlayoffs_NumbersFollowSeededBracketOrder(t *testing.T) {
+	var b bytes.Buffer
+	writer := bufio.NewWriter(&b)
+
+	tmpSeeds, err := os.CreateTemp("", "seeds-*.csv")
+	require.NoError(t, err)
+	defer os.Remove(tmpSeeds.Name())
+	_, err = tmpSeeds.WriteString("Name,Rank\nDave,1\n")
+	require.NoError(t, err)
+	tmpSeeds.Close()
+
+	o := &playoffOptions{
+		outputWriter: writer,
+		outputPath:   "seeded-numbering.xlsx",
+		determined:   true, // no shuffle: roster order is exactly the input order
+		numberPrefix: "K",
+		seedsPath:    tmpSeeds.Name(),
+	}
+	entries := []string{
+		"Alice,DojoA",
+		"Bob,DojoB",
+		"Carol,DojoC",
+		"Dave,DojoD",
+	}
+	require.NoError(t, o.createPlayoffs(entries))
+	require.NoError(t, writer.Flush())
+
+	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
+	require.NoError(t, err)
+	defer func() { assert.NoError(t, f.Close()) }()
+
+	rows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	byName := make(map[string]string, 4)
+	for i, row := range rows {
+		if i < 2 || len(row) < 4 { // rows 1-2 are the title/header block
+			continue
+		}
+		byName[row[1]] = row[3] // column B: Player Name, column D: Player Number
+	}
+	require.Len(t, byName, 4)
+	assert.Equal(t, "K1", byName["Dave"], "the sole seed must claim K1 (bracket slot 0), not K4 (its roster position)")
+	assert.Equal(t, "K2", byName["Alice"])
+	assert.Equal(t, "K3", byName["Bob"])
+	assert.Equal(t, "K4", byName["Carol"])
+
+	// Data sheet ROWS must also be written in that same bracket order (Dave
+	// first), not roster order: bc-pnum ruling 2 moved the Data-sheet write
+	// itself onto the seeded slice, not merely the numbers within it.
+	var rowOrder []string
+	for i, row := range rows {
+		if i < 2 || len(row) < 4 {
+			continue
+		}
+		rowOrder = append(rowOrder, row[1])
+	}
+	assert.Equal(t, []string{"Dave", "Alice", "Bob", "Carol"}, rowOrder,
+		"the Data sheet's rows must be written in bracket order, matching the Player Number column")
+}
+
 // TestCreatePlayoffs_NumberPrefix_OverLongExplicit_Errors pins bc-pnum A10:
 // an over-long explicit --number-prefix must be refused, not accepted
 // verbatim.

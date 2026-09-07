@@ -148,12 +148,22 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Reorder players into bracket-slot order BEFORE numbering (bc-pnum
+	// ruling 2): a number belongs to a position in the draw, so it must be
+	// composed from the SEEDED order, not the roster's entry order.
+	// AddPlayerDataToSheet's own doc comment describes the OLD ordering
+	// (seed after writing the Data sheet, entry order in column A, bracket
+	// order nowhere) -- this reorders both the numbering and the Data
+	// sheet/Names-to-Print writes onto the seeded slice, so every sheet that
+	// reads player.Number lists competitors in that same number (bracket)
+	// order top to bottom. playerCoords is therefore computed AFTER the
+	// reorder too, so its cell references point at the rows this actually
+	// wrote.
+	players = helper.StandardSeeding(players)
 	helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
 
 	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
-
-	// Reorder players based on seeds for standard bracket distribution
-	players = helper.StandardSeeding(players)
 
 	// gather all player names
 	var names []string

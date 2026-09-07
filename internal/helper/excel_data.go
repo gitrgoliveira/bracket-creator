@@ -144,17 +144,27 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 // first entrant) as "0" beside a "Player Number" column already reading
 // "K1" -- two different counting conventions on the same row.
 //
-// This function runs BEFORE StandardSeeding reorders players into bracket
-// slot order (see cmd/create-playoffs.go), so column A is the ENTRY order
-// -- the shuffled order the CLI drew the roster in, or the roster order for
-// the engine's export path -- never the bracket slot order the header used
-// to imply with the now-removed "Draw order" name. Relabelled, not
-// reordered: this column stays display-only and the Data sheet stays the
-// numbering source of truth Names to Print links to by coordinate, so
-// changing what it counts (rather than what it is called) would break that
-// link. Nothing reads this cell by formula reference anywhere downstream
-// (unlike the "Player Number" column, which CreateNamesToPrint links to);
-// it is display-only, which is what makes a pure rename safe.
+// Column A's VALUE is always that player's own PoolPosition+1 (a field
+// carried on the Player struct itself, set once by CreatePlayers at parse
+// time), regardless of what order the `players` slice is in when this
+// function runs -- reordering the slice changes ROW order, never what a
+// given row's column A says about that specific player. bc-pnum ruling 2
+// moved the CLI's own call site (cmd/create-playoffs.go) to AFTER
+// StandardSeeding, so ROWS are now in bracket order (matching the "Player
+// Number" column, which the same reorder feeds), while column A still
+// names each row's original entry number, no longer running 1, 2, 3...
+// top to bottom for that caller. That is intentional, not a regression:
+// the header still reads "Entry order", and the value in each cell is
+// still true of that row -- it simply is not sorted any more, since the
+// SHEET is now sorted by draw position instead. The engine's export path
+// (via engine.NumberedParticipantsFor) reorders the same way, for the same
+// reason. Relabelled, not renumbered: this column stays display-only and
+// the Data sheet stays the numbering source of truth Names to Print links
+// to by coordinate, so changing what it counts (rather than what it is
+// called) would break that link. Nothing reads this cell by formula
+// reference anywhere downstream (unlike the "Player Number" column, which
+// CreateNamesToPrint links to); it is display-only, which is what makes a
+// pure rename (and a caller reordering its rows) safe.
 func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, titlePrefix string) map[string]playerCellCoord {
 	// hasNumber (bc-pnum review): any player, not just the first -- see
 	// the identical rationale in AddPoolDataToSheet above.

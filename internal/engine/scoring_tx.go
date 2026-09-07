@@ -362,6 +362,15 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 	// pool match here -- there is no name fallback.
 	poolMatches, err := tx.LoadPoolMatches(compID)
 	if err == nil {
+		// currentPoolMatchSideIDs (eligibility.go) supersedes
+		// resolvePlayerIDsTx's name-derived guess with the CURRENT match's
+		// own stored SideAID/SideBID when it is itself a pool match -- see
+		// that function's doc comment for why a name re-derivation
+		// misattributes a same-name-different-dojo pairing. A bracket match
+		// (ok == false) keeps the name-derived pair, unchanged.
+		if ownIDA, ownIDB, ok := currentPoolMatchSideIDs(poolMatches, matchID); ok {
+			rawIDA, rawIDB = ownIDA, ownIDB
+		}
 		for _, m := range poolMatches {
 			if m.ID == matchID || m.Status != state.MatchStatusRunning {
 				continue

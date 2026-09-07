@@ -643,6 +643,45 @@ func TestStartMatchTx_MatchNotFound(t *testing.T) {
 	require.Error(t, txErr)
 }
 
+// TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock is
+// checkSimultaneousMatch's Tx twin of the same pin (eligibility_test.go,
+// TestStartMatch_RejectsSimultaneousMatch's "running match for a DIFFERENT
+// id sharing the same name" case): two "Sam"s from different dojos are a
+// legal roster, and one running on another court must not block the other
+// from starting, whatever order the roster happens to list them in. Both
+// checkSimultaneousMatch and checkSimultaneousMatchTx resolve the CURRENT
+// match's own identity via currentPoolMatchSideIDs (its own stored
+// SideAID/SideBID), never by re-deriving it from the bare name.
+func TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "csmtx-same-name-diff-id"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	samSouthID := helper.NewUUID4()
+	samNorthID := helper.NewUUID4()
+	runningOpponentID := helper.NewUUID4()
+	waitingOpponentID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: samSouthID, Name: "Sam", Dojo: "South"},
+		{ID: samNorthID, Name: "Sam", Dojo: "North"},
+		{ID: runningOpponentID, Name: "RunningOpponent", Dojo: "O1"},
+		{ID: waitingOpponentID, Name: "WaitingOpponent", Dojo: "O2"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "A-0", SideA: "Sam", SideAID: samSouthID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+			Status: state.MatchStatusRunning, Court: "A"},
+		{ID: "A-1", SideA: "Sam", SideAID: samNorthID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+			Status: state.MatchStatusScheduled, Court: "B"},
+	}))
+
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "A-1")
+		return nil
+	})
+	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere must not block")
+}
+
 // TestRecordDecisionTx_ValidationError confirms RecordDecisionTx returns
 // a validation error when decisionBy is not "shiro" or "aka".
 func TestRecordDecisionTx_ValidationError(t *testing.T) {

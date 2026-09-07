@@ -1033,7 +1033,11 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 		// WinnerSide hint, e.g. the admin score editor, which picks a
 		// winner by name. The winning side usually has more ippons, so
 		// infer from the scoreline. Equal counts (hantei/undecidable) or a
-		// draw (empty Winner) leave WinnerID empty → name fallback.
+		// draw (empty Winner) leave WinnerID empty -- unresolved, not a name
+		// fallback: every id-only consumer (standings, tie-break, Swiss, …)
+		// simply attributes this match to nobody rather than guessing from
+		// the name, which is exactly what two same-name competitors made
+		// ambiguous in the first place.
 		switch a, b := countScoringIppons(result.IpponsA), countScoringIppons(result.IpponsB); {
 		case a > b:
 			result.WinnerID = result.SideAID
@@ -1052,22 +1056,46 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 // withdrawal never wipes the sub-bouts already fought (both teams' results
 // stand and continue to count in IV/PW standings via accrueTeamSubResults).
 //
-// prior is the match state before the decision; nothing is preserved unless
-// its sides still match BY ID (operator ruling bc-pnum) -- a drifted or
-// re-oriented prior must not mis-attribute points, and a prior (or incoming
-// result) that carries no side id at all can never be proven to match, so
-// it is treated as a non-match rather than falling back to a name
-// comparison: no preservation, not a guess. decisionBy names the
-// WITHDRAWING side ("shiro" = SideB/Shiro, "aka" = SideA/Aka). Shared by the
-// two RecordDecision twins.
+// prior is the match state before the decision. Two record classes reach
+// here and are compared differently, which is the same split CLAUDE.md
+// documents for every id resolution in this file:
+//
+//   - A record that carries a side id (the POOL class -- generation-time
+//     SideAID/SideBID, stamped even before the match is ever scored) is
+//     compared BY ID ONLY (operator ruling bc-pnum): a drifted or
+//     re-oriented prior must not mis-attribute points, so a mismatch, or
+//     only one side carrying an id, is treated as a non-match -- no
+//     preservation, not a guess.
+//   - A record that carries NO id field at all (the BRACKET class --
+//     BracketMatch persists no per-side id, so bracketMatchAsResult's
+//     projection leaves every id empty on both sides) falls back to the
+//     pre-bc-pnum name comparison. This is the one legitimate "record with
+//     no id field at all" case, not a name fallback sitting beside an id
+//     lookup on the SAME record: comparing two empty-string ids would look
+//     like a match but proves nothing, so the id branch must never be
+//     reached for this class. Before this split, a kiken on a bracket
+//     match hit the id branch, found both sides id-less, and returned
+//     early -- erasing the withdrawer's already-struck ippons outright, a
+//     regression against FIK Art. 32 (bc-pnum review finding 1).
+//
+// decisionBy names the WITHDRAWING side ("shiro" = SideB/Shiro, "aka" =
+// SideA/Aka). Shared by the two RecordDecision twins.
 func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 	if prior == nil {
 		return
 	}
-	if prior.SideAID == "" || prior.SideBID == "" || result.SideAID == "" || result.SideBID == "" {
-		return
-	}
-	if prior.SideAID != result.SideAID || prior.SideBID != result.SideBID {
+	if prior.SideAID != "" || prior.SideBID != "" || result.SideAID != "" || result.SideBID != "" {
+		// At least one side carries an id: this is the pool class. Every id
+		// must be present and every id must match, or nothing is preserved.
+		if prior.SideAID == "" || prior.SideBID == "" || result.SideAID == "" || result.SideBID == "" {
+			return
+		}
+		if prior.SideAID != result.SideAID || prior.SideBID != result.SideBID {
+			return
+		}
+	} else if prior.SideA != result.SideA || prior.SideB != result.SideB {
+		// Bracket class (no id field at all): fall back to the name
+		// comparison this function used before the bc-pnum id-only pass.
 		return
 	}
 	result.SubResults = prior.SubResults
@@ -1503,9 +1531,12 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 
 		// Apply manual rank overrides. Overrides are keyed by competitor
 		// IDENTITY (helper.CompetitorKey: id-preferred, name+dojo fallback),
-		// not bare name (bc-cse) -- lookupPoolRankOverride also honours a
-		// legacy bare-name key for an overrides.json written before this fix,
-		// see its doc comment for the read-only compatibility decision.
+		// not bare name (bc-cse). lookupPoolRankOverride tries ONLY that
+		// key: the separate legacy bare-name overrides[name] fallback was
+		// removed (operator ruling bc-pnum -- see that function's own doc
+		// comment), so a pre-bc-cse overrides.json entry keyed by bare name
+		// alone is unresolvable until the operator re-records it through the
+		// current chusen/override-rank flow.
 		// `overrides` itself is loaded ONCE above this loop, not per pool.
 		var poolOverrides map[string]int
 		if overrides != nil {
@@ -1540,10 +1571,15 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			// an override's OWN rank number is 1-based (an operator recording
 			// "Alice is rank 1" via the chusen panel), and the two numbers must
 			// live on the same scale for "sort by whichever number is smaller"
-			// to mean anything: a legacy bare-name override of exactly 1 (see
-			// TestCalculatePoolStandings_Override_LegacyBareNameKey) must beat
-			// an undefeated, non-overridden natural WINNER, which only happens
-			// when that winner's own natural rank is 1, not 0.
+			// to mean anything: an identity-keyed override of exactly 1 must
+			// beat an undefeated, non-overridden natural WINNER, which only
+			// happens when that winner's own natural rank is 1, not 0 (natural
+			// rank generally beating an override is pinned by
+			// TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride).
+			// A BARE-NAME-keyed override cannot reach this comparison at all,
+			// legacy or not: lookupPoolRankOverride is id-only (see its own
+			// doc comment) -- TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable
+			// pins that such an entry simply never applies.
 			//
 			// The natural rank MUST be captured PER ELEMENT, not in a map keyed
 			// by identity (standingsPlayerKey): two id-less namesakes (legal

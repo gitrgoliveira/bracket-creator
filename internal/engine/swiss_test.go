@@ -1188,11 +1188,94 @@ func TestSwissPairing_SameNameDifferentDojo_ByeIndependence(t *testing.T) {
 //
 // The operator ruling bc-pnum removed that whole resolution path: every one
 // of those functions is id-only now, so an id-less match row resolves to
-// NOTHING everywhere, not to a picked-or-admitted namesake. Under the first
-// test's exact fixture (round-1 rows with no side ids at all) the field
-// freeze in GenerateSwissRound would now admit NOBODY, dropping below the
-// 2-participant minimum and returning a validation error instead of a
-// round -- there is no attribution left for a converted test to assert on,
-// so both are deleted rather than converted. Every Swiss match this engine
-// generates carries SideAID/SideBID (buildSwissMatches), so this only
-// affects hand-edited or pre-existing id-less data.
+// NOTHING everywhere, not to a picked-or-admitted namesake. Under the
+// FIRST test's exact fixture (round-1 rows with no side ids AT ALL, for a
+// 4-player roster) the field freeze in GenerateSwissRound would now admit
+// NOBODY, dropping below the 2-participant minimum and returning a
+// validation error instead of a round -- there is no attribution left for
+// a converted test to assert on with THAT fixture. The two tests below are
+// the id-only twins bc-pnum review finding 5 asks for: same claim (a prior
+// row with no id contributes nothing), proven on fixtures shaped so the
+// round can still generate.
+
+// TestSwissFieldKeysFromMatches_IDlessRow_AdmitsNobody is
+// TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth's id-only
+// twin, at the same unit level (direct call, no round generation needed).
+// Two round-1 rows -- an id-less regular match and an id-less bye -- name
+// three real roster players by NAME alone; none of the three may be
+// admitted to the frozen field, because swissFieldKeysFromMatches'
+// admit() goes through resolveSwissRosterKey, which is id-only. This is
+// also the "bye" half of finding 5: bye admission (hadBye, in
+// GenerateSwissRound) and field admission both gate on the SAME
+// resolveSwissRosterKey(byID, m.SideAID) call, so an id-less bye row is
+// provably inert on both counts via this one guard.
+func TestSwissFieldKeysFromMatches_IDlessRow_AdmitsNobody(t *testing.T) {
+	players := []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "Dojo A"},
+		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "Dojo B"},
+		{ID: helper.NewUUID4(), Name: "Carol", Dojo: "Dojo C"},
+	}
+	rosterByID := buildSwissRosterIndex(players)
+
+	priorMatches := []state.MatchResult{
+		// Id-less regular match: Alice beat Bob, but the row carries no
+		// per-side ids at all (the pre-bc-cse wire shape / a hand-edited file).
+		{ID: "Swiss-R1-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted},
+		// Id-less bye: Carol received round 1's bye, same no-id shape.
+		{ID: "Swiss-R1-1", SideA: "Carol", SideB: "", Winner: "Carol", Status: state.MatchStatusCompleted},
+	}
+
+	field := swissFieldKeysFromMatches(priorMatches, rosterByID)
+	assert.Empty(t, field, "an id-less prior row must admit NOBODY to the frozen field, win or bye alike")
+}
+
+// TestGenerateSwissRound_IDlessWinnerIDContributesNoWin isolates the WIN
+// half of finding 5 from field/bye admission: SideAID/SideBID are both
+// present (so field admission, rematch history and pairing all resolve
+// normally), but the row's WinnerID is empty even though Winner names a
+// side. The winner's win must not be credited, exactly as if the match had
+// never been won -- proven observably through round 2's pairing, the same
+// technique TestSwissRound2PairsByWins uses for a normal (fully-credited)
+// win.
+func TestGenerateSwissRound_IDlessWinnerIDContributesNoWin(t *testing.T) {
+	names := []string{"Alice", "Bob", "Carol", "Dave", "Eve", "Fay"}
+	seeds := map[string]int{"Alice": 1, "Bob": 2, "Carol": 3, "Dave": 4, "Eve": 5, "Fay": 6}
+	eng, store, compID, byName := setupSwissCompetition(t, names, seeds, 3)
+
+	round1 := []state.MatchResult{
+		// Alice "won" over Bob, but WinnerID is empty: the win must not count.
+		{ID: "Swiss-R1-0", SideA: "Alice", SideAID: byName["Alice"].ID, SideB: "Bob", SideBID: byName["Bob"].ID,
+			Winner: "Alice", WinnerID: "", Status: state.MatchStatusCompleted},
+		// Carol and Eve win normally (WinnerID stamped), for comparison.
+		{ID: "Swiss-R1-1", SideA: "Carol", SideAID: byName["Carol"].ID, SideB: "Dave", SideBID: byName["Dave"].ID,
+			Winner: "Carol", WinnerID: byName["Carol"].ID, Status: state.MatchStatusCompleted},
+		{ID: "Swiss-R1-2", SideA: "Eve", SideAID: byName["Eve"].ID, SideB: "Fay", SideBID: byName["Fay"].ID,
+			Winner: "Eve", WinnerID: byName["Eve"].ID, Status: state.MatchStatusCompleted},
+	}
+	require.NoError(t, store.SavePoolMatches(compID, round1))
+
+	r2, err := eng.GenerateSwissRound(compID, 2)
+	require.NoError(t, err)
+	require.Len(t, r2, 3, "6 active players -> 3 matches")
+
+	oneWinGroup := map[string]bool{"Carol": true, "Eve": true}
+	for _, m := range r2 {
+		aIsWinner, bIsWinner := oneWinGroup[m.SideA], oneWinGroup[m.SideB]
+		if aIsWinner || bIsWinner {
+			assert.True(t, aIsWinner && bIsWinner,
+				"the 1-win group (Carol, Eve) must pair with each other, not with a 0-win player: got %s vs %s", m.SideA, m.SideB)
+		}
+		// Alice must never face Bob again (rematch avoidance -- proves the
+		// ids on THIS row still drove pairing history normally) and must
+		// never be paired with Carol or Eve (which would mean her claimed
+		// win over Bob was, wrongly, credited).
+		if m.SideA == "Alice" || m.SideB == "Alice" {
+			other := m.SideB
+			if m.SideA != "Alice" {
+				other = m.SideA
+			}
+			assert.NotEqual(t, "Bob", other, "round 2 must not replay Alice vs Bob")
+			assert.False(t, oneWinGroup[other], "Alice's uncredited win must not place her in the 1-win group (paired with %s)", other)
+		}
+	}
+}

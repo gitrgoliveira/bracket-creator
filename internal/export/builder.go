@@ -159,7 +159,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// len(pools) == 0 branch below), because this workbook is a results
 	// snapshot and the pool-oriented renderer's formula references have
 	// nowhere valid to point without a pool data sheet.
-	poolsByCourt, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	// The second return value (the playoffs-only numbered roster) is the
+	// blank-template export's own extra (its Tags sheet); this results
+	// export has no such extra and discards it.
+	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}

@@ -50,6 +50,20 @@ func DrawSourceFor(comp *state.Competition) DrawSource {
 	}
 }
 
+// drawPositions maps each drawOrder id to its 0-based bracket position.
+// Shared by NumberKnockoutParticipants/numberByPosition and
+// orderPlayersByDraw, which NumberedParticipantsFor (below) always calls
+// together over the SAME drawOrder -- building the map once there means the
+// two can never disagree on a position by building independent copies of
+// it.
+func drawPositions(drawOrder []string) map[string]int {
+	pos := make(map[string]int, len(drawOrder))
+	for i, id := range drawOrder {
+		pos[id] = i
+	}
+	return pos
+}
+
 // NumberKnockoutParticipants is the ONE derivation of a knockout-only
 // competition's numbers (bc-pnum ruling 2): a number belongs to a POSITION
 // in the draw, so it composes players[i].Number from drawOrder, the
@@ -59,7 +73,7 @@ func DrawSourceFor(comp *state.Competition) DrawSource {
 // competition has not drawn yet so drawOrder is empty) gets NO number --
 // there is no participant-order or name-based fallback. No-op when the
 // competition has no prefix, so a caller does not have to special-case that
-// itself. mobileapp.numbersFromDraw / applyDrawNumbers and
+// itself. mobileapp.numbersFromDrawWithBracket / applyDrawNumbers and
 // NumberedParticipantsFor below are this function's two callers, so the
 // viewer/display merge and the blank-template export cannot silently drift
 // apart on how a knockout-only competitor's number is composed.
@@ -68,10 +82,15 @@ func NumberKnockoutParticipants(comp *state.Competition, drawOrder []string, pla
 	if prefix == "" || len(drawOrder) == 0 {
 		return
 	}
-	pos := make(map[string]int, len(drawOrder))
-	for i, id := range drawOrder {
-		pos[id] = i
-	}
+	numberByPosition(prefix, drawPositions(drawOrder), players)
+}
+
+// numberByPosition assigns players[i].Number from pos (a drawPositions map)
+// for every player whose id appears in it, leaving the rest untouched.
+// Split out from NumberKnockoutParticipants so NumberedParticipantsFor can
+// share one drawPositions map with orderPlayersByDraw instead of each
+// deriving its own copy from the identical drawOrder.
+func numberByPosition(prefix string, pos map[string]int, players []domain.Player) {
 	for i := range players {
 		if p, ok := pos[players[i].ID]; ok {
 			players[i].Number = helper.CompetitorNumber(prefix, p+1)
@@ -80,20 +99,15 @@ func NumberKnockoutParticipants(comp *state.Competition, drawOrder []string, pla
 }
 
 // orderPlayersByDraw returns players reordered so those with a known draw
-// position (their id appears in drawOrder) come first, ordered by that
-// position, followed by the rest in their original (roster) order. Used by
+// position (their id appears in pos) come first, ordered by that position,
+// followed by the rest in their original (roster) order. Used by
 // NumberedParticipantsFor so the Names-to-Print sheet and the printed Tags
 // list competitors top to bottom of the bracket, matching what
-// NumberKnockoutParticipants just labelled K1, K2, .... A nil/empty
-// drawOrder (no draw yet, or a legacy bracket with none recorded) leaves
-// players untouched.
-func orderPlayersByDraw(players []domain.Player, drawOrder []string) []domain.Player {
-	if len(drawOrder) == 0 {
+// numberByPosition just labelled K1, K2, .... An empty pos (no draw yet, or
+// a legacy bracket with none recorded) leaves players untouched.
+func orderPlayersByDraw(players []domain.Player, pos map[string]int) []domain.Player {
+	if len(pos) == 0 {
 		return players
-	}
-	pos := make(map[string]int, len(drawOrder))
-	for i, id := range drawOrder {
-		pos[id] = i
 	}
 	drawn := make([]domain.Player, 0, len(players))
 	rest := make([]domain.Player, 0, len(players))
@@ -110,12 +124,12 @@ func orderPlayersByDraw(players []domain.Player, drawOrder []string) []domain.Pl
 	return append(drawn, rest...)
 }
 
-// NumberedParticipantsFor returns comp's roster, loaded fresh, numbered by
-// NumberKnockoutParticipants from the bracket's DrawOrder and returned in
-// DRAW order (orderPlayersByDraw): numbered players first, top to bottom of
-// the bracket, unnumbered players (never drawn) after, in roster order. Used
-// by the blank-template export, which (unlike the viewer/display merge) has
-// no already-loaded roster to mutate in place.
+// NumberedParticipantsFor returns comp's roster, loaded fresh, numbered from
+// the bracket's DrawOrder and returned in DRAW order (orderPlayersByDraw):
+// numbered players first, top to bottom of the bracket, unnumbered players
+// (never drawn) after, in roster order. Used by the blank-template export,
+// which (unlike the viewer/display merge) has no already-loaded roster to
+// mutate in place.
 //
 // bracket is the caller's own already-loaded read when it has one (nil
 // otherwise, meaning "load it here"): ExportCompetitionXlsx loads the
@@ -133,8 +147,14 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 			return nil, err
 		}
 	}
-	NumberKnockoutParticipants(comp, bracket.DrawOrder, players)
-	return orderPlayersByDraw(players, bracket.DrawOrder), nil
+	// pos is built ONCE here and shared by numberByPosition and
+	// orderPlayersByDraw (rather than calling NumberKnockoutParticipants,
+	// which would derive its own copy from the same bracket.DrawOrder).
+	pos := drawPositions(bracket.DrawOrder)
+	if prefix := comp.EffectiveNumberPrefix(); prefix != "" {
+		numberByPosition(prefix, pos, players)
+	}
+	return orderPlayersByDraw(players, pos), nil
 }
 
 // PlayoffsNamesToPrint is the ONE derivation of the numbered roster

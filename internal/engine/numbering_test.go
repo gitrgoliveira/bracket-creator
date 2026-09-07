@@ -521,7 +521,7 @@ func TestOrderPlayersByDraw(t *testing.T) {
 		{ID: "p3", Name: "Cleo"},
 		{ID: "p4", Name: "Excluded"},
 	}
-	ordered := orderPlayersByDraw(players, []string{"p3", "p1", "p2"})
+	ordered := orderPlayersByDraw(players, drawPositions([]string{"p3", "p1", "p2"}))
 	names := make([]string, len(ordered))
 	for i, p := range ordered {
 		names[i] = p.Name
@@ -529,7 +529,7 @@ func TestOrderPlayersByDraw(t *testing.T) {
 	assert.Equal(t, []string{"Cleo", "Alice", "Bob", "Excluded"}, names)
 
 	t.Run("empty drawOrder leaves players untouched", func(t *testing.T) {
-		assert.Equal(t, players, orderPlayersByDraw(players, nil))
+		assert.Equal(t, players, orderPlayersByDraw(players, drawPositions(nil)))
 	})
 }
 

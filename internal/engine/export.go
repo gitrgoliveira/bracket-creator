@@ -117,14 +117,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// The shared sheet pipeline (mp-yuy8): Data, Pool Draw, Pool Matches,
 	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
 	// steps and order to internal/export.BuildResultsWorkbook.
-	// RenderCompetitionWorkbook derives its own namesToPrintPlayers via
+	// RenderCompetitionWorkbook derives namesToPrintPlayers via
 	// PlayoffsNamesToPrint (numbering.go, bc-pnum A8/[review]: a
 	// playoffs-only competition never has a pools.csv, so feeding it the
 	// empty pools slice alone would make its Data and Names-to-Print steps
 	// no-ops) -- internal/export.BuildResultsWorkbook resolves through the
 	// SAME derivation, so the two exports of one competition agree on
 	// whether that sheet exists at all.
-	if _, err := e.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches); err != nil {
+	_, namesToPrintPlayers, err := e.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	if err != nil {
 		return nil, err
 	}
 
@@ -137,14 +138,11 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	if tourn != nil {
 		publicURL = tourn.PublicURL
 	}
-	// namesToPrintPlayers is re-derived here (not threaded out of the call
-	// above, which now computes its own copy internally): CreateTagsSheet
-	// needs the SAME numbered roster the Names-to-Print sheet just used, for
-	// the identical playoffs-only shape.
-	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools, bracket)
-	if err != nil {
-		return nil, err
-	}
+	// namesToPrintPlayers is the SAME numbered roster the Names-to-Print
+	// sheet above just used (RenderCompetitionWorkbook's second return
+	// value), not re-derived here: CreateTagsSheet needs it for the
+	// identical playoffs-only shape, and deriving it a second time would
+	// just be a second PlayoffsNamesToPrint call over the same inputs.
 	tagsPools := pools
 	if namesToPrintPlayers != nil {
 		// Same numbered roster as the Names-to-Print sheet above (bc-pnum A8):

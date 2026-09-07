@@ -33,11 +33,18 @@ func CompetitorNumber(prefix string, n int) string {
 // starts at start and increments by one. Returns the next counter value so callers
 // can chain across multiple slices (e.g. pools).
 //
-// This is the ONE place the competitor-number string is composed. Three callers
-// used to spell `prefix + strconv(i+1)` themselves (the pool loop in
-// engine/pools.go, its verbatim twin in cmd/create-pools.go, and the playoffs
-// re-derivation in mobileapp/handlers_viewer.go); they now all route here, so a
-// change to the number's shape cannot reach one surface and miss another.
+// It is a thin loop over CompetitorNumber above, which is the actual ONE
+// place the competitor-number string is composed -- AssignPlayerNumbers is
+// only the "number players in the order they're already in" shape of that
+// composition, used by the pool loop (engine/pools.go, its verbatim twin in
+// cmd/create-pools.go) and by cmd/create-playoffs.go (over the SEEDED slice,
+// bc-pnum ruling 2, so "the order they're already in" is bracket order
+// there, not roster order). A knockout-only competition's number on the web
+// app does NOT route through here: it is composed at READ time, per
+// position in the bracket's DrawOrder rather than per index in a players
+// slice, by engine.NumberKnockoutParticipants calling CompetitorNumber
+// directly (bc-pnum ruling 2; see internal/mobileapp/handlers_viewer.go's
+// applyDrawNumbers).
 func AssignPlayerNumbers(players []Player, prefix string, start int) int {
 	for i := range players {
 		players[i].Number = CompetitorNumber(prefix, start+i)

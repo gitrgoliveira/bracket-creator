@@ -113,9 +113,16 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 // analogue of create-pools_test.go's TestCreatePools_NumberPrefix_ByteIdenticalNumbering
 // (bc-pnum D1): an explicit --number-prefix numbers byte-identically to how
 // it always has, prefix plus one counter running straight through the
-// participant order. Mutation: gating helper.AssignPlayerNumbers on a
-// non-empty prefix would be a no-op here (the default is never empty), so
-// this pins the wiring itself, not just the composition helper.
+// SEEDED order (bc-pnum ruling 2 moved numbering to after
+// helper.StandardSeeding; see TestCreatePlayoffs_NumbersFollowSeededBracketOrder
+// below for the case where that distinguishes anything). This fixture has
+// no seeds and no dojo collision for delayDojoMeetings to repair, so
+// StandardSeeding is an identity reorder and seeded order coincides with
+// plain participant order -- which is exactly why it stays
+// byte-identical, not because numbering still runs before seeding.
+// Mutation: gating helper.AssignPlayerNumbers on a non-empty prefix would be
+// a no-op here (the default is never empty), so this pins the wiring
+// itself, not just the composition helper.
 func TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)

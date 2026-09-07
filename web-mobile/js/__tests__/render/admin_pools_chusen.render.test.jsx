@@ -200,7 +200,7 @@ describe('AdminPools chusen banner: same-name members are kept apart by index/id
     expect(screen.queryByText(/Enter each of positions/)).toBeNull();
   });
 
-  it('sends one overridePoolRank call per member, each with its OWN playerId/dojo', async () => {
+  it('sends one overridePoolRank call per member, each with its OWN playerId', async () => {
     const api = makeApi([samenameGroup]);
     await mountAdminPools({ api });
 
@@ -214,9 +214,9 @@ describe('AdminPools chusen banner: same-name members are kept apart by index/id
 
     await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
     const calls = api.overridePoolRank.mock.calls;
-    // (compID, poolID, playerName, rank, password, playerId, playerDojo)
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Ryu Kan', 2, PASSWORD, 'team-1', 'Dojo North']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Ryu Kan', 1, PASSWORD, 'team-2', 'Dojo South']);
+    // (compID, poolID, playerName, rank, password, playerId)
+    expect(calls[0]).toEqual(['c1', 'Pool A', 'Ryu Kan', 2, PASSWORD, 'team-1']);
+    expect(calls[1]).toEqual(['c1', 'Pool A', 'Ryu Kan', 1, PASSWORD, 'team-2']);
     // The two calls must not carry the same identity: that was the defect
     // (both rows resolved through one identityByName['Ryu Kan'] entry).
     expect(calls[0][5]).not.toBe(calls[1][5]);
@@ -242,8 +242,8 @@ describe('AdminPools chusen banner: unique-name group regression guard', () => {
 
     await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
     const calls = api.overridePoolRank.mock.calls;
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a', 'Dojo A']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b', 'Dojo B']);
+    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a']);
+    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b']);
   });
 
   it('still rejects an invalid permutation (regression guard on validation)', async () => {
@@ -337,8 +337,8 @@ describe('AdminPools chusen banner: two tied groups in the same pool stay indepe
 
     await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(2));
     const calls = api.overridePoolRank.mock.calls;
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a', 'Dojo A']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b', 'Dojo B']);
+    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 2, PASSWORD, 'team-a']);
+    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 1, PASSWORD, 'team-b']);
     // Group 2 must never appear in the write: it was not submitted.
     expect(calls.some((c) => c[2] === 'Gamma' || c[2] === 'Delta')).toBe(false);
 
@@ -487,20 +487,23 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     expect(gammaInput.value).toBe('3');
   });
 
-  it('accepts the shown defaults (1,2,3) as a valid permutation and submits all three', async () => {
+  // overridePoolRank now requires playerId (operator ruling bc-pnum): the
+  // server resolves a pool member by id only and 400s outright without
+  // one. Before the idsMissing gate, this test clicked the (enabled)
+  // button and asserted the resulting playerId:"" payload -- a request
+  // shaped to fail. It now asserts the button is disabled instead, with a
+  // hint, so the operator can never reach that 400 from here.
+  it('disables "Record chusen result" with a hint when a member has no id, rather than submitting playerId ""', async () => {
     const api = makeApi([legacyGroup]);
     await mountAdminPools({ api });
 
     await screen.findByText('Chusen (drawing lots) required');
     const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
-    await act(async () => { fireEvent.click(recordBtn); });
+    expect(recordBtn.disabled).toBe(true);
+    expect(screen.getByText(/has no id yet/)).toBeTruthy();
 
-    await waitFor(() => expect(api.overridePoolRank).toHaveBeenCalledTimes(3));
-    expect(screen.queryByText(/Enter each of positions/)).toBeNull();
-    const calls = api.overridePoolRank.mock.calls;
-    expect(calls[0]).toEqual(['c1', 'Pool A', 'Alpha', 1, PASSWORD, '', 'Dojo A']);
-    expect(calls[1]).toEqual(['c1', 'Pool A', 'Beta', 2, PASSWORD, '', 'Dojo B']);
-    expect(calls[2]).toEqual(['c1', 'Pool A', 'Gamma', 3, PASSWORD, '', 'Dojo G']);
+    recordBtn.click();
+    expect(api.overridePoolRank).not.toHaveBeenCalled();
   });
 });
 

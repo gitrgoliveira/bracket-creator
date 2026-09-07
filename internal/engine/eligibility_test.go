@@ -627,6 +627,26 @@ func TestLosingSide(t *testing.T) {
 			},
 			wantID: "", wantName: "", wantOK: false,
 		},
+		{
+			// bc-pnum review round 2, finding 3: an id-carrying row (kiken
+			// decision, SideAID/SideBID both set) with NEITHER WinnerSide
+			// NOR WinnerID resolves to ok=false -- tiers 1/2 have nothing to
+			// go on, and the tier-3/4 id gate (the case above) blocks a
+			// name/ippon guess even though a scoreline signal (IpponsA
+			// struck, IpponsB empty) is sitting right there. This is
+			// DELIBERATE, not a gap to fix: see losingSide's own doc
+			// comment for the known (and, through the app itself,
+			// unreachable) consequence -- RecordDecisionTx's
+			// hadPriorLoser check treats this ok=false as "no prior loser
+			// to protect" and skips the T103 downstream-match lock.
+			name: "id-carrying prior with no WinnerSide/WinnerID resolves nothing, even with a scoreline (deliberate, see losingSide doc comment)",
+			result: state.MatchResult{
+				SideA: "Alice", SideAID: "idA", SideB: "Bob", SideBID: "idB",
+				Decision: "kiken-voluntary",
+				IpponsA:  []string{"M"}, IpponsB: nil,
+			},
+			wantID: "", wantName: "", wantOK: false,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1720,10 +1740,23 @@ func TestRecordDecision_BracketLoserKeepsStruckPoints(t *testing.T) {
 }
 
 // TestRecordDecision_BracketTeamWithdrawalKeepsSubResults is the bracket-shaped
-// twin of TestRecordDecision_TeamWithdrawalKeepsSubResults: a team encounter
-// fought in the knockout must keep its already-fought sub-bouts across a
-// withdrawal, exactly like a pool encounter. Same no-id class as the test
-// above.
+// twin of TestRecordDecision_TeamWithdrawalKeepsSubResults, but the two
+// assertions it carries are NOT pinned by the same mechanism (bc-pnum
+// review round 2, finding 4):
+//
+//   - The match-level IpponsA assertion below IS pinned by preserveLoserScore:
+//     that function is what copies the withdrawing side's already-struck
+//     ippons ("M") from prior onto result, per the id/name-class split
+//     TestRecordDecision_BracketLoserKeepsStruckPoints already pins for the
+//     individual case. Disable preserveLoserScore and THIS assertion goes red.
+//   - The SubResults assertion is NOT pinned by preserveLoserScore for a
+//     BRACKET match: applyBracketMatchResult's own merge rule already
+//     preserves bm.SubResults whenever the incoming write omits it
+//     (nil != explicit-empty-clear), independent of anything
+//     preserveLoserScore does. Disabling preserveLoserScore leaves this
+//     assertion green regardless -- it is exercised here only because the
+//     same withdrawal decision naturally carries both facts at once, not
+//     because this line depends on the function under test.
 func TestRecordDecision_BracketTeamWithdrawalKeepsSubResults(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-team-withdrawal-subs"
@@ -1741,14 +1774,21 @@ func TestRecordDecision_BracketTeamWithdrawalKeepsSubResults(t *testing.T) {
 		{Position: 1, SideA: "Team Red", SideB: "Team White", IpponsA: []string{"M"}, Winner: "Team Red"},
 		{Position: 2, SideA: "Team Red", SideB: "Team White", IpponsB: []string{"K"}, Winner: "Team White"},
 	}
+	// IpponsA: ["M"] is Team Red's own struck match-level point, live in the
+	// encounter before the withdrawal -- the fact preserveLoserScore must
+	// carry across the decision write, exactly as the individual test's
+	// IpponsB does for Bob.
 	require.NoError(t, eng.RecordMatchResult(compID, "m-r1-0", &state.MatchResult{
-		SideA: "Team Red", SideB: "Team White", Status: state.MatchStatusRunning, SubResults: subs,
+		SideA: "Team Red", SideB: "Team White", Status: state.MatchStatusRunning,
+		IpponsA: []string{"M"}, SubResults: subs,
 	}))
 	// aka (SideA = Team Red) withdraws -> shiro (SideB = Team White) wins.
 	result, _, err := eng.RecordDecision(compID, "m-r1-0", "kiken-voluntary", "aka", "withdrew", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, "Team White", result.Winner)
-	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32)")
+	assert.Equal(t, []string{"M"}, result.IpponsA,
+		"withdrawing side (Team Red) keeps its struck ippon (FIK Art. 32) -- this is the assertion preserveLoserScore actually pins")
+	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32) -- via applyBracketMatchResult's own merge rule, not preserveLoserScore")
 	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
 	assert.Equal(t, "Team White", result.SubResults[1].Winner)
 }

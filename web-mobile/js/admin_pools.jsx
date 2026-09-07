@@ -349,6 +349,12 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const groupKey = `${poolName}::${minPosition}`;
         const isBusy = !!chusenBusy[groupKey];
         const groupErrMsg = chusenGroupErr[groupKey] || null;
+        // overridePoolRank now requires playerId (operator ruling bc-pnum:
+        // the server resolves a pool member by id only and 400s outright
+        // without one); an id-less member here would otherwise let the
+        // operator submit a request shaped to fail. Mirrors the
+        // league-tiebreak buttons' own idsMissing gate below in this file.
+        const idsMissing = members.some(m => !m.id);
 
         // Effective value for a member's input, keyed by the member's
         // IDENTITY (checkinPid; data.jsx owns id-vs-name|dojo fallback rule),
@@ -394,7 +400,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
           try {
             for (let i = 0; i < members.length; i++) {
               const member = members[i];
-              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(member, i), password, member.id, member.dojo);
+              await window.API.overridePoolRank(c.id, poolName, member.name, effRank(member, i), password, member.id);
             }
             // Optimistically hide THIS group only (a pool can hold several) - the
             // effect re-fetches on the next update to reconcile.
@@ -474,12 +480,15 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
               <button
                 type="button"
                 className="btn btn--sm btn--primary"
-                disabled={isBusy}
+                disabled={isBusy || idsMissing}
                 onClick={handleRecord}
               >
                 {isBusy && <span className="spinner" />}
                 Record chusen result
               </button>
+              {idsMissing && (
+                <span className="field__hint">One of these teams has no id yet: re-save the roster, then retry.</span>
+              )}
             </div>
             {groupErrMsg && (
               <div className="league-tiebreak__err">{groupErrMsg}</div>

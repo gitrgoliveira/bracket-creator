@@ -1234,6 +1234,32 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(s2Cell.props.className).toContain('league-matrix__cell--empty');
     expect(s2Cell.props.title).toContain('not played');
   });
+
+  // bc-pnum item 1 (BEHAVIOUR CHANGE): rowWon now routes through
+  // sameCompetitor, which never guesses a mixed pair. Before this item, an
+  // id-less winner fell through to a bare name compare against rowPlayer
+  // regardless of whether rowPlayer itself carried a real id.
+  it('never guesses a mixed pair: an id-less winner beside id-carrying players shows no win cell', () => {
+    const idPlayers = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'pA', name: 'Alice' },
+        { id: 'pB', name: 'Bob' },
+      ],
+    };
+    const m = {
+      id: 'Pool A-1', sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      status: 'completed',
+      // Winner recorded with no id at all even though both players carry
+      // real ids (e.g. a legacy write path): sameCompetitor refuses to guess.
+      winner: { id: '', name: 'Alice' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: idPlayers, matches: [m], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    expect(winCell).toBeFalsy();
+  });
 });
 
 // mp-7x4n: ViewerOverview opens MatchViewerModal in self-run mode,

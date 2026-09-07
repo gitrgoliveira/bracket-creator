@@ -17,12 +17,17 @@
 //          aside. Per competition, via `dataIssues` on the aggregate.
 //
 //   ADVISORY  the file loads fine and nothing is blocked, but a data-
-//          completeness gap needs the operator's attention (e.g. a legacy
-//          roster row with no stable id, bc-pnum ruling 1b). Reported the
-//          same way as LOUD, on the same `dataIssues` list, distinguished by
-//          a "kind" field ("missing-ids") so the console renders accurate
-//          copy instead of the LOUD banner's "a file could not be read" and
-//          "every write is refused" claims, neither of which is true here.
+//          completeness gap needs the operator's attention: a row with no
+//          stable id in participants.csv, pools.csv, or a side/winner with
+//          no id in pool-matches.csv (operator ruling bc-pnum -- every
+//          on-disk record that carries an id field is now resolved by id
+//          only, so a row missing one is silently unresolvable rather than
+//          broken). Reported the same way as LOUD, on the same
+//          `dataIssues` list, distinguished by a "kind" field
+//          ("missing-ids") so the console renders accurate copy instead of
+//          the LOUD banner's "a file could not be read" and "every write is
+//          refused" claims, neither of which is true here. Up to THREE such
+//          entries can appear at once, one per affected file.
 //
 // One module because the three share an audience and a voice, and because the
 // three surfaces that show them (the pool match list, the pool standings, the
@@ -223,44 +228,59 @@ export function isLoudIssue(i) {
   return !!i && !isAdvisoryIssue(i);
 }
 
-// missingIDsIssue picks the ADVISORY entry (kind "missing-ids") out of a
-// dataIssues list, or null when there is none. The server emits at most one:
-// every affected roster row folds into a single detail sentence
-// (missingParticipantIDsIssue, handlers_viewer.go), so there is nothing to
-// aggregate here.
-export function missingIDsIssue(issues) {
-  return (issues || []).find(isAdvisoryIssue) || null;
+// missingIDsIssues picks every ADVISORY entry (kind "missing-ids") out of a
+// dataIssues list. The server can now emit up to THREE (operator ruling
+// bc-pnum: participants.csv, pools.csv and pool-matches.csv each carry an id
+// field a side is resolved from, and each is checked and reported
+// independently -- missingParticipantIDsIssue / poolsMissingParticipantIDsIssue /
+// poolMatchesMissingSideIDsIssue, handlers_viewer.go), each folding its own
+// affected rows into one detail sentence. Renamed from the singular
+// missingIDsIssue (which picked at most one entry via .find): keeping only
+// the first would silently drop the other two notices whenever more than
+// one file has an issue at once.
+export function missingIDsIssues(issues) {
+  return (issues || []).filter(isAdvisoryIssue);
 }
 
-// MissingParticipantIDsNotice: the ADVISORY-class notice. Deliberately NOT
-// role="alert" -- the LOUD banner reserves that interrupt for "scoring is
-// blocked", and this is neither loud nor blocking: the roster loaded, the
-// competition runs, only a re-save is needed to backfill the id. The
-// server's own sentence already names the competitors and the remedy
-// (missingParticipantIDsIssue), so this renders it verbatim rather than
-// re-composing the wording client-side.
-export function MissingParticipantIDsNotice({ issue }) {
-  if (!issue) return null;
+// MissingParticipantIDsNotice: the ADVISORY-class notice, rendered as ONE
+// LINE PER ENTRY (operator ruling bc-pnum: participants.csv, pools.csv and
+// pool-matches.csv are independent files that can each carry id-less/
+// unresolvable rows at the same time, so an operator fixing one must still
+// see the other two rather than have them silently hidden by a
+// single-entry picker). Deliberately NOT role="alert" -- the LOUD banner
+// reserves that interrupt for "scoring is blocked", and this is neither
+// loud nor blocking: the roster/draw/pool-matches loaded, the competition
+// runs, only a re-save / draw regeneration / re-entry is needed. Each line
+// is the server's own sentence for that file, rendered verbatim rather
+// than re-composed client-side.
+export function MissingParticipantIDsNotice({ issues }) {
+  const list = issues || [];
+  if (list.length === 0) return null;
   return (
-    <div className="alert alert--warn data-issue data-issue--missing-ids" role="status">
-      <span aria-hidden="true">⚠</span>
-      <span>{issue.detail}</span>
-    </div>
+    <>
+      {list.map((issue) => (
+        <div key={issue.file} className="alert alert--warn data-issue data-issue--missing-ids" role="status">
+          <span aria-hidden="true">⚠</span>
+          <span>{issue.detail}</span>
+        </div>
+      ))}
+    </>
   );
 }
 
 // DataIssueBanner: the competition-level notice for the LOUD class, where a
 // whole file will not parse and every write to it is refused. Also renders
-// the ADVISORY missing-ids notice (see MissingParticipantIDsNotice) when the
-// list carries one, as a second, separate notice, since the two classes say
-// materially different things and must not share one alert's wording.
+// the ADVISORY missing-ids notices (see MissingParticipantIDsNotice) when the
+// list carries any -- one line per affected file, up to three -- as separate
+// notices, since the two classes say materially different things and must
+// not share one alert's wording.
 //
 // It states the consequences in the banner rather than hiding them behind the
 // confirm dialog, because they are what the operator is choosing between and
 // the dialog is a last gate, not a briefing.
 export function DataIssueBanner({ issues, competition, onReset, resetting }) {
   const all = issues || [];
-  const missingIDs = missingIDsIssue(all);
+  const missingIDs = missingIDsIssues(all);
   const list = all.filter(isLoudIssue);
   const bracket = bracketIssue(list);
   // Only ask the format question when the bracket is the broken file: a corrupt
@@ -340,7 +360,7 @@ export function DataIssueBanner({ issues, competition, onReset, resetting }) {
           </div>
         </div>
       ) : null}
-      <MissingParticipantIDsNotice issue={missingIDs} />
+      <MissingParticipantIDsNotice issues={missingIDs} />
     </>
   );
 }

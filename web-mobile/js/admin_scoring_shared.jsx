@@ -378,12 +378,18 @@ function makeSubmitDecision({
         // Kiken keeps the modal open so the operator can walk through
         // RemainingMatchesPanel and award default wins to each remaining
         // scheduled match for the withdrawn player. Do NOT advance yet.
-        const winnerName = (updated?.winner || '').trim();
-        const loserName = winnerName === (updated?.sideA || '') ? (updated?.sideB || '') : (updated?.sideA || '');
-        const loser =
-          (match.sideA?.name === loserName) ? match.sideA :
-          (match.sideB?.name === loserName) ? match.sideB :
-          { id: '', name: loserName };
+        //
+        // bc-pnum: decisionBy ("aka"/"shiro") already names the withdrawn
+        // SIDE unambiguously and matches the server's own attribution
+        // exactly (scoring_tx.go: aka=sideA, shiro=sideB) -- no name
+        // comparison needed. Re-deriving the loser from the /decision
+        // response's plain winner/sideA/sideB NAME strings (the previous
+        // approach) goes wrong for a same-name/different-dojo pair: both
+        // sides' names are then identical, so a name compare always
+        // resolves to the SAME side regardless of who actually withdrew.
+        const loser = decisionBy === 'aka'
+          ? (match.sideA || { id: '', name: '' })
+          : (match.sideB || { id: '', name: '' });
         setWithdrawnPlayer(loser);
         setDecisionPromptKind('');
       } else if (!isComplete && onAfterDecision) {
@@ -664,6 +670,25 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
   );
 }
 
+// bc-pnum: does `side` (a match's sideA/sideB, {id,name}) refer to the
+// withdrawn player identified by (wid, wname)? An id decides whenever
+// BOTH the withdrawn player and this side carry one -- never an OR with
+// name, which would count a name hit even when both ids are present and
+// differ (the previous shape: `(wid && side.id===wid) || (wname &&
+// side.name===wname)` -- the second clause fires independently of the
+// first, so a same-name/different-dojo participant on this side is
+// wrongly read as the withdrawn player whenever the id compare fails).
+// Name is the fallback only when NEITHER carries an id; the mixed case
+// (one has an id, the other doesn't) has no id to decide with and no
+// name-only case to safely fall back on, so it resolves to false rather
+// than guessing.
+function sideIsWithdrawnPlayer(side, wid, wname) {
+  const sid = side?.id || "";
+  if (wid && sid) return wid === sid;
+  if (!wid && !sid) return !!wname && side?.name === wname;
+  return false;
+}
+
 // T098: "Remaining matches for [player]" panel. After a kiken decision lands,
 // look up every scheduled match where the just-withdrawn player still appears
 // and offer a one-click "Award default win to opponent" for each. The button
@@ -698,9 +723,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
         const wid = withdrawnPlayer?.id || "";
         const matchesForPlayer = all.filter(m => {
           if (m.status !== "scheduled") return false;
-          const aMatch = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
-          const bMatch = (wid && m.sideB?.id === wid) || (wname && m.sideB?.name === wname);
-          return aMatch || bMatch;
+          return sideIsWithdrawnPlayer(m.sideA, wid, wname) || sideIsWithdrawnPlayer(m.sideB, wid, wname);
         });
         setMatches(matchesForPlayer);
       } catch (e) {
@@ -716,7 +739,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
     const wname = (withdrawnPlayer?.name || "").trim();
     const wid = withdrawnPlayer?.id || "";
-    const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+    const isOnA = sideIsWithdrawnPlayer(m.sideA, wid, wname);
     const decisionBy = isOnA ? "aka" : "shiro";
     setBusyId(m.id);
     // Clear any previous verdict before this attempt. Without it the panel's
@@ -773,7 +796,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
           {matches.map(m => {
             const wname = (withdrawnPlayer?.name || "").trim();
             const wid = withdrawnPlayer?.id || "";
-            const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+            const isOnA = sideIsWithdrawnPlayer(m.sideA, wid, wname);
             const opponent = isOnA ? m.sideB : m.sideA;
             return (
               <li key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -1136,6 +1159,7 @@ export {
   daihyosenEnchoFields,
   decideDrawToggle,
   shouldBlockScoringKeys,
+  sideIsWithdrawnPlayer,
   useAdoptFromServer,
   EnchoControl,
   DecisionPrompt,

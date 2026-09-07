@@ -264,7 +264,7 @@ function normalizeMatch(m, playerMap) {
             const byName = playerMap?.[name];
             if (byName && (!flatId || byName.id === flatId)) p = byName;
         }
-        // bc-pnum (Opus review round): never invent an id from the name. A
+        // bc-pnum: never invent an id from the name. A
         // side absent from the player map entirely (not found by flat id or
         // by name) keeps id "" -- exactly like buildPlayerMap now does for
         // an id-less participant -- so every downstream "does this side

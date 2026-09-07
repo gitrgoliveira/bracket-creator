@@ -3933,6 +3933,15 @@ button.pool-match-row {
   font-family: var(--font-mono);
 }
 
+/* bc-pnum (2nd Opus review round): the disabled check-in checkbox's reason
+   surfaced inline (not just a hover title, per item 6 -- unreachable on a
+   tablet or by keyboard). Prose, not an id, so no font-mono. */
+.seed-row__noid {
+  font-size: 11px;
+  color: var(--warn-ink);
+  font-weight: 500;
+}
+
 .vlist-item__icon {
   width: 36px;
   height: 36px;
@@ -9700,6 +9709,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .rd-row__seed {
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+/* bc-pnum (2nd Opus review round): the check-in reason surfaced inline on
+   the row (not just a hover title, per item 6 -- unreachable on a tablet
+   or by keyboard), matching admin_participants.jsx's seed-row__id sibling
+   use and the Edit modal's field__hint / rd-edit__note styling family. */
+.rd-row__noid {
+  color: var(--warn-ink);
+  font-weight: 500;
 }
 
 .rd-row__right {

@@ -286,7 +286,7 @@ function sideMarks(decision, decidedByHantei) {
 // "left" | "right" | null (no winner recorded, drifted data, or a mixed
 // id/no-id pair that sameCompetitor refuses to guess on). Accepts both
 // object sides ({id, name}) and bare name strings (routed through
-// sameCompetitor, competitor_identity.jsx — the one owner of the id/name
+// sameCompetitor, competitor_identity.jsx -- the one owner of the id/name
 // attribution rule).
 function winnerSideLR(m) {
   if (!m || !m.winner) return null;

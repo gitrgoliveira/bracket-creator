@@ -216,7 +216,7 @@ function sideMatchesPickedSet(side, ids, names) {
 // buildPickedSets: the {ids, names} shape sideMatchesPickedSet consults,
 // built EXCLUSIVELY per entry like buildWatchedSets (viewer_watchlist_core.jsx)
 // -- an entry WITH an id contributes to `ids` ONLY, one WITHOUT contributes
-// its name to `names` ONLY. 2nd Opus review round: the two inline builders
+// its name to `names` ONLY. the two inline builders
 // this replaced (one copy-pasted into each of applyFilters/matchHighlightedBy)
 // added a picked entry's name to `names` UNCONDITIONALLY, even when that
 // same entry also carried an id, so an id-less side sharing an id-carrying

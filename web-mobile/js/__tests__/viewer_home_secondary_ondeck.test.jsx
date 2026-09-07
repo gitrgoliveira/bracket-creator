@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { filterSecondaryOnDeck } from '../viewer_home.jsx';
 
-// bc-pnum (Opus review round): filterSecondaryOnDeck backs ViewerHome's
+// bc-pnum: filterSecondaryOnDeck backs ViewerHome's
 // quiet on-deck banner for non-primary watched players. A side WITH an id
 // matches only a watched id; a side WITHOUT one matches by name only.
 describe('filterSecondaryOnDeck', () => {
@@ -25,7 +25,7 @@ describe('filterSecondaryOnDeck', () => {
     expect(filterSecondaryOnDeck([idLessMatch], watched, noPrimary).map((m) => m.id)).toEqual(['m1']);
   });
 
-  // bc-pnum (2nd Opus review round, MEDIUM): the case the two tests above
+  // bc-pnum (MEDIUM): the case the two tests above
   // don't cover. An id-CARRYING watched entry must never light an id-less
   // side that merely shares its display name -- a mixed pair, refused
   // exactly like the id-carrying-side test above. Before the fix this

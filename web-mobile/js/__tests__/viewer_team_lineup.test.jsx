@@ -54,7 +54,7 @@ describe('lineup_resolver: resolveLineupTeamId', () => {
     expect(resolveLineupTeamId('any-key', undefined)).toBe('any-key');
   });
 
-  // bc-pnum (Opus review round): an object-form overload (id decides when
+  // bc-pnum: an object-form overload (id decides when
   // present) was added here, found to have no production caller (YAGNI),
   // and removed -- see lineup_resolver.jsx's header comment on
   // resolveLineupTeamId for why every real caller collapses the side to a

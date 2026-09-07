@@ -25,7 +25,7 @@
 // participants_updated subscription that reconciles other desks' changes, and
 // onUpdate() pushes back to the parent so navigating "Back" shows fresh data.
 
-import { checkinPid, checkinApiPid } from './data.jsx';
+import { checkinPid, checkinApiPid, NO_ID_HINT } from './data.jsx';
 
 const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
 
@@ -78,16 +78,6 @@ function rdPid(p) {
 function rdApiPid(p) {
   return checkinApiPid(p);
 }
-
-// bc-pnum (Opus review round): an id-less row has no safe wire identifier
-// (rdApiPid returns "" for it). The check-in control and RdEditModal's Save
-// are disabled for such a row rather than sending a write that can only
-// 404 or hit no route; this is the exact remedy sentence
-// internal/helper/participant_ids.go MissingParticipantIDsMessage uses (and
-// the Overview data-issues notice renders verbatim), mirrored here so an
-// operator seeing either surface reads the same words. Same constant as
-// admin_participants.jsx's NO_ID_HINT.
-const RD_NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
 
 // Subsequence score for one token against a normalized haystack. Returns null
 // when the token isn't even a subsequence; otherwise a score where lower is a
@@ -308,7 +298,7 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
             key={comp.id}
             className={`rd-chip${checked ? " is-checked" : ""}`}
             disabled={busy || idLess}
-            title={idLess ? RD_NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
+            title={idLess ? NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
             onClick={() => !checked && onToggle(comp.id, rdApiPid(player), true)}
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
@@ -345,16 +335,26 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
     ? (presence === "all" ? "true" : presence === "partial" ? "mixed" : "false")
     : checked;
 
-  // bc-pnum (Opus review round): a "comp" row is exactly one participant in
+  // bc-pnum: a "comp" row is exactly one participant in
   // one competition, so an id-less row can never check in (rdApiPid returns
   // "" for it -- disable rather than send a write that can only 404).
   // "all" mode aggregates one PERSON across every competition they entered
   // (rdBuildPeopleIndex groups by name+dojo, not by id); `player` here is
   // only entries[0]'s representative record, which may carry an id even
   // when a SIBLING entry doesn't, so this narrower disable does not extend
-  // to that mode -- checkPersonEntries already skips (rather than
-  // misdirects) any entry whose own id is missing.
+  // to that mode -- checkPersonEntries filters its
+  // own `targets` down to entries that carry an id, so a sibling entry's
+  // missing id is skipped rather than sent as a write that can only 404,
+  // and the skipped count is reported back through a toast rather than
+  // silently dropped.
   const idLessCompRow = mode === "comp" && !player.id;
+
+  // bc-pnum: a hover title alone is unreachable on
+  // a tablet or by keyboard/screen-reader, so the disabled reason rides in
+  // the aria-label too (title stays for the mouse-hover case), and is also
+  // rendered inline on the row's meta line below -- matching how the Edit
+  // modal already shows this same hint.
+  const checkAriaLabel = `${checkLabel}${idLessCompRow ? `. ${NO_ID_HINT}` : ""}`;
 
   return (
     <div className={`rd-row ${stateClass}${isLast ? " rd-row--last" : ""}`}>
@@ -363,9 +363,9 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
         className="rd-check"
         role="checkbox"
         aria-checked={ariaChecked}
-        aria-label={checkLabel}
+        aria-label={checkAriaLabel}
         disabled={busy || idLessCompRow}
-        title={idLessCompRow ? RD_NO_ID_HINT : undefined}
+        title={idLessCompRow ? NO_ID_HINT : undefined}
         onClick={onPrimary}
       >
         <span className="rd-check__box" aria-hidden="true">
@@ -384,6 +384,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
           {player.dojo && <span className="rd-row__dojo">{player.dojo}</span>}
           {danGrade && <span className="rd-row__dan">{danGrade}</span>}
           {player.seed ? <span className="rd-row__seed">Seed {player.seed}</span> : null}
+          {idLessCompRow && <span className="rd-row__noid" title={NO_ID_HINT}>{NO_ID_HINT}</span>}
         </div>
         {mode === "all" && <RdOtherChips entries={entries} onToggle={onToggle} busy={busy} label="In" />}
         {mode === "comp" && others.length > 0 && <RdOtherChips entries={others} onToggle={onToggle} busy={busy} label="Also in" />}
@@ -525,7 +526,7 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
     }
   };
 
-  // bc-pnum (Opus review round): PUT .../participants/ with an empty id
+  // bc-pnum: PUT .../participants/ with an empty id
   // segment (rdApiPid returns "" for this row) matches no route at all;
   // block the write client-side rather than toasting the resulting generic
   // failure.
@@ -538,10 +539,10 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
       dismissable={!busy}
       footer={<>
         <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || idLess} title={idLess ? RD_NO_ID_HINT : undefined}>{busy ? "Saving…" : "Save changes"}</button>
+        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || idLess} title={idLess ? NO_ID_HINT : undefined}>{busy ? "Saving…" : "Save changes"}</button>
       </>}
     >
-      {idLess && <p className="rd-edit__note">{RD_NO_ID_HINT}</p>}
+      {idLess && <p className="rd-edit__note">{NO_ID_HINT}</p>}
       <div className="rd-walkup__grid">
         <label className="field">
           <span className="field__label">{isTeam ? "Team name" : "Name"}</span>
@@ -688,19 +689,29 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   };
 
   // Core "set this person's check-in across every competition they entered":
-  // optimistic local writes + parallel API calls, returning the failure count.
-  // No busy/refresh side effects so callers can coordinate one bulk operation
-  // around many people without each clearing the shared busy flag early.
+  // optimistic local writes + parallel API calls, returning the failure and
+  // skip counts. No busy/refresh side effects so callers can coordinate one
+  // bulk operation around many people without each clearing the shared busy
+  // flag early.
+  //
+  // bc-pnum: an entry whose OWN record carries no
+  // id (rdApiPid returns "" for it) has no safe wire identifier -- it is
+  // filtered out of `targets` here rather than sent as a write that can
+  // only 404 about a row the operator is looking at. `skipped` reports the
+  // count back so callers can tell the operator, rather than the write
+  // silently vanishing.
   const checkPersonEntries = async (rec, makeChecked) => {
-    const targets = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
-    if (!targets.length) return { failed: 0, total: 0 };
+    const relevant = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
+    const targets = relevant.filter(({ player }) => !!player.id);
+    const skipped = relevant.length - targets.length;
+    if (!targets.length) return { failed: 0, total: 0, skipped };
     targets.forEach(({ comp, player }) => setLocal(comp.id, rdApiPid(player), makeChecked));
     inFlightRef.current += 1;
     try {
       const results = await Promise.allSettled(
         targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdApiPid(player), makeChecked, password))
       );
-      return { failed: results.filter((r) => r.status === "rejected").length, total: targets.length };
+      return { failed: results.filter((r) => r.status === "rejected").length, total: targets.length, skipped };
     } finally {
       inFlightRef.current -= 1;
     }
@@ -711,11 +722,18 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     const makeChecked = rdPresence(rec.entries) !== "all"; // none/partial → check all; all → undo all
     setBusy(true);
     try {
-      const { failed, total } = await checkPersonEntries(rec, makeChecked);
-      if (total === 0) return;
-      if (failed) showToast(`${failed} of ${total} check-ins failed: reloading`, "error");
-      else if (makeChecked) {
-        announceHandoff(rec.name, rec.entries.map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
+      const { failed, total, skipped } = await checkPersonEntries(rec, makeChecked);
+      if (total === 0) {
+        if (skipped) showToast(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id: save the roster once and retry`, "error");
+        return;
+      }
+      if (failed) {
+        showToast(`${failed} of ${total} check-in(s) failed${skipped ? `, ${skipped} have no id` : ""}: reloading`, "error");
+      } else {
+        if (skipped) showToast(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id and were skipped`, "error");
+        if (makeChecked) {
+          announceHandoff(rec.name, rec.entries.filter(({ player }) => player.id).map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
+        }
       }
       await refresh();
     } finally {
@@ -735,7 +753,13 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     try {
       const results = await Promise.allSettled(pending.map((rec) => checkPersonEntries(rec, true)));
       const failed = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.failed : 1), 0);
-      if (failed) showToast(`${failed} check-in(s) failed: reloading`, "error");
+      const skipped = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.skipped : 0), 0);
+      if (failed || skipped) {
+        const parts = [];
+        if (failed) parts.push(`${failed} check-in(s) failed`);
+        if (skipped) parts.push(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id`);
+        showToast(`${parts.join(", ")}: reloading`, "error");
+      }
       await refresh();
     } finally {
       inFlightRef.current -= 1;

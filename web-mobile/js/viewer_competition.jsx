@@ -119,7 +119,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   // pooled Set -- isPlayerWatched/sideIsWatched decide which to consult by
   // the CHECKED side's own id presence, never both independently.
   //
-  // 2nd Opus review round: this is now the ONLY set built from
+  // this is now the ONLY set built from
   // resolvedWatched. A separate watchedIds/watchedNames pair used to be
   // built here purely for matchInvolvesWatchedSet, inclusively (every
   // entry's name landed in watchedNames even when that entry also carried

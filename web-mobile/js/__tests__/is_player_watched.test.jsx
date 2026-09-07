@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { isPlayerWatched, buildWatchedSets } from '../viewer_watchlist_core.jsx';
 
-// bc-pnum (Opus review round): isPlayerWatched used to pool watched ids AND
+// bc-pnum: isPlayerWatched used to pool watched ids AND
 // lowercased names into ONE flat Set and accept a hit on either
 // independently, so watching Sato of Tokyo also highlighted Sato of Osaka's
 // rows in the bracket/pool/schedule wherever the id check missed. `watched`

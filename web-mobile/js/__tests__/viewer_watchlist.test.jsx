@@ -120,7 +120,7 @@ describe('buildWatchlistUpcoming', () => {
     expect(globalRunning[0].compId).toBe('comp-B');
   });
 
-  // bc-pnum (Opus review round): a match side WITH an id must match only a
+  // bc-pnum: a match side WITH an id must match only a
   // watched id, never falling through to a name hit. Watching Sato of Tokyo
   // must not also surface Sato of Osaka's (unrelated, real-id-carrying)
   // matches just because the names coincide.
@@ -140,7 +140,7 @@ describe('buildWatchlistUpcoming', () => {
     expect(buildWatchlistUpcoming(watched, all).map((m) => m.id)).toEqual(['m1']);
   });
 
-  // bc-pnum (2nd Opus review round, MEDIUM): the case the two tests above
+  // bc-pnum (MEDIUM): the case the two tests above
   // don't cover. An id-CARRYING watched entry's name must never leak into
   // the name fallback: an id-less side that merely shares that entry's
   // display name is a mixed pair (the watched entry has a real id, this

@@ -66,7 +66,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     const m = normalizeMatch(raw, {});
 
     // After normalization both sides and winner should be {id, name} objects.
-    // bc-pnum (Opus review round): resolveSide no longer invents an id from
+    // bc-pnum: resolveSide no longer invents an id from
     // the name for a side absent from the player map -- id stays "" for all
     // three (sideA, sideB, winner) here, honestly reflecting that none of
     // them resolved to a real participant. The winner cue below therefore

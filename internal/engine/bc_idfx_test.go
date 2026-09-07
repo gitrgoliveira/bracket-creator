@@ -455,7 +455,7 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 }
 
 // TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank
-// converts the BLOCKER from the Opus review round 2 of this bead. Originally
+// converts the BLOCKER from a review of this bead. Originally
 // reproduced with ID-LESS namesakes (naturalRank was a map keyed by
 // standingsPlayerKey(ID, Name), so two id-less namesakes -- legal across
 // dojos, CheckDuplicateEntriesByNameDojo -- collapsed onto ONE map entry,
@@ -776,7 +776,7 @@ func TestPairKeyRemoved_UsesTiebreakerPairKey(t *testing.T) {
 	assert.Equal(t, "a|b", tiebreakerPairKey("a", "b"))
 }
 
-// --- Opus review round 2 ---
+// --- id-only resolution pins ---
 
 // TestApplyPoolWrite_RestorePolicyIgnoresWinnerIDMismatch is finding 2 from
 // the round-2 review: backfillMatchIdentity's unattributable-WinnerID

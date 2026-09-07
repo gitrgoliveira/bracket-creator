@@ -13,7 +13,7 @@ import { applyPatchOrdered, checkSeqGap } from '../patch.jsx';
 // These tests pin all three branches plus the first-event behaviour
 // (no false-positive gap on initial connect).
 //
-// bc-pnum (Opus review round): winner assertions expect id "" -- these
+// bc-pnum: winner assertions expect id "" -- these
 // fixtures carry no player map, so resolveSide (api_serializers.jsx) has
 // nothing to resolve the winner NAME against and no longer invents an id
 // from it.

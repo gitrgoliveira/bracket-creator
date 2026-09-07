@@ -328,19 +328,19 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // (loaded via /api/viewer/competitions) already carries each team's
   // metadata (member roster): no extra participants fetch is needed.
   //
-  // The match's sideA/sideB are normalized to { id, name }, where `id`
-  // falls back to the team NAME when the backend has no UUID for that slot
-  // (see api_serializers.resolveSide) -- an accepted residual gap kept by
-  // design for exactly this recovery path, so it is NOT "fixed" here.
-  // sideKey prefers side.id over side.name: a real id decides, since a
-  // UUID never coincidentally equals another team's display name, so
+  // The match's sideA/sideB are normalized to { id, name } (see
+  // api_serializers.resolveSide); `id` is the participant's real UUID when
+  // resolved, or "" when the backend has no UUID for that slot -- resolveSide
+  // never invents an id from the team NAME. sideKey below falls back to
+  // side.name in that "" case, which is the recovery path this file needs:
+  // sideKey prefers side.id over side.name (a real id decides, since a
+  // UUID never coincidentally equals another team's display name), so
   // matchesKey's `p.id === key || p.name === key` only ever succeeds by
-  // name when key itself carries no real id to offer (the invented-id
-  // case above, or a side genuinely without one). The previous
-  // `(p.id || p.name) === sideId` form compared only the first truthy key
-  // (the UUID), which never equals a name-keyed sideId, so the roster
-  // silently failed to resolve and every dropdown showed "No roster
-  // found" -- do not reintroduce that single-key form.
+  // name when key itself carries no real id to offer (an id-less side).
+  // The previous `(p.id || p.name) === sideId` form compared only the
+  // first truthy key (the UUID), which never equals a name-keyed sideId,
+  // so the roster silently failed to resolve and every dropdown showed
+  // "No roster found" -- do not reintroduce that single-key form.
   const sideKey = (side) =>
     (side && typeof side === "object" ? (side.id || side.name) : side) || "";
   const sideAKey = sideKey(m.sideA);

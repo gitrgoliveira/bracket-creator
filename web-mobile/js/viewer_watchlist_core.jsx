@@ -277,7 +277,7 @@ export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
   if (ids.size === 0) return null;
   const list = Array.isArray(allMatches) ? allMatches : [];
   const pending = list.filter((m) => m && m.status !== "completed");
-  // bc-pnum (2nd Opus review round, HIGH regression fix): the primary
+  // bc-pnum (HIGH regression fix): the primary
   // entry always carries a real id (resolveEntryPlayerIds only ever returns
   // roster-backed ids), so a match side with NO id is a MIXED pair and must
   // never be guessed at by name -- sameCompetitor's rule. A removed name

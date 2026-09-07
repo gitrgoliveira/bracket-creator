@@ -14,13 +14,13 @@
 // This governs ATTRIBUTION: deciding who won, which row is watched, which
 // player withdrew. It is deliberately narrower than "id decides when
 // present, else name" (which independently checks each side and lets a
-// mixed pair fall through to a name compare) — that shape is exactly what
+// mixed pair fall through to a name compare) -- that shape is exactly what
 // let a same-name/different-dojo competitor get credited with a stranger's
 // win once one side's id went missing.
 //
 // It does NOT govern ROSTER/LINEUP LOOKUP: resolving an id-less side against
 // a roster keyed by id-or-name is a different operation (a KEY composite,
-// not a peer comparison) and may still fall back to a name match — that is
+// not a peer comparison) and may still fall back to a name match -- that is
 // the intentional recovery path for resolveSide's own "no id at all"
 // fallback (api_serializers.jsx), and is why callers like
 // match_scoreboard.jsx's useTeamLineups, admin_scoring_team.jsx's
@@ -29,8 +29,8 @@
 // than calling sameCompetitor. Keys and lookups may compose; comparisons of
 // two already-resolved records must go through sameCompetitor.
 //
-// Accepts a {id,name} object OR a bare name string (some callers — team
-// sub-bout winners/sides — carry no id concept on the wire at all, by
+// Accepts a {id,name} object OR a bare name string (some callers -- team
+// sub-bout winners/sides -- carry no id concept on the wire at all, by
 // design; a bare string is therefore "no id" for this rule, exactly like an
 // object whose id is "").
 

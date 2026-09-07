@@ -5,24 +5,12 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
+import { NO_ID_HINT } from './data.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
-
-// bc-pnum: an id-less row (checkinApiPid returns "" for
-// it) has no safe wire identifier at all. Sending its check-in or replace
-// write anyway reaches the wrong outcome either way: PUT
-// .../participants//checkin hits the handler and 404s "participant not
-// found" about a row the operator is looking right at; PUT
-// .../participants/ (empty id segment) matches no route at all and toasts a
-// generic failure. Both controls are disabled client-side instead, with
-// this hint -- the exact remedy sentence internal/helper/participant_ids.go
-// MissingParticipantIDsMessage uses (and 1b's Overview data-issues notice
-// renders verbatim), so an operator seeing either surface reads the same
-// words.
-const NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
 
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's

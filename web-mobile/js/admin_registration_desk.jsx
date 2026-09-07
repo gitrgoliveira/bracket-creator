@@ -25,7 +25,7 @@
 // participants_updated subscription that reconciles other desks' changes, and
 // onUpdate() pushes back to the parent so navigating "Back" shows fresh data.
 
-import { checkinPid, checkinApiPid } from './data.jsx';
+import { checkinPid, checkinApiPid, NO_ID_HINT } from './data.jsx';
 
 const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
 
@@ -78,16 +78,6 @@ function rdPid(p) {
 function rdApiPid(p) {
   return checkinApiPid(p);
 }
-
-// bc-pnum: an id-less row has no safe wire identifier
-// (rdApiPid returns "" for it). The check-in control and RdEditModal's Save
-// are disabled for such a row rather than sending a write that can only
-// 404 or hit no route; this is the exact remedy sentence
-// internal/helper/participant_ids.go MissingParticipantIDsMessage uses (and
-// the Overview data-issues notice renders verbatim), mirrored here so an
-// operator seeing either surface reads the same words. Same constant as
-// admin_participants.jsx's NO_ID_HINT.
-const RD_NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
 
 // Subsequence score for one token against a normalized haystack. Returns null
 // when the token isn't even a subsequence; otherwise a score where lower is a
@@ -308,7 +298,7 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
             key={comp.id}
             className={`rd-chip${checked ? " is-checked" : ""}`}
             disabled={busy || idLess}
-            title={idLess ? RD_NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
+            title={idLess ? NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
             onClick={() => !checked && onToggle(comp.id, rdApiPid(player), true)}
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
@@ -364,7 +354,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
   // the aria-label too (title stays for the mouse-hover case), and is also
   // rendered inline on the row's meta line below -- matching how the Edit
   // modal already shows this same hint.
-  const checkAriaLabel = `${checkLabel}${idLessCompRow ? `. ${RD_NO_ID_HINT}` : ""}`;
+  const checkAriaLabel = `${checkLabel}${idLessCompRow ? `. ${NO_ID_HINT}` : ""}`;
 
   return (
     <div className={`rd-row ${stateClass}${isLast ? " rd-row--last" : ""}`}>
@@ -375,7 +365,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
         aria-checked={ariaChecked}
         aria-label={checkAriaLabel}
         disabled={busy || idLessCompRow}
-        title={idLessCompRow ? RD_NO_ID_HINT : undefined}
+        title={idLessCompRow ? NO_ID_HINT : undefined}
         onClick={onPrimary}
       >
         <span className="rd-check__box" aria-hidden="true">
@@ -394,7 +384,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
           {player.dojo && <span className="rd-row__dojo">{player.dojo}</span>}
           {danGrade && <span className="rd-row__dan">{danGrade}</span>}
           {player.seed ? <span className="rd-row__seed">Seed {player.seed}</span> : null}
-          {idLessCompRow && <span className="rd-row__noid" title={RD_NO_ID_HINT}>{RD_NO_ID_HINT}</span>}
+          {idLessCompRow && <span className="rd-row__noid" title={NO_ID_HINT}>{NO_ID_HINT}</span>}
         </div>
         {mode === "all" && <RdOtherChips entries={entries} onToggle={onToggle} busy={busy} label="In" />}
         {mode === "comp" && others.length > 0 && <RdOtherChips entries={others} onToggle={onToggle} busy={busy} label="Also in" />}
@@ -549,10 +539,10 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
       dismissable={!busy}
       footer={<>
         <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || idLess} title={idLess ? RD_NO_ID_HINT : undefined}>{busy ? "Saving…" : "Save changes"}</button>
+        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || idLess} title={idLess ? NO_ID_HINT : undefined}>{busy ? "Saving…" : "Save changes"}</button>
       </>}
     >
-      {idLess && <p className="rd-edit__note">{RD_NO_ID_HINT}</p>}
+      {idLess && <p className="rd-edit__note">{NO_ID_HINT}</p>}
       <div className="rd-walkup__grid">
         <label className="field">
           <span className="field__label">{isTeam ? "Team name" : "Name"}</span>

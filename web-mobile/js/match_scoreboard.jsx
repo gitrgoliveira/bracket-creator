@@ -49,6 +49,18 @@ export function useTeamLineups(match, competition, roundIndex) {
 
   const compId = (competition && competition.id) || match?.compId;
   const matchId = match?.id;
+  // bc-pnum: this composite already prefers side.id over side.name (a real
+  // id decides, since a UUID never coincidentally equals another team's
+  // display name -- resolveLineupTeamId's bare-string branch then either
+  // confirms it against the roster by name or, finding nothing, returns it
+  // unchanged). Deliberately NOT switched to passing the side object
+  // straight through: resolveSide (api_serializers.jsx) can still invent
+  // `id: name` for a side with no real id at all when the player map
+  // lookup misses entirely (an accepted residual gap, kept by design -- see
+  // that file's header comment); the object form's id-decides branch would
+  // treat that invented value as a real id and stop, never recovering the
+  // real id via the name lookup the string form still performs. The string
+  // form is therefore the SAFER of the two here, not a leftover.
   const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
   const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
 

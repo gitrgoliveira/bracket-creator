@@ -53,6 +53,33 @@ describe('lineup_resolver: resolveLineupTeamId', () => {
     expect(resolveLineupTeamId('any-key', null)).toBe('any-key');
     expect(resolveLineupTeamId('any-key', undefined)).toBe('any-key');
   });
+
+  // bc-pnum: callers that already have the resolved side OBJECT (not just a
+  // pre-collapsed string) can pass it straight through. When the side
+  // carries an id, the roster must be matched by that id ONLY -- never
+  // falling back to a name compare that could resolve a DIFFERENT
+  // participant/team sharing the same display name.
+  describe('object-form side (bc-pnum: id decides when present)', () => {
+    it('decides by id, never by name, when two roster entries share a display name', () => {
+      const players = [
+        { id: 'S2', name: 'Sato Dojo' },
+        { id: 'S1', name: 'Sato Dojo' },
+      ];
+      // side.id names S1 unambiguously, even though S2 shares the name and
+      // sits earlier in the roster array.
+      expect(resolveLineupTeamId({ id: 'S1', name: 'Sato Dojo' }, players)).toBe('S1');
+    });
+
+    it('falls back to its own id (never a same-name roster entry) when the id is not found', () => {
+      const players = [{ id: 'S2', name: 'Sato Dojo' }];
+      expect(resolveLineupTeamId({ id: 'S1', name: 'Sato Dojo' }, players)).toBe('S1');
+    });
+
+    it('falls back to name only for a side object with no id (bracket row)', () => {
+      const players = [{ id: 'uuid-99', name: 'Team Alpha' }];
+      expect(resolveLineupTeamId({ id: '', name: 'Team Alpha' }, players)).toBe('uuid-99');
+    });
+  });
 });
 
 describe('lineup_resolver: pickFromLineup', () => {

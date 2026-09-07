@@ -981,8 +981,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // resolveRoundIndex prefers roundIndex, falls back for legacy shapes.
     // Pool matches return 0 (no per-round lineup).
     const round = window.resolveRoundIndex(m);
-    // Side keys are NAME-keyed (api_serializers.buildPlayerMap sets id =
-    // name); lineups are stored under the participant's real id (UUID).
+    // bc-pnum: this composite prefers m.sideA.id over m.sideA.name -- a real
+    // id decides, since a UUID never coincidentally equals another team's
+    // display name. resolveLineupTeamId's bare-string branch then either
+    // confirms it against the roster by name or, finding nothing, returns
+    // it unchanged. Deliberately a STRING, not the side object:
+    // resolveSide (api_serializers.jsx) can still invent `id: name` for a
+    // side with no real id at all when the player map lookup misses
+    // entirely (an accepted residual gap, kept by design); the object
+    // form's id-decides branch would treat that invented value as a real
+    // id and stop, never recovering the real id via the name lookup this
+    // string form still performs.
     const sideAKey = m.sideA?.id || m.sideA?.name || (typeof m.sideA === "string" ? m.sideA : "");
     const sideBKey = m.sideB?.id || m.sideB?.name || (typeof m.sideB === "string" ? m.sideB : "");
     (async () => {
@@ -1058,6 +1067,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // Derive each team's roster from compMeta.players. rosterFor expects the
   // team object (with metadata array); resolveLineupTeamId matches by name.
+  //
+  // bc-pnum: sideKey below prefers side.id over side.name -- a real id
+  // decides, since a UUID never coincidentally equals another team's
+  // display name. Below, `pid` mirrors that same id-else-name preference
+  // for each CANDIDATE team, so the `pid === sideKey || pname === sideKey`
+  // compare only ever succeeds by name when BOTH sides of the compare
+  // already have no real id to offer; a real id on either side makes the
+  // opposite clause structurally unreachable (a UUID string cannot equal a
+  // display name). This is left as a string compare rather than switched to
+  // the id-decides-then-stop object form for the same reason as the sibling
+  // sideAKey/sideBKey composite above: resolveSide can still invent
+  // `id: name` for a side with no real id at all, and only the name-lookup
+  // path recovers the real id in that case.
   const allPlayers =
     (compMeta?.players?.length ? compMeta.players : null)
     || (compMeta?.config?.players)

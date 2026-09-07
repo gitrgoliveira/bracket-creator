@@ -152,7 +152,7 @@ func TestMissingParticipantIDsIssue_ManyRowsNamesFirstFewPlusCount(t *testing.T)
 		{Name: "Dave", Dojo: "Dojo D"},
 		{Name: "Eve", Dojo: "Dojo E"},
 	}
-	issue := missingParticipantIDsIssue(players)
+	issue := missingIDsIssue("participants.csv", helper.MissingParticipantIDsMessage(players))
 	require.NotNil(t, issue)
 	detail, _ := (*issue)["detail"].(string)
 	assert.Contains(t, detail, "5 competitors, including")
@@ -166,7 +166,7 @@ func TestMissingParticipantIDsIssue_NilWhenEveryRowHasAnID(t *testing.T) {
 	players := []domain.Player{
 		{ID: "00000000-0000-4000-8000-000000000000", Name: "Alice", Dojo: "Dojo A"},
 	}
-	assert.Nil(t, missingParticipantIDsIssue(players))
+	assert.Nil(t, missingIDsIssue("participants.csv", helper.MissingParticipantIDsMessage(players)))
 }
 
 // bc-pnum ruling 1e follow-up: the single-competition detail endpoint

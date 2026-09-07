@@ -271,10 +271,8 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, m := range poolMatches {
-		if m.ID == matchID {
-			return m.Court, nil
-		}
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		return m.Court, nil
 	}
 	bracket, err := e.store.LoadBracket(compID)
 	if err != nil {
@@ -295,156 +293,37 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
-// currentPoolMatchSideIDs finds matchID's OWN SideAID/SideBID within an
-// already-loaded pool-matches slice. ok is false when matchID is not among
-// them (a bracket match, out of scope for bc-pnum -- BracketMatch carries
-// no per-side id at all).
+// findPoolMatch returns matchID's own row within an already-loaded
+// pool-matches slice. ok is false when matchID is not among them (a bracket
+// match, out of scope for bc-pnum -- BracketMatch carries no per-side id at
+// all).
 //
-// checkSimultaneousMatch(Tx) uses this instead of re-deriving the CURRENT
-// match's identity from its bare SideA/SideB names via a roster scan
-// (resolvePlayerIDs/lookupPlayerID): a pool row already carries its own
-// SideAID/SideBID, so reading them directly is strictly better than
-// guessing from a name that two different competitors can share. Before
-// this, two "Sam"s from different dojos would misattribute: the target
-// match's OWN row correctly names, say, "Sam" (North)'s id, but
-// resolvePlayerIDs re-derived rawIDA from the bare name "Sam" against the
-// full roster and picked WHICHEVER "Sam" a name lookup found first --
-// wrongly blocking North's Sam from starting because South's Sam happened
-// to be running elsewhere, the exact same-name misattribution bc-pnum
-// exists to close.
-func currentPoolMatchSideIDs(poolMatches []state.MatchResult, matchID string) (idA, idB string, ok bool) {
+// checkSimultaneousMatchTx uses this to resolve the CURRENT match's identity
+// from its own stored SideAID/SideBID instead of re-deriving it from the
+// bare SideA/SideB names via a roster scan (resolvePlayerIDs/
+// lookupPlayerID): a pool row already carries its ids, so reading them
+// directly is strictly better than guessing from a name that two different
+// competitors can share. Before this, two "Sam"s from different dojos would
+// misattribute: the target match's OWN row correctly names, say, "Sam"
+// (North)'s id, but resolvePlayerIDs re-derived it from the bare name "Sam"
+// against the full roster and picked WHICHEVER "Sam" a name lookup found
+// first -- wrongly blocking North's Sam from starting because South's Sam
+// happened to be running elsewhere, the exact same-name misattribution
+// bc-pnum exists to close.
+func findPoolMatch(poolMatches []state.MatchResult, matchID string) (state.MatchResult, bool) {
 	for _, m := range poolMatches {
 		if m.ID == matchID {
-			return m.SideAID, m.SideBID, true
+			return m, true
 		}
 	}
-	return "", "", false
+	return state.MatchResult{}, false
 }
 
-// checkSimultaneousMatch returns an *IneligibleCompetitorError if either
-// participant in matchID is currently Running in a different match within
-// the same competition. Pool matches and bracket matches are both checked.
-//
-// Phase 2c simultaneity gate.
+// checkSimultaneousMatch is the non-tx entry point for
+// checkSimultaneousMatchTx (scoring_tx.go), which holds the shared body and
+// its full doc comment.
 func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
-	sideA, sideB, err := e.lookupMatchSides(e.store, compID, matchID)
-	if err != nil {
-		return nil
-	}
-	if sideA == "" && sideB == "" {
-		return nil
-	}
-
-	idA, idB, rawIDA, rawIDB := e.resolvePlayerIDs(compID, sideA, sideB)
-
-	// Pool-vs-pool half: id only (operator ruling bc-pnum). A side with no
-	// resolvable roster id (rawIDA/rawIDB == "") never matches any other
-	// pool match here -- there is no name fallback.
-	poolMatches, err := e.store.LoadPoolMatches(compID)
-	if err == nil {
-		// When matchID is itself a pool match, its own stored SideAID/SideBID
-		// (currentPoolMatchSideIDs, see its doc comment) supersede
-		// resolvePlayerIDs' name-derived guess for THIS comparison. A bracket
-		// match (ok == false) keeps the name-derived pair -- out of scope,
-		// bracket has no id field to prefer instead.
-		if ownIDA, ownIDB, ok := currentPoolMatchSideIDs(poolMatches, matchID); ok {
-			rawIDA, rawIDB = ownIDA, ownIDB
-		}
-		for _, m := range poolMatches {
-			if m.ID == matchID || m.Status != state.MatchStatusRunning {
-				continue
-			}
-			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
-				return &IneligibleCompetitorError{
-					PlayerID: idA,
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
-				}
-			}
-			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
-				return &IneligibleCompetitorError{
-					PlayerID: idB,
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
-				}
-			}
-		}
-	}
-
-	// Bracket half: name-based, out of scope for bc-pnum (BracketMatch
-	// carries no per-side id).
-	bracket, berr := e.store.LoadBracket(compID)
-	if berr == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
-					continue
-				}
-				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
-					return &IneligibleCompetitorError{
-						PlayerID: idA,
-						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
-					}
-				}
-				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
-					return &IneligibleCompetitorError{
-						PlayerID: idB,
-						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
-					}
-				}
-			}
-		}
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
-			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
-				return &IneligibleCompetitorError{
-					PlayerID: idA,
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
-				}
-			}
-			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
-				return &IneligibleCompetitorError{
-					PlayerID: idB,
-					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// resolvePlayerIDs resolves sideA/sideB (display names) against the
-// competition's roster and returns two pairs: (idA, idB), which fall back to
-// the bare name when no participant id is found (kept for the
-// IneligibleCompetitorError.PlayerID reporting field, which has always
-// preferred SOME identifier over a blank one), and (rawIDA, rawIDB), which
-// are "" on the same miss with NO fallback. checkSimultaneousMatch's
-// pool-vs-pool comparison must use the raw pair (operator ruling bc-pnum): a
-// record with an id field -- state.MatchResult.SideAID/SideBID -- is
-// resolved by id only, and a name silently substituted for a missing id
-// would never legitimately equal a real SideAID/SideBID value, so using the
-// name-fallback pair there wouldn't create a false match, but it would be
-// comparing the wrong kind of value for the wrong reason.
-func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (idA, idB, rawIDA, rawIDB string) {
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		return sideA, sideB, "", ""
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return sideA, sideB, "", ""
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	rawIDA = lookupPlayerID(pool, sideA)
-	idA = rawIDA
-	if idA == "" {
-		idA = sideA
-	}
-	rawIDB = lookupPlayerID(pool, sideB)
-	idB = rawIDB
-	if idB == "" {
-		idB = sideB
-	}
-	return idA, idB, rawIDA, rawIDB
+	return e.checkSimultaneousMatchTx(e.store, compID, matchID)
 }
 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips
@@ -651,10 +530,8 @@ func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, e
 func (e *Engine) lookupMatchSides(h state.StoreTx, compID, matchID string) (string, string, error) {
 	poolMatches, err := h.LoadPoolMatches(compID)
 	if err == nil {
-		for _, m := range poolMatches {
-			if m.ID == matchID {
-				return m.SideA, m.SideB, nil
-			}
+		if m, ok := findPoolMatch(poolMatches, matchID); ok {
+			return m.SideA, m.SideB, nil
 		}
 	}
 	bracket, err := h.LoadBracket(compID)

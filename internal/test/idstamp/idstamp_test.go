@@ -3,6 +3,8 @@ package idstamp
 import (
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
@@ -17,6 +19,22 @@ func TestStampPlayerID_DeterministicAndDojoScoped(t *testing.T) {
 	require.Equal(t, a1, a2, "the same (name, dojo) pair must always derive the same id")
 	assert.NotEqual(t, a1, b, "a different dojo must derive a different id for the same name")
 	assert.NotEmpty(t, a1)
+}
+
+// TestStampPlayerID_UUIDv4Shaped pins the id-stamp shape participants.csv's
+// has-ids sniff (state.uuidRE, via helper.IsUUIDv4) requires: a non-UUID-
+// shaped id round-trips as the legacy column layout instead, silently
+// shifting every field one column over. The version/variant nibbles are
+// also checked directly (uuid.Parse), since the sniff itself only checks
+// the 8-4-4-4-12 shape and would not catch a regression there.
+func TestStampPlayerID_UUIDv4Shaped(t *testing.T) {
+	id := StampPlayerID("Tanaka Kenji", "Tokyo")
+	require.True(t, helper.IsUUIDv4(id), "must pass participants.csv's has-ids shape sniff: %s", id)
+
+	parsed, err := uuid.Parse(id)
+	require.NoError(t, err)
+	assert.Equal(t, uuid.Version(4), parsed.Version(), "version nibble must be set")
+	assert.Equal(t, uuid.RFC4122, parsed.Variant(), "variant nibble must be set")
 }
 
 func TestStampIDs_StampsPlayersAndFillsMatchSides(t *testing.T) {

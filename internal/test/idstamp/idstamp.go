@@ -14,35 +14,13 @@
 package idstamp
 
 import (
-	"strings"
+	"crypto/md5" //nolint:gosec // fixture id derivation only, not a security use
+	"fmt"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
-
-// slugIDPart lowercases s and replaces every run of characters outside
-// [a-z0-9] with a single "-", so StampPlayerID's id is deterministic and
-// readable in test failure output regardless of what punctuation/whitespace
-// the fixture's name or dojo contains.
-func slugIDPart(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	prevDash := false
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prevDash = false
-		default:
-			if !prevDash {
-				b.WriteByte('-')
-				prevDash = true
-			}
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
 
 // StampPlayerID deterministically derives a participant id from (name, dojo)
 // alone, so a fixture can predict the id a call to StampIDs/StampPoolIDs
@@ -53,8 +31,19 @@ func slugIDPart(s string) string {
 // different dojos never collides, and a fixture that wants two distinct
 // same-name-same-dojo rows (there is no such legal case) must assign ids by
 // hand rather than relying on this derivation.
+//
+// UUID-v4-SHAPED (8-4-4-4-12 lowercase hex, version nibble '4', variant
+// nibble in 8-b): participants.csv's has-ids sniff (internal/state/
+// participants.go, via helper.IsUUIDv4) only checks the 8-4-4-4-12 shape,
+// but the version/variant nibbles are set anyway so a stamped id is
+// indistinguishable from a genuine random one wherever something DOES parse
+// further (uuid.Parse(...).Version()/Variant()).
 func StampPlayerID(name, dojo string) string {
-	return "id-" + slugIDPart(name) + "-" + slugIDPart(dojo)
+	sum := md5.Sum([]byte(name + "\x00" + dojo)) //nolint:gosec // fixture id derivation only, not a security use
+	sum[6] = (sum[6] & 0x0f) | 0x40              // version 4
+	sum[8] = (sum[8] & 0x3f) | 0x80              // variant 10xx (RFC 4122)
+	h := fmt.Sprintf("%x", sum)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
 }
 
 // StampIDs assigns a deterministic id (StampPlayerID) to every id-less

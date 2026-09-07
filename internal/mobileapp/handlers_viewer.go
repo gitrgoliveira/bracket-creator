@@ -370,7 +370,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 // everything else: a missing file, a permissions problem or a nil is not
 // something an operator repairs with a text editor, so it gets no banner.
 // Each entry carries "kind": "corrupt-file" explicitly (PR #416 finding 9),
-// alongside missingParticipantIDsIssue's own "missing-ids" kind below, so a
+// alongside missingIDsIssue's own "missing-ids" kind below, so a
 // consumer partitions the list by reading the field rather than by an
 // absent-vs-present convention (the SPA still reads an absent kind as
 // corrupt-file too, for an older payload's sake; see data_integrity.jsx).

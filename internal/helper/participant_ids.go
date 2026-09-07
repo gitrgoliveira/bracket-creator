@@ -25,7 +25,7 @@ var ErrMissingParticipantIDsInDraw = errors.New("cannot draw: every competitor m
 // "" when every row already has an id.
 //
 // Shared by ValidateNoMissingParticipantIDs below (the draw pre-flight) and
-// the operator console's data-issues banner (missingParticipantIDsIssue,
+// the operator console's data-issues banner (missingIDsIssue,
 // internal/mobileapp/handlers_viewer.go) so the two surfaces describe the
 // exact same condition with the exact same words: one is a hard refusal, the
 // other is advance warning before the operator ever tries to draw, and they

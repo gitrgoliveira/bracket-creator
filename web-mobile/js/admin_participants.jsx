@@ -5,7 +5,7 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
-import { NO_ID_HINT, noIdControlProps, NoIdHint } from './data_integrity.jsx';
+import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -1063,7 +1063,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                   )}
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button type="button" className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
-                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim() || noIdControlProps(!!replaceTarget.id).disabled} title={noIdControlProps(!!replaceTarget.id).title} onClick={handleReplaceParticipant}>
+                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim() || !replaceTarget.id} title={replaceTarget.id ? undefined : NO_ID_HINT} onClick={handleReplaceParticipant}>
                       {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
@@ -1123,7 +1123,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
-                          disabled={noIdControlProps(!!p.id).disabled}
+                          disabled={!p.id}
                           onChange={(e) => toggleCheckIn(window.checkinApiPid(p), e.target.checked)}
                           style={{ width: 18, height: 18, cursor: p.id ? "pointer" : "not-allowed" }}
                           // bc-pnum: a hover title alone is
@@ -1131,7 +1131,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           // the disabled reason rides in the aria-label too; the
                           // title stays for the mouse-hover case.
                           aria-label={`${p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}${p.id ? "" : `. ${NO_ID_HINT}`}`}
-                          title={noIdControlProps(!!p.id).title}
+                          title={p.id ? undefined : NO_ID_HINT}
                         />
                       </div>
                     )}
@@ -1174,7 +1174,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                             hint. Distinct from the 1e ruling above, which is about
                             the id STRING display, not the disabled-control reason. */}
                         {!p.id && c.checkInEnabled && (
-                          <> · <NoIdHint /></>
+                          <NoIdHint prefix=" · " />
                         )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"

@@ -8,10 +8,14 @@
 // tag, or the browser fetches it under a second URL (.js?v=N vs .jsx) and evaluates
 // it twice (double-load; same class as mp-zd1v).
 //
-// Cycle note: viewer.jsx imports from this file and re-exports every symbol
-// here (plus window.* assignments) so the public surface of viewer.jsx is
-// unchanged. viewer_watchlist.jsx (panel UI) continues to read the watchlist
-// helpers via window.* lazy reads: those assignments still live in viewer.jsx.
+// Cycle note: viewer.jsx imports from this file and re-exports MOST symbols
+// here (plus window.* assignments) so its own public surface stays backward
+// compatible. Four are NOT re-exported through viewer.jsx -- buildWatchedSets,
+// sideIsWatched, matchParticipantNames, matchInvolvesWatchedSet -- their
+// consumers (viewer_home.jsx, viewer_schedule.jsx, viewer_competition.jsx,
+// viewer_standings.jsx) import this file directly instead. viewer_watchlist.jsx
+// (panel UI) continues to read the re-exported watchlist helpers via window.*
+// lazy reads: those assignments still live in viewer.jsx.
 
 import { competitorKey } from './competitor_identity.jsx';
 

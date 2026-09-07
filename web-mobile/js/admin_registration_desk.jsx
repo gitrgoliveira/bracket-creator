@@ -26,7 +26,7 @@
 // onUpdate() pushes back to the parent so navigating "Back" shows fresh data.
 
 import { checkinPid, checkinApiPid } from './data.jsx';
-import { NO_ID_HINT, noIdControlProps, NoIdHint } from './data_integrity.jsx';
+import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 
 const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
 
@@ -76,16 +76,16 @@ function rdPid(p) {
 // from mutable fields. Delegates to checkinApiPid (data.jsx), the one owner
 // of the id-only rule, exactly as rdPid delegates to checkinPid for the
 // composite rule.
+function rdApiPid(p) {
+  return checkinApiPid(p);
+}
+
 // skippedNoIdMsg: the pluralized "N entries have no id" clause, shared by
 // the check-in toasts that report how many entries checkPersonEntries
 // filtered out for having no id at all (rdApiPid returns "" for them, so a
 // write can only 404). Callers append their own remedy/consequence text.
 function skippedNoIdMsg(n) {
   return `${n} ${n === 1 ? "entry has" : "entries have"} no id`;
-}
-
-function rdApiPid(p) {
-  return checkinApiPid(p);
 }
 
 // Subsequence score for one token against a normalized haystack. Returns null
@@ -306,8 +306,8 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
             type="button"
             key={comp.id}
             className={`rd-chip${checked ? " is-checked" : ""}`}
-            disabled={busy || noIdControlProps(!idLess).disabled}
-            title={noIdControlProps(!idLess).title || (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
+            disabled={busy || idLess}
+            title={idLess ? NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
             onClick={() => !checked && onToggle(comp.id, rdApiPid(player), true)}
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
@@ -373,8 +373,8 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
         role="checkbox"
         aria-checked={ariaChecked}
         aria-label={checkAriaLabel}
-        disabled={busy || noIdControlProps(!idLessCompRow).disabled}
-        title={noIdControlProps(!idLessCompRow).title}
+        disabled={busy || idLessCompRow}
+        title={idLessCompRow ? NO_ID_HINT : undefined}
         onClick={onPrimary}
       >
         <span className="rd-check__box" aria-hidden="true">
@@ -548,7 +548,7 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
       dismissable={!busy}
       footer={<>
         <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || noIdControlProps(!idLess).disabled} title={noIdControlProps(!idLess).title}>{busy ? "Saving…" : "Save changes"}</button>
+        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || idLess} title={idLess ? NO_ID_HINT : undefined}>{busy ? "Saving…" : "Save changes"}</button>
       </>}
     >
       {idLess && <p className="rd-edit__note">{NO_ID_HINT}</p>}

@@ -1098,6 +1098,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const rosterForSide = (side, lineup) => {
     if (!window.AdminLineupHelpers?.rosterFor) return [];
     const sideKey = sideLookupKey(side);
+    // sideLookupKey returns "" (not undefined) for an id-less, name-less
+    // side. Bail before the find() below: a roster entry whose own
+    // id/ID/name/Name are ALL absent also falls through its `|| ""` chain
+    // to "", and pid === "" would otherwise match this id-less side to
+    // that equally-unresolvable entry (resolveLineupTeamId guards the same
+    // way).
+    if (!sideKey) return [];
     const teamObj = allPlayers.find(p => {
       const pid = p?.id || p?.ID || p?.name || p?.Name || "";
       const pname = p?.name || p?.Name || "";
@@ -1110,6 +1117,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   };
   const teamIdForSide = (side) => {
     const sideKey = sideLookupKey(side);
+    // Same guard as rosterForSide above: "" must never match a roster
+    // entry whose own id/ID/name/Name are all absent.
+    if (!sideKey) return "";
     const teamObj = allPlayers.find(p => {
       const pid = p?.id || p?.ID || p?.name || p?.Name || "";
       const pname = p?.name || p?.Name || "";

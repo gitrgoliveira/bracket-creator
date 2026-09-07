@@ -58,25 +58,23 @@
 // any of these surfaces reads the same words.
 export const NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
 
-// noIdControlProps: the {disabled, title} pair for an id-less CONTROL (a
-// check-in checkbox, a Save/edit button) -- disabled with NO_ID_HINT as the
-// hover title whenever the row has no id, both blank when it does.
-export function noIdControlProps(hasId) {
-  return { disabled: !hasId, title: hasId ? undefined : NO_ID_HINT };
-}
-
 // NoIdHint: the inline warning span naming an id-less row. `text` defaults
 // to NO_ID_HINT; admin_pools.jsx passes NO_ID_POOL_HINT instead, since a
 // pool-draw row's remedy (regenerate the draw) differs from a roster save.
-export function NoIdHint({ text = NO_ID_HINT }) {
-  return <span className="noid-hint" title={text}>{text}</span>;
+// `prefix` (e.g. " · ") lives INSIDE the span, matching the sibling
+// .seed-row__id's own leading separator: admin_participants.jsx's roster row
+// renders this right after the dojo line and needs the same visual joint.
+export function NoIdHint({ text = NO_ID_HINT, prefix = "" }) {
+  return <span className="noid-hint" title={text}>{prefix}{text}</span>;
 }
 
-// NO_ID_POOL_HINT: the pool-draw counterpart to NO_ID_HINT. A team missing
-// an id in pools.csv can't be fixed by re-saving the roster (the draw
-// already happened): the remedy is to regenerate the draw while it is
-// still draw-ready, matching the server's own pools.csv notice.
-export const NO_ID_POOL_HINT = "A team here has no id in the pool draw. See the notice on the Overview.";
+// NO_ID_POOL_HINT: the pool-draw counterpart to NO_ID_HINT. A competitor
+// missing an id in pools.csv can't be fixed by re-saving the roster (the
+// draw already happened): the remedy is to regenerate the draw while it is
+// still draw-ready, matching the server's own pools.csv notice. "Competitor"
+// not "team": the chusen banner this also serves runs in individual
+// competitions too, where a pool member is a person, not a team.
+export const NO_ID_POOL_HINT = "A competitor here has no id in the pool draw. See the notice on the Overview.";
 
 // matchDataUnreadable: the ONE test for "this match lost its bouts to a cell
 // that would not parse". Everything else asks this rather than reading the

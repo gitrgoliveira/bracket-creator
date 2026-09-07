@@ -3936,10 +3936,11 @@ button.pool-match-row {
 /* The one visual for NoIdHint (data_integrity.jsx): an id-less row's
    disabled-control reason, surfaced inline rather than only as a hover
    title (unreachable on a tablet or by keyboard). Prose, not an id, so no
-   font-mono. Shared by admin_participants.jsx's seed row,
-   admin_registration_desk.jsx's rd row, and admin_pools.jsx's pool draw. */
+   font-mono. No font-size here: each host (admin_participants.jsx's seed
+   row, admin_registration_desk.jsx's rd row, admin_pools.jsx's pool draw)
+   sets its own, matching its surrounding text; only the warn colour/weight
+   is the shared part of this look. */
 .noid-hint {
-  font-size: 11px;
   color: var(--warn-ink);
   font-weight: 500;
 }

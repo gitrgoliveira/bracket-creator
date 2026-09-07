@@ -60,6 +60,8 @@ This is a per-tournament-file rule, not a rule about your venue. A hall with thr
 
 Works the same as `create-pools`; top seeds are placed on opposite sides of the bracket so they can only meet in the final. See the [input format](../organisers/input-format.md#seeds-file) for the seeds CSV layout.
 
+Competitor numbers follow that seeded bracket order, not the order participants were listed in the input file: the top seed is numbered first, and every other competitor's number follows their position in the bracket, top to bottom. The Data and Names to Print sheets list competitors in that same order.
+
 ## Output sheets
 
 | Sheet | Contents |

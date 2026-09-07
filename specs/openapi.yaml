@@ -4460,16 +4460,16 @@ components:
           type: string
           description: |
             The competitor's ASSIGNED number: prefix + sequence (e.g. "K1").
-            Present only on the viewer and display payloads. For a POOLED
-            format (mixed/league) it appears once the draw has assigned it,
-            pool by pool, from pools.csv (draw order, e.g. K1-K4 for the
-            first pool); before that draw, it is absent entirely -- a pooled
-            competition's competitors carry no number at all until the draw
-            runs. For an EFFECTIVE-PLAYOFFS competition it is different: the
-            number IS participant order, composed on every read (that draw
-            never writes pools.csv), so it is present from `setup` onward,
-            not only after a draw. Also absent on the participants endpoint,
-            and absent when the draw on disk cannot be read.
+            Present only on the viewer and display payloads, and only once
+            the draw has assigned it -- before that draw, it is absent
+            entirely, for every format. For a POOLED format (mixed/league)
+            it comes from pools.csv, pool by pool (e.g. K1-K4 for the first
+            pool). For an EFFECTIVE-PLAYOFFS (knockout-only) competition it
+            comes from the bracket's `drawOrder` instead, top of the tree to
+            the bottom (see the Bracket schema): a competitor excluded from
+            the draw (e.g. not checked in) carries no number even after the
+            draw. Also absent on the participants endpoint, and absent when
+            the draw on disk cannot be read.
         checkedIn:
           type: boolean
           description: True when the participant has checked in.
@@ -5091,6 +5091,22 @@ components:
             position-encoded for winner advancement, so splicing a bronze
             match into that geometry would corrupt it. Absent unless a
             bronze match was generated.
+        drawOrder:
+          type: array
+          readOnly: true
+          items:
+            type: string
+          description: >
+            Participant ids in bracket-position order, top of the tree to
+            the bottom (the first shiaijo's block first), byes skipped: a
+            competitor's number is their position in this list plus one. Set
+            only on a standalone knockout (playoffs) competition's bracket,
+            stamped once when the draw is generated; a pooled (mixed/league)
+            competition's bracket never carries it, since its competitors
+            are numbered pool by pool from pools.csv instead. Absent on a
+            bracket generated before this field existed (a legacy
+            bracket.json); a competitor whose id is missing from this list
+            was not drawn (e.g. excluded by check-in) and carries no number.
 
     PlayerStanding:
       type: object

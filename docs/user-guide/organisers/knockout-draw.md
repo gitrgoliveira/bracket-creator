@@ -145,9 +145,11 @@ Two things it never does. It does not move a **seeded** competitor: seed places 
 
 ## Competitor numbers
 
-A **Knockout only** competition numbers its competitors differently from a pooled one. See [Competitor numbers](pool-draw.md#competitor-numbers) for the pooled-format rule (mixed and league), which this section does not repeat.
+A **Knockout only** competition numbers its competitors the same way a pooled one does, down the bracket instead of pool by pool. See [Competitor numbers](pool-draw.md#competitor-numbers) for the pooled-format rule (mixed and league).
 
-There is no pool draw to wait for, so a knockout-only competition's numbers are **final from setup**: each competitor's number is their prefix plus their position in the registration order, and it is shown that way from the moment the roster is entered. It changes only when the roster itself changes (an entry added, removed or reordered) or when you change the number prefix; generating or discarding the draw does not touch it, because there is no pool draw to fix an order at.
+Numbers are assigned when the draw is generated, not before: nothing is shown while the competition is still in setup, whatever prefix you have set. Once the draw runs, each competitor's number follows their position in the bracket, read from the top of the tree to the bottom, one shiai-jo's block at a time starting with the first. A bye takes no number, so numbering stays sequential rather than skipping a slot for it. A competitor excluded from the draw (for example, not checked in) carries no number either.
+
+Discarding the draw removes the numbers along with it, exactly as it does for a pooled competition; generating a fresh draw assigns them again from the new bracket. Changing the number prefix relabels every competitor immediately, with no need to regenerate the draw.
 
 Everything else about the prefix works the same as the pooled-format rule: you can set your own or leave it blank to derive one, change it at any time, and the printed tags carry these numbers the same way, with a reprint needed after a prefix change. When the prefix is more than one character, the printed tags and the Names to Print cards show the prefix above the rest of the number, for example KO above 20; a one-character prefix stays on one line, for example K20.
 

@@ -129,8 +129,11 @@ describe('enrichPoolMatchWithComp', () => {
     // and competitor names would not render.
     const m = { id: 'A-0', status: 'scheduled', sideA: 'Alice', sideB: 'Bob' };
     const enriched = enrichPoolMatchWithComp(m, comp);
-    expect(enriched.sideA).toEqual(expect.objectContaining({ id: 'Alice', name: 'Alice' }));
-    expect(enriched.sideB).toEqual(expect.objectContaining({ id: 'Bob', name: 'Bob' }));
+    // bc-pnum item 5: an unresolved side (no playerMap entry, no sideId)
+    // gets id "", never the name -- toPlayer stopped inventing an id from
+    // the name, matching resolveSide's (api_serializers.jsx) contract.
+    expect(enriched.sideA).toEqual(expect.objectContaining({ id: '', name: 'Alice' }));
+    expect(enriched.sideB).toEqual(expect.objectContaining({ id: '', name: 'Bob' }));
   });
 
   it('resolves player dojo from buildPlayerMap when available', () => {
@@ -142,7 +145,9 @@ describe('enrichPoolMatchWithComp', () => {
       const m = { id: 'A-0', status: 'scheduled', sideA: 'Alice', sideB: 'Unknown' };
       const enriched = enrichPoolMatchWithComp(m, comp);
       expect(enriched.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'DojoA' });
-      expect(enriched.sideB).toEqual({ id: 'Unknown', name: 'Unknown' });
+      // bc-pnum item 5: 'Unknown' has no playerMap entry and no sideBId, so
+      // it resolves to id "" rather than inventing 'Unknown' as an id.
+      expect(enriched.sideB).toEqual({ id: '', name: 'Unknown' });
     } finally {
       if (prev === undefined) {
         delete window.buildPlayerMap;

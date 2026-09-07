@@ -76,7 +76,12 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     if (side && typeof side === "object") return side;
     if (!side) return { id: "", name: "" };
     const p = sideId ? playerMap[sideId] : playerMap[side];
-    return p || { id: sideId || side, name: side };
+    // bc-pnum: an unresolved side gets id "", never the name -- resolveSide
+    // (api_serializers.jsx) stopped inventing an id from the name, so this
+    // matches that contract instead of reintroducing it here. Consumers key
+    // on `side.id || side.name` (sideLookupKey), which already falls
+    // through to the name when id is "".
+    return p || { id: sideId || "", name: side };
   };
   // Pool daihyosen ("Pool X-DH-N") and tiebreaker ("Pool X-TB-N") bouts are
   // single representative/ippon-shobu matches, scored as INDIVIDUAL even in a

@@ -14,7 +14,7 @@
 package idstamp
 
 import (
-	"crypto/md5" //nolint:gosec // fixture id derivation only, not a security use
+	"crypto/md5" // #nosec G501 -- fixture id derivation only, not a security use
 	"fmt"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -39,7 +39,7 @@ import (
 // indistinguishable from a genuine random one wherever something DOES parse
 // further (uuid.Parse(...).Version()/Variant()).
 func StampPlayerID(name, dojo string) string {
-	sum := md5.Sum([]byte(name + "\x00" + dojo)) //nolint:gosec // fixture id derivation only, not a security use
+	sum := md5.Sum([]byte(name + "\x00" + dojo)) // #nosec G401 -- fixture id derivation only, not a security use
 	sum[6] = (sum[6] & 0x0f) | 0x40              // version 4
 	sum[8] = (sum[8] & 0x3f) | 0x80              // variant 10xx (RFC 4122)
 	h := fmt.Sprintf("%x", sum)

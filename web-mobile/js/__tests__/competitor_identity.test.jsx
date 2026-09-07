@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { sameCompetitor, idOf, nameOf } from '../competitor_identity.jsx';
 
-// bc-pnum (Opus review round): the ONE predicate for competitor-identity
+// bc-pnum: the ONE predicate for competitor-identity
 // attribution. both-id / neither-id / mixed, per the operator ruling.
 describe('sameCompetitor', () => {
   it('decides by id when both carry a non-empty id', () => {

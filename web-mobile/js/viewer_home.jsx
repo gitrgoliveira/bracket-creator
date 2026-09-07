@@ -39,7 +39,7 @@ const pluralize = window.pluralize;
 // {ids, names} shape, and sideIsWatched (same file) THE ONE side predicate
 // deciding by the SIDE's own id presence -- never an OR of id-hit-or-
 // name-hit for the same side, which let watching Sato of Tokyo also surface
-// Sato of Osaka's on-deck match. 2nd Opus review round: this used to build
+// Sato of Osaka's on-deck match. this used to build
 // its OWN watchedIds/watchedNames pair inline, inclusively (every entry's
 // name landed in watchedNames even when that entry also carried an id), so
 // an id-less side sharing an id-carrying watched entry's name fired this

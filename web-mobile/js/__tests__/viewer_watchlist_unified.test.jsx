@@ -194,7 +194,7 @@ describe('buildPrimaryNextMatch', () => {
     expect(buildPrimaryNextMatch(null, roster, matches)).toBeNull();
   });
 
-  // bc-pnum (2nd Opus review round, HIGH regression from c23ea84e): the
+  // bc-pnum (HIGH regression from c23ea84e): the
   // primary entry always carries a real id (resolveEntryPlayerIds only ever
   // returns roster-backed ids), so an id-less match side is a MIXED pair
   // and must never be guessed at by name -- sameCompetitor's rule. The

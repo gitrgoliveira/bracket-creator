@@ -79,7 +79,7 @@ function rdApiPid(p) {
   return checkinApiPid(p);
 }
 
-// bc-pnum (Opus review round): an id-less row has no safe wire identifier
+// bc-pnum: an id-less row has no safe wire identifier
 // (rdApiPid returns "" for it). The check-in control and RdEditModal's Save
 // are disabled for such a row rather than sending a write that can only
 // 404 or hit no route; this is the exact remedy sentence
@@ -345,14 +345,14 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
     ? (presence === "all" ? "true" : presence === "partial" ? "mixed" : "false")
     : checked;
 
-  // bc-pnum (Opus review round): a "comp" row is exactly one participant in
+  // bc-pnum: a "comp" row is exactly one participant in
   // one competition, so an id-less row can never check in (rdApiPid returns
   // "" for it -- disable rather than send a write that can only 404).
   // "all" mode aggregates one PERSON across every competition they entered
   // (rdBuildPeopleIndex groups by name+dojo, not by id); `player` here is
   // only entries[0]'s representative record, which may carry an id even
   // when a SIBLING entry doesn't, so this narrower disable does not extend
-  // to that mode -- checkPersonEntries (2nd Opus review round) filters its
+  // to that mode -- checkPersonEntries filters its
   // own `targets` down to entries that carry an id, so a sibling entry's
   // missing id is skipped rather than sent as a write that can only 404,
   // and the skipped count is reported back through a toast rather than
@@ -528,7 +528,7 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
     }
   };
 
-  // bc-pnum (Opus review round): PUT .../participants/ with an empty id
+  // bc-pnum: PUT .../participants/ with an empty id
   // segment (rdApiPid returns "" for this row) matches no route at all;
   // block the write client-side rather than toasting the resulting generic
   // failure.
@@ -696,7 +696,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // bulk operation around many people without each clearing the shared busy
   // flag early.
   //
-  // bc-pnum (2nd Opus review round): an entry whose OWN record carries no
+  // bc-pnum: an entry whose OWN record carries no
   // id (rdApiPid returns "" for it) has no safe wire identifier -- it is
   // filtered out of `targets` here rather than sent as a write that can
   // only 404 about a row the operator is looking at. `skipped` reports the

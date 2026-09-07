@@ -53,7 +53,7 @@ describe('applyPatch', () => {
     const prev = makeState();
     const next = applyPatch(prev, { data: { result: { id: "p1", winner: "Alice", status: "completed" } } });
     expect(next).not.toBe(prev);
-    // bc-pnum (Opus review round): resolveSide no longer invents an id from
+    // bc-pnum: resolveSide no longer invents an id from
     // the name for a side absent from the (empty, here) player map -- id
     // stays "" rather than "Alice".
     expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });

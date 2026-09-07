@@ -84,7 +84,7 @@ describe('isFollowedPlayer', () => {
     expect(isFollowedPlayer(sideA, { id: 'p1', name: 'Alice' })).toBe(true);
   });
 
-  // bc-pnum (Opus review round): both sides carry ids and they DIFFER --
+  // bc-pnum: both sides carry ids and they DIFFER --
   // never guess from the name (a same-name/different-dojo pair): the id
   // check is authoritative once both records have one.
   it('never falls back to name when both sides carry ids and they differ', () => {

@@ -11,7 +11,7 @@ const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: u
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
 
-// bc-pnum (Opus review round): an id-less row (checkinApiPid returns "" for
+// bc-pnum: an id-less row (checkinApiPid returns "" for
 // it) has no safe wire identifier at all. Sending its check-in or replace
 // write anyway reaches the wrong outcome either way: PUT
 // .../participants//checkin hits the handler and 404s "participant not

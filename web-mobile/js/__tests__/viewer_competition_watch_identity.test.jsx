@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { matchInvolvesWatchedSet } from '../viewer_competition.jsx';
 import { buildWatchedSets } from '../viewer_watchlist_core.jsx';
 
-// bc-pnum (2nd Opus review round): matchInvolvesWatchedSet backs
+// bc-pnum: matchInvolvesWatchedSet backs
 // ViewerCompetition's running/upcoming/recent match filtering by watchlist.
 // A side WITH an id must match only a watched id; a side WITHOUT one
 // matches by name only -- never an OR of both for the same side.
@@ -42,7 +42,7 @@ describe('matchInvolvesWatchedSet', () => {
     expect(matchInvolvesWatchedSet(idLessMatch, watched)).toBe(false);
   });
 
-  // bc-pnum (2nd Opus review round, MEDIUM): the case this file previously
+  // bc-pnum (MEDIUM): the case this file previously
   // missed entirely. Watching Sato-of-Tokyo (a real id) must not also list
   // an UNRELATED, id-less "Sato" row that merely shares the display name --
   // a mixed pair (watched entry has an id, this side doesn't) is never

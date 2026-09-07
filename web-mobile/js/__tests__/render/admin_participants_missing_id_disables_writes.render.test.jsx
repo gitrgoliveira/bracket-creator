@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
-// bc-pnum (Opus review round, item 4): a check-in or replace write for an
+// bc-pnum (item 4): a check-in or replace write for an
 // id-less row can never land (checkinApiPid returns "" for it): PUT
 // .../participants//checkin 404s "participant not found" about a row on
 // screen, and PUT .../participants/ (empty id segment) matches no route at

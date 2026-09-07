@@ -114,7 +114,7 @@ describe('AdminRegistrationDeskPage render-smoke', () => {
 // id when present, else the "name|dojo" composite -- to toggleCheckIn/
 // bulkCheckIn. Name and dojo are operator-editable after the draw, so that
 // composite is not a safe wire identifier. It must send the id ONLY
-// (rdApiPid). 2nd Opus review round: an id-less row has no safe wire
+// (rdApiPid). an id-less row has no safe wire
 // identifier at all, and checkPersonEntries now skips it client-side
 // (reporting the skip via toast) rather than sending a write the server
 // can only 404.
@@ -147,7 +147,7 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
     expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw');
   });
 
-  // 2nd Opus review round: checkPersonEntries now filters an id-less entry
+  // checkPersonEntries now filters an id-less entry
   // out of its own `targets` before sending anything, rather than sending
   // "" and letting the server 404 it.
   it('sends no request (never "" or the name|dojo composite) for an id-less legacy row, and toasts the skip', async () => {
@@ -182,7 +182,7 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
   // setLocal keys its optimistic update on rdApiPid's output (id-only), so
   // a pid of "" must never match every id-less row at once -- the `pid &&`
   // guard in setLocal defends that for callers that still forward one
-  // (toggleOne, bulkDojoComp). 2nd Opus review round: checkPersonEntries no
+  // (toggleOne, bulkDojoComp). checkPersonEntries no
   // longer reaches setLocal for an id-less entry at all (it is filtered out
   // of `targets` first), so this scenario is now doubly defended; the test
   // stays as a regression guard on setLocal's own `pid &&` check. The
@@ -219,7 +219,7 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
   });
 });
 
-// bc-pnum (Opus review round, item 4): an id-less row's rdApiPid is "", so a
+// bc-pnum (item 4): an id-less row's rdApiPid is "", so a
 // check-in / chip / edit-save write for it can only 404 (empty id segment
 // matches no route, or matches nothing on the server). All three controls
 // are disabled client-side for such a row instead, each with a hint mirroring
@@ -338,7 +338,7 @@ describe('AdminRegistrationDeskPage disables writes for an id-less row in comp m
   });
 });
 
-// bc-pnum (2nd Opus review round, item 3): checkPersonEntries/bulkCheckPeople
+// bc-pnum (item 3): checkPersonEntries/bulkCheckPeople
 // ("All competitions" mode) used to send toggleCheckIn for EVERY entry a
 // person has, including one whose OWN record carries no id (rdApiPid
 // returns "" for it, which can only 404 about a row on screen) -- a comment

@@ -54,7 +54,7 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
 // participant list by id OR name and return its real id, falling back to
 // the original key when unmatched.
 //
-// bc-pnum (Opus review round): a side-OBJECT overload (id decides whenever
+// bc-pnum: a side-OBJECT overload (id decides whenever
 // present, matched against the roster by id ONLY) was added here and then
 // removed (YAGNI): every production caller already collapses the side to a
 // bare key BEFORE calling -- match_scoreboard.jsx's useTeamLineups and

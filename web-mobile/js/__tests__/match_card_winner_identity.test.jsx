@@ -1,4 +1,4 @@
-// bc-pnum (Opus review round, HIGH regression from dfe6ea24): MatchCard's
+// bc-pnum (HIGH regression from dfe6ea24): MatchCard's
 // aWin/bWin used a bare `match.winner.id === match.side*.id` with no name
 // fallback at all. Once buildPlayerMap started keeping id "" for an
 // id-less participant (instead of inventing one from the name), a bracket

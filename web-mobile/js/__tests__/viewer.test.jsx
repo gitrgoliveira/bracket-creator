@@ -98,7 +98,7 @@ describe('Viewer Utils', () => {
       expect(filtered[0].id).toBe('m1');
     });
 
-    // bc-pnum (Opus review round): a side WITHOUT an id (a placeholder, or
+    // bc-pnum: a side WITHOUT an id (a placeholder, or
     // an unresolved bracket row per api_serializers.resolveSide) matches by
     // name only -- when the PICKED entry is itself id-less too. An id-less
     // side is never guessed at by name against an id-CARRYING picked entry
@@ -131,7 +131,7 @@ describe('Viewer Utils', () => {
       expect(filtered.length).toBe(0);
     });
 
-    // bc-pnum (2nd Opus review round, MEDIUM): the other half of the mixed
+    // bc-pnum (MEDIUM): the other half of the mixed
     // pair. A picked entry WITH a real id must never match an id-less side
     // that merely shares its display name -- buildPickedSets must not let
     // that id-carrying entry's name leak into the name Set. Before the fix
@@ -176,7 +176,7 @@ describe('Viewer Utils', () => {
       expect(matchHighlightedBy(tagged, [], 'A9')).toBe(false);
     });
 
-    // bc-pnum (Opus review round): an id-less side matches by name when the
+    // bc-pnum: an id-less side matches by name when the
     // picked entry is itself id-less too; a side carrying a (different)
     // real id never does, even when the name also happens to match --
     // never guess on a mixed pair.
@@ -189,7 +189,7 @@ describe('Viewer Utils', () => {
       expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(false);
     });
 
-    // bc-pnum (2nd Opus review round, MEDIUM): the other half of the mixed
+    // bc-pnum (MEDIUM): the other half of the mixed
     // pair -- a picked entry WITH a real id must never light an id-less
     // side that merely shares its display name. Before the fix this
     // returned true (the OLD inline builder folded the picked entry's name
@@ -264,7 +264,7 @@ describe('Viewer Utils', () => {
       expect(isFollowedPlayer({ id: 'uuid-alice', name: 'Alice' }, followed)).toBe(true);
     });
 
-    // bc-pnum (Opus review round): an id-less side is a MIXED pair against
+    // bc-pnum: an id-less side is a MIXED pair against
     // an id-carrying `followed` -- never guessed at by name, even on an
     // exact (case-insensitive) match. Only a fully id-less pair on BOTH
     // sides may fall back to name (see viewer_mymatch.test.jsx).
@@ -933,7 +933,7 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(lossCell).toBeTruthy();
   });
 
-  // bc-pnum (Opus review round, item 7): the shared `pool` fixture above
+  // bc-pnum (item 7): the shared `pool` fixture above
   // gained ids on every player specifically so the (now id-only) matchMap
   // lookup would find completedMatch/pendingMatch/runningMatch, which
   // dropped this suite's only coverage of a genuinely id-less roster (the

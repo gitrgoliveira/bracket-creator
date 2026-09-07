@@ -420,7 +420,7 @@ describe('winnerSideLR: id disambiguates same-name opponents', () => {
     expect(winnerSideLR({ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' })).toBe('right');
   });
 
-  // bc-pnum (Opus review round): sameCompetitor never guesses on a MIXED
+  // bc-pnum: sameCompetitor never guesses on a MIXED
   // pair. A bare-string winner carries no id (same as an object whose id is
   // ""), so pairing it against an id-carrying side is exactly the mixed
   // case: winnerSideLR now returns null rather than falling back to name,

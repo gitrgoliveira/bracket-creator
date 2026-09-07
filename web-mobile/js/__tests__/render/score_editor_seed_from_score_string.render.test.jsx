@@ -171,7 +171,7 @@ describe('ScoreEditorModal ippon seeding', () => {
     expect(akaSlots(container)).toEqual(['·', '·']);
   });
 
-  // bc-pnum (Opus review round, HIGH regression class from dfe6ea24): the
+  // bc-pnum (HIGH regression class from dfe6ea24): the
   // score.ippons seeding used a bare `winner?.id === side?.id`. With BOTH
   // sides id-less (resolveSide/buildPlayerMap now keep id "" honestly
   // instead of inventing one from the name), winner.id === sideA.id AND

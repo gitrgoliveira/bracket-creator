@@ -78,11 +78,6 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	// belongs to a position in the draw". This is the ONE place that
 	// stamps it -- a mixed (Pools + Knockout) bracket never carries it,
 	// its competitors are numbered pool by pool instead.
-	// DrawOrder is StandardSeeding's own placement, participant ids in
-	// bracket-position order top to bottom (bc-pnum ruling 2): "a number
-	// belongs to a position in the draw". This is the ONE place that
-	// stamps it -- a mixed (Pools + Knockout) bracket never carries it,
-	// its competitors are numbered pool by pool instead.
 	bracket.DrawOrder = drawOrder
 
 	return e.store.SaveBracket(comp.ID, bracket)

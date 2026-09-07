@@ -23,6 +23,7 @@ import (
 
 	excelize "github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -430,29 +431,58 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 // TestExportedTagsNumbersMatchActualViewerPayload. This test remains as the
 // lighter same-package regression guard for the sheet-shape bug the doc
 // comment above describes (empty Tags, missing Names-to-Print sheet).
+//
+// [review, bc-pnum-knockout follow-up] the ORIGINAL fixture (4 unseeded
+// entrants, no dojo collision) made NumberedParticipantsFor's orderPlayersByDraw
+// call unfalsifiable: with nothing to reorder, roster order already equals
+// draw order, so `return players, nil` (skipping the reorder entirely) kept
+// this test green. Player04 is now the sole seed (StandardSeeding places
+// rank 1 at bracket slot 0, ahead of the three unseeded entrants that follow
+// it in roster order), and Player05 is present but not checked in, so
+// generatePlayoffs never draws them at all -- the two cases orderPlayersByDraw
+// exists to handle: numbered entrants in DRAW position, unnumbered ones
+// last, in roster order.
 func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pure-playoffs-tags"
 	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 		c.NumberPrefix = "K"
+		c.CheckInEnabled = true
 	})
-	names := make([]string, 4)
-	for i := range names {
-		names[i] = fmt.Sprintf("Player%02d", i+1)
-	}
-	saveTestParticipants(t, store, compID, names)
+	// Unique dojos: delayDojoMeetings must never fire here, so the ONLY
+	// thing that can move Player04 ahead of Player01-03 is the seed below,
+	// not an incidental dojo-collision swap.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Player01", Dojo: "DojoA", CheckedIn: true},
+		{Name: "Player02", Dojo: "DojoB", CheckedIn: true},
+		{Name: "Player03", Dojo: "DojoC", CheckedIn: true},
+		{Name: "Player04", Dojo: "DojoD", CheckedIn: true},
+		{Name: "Player05", Dojo: "DojoE", CheckedIn: false}, // excluded: not checked in
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Player04", SeedRank: 1},
+	}))
 	require.NoError(t, eng.StartCompetition(compID))
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	wantNumbered, err := eng.NumberedParticipantsFor(comp, nil)
 	require.NoError(t, err)
+	require.Len(t, wantNumbered, 5, "premise: the checked-out entrant is still IN the returned roster, just unnumbered")
 	wantNumbers := make(map[string]string, len(wantNumbered))
-	for _, p := range wantNumbered {
+	wantOrder := make([]string, len(wantNumbered))
+	for i, p := range wantNumbered {
 		wantNumbers[p.Name] = p.Number
+		wantOrder[i] = p.Name
 	}
-	require.Len(t, wantNumbers, 4, "premise: every entrant carries a K-prefixed number")
+	assert.Equal(t, []string{"Player04", "Player01", "Player02", "Player03", "Player05"}, wantOrder,
+		"NumberedParticipantsFor must return numbered entrants by draw position, unnumbered ones last")
+	assert.Equal(t, "K1", wantNumbers["Player04"], "the sole seed must claim K1 (bracket slot 0), not K4 (its roster position)")
+	assert.Equal(t, "K2", wantNumbers["Player01"])
+	assert.Equal(t, "K3", wantNumbers["Player02"])
+	assert.Equal(t, "K4", wantNumbers["Player03"])
+	assert.Equal(t, "", wantNumbers["Player05"], "excluded from the draw -> no number")
 
 	f := openExportedWorkbook(t, eng, compID)
 
@@ -462,17 +492,28 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 	tagRows, err := f.GetRows(helper.SheetTags)
 	require.NoError(t, err)
 	gotTagNumbers := map[string]bool{}
+	var tagNumbersInOrder []string
 	for _, row := range tagRows {
 		for _, cell := range row {
 			cell = strings.TrimSpace(cell)
 			if cell != "" {
 				gotTagNumbers[cell] = true
+				tagNumbersInOrder = append(tagNumbersInOrder, cell)
 			}
 		}
 	}
 	for name, number := range wantNumbers {
+		if number == "" {
+			continue
+		}
 		assert.Truef(t, gotTagNumbers[number], "Tags sheet must print %q's number %q; got cells %v", name, number, gotTagNumbers)
 	}
+	// Each entrant's tag is written TWICE (top and bottom half of the A4
+	// page, see CreateTagsSheet); an unnumbered entrant's tag is empty and
+	// contributes no cell here. The four numbered entrants' tags must
+	// appear in BRACKET-POSITION order, matching NumberedParticipantsFor.
+	assert.Equal(t, []string{"K1", "K1", "K2", "K2", "K3", "K3", "K4", "K4"}, tagNumbersInOrder,
+		"Tags sheet cells must appear in bracket-position order, matching NumberedParticipantsFor")
 
 	// Names to Print: a sheet must now exist (deleted-with-nothing-created was
 	// the bug) and carry an entry per entrant.
@@ -487,7 +528,29 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 	require.NotEmpty(t, namesSheet, "a playoffs-only competition must still get a Names to Print sheet")
 	nameRows, err := f.GetRows(namesSheet)
 	require.NoError(t, err)
-	assert.GreaterOrEqual(t, len(nameRows), 4, "Names to Print must carry one row per entrant")
+	assert.GreaterOrEqual(t, len(nameRows), 5, "Names to Print must carry one row per entrant")
+
+	// Data sheet: column B is the name, D is the number (AddPlayerDataToSheet,
+	// non-sanitized layout). Rows must be written in the SAME bracket-position
+	// order the Tags sheet and NumberedParticipantsFor agree on, with the
+	// unnumbered entrant last.
+	dataRows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	var gotNames, gotNumbers []string
+	for i, row := range dataRows {
+		if i < 2 || len(row) < 2 { // rows 1-2 are the title/header block
+			continue
+		}
+		gotNames = append(gotNames, row[1])
+		if len(row) >= 4 {
+			gotNumbers = append(gotNumbers, row[3])
+		} else {
+			gotNumbers = append(gotNumbers, "")
+		}
+	}
+	assert.Equal(t, []string{"Player04", "Player01", "Player02", "Player03", "Player05"}, gotNames,
+		"the Data sheet's rows must be written in bracket-position order, unnumbered entrant last")
+	assert.Equal(t, []string{"K1", "K2", "K3", "K4", ""}, gotNumbers)
 }
 
 // captureStdout redirects os.Stdout for the duration of fn and returns

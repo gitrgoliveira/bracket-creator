@@ -72,13 +72,13 @@ import (
 // draw before calling this function -- recomputing it here would just be a
 // second call to the same pure function over the same inputs.
 //
-// Returns poolsByCourt, the one artifact from PrintPoolMatches a caller's own
-// extras need: the results export's overlayPoolScores/overlayPoolStandings
-// take it directly to map a court's "N-th pool" back to a pool index. Nothing
-// else PrintPoolMatches or AddPoolDataToSheet returns (poolCoords,
-// playerCoords, matchWinners) is read again once this function's own steps
-// that consume them have run, so returning them would be dead weight at
-// every call site.
+// Returns (poolsByCourt, namesToPrintPlayers, error). poolsByCourt is the
+// one artifact from PrintPoolMatches a caller's own extras need: the
+// results export's overlayPoolScores/overlayPoolStandings take it directly
+// to map a court's "N-th pool" back to a pool index. Nothing else
+// PrintPoolMatches or AddPoolDataToSheet returns (poolCoords, playerCoords,
+// matchWinners) is read again once this function's own steps that consume
+// them have run, so returning them would be dead weight at every call site.
 //
 // namesToPrintPlayers is derived internally, via e.PlayoffsNamesToPrint(comp,
 // pools) -- bc-pnum A8/[review]'s single guarded branch for a playoffs-only
@@ -98,6 +98,12 @@ import (
 // playoffs-only shape that needed the second writer at all. Steps 1 and 6
 // below are now the ONE place that decides which writer runs, so the sheet
 // is written exactly once regardless of caller.
+//
+// It is also returned as a second value so ExportCompetitionXlsx's Tags-
+// sheet extra (which needs the identical numbered roster) reads it off this
+// call instead of calling PlayoffsNamesToPrint a second time over the same
+// comp/pools/bracket; export.BuildResultsWorkbook has no such extra and
+// discards it.
 func (e *Engine) RenderCompetitionWorkbook(
 	f *excelize.File,
 	comp *state.Competition,
@@ -107,10 +113,10 @@ func (e *Engine) RenderCompetitionWorkbook(
 	courtOfPool map[string]string,
 	draw *helper.KnockoutDraw,
 	kachinukiMatches []helper.KachinukiMatchDetail,
-) ([][]int, error) {
+) ([][]int, []helper.Player, error) {
 	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools, bracket)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 1. Data sheet (Player Name, Dojo, Display Name). AddDataToSheetForExport
@@ -125,7 +131,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 
 	// 2. Pool Draw sheet (reactive formula references to data sheet).
 	if err := helper.AddPoolsToSheet(f, pools, poolCoords, playerCoords); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// 3. Pool Matches sheet. numCourts is the operator's allocation;
@@ -178,7 +184,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 		plan := LiveCourtPlan(draw, courts, bracket)
 		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
-			return nil, fmt.Errorf("render workbook: %w", err)
+			return nil, nil, fmt.Errorf("render workbook: %w", err)
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
 			plan, comp.Mirror, comp.Engi, hasBronze)
@@ -229,14 +235,14 @@ func (e *Engine) RenderCompetitionWorkbook(
 		// empty-Format competition fell through this guard unrefused and step
 		// 4 rendered nothing -- an empty Elimination Matches sheet with no
 		// error. EffectiveFormat is why that shape is now caught here instead.
-		return nil, ErrBracketDrawMismatch
+		return nil, nil, ErrBracketDrawMismatch
 	}
 	// 5. The bare "Tree" sheet is a layout scaffold, never output. Delete it
 	//    whether it was copied into pages above or left unused (a format with
 	//    no knockout), so no blank tree page ever reaches the workbook or the
 	//    printed booklet.
 	if err := f.DeleteSheet(helper.SheetTree); err != nil {
-		return nil, fmt.Errorf("render workbook: delete tree template sheet: %w", err)
+		return nil, nil, fmt.Errorf("render workbook: delete tree template sheet: %w", err)
 	}
 
 	// 6. Names to Print sheet, one per shiaijo. Clamps the allocation to the
@@ -256,10 +262,15 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    at least one match with bout data. The renderer is a no-op for
 	//    empty input, so this is safe even when the format is fixed.
 	if err := helper.WriteKachinukiDetailSheet(f, kachinukiMatches); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return poolsByCourt, nil
+	// namesToPrintPlayers is returned as a second value so callers that also
+	// need it for their own extras (ExportCompetitionXlsx's Tags sheet)
+	// derive it once here rather than calling PlayoffsNamesToPrint a second
+	// time over the same comp/pools/bracket. export.BuildResultsWorkbook has
+	// no such extra and ignores it.
+	return poolsByCourt, namesToPrintPlayers, nil
 }
 
 // bracketHasKnockoutContent reports whether bracket carries knockout content

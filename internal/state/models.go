@@ -1268,6 +1268,18 @@ func (m *MatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(m.IpponsA) || domain.ContainsHantei(m.IpponsB)
 }
 
+// CarriesSideIDs reports whether m is a record with a per-side id field
+// stamped (SideAID or SideBID non-empty) -- the POOL class, resolved BY ID
+// ONLY (operator ruling bc-pnum). A record with neither (the BRACKET
+// class -- BracketMatch persists no per-side id at all, so a MatchResult
+// projected from one, e.g. bracketMatchAsResult, leaves both empty) is the
+// one legitimate case a caller may fall back to comparing SideA/SideB by
+// name instead: comparing two empty-string ids would look like a match but
+// proves nothing.
+func (m *MatchResult) CarriesSideIDs() bool {
+	return m.SideAID != "" || m.SideBID != ""
+}
+
 // EnchoMetadata records overtime / sudden-death periods played in a
 // match. Read/persisted only in Slice 1; the score endpoint accepts it
 // but does not yet act on it. Slice 3 (T076) will wire it into the

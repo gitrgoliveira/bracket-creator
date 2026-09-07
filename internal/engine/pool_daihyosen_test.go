@@ -188,7 +188,7 @@ func TestGeneratePoolDaihyosenMatches_ThreeWayWithNamesakeTeams(t *testing.T) {
 // TestGeneratePoolDaihyosenMatches_PrefillDedupsNamesakeInvolvingPair closes
 // the class the FIX2 doc comment used to describe as an "accepted, narrower
 // gap": generatePoolDaihyosenMatches now shares generateTiebreakerMatches'
-// existingRows contract (identity-keyed dedup via newGroupKeyResolver)
+// existingRows contract (identity-keyed dedup via groupMemberIDs)
 // instead of a bare-name existingPairs map, so this scenario is fixed for
 // EVERY caller of the shared function -- both InjectPoolDaihyosenMatches
 // (auto-injection) and GenerateLeagueTiebreakMatches (league_tiebreak.go,
@@ -828,6 +828,13 @@ func TestDHStandingsApplied(t *testing.T) {
 		// DH bout reads as winnerless and the standings below would
 		// coincidentally match the pool's on-disk roster order (Alpha,
 		// Beta, Gamma) without the DH sort ever actually running.
+		//
+		// Checked by NAME on both sides, never by assuming a side: the
+		// pre-DH tied group's order (and so which side of the Beta/Gamma
+		// bout is SideA) is itself sorted by Player.ID when Points tie
+		// (computeStandingsFrom's deterministic tiebreak), and ids are
+		// bctest.StampPlayerID's UUID-v4-shaped hash -- unrelated to name
+		// order -- so Beta is not guaranteed to land in SideA.
 		switch {
 		case sA == "Alpha":
 			allMatches[i].Winner = "Alpha"
@@ -835,9 +842,12 @@ func TestDHStandingsApplied(t *testing.T) {
 		case sB == "Alpha":
 			allMatches[i].Winner = "Alpha"
 			allMatches[i].WinnerID = allMatches[i].SideBID
-		default:
-			allMatches[i].Winner = sA // Beta beats Gamma
+		case sA == "Beta":
+			allMatches[i].Winner = "Beta" // Beta beats Gamma
 			allMatches[i].WinnerID = allMatches[i].SideAID
+		default:
+			allMatches[i].Winner = "Beta" // Beta beats Gamma
+			allMatches[i].WinnerID = allMatches[i].SideBID
 		}
 	}
 	require.NoError(t, store.SavePoolMatches("dh-standings", allMatches))

@@ -643,15 +643,15 @@ func TestStartMatchTx_MatchNotFound(t *testing.T) {
 	require.Error(t, txErr)
 }
 
-// TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock is
-// checkSimultaneousMatch's Tx twin of the same pin (eligibility_test.go,
-// TestStartMatch_RejectsSimultaneousMatch's "running match for a DIFFERENT
-// id sharing the same name" case): two "Sam"s from different dojos are a
-// legal roster, and one running on another court must not block the other
-// from starting, whatever order the roster happens to list them in. Both
-// checkSimultaneousMatch and checkSimultaneousMatchTx resolve the CURRENT
-// match's own identity via currentPoolMatchSideIDs (its own stored
-// SideAID/SideBID), never by re-deriving it from the bare name.
+// TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock pins the tx
+// entry point directly (eligibility_test.go's
+// TestStartMatch_RejectsSimultaneousMatch pins the non-tx entry point,
+// checkSimultaneousMatch, via StartMatch): two "Sam"s from different dojos
+// are a legal roster, and one running on another court must not block the
+// other from starting, whatever order the roster happens to list them in.
+// checkSimultaneousMatchTx resolves the CURRENT match's own identity via
+// findPoolMatch (its own stored SideAID/SideBID), never by re-deriving it
+// from the bare name.
 func TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "csmtx-same-name-diff-id"

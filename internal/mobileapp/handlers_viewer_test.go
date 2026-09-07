@@ -578,8 +578,8 @@ func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
 		// loads the bracket once (for the court-feed check) and the numbering
 		// merge must reuse that same read/error rather than attempting a
 		// second bracket.json load and reporting the identical corrupt-file
-		// failure a second time (numbersFromDrawWithBracket, not
-		// numbersFromDraw, is what closes that door).
+		// failure a second time (numbersFromDrawWithBracket takes the
+		// caller's own bracket read instead of repeating it).
 		var bracketIssues int
 		for _, di := range item.DataIssues {
 			if di.File == "bracket.json" {
@@ -594,7 +594,7 @@ func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
 // TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers is the
 // aggregate-payload counterpart of TestCourtCurrentUnreadablePoolsShowsNoNumbers
 // (handlers_display_test.go), covering numbersFromDrawWithBracket's own
-// pools.csv branch instead of numbersFromDraw's: a Mixed-format competition
+// pools.csv branch: a Mixed-format competition
 // whose pools.csv will not parse must both show NO numbers (already
 // covered by TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers-style
 // dataIssues assertions elsewhere) AND leave a log breadcrumb naming the
@@ -649,9 +649,10 @@ func TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers(t *testing.T) 
 	assert.True(t, found, "the competition must still be listed")
 }
 
-// TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins numbersFromDraw's
-// (formerly numbersFromPools') setup-status skip (PR #416 finding 3): a
-// competition that has never drawn cannot legitimately have a pools.csv, so
+// TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins
+// drawInPoolsFile's (engine.DrawSourceFor's) setup-status skip (PR #416
+// finding 3): a competition that has never drawn cannot legitimately have
+// a pools.csv, so
 // the read must not even be attempted -- garbage bytes left at that path (a
 // stray fixture/leftover, not an operator-actionable file) must surface as
 // neither a dataIssue nor a log line. TestCourtCurrentUnreadablePoolsShowsNoNumbers

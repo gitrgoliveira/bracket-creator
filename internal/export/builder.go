@@ -159,7 +159,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// len(pools) == 0 branch below), because this workbook is a results
 	// snapshot and the pool-oriented renderer's formula references have
 	// nowhere valid to point without a pool data sheet.
-	poolsByCourt, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	// The second return value (the playoffs-only numbered roster) is the
+	// blank-template export's own extra (its Tags sheet); this results
+	// export has no such extra and discards it.
+	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}
@@ -727,7 +730,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				if dataRowIdx >= len(rows) {
 					break
 				}
-				ps, ok := byID[standingKey(player)]
+				ps, ok := byID[player.ID]
 				if !ok {
 					continue
 				}
@@ -871,7 +874,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 
 			nPlayers := len(pool.Players)
 			for i, player := range pool.Players {
-				ps, ok := byID[standingKey(player)]
+				ps, ok := byID[player.ID]
 				if !ok {
 					continue
 				}
@@ -1212,26 +1215,18 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 // standingMap keys standings by participant ID ONLY (operator ruling
 // bc-pnum: a state.PlayerStanding carries an id field, so it is resolved by
 // id only) so two same-name competitors in one pool don't collapse onto a
-// single entry. An id-less standing is never inserted, matching
-// attachPoolMatches' own id-only resolution. Look up with
-// standingKey(player).
+// single entry. A row is keyed by its participant id; a row without one
+// resolves to nothing, so an id-less standing is never inserted, matching
+// attachPoolMatches' own id-only resolution. Look up with player.ID.
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
 		if ps.Player.ID == "" {
 			continue
 		}
-		m[standingKey(ps.Player)] = ps
+		m[ps.Player.ID] = ps
 	}
 	return m
-}
-
-// standingKey returns the lookup key for standingMap: the player's
-// participant id, and nothing else (operator ruling bc-pnum). An id-less
-// player (Player.ID == "") returns "" and never resolves, since
-// standingMap never inserts a "" key.
-func standingKey(p helper.Player) string {
-	return p.ID
 }
 
 // buildBracketMatchIndex maps MatchNumber -> match for O(1) lookup by the printed

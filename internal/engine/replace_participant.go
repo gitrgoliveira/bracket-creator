@@ -2,7 +2,6 @@ package engine
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 
@@ -128,10 +127,10 @@ func (e *Engine) ReplaceParticipantInDraw(
 		// filterCheckedIn's narrower one, since the bracket may have been
 		// drawn from a check-in state that has since changed -- holds ANOTHER
 		// participant still named oldName, excluded by id (pid) or by
-		// (name, dojo) identity. Memoized via sync.OnceValues: bracket.json
-		// and the id-less pool-matches branch below both may need the same
-		// answer.
-		oldNameAmbiguous := sync.OnceValues(func() (bool, error) {
+		// (name, dojo) identity. A plain closure: the bracket branch below is
+		// its only caller now that the pool-matches branch resolves by id
+		// only and no longer needs this same answer.
+		oldNameAmbiguous := func() (bool, error) {
 			participants, perr := tx.LoadParticipants(compID, current.EffectiveWithZekkenName())
 			if perr != nil {
 				return false, fmt.Errorf("loading participants for rename ambiguity check: %w", perr)
@@ -150,7 +149,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 				return true, nil
 			}
 			return false, nil
-		})
+		}
 
 		// --- bracket.json + pool-matches.csv (WAL-staged) ---
 		bracket, err := tx.LoadBracket(compID)
@@ -234,7 +233,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 			// poolHasNamesake; both the fallback and its guard are removed,
 			// not merely made unreachable.
 			applySide := func(rowID string, setName func(string)) {
-				if rowID != "" && pid != "" && rowID == pid {
+				if matchesParticipant(rowID, pid) {
 					setName(newName)
 					matchesChanged = true
 					matchesFound = true

@@ -190,6 +190,43 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.False(t, hasBareName, "rank override should not be keyed under the bare trimmed name either")
 	})
 
+	t.Run("Override Rank PlayerName Is Ignored, Not Validated", func(t *testing.T) {
+		// playerName is DEPRECATED (bc-pnum item 8): it is bound for older
+		// clients but never validated, never used to select, and never
+		// persisted -- the override is keyed and resolved by playerId
+		// alone. A client sending a playerName that names a DIFFERENT
+		// competitor, or one exceeding the old MaxLenPlayerName cap, must
+		// not affect the outcome: this was a behaviour change (the old
+		// handler 400'd an over-length playerName via validateMaxLen even
+		// though the value was never stored anywhere real).
+		comp := state.Competition{ID: "rank-ignores-name", Status: state.CompStatusPools}
+		store.SaveCompetition(&comp)
+		require.NoError(t, store.SavePools("rank-ignores-name", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{ID: "ignore-name-p1", Name: "Player 1", Dojo: "Dojo Player 1"},
+				{Name: "Player 2", Dojo: "Dojo Player 2"},
+			}},
+		}))
+
+		overLong := strings.Repeat("x", 5000)
+		reqBody, _ := json.Marshal(map[string]any{
+			"playerId":   "ignore-name-p1",
+			"playerName": overLong,
+			"rank":       1,
+		})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-ignores-name/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "an over-length playerName must not be rejected: it is never validated, response: %s", w.Body.String())
+
+		overrides, err := store.LoadOverrides("rank-ignores-name")
+		require.NoError(t, err)
+		idKey := helper.CompetitorKey("ignore-name-p1", "", "")
+		assert.Equal(t, 1, overrides.PoolRanks["pool-1"][idKey],
+			"the override must land under the id key regardless of what playerName was sent")
+	})
+
 	t.Run("Override Rank Rejects Invalid Input", func(t *testing.T) {
 		comp := state.Competition{ID: "rank-bad-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)

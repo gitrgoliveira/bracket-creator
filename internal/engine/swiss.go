@@ -87,13 +87,12 @@ func buildSwissRosterIndex(roster []domain.Player) map[string]string {
 }
 
 // resolveSwissRosterKey resolves a Swiss match side's id to a roster
-// identity key from buildSwissRosterIndex. ID-only (operator ruling
-// bc-pnum): an empty id, or one this index never registered (stale/foreign
-// data), returns ("", false) rather than falling back to a name lookup.
+// identity key from buildSwissRosterIndex: a plain map index, no separate
+// empty-id guard needed, since buildSwissRosterIndex never inserts a ""
+// key, so id == "" already misses like any other id it never registered
+// (stale/foreign data) -- there is no name-lookup fallback either way
+// (operator ruling bc-pnum).
 func resolveSwissRosterKey(byID map[string]string, id string) (string, bool) {
-	if id == "" {
-		return "", false
-	}
 	k, ok := byID[id]
 	return k, ok
 }
@@ -789,8 +788,8 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 
 		// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
-		keyA := standingsPlayerKey(sA.Player.ID)
-		keyB := standingsPlayerKey(sB.Player.ID)
+		keyA := sA.Player.ID
+		keyB := sB.Player.ID
 		switch {
 		case winnerIsA:
 			sA.Wins++
@@ -840,8 +839,8 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 			}
 		}
 		// Head-to-head: if a beat b directly, a ranks higher.
-		keyA := standingsPlayerKey(a.Player.ID)
-		keyB := standingsPlayerKey(b.Player.ID)
+		keyA := a.Player.ID
+		keyB := b.Player.ID
 		if winner, ok := lookupH2H(headToHead, keyA, keyB); ok {
 			if winner == keyA {
 				return true

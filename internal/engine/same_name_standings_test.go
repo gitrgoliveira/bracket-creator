@@ -17,9 +17,9 @@ import (
 // bare name (computeStandingsFrom in scoring.go), so two same-named
 // competitors in one pool collapsed to a single standings row and win
 // attribution fell back to a raw name comparison that both sides satisfy.
-// These tests pin the fix: standings are keyed by standingsPlayerKey
-// (id-preferring, name-fallback for legacy data) and the winning side is
-// resolved by WinnerID when present.
+// These tests pin the fix: standings are keyed by participant id ONLY
+// (operator ruling bc-pnum, registerStandingsPlayer/lookupStandingsPlayer
+// in engi.go) and the winning side is resolved by WinnerID.
 const (
 	snIDTokyo    = "11111111-1111-4111-8111-111111111111" // Tanaka Kenji, Tokyo
 	snIDOsaka    = "22222222-2222-4222-8222-222222222222" // Tanaka Kenji, Osaka

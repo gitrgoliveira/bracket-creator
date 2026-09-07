@@ -94,7 +94,7 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // bleed across; a group with no decided supplementary bouts is left untouched.
 //
 // Group membership and win attribution are keyed by participant id ONLY
-// (operator ruling bc-pnum, via newGroupKeyResolver): two tied competitors
+// (operator ruling bc-pnum, via groupMemberIDs): two tied competitors
 // can share a display name across dojos (CheckDuplicateEntriesByNameDojo),
 // so a bare-name key would both misclassify group membership (a
 // same-named, unrelated competitor elsewhere in the pool falsely counted as
@@ -116,42 +116,39 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // always reflects whoever CURRENTLY occupies that slot, so it can't go
 // stale.
 //
-// A match side is resolved to a group member's canonical key via
-// resolveGroupMatchKey: the match must carry an id for that side, and it
-// must be one of THIS group's members (only membership in this specific
-// tied group is verified, the id itself is the key). A match side with no
-// id, or a foreign id (not a group member's), resolves to ("", false) and
-// contributes nothing -- there is no name-based fallback attribution.
+// A match side counts toward the group only when both sides are members of
+// THIS tied group (groupMemberIDs, id-only membership) and the two sides
+// are not the same member. A match side with no id, or a foreign id (not a
+// group member's), is simply not a member -- there is no name-based
+// fallback attribution.
 func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) {
 	for _, positions := range detectPoolTies(sorted) {
 		i := positions[0]
 		j := positions[len(positions)-1] + 1
 
-		resolveGroupMatchKey := newGroupKeyResolver(sorted[i:j])
+		ids := groupMemberIDs(sorted[i:j])
 
 		groupWins := map[string]int{}
 		for _, m := range matches {
 			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.WinnerID == "" {
 				continue
 			}
-			keyA, aOK := resolveGroupMatchKey(m.SideAID)
-			keyB, bOK := resolveGroupMatchKey(m.SideBID)
-			if !aOK || !bOK || keyA == keyB {
+			if !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
 				continue
 			}
 			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
-				groupWins[keyA]++
+				groupWins[m.SideAID]++
 			case winnerIsB:
-				groupWins[keyB]++
+				groupWins[m.SideBID]++
 			}
 		}
 		if len(groupWins) > 0 {
 			sort.SliceStable(sorted[i:j], func(a, b int) bool {
-				keyA := standingsPlayerKey(sorted[i+a].Player.ID)
-				keyB := standingsPlayerKey(sorted[i+b].Player.ID)
+				keyA := sorted[i+a].Player.ID
+				keyB := sorted[i+b].Player.ID
 				return groupWins[keyA] > groupWins[keyB]
 			})
 		}
@@ -246,24 +243,22 @@ func tiebreakerPairKey(a, b string) string {
 // group members is visited exactly once, regardless of what any of them are
 // named.
 //
-// Dedup against existingRows resolves each row's sides to a group member's
-// canonical identity key via newGroupKeyResolver (id-only, operator ruling
-// bc-pnum -- the same resolver applyTiebreakSort uses), so the two
-// namesake-involving pairs above are tracked as the distinct pairs they are,
-// never merged under one bare-name bucket.
+// Dedup against existingRows resolves each row's sides against
+// groupMemberIDs (id-only, operator ruling bc-pnum -- the same set
+// applyTiebreakSort uses), so the two namesake-involving pairs above are
+// tracked as the distinct pairs they are, never merged under one bare-name
+// bucket.
 //
 // Stamps SideAID/SideBID from the tied competitors' participant ids (mirrors
 // pools.go's regular-match generation), so applyTiebreakSort can resolve the
 // winning side by id when two tied competitors share a display name
 // (allowed across dojos, CheckDuplicateEntriesByNameDojo).
 func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding, existingTBCount int, court string, existingRows []state.MatchResult) []state.MatchResult {
-	resolve := newGroupKeyResolver(tiedGroup)
+	ids := groupMemberIDs(tiedGroup)
 	existingPairs := make(map[string]bool, len(existingRows))
 	for _, m := range existingRows {
-		keyA, okA := resolve(m.SideAID)
-		keyB, okB := resolve(m.SideBID)
-		if okA && okB {
-			existingPairs[tiebreakerPairKey(keyA, keyB)] = true
+		if ids[m.SideAID] && ids[m.SideBID] && m.SideAID != m.SideBID {
+			existingPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
 		}
 	}
 
@@ -272,8 +267,8 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 	for i := 0; i < len(tiedGroup); i++ {
 		for j := i + 1; j < len(tiedGroup); j++ {
 			a, b := tiedGroup[i], tiedGroup[j]
-			keyA := standingsPlayerKey(a.Player.ID)
-			keyB := standingsPlayerKey(b.Player.ID)
+			keyA := a.Player.ID
+			keyB := b.Player.ID
 			if existingPairs[tiebreakerPairKey(keyA, keyB)] {
 				continue
 			}
@@ -368,7 +363,7 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	// Scan existing TB matches per pool for idempotency and ID sequencing.
 	// existingRows are handed to generateTiebreakerMatches raw (not reduced to
 	// a bare-name dedup map here) so it can resolve each row's sides against
-	// the SPECIFIC tied group being processed via newGroupKeyResolver -- see
+	// the SPECIFIC tied group being processed via groupMemberIDs -- see
 	// that function's doc comment for why a bare-name reduction at this scan
 	// stage would collapse distinct namesake-involving pairs.
 	type poolTBInfo struct {
@@ -469,35 +464,29 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	return injected, nil
 }
 
-// newGroupKeyResolver indexes a tied group and returns the id -> canonical
-// member key resolution shared by applyTiebreakSort and groupNeedsChusen
-// (chusen.go). Both ask the same question of the same kind of data: a
-// supplementary bout names two sides, and the caller needs to know which
-// member of THIS tied group each side is.
+// groupMemberIDs returns the set of participant ids among a tied group's
+// members, shared by applyTiebreakSort, groupNeedsChusen (chusen.go),
+// leagueGroupHasDH (competition.go), generateTiebreakerMatches and
+// generatePoolDaihyosenMatches (daihyosen.go). All five ask the same
+// question of the same kind of data: a supplementary bout names two sides,
+// and the caller needs to know whether each is a member of THIS tied group.
 //
-// ID-only (operator ruling bc-pnum): a bout side with no id, or a non-empty
-// id that is NOT one of this group's members (foreign or stale data, e.g. a
-// TB/DH row generated for a tie that a later score correction has since
-// reshaped), resolves to ("", false). There is no name fallback: falling
+// ID-only (operator ruling bc-pnum): a row is keyed by its participant id; a
+// row without one resolves to nothing. There is no name fallback: falling
 // through to a bare-name lookup would risk attributing the row to whichever
 // OTHER member of THIS group happens to share a display name (two members
 // can share a name across dojos), which is exactly the misattribution the
 // operator ruling forbids. A member with no id (Player.ID == "") is simply
-// never inserted into the group's key set, so no bout side can ever resolve
-// to it by id; that member still appears in the group for sorting/output
-// purposes, it just cannot be credited a supplementary win.
-func newGroupKeyResolver(members []state.PlayerStanding) func(id string) (string, bool) {
-	groupKeys := make(map[string]bool, len(members))
+// never inserted, so no bout side can ever resolve to it by id; that member
+// still appears in the group for sorting/output purposes, it just cannot be
+// credited a supplementary win.
+func groupMemberIDs(members []state.PlayerStanding) map[string]bool {
+	ids := make(map[string]bool, len(members))
 	for _, s := range members {
 		if s.Player.ID == "" {
 			continue
 		}
-		groupKeys[s.Player.ID] = true
+		ids[s.Player.ID] = true
 	}
-	return func(id string) (string, bool) {
-		if id == "" || !groupKeys[id] {
-			return "", false
-		}
-		return id, true
-	}
+	return ids
 }

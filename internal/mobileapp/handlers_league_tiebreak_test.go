@@ -126,7 +126,7 @@ func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidates(string) ([]engine.Ti
 	return e.candidates, e.candidatesErr
 }
 
-func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string, tiedTeamIDs []string) ([]state.MatchResult, error) {
+func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error) {
 	e.receivedTeamIDs = tiedTeamIDs
 	return e.generated, e.generateErr
 }

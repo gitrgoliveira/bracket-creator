@@ -38,18 +38,15 @@ type ChusenGroup struct {
 // (a true win/loss cycle, an all-drawn round, or any other partial tie) so the
 // order is undetermined.
 //
-// groupOverrides is resolved per member via lookupPoolRankOverride (bc-cse):
-// identity-keyed only (id-preferred, name+dojo fallback within
-// helper.CompetitorKey itself; the separate legacy bare-name overrides[name]
-// fallback was removed under bc-pnum -- see lookupPoolRankOverride's own doc
-// comment). Two same-name, different-dojo teammates in one tied group
-// therefore no longer share a single "already recorded" verdict -- each is
-// checked against its own override entry.
+// groupOverrides is resolved per member via lookupPoolRankOverride, keyed by
+// participant id ONLY (bc-cse, bc-pnum). Two same-name, different-dojo
+// teammates in one tied group therefore never share a single "already
+// recorded" verdict -- each is checked against its own override entry.
 func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
 	if len(groupOverrides) > 0 {
 		allOverridden := true
 		for _, s := range group {
-			if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID, s.Player.Name, s.Player.Dojo); !ok {
+			if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); !ok {
 				allOverridden = false
 				break
 			}
@@ -72,7 +69,7 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	// changes who advances. generatePoolDaihyosenMatches stamps
 	// SideAID/SideBID/WinnerID, so the ids are there to key on and there is
 	// no fallback if they were ever missing.
-	resolve := newGroupKeyResolver(group)
+	ids := groupMemberIDs(group)
 
 	dhWins := make(map[string]int, len(group))
 	dhCompleted := 0
@@ -80,9 +77,7 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 		if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted {
 			continue
 		}
-		keyA, okA := resolve(m.SideAID)
-		keyB, okB := resolve(m.SideBID)
-		if !okA || !okB || keyA == keyB {
+		if !ids[m.SideAID] || !ids[m.SideBID] || m.SideAID == m.SideBID {
 			continue
 		}
 		dhCompleted++
@@ -95,9 +90,9 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
 		switch {
 		case winnerIsA:
-			dhWins[keyA]++
+			dhWins[m.SideAID]++
 		case winnerIsB:
-			dhWins[keyB]++
+			dhWins[m.SideBID]++
 		}
 	}
 	// Only judge the group once its FULL pairwise daihyosen round is complete
@@ -115,7 +110,7 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	}
 	seen := make(map[int]bool, len(group))
 	for _, s := range group {
-		count := dhWins[standingsPlayerKey(s.Player.ID)]
+		count := dhWins[s.Player.ID]
 		if seen[count] {
 			return true
 		}

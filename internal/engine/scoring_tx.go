@@ -59,8 +59,8 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// topNFinisher pairs a top-N finisher's IDENTITY key (standingsPlayerKey:
-// id-only, operator ruling bc-pnum) with their bare display name. The
+// topNFinisher pairs a top-N finisher's IDENTITY key (the participant id,
+// id-only per operator ruling bc-pnum) with their bare display name. The
 // mp-e2k1 displaced-qualifier guard below needs both: membership in the
 // pre/post top-N sets must be decided by identity (two competitors sharing a
 // display name from different dojos are explicitly legal,
@@ -164,7 +164,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 				ps := preStandings[pn]
 				for i := 0; i < poolWinners && i < len(ps); i++ {
 					p := ps[i].Player
-					oldTopN = append(oldTopN, topNFinisher{key: standingsPlayerKey(p.ID), name: p.Name})
+					oldTopN = append(oldTopN, topNFinisher{key: p.ID, name: p.Name})
 				}
 			}
 		}
@@ -195,7 +195,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 		ps := postStandings[poolRescoredName]
 		// Build the new top-N set and find displaced finishers, keyed by
-		// IDENTITY (standingsPlayerKey: id-only, operator ruling bc-pnum)
+		// IDENTITY (the participant id, id-only per operator ruling bc-pnum)
 		// rather than bare name. Two competitors sharing a display name from
 		// different dojos are explicitly legal (CheckDuplicateEntriesByNameDojo),
 		// so a re-score that swaps WHICH namesake holds a qualifying rank
@@ -209,7 +209,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		newSet := make(map[string]struct{}, poolWinners)
 		for i := 0; i < poolWinners && i < len(ps); i++ {
 			p := ps[i].Player
-			newSet[standingsPlayerKey(p.ID)] = struct{}{}
+			newSet[p.ID] = struct{}{}
 		}
 		// displaced carries bare NAMES (not keys): hasStartedKnockoutMatchTx
 		// below matches bracket sides by name only (BracketMatch carries no
@@ -341,58 +341,80 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	return nil
 }
 
-// checkSimultaneousMatchTx is the tx-aware twin of checkSimultaneousMatch.
-// Returns *IneligibleCompetitorError if either participant in matchID is
-// currently Running in a different match within the same competition.
+// checkSimultaneousMatchTx returns *IneligibleCompetitorError if either
+// participant in matchID is currently Running in a different match within
+// the same competition. Pool matches and bracket matches are both checked.
+// checkSimultaneousMatch (eligibility.go) is the non-tx entry point, calling
+// this with e.store as h (bc-twin: one body, two doors).
+//
+// matchID's own identity is resolved from the pool-matches slice FIRST,
+// via findPoolMatch: a pool row already carries its
+// own SideAID/SideBID, so reading them directly is strictly better than a
+// roster name scan, which two different competitors can share (operator
+// ruling bc-pnum). The roster scan (resolvePlayerIDs) therefore only runs
+// for a match that is NOT itself a pool row, i.e. the bracket half, where
+// no id field exists to prefer instead.
+//
+// The pool-vs-pool comparison below is id-only: a side with no resolvable
+// roster id (rawIDA/rawIDB == "") never matches any other pool match, there
+// is no name fallback for it. The bracket half stays name-based
+// (BracketMatch carries no per-side id).
 //
 // Phase 2c simultaneity gate.
-func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID string) error {
-	sideA, sideB, err := e.lookupMatchSides(tx, compID, matchID)
-	if err != nil {
-		return nil
+func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string) error {
+	var sideA, sideB, rawIDA, rawIDB string
+	isPoolMatch := false
+	poolMatches, poolErr := h.LoadPoolMatches(compID)
+	if poolErr == nil {
+		if m, ok := findPoolMatch(poolMatches, matchID); ok {
+			isPoolMatch = true
+			sideA, sideB = m.SideA, m.SideB
+			rawIDA, rawIDB = m.SideAID, m.SideBID
+		}
+	}
+	if !isPoolMatch {
+		var err error
+		sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
+		if err != nil {
+			return nil
+		}
+		rawIDA, rawIDB = resolvePlayerIDs(h, compID, sideA, sideB)
 	}
 	if sideA == "" && sideB == "" {
 		return nil
 	}
 
-	idA, idB, rawIDA, rawIDB := resolvePlayerIDsTx(tx, compID, sideA, sideB)
-
-	// Pool-vs-pool half: id only (operator ruling bc-pnum). A side with no
-	// resolvable roster id (rawIDA/rawIDB == "") never matches any other
-	// pool match here -- there is no name fallback.
-	poolMatches, err := tx.LoadPoolMatches(compID)
-	if err == nil {
-		// currentPoolMatchSideIDs (eligibility.go) supersedes
-		// resolvePlayerIDsTx's name-derived guess with the CURRENT match's
-		// own stored SideAID/SideBID when it is itself a pool match -- see
-		// that function's doc comment for why a name re-derivation
-		// misattributes a same-name-different-dojo pairing. A bracket match
-		// (ok == false) keeps the name-derived pair, unchanged.
-		if ownIDA, ownIDB, ok := currentPoolMatchSideIDs(poolMatches, matchID); ok {
-			rawIDA, rawIDB = ownIDA, ownIDB
+	// playerIDFor is the IneligibleCompetitorError.PlayerID reporting value:
+	// the resolved id when there is one, else the bare name -- preferring
+	// SOME identifier over a blank one.
+	playerIDFor := func(raw, name string) string {
+		if raw != "" {
+			return raw
 		}
+		return name
+	}
+
+	if poolErr == nil {
 		for _, m := range poolMatches {
 			if m.ID == matchID || m.Status != state.MatchStatusRunning {
 				continue
 			}
 			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
 				return &IneligibleCompetitorError{
-					PlayerID: idA,
+					PlayerID: playerIDFor(rawIDA, sideA),
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
 			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
 				return &IneligibleCompetitorError{
-					PlayerID: idB,
+					PlayerID: playerIDFor(rawIDB, sideB),
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
 		}
 	}
 
-	// Bracket half: name-based, out of scope for bc-pnum (BracketMatch
-	// carries no per-side id).
-	bracket, berr := tx.LoadBracket(compID)
+	bracket, berr := h.LoadBracket(compID)
 	if berr == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
 			for _, bm := range round {
@@ -401,13 +423,13 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 				}
 				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
 					return &IneligibleCompetitorError{
-						PlayerID: idA,
+						PlayerID: playerIDFor(rawIDA, sideA),
 						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 					}
 				}
 				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
 					return &IneligibleCompetitorError{
-						PlayerID: idB,
+						PlayerID: playerIDFor(rawIDB, sideB),
 						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 					}
 				}
@@ -416,13 +438,13 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
 			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
 				return &IneligibleCompetitorError{
-					PlayerID: idA,
+					PlayerID: playerIDFor(rawIDA, sideA),
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 				}
 			}
 			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
 				return &IneligibleCompetitorError{
-					PlayerID: idB,
+					PlayerID: playerIDFor(rawIDB, sideB),
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 				}
 			}
@@ -501,10 +523,8 @@ func lookupMatchCourtTx(tx state.StoreTx, compID, matchID string) (string, error
 	if err != nil {
 		return "", err
 	}
-	for _, m := range poolMatches {
-		if m.ID == matchID {
-			return m.Court, nil
-		}
+	if m, ok := findPoolMatch(poolMatches, matchID); ok {
+		return m.Court, nil
 	}
 	bracket, err := tx.LoadBracket(compID)
 	if err != nil {
@@ -561,30 +581,24 @@ func courtOccupied(poolMatches []state.MatchResult, bracket *state.Bracket, cour
 	return nil
 }
 
-// resolvePlayerIDsTx is the tx-aware twin of resolvePlayerIDs; see that
-// function's doc comment for the (idA, idB, rawIDA, rawIDB) contract.
-func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (idA, idB, rawIDA, rawIDB string) {
-	comp, err := tx.LoadCompetition(compID)
+// resolvePlayerIDs resolves sideA/sideB (display names) against the
+// competition's roster, returning "" for either side with no participant
+// match (no name fallback: checkSimultaneousMatchTx's pool-vs-pool
+// comparison is id-only by operator ruling bc-pnum, since a name silently
+// substituted for a missing id could never legitimately equal a real
+// SideAID/SideBID anyway).
+func resolvePlayerIDs(h state.StoreTx, compID, sideA, sideB string) (rawIDA, rawIDB string) {
+	comp, err := h.LoadCompetition(compID)
 	if err != nil || comp == nil {
-		return sideA, sideB, "", ""
+		return "", ""
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
+	participants, err := h.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
-		return sideA, sideB, "", ""
+		return "", ""
 	}
 	pool := combinedPlayerPool(comp.Players, participants)
-	rawIDA = lookupPlayerID(pool, sideA)
-	idA = rawIDA
-	if idA == "" {
-		idA = sideA
-	}
-	rawIDB = lookupPlayerID(pool, sideB)
-	idB = rawIDB
-	if idB == "" {
-		idB = sideB
-	}
-	return idA, idB, rawIDA, rawIDB
+	return lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)
 }
 
 // hasStartedKnockoutMatchTx reports whether any BRACKET (knockout) match
@@ -733,21 +747,13 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	}
 	hadPriorLoser := false
 	if domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai) {
-		// losingSide (not the narrower loserSideName) so a prior decision
-		// that itself came through RecordDecisionTx -- and so already
-		// carries WinnerSide -- is attributed by that authoritative hint
-		// rather than an ambiguous name/ippon guess (PR #416 findings 4/5).
-		//
-		// hadPriorLoser=false (skipping the T103 lock below, i.e. failing
-		// OPEN) is losingSide's answer whenever it cannot attribute the
-		// loss at all -- including an id-carrying prior whose tiers 3/4
-		// are gated off (bc-pnum review round 2, finding 3) with no
-		// WinnerSide/WinnerID to fall back on. Only reachable via a
-		// hand-edited pool-matches.csv: every write path this engine
-		// itself takes to a kiken/fusenpai Decision stamps one or the
-		// other (backfillMatchIdentity fills WinnerID;
-		// RecordDecisionTx always stamps WinnerSide). See losingSide's
-		// own doc comment for why the id gate wins anyway.
+		// losingSide, so a prior decision that itself came through
+		// RecordDecisionTx -- and so already carries WinnerSide -- is
+		// attributed by that authoritative hint rather than an ambiguous
+		// name/ippon guess. hadPriorLoser=false (skipping the T103 lock
+		// below, i.e. failing OPEN) is losingSide's answer whenever it
+		// cannot attribute the loss at all; see its own doc comment for the
+		// one known, narrow case that reaches.
 		_, name, ok := losingSide(prior)
 		hadPriorLoser = ok && name != ""
 	}

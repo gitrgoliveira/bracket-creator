@@ -1056,27 +1056,12 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 // withdrawal never wipes the sub-bouts already fought (both teams' results
 // stand and continue to count in IV/PW standings via accrueTeamSubResults).
 //
-// prior is the match state before the decision. Two record classes reach
-// here and are compared differently, which is the same split CLAUDE.md
-// documents for every id resolution in this file:
-//
-//   - A record that carries a side id (the POOL class -- generation-time
-//     SideAID/SideBID, stamped even before the match is ever scored) is
-//     compared BY ID ONLY (operator ruling bc-pnum): a drifted or
-//     re-oriented prior must not mis-attribute points, so a mismatch, or
-//     only one side carrying an id, is treated as a non-match -- no
-//     preservation, not a guess.
-//   - A record that carries NO id field at all (the BRACKET class --
-//     BracketMatch persists no per-side id, so bracketMatchAsResult's
-//     projection leaves every id empty on both sides) falls back to the
-//     pre-bc-pnum name comparison. This is the one legitimate "record with
-//     no id field at all" case, not a name fallback sitting beside an id
-//     lookup on the SAME record: comparing two empty-string ids would look
-//     like a match but proves nothing, so the id branch must never be
-//     reached for this class. Before this split, a kiken on a bracket
-//     match hit the id branch, found both sides id-less, and returned
-//     early -- erasing the withdrawer's already-struck ippons outright, a
-//     regression against FIK Art. 32 (bc-pnum review finding 1).
+// prior is the match state before the decision. When either record carries
+// a side id (CarriesSideIDs, the POOL class), both records' ids must be
+// present and equal or nothing is preserved -- a drifted or re-oriented
+// prior must not mis-attribute points, so a mismatch is a non-match, not a
+// guess. Otherwise (the BRACKET class: BracketMatch persists no per-side id
+// at all) SideA/SideB are compared by name instead.
 //
 // decisionBy names the WITHDRAWING side ("shiro" = SideB/Shiro, "aka" =
 // SideA/Aka). Shared by the two RecordDecision twins.
@@ -1084,9 +1069,7 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 	if prior == nil {
 		return
 	}
-	if prior.SideAID != "" || prior.SideBID != "" || result.SideAID != "" || result.SideBID != "" {
-		// At least one side carries an id: this is the pool class. Every id
-		// must be present and every id must match, or nothing is preserved.
+	if prior.CarriesSideIDs() || result.CarriesSideIDs() {
 		if prior.SideAID == "" || prior.SideBID == "" || result.SideAID == "" || result.SideBID == "" {
 			return
 		}
@@ -1094,8 +1077,6 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 			return
 		}
 	} else if prior.SideA != result.SideA || prior.SideB != result.SideB {
-		// Bracket class (no id field at all): fall back to the name
-		// comparison this function used before the bc-pnum id-only pass.
 		return
 	}
 	result.SubResults = prior.SubResults
@@ -1530,13 +1511,11 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
 
 		// Apply manual rank overrides. Overrides are keyed by competitor
-		// IDENTITY (helper.CompetitorKey: id-preferred, name+dojo fallback),
-		// not bare name (bc-cse). lookupPoolRankOverride tries ONLY that
-		// key: the separate legacy bare-name overrides[name] fallback was
-		// removed (operator ruling bc-pnum -- see that function's own doc
-		// comment), so a pre-bc-cse overrides.json entry keyed by bare name
-		// alone is unresolvable until the operator re-records it through the
-		// current chusen/override-rank flow.
+		// participant id ONLY (bc-cse, bc-pnum), not bare name:
+		// lookupPoolRankOverride resolves nothing for an id-less row, so a
+		// pre-bc-cse overrides.json entry keyed by bare name alone is
+		// unresolvable until the operator re-records it through the current
+		// chusen/override-rank flow.
 		// `overrides` itself is loaded ONCE above this loop, not per pool.
 		var poolOverrides map[string]int
 		if overrides != nil {
@@ -1582,7 +1561,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			// pins that such an entry simply never applies.
 			//
 			// The natural rank MUST be captured PER ELEMENT, not in a map keyed
-			// by identity (standingsPlayerKey): two id-less namesakes (legal
+			// by identity (the participant id): two id-less namesakes (legal
 			// across dojos, CheckDuplicateEntriesByNameDojo) share the identical
 			// key, so a map assignment for the SECOND one silently overwrites
 			// the FIRST one's entry, and both then read whichever was written
@@ -1615,7 +1594,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				wrapped[i] = poolRankPairing{standing: s, nat: i + 1}
 			}
 			rankFor := func(w *poolRankPairing) (rank int, overridden bool) {
-				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID, w.standing.Player.Name, w.standing.Player.Dojo); ok {
+				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID); ok {
 					return r, true
 				}
 				return w.nat, false
@@ -1640,7 +1619,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		for i := range sorted {
 			sorted[i].Rank = i + 1
 			if poolHasOverrides {
-				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo); ok {
+				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID); ok {
 					sorted[i].IsOverridden = true
 				}
 			}
@@ -1771,7 +1750,7 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 // still read "done" often enough to pass the one fixture that existed):
 //
 //  1. Completion buckets (statusFor) are keyed by helper.CompetitorKey(ID,
-//     Name, Dojo), not by standingsPlayerKey(ID) alone: rosterIndex's own
+//     Name, Dojo), not by the participant ID alone: rosterIndex's own
 //     lookup below is id-only (operator ruling bc-pnum), so once a match
 //     side resolves at all it names exactly one roster entry; the roster
 //     may nonetheless carry an entry with no id yet, and CompetitorKey's

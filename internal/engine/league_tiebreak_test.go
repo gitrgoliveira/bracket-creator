@@ -429,10 +429,10 @@ func TestMaybeAutoCompletePools_TeamLeague_DHCompletedAfterOperatorInject(t *tes
 	require.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
 
 	// Operator injects DH for the tied group (Phase 3b path). Selection is
-	// id-only now (operator ruling bc-pnum): teamNames is accepted but never
-	// used to select, so the ids (deterministic via bctest.StampPlayerID,
-	// dojo "" since setupTeamLeagueComp's teams carry no dojo) must be passed.
-	injected, injErr := eng.GenerateLeagueTiebreakMatches("league-operator-dh", []string{"Alpha", "Beta"},
+	// id-only (operator ruling bc-pnum): the ids (deterministic via
+	// bctest.StampPlayerID, dojo "" since setupTeamLeagueComp's teams carry
+	// no dojo) must be passed.
+	injected, injErr := eng.GenerateLeagueTiebreakMatches("league-operator-dh",
 		[]string{bctest.StampPlayerID("Alpha", ""), bctest.StampPlayerID("Beta", "")})
 	require.NoError(t, injErr)
 	require.Len(t, injected, 1, "one DH match for a two-way tie")

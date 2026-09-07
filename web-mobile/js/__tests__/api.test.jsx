@@ -617,7 +617,9 @@ describe('API Utils', () => {
       const norm = normalizeMatch(match, playerMap);
       
       expect(norm.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A' });
-      expect(norm.sideB).toEqual({ id: 'Bob', name: 'Bob' }); // Fallback if not in map
+      // bc-pnum: 'Bob' has no playerMap entry; resolveSide keeps id ""
+      // rather than inventing one from the name.
+      expect(norm.sideB).toEqual({ id: '', name: 'Bob' });
     });
 
     // mp-jvzy: the playerMap is keyed by NAME, so two same-name participants

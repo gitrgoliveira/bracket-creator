@@ -10,6 +10,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
@@ -75,8 +76,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // empty cell would desynchronise those two (a placeholder in cell 0 pushes
   // the mark to cell 1, where it renders OVER a recorded letter, hiding a
   // struck point). Cleaning once here keeps every downstream consumer honest.
-  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && m.winner?.id === m.sideA?.id ? realIppons(m.score.ippons) : []);
-  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && m.winner?.id === m.sideB?.id ? realIppons(m.score.ippons) : []);
+  // bc-pnum: sameCompetitor, never a bare `winner?.id === side?.id` -- with
+  // both sides id-less (buildPlayerMap/resolveSide keep id "" rather than
+  // inventing one from the name), the naked equality made BOTH conditions
+  // true and seeded the SAME score.ippons onto both sides at once (the
+  // 4d602de2 regression class this seeding already guards elsewhere).
+  const seedAPts = cleanA.length ? cleanA : (m.score?.type === "ippon" && sameCompetitor(m.winner, m.sideA) ? realIppons(m.score.ippons) : []);
+  const seedBPts = cleanB.length ? cleanB : (m.score?.type === "ippon" && sameCompetitor(m.winner, m.sideB) ? realIppons(m.score.ippons) : []);
 
   // Use ?? not || so an explicit 0 isn't treated as "unset".
   // reconcileFoulsAtOpen turns the pre-fix cumulative raw count into the

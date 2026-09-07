@@ -217,10 +217,10 @@ export function bracketResetToast(quarantinedAs, rebuilt) {
 
 // isAdvisoryIssue / isLoudIssue partition a dataIssues entry by its "kind"
 // field (PR #416 finding 10), rather than by comparing object identity
-// against the one entry missingIDsIssue already picked out. An entry with NO
-// "kind" at all -- an older server payload, from before PR #416 finding 9
-// started stamping "corrupt-file" explicitly -- reads as LOUD here, matching
-// the server's own documented default for that case.
+// against the entries missingIDsIssues (plural, below) already picked out.
+// An entry with NO "kind" at all -- an older server payload, from before
+// PR #416 finding 9 started stamping "corrupt-file" explicitly -- reads as
+// LOUD here, matching the server's own documented default for that case.
 export function isAdvisoryIssue(i) {
   return !!(i && i.kind === "missing-ids");
 }

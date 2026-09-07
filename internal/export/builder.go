@@ -713,7 +713,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 			if !ok {
 				continue
 			}
-			byName := standingMap(poolStandings)
+			byID := standingMap(poolStandings)
 			// Scope the header map to THIS court's 8-column band. Pool Matches
 			// repeats the W/L/T/PW/PL/Rank headers once per court, and a whole-row
 			// map keeps only the first occurrence, so on a multi-court sheet every
@@ -727,7 +727,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				if dataRowIdx >= len(rows) {
 					break
 				}
-				ps, ok := byName[standingKey(player)]
+				ps, ok := byID[standingKey(player)]
 				if !ok {
 					continue
 				}
@@ -856,7 +856,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 			if !ok {
 				continue
 			}
-			byName := standingMap(poolStandings)
+			byID := standingMap(poolStandings)
 
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt // 1-based
 			wCol := colNum(courtStartCol + 1)
@@ -871,7 +871,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 
 			nPlayers := len(pool.Players)
 			for i, player := range pool.Players {
-				ps, ok := byName[standingKey(player)]
+				ps, ok := byID[standingKey(player)]
 				if !ok {
 					continue
 				}

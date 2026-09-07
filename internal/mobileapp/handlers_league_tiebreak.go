@@ -286,7 +286,10 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 // satisfy the local interfaces by structural match.
 func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, hub Broadcaster) {
 	// POST /competitions/:id/league-tiebreak
-	// Body: { "teamNames": ["TeamA", "TeamB", ...] }
+	// Body: { "teamNames": ["TeamA", "TeamB", ...], "teamIds": ["id-a", "id-b", ...] }
+	// teamIds is REQUIRED (operator ruling bc-pnum): the tied group is
+	// selected by id only, so the request 400s when teamIds is missing, has
+	// fewer than two entries, carries a blank entry, or has a duplicate.
 	// Generates round-robin tie-breaker matches for the selected tied group.
 	// Validates that the selection matches exactly one candidate group.
 	// 400 if the selection does not match any candidate group.
@@ -404,9 +407,10 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 	})
 
 	// DELETE /competitions/:id/league-tiebreak
-	// Body: { "teamNames": ["TeamA", "TeamB", ...] }
+	// Body: { "teamNames": ["TeamA", "TeamB", ...], "teamIds": ["id-a", "id-b", ...] }
+	// teamIds is REQUIRED, same contract as the POST endpoint above.
 	// Removes UNSCORED tie-breaker DH matches for the given group.
-	// 400 if teamNames has duplicates or names only part of a tie-breaker group.
+	// 400 if teamIds is missing/invalid, or teamNames has duplicates or names only part of a tie-breaker group.
 	// 409 if any match for the group is in progress or has already been scored.
 	// 404 if no tie-breaker matches exist for the group.
 	r.DELETE("/competitions/:id/league-tiebreak", func(c *gin.Context) {

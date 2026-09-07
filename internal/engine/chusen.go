@@ -39,11 +39,12 @@ type ChusenGroup struct {
 // order is undetermined.
 //
 // groupOverrides is resolved per member via lookupPoolRankOverride (bc-cse):
-// identity-keyed first (id-preferred, name+dojo fallback), then a legacy
-// bare-name key for pre-fix overrides.json data. Two same-name,
-// different-dojo teammates in one tied group therefore no longer share a
-// single "already recorded" verdict -- each is checked against its own
-// override entry.
+// identity-keyed only (id-preferred, name+dojo fallback within
+// helper.CompetitorKey itself; the separate legacy bare-name overrides[name]
+// fallback was removed under bc-pnum -- see lookupPoolRankOverride's own doc
+// comment). Two same-name, different-dojo teammates in one tied group
+// therefore no longer share a single "already recorded" verdict -- each is
+// checked against its own override entry.
 func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
 	if len(groupOverrides) > 0 {
 		allOverridden := true

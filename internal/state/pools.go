@@ -95,8 +95,13 @@ func parsePoolsFile(path string) (any, error) {
 			player.Number = rec[6]
 		}
 		// Participant UUID (appended after the legacy 7-column layout).
-		// Absent in pre-change files → empty id; the league matrix then
-		// falls back to name-based cell matching.
+		// Absent in pre-change files → empty id. A helper.Player is a record
+		// that carries an id field, so it is resolved BY ID ONLY (operator
+		// ruling bc-pnum): an empty id here resolves to nothing downstream
+		// (no player number, no standings/scoring attribution), it does not
+		// fall back to name-based cell matching -- see
+		// helper.PoolsMissingParticipantIDsMessage, the operator-facing
+		// notice for exactly this gap.
 		if len(rec) > 7 {
 			player.ID = rec[7]
 		}
@@ -547,7 +552,11 @@ var poolMatchColumns = []poolMatchColumn{
 	// column with an absent-default.
 	intCol("Round", func(m *MatchResult) *int { return &m.Round }),
 	// Participant-id columns. Absent in files written before they existed;
-	// ids stay empty and consumers fall back to name matching.
+	// a MatchResult is a record that carries an id field, so it is resolved
+	// BY ID ONLY (operator ruling bc-pnum) -- ids staying empty here means
+	// the row resolves to nothing downstream, not a name-matching fallback.
+	// See engine.PoolMatchesMissingSideIDsMessage, the operator-facing
+	// notice for exactly this gap.
 	strCol("SideAID", func(m *MatchResult) *string { return &m.SideAID }),
 	strCol("SideBID", func(m *MatchResult) *string { return &m.SideBID }),
 	strCol("WinnerID", func(m *MatchResult) *string { return &m.WinnerID }),

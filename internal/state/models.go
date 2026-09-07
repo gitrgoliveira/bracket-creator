@@ -1101,16 +1101,21 @@ type MatchResult struct {
 	SideB  string `json:"sideB"`
 	Winner string `json:"winner"`
 	// SideAID/SideBID/WinnerID carry the participant UUID for each side and
-	// the winner when available. Sides are stored by name everywhere else,
-	// but a name is not unique within a competition; two participants from
-	// different dojos may share a name (CheckDuplicateEntriesByNameDojo only
-	// rejects same-name AND same-dojo). These ids let consumers (e.g. the
-	// league matrix) cross-reference a match cell to the right row/column
-	// player AND tell apart the winner when two identical-name players meet.
-	// Purely additive metadata: all Go scoring/standings logic still keys on
-	// name, and these stay empty for legacy data, so behavior is unchanged
-	// when ids are absent. omitempty + append-only CSV columns keep old
-	// files/readers fully compatible.
+	// the winner when available. Sides are stored by NAME too (SideA/SideB
+	// above), but a name is not unique within a competition; two
+	// participants from different dojos may share a name
+	// (CheckDuplicateEntriesByNameDojo only rejects same-name AND
+	// same-dojo). A record that carries an id field is resolved BY ID ONLY
+	// (operator ruling bc-pnum): every standings/tie-break/eligibility/
+	// export/league-matrix consumer resolves a side or winner through these
+	// three fields, never through SideA/SideB/Winner directly, and an empty
+	// id resolves to NOTHING rather than falling back to the name -- a
+	// legacy row missing them (written before this field existed) is
+	// therefore not counted in standings until it is re-entered (see
+	// engine.PoolMatchesMissingSideIDsMessage, the operator-facing notice
+	// for exactly this gap). omitempty + append-only CSV columns keep old
+	// files/readers fully compatible on read; they no longer keep old
+	// BEHAVIOR compatible, which is the point.
 	SideAID  string `json:"sideAId,omitempty"`
 	SideBID  string `json:"sideBId,omitempty"`
 	WinnerID string `json:"winnerId,omitempty"`

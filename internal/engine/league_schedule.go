@@ -80,6 +80,15 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 
 		var slotMatches []state.MatchResult
 		used := make(map[string]bool)
+		// used[""] is shared by every id-less side (a hand-built fixture that
+		// predates the draw, see this function's own doc comment): the FIRST
+		// id-less match placed in a slot sets used[""]=true, which then blocks
+		// a SECOND, unrelated id-less match from joining the same slot even
+		// though they share no real player. This fails CLOSED (denies a
+		// legitimate simultaneous pairing) rather than open (which would risk
+		// actually colliding two matches that DO share a player), so it is
+		// the safe direction for data this function was never meant to see in
+		// practice -- production matches always carry ids.
 
 		// Fill this slot with matches whose players did NOT fight in slot-1
 		// (hard G2) and are not already placed in this slot (G1). Preferring

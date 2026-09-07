@@ -585,8 +585,10 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		return nil, err
 	}
 
-	// Resolve by stable UUID, falling back to the composite "name|dojo" key for
-	// legacy UUID-less rosters (see resolveParticipantIndex).
+	// ID-only (operator ruling bc-pnum): resolve by stable UUID and nothing
+	// else -- an empty pid, or a legacy composite "name|dojo" string a
+	// pre-bc-pnum client might still send for an id-less row, resolves to
+	// nothing (see resolveParticipantIndex's own doc comment).
 	foundIdx := resolveParticipantIndex(players, pid)
 	if foundIdx == -1 {
 		return nil, ErrParticipantNotFound

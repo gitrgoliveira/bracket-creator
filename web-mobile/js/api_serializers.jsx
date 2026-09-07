@@ -108,12 +108,16 @@ function toBackendMatchResult(patch, match) {
     // only put winnerId on the wire when it is an id the SERVER
     // itself supplied for the winning side (match.sideAId / match.sideBId,
     // the raw flat fields -- not sideAId/sideBId above, which are read off
-    // the resolved side OBJECTS and can themselves carry the same invented
+    // the resolved side OBJECTS and can themselves carry an invented
     // fallback). Both derivations of winnerId above can land on
-    // buildPlayerMap's own invented id (`id: norm.id || norm.name`) for a
-    // side the server sent with NO id at all -- e.g. a partially-stamped
-    // legacy roster (SideAID "", SideBID set) -- in which case winnerId
-    // would be the competitor's NAME. Sending that as winnerId tells the
+    // resolveSide's own invented id (`{ id: flatId || name, name }`, this
+    // file's normalizeMatch) for a side the server sent with NO id at all
+    // -- e.g. a partially-stamped legacy roster (SideAID "", SideBID set)
+    // -- in which case winnerId would be the competitor's NAME. (bc-pnum:
+    // buildPlayerMap itself no longer invents id=name for an id-less
+    // participant, but resolveSide's OWN "not found in playerMap at all"
+    // branch still can, by design -- see that function's comment -- so this
+    // gate remains load-bearing.) Sending that as winnerId tells the
     // engine's forward-write gate a name string is a participant UUID, and
     // the write is rejected outright, so the match could never be scored.
     // A real same-name pair where the server DID supply both flat ids still
@@ -146,8 +150,13 @@ function toBackendMatchResult(patch, match) {
     // branch compares name against name and answers exactly as its name branch
     // would), but it must not go on the wire: a pool write persists the ids
     // verbatim, so an invented one would be stored as though it were a real
-    // participant UUID, and buildPlayerMap collapses a same-name pair onto one
-    // entry, so BOTH sides would be stored under the SAME invented id.
+    // participant UUID. (bc-pnum: buildPlayerMap itself no longer invents
+    // id=name for an id-less participant -- its map entries carry a genuine
+    // id or "" -- but resolveSide's per-side fallback above still can, and
+    // it applies independently to each side: two DIFFERENT same-named sides
+    // with no flat id would each invent THEIR OWN name as their id, which
+    // happen to be equal since the names are, so both would still be stored
+    // under the SAME invented id if this were sent.)
     //
     // Gating on the flat id the server sent, rather than on the resolved side
     // object, keeps the case this was added for (a real same-name pair, whose

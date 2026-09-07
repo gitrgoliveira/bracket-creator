@@ -52,14 +52,15 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	// here would also alias back into the caller's own slice (runDrawPipeline
 	// in competition.go), but that caller never reads it again either -- the
 	// generation-relevant re-validation after this call checks comp fields
-	// only. A playoffs competitor's Number is composed once, at read time, by
-	// mobileapp.mergePoolNumbersIntoPlayersSlice (G8), which re-derives from
-	// the CURRENT NumberPrefix and CURRENT participant order and therefore
-	// cannot desync from a value drawn here and never used.
+	// only. A knockout-only competitor's Number is composed at READ time by
+	// engine.NumberKnockoutParticipants (bc-pnum ruling 2), from the
+	// DrawOrder stamped below, so nothing here needs to write Number.
 	seededPlayers := helper.StandardSeeding(players)
 	names := make([]string, len(seededPlayers))
+	drawOrder := make([]string, len(seededPlayers))
 	for i, p := range seededPlayers {
 		names[i] = p.Name
+		drawOrder[i] = p.ID
 	}
 	tree := helper.CreateBalancedTree(names)
 
@@ -71,6 +72,18 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	if err != nil {
 		return err
 	}
+
+	// DrawOrder is StandardSeeding's own placement, participant ids in
+	// bracket-position order top to bottom (bc-pnum ruling 2): "a number
+	// belongs to a position in the draw". This is the ONE place that
+	// stamps it -- a mixed (Pools + Knockout) bracket never carries it,
+	// its competitors are numbered pool by pool instead.
+	// DrawOrder is StandardSeeding's own placement, participant ids in
+	// bracket-position order top to bottom (bc-pnum ruling 2): "a number
+	// belongs to a position in the draw". This is the ONE place that
+	// stamps it -- a mixed (Pools + Knockout) bracket never carries it,
+	// its competitors are numbered pool by pool instead.
+	bracket.DrawOrder = drawOrder
 
 	return e.store.SaveBracket(comp.ID, bracket)
 }

@@ -28,14 +28,13 @@ import (
 // in deps.go that covers the OTHER read methods we need here, and inventing
 // one for a single consumer would be premature. If a second polled surface
 // lands later we can hoist a DisplayStore interface then. Number merging
-// (currentMatchPlayers) reaches engine.NumberPlayoffsOnlyParticipants
-// through mergePoolNumbersIntoPlayersSlice (handlers_viewer.go, same
-// package) exactly as the viewer payload does (that shared helper
-// calls the engine function directly -- a plain package-level function, not
-// threaded through as a parameter -- so this file needs no engine
-// reference of its own), the SAME derivation the blank-template export
-// uses, so this surface's numbers cannot silently disagree with either of
-// those.
+// (currentMatchPlayers) reaches engine.NumberKnockoutParticipants through
+// numbersFromDraw (handlers_viewer.go, same package) exactly as the viewer
+// payload does (that shared helper calls the engine function directly --
+// a plain package-level function, not threaded through as a parameter --
+// so this file needs no engine reference of its own), the SAME derivation
+// the blank-template export uses, so this surface's numbers cannot
+// silently disagree with either of those.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
@@ -302,9 +301,10 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // current-match payload (DisplayName/Dojo/number). LoadParticipantsOpt is the
 // canonical read so we pick up DisplayName/Dojo even on legacy competitions
 // that predate the HasParticipantIDs flag. mp-13y: when a numberPrefix is
-// configured, merge the pools.csv-derived numbers onto the slice so buildSide
-// can include "number" in the polled OBS/vMix overlay payload; the pools.csv
-// read is skipped entirely otherwise (the common case).
+// configured, merge the draw-derived numbers onto the slice so buildSide
+// can include "number" in the polled OBS/vMix overlay payload; the
+// pools.csv/bracket.json read is skipped entirely otherwise (the common
+// pre-draw case).
 func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
 	// the load error used to be discarded outright (`players, _ :=...`)
 	// while the pools load just below already logs its own. Logged, not
@@ -316,10 +316,13 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	if plErr != nil {
 		log.Printf("mobileapp: court current %s: load participants: %v", comp.ID, plErr)
 	}
-	// numbersFromPools (PR #416 finding 3) owns the prefix/no-draw-yet skip
-	// and the pools.csv read; an unreadable pools.csv is reported, not
-	// merged, so the overlay shows MISSING numbers, never composed ones (D1).
-	if err := numbersFromPools(store, comp, players); err != nil {
+	// numbersFromDraw (bc-pnum ruling 2 successor to PR #416 finding 3) owns
+	// the prefix/no-draw-yet skip and the format-specific read (pools.csv or
+	// bracket.json); this caller has neither preloaded, so it lets
+	// numbersFromDraw read whichever the format needs. An unreadable file is
+	// reported, not merged, so the overlay shows MISSING numbers, never
+	// composed ones (D1).
+	if err := numbersFromDraw(store, comp, players); err != nil {
 		log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
 	}
 	return players

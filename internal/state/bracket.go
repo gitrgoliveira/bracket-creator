@@ -100,6 +100,9 @@ func (s *Store) copyBracket(b *Bracket) *Bracket {
 		Rounds:  make([][]BracketMatch, len(b.Rounds)),
 		Preview: b.Preview,
 	}
+	if b.DrawOrder != nil {
+		res.DrawOrder = append([]string(nil), b.DrawOrder...)
+	}
 	for i, round := range b.Rounds {
 		res.Rounds[i] = make([]BracketMatch, len(round))
 		copy(res.Rounds[i], round)

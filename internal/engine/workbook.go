@@ -108,7 +108,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	draw *helper.KnockoutDraw,
 	kachinukiMatches []helper.KachinukiMatchDetail,
 ) ([][]int, error) {
-	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools)
+	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools, bracket)
 	if err != nil {
 		return nil, err
 	}

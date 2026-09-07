@@ -446,7 +446,7 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	wantNumbered, err := eng.NumberedParticipantsFor(comp)
+	wantNumbered, err := eng.NumberedParticipantsFor(comp, nil)
 	require.NoError(t, err)
 	wantNumbers := make(map[string]string, len(wantNumbered))
 	for _, p := range wantNumbered {

@@ -115,13 +115,20 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 }
 
 // TestCourtCurrentUnreadablePoolsShowsNoNumbers pins bc-pnum D3: the same
-// corrupt-pools scenario TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers
-// pins for the aggregate viewer payload, exercised here through
-// currentMatchPlayers (handlers_display.go), the court-overlay read path.
-// pools.csv unreadable must show as MISSING numbers, never as composed ones
-// (D1): the else guard around mergePoolNumbersIntoPlayersSlice is what stops
-// a LoadPools error from being silently treated as "no pools = derive fresh
-// participant-order numbers" for an effective-playoffs competition.
+// corrupt-pools scenario TestViewerCompetitionsList_CorruptBracketShowsNoNumbers
+// pins for the aggregate viewer payload (over bracket.json, for a playoffs
+// competition), exercised here through currentMatchPlayers
+// (handlers_display.go), the court-overlay read path, for a POOLED
+// competition instead. pools.csv unreadable must show as MISSING numbers,
+// never as composed ones (D1): numbersFromDraw returns the LoadPools error
+// rather than merging against a nil/empty pools slice, which
+// applyDrawNumbers would otherwise read as "no draw yet".
+//
+// bc-pnum ruling 2 moved a playoffs competition's numbering off pools.csv
+// entirely (onto bracket.DrawOrder), so this fixture is Mixed format on
+// purpose now: for playoffs, a corrupt pools.csv is never even read (see
+// TestViewerCompetitionsList_CorruptBracketShowsNoNumbers for that format's
+// own read-error case, over bracket.json instead).
 func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -132,7 +139,7 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 
 	const cid = "corrupt-pools-current"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "Corrupt Pools Current", Format: state.CompFormatPlayoffs, Kind: "individual",
+		ID: cid, Name: "Corrupt Pools Current", Format: state.CompFormatMixed, Kind: "individual",
 		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K",
 	}))
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{

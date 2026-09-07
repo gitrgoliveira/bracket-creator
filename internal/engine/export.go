@@ -141,7 +141,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// above, which now computes its own copy internally): CreateTagsSheet
 	// needs the SAME numbered roster the Names-to-Print sheet just used, for
 	// the identical playoffs-only shape.
-	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools)
+	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools, bracket)
 	if err != nil {
 		return nil, err
 	}

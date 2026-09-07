@@ -570,6 +570,50 @@ func TestCopyBracket_Nil(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+// TestSaveBracket_DrawOrderRoundTrip pins bc-pnum ruling 2's DrawOrder field
+// through the FULL round trip: SaveBracket refreshes the file cache via
+// copyBracket (bracket.go), and LoadBracket always returns copyBracket's
+// output, never the raw saved struct -- so a copyBracket that only copies
+// Rounds/Preview/ThirdPlaceMatch (as it did before this field existed) would
+// silently drop DrawOrder on every read even though the bytes on disk are
+// correct. A bare LoadBracket right after SaveBracket (served from the
+// freshly-refreshed cache, never touching disk) is the tightest repro.
+func TestSaveBracket_DrawOrderRoundTrip(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	const compID = "draw-order-roundtrip"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	want := []string{"p3", "p1", "p2"}
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds:    [][]BracketMatch{{{ID: "m-r1-0", SideA: "A", SideB: "B"}}},
+		DrawOrder: want,
+	}))
+
+	// Served from the cache SaveBracket just refreshed (copyBracket), not disk.
+	fromCache, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, want, fromCache.DrawOrder, "DrawOrder must survive the cache refresh copyBracket performs on save")
+
+	// A cold read (fresh Store, so nothing is cached) must agree.
+	store2, err := NewStore(store.folder)
+	require.NoError(t, err)
+	fromDisk, err := store2.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, want, fromDisk.DrawOrder, "DrawOrder must round-trip through the on-disk JSON too")
+
+	// A bracket with no DrawOrder (a mixed competition's, or a legacy file)
+	// must load as nil/empty, never a zero-length-but-non-nil slice that
+	// would serialise differently than "the field was never set".
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds: [][]BracketMatch{{{ID: "m-r1-0", SideA: "A", SideB: "B"}}},
+	}))
+	noOrder, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Empty(t, noOrder.DrawOrder)
+}
+
 // TestLoadBracket_DeepCopyIsolation guards copyBracket's deep-copy of the
 // reference-type fields on BracketMatch (Encho pointer, SubResults slice and
 // each SubMatchResult's IpponsA/IpponsB/Encho). A shallow copy would alias the

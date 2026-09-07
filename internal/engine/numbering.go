@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -10,31 +11,91 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// NumberPlayoffsOnlyParticipants is the ONE derivation of a knockout-only
-// competition's numbers: participant order under the prefix, via
-// helper.AssignPlayerNumbers, mutating players in place. No-op when the
+// NumberKnockoutParticipants is the ONE derivation of a knockout-only
+// competition's numbers (bc-pnum ruling 2): a number belongs to a POSITION
+// in the draw, so it composes players[i].Number from drawOrder, the
+// participant-id list generatePlayoffs stamped onto bracket.DrawOrder in
+// bracket-position order (top of the tree to the bottom). A player whose id
+// is not in drawOrder (never drawn, e.g. excluded by check-in, or the
+// competition has not drawn yet so drawOrder is empty) gets NO number --
+// there is no participant-order or name-based fallback. No-op when the
 // competition has no prefix, so a caller does not have to special-case that
-// itself. Both callers -- mobileapp.mergePoolNumbersIntoPlayersSlice's
-// playoffs-only branch and NumberedParticipantsFor below -- go through this
-// one function rather than each calling helper.AssignPlayerNumbers
-// independently, so the two surfaces cannot silently drift apart.
-func NumberPlayoffsOnlyParticipants(comp *state.Competition, players []domain.Player) {
-	if prefix := comp.EffectiveNumberPrefix(); prefix != "" {
-		helper.AssignPlayerNumbers(players, prefix, 1)
+// itself. mobileapp.numbersFromDraw / applyDrawNumbers and
+// NumberedParticipantsFor below are this function's two callers, so the
+// viewer/display merge and the blank-template export cannot silently drift
+// apart on how a knockout-only competitor's number is composed.
+func NumberKnockoutParticipants(comp *state.Competition, drawOrder []string, players []domain.Player) {
+	prefix := comp.EffectiveNumberPrefix()
+	if prefix == "" || len(drawOrder) == 0 {
+		return
+	}
+	pos := make(map[string]int, len(drawOrder))
+	for i, id := range drawOrder {
+		pos[id] = i
+	}
+	for i := range players {
+		if p, ok := pos[players[i].ID]; ok {
+			players[i].Number = helper.CompetitorNumber(prefix, p+1)
+		}
 	}
 }
 
-// NumberedParticipantsFor returns comp's roster, loaded fresh, with Number
-// composed by NumberPlayoffsOnlyParticipants above. Used by the
-// blank-template export, which (unlike the viewer/display merge) has no
-// already-loaded roster to mutate in place.
-func (e *Engine) NumberedParticipantsFor(comp *state.Competition) ([]domain.Player, error) {
+// orderPlayersByDraw returns players reordered so those with a known draw
+// position (their id appears in drawOrder) come first, ordered by that
+// position, followed by the rest in their original (roster) order. Used by
+// NumberedParticipantsFor so the Names-to-Print sheet and the printed Tags
+// list competitors top to bottom of the bracket, matching what
+// NumberKnockoutParticipants just labelled K1, K2, .... A nil/empty
+// drawOrder (no draw yet, or a legacy bracket with none recorded) leaves
+// players untouched.
+func orderPlayersByDraw(players []domain.Player, drawOrder []string) []domain.Player {
+	if len(drawOrder) == 0 {
+		return players
+	}
+	pos := make(map[string]int, len(drawOrder))
+	for i, id := range drawOrder {
+		pos[id] = i
+	}
+	drawn := make([]domain.Player, 0, len(players))
+	rest := make([]domain.Player, 0, len(players))
+	for _, p := range players {
+		if _, ok := pos[p.ID]; ok {
+			drawn = append(drawn, p)
+		} else {
+			rest = append(rest, p)
+		}
+	}
+	sort.SliceStable(drawn, func(i, j int) bool {
+		return pos[drawn[i].ID] < pos[drawn[j].ID]
+	})
+	return append(drawn, rest...)
+}
+
+// NumberedParticipantsFor returns comp's roster, loaded fresh, numbered by
+// NumberKnockoutParticipants from the bracket's DrawOrder and returned in
+// DRAW order (orderPlayersByDraw): numbered players first, top to bottom of
+// the bracket, unnumbered players (never drawn) after, in roster order. Used
+// by the blank-template export, which (unlike the viewer/display merge) has
+// no already-loaded roster to mutate in place.
+//
+// bracket is the caller's own already-loaded read when it has one (nil
+// otherwise, meaning "load it here"): ExportCompetitionXlsx loads the
+// bracket for its own elimination-sheet rendering before this is ever
+// called, so passing it through avoids a second bracket.json read for the
+// same request.
+func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state.Bracket) ([]domain.Player, error) {
 	players, err := e.store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
 	if err != nil {
 		return nil, err
 	}
-	NumberPlayoffsOnlyParticipants(comp, players)
-	return players, nil
+	if bracket == nil {
+		bracket, err = e.store.LoadBracket(comp.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	NumberKnockoutParticipants(comp, bracket.DrawOrder, players)
+	return orderPlayersByDraw(players, bracket.DrawOrder), nil
 }
 
 // PlayoffsNamesToPrint is the ONE derivation of the numbered roster
@@ -60,15 +121,18 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition) ([]domain.Play
 // pools is the caller's own already-loaded roster, not re-read here: every
 // caller loads it earlier for its own needs (rendering the pool sheets),
 // and passing it in keeps this function pure over its inputs rather than
-// hitting the store a second time.
+// hitting the store a second time. bracket is likewise the caller's own
+// already-loaded bracket (nil when the caller has none, in which case
+// NumberedParticipantsFor loads it itself); both of RenderCompetitionWorkbook's
+// callers already load one before calling in.
 //
 // Returns (nil, nil) -- not an error -- when the competition is not this
 // shape, so a caller can use the result without a branch of its own.
-func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Pool) ([]helper.Player, error) {
+func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) ([]helper.Player, error) {
 	if comp.EffectiveFormat() != state.CompFormatPlayoffs || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
 		return nil, nil
 	}
-	return e.NumberedParticipantsFor(comp)
+	return e.NumberedParticipantsFor(comp, bracket)
 }
 
 // RenumberCompetitors rewrites every competitor's Number from the competition's
@@ -86,18 +150,22 @@ func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Po
 // failed (or a legacy pools.csv whose Number column was never populated, see
 // G7) is healed by the very next save with no extra code.
 //
-// pools.csv column 7 is the only persisted home of Player.Number (BracketMatch
-// has no such field and participants.csv does not persist it), so rewriting the
-// pools file renumbers every surface. "No pools file" is not the same thing as
-// "playoffs-only": a playoffs competition never has one (its numbers are
-// composed from participant order on read, see
-// mobileapp.mergePoolNumbersIntoPlayers); a mixed or league competition that
-// has not been drawn YET has none either, because SavePools has not run; and a
-// Swiss competition NEVER has one (its draw writes rounds to pool-matches.csv
-// and never calls SavePools), so Swiss competitors carry no number on any
-// surface and this call is a permanent no-op for them, a pre-existing gap this
-// bead names rather than closes. In every case there is nothing on disk to
-// rewrite, so this returns (false, nil).
+// pools.csv column 7 is the only persisted home of Player.Number
+// (participants.csv does not persist it either), so rewriting the pools
+// file renumbers every surface for a POOLED competition. This function is
+// pools-only and does not touch a playoffs (knockout-only) competition's
+// numbers at all: those are composed at read time from the bracket's
+// DrawOrder (bc-pnum ruling 2, engine.NumberKnockoutParticipants), and a
+// prefix change is reflected on the next read with no rewrite needed --
+// BracketMatch carries no Number field to rewrite in the first place. "No
+// pools file" is not the same thing as "playoffs-only": a mixed or league
+// competition that has not been drawn YET has none either, because
+// SavePools has not run; and a Swiss competition NEVER has one (its draw
+// writes rounds to pool-matches.csv and never calls SavePools), so Swiss
+// competitors carry no number on any surface and this call is a permanent
+// no-op for them, a pre-existing gap this bead names rather than closes. In
+// every case there is nothing on disk to rewrite, so this returns (false,
+// nil).
 //
 // The load and the save share one WithTransaction, so a concurrent score write
 // cannot interleave between reading the pools and writing them back.

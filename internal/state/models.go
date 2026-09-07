@@ -1491,6 +1491,19 @@ type Bracket struct {
 	// its ID is always "m-bronze", and its sides are filled from the two
 	// semifinal losers by propagateBracketWinner.
 	ThirdPlaceMatch *BracketMatch `json:"thirdPlaceMatch,omitempty"`
+	// DrawOrder holds participant ids in bracket-position order, top of the
+	// tree to the bottom (shiaijo A's block first), byes skipped: a number
+	// belongs to a position in the draw, and index+1 is that position's
+	// counter. Stamped ONLY by a standalone knockout draw (generatePlayoffs,
+	// bracket.go), from the order helper.StandardSeeding returns; a mixed
+	// (Pools + Knockout) competition's bracket never carries it, since its
+	// competitors are already numbered pool by pool at the pool draw
+	// (helper.NumberPools) and this field would be a second, redundant
+	// numbering of the same roster. engine.NumberKnockoutParticipants is the
+	// one reader (bc-pnum ruling 2): a legacy bracket.json written before
+	// this field existed has no draw order and yields NO numbers, by design;
+	// there is no name-based fallback.
+	DrawOrder []string `json:"drawOrder,omitempty"`
 }
 
 type Announcement struct {

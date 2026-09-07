@@ -16,55 +16,26 @@ import (
 )
 
 // mergePoolNumbersIntoPlayersSlice fills each player's ASSIGNED Number (e.g.
-// "K1") in place. participants.csv never persists Number: the draw assigns it
-// and persists it only in pools.csv, so every payload that shows a number
-// derives it here at read time (mp-13y).
+// "K1") from pools.csv, in place. participants.csv never persists Number:
+// the draw assigns it and persists it only in pools.csv, so every pooled
+// payload that shows a number derives it here at read time (mp-13y). A
+// knockout-only (playoffs) competition's number lives in the bracket's
+// DrawOrder instead, merged by engine.NumberKnockoutParticipants -- see
+// applyDrawNumbers below, this function's sibling for that format.
 //
-// Two sources, both "assigned by the draw":
-//   - a pools.csv exists: the number is the one it holds, matched by id first
-//     (HasParticipantIDs case) and by (name, dojo) -- the identity rule this
-//     whole codebase uses, never bare name -- as the legacy fallback for
-//     rosters drawn before ids existed;
-//   - the competition is playoffs-only: its draw never writes pools.csv and
-//     its number IS participant order under the prefix, composed through the
-//     same helper the draw uses.
+// Matched by id ONLY (bc-pnum ruling 2: identity is the participant id,
+// never bare name or (name, dojo) -- the (name, dojo) fallback this
+// function used to carry for legacy id-less rosters was removed under that
+// same ruling). A pools.csv row with no id, or a roster row with no id,
+// contributes no number; surfacing that gap as an operator-visible notice
+// is a separate concern, not this function's job.
 //
-// comp supplies both NumberPrefix and the EFFECTIVE format
-// (comp.EffectiveFormat(), never comp.Format directly: an unset Format ("")
-// is standalone playoffs too, generation's default case falls to
-// generatePlayoffs for it identically), so every caller derives the same
-// answer from the same source instead of restating the caveat locally.
-// players is still explicit -- separate from comp.Players -- because the
+// players is explicit -- separate from comp.Players -- because the
 // court-overlay caller (currentMatchPlayers) loads its OWN roster slice
-// rather than mutating the competition's.
-//
-// The playoffs-only branch below calls engine.NumberPlayoffsOnlyParticipants
-// directly, the SAME function the blank-template export's
-// NumberedParticipantsFor calls -- ONE derivation, not two independent call
-// sites invoking the shared helper.AssignPlayerNumbers primitive, which is
-// what actually prevents the public payload and the printed
-// Tags/Names-to-Print sheets from silently disagreeing.
-//
-// Any other format with no pools is left WITHOUT numbers: before the draw a
-// pooled competition's competitors show no number anywhere (bc-pnum operator
-// ruling), and a public surface never shows a number the draw has not
-// assigned. Callers pass pools only from a SUCCESSFUL read:
-// an unreadable pools.csv is reported, not treated as "no draw yet", so a
-// corrupt file cannot make this compose numbers that contradict the draw on
-// disk. No-op when comp is nil, its NumberPrefix is empty, or the roster is
-// empty.
+// rather than mutating the competition's. No-op when comp is nil, its
+// NumberPrefix is empty, or the roster/pools list is empty.
 func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.Player, pools []helper.Pool) {
 	if comp == nil || comp.EffectiveNumberPrefix() == "" || len(players) == 0 {
-		return
-	}
-	if len(pools) == 0 {
-		if comp.EffectiveFormat() != state.CompFormatPlayoffs {
-			return
-		}
-		// Playoffs-only: nothing on disk carries a number, so derive it from
-		// participant order under the current prefix. A prefix change is
-		// therefore reflected on the next read with no file write.
-		engine.NumberPlayoffsOnlyParticipants(comp, players)
 		return
 	}
 	byID := make(map[string]string)
@@ -75,100 +46,132 @@ func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.
 			}
 		}
 	}
-	// byNameDojo is built LAZILY, on the first roster row that misses
-	// byID, rather than unconditionally up front. The vast majority of
-	// payload builds are for a roster where every row carries an id (the
-	// common, ids-everywhere case), so byID alone resolves every row and
-	// this second pass over every pool -- plus two helper.CompetitorKey
-	// normalisations per row -- was pure waste on every single payload
-	// build. Deliberately NOT gated on "the roster has ids": a pool row may
-	// carry a blank id while the roster row has one (or vice versa), and
-	// that legacy (name, dojo) fallback must still be reachable per row, not
-	// switched off for the whole call based on one row's shape.
-	var byNameDojo map[string]string
 	for i := range players {
 		if players[i].Number != "" {
 			continue
 		}
 		if n, ok := byID[players[i].ID]; ok && n != "" {
 			players[i].Number = n
-			continue
-		}
-		if byNameDojo == nil {
-			// bc-pnum A4: keyed on (name, dojo) via the shared identity
-			// primitive, not bare name -- two legal namesakes from
-			// DIFFERENT dojos (allowed everywhere per this repo's identity
-			// rule) used to collide in a name-only map, so the SECOND one
-			// written silently overwrote the FIRST's number and both
-			// entrants in the public payload showed the second's number.
-			//
-			// Accepted degradation, id-less legacy rosters only: a
-			// competitor edited (dojo corrected/transferred) AFTER a legacy
-			// draw with no participant IDs shows NO number rather than a
-			// WRONG one. Neither key can survive the edit -- ID is blank on
-			// both sides for legacy data, and the (name, dojo) key below is
-			// now the participant's NEW dojo against the pool row's OLD one
-			// -- so the lookup misses cleanly and the fall-through below
-			// leaves Number empty. That is the correct failure direction: a
-			// silent match on the wrong dojo (or on bare name, the exact A4
-			// bug this key replaced) would misattribute someone else's
-			// number instead.
-			byNameDojo = make(map[string]string)
-			for _, pool := range pools {
-				for _, pp := range pool.Players {
-					if pp.Number == "" {
-						continue
-					}
-					byNameDojo[helper.CompetitorKey("", pp.Name, pp.Dojo)] = pp.Number
-				}
-			}
-		}
-		if n, ok := byNameDojo[helper.CompetitorKey("", players[i].Name, players[i].Dojo)]; ok && n != "" {
-			players[i].Number = n
 		}
 	}
 }
 
-// numbersFromPools is the ONE owner of "numbers come from pools.csv": a
-// caller that wants players' Number field filled from the draw's assignment
-// calls this rather than hand-copying the prefix/no-draw-yet skip and its
-// own store.LoadPools call (PR #416 finding 3).
+// applyDrawNumbers is the pure, no-I/O core of "numbers come from the draw"
+// (bc-pnum ruling 2): given comp and the caller's own already-loaded pools
+// and/or bracket (either or both nil when the caller has neither, or when
+// the competition's format does not use that file), it fills players'
+// Number field exactly as the draw assigned it -- pools.csv for a pooled
+// competition (mergePoolNumbersIntoPlayersSlice, id-only), the bracket's
+// DrawOrder for a standalone knockout (engine.NumberKnockoutParticipants).
 //
-// No-ops with no I/O at all when comp has no configured NumberPrefix
-// (mergePoolNumbersIntoPlayersSlice's own no-op condition, checked here too
-// so callers never pay for a read whose result would be discarded).
+// comp supplies both NumberPrefix and the EFFECTIVE format
+// (comp.EffectiveFormat(), never comp.Format directly: an unset Format ("")
+// is standalone playoffs too, generation's default case falls to
+// generatePlayoffs for it identically), so every caller derives the same
+// answer from the same source instead of restating the caveat locally.
 //
-// Skips the READ (but still merges, against an empty pools slice) when the
-// competition has no draw yet (engine.CanGenerateDraw(comp.Status), i.e.
-// status "setup" or the legacy empty status): pools.csv cannot exist for a
-// competition that has never drawn, so the read is a guaranteed-empty stat --
-// and, more importantly, any bytes found at that path for such a competition
-// are noise (a stray fixture/leftover from another run), not an operator-
-// actionable file, so they must never surface as a data issue or a log line.
-// Merging against an empty slice regardless keeps this a pure optimization,
-// never a behaviour change: mergePoolNumbersIntoPlayersSlice already treats
-// an empty pools slice as "no draw" for every format (playoffs-only still
-// derives its number from participant order; every other format shows none,
-// per the bc-pnum operator ruling on its own doc comment).
+// No-ops when comp is nil, its NumberPrefix is empty, or the competition has
+// no draw yet (engine.CanGenerateDraw(comp.Status)): a knockout-only
+// competitor shows NO number before the draw, exactly like a pooled one
+// (bc-pnum operator ruling) -- there is deliberately no participant-order or
+// name-based fallback of any kind.
+func applyDrawNumbers(comp *state.Competition, players []domain.Player, pools []helper.Pool, bracket *state.Bracket) {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" {
+		return
+	}
+	if engine.CanGenerateDraw(comp.Status) {
+		return
+	}
+	if comp.EffectiveFormat() == state.CompFormatPlayoffs {
+		var drawOrder []string
+		if bracket != nil {
+			drawOrder = bracket.DrawOrder
+		}
+		engine.NumberKnockoutParticipants(comp, drawOrder, players)
+		return
+	}
+	mergePoolNumbersIntoPlayersSlice(comp, players, pools)
+}
+
+// numbersFromDraw is applyDrawNumbers' I/O-performing wrapper (renamed from
+// numbersFromPools, bc-pnum ruling 2 successor to PR #416 finding 3): a
+// caller that wants players' Number field filled from the draw's
+// assignment, and has loaded NEITHER pools nor the bracket for its own
+// purposes, calls this rather than hand-rolling the format switch, the
+// prefix/no-draw-yet skip, and the read itself. currentMatchPlayers
+// (handlers_display.go) is that caller.
+//
+// Skips ALL reads (pools or bracket) when the competition has no draw yet
+// (engine.CanGenerateDraw(comp.Status)): pools.csv/bracket.json cannot
+// exist yet for a competition that has never drawn, so the read is a
+// guaranteed-empty stat -- and, more importantly, any bytes found at that
+// path for such a competition are noise (a stray fixture/leftover from
+// another run), not an operator-actionable file, so they must never surface
+// as a data issue or a log line.
 //
 // On a genuine read/parse error the merge is skipped (numbers are never
-// composed from a partial/corrupt read, matching mergePoolNumbersIntoPlayersSlice's
-// own doc comment) and the error is returned so a caller that maintains a
-// dataIssues list (the aggregate payload builder) can fold it in; other
-// callers log it directly.
-func numbersFromPools(store *state.Store, comp *state.Competition, players []domain.Player) error {
+// composed from a partial/corrupt read) and the error is returned so a
+// caller that maintains a dataIssues list can fold it in; other callers log
+// it directly.
+//
+// A caller that has ALREADY attempted to load the bracket for its own
+// purposes (buildViewerCompetitionPayload, below) must NOT call this: doing
+// so would re-attempt the identical read on a failure and report the same
+// corrupt-file error a second time, once under its own brErr and once under
+// this function's return. numbersFromDrawWithBracket is that caller's own
+// door instead.
+func numbersFromDraw(store *state.Store, comp *state.Competition, players []domain.Player) error {
 	if comp == nil || comp.EffectiveNumberPrefix() == "" {
 		return nil
 	}
 	if engine.CanGenerateDraw(comp.Status) {
-		mergePoolNumbersIntoPlayersSlice(comp, players, nil)
+		return nil
+	}
+	if comp.EffectiveFormat() == state.CompFormatPlayoffs {
+		bracket, err := store.LoadBracket(comp.ID)
+		if err != nil {
+			return err
+		}
+		applyDrawNumbers(comp, players, nil, bracket)
 		return nil
 	}
 	pools, err := store.LoadPools(comp.ID)
 	if err != nil {
 		return err
 	}
-	mergePoolNumbersIntoPlayersSlice(comp, players, pools)
+	applyDrawNumbers(comp, players, pools, nil)
+	return nil
+}
+
+// numbersFromDrawWithBracket is numbersFromDraw's sibling for a caller that
+// has ALREADY attempted to load the bracket for its own purposes:
+// buildViewerCompetitionPayload loads it unconditionally for the court-feed
+// match check before numbering is ever computed. bracket is that read's
+// result verbatim -- nil exactly when the read failed, which the caller
+// reports itself (its own brErr), so this never retries it: retrying would
+// both cost a second bracket.json read and report the identical corrupt-file
+// error a second time in the payload's dataIssues.
+//
+// Only the playoffs branch can skip an I/O read this way (bracket is the
+// ONLY file that format ever needs for numbering); every other format still
+// performs its own pools.csv read here, since the caller has not loaded
+// one. Same prefix/no-draw-yet skip as numbersFromDraw.
+func numbersFromDrawWithBracket(store *state.Store, comp *state.Competition, players []domain.Player, bracket *state.Bracket) error {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" {
+		return nil
+	}
+	if engine.CanGenerateDraw(comp.Status) {
+		return nil
+	}
+	if comp.EffectiveFormat() == state.CompFormatPlayoffs {
+		applyDrawNumbers(comp, players, nil, bracket)
+		return nil
+	}
+	pools, err := store.LoadPools(comp.ID)
+	if err != nil {
+		return err
+	}
+	applyDrawNumbers(comp, players, pools, nil)
 	return nil
 }
 
@@ -289,10 +292,14 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		log.Printf("mobileapp: viewer payload %s: load participants: %v", compID, plErr)
 	}
 	comp.Players = players
-	// mp-13y: merge numberPrefix-derived numbers from pools.csv, via the one
-	// owner of that read (numbersFromPools, PR #416 finding 3) so the
-	// prefix/no-draw-yet skip can't drift from the other two callers.
-	poolsErr := numbersFromPools(store, comp, players)
+	// mp-13y: merge numberPrefix-derived numbers from the draw, via the one
+	// owner of that logic (applyDrawNumbers, bc-pnum ruling 2 successor to
+	// PR #416 finding 3) so the prefix/no-draw-yet skip can't drift from the
+	// other callers. bracket is already loaded above (line ~242) for the
+	// court-feed check, so numbersFromDrawWithBracket reuses it for a
+	// playoffs-format competition's number rather than re-reading (and, on
+	// a corrupt file, re-reporting) bracket.json a second time.
+	poolsErr := numbersFromDrawWithBracket(store, comp, players, bracket)
 	if poolsErr != nil {
 		// Reported, not merged: an unreadable pools.csv must show as
 		// MISSING numbers, never as composed ones (D1). bc-pnum C4: only a
@@ -580,18 +587,18 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			annotateQueuePositions(poolMatches)
 			annotateBracketQueuePositions(bracket)
 
-			// mp-13y: merge assigned competitor Number from pools.csv onto
+			// mp-13y: merge assigned competitor Number from the draw onto
 			// comp.Players so the numberPrefix-derived "K1", "K2", … surface
 			// on the TV display, streaming overlay, and viewer card. `pools`
-			// is already loaded above (it is also this payload's own "pools"
-			// field), so this calls the Slice form directly rather than
-			// numbersFromPools (PR #416 finding 3), which would re-read
-			// pools.csv a second time. A pools read error degrades (above)
-			// rather than aborting, so `pools` may be empty here;
-			// mergePoolNumbersIntoPlayersSlice is a no-op over an empty
-			// slice, matching the aggregate's own tolerance for the same
-			// fault.
-			mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
+			// and `bracket` are already loaded above (both are also this
+			// payload's own fields), so this calls the pure, no-I/O
+			// applyDrawNumbers directly rather than numbersFromDraw
+			// (bc-pnum ruling 2 successor to PR #416 finding 3), which would
+			// re-read pools.csv/bracket.json a second time. A read error
+			// degrades (above) rather than aborting, so `pools`/`bracket` may
+			// be empty/nil here; applyDrawNumbers is a no-op over either,
+			// matching the aggregate's own tolerance for the same fault.
+			applyDrawNumbers(comp, comp.Players, pools, bracket)
 
 			// Redact operator-only audit fields before this PUBLIC payload.
 			stripMatchesAudit(poolMatches)

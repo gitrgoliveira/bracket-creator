@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -466,6 +467,108 @@ func TestRenumberCompetitors_InvalidatesStandingsCache(t *testing.T) {
 	assert.Equal(t, "Y1", afterNumbers["Alice"],
 		"standings must reflect the renumber, not the cached pre-renumber tokens")
 	assert.Equal(t, "Y2", afterNumbers["Bob"])
+}
+
+// TestNumberKnockoutParticipants pins bc-pnum ruling 2's knockout-only
+// derivation: a number belongs to a POSITION in drawOrder, not to
+// registration order or a name match.
+func TestNumberKnockoutParticipants(t *testing.T) {
+	t.Run("no-op when prefix is empty", func(t *testing.T) {
+		comp := &state.Competition{}
+		players := []domain.Player{{ID: "p1", Name: "Alice"}}
+		NumberKnockoutParticipants(comp, []string{"p1"}, players)
+		assert.Equal(t, "", players[0].Number)
+	})
+
+	t.Run("no-op when drawOrder is empty (pre-draw or legacy bracket)", func(t *testing.T) {
+		comp := &state.Competition{NumberPrefix: "K"}
+		players := []domain.Player{{ID: "p1", Name: "Alice"}}
+		NumberKnockoutParticipants(comp, nil, players)
+		assert.Equal(t, "", players[0].Number)
+	})
+
+	t.Run("numbers by drawOrder position, not by roster order", func(t *testing.T) {
+		comp := &state.Competition{NumberPrefix: "K"}
+		players := []domain.Player{
+			{ID: "p1", Name: "Alice"},
+			{ID: "p2", Name: "Bob"},
+			{ID: "p3", Name: "Cleo"},
+		}
+		NumberKnockoutParticipants(comp, []string{"p3", "p1", "p2"}, players)
+		assert.Equal(t, "K2", players[0].Number, "p1 is drawOrder[1]")
+		assert.Equal(t, "K3", players[1].Number, "p2 is drawOrder[2]")
+		assert.Equal(t, "K1", players[2].Number, "p3 is drawOrder[0]")
+	})
+
+	t.Run("a player absent from drawOrder gets no number", func(t *testing.T) {
+		comp := &state.Competition{NumberPrefix: "K"}
+		players := []domain.Player{
+			{ID: "p1", Name: "Alice"},
+			{ID: "p2", Name: "Excluded"},
+		}
+		NumberKnockoutParticipants(comp, []string{"p1"}, players)
+		assert.Equal(t, "K1", players[0].Number)
+		assert.Equal(t, "", players[1].Number)
+	})
+}
+
+// TestOrderPlayersByDraw pins orderPlayersByDraw's ordering: drawn players
+// first, by their draw position, then the rest in original roster order.
+func TestOrderPlayersByDraw(t *testing.T) {
+	players := []domain.Player{
+		{ID: "p1", Name: "Alice"},
+		{ID: "p2", Name: "Bob"},
+		{ID: "p3", Name: "Cleo"},
+		{ID: "p4", Name: "Excluded"},
+	}
+	ordered := orderPlayersByDraw(players, []string{"p3", "p1", "p2"})
+	names := make([]string, len(ordered))
+	for i, p := range ordered {
+		names[i] = p.Name
+	}
+	assert.Equal(t, []string{"Cleo", "Alice", "Bob", "Excluded"}, names)
+
+	t.Run("empty drawOrder leaves players untouched", func(t *testing.T) {
+		assert.Equal(t, players, orderPlayersByDraw(players, nil))
+	})
+}
+
+// TestNumberedParticipantsFor_LegacyBracketWithNoDrawOrder pins bc-pnum
+// ruling 2's explicit no-fallback rule: a bracket.json written before the
+// DrawOrder field existed unmarshals with DrawOrder == nil (the JSON key is
+// simply absent, not an empty array), and NumberedParticipantsFor must yield
+// NO numbers for it -- never a name-based or participant-order backfill.
+func TestNumberedParticipantsFor_LegacyBracketWithNoDrawOrder(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	const compID = "legacy-bracket-no-draw-order"
+
+	comp := &state.Competition{
+		ID: compID, Name: "Legacy Bracket", Kind: "individual", Format: state.CompFormatPlayoffs,
+		Status: state.CompStatusDrawReady, NumberPrefix: "K", Courts: []string{"A"},
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"},
+		{Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	// A hand-written legacy bracket: real Rounds content, but no "drawOrder"
+	// key at all -- exactly what a pre-ruling bracket.json looks like on disk.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled}},
+		},
+	}))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Empty(t, bracket.DrawOrder, "premise: the legacy bracket carries no DrawOrder")
+
+	numbered, err := eng.NumberedParticipantsFor(comp, nil)
+	require.NoError(t, err)
+	require.Len(t, numbered, 2)
+	for _, p := range numbered {
+		assert.Equal(t, "", p.Number, "a legacy bracket with no DrawOrder must yield NO numbers, never a name-based backfill")
+	}
 }
 
 // TestTakenNumberPrefixesAndDefaultFor pins the engine's one derivation: the

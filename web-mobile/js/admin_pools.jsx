@@ -115,18 +115,23 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
 }
 
 // groupTeamIds derives the teamIds array to send alongside teamNames on a
-// league-tiebreak generate/remove request (second-Opus-pass nit 7): the
-// candidates payload's `teams` array carries {id,name,dojo} per team,
-// positionally parallel to `teamNames` (server: handlers_competition.go's
-// GET /league-tiebreak/candidates builds both from the same loop over
-// g.Teams, mirroring chusen's own teams array).
+// league-tiebreak generate/remove request: the candidates payload's `teams`
+// array carries {id,name,dojo} per team, positionally parallel to
+// `teamNames` (server: handlers_competition.go's GET
+// /league-tiebreak/candidates builds both from the same loop over g.Teams,
+// mirroring chusen's own teams array).
 //
-// Returns undefined -- teamIds omitted entirely -- unless `teams` is
-// present, the same length as `names`, and EVERY team carries a non-empty
-// id: a legacy id-less group (or a group predating this field) must not
-// send a teamIds array at all, since the server now rejects a blank entry
-// outright (second-Opus-pass item 4) rather than treat it as "no id
-// available".
+// Returns undefined unless `teams` is present, the same length as `names`,
+// and EVERY team carries a non-empty id. teamIds is now REQUIRED by the
+// server (operator ruling bc-pnum: the tied group is selected by id only,
+// >= 2 entries, no blanks, no duplicates) -- undefined here does NOT mean
+// "safe to omit and let the server fall back to names", it means the
+// action cannot be performed at all for this group. The caller (the
+// "Run tie-breaker" / "Remove unscored tie-breaker" buttons below) MUST
+// disable itself and show a hint rather than send a request shaped to
+// 400: a legacy id-less group is exactly the error state the competition
+// Overview's missing-ids notice already reports, so the operator has
+// already been told what to fix.
 //
 // Exported for vitest at __tests__/admin_pools.test.jsx.
 function groupTeamIds(teams, names) {
@@ -494,6 +499,13 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       {tiebreakCandidates.map((group) => {
         const names = group.teamNames || [];
         const teamIds = groupTeamIds(group.teams, names);
+        // teamIds is REQUIRED by the server (operator ruling bc-pnum); an
+        // undefined teamIds means this group has an id-less team and the
+        // request can only 400. Disabling here, with a hint, replaces
+        // letting the operator click through to that 400 -- the competition
+        // Overview's missing-ids notice already reports this exact error
+        // state, so the hint below just points back at the same remedy.
+        const idsMissing = !teamIds;
         const hasDH = dhMatchExistsForGroup(names);
         const dhScored = hasDH && dhMatchScoredForGroup(names);
         const posLabel = group.minPosition === group.maxPosition
@@ -509,26 +521,34 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
             </div>
             <div className="league-tiebreak__actions">
               {!hasDH ? (
-                <button
-                  type="button"
-                  className="btn btn--sm btn--primary"
-                  disabled={tiebreakActionBusy}
-                  onClick={() => handleTiebreakGenerate(names, teamIds)}
-                >
-                  {tiebreakBusyAction === generateKey && <span className="spinner" />}
-                  Run tie-breaker
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--primary"
+                    disabled={tiebreakActionBusy || idsMissing}
+                    onClick={() => handleTiebreakGenerate(names, teamIds)}
+                  >
+                    {tiebreakBusyAction === generateKey && <span className="spinner" />}
+                    Run tie-breaker
+                  </button>
+                  {idsMissing && (
+                    <span className="field__hint">One of these teams has no id yet: re-save the roster, then retry.</span>
+                  )}
+                </>
               ) : (
                 <>
                   <button
                     type="button"
                     className="btn btn--sm btn--danger btn--ghost"
-                    disabled={tiebreakActionBusy || dhScored}
+                    disabled={tiebreakActionBusy || dhScored || idsMissing}
                     onClick={() => handleTiebreakRemove(names, teamIds)}
                   >
                     {tiebreakBusyAction === removeKey && <span className="spinner" />}
                     Remove unscored tie-breaker
                   </button>
+                  {idsMissing && (
+                    <span className="field__hint">One of these teams has no id yet: re-save the roster, then retry.</span>
+                  )}
                   {dhScored && (
                     <span className="field__hint">Tie-breaker is running or already scored: score it to continue.</span>
                   )}

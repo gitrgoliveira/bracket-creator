@@ -1072,6 +1072,19 @@ describe('API Utils', () => {
           }),
         );
       });
+
+      // playerId is REQUIRED server-side (operator ruling bc-pnum:
+      // resolvePoolOverrideTarget resolves a pool member by id only). This
+      // pins that the client forwards it verbatim, and that playerDojo is
+      // NEVER sent -- the server never read it, so there is nothing to gain
+      // from including it, unlike the pre-bc-pnum client which sent it
+      // whenever the caller happened to have one.
+      it('includes playerId when the caller passes one, and never sends playerDojo', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        await API.overridePoolRank('comp1', 'pool-A', 'Alice', 3, 'secret', 'id-alice');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(JSON.parse(opts.body)).toEqual({ playerName: 'Alice', rank: 3, playerId: 'id-alice' });
+      });
     });
 
     describe('overrideBracketWinner (applied signal)', () => {

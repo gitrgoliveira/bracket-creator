@@ -25,6 +25,18 @@ describe('filterSecondaryOnDeck', () => {
     expect(filterSecondaryOnDeck([idLessMatch], watched, noPrimary).map((m) => m.id)).toEqual(['m1']);
   });
 
+  // bc-pnum (2nd Opus review round, MEDIUM): the case the two tests above
+  // don't cover. An id-CARRYING watched entry must never light an id-less
+  // side that merely shares its display name -- a mixed pair, refused
+  // exactly like the id-carrying-side test above. Before the fix this
+  // returned ['m1'] (the OLD inline builder folded the watched entry's
+  // name into watchedNames unconditionally, even though it also had an id).
+  it('an id-carrying watched entry does not match an id-less side that merely shares its name', () => {
+    const watched = [{ id: 'sato-tokyo', name: 'Sato' }];
+    const idLessSameName = { id: 'm1', status: 'running', sideA: { id: '', name: 'Sato' }, sideB: { id: 'other', name: 'Someone' } };
+    expect(filterSecondaryOnDeck([idLessSameName], watched, noPrimary)).toEqual([]);
+  });
+
   it('excludes a match already covered by the primary watched player', () => {
     const watched = [{ id: 'sato-tokyo', name: 'Sato' }];
     const primaryIds = new Set(['sato-tokyo']);

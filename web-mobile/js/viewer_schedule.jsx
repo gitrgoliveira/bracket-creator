@@ -2,7 +2,7 @@
 // Pure file split. no behaviour change.
 
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, sideIsWatched } from './viewer_watchlist_core.jsx';
 import { withNumber } from './match_scoreboard.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
@@ -49,28 +49,24 @@ export function usePrimaryWatch() {
 // scheduledAt ascending (empty/missing times sort last via "99:99" sentinel).
 // "Upcoming" = status !== "completed": we keep `running` matches in the
 // list so a coach can spot a watched player who just started.
-// bc-pnum (Opus review round): a side WITH an id matches only a watched id;
-// a side WITHOUT one matches by name only -- never an OR of both for the
-// SAME side (that let watching Sato of Tokyo also surface Sato of Osaka's
-// matches whenever the id compare missed).
-export function sideHitsWatchSet(id, name, watchedIds, watchedNames) {
-  return id ? watchedIds.has(id) : (!!name && watchedNames.has(name.trim().toLowerCase()));
-}
-
+//
+// buildWatchedSets + sideIsWatched (viewer_watchlist_core.jsx) are THE ONE
+// producer + predicate every case-insensitive watch surface must share.
+// This used to build its own watchedIds/watchedNames pair inline,
+// inclusively (an entry's name landed in watchedNames even when that same
+// entry also carried an id), so an id-less side sharing an id-carrying
+// watched entry's name surfaced here even though the highlight predicate
+// elsewhere correctly refused it -- watching Sato of Tokyo must not also
+// surface an id-less "Sato" row.
 export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
-  const watchedIds = new Set();
-  const watchedNames = new Set();
-  (Array.isArray(watched) ? watched : []).forEach((w) => {
-    if (w && w.id) watchedIds.add(String(w.id));
-    if (w && w.name) watchedNames.add(w.name.trim().toLowerCase());
-  });
-  if (watchedIds.size === 0 && watchedNames.size === 0) return [];
+  const sets = buildWatchedSets(watched);
+  if (sets.ids.size === 0 && sets.names.size === 0) return [];
   const list = Array.isArray(allMatches) ? allMatches : [];
   const upcoming = list.filter((m) => {
     if (!m || m.status === "completed") return false;
     const [aId, bId] = matchParticipantIds(m);
     const [aName, bName] = matchParticipantNames(m);
-    return sideHitsWatchSet(aId, aName, watchedIds, watchedNames) || sideHitsWatchSet(bId, bName, watchedIds, watchedNames);
+    return sideIsWatched(aId, aName, sets) || sideIsWatched(bId, bName, sets);
   });
   upcoming.sort((x, y) => {
     const xt = x.scheduledAt || "99:99";
@@ -205,24 +201,42 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   );
 }
 
-// Same RULE as sideHitsWatchSet above (id decides when the SIDE carries
-// one, name only when it doesn't), kept as a separate function because the
-// case-sensitivity convention differs: picked-player names here compare
-// exact-case (as applyFilters/matchHighlightedBy always did), while
-// sideHitsWatchSet's watchlist names compare case-insensitively (as
-// buildWatchlistUpcoming always did) -- merging the two would silently
-// change one or the other's matching behaviour. `.filter(Boolean)` on the
-// id set at each call site: a picked entry with no id must never
-// contribute an empty string that could coincidentally satisfy an id
-// lookup.
+// Same RULE as sideIsWatched (viewer_watchlist_core.jsx: id decides when
+// the SIDE carries one, name only when it doesn't), kept as a separate
+// function because the case-sensitivity convention differs: picked-player
+// names here compare exact-case (as applyFilters/matchHighlightedBy always
+// did), while sideIsWatched's watchlist names compare case-insensitively
+// (as buildWatchlistUpcoming always did) -- merging the two would silently
+// change one or the other's matching behaviour.
 function sideMatchesPickedSet(side, ids, names) {
   if (!side) return false;
   return side.id ? ids.has(side.id) : (!!side.name && names.has(side.name));
 }
 
+// buildPickedSets: the {ids, names} shape sideMatchesPickedSet consults,
+// built EXCLUSIVELY per entry like buildWatchedSets (viewer_watchlist_core.jsx)
+// -- an entry WITH an id contributes to `ids` ONLY, one WITHOUT contributes
+// its name to `names` ONLY. 2nd Opus review round: the two inline builders
+// this replaced (one copy-pasted into each of applyFilters/matchHighlightedBy)
+// added a picked entry's name to `names` UNCONDITIONALLY, even when that
+// same entry also carried an id, so an id-less side sharing an id-carrying
+// picked entry's name matched by name -- a mixed pair sameCompetitor's rule
+// forbids everywhere else in this file. `.filter(Boolean)` is unnecessary
+// now: the `if (p.id) ... else if (p.name)` split already only adds a
+// truthy value to either set.
+function buildPickedSets(picked) {
+  const ids = new Set();
+  const names = new Set();
+  (Array.isArray(picked) ? picked : []).forEach((p) => {
+    if (!p) return;
+    if (p.id) ids.add(p.id);
+    else if (p.name) names.add(p.name);
+  });
+  return { ids, names };
+}
+
 export function applyFilters(matches, picked, dojoText, compFilter) {
-  const ids = new Set(picked.map((p) => p.id).filter(Boolean));
-  const names = new Set(picked.map((p) => p.name).filter(Boolean));
+  const { ids, names } = buildPickedSets(picked);
   const dt = (dojoText || "").trim().toLowerCase();
   return matches.filter((m) => {
     if (compFilter !== "all" && m.compId !== compFilter) return false;
@@ -239,8 +253,7 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
 }
 
 export function matchHighlightedBy(m, picked, dojoText) {
-  const ids = new Set(picked.map((p) => p.id).filter(Boolean));
-  const names = new Set(picked.map((p) => p.name).filter(Boolean));
+  const { ids, names } = buildPickedSets(picked);
   if (picked.length > 0 && (sideMatchesPickedSet(m.sideA, ids, names) || sideMatchesPickedSet(m.sideB, ids, names))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
   if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;

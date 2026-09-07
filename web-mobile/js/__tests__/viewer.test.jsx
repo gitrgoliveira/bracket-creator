@@ -100,19 +100,22 @@ describe('Viewer Utils', () => {
 
     // bc-pnum (Opus review round): a side WITHOUT an id (a placeholder, or
     // an unresolved bracket row per api_serializers.resolveSide) matches by
-    // name only.
-    it('an id-less side matches by name (unresolved bracket row)', () => {
+    // name only -- when the PICKED entry is itself id-less too. An id-less
+    // side is never guessed at by name against an id-CARRYING picked entry
+    // (see the mixed-pair test below): buildPickedSets is exclusive per
+    // entry, so an id-carrying pick's name never lands in the name Set.
+    it('an id-less side matches by name (unresolved bracket row) when the picked entry is itself id-less', () => {
       const idLessMatches = [
         { id: 'm1', compId: 'c1', sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } },
       ];
-      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
+      const picked = [{ id: '', name: 'Alice' }];
       const filtered = applyFilters(idLessMatches, picked, '', 'all');
       expect(filtered.length).toBe(1);
     });
 
     it('an id-less side matches by name on sideB too', () => {
       const m = [{ id: 'm1', compId: 'c1', sideA: { id: '', name: 'X' }, sideB: { id: '', name: 'Bob' } }];
-      const filtered = applyFilters(m, [{ id: 'uuid-bbb', name: 'Bob' }], '', 'all');
+      const filtered = applyFilters(m, [{ id: '', name: 'Bob' }], '', 'all');
       expect(filtered.length).toBe(1);
     });
 
@@ -125,6 +128,21 @@ describe('Viewer Utils', () => {
       ];
       const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
       const filtered = applyFilters(uuidMatches, picked, '', 'all');
+      expect(filtered.length).toBe(0);
+    });
+
+    // bc-pnum (2nd Opus review round, MEDIUM): the other half of the mixed
+    // pair. A picked entry WITH a real id must never match an id-less side
+    // that merely shares its display name -- buildPickedSets must not let
+    // that id-carrying entry's name leak into the name Set. Before the fix
+    // this returned length 1 (the OLD inline builder added the picked
+    // entry's name unconditionally, even though it also had an id).
+    it('an id-carrying picked entry does not match an id-less side that merely shares its name', () => {
+      const idLessMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } },
+      ];
+      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
+      const filtered = applyFilters(idLessMatches, picked, '', 'all');
       expect(filtered.length).toBe(0);
     });
 
@@ -158,16 +176,27 @@ describe('Viewer Utils', () => {
       expect(matchHighlightedBy(tagged, [], 'A9')).toBe(false);
     });
 
-    // bc-pnum (Opus review round): an id-less side matches by name; a side
-    // carrying a (different) real id never does, even when the name also
-    // happens to match -- never guess on a mixed pair.
-    it('an id-less side matches by name; a side carrying a different id does not', () => {
+    // bc-pnum (Opus review round): an id-less side matches by name when the
+    // picked entry is itself id-less too; a side carrying a (different)
+    // real id never does, even when the name also happens to match --
+    // never guess on a mixed pair.
+    it('an id-less side matches by name when the picked entry is id-less; a side carrying a different id does not', () => {
       const idLessMatch = { sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } };
-      expect(matchHighlightedBy(idLessMatch, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(true);
-      expect(matchHighlightedBy(idLessMatch, [{ id: 'uuid-xxx', name: 'Nobody' }], '')).toBe(false);
+      expect(matchHighlightedBy(idLessMatch, [{ id: '', name: 'Alice' }], '')).toBe(true);
+      expect(matchHighlightedBy(idLessMatch, [{ id: '', name: 'Nobody' }], '')).toBe(false);
       // `match` (module-level fixture above) carries real ids on both sides:
       // a same-named pick with a DIFFERENT id must never light it.
       expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(false);
+    });
+
+    // bc-pnum (2nd Opus review round, MEDIUM): the other half of the mixed
+    // pair -- a picked entry WITH a real id must never light an id-less
+    // side that merely shares its display name. Before the fix this
+    // returned true (the OLD inline builder folded the picked entry's name
+    // into the name Set unconditionally, even though it also carried an id).
+    it('an id-carrying picked entry does not highlight an id-less side that merely shares its name', () => {
+      const idLessMatch = { sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } };
+      expect(matchHighlightedBy(idLessMatch, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(false);
     });
   });
 

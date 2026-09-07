@@ -1131,7 +1131,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                           disabled={!p.id}
                           onChange={(e) => toggleCheckIn(window.checkinApiPid(p), e.target.checked)}
                           style={{ width: 18, height: 18, cursor: p.id ? "pointer" : "not-allowed" }}
-                          aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
+                          // bc-pnum (2nd Opus review round): a hover title alone is
+                          // unreachable on a tablet or by keyboard/screen-reader, so
+                          // the disabled reason rides in the aria-label too; the
+                          // title stays for the mouse-hover case.
+                          aria-label={`${p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}${p.id ? "" : `. ${NO_ID_HINT}`}`}
                           title={p.id ? undefined : NO_ID_HINT}
                         />
                       </div>
@@ -1165,6 +1169,17 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                             names an id-less row, not this per-row display. */}
                         {p.id && (
                           <span className="seed-row__id" title={p.id}> · {p.id.length <= 12 ? p.id : p.id.slice(0, 8)}</span>
+                        )}
+                        {/* bc-pnum (2nd Opus review round): the check-in checkbox
+                            above is disabled for this row (rendered only when
+                            checkInEnabled), but a hover title alone is unreachable
+                            on a tablet or by keyboard -- show the same reason
+                            inline, in the id slot's spot (empty anyway when there
+                            is no id), matching how both modals already render this
+                            hint. Distinct from the 1e ruling above, which is about
+                            the id STRING display, not the disabled-control reason. */}
+                        {!p.id && c.checkInEnabled && (
+                          <span className="seed-row__noid" title={NO_ID_HINT}> · {NO_ID_HINT}</span>
                         )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"

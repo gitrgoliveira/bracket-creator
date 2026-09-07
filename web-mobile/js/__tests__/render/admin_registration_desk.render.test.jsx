@@ -331,10 +331,51 @@ describe('AdminRegistrationDeskPage disables writes for an id-less row in comp m
     const saveButton = getByText('Save changes');
     expect(saveButton.disabled).toBe(true);
     expect(saveButton.getAttribute('title')).toContain('No id on file');
-    expect(getByText('No id on file. Save the roster once and the ids are assigned.')).toBeTruthy();
+    // Scoped to the modal's own note (.rd-edit__note): the row behind the
+    // modal ALSO renders this same hint inline (item 6, 2nd Opus review
+    // round), so an unscoped getByText would find two matches here.
+    const modalNote = container.querySelector('.rd-edit__note');
+    expect(modalNote?.textContent).toBe('No id on file. Save the roster once and the ids are assigned.');
 
     fireEvent.click(saveButton);
     expect(replaceParticipant).not.toHaveBeenCalled();
+  });
+});
+
+// bc-pnum (2nd Opus review round, item 6): a hover title alone is
+// unreachable on a tablet or by keyboard/screen-reader. The row check-in
+// checkbox's disabled reason must ride in the aria-label AND render inline
+// on the row, not only in a title attribute.
+describe('AdminRegistrationDeskPage folds the id-less reason into aria-label and renders it inline (bc-pnum)', () => {
+  it('states the reason in the checkbox aria-label and shows it inline on the row', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByRole } = await mount(tournament);
+    enterCompMode(container);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato.*no id on file/i });
+    expect(checkbox).toBeTruthy();
+    const inlineHint = container.querySelector('.rd-row__noid');
+    expect(inlineHint?.textContent).toBe('No id on file. Save the roster once and the ids are assigned.');
+  });
+
+  it('does not fold a reason into the aria-label, nor render an inline hint, for a stamped row', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-kenji', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByRole } = await mount(tournament);
+    enterCompMode(container);
+    const checkbox = getByRole('checkbox', { name: 'Check in Kenji Sato' });
+    expect(checkbox).toBeTruthy();
+    expect(container.querySelector('.rd-row__noid')).toBeNull();
   });
 });
 

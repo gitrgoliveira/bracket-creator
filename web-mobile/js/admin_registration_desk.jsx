@@ -359,6 +359,13 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
   // silently dropped.
   const idLessCompRow = mode === "comp" && !player.id;
 
+  // bc-pnum (2nd Opus review round): a hover title alone is unreachable on
+  // a tablet or by keyboard/screen-reader, so the disabled reason rides in
+  // the aria-label too (title stays for the mouse-hover case), and is also
+  // rendered inline on the row's meta line below -- matching how the Edit
+  // modal already shows this same hint.
+  const checkAriaLabel = `${checkLabel}${idLessCompRow ? `. ${RD_NO_ID_HINT}` : ""}`;
+
   return (
     <div className={`rd-row ${stateClass}${isLast ? " rd-row--last" : ""}`}>
       <button
@@ -366,7 +373,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
         className="rd-check"
         role="checkbox"
         aria-checked={ariaChecked}
-        aria-label={checkLabel}
+        aria-label={checkAriaLabel}
         disabled={busy || idLessCompRow}
         title={idLessCompRow ? RD_NO_ID_HINT : undefined}
         onClick={onPrimary}
@@ -387,6 +394,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
           {player.dojo && <span className="rd-row__dojo">{player.dojo}</span>}
           {danGrade && <span className="rd-row__dan">{danGrade}</span>}
           {player.seed ? <span className="rd-row__seed">Seed {player.seed}</span> : null}
+          {idLessCompRow && <span className="rd-row__noid" title={RD_NO_ID_HINT}>{RD_NO_ID_HINT}</span>}
         </div>
         {mode === "all" && <RdOtherChips entries={entries} onToggle={onToggle} busy={busy} label="In" />}
         {mode === "comp" && others.length > 0 && <RdOtherChips entries={others} onToggle={onToggle} busy={busy} label="Also in" />}

@@ -108,22 +108,14 @@ function toBackendMatchResult(patch, match) {
     }
     // Only put winnerId on the wire when it equals the flat sideAId/
     // sideBId the SERVER associated with THIS match (match.sideAId /
-    // match.sideBId, the raw fields -- not sideAId/sideBId above, which are
-    // read off the resolved side OBJECTS). resolveSide (this file's
-    // normalizeMatch) never invents an id from a name: an unresolved side
-    // carries the match's own flatId, or "" -- never the competitor's NAME.
-    // So a winnerId derived above is always a genuine id or empty, never a
-    // name string masquerading as one. The gate still matters for a
-    // different reason: a resolved side's id can come from a playerMap
-    // lookup BY NAME (a real id belonging to some other row that merely
-    // shares this side's display name), which need not be the id the
-    // server itself filed against THIS match. Forwarding that would tell
-    // the engine's forward-write gate this is the winner's id for this
-    // match when the server never made that association, misattributing
-    // the mark to a different, same-named participant. A real same-name
-    // pair where the server DID supply both flat ids still sends winnerId
-    // here (it will equal one of the two real ids): that is the one
-    // channel that disambiguates the pair, and this gate does not touch it.
+    // match.sideBId -- not sideAId/sideBId above, which are read off the
+    // resolved side OBJECTS and can come from a playerMap lookup BY NAME: a
+    // real id belonging to some OTHER row that merely shares this side's
+    // display name, which the server never filed against this match.
+    // Forwarding that would misattribute the mark to a different,
+    // same-named participant. A genuine same-name pair where the server DID
+    // supply both flat ids still passes this gate (winnerId equals one of
+    // them) -- the one channel that disambiguates the pair.
     const winnerIdIsServerSupplied = !!winnerId && (
         (!!match?.sideAId && winnerId === match.sideAId) ||
         (!!match?.sideBId && winnerId === match.sideBId)
@@ -133,34 +125,13 @@ function toBackendMatchResult(patch, match) {
     // winnerId so the server's validateHanteiMarkPlacement sees the SAME
     // triple this function just used to place the mark above, rather than
     // relying solely on the server backfilling them from the stored match.
-    // Without this the server never learned the ids on the wire at all -
-    // sideAId/sideBId are computed above purely for this function's own
-    // placement and were otherwise discarded - so a same-name pair's
-    // correctly id-attributed mark could be rejected by the server's
-    // name-only fallback. Omitted (not sent as "") when a side carries no
-    // id at all, matching every other optional field in this payload.
-    //
-    // Send back ONLY an id the server associated with THIS match.
-    // resolveSide (this file's normalizeMatch) never invents an id from a
-    // name (bc-pnum fix): its per-side fallback is `{ id: flatId || "" }`,
-    // so a match the server sends WITHOUT flat side ids -- a bracket match,
-    // which persists none, or a legacy pool row written before the id
-    // columns existed -- now yields sides whose id is simply "", never the
-    // display name. That alone would make sideAId/sideBId above safe to
-    // forward unconditionally in THAT case, but it doesn't cover every
-    // case: sideAId/sideBId can still be a GENUINE id sourced from a
-    // playerMap lookup BY NAME (a real id belonging to some other row that
-    // merely shares this side's display name), which the server never
-    // filed against THIS match's own flat fields. Sending that id would
-    // misattribute the mark to a different, same-named participant.
-    //
-    // Gating on the flat id the server sent for THIS match (match?.sideAId
-    // / match?.sideBId), rather than on the resolved side object, keeps the
-    // case this was added for (a real same-name pair, whose mark can only
-    // be attributed by id) and drops exactly the case where the resolved
-    // side's id did not come from this match's own record. With nothing
-    // sent, the server backfills from the stored match and falls back to
-    // name attribution, which is what it did before these were added.
+    // Same gate and same reason as winnerIdIsServerSupplied above -- only
+    // forward a side id that equals the match's own flat id, since
+    // sideAId/sideBId can otherwise be a name-keyed playerMap lookup the
+    // server never filed against this match. Omitted (not sent as "") when
+    // a side carries no id at all, matching every other optional field
+    // here; with nothing sent, the server backfills from the stored match
+    // and falls back to name attribution.
     if (match?.sideAId && sideAId) result.sideAId = sideAId;
     if (match?.sideBId && sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry

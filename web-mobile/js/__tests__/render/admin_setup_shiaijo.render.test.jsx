@@ -279,7 +279,7 @@ describe('Import row errors read as prose, not as a tag (U4)', () => {
   });
 });
 
-// bc-pnum [review] round 2, item 2: a reassigned import row (the number
+// bc-pnum: a reassigned import row (the number
 // prefix collided on restore, so the server picked a different one) landed
 // successfully -- ImportResult carried only `error`, which stayed empty --
 // so this row was indistinguishable from a clean one. Every tag already

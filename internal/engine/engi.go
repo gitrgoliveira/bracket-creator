@@ -211,23 +211,6 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 	}
 }
 
-// standingsPlayerKey returns the identity key used by registerStandingsPlayer
-// / lookupStandingsPlayer below. Every record this package resolves a
-// competitor from (state.MatchResult's SideAID/SideBID/WinnerID,
-// state.PlayerStanding's Player.ID) carries an id field, so resolution is
-// ID-ONLY (operator ruling bc-pnum): there is no name or (name, dojo)
-// fallback here.
-//
-// An empty id yields "" as the key, but registerStandingsPlayer never
-// inserts a "" entry into the lookup map, so a lookup with id == "" always
-// misses. Two competitors that both carry no id can therefore never
-// spuriously collide with each other through this key: neither one is ever
-// found via it, they are simply unresolvable, which is what an empty id
-// means under the operator ruling ("an empty id resolves to NOTHING").
-func standingsPlayerKey(id string) string {
-	return id
-}
-
 // resolveWinnerSide reports which side of a match won, by participant id
 // only (operator ruling bc-pnum). A match with no WinnerID resolves to no
 // win at all, even when Winner/SideA/SideB carry names that would otherwise
@@ -263,36 +246,28 @@ func newStandingsIndex(players []domain.Player) (map[string]*state.PlayerStandin
 }
 
 // registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
-// into m under its id key (when player.ID is non-empty), and returns the
-// standing so the caller can keep populating it.
-//
-// An id-less player is intentionally NOT inserted into m at all: inserting
-// it under a "" key would make it resolvable by ANY id-less match side,
-// including one that actually names a different, unrelated competitor, and
-// would make two id-less roster entries collide with each other on the same
-// key. Per the operator ruling, an empty id resolves to nothing, so the
-// correct map contribution for an id-less player is none. That player is
-// still present in the `order` slice newStandingsIndex returns, so it still
-// appears in the standings output, it just cannot be matched to a bare match
-// side that carries no id.
+// into m under its participant id (when player.ID is non-empty), and
+// returns the standing so the caller can keep populating it. A row is keyed
+// by its participant id; a row without one resolves to nothing (operator
+// ruling bc-pnum), so an id-less player is deliberately NOT inserted at
+// all -- that player is still present in the `order` slice
+// newStandingsIndex returns, so it still appears in the standings output,
+// it just cannot be matched to a bare match side that carries no id.
 func registerStandingsPlayer(m map[string]*state.PlayerStanding, player domain.Player) *state.PlayerStanding {
 	st := &state.PlayerStanding{Player: player}
 	if player.ID != "" {
-		m[standingsPlayerKey(player.ID)] = st
+		m[player.ID] = st
 	}
 	return st
 }
 
 // lookupStandingsPlayer resolves a match side's id to the
-// *state.PlayerStanding registered by registerStandingsPlayer. ID-only
-// (operator ruling bc-pnum): an empty id, or an id that was never
-// registered (stale/foreign data), returns nil rather than falling back to
-// a name lookup.
+// *state.PlayerStanding registered by registerStandingsPlayer: a plain map
+// index, no separate empty-id guard needed, since registerStandingsPlayer
+// never inserts a "" key, so id == "" already misses like any other
+// unregistered id.
 func lookupStandingsPlayer(m map[string]*state.PlayerStanding, id string) *state.PlayerStanding {
-	if id == "" {
-		return nil
-	}
-	return m[standingsPlayerKey(id)]
+	return m[id]
 }
 
 // engiScoreSummary renders the human-readable score cell for an engi
@@ -402,8 +377,8 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 // before name) but ranks by (1) Wins then (2) accumulated OWN-SIDE flags,
 // exactly like the pool/league computeEngiStandings.
 //
-// Identity is keyed via standingsPlayerKey / registerStandingsPlayer /
-// lookupStandingsPlayer, ID-ONLY (operator ruling bc-pnum), exactly like the
+// Identity is keyed via registerStandingsPlayer / lookupStandingsPlayer,
+// by participant id ONLY (operator ruling bc-pnum), exactly like the
 // kendo SwissStandings it twins. buildSwissMatches stamps SideAID/SideBID on
 // every match it generates (mirroring pools.go), including engi Swiss
 // matches, since GenerateSwissRound has no engi/kendo fork and the same
@@ -439,8 +414,8 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 		}
 		// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
-		keyA := standingsPlayerKey(sA.Player.ID)
-		keyB := standingsPlayerKey(sB.Player.ID)
+		keyA := sA.Player.ID
+		keyB := sB.Player.ID
 		switch {
 		case winnerIsA:
 			sA.Wins++
@@ -469,8 +444,8 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 			return a.Flags > b.Flags
 		}
 		// Head-to-head: if a beat b directly, a ranks higher.
-		keyA := standingsPlayerKey(a.Player.ID)
-		keyB := standingsPlayerKey(b.Player.ID)
+		keyA := a.Player.ID
+		keyB := b.Player.ID
 		if winner, ok := lookupH2H(headToHead, keyA, keyB); ok {
 			if winner == keyA {
 				return true

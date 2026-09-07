@@ -234,7 +234,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 			// poolHasNamesake; both the fallback and its guard are removed,
 			// not merely made unreachable.
 			applySide := func(rowID string, setName func(string)) {
-				if rowID != "" && pid != "" && rowID == pid {
+				if matchesParticipant(rowID, pid) {
 					setName(newName)
 					matchesChanged = true
 					matchesFound = true

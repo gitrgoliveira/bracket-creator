@@ -188,7 +188,7 @@ func TestGeneratePoolDaihyosenMatches_ThreeWayWithNamesakeTeams(t *testing.T) {
 // TestGeneratePoolDaihyosenMatches_PrefillDedupsNamesakeInvolvingPair closes
 // the class the FIX2 doc comment used to describe as an "accepted, narrower
 // gap": generatePoolDaihyosenMatches now shares generateTiebreakerMatches'
-// existingRows contract (identity-keyed dedup via newGroupKeyResolver)
+// existingRows contract (identity-keyed dedup via groupMemberIDs)
 // instead of a bare-name existingPairs map, so this scenario is fixed for
 // EVERY caller of the shared function -- both InjectPoolDaihyosenMatches
 // (auto-injection) and GenerateLeagueTiebreakMatches (league_tiebreak.go,

@@ -1582,7 +1582,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			// pins that such an entry simply never applies.
 			//
 			// The natural rank MUST be captured PER ELEMENT, not in a map keyed
-			// by identity (standingsPlayerKey): two id-less namesakes (legal
+			// by identity (the participant id): two id-less namesakes (legal
 			// across dojos, CheckDuplicateEntriesByNameDojo) share the identical
 			// key, so a map assignment for the SECOND one silently overwrites
 			// the FIRST one's entry, and both then read whichever was written
@@ -1771,7 +1771,7 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 // still read "done" often enough to pass the one fixture that existed):
 //
 //  1. Completion buckets (statusFor) are keyed by helper.CompetitorKey(ID,
-//     Name, Dojo), not by standingsPlayerKey(ID) alone: rosterIndex's own
+//     Name, Dojo), not by the participant ID alone: rosterIndex's own
 //     lookup below is id-only (operator ruling bc-pnum), so once a match
 //     side resolves at all it names exactly one roster entry; the roster
 //     may nonetheless carry an entry with no id yet, and CompetitorKey's

@@ -59,8 +59,8 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// topNFinisher pairs a top-N finisher's IDENTITY key (standingsPlayerKey:
-// id-only, operator ruling bc-pnum) with their bare display name. The
+// topNFinisher pairs a top-N finisher's IDENTITY key (the participant id,
+// id-only per operator ruling bc-pnum) with their bare display name. The
 // mp-e2k1 displaced-qualifier guard below needs both: membership in the
 // pre/post top-N sets must be decided by identity (two competitors sharing a
 // display name from different dojos are explicitly legal,
@@ -164,7 +164,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 				ps := preStandings[pn]
 				for i := 0; i < poolWinners && i < len(ps); i++ {
 					p := ps[i].Player
-					oldTopN = append(oldTopN, topNFinisher{key: standingsPlayerKey(p.ID), name: p.Name})
+					oldTopN = append(oldTopN, topNFinisher{key: p.ID, name: p.Name})
 				}
 			}
 		}
@@ -195,7 +195,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 		ps := postStandings[poolRescoredName]
 		// Build the new top-N set and find displaced finishers, keyed by
-		// IDENTITY (standingsPlayerKey: id-only, operator ruling bc-pnum)
+		// IDENTITY (the participant id, id-only per operator ruling bc-pnum)
 		// rather than bare name. Two competitors sharing a display name from
 		// different dojos are explicitly legal (CheckDuplicateEntriesByNameDojo),
 		// so a re-score that swaps WHICH namesake holds a qualifying rank
@@ -209,7 +209,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		newSet := make(map[string]struct{}, poolWinners)
 		for i := 0; i < poolWinners && i < len(ps); i++ {
 			p := ps[i].Player
-			newSet[standingsPlayerKey(p.ID)] = struct{}{}
+			newSet[p.ID] = struct{}{}
 		}
 		// displaced carries bare NAMES (not keys): hasStartedKnockoutMatchTx
 		// below matches bracket sides by name only (BracketMatch carries no

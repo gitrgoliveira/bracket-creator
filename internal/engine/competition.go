@@ -373,36 +373,33 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // that tie-breaker actually resolved the order is then verified by
 // dhCycleExists.
 //
-// Membership is resolved via newGroupKeyResolver (id-only, operator ruling
+// Membership is resolved via groupMemberIDs (id-only, operator ruling
 // bc-pnum), mirroring groupNeedsChusen's identical conversion (chusen.go) --
 // the two functions ask the same question of the same kind of data. An
 // id-only membership test correctly rejects a row that pairs ONE group
-// member against THEMSELVES (SideA and SideB both resolving to the
-// identical group member -- corrupted/self-referential data): the keyA !=
-// keyB guard below catches it because resolve() returns the participant id
-// verbatim, so a self-pairing produces keyA == keyB regardless of how the
-// row got that way.
+// member against THEMSELVES (SideA and SideB both naming the identical
+// group member -- corrupted/self-referential data): the SideAID != SideBID
+// guard below catches it directly, since a self-pairing means both fields
+// hold the same id regardless of how the row got that way.
 //
 // A group member with no id (Player.ID == "") is never inserted into
-// newGroupKeyResolver's key set, so no DH row can ever resolve to it; a
-// genuine tie-breaker played between two id-less same-name members is
-// therefore reported as NOT having a DH, exactly like the corrupted
-// self-pair case above. This fails CLOSED, which is the safe direction for
-// this guard: the group is reported as still lacking a tie-breaker, so
+// groupMemberIDs' set, so no DH row can ever resolve to it; a genuine
+// tie-breaker played between two id-less same-name members is therefore
+// reported as NOT having a DH, exactly like the corrupted self-pair case
+// above. This fails CLOSED, which is the safe direction for this guard: the
+// group is reported as still lacking a tie-breaker, so
 // MaybeAutoCompletePools keeps returning AwaitingLeagueTiebreak /
 // AutoCompleteNoChange instead of advancing on a result this function
 // cannot actually verify belongs to two distinct competitors, and the
 // operator sees the group still needs action rather than the competition
 // silently completing on an unverifiable DH.
 func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
-	resolve := newGroupKeyResolver(group)
+	ids := groupMemberIDs(group)
 	for _, m := range allMatches {
 		if !IsPoolDaihyosenMatchID(m.ID) {
 			continue
 		}
-		keyA, okA := resolve(m.SideAID)
-		keyB, okB := resolve(m.SideBID)
-		if okA && okB && keyA != keyB {
+		if ids[m.SideAID] && ids[m.SideBID] && m.SideAID != m.SideBID {
 			return true
 		}
 	}

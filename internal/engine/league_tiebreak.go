@@ -238,7 +238,7 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 	// Determine the court from existing matches. existingRows are handed to
 	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
 	// here): it resolves each row's sides against tiedGroup itself via
-	// newGroupKeyResolver, the same identity-keyed contract
+	// groupMemberIDs, the same identity-keyed contract
 	// InjectPoolDaihyosenMatches uses, so a namesake-involving existing bout
 	// cannot suppress a distinct pair on this operator-triggered path either.
 	allMatches, err := e.store.LoadPoolMatches(compID)

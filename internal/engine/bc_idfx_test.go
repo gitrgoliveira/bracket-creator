@@ -28,35 +28,31 @@ func corruptOverridesFile(t *testing.T, store *state.Store, compID string) {
 	require.NoError(t, os.WriteFile(path, []byte("{not valid json"), 0o600))
 }
 
-// --- Finding 1: newGroupKeyResolver must not fall through a foreign id to the name index ---
+// --- Finding 1: groupMemberIDs must not fall through a foreign id to the name index ---
 
-// TestNewGroupKeyResolver_NonMemberIDDoesNotFallThroughToName pins the
-// resolver contract directly: a NON-EMPTY id that does not belong to any
-// member of the group must resolve to ("", false), never fall through to a
-// name match. An EMPTY id ALSO resolves to ("", false) (operator ruling
-// bc-pnum, converted from the pre-ruling behaviour: an empty id used to take
-// a bare-name path; there is no name path left at all now).
-func TestNewGroupKeyResolver_NonMemberIDDoesNotFallThroughToName(t *testing.T) {
+// TestGroupMemberIDs_NonMemberIDDoesNotFallThroughToName pins the
+// membership-set contract directly: a NON-EMPTY id that does not belong to
+// any member of the group must not resolve, never fall through to a name
+// match. An EMPTY id ALSO does not resolve (operator ruling bc-pnum,
+// converted from the pre-ruling behaviour: an empty id used to take a
+// bare-name path; there is no name path left at all now).
+func TestGroupMemberIDs_NonMemberIDDoesNotFallThroughToName(t *testing.T) {
 	group := []state.PlayerStanding{
 		{Player: domain.Player{ID: "id-x-a", Name: "X", Dojo: "Dojo A"}},
 		{Player: domain.Player{ID: "id-y", Name: "Y", Dojo: "Dojo Y"}},
 	}
-	resolve := newGroupKeyResolver(group)
+	ids := groupMemberIDs(group)
 
 	// id-x-b is a REAL id, but belongs to X@DojoB, who is NOT a member of
 	// this specific tied group (e.g. a stale TB row from before a score
-	// correction moved the consequential tie). Resolving it must fail
+	// correction moved the consequential tie). It must not resolve
 	// outright rather than silently attributing it to X@DojoA merely
 	// because they share the display name "X".
-	key, ok := resolve("id-x-b")
-	assert.False(t, ok, "a non-member id must not resolve, even when the name matches a group member")
-	assert.Empty(t, key)
+	assert.False(t, ids["id-x-b"], "a non-member id must not resolve, even when the name matches a group member")
 
 	// An EMPTY id resolves to nothing (operator ruling bc-pnum: no name
 	// fallback survives, even for a group that DOES carry ids).
-	key, ok = resolve("")
-	assert.False(t, ok, "an empty id must resolve to nothing, never to a name match")
-	assert.Empty(t, key)
+	assert.False(t, ids[""], "an empty id must resolve to nothing, never to a name match")
 }
 
 // TestApplyTiebreakSort_ForeignIDNeverCreditsWrongMember is the end-to-end
@@ -455,24 +451,19 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 }
 
 // TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank
-// converts the BLOCKER from a review of this bead. Originally
-// reproduced with ID-LESS namesakes (naturalRank was a map keyed by
-// standingsPlayerKey(ID, Name), so two id-less namesakes -- legal across
-// dojos, CheckDuplicateEntriesByNameDojo -- collapsed onto ONE map entry,
-// whichever was processed LAST in points-sorted order overwriting the
-// natural rank the FIRST one had just written).
+// pins the rule computeStandingsFrom's pairing struct enforces: a
+// competitor's natural rank travels glued to their own standing through the
+// sort (a per-element field, never a map keyed by identity), so two
+// same-name-different-dojo competitors (legal, CheckDuplicateEntriesByNameDojo)
+// can never have one's natural rank silently overwritten by the other's.
 //
-// Standings resolution is now id-only (operator ruling bc-pnum): an id-less
-// match row no longer contributes to anyone's record at all (it is simply
-// skipped), so the original id-less fixture can no longer reach the same
-// win/loss data. Converted to stamp both Tanakas with real, distinct ids
+// Standings resolution is id-only (operator ruling bc-pnum): an id-less
+// match row does not contribute to anyone's record at all (it is simply
+// skipped). The fixture stamps both Tanakas with real, distinct ids
 // (bctest.StampIDs) so their matches resolve and accrue wins exactly as
-// production data would; this still exercises the SAME production fix (the
-// pairing-struct natural-rank capture in computeStandingsFrom, which never
-// actually used standingsPlayerKey as a map key -- that was the REJECTED
-// design this comment and the fix's own doc comment describe) against a
-// same-name-different-dojo pair, which is the scenario the regression
-// itself is about, independent of whether the pair happens to carry ids.
+// production data would, against a same-name-different-dojo pair, which is
+// the scenario this rule protects, independent of whether the pair happens
+// to carry ids.
 //
 // Fixture: TanakaGhost (0-0-0, registered FIRST in roster order) and
 // TanakaReal (2-0, undefeated leader, registered LAST) share the name
@@ -887,7 +878,7 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 	}))
 	// SideAID/SideBID/WinnerID and roster ids are stamped (operator ruling
 	// bc-pnum): leagueGroupHasDH resolves the DH row against the group's
-	// OWN member ids (newGroupKeyResolver, id-only), so an id-less roster
+	// OWN member ids (groupMemberIDs, id-only), so an id-less roster
 	// and DH row would never resolve, and MaybeAutoCompletePools would
 	// short-circuit at AwaitingLeagueTiebreak BEFORE ever reaching the
 	// LoadOverrides call this test targets -- for a reason unrelated to

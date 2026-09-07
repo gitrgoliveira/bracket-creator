@@ -661,21 +661,22 @@ func TestStandingMap_IDlessStandingsNeverResolve(t *testing.T) {
 
 // TestStandingMap_SameNameKeyedByID is the regression test for standingMap
 // collapsing same-name participants: two "Sam"s in different dojos must remain
-// distinct standings entries because the map keys by participant UUID.
+// distinct standings entries because the map keys by participant UUID. A
+// row without an id (operator ruling bc-pnum) resolves to nothing: it is
+// never inserted, never a name fallback.
 func TestStandingMap_SameNameKeyedByID(t *testing.T) {
 	t.Parallel()
 	standings := []state.PlayerStanding{
 		{Player: domain.Player{ID: "id-1", Name: "Sam", Dojo: "North"}, Rank: 1},
 		{Player: domain.Player{ID: "id-2", Name: "Sam", Dojo: "South"}, Rank: 4},
+		{Player: domain.Player{Name: "Legacy", Dojo: "Dojo Legacy"}, Rank: 3},
 	}
 	m := standingMap(standings)
-	assert.Len(t, m, 2, "same-name players with distinct IDs must not collapse")
+	assert.Len(t, m, 2, "same-name players with distinct IDs must not collapse, and the id-less row must not be inserted")
 	assert.Equal(t, 1, m["id-1"].Rank)
 	assert.Equal(t, 4, m["id-2"].Rank)
-	// standingKey is id-only (operator ruling bc-pnum): an id-less player
-	// returns "", never a name fallback.
-	assert.Equal(t, "id-1", standingKey(helper.Player{ID: "id-1", Name: "Sam", Dojo: "Dojo Sam"}))
-	assert.Equal(t, "", standingKey(helper.Player{Name: "Legacy", Dojo: "Dojo Legacy"}))
+	_, ok := m[""]
+	assert.False(t, ok, "an id-less row must never be inserted under a \"\" key")
 }
 
 // TestAttachPoolMatches_SkipsUnresolvableSide is the regression test for the nil

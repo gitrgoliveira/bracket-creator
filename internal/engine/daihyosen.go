@@ -164,22 +164,19 @@ func IsPoolDaihyosenMatchID(matchID string) bool {
 // describes the identical failure in detail).
 //
 // existingRows are the DH rows already on disk for this pool; dedup resolves
-// each row's sides to a group member's canonical identity key via
-// newGroupKeyResolver (id-only, operator ruling bc-pnum), exactly as
-// generateTiebreakerMatches does, so two namesake-involving pairs (e.g.
-// X@dojoA-vs-Y and X@dojoB-vs-Y) are tracked as the distinct pairs they are
-// rather than colliding on a shared bare-name bucket. Both callers --
-// InjectPoolDaihyosenMatches below (auto-injection) and
-// GenerateLeagueTiebreakMatches (league_tiebreak.go, the operator-triggered
-// team-league path) -- share this one contract.
+// each row's sides against groupMemberIDs (id-only, operator ruling
+// bc-pnum), exactly as generateTiebreakerMatches does, so two namesake-
+// involving pairs (e.g. X@dojoA-vs-Y and X@dojoB-vs-Y) are tracked as the
+// distinct pairs they are rather than colliding on a shared bare-name
+// bucket. Both callers -- InjectPoolDaihyosenMatches below (auto-injection)
+// and GenerateLeagueTiebreakMatches (league_tiebreak.go, the operator-
+// triggered team-league path) -- share this one contract.
 func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStanding, existingDHCount int, court string, existingRows []state.MatchResult) []state.MatchResult {
-	resolve := newGroupKeyResolver(tiedGroup)
+	ids := groupMemberIDs(tiedGroup)
 	existingPairs := make(map[string]bool, len(existingRows))
 	for _, m := range existingRows {
-		keyA, okA := resolve(m.SideAID)
-		keyB, okB := resolve(m.SideBID)
-		if okA && okB {
-			existingPairs[tiebreakerPairKey(keyA, keyB)] = true
+		if ids[m.SideAID] && ids[m.SideBID] && m.SideAID != m.SideBID {
+			existingPairs[tiebreakerPairKey(m.SideAID, m.SideBID)] = true
 		}
 	}
 
@@ -188,8 +185,8 @@ func generatePoolDaihyosenMatches(poolName string, tiedGroup []state.PlayerStand
 	for i := 0; i < len(tiedGroup); i++ {
 		for j := i + 1; j < len(tiedGroup); j++ {
 			a, b := tiedGroup[i], tiedGroup[j]
-			keyA := standingsPlayerKey(a.Player.ID)
-			keyB := standingsPlayerKey(b.Player.ID)
+			keyA := a.Player.ID
+			keyB := b.Player.ID
 			if existingPairs[tiebreakerPairKey(keyA, keyB)] {
 				continue
 			}
@@ -249,7 +246,7 @@ func (e *Engine) InjectPoolDaihyosenMatches(compID string) ([]state.MatchResult,
 	// correctly without ambiguous prefix scanning. existingRows are handed to
 	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
 	// here) so it can resolve each row's sides against the SPECIFIC tied
-	// group being processed via newGroupKeyResolver -- see that function's
+	// group being processed via groupMemberIDs -- see that function's
 	// doc comment for why a bare-name reduction at this scan stage would
 	// collapse distinct namesake-involving pairs.
 	type poolDHInfo struct {

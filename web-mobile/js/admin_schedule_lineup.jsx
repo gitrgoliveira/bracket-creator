@@ -2,6 +2,7 @@
 // pickCopySource, MatchLineupSideEditor (local), MatchLineupPanel.
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
+import { sideLookupKey } from './competitor_identity.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -331,9 +332,9 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // The match's sideA/sideB are normalized to { id, name } (see
   // api_serializers.resolveSide); `id` is the participant's real UUID when
   // resolved, or "" when the backend has no UUID for that slot -- resolveSide
-  // never invents an id from the team NAME. sideKey below falls back to
-  // side.name in that "" case, which is the recovery path this file needs:
-  // sideKey prefers side.id over side.name (a real id decides, since a
+  // never invents an id from the team NAME. sideLookupKey (competitor_
+  // identity.jsx) falls back to side.name in that "" case, which is the
+  // recovery path this file needs: id over name (a real id decides, since a
   // UUID never coincidentally equals another team's display name), so
   // matchesKey's `p.id === key || p.name === key` only ever succeeds by
   // name when key itself carries no real id to offer (an id-less side).
@@ -341,10 +342,8 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // first truthy key (the UUID), which never equals a name-keyed sideId,
   // so the roster silently failed to resolve and every dropdown showed
   // "No roster found" -- do not reintroduce that single-key form.
-  const sideKey = (side) =>
-    (side && typeof side === "object" ? (side.id || side.name) : side) || "";
-  const sideAKey = sideKey(m.sideA);
-  const sideBKey = sideKey(m.sideB);
+  const sideAKey = sideLookupKey(m.sideA);
+  const sideBKey = sideLookupKey(m.sideB);
   const players = comp.players || [];
   const matchesKey = (p, key) =>
     !!key && (p.id === key || p.ID === key || p.name === key || p.Name === key);

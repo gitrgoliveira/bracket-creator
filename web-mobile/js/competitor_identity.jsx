@@ -24,10 +24,13 @@
 // the intentional recovery path for resolveSide's own "no id at all"
 // fallback (api_serializers.jsx), and is why callers like
 // match_scoreboard.jsx's useTeamLineups, admin_scoring_team.jsx's
-// sideAKey/rosterForSide/teamIdForSide, admin_schedule_lineup.jsx's
-// sideKey/matchesKey, and pickCopySource build an `id || name` key rather
-// than calling sameCompetitor. Keys and lookups may compose; comparisons of
-// two already-resolved records must go through sameCompetitor.
+// sideAKey/rosterForSide/teamIdForSide, and admin_schedule_lineup.jsx's
+// sideKey/matchesKey call sideLookupKey (below) rather than sameCompetitor.
+// admin_lineup.jsx's teamIdOf is the one exception: its legacy ID/Name
+// fallback has a precedence sideLookupKey's simple shape can't reproduce,
+// so it composes idOf/nameOf directly instead (see that function's own
+// comment). Keys and lookups may compose; comparisons of two
+// already-resolved records must go through sameCompetitor.
 //
 // Accepts a {id,name} object OR a bare name string (some callers -- team
 // sub-bout winners/sides -- carry no id concept on the wire at all, by
@@ -60,4 +63,10 @@ export function competitorKey(x, normalizeName = (s) => s) {
 export function sameCompetitor(a, b) {
   const ka = competitorKey(a);
   return !!ka && ka === competitorKey(b);
+}
+
+// sideLookupKey: the LOOKUP counterpart to sameCompetitor -- id else name, a
+// roster/lineup key composite (not a peer comparison; see this file's header).
+export function sideLookupKey(side) {
+  return idOf(side) || nameOf(side);
 }

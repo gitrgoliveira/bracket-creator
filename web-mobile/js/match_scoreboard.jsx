@@ -20,6 +20,7 @@
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
+import { sideLookupKey } from './competitor_identity.jsx';
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -49,20 +50,18 @@ export function useTeamLineups(match, competition, roundIndex) {
 
   const compId = (competition && competition.id) || match?.compId;
   const matchId = match?.id;
-  // bc-pnum: this composite already prefers side.id over side.name (a real
-  // id decides, since a UUID never coincidentally equals another team's
-  // display name -- resolveLineupTeamId's bare-string branch then either
-  // confirms it against the roster by name or, finding nothing, returns it
-  // unchanged). Deliberately NOT switched to passing the side object
-  // straight through: resolveSide (api_serializers.jsx) never invents an
-  // id from the name -- a side with no real id at all (the player map
-  // lookup misses entirely) carries id "" -- so the object form's
-  // id-decides branch would stop at that empty id and never fall through
-  // to the name lookup the string form still performs. The string form is
-  // therefore the one that still recovers a name-only match, not a
-  // leftover.
-  const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
-  const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
+  // sideLookupKey (competitor_identity.jsx) already prefers side.id over
+  // side.name (a real id decides, since a UUID never coincidentally equals
+  // another team's display name -- resolveLineupTeamId's bare-string branch
+  // then either confirms it against the roster by name or, finding
+  // nothing, returns it unchanged). Deliberately NOT passing the side
+  // object straight through: resolveSide (api_serializers.jsx) never
+  // invents an id from the name -- a side with no real id at all (the
+  // player map lookup misses entirely) carries id "" -- so the object
+  // form's id-decides branch would stop at that empty id and never fall
+  // through to the name lookup the string key still performs.
+  const sideAId = sideLookupKey(match?.sideA);
+  const sideBId = sideLookupKey(match?.sideB);
 
   // Subscribe to lineup-updated window CustomEvent (dispatched by app.jsx when
   // the backend emits an SSE lineup_updated for this competition). Incrementing

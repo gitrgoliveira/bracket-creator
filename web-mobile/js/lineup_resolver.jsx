@@ -45,16 +45,16 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
 // lineups are stored under. A match side's `id`, once resolved
 // (api_serializers.resolveSide), is EITHER the participant's real id (a
 // UUID) or "" -- resolveSide never invents an id from the display name.
-// Callers build `sideKey` as `side.id || side.name`, so an unresolved side
-// (id "") still falls through to its NAME here, and TeamLineups are keyed
-// server-side by whatever team key was used when the lineup was saved; in
-// practice, that's the participant's real id. Passing a bare name straight
-// through can make the lineup GET 404 and the per-match (and round) lineup
-// never reaches the scoring grid. We look the side up in the competition's
-// participant list by id OR name and return its real id, falling back to
-// the original key when unmatched.
+// Callers build `sideKey` via sideLookupKey(side) (competitor_identity.jsx),
+// so an unresolved side (id "") still falls through to its NAME here, and
+// TeamLineups are keyed server-side by whatever team key was used when the
+// lineup was saved; in practice, that's the participant's real id. Passing
+// a bare name straight through can make the lineup GET 404 and the
+// per-match (and round) lineup never reaches the scoring grid. We look the
+// side up in the competition's participant list by id OR name and return
+// its real id, falling back to the original key when unmatched.
 //
-// bc-pnum: callers pass `side.id || side.name` deliberately -- the name arm
+// bc-pnum: callers pass sideLookupKey(side) deliberately -- the name arm
 // recovers a real id for an id-less side. No object overload (YAGNI).
 export function resolveLineupTeamId(sideKey, players) {
   if (!sideKey) return "";

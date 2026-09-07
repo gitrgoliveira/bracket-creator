@@ -124,6 +124,7 @@ import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
 import { matchDataUnreadable, UnreadableEditorNote } from './data_integrity.jsx';
+import { sideLookupKey } from './competitor_identity.jsx';
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
@@ -981,18 +982,18 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // resolveRoundIndex prefers roundIndex, falls back for legacy shapes.
     // Pool matches return 0 (no per-round lineup).
     const round = window.resolveRoundIndex(m);
-    // bc-pnum: this composite prefers m.sideA.id over m.sideA.name -- a real
-    // id decides, since a UUID never coincidentally equals another team's
-    // display name. resolveLineupTeamId's bare-string branch then either
-    // confirms it against the roster by name or, finding nothing, returns
-    // it unchanged. Deliberately a STRING, not the side object:
-    // resolveSide (api_serializers.jsx) never invents an id from the name
-    // -- a side with no real id at all (the player map lookup misses
-    // entirely) carries id "" -- so the object form's id-decides branch
-    // would stop at that empty id and never fall through to the name
+    // sideLookupKey (competitor_identity.jsx) prefers m.sideA.id over
+    // m.sideA.name -- a real id decides, since a UUID never coincidentally
+    // equals another team's display name. resolveLineupTeamId's bare-string
+    // branch then either confirms it against the roster by name or, finding
+    // nothing, returns it unchanged. Deliberately a STRING, not the side
+    // object: resolveSide (api_serializers.jsx) never invents an id from
+    // the name -- a side with no real id at all (the player map lookup
+    // misses entirely) carries id "" -- so the object form's id-decides
+    // branch would stop at that empty id and never fall through to the name
     // lookup this string form still performs.
-    const sideAKey = m.sideA?.id || m.sideA?.name || (typeof m.sideA === "string" ? m.sideA : "");
-    const sideBKey = m.sideB?.id || m.sideB?.name || (typeof m.sideB === "string" ? m.sideB : "");
+    const sideAKey = sideLookupKey(m.sideA);
+    const sideBKey = sideLookupKey(m.sideB);
     (async () => {
       // Competition detail for teamMatchType + format AND the participant
       // list used to map the name-keyed sides to their real lineup ids.
@@ -1067,9 +1068,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // Derive each team's roster from compMeta.players. rosterFor expects the
   // team object (with metadata array); resolveLineupTeamId matches by name.
   //
-  // bc-pnum: sideKey below prefers side.id over side.name -- a real id
-  // decides, since a UUID never coincidentally equals another team's
-  // display name. `pid` mirrors that same id-else-name preference for each
+  // bc-pnum: sideKey below (sideLookupKey, competitor_identity.jsx) prefers
+  // side.id over side.name -- a real id decides, since a UUID never
+  // coincidentally equals another team's display name. `pid` mirrors that
+  // same id-else-name preference for each
   // CANDIDATE team, so `pid === sideKey || pname === sideKey` matches by id
   // whenever BOTH `side` and the candidate carry one. The name clause is
   // unreachable ONLY when `side` itself carries a real id (sideKey is then
@@ -1095,7 +1097,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // other positions instead of vanishing after a single entry.
   const rosterForSide = (side, lineup) => {
     if (!window.AdminLineupHelpers?.rosterFor) return [];
-    const sideKey = typeof side === "object" ? (side?.id || side?.name) : side;
+    const sideKey = sideLookupKey(side);
     const teamObj = allPlayers.find(p => {
       const pid = p?.id || p?.ID || p?.name || p?.Name || "";
       const pname = p?.name || p?.Name || "";
@@ -1107,7 +1109,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       : base;
   };
   const teamIdForSide = (side) => {
-    const sideKey = typeof side === "object" ? (side?.id || side?.name) : side;
+    const sideKey = sideLookupKey(side);
     const teamObj = allPlayers.find(p => {
       const pid = p?.id || p?.ID || p?.name || p?.Name || "";
       const pname = p?.name || p?.Name || "";

@@ -257,9 +257,9 @@ export function isLoudIssue(i) {
 // dataIssues list. The server can now emit up to THREE (operator ruling
 // bc-pnum: participants.csv, pools.csv and pool-matches.csv each carry an id
 // field a side is resolved from, and each is checked and reported
-// independently -- missingParticipantIDsIssue / poolsMissingParticipantIDsIssue /
-// poolMatchesMissingSideIDsIssue, handlers_viewer.go), each folding its own
-// affected rows into one detail sentence. Renamed from the singular
+// independently, through the one composer missingIDsIssue in
+// handlers_viewer.go), each folding its own affected rows into one detail
+// sentence. Renamed from the singular
 // missingIDsIssue (which picked at most one entry via .find): keeping only
 // the first would silently drop the other two notices whenever more than
 // one file has an issue at once.

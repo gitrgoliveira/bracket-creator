@@ -321,9 +321,11 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 	// bracket.json); this caller has neither preloaded, so it lets
 	// numbersFromDraw read whichever the format needs. An unreadable file is
 	// reported, not merged, so the overlay shows MISSING numbers, never
-	// composed ones (D1).
+	// composed ones (D1). The log line says "load draw", not "load pools":
+	// for a playoffs-format competition the file behind this error is
+	// bracket.json, not pools.csv.
 	if err := numbersFromDraw(store, comp, players); err != nil {
-		log.Printf("mobileapp: court current %s: load pools: %v", comp.ID, err)
+		log.Printf("mobileapp: court current %s: load draw: %v", comp.ID, err)
 	}
 	return players
 }

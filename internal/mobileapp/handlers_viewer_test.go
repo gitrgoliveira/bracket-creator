@@ -591,6 +591,64 @@ func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
 	assert.True(t, found, "the competition must still be listed")
 }
 
+// TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers is the
+// aggregate-payload counterpart of TestCourtCurrentUnreadablePoolsShowsNoNumbers
+// (handlers_display_test.go), covering numbersFromDrawWithBracket's own
+// pools.csv branch instead of numbersFromDraw's: a Mixed-format competition
+// whose pools.csv will not parse must both show NO numbers (already
+// covered by TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers-style
+// dataIssues assertions elsewhere) AND leave a log breadcrumb naming the
+// read that failed -- the response-only assertion cannot tell "the read
+// errored and was propagated" apart from "the read errored and was
+// swallowed into an empty pools slice", since mergePoolNumbersIntoPlayersSlice
+// is ALSO a no-op over an empty slice.
+func TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "corrupt-pools-aggregate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Corrupt Pools Aggregate", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.Contains(t, logBuf.String(), "load draw",
+		"an unreadable pools.csv must leave a server-side log breadcrumb naming the read that failed, not be silently swallowed")
+	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
+
+	var items []struct {
+		Config state.Competition `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+	var found bool
+	for _, item := range items {
+		if item.Config.ID != cid {
+			continue
+		}
+		found = true
+		require.NotEmpty(t, item.Config.Players, "the roster must still be served")
+		for _, p := range item.Config.Players {
+			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable pools.csv, got %q", p.Name, p.Number)
+		}
+	}
+	assert.True(t, found, "the competition must still be listed")
+}
+
 // TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins numbersFromDraw's
 // (formerly numbersFromPools') setup-status skip (PR #416 finding 3): a
 // competition that has never drawn cannot legitimately have a pools.csv, so

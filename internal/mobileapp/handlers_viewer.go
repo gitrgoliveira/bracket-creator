@@ -93,6 +93,24 @@ func applyDrawNumbers(comp *state.Competition, players []domain.Player, pools []
 	mergePoolNumbersIntoPlayersSlice(comp, players, pools)
 }
 
+// numberingApplies is the ONE place that states the guard chain every
+// caller of applyDrawNumbers' I/O wrappers must agree on: a nil comp, an
+// empty prefix, or a competition with no draw yet (engine.CanGenerateDraw)
+// means "do nothing, no I/O, no number" (ok=false). Otherwise ok is true
+// and needsBracket says which file the draw actually needs for comp's
+// EFFECTIVE format (comp.EffectiveFormat(), never comp.Format directly: an
+// unset Format ("") is standalone playoffs too) -- the bracket's DrawOrder
+// for a standalone knockout, pools.csv for everything else. Shared by
+// numbersFromDraw and numbersFromDrawWithBracket below so the rule cannot
+// drift between the two: before this existed, each spelled out the same
+// three checks independently.
+func numberingApplies(comp *state.Competition) (needsBracket, ok bool) {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" || engine.CanGenerateDraw(comp.Status) {
+		return false, false
+	}
+	return comp.EffectiveFormat() == state.CompFormatPlayoffs, true
+}
+
 // numbersFromDraw is applyDrawNumbers' I/O-performing wrapper (renamed from
 // numbersFromPools, bc-pnum ruling 2 successor to PR #416 finding 3): a
 // caller that wants players' Number field filled from the draw's
@@ -101,13 +119,18 @@ func applyDrawNumbers(comp *state.Competition, players []domain.Player, pools []
 // prefix/no-draw-yet skip, and the read itself. currentMatchPlayers
 // (handlers_display.go) is that caller.
 //
-// Skips ALL reads (pools or bracket) when the competition has no draw yet
-// (engine.CanGenerateDraw(comp.Status)): pools.csv/bracket.json cannot
-// exist yet for a competition that has never drawn, so the read is a
-// guaranteed-empty stat -- and, more importantly, any bytes found at that
-// path for such a competition are noise (a stray fixture/leftover from
-// another run), not an operator-actionable file, so they must never surface
-// as a data issue or a log line.
+// A thin front door: it runs the shared guard (numberingApplies), loads the
+// bracket itself ONLY when the format actually needs one, and delegates
+// everything else -- the pools.csv read for every other format, and the
+// merge itself -- to numbersFromDrawWithBracket, so neither function has to
+// restate the guard chain or the format switch on its own.
+//
+// Skips ALL reads (pools or bracket) when the competition has no draw yet:
+// pools.csv/bracket.json cannot exist yet for a competition that has never
+// drawn, so the read is a guaranteed-empty stat -- and, more importantly,
+// any bytes found at that path for such a competition are noise (a stray
+// fixture/leftover from another run), not an operator-actionable file, so
+// they must never surface as a data issue or a log line.
 //
 // On a genuine read/parse error the merge is skipped (numbers are never
 // composed from a partial/corrupt read) and the error is returned so a
@@ -121,26 +144,19 @@ func applyDrawNumbers(comp *state.Competition, players []domain.Player, pools []
 // this function's return. numbersFromDrawWithBracket is that caller's own
 // door instead.
 func numbersFromDraw(store *state.Store, comp *state.Competition, players []domain.Player) error {
-	if comp == nil || comp.EffectiveNumberPrefix() == "" {
+	needsBracket, ok := numberingApplies(comp)
+	if !ok {
 		return nil
 	}
-	if engine.CanGenerateDraw(comp.Status) {
-		return nil
-	}
-	if comp.EffectiveFormat() == state.CompFormatPlayoffs {
-		bracket, err := store.LoadBracket(comp.ID)
+	var bracket *state.Bracket
+	if needsBracket {
+		var err error
+		bracket, err = store.LoadBracket(comp.ID)
 		if err != nil {
 			return err
 		}
-		applyDrawNumbers(comp, players, nil, bracket)
-		return nil
 	}
-	pools, err := store.LoadPools(comp.ID)
-	if err != nil {
-		return err
-	}
-	applyDrawNumbers(comp, players, pools, nil)
-	return nil
+	return numbersFromDrawWithBracket(store, comp, players, bracket)
 }
 
 // numbersFromDrawWithBracket is numbersFromDraw's sibling for a caller that
@@ -155,15 +171,17 @@ func numbersFromDraw(store *state.Store, comp *state.Competition, players []doma
 // Only the playoffs branch can skip an I/O read this way (bracket is the
 // ONLY file that format ever needs for numbering); every other format still
 // performs its own pools.csv read here, since the caller has not loaded
-// one. Same prefix/no-draw-yet skip as numbersFromDraw.
+// one. Same guard as numbersFromDraw (numberingApplies), which is also this
+// function's own direct caller's gate -- numbersFromDraw delegates here
+// after running it once, so stating it again costs nothing wrong, only a
+// second cheap boolean check, and this function still needs its own copy
+// for the callers that reach it directly (buildViewerCompetitionPayload).
 func numbersFromDrawWithBracket(store *state.Store, comp *state.Competition, players []domain.Player, bracket *state.Bracket) error {
-	if comp == nil || comp.EffectiveNumberPrefix() == "" {
+	needsBracket, ok := numberingApplies(comp)
+	if !ok {
 		return nil
 	}
-	if engine.CanGenerateDraw(comp.Status) {
-		return nil
-	}
-	if comp.EffectiveFormat() == state.CompFormatPlayoffs {
+	if needsBracket {
 		applyDrawNumbers(comp, players, nil, bracket)
 		return nil
 	}
@@ -295,21 +313,27 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// mp-13y: merge numberPrefix-derived numbers from the draw, via the one
 	// owner of that logic (applyDrawNumbers, bc-pnum ruling 2 successor to
 	// PR #416 finding 3) so the prefix/no-draw-yet skip can't drift from the
-	// other callers. bracket is already loaded above (line ~242) for the
+	// other callers. bracket is already loaded above (line ~270) for the
 	// court-feed check, so numbersFromDrawWithBracket reuses it for a
 	// playoffs-format competition's number rather than re-reading (and, on
 	// a corrupt file, re-reporting) bracket.json a second time.
-	poolsErr := numbersFromDrawWithBracket(store, comp, players, bracket)
-	if poolsErr != nil {
-		// Reported, not merged: an unreadable pools.csv must show as
-		// MISSING numbers, never as composed ones (D1). bc-pnum C4: only a
-		// PARSE failure joins the payload's dataIssues below (dataIssuesFrom
-		// -> state.AsCorruptFile, which corruptCSV populates from a
-		// csv.ParseError specifically). A raw READ error (permissions, I/O)
-		// is not something an operator repairs with a text editor, and its
-		// message names the absolute path on disk, which must never reach
-		// this PUBLIC payload -- it is logged server-side only, here.
-		log.Printf("mobileapp: viewer payload %s: load pools: %v", compID, poolsErr)
+	//
+	// numbersErr, not poolsErr: for a playoffs-format competition the file
+	// this could fail over is bracket.json, not pools.csv (numbersFromDrawWithBracket
+	// only performs its OWN read for a pooled format; the playoffs branch
+	// never errors here since bracket was already resolved above).
+	numbersErr := numbersFromDrawWithBracket(store, comp, players, bracket)
+	if numbersErr != nil {
+		// Reported, not merged: an unreadable pools.csv/bracket.json must
+		// show as MISSING numbers, never as composed ones (D1). bc-pnum C4:
+		// only a PARSE failure joins the payload's dataIssues below
+		// (dataIssuesFrom -> state.AsCorruptFile, which corruptCSV
+		// populates from a csv.ParseError specifically). A raw READ error
+		// (permissions, I/O) is not something an operator repairs with a
+		// text editor, and its message names the absolute path on disk,
+		// which must never reach this PUBLIC payload -- it is logged
+		// server-side only, here.
+		log.Printf("mobileapp: viewer payload %s: load draw: %v", compID, numbersErr)
 	}
 
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
@@ -353,7 +377,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// competition detail endpoint build the list from (bc-pnum ruling 1e
 	// follow-up), so the two surfaces never disagree about what a given
 	// competition's issues are.
-	issues := viewerDataIssues(players, pmErr, brErr, poolsErr)
+	issues := viewerDataIssues(players, pmErr, brErr, numbersErr)
 	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}

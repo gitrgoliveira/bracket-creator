@@ -124,11 +124,24 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 // rather than merging against a nil/empty pools slice, which
 // applyDrawNumbers would otherwise read as "no draw yet".
 //
+// The response-only assertion used to be vacuous: mergePoolNumbersIntoPlayersSlice
+// is ALSO a no-op over an empty/nil pools slice, so "the read errored and was
+// correctly propagated" and "the read errored and was silently swallowed
+// into an empty slice" produce the IDENTICAL response body -- a mutation
+// that swallowed the error (`if err != nil { pools = nil }` instead of
+// `return err`) left the whole package green. The log line is the only
+// observable difference, so it is asserted the same way
+// TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins the
+// participants-read log.
+//
 // bc-pnum ruling 2 moved a playoffs competition's numbering off pools.csv
 // entirely (onto bracket.DrawOrder), so this fixture is Mixed format on
 // purpose now: for playoffs, a corrupt pools.csv is never even read (see
 // TestViewerCompetitionsList_CorruptBracketShowsNoNumbers for that format's
-// own read-error case, over bracket.json instead).
+// own read-error case, over bracket.json instead, and
+// TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers below for
+// the aggregate-payload counterpart of THIS test, via
+// numbersFromDrawWithBracket rather than numbersFromDraw).
 func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -156,10 +169,19 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
 	}))
 
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
 	r.ServeHTTP(w, req)
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.Contains(t, logBuf.String(), "load draw",
+		"an unreadable pools.csv must leave a server-side log breadcrumb naming the read that failed, not be silently swallowed")
+	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
 
 	var resp courtCurrentResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))

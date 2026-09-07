@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
@@ -17,6 +17,18 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
+
+// bc-pnum (Opus review round): a side WITH an id matches only a watched id;
+// a side WITHOUT one matches by name only -- never an OR of both for the
+// SAME side (that let watching Sato of Tokyo also surface Sato of Osaka's
+// matches whenever the id compare missed). Exported for unit testing.
+export function matchInvolvesWatchedSet(m, watchedIds, watchedNames) {
+  const [aId, bId] = matchParticipantIds(m);
+  const [aName, bName] = matchParticipantNames(m);
+  const sideHit = (id, name) => id ? watchedIds.has(id) : (!!name && watchedNames.has(name.trim().toLowerCase()));
+  return sideHit(aId, aName) || sideHit(bId, bName);
+}
+
 // bracketRoundsContain: is this match id drawn INSIDE BracketTree? The bronze
 // (3rd-place) playoff is a sibling of bracket.rounds and is rendered below the
 // tree, so it is not, and the tree holds no ref by which to scroll to it.
@@ -87,7 +99,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     [watchlist, compDojos, rosterById],
   );
   const resolvedWatched = useMemo(() => resolveWatchedPlayers(compWatchlist, compRoster), [compWatchlist, compRoster]);
-  const watchedIds = useMemo(() => new Set(resolvedWatched.map((p) => String(p.id))), [resolvedWatched]);
+  const watchedIds = useMemo(() => new Set(resolvedWatched.map((p) => String(p.id)).filter(Boolean)), [resolvedWatched]);
   const watchedNames = useMemo(() => new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean)), [resolvedWatched]);
   const hasActiveFilter = compWatchlist.length > 0;
 
@@ -100,31 +112,16 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const myUpcoming = useMemo(() => buildPrimaryNextMatch(primaryEntry, compRoster, allMatches.filter(hasBothSides)), [primaryEntry, compRoster, allMatches]);
 
   // mp-xhaa: the highlight set covers ALL watched players (dojo entries
-  // expanded to members), keyed by id AND lowercased name so the
-  // bracket/pool/schedule highlight matches by either. This is the upgrade
-  // over the old single-followed-player highlight.
-  const highlightPlayers = useMemo(() => {
-    const s = new Set();
-    resolvedWatched.forEach((p) => {
-      if (p.id) s.add(String(p.id));
-      const n = (p.name || "").trim().toLowerCase();
-      if (n) s.add(n);
-    });
-    return s;
-  }, [resolvedWatched]);
+  // expanded to members). This is the upgrade over the old single-followed-
+  // player highlight. bc-pnum: {ids, names} (buildWatchedSets), not one
+  // pooled Set -- isPlayerWatched decides which to consult by the CHECKED
+  // side's own id presence, never both independently.
+  const highlightPlayers = useMemo(() => buildWatchedSets(resolvedWatched), [resolvedWatched]);
 
   const { runningMatches, upcomingMatches, recentMatches } = useMemo(() => {
     const matchInvolvesWatched = (m) => {
       if (!hasActiveFilter) return true;
-      const [aId, bId] = matchParticipantIds(m);
-      if ((aId && watchedIds.has(aId)) || (bId && watchedIds.has(bId))) return true;
-      if (watchedNames.size > 0) {
-        const [aName, bName] = matchParticipantNames(m);
-        const aN = aName ? aName.trim().toLowerCase() : "";
-        const bN = bName ? bName.trim().toLowerCase() : "";
-        if ((aN && watchedNames.has(aN)) || (bN && watchedNames.has(bN))) return true;
-      }
-      return false;
+      return matchInvolvesWatchedSet(m, watchedIds, watchedNames);
     };
     const running = allMatches.filter((m) => m.status === "running" && hasBothSides(m) && matchInvolvesWatched(m));
     const upcoming = allMatches.filter((m) => m.status === "scheduled" && hasBothSides(m) && matchInvolvesWatched(m))

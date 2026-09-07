@@ -78,21 +78,34 @@ describe('buildPlayerMatchHighlight', () => {
 });
 
 describe('isFollowedPlayer', () => {
-  it('matches by UUID first, then falls back to name when ids diverge', () => {
+  it('matches by UUID when both sides carry one', () => {
     // Both sides have ids. Same id is a match.
     const sideA = { id: 'p1', name: 'Alice' };
     expect(isFollowedPlayer(sideA, { id: 'p1', name: 'Alice' })).toBe(true);
-    // Both sides have ids and they differ. The id check fails but the
-    // name fallback still matches. Documents the two-layer match contract.
-    expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(true);
   });
 
-  it('falls back to name match when UUID is missing on either side', () => {
+  // bc-pnum (Opus review round): both sides carry ids and they DIFFER --
+  // never guess from the name (a same-name/different-dojo pair): the id
+  // check is authoritative once both records have one.
+  it('never falls back to name when both sides carry ids and they differ', () => {
+    const sideA = { id: 'p1', name: 'Alice' };
+    expect(isFollowedPlayer(sideA, { id: 'p2', name: 'Alice' })).toBe(false);
+  });
+
+  it('falls back to name match when NEITHER side carries an id', () => {
     // Team-match sub-players (or legacy fixtures) may key by display name.
-    expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: 'p1', name: 'Alice' })).toBe(true);
     expect(isFollowedPlayer({ name: 'Alice' }, { id: '', name: 'Alice' })).toBe(true);
     // String side shape (legacy `sideA: 'Alice'`).
     expect(isFollowedPlayer('Alice', { id: '', name: 'Alice' })).toBe(true);
+  });
+
+  // bc-pnum: a MIXED pair (one side carries an id, the other doesn't) is
+  // never guessed at by name -- there is no id to decide with on one side,
+  // and a name-only compare against the id-carrying side could resolve an
+  // unrelated same-named person.
+  it('never guesses by name when exactly one side carries an id (mixed pair)', () => {
+    expect(isFollowedPlayer({ id: '', name: 'Alice' }, { id: 'p1', name: 'Alice' })).toBe(false);
+    expect(isFollowedPlayer({ id: 'p1', name: 'Alice' }, { id: '', name: 'Alice' })).toBe(false);
   });
 
   it('rejects different ids and different names', () => {

@@ -98,19 +98,44 @@ describe('Viewer Utils', () => {
       expect(filtered[0].id).toBe('m1');
     });
 
-    it('matches by name when picked id differs from match side id (UUID vs name)', () => {
-      const uuidMatches = [
-        { id: 'm1', compId: 'c1', sideA: { id: 'Alice', name: 'Alice' }, sideB: { id: 'Bob', name: 'Bob' } },
+    // bc-pnum (Opus review round): a side WITHOUT an id (a placeholder, or
+    // an unresolved bracket row per api_serializers.resolveSide) matches by
+    // name only.
+    it('an id-less side matches by name (unresolved bracket row)', () => {
+      const idLessMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } },
       ];
       const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
-      const filtered = applyFilters(uuidMatches, picked, '', 'all');
+      const filtered = applyFilters(idLessMatches, picked, '', 'all');
       expect(filtered.length).toBe(1);
     });
 
-    it('matches by name on sideB', () => {
-      const m = [{ id: 'm1', compId: 'c1', sideA: { id: 'x', name: 'X' }, sideB: { id: 'Bob', name: 'Bob' } }];
+    it('an id-less side matches by name on sideB too', () => {
+      const m = [{ id: 'm1', compId: 'c1', sideA: { id: '', name: 'X' }, sideB: { id: '', name: 'Bob' } }];
       const filtered = applyFilters(m, [{ id: 'uuid-bbb', name: 'Bob' }], '', 'all');
       expect(filtered.length).toBe(1);
+    });
+
+    // A side carrying a REAL (different) id never matches by name: never
+    // guess on a mixed id-present/id-present-but-different pair. Two
+    // competitors named "Alice" from different dojos must not collide.
+    it('a side carrying a different id does not match by name', () => {
+      const uuidMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: 'other-uuid', name: 'Alice' }, sideB: { id: 'bob-uuid', name: 'Bob' } },
+      ];
+      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
+      const filtered = applyFilters(uuidMatches, picked, '', 'all');
+      expect(filtered.length).toBe(0);
+    });
+
+    // Canonical bc-pnum case: watching Sato of Tokyo must never also filter
+    // in a match for the unrelated Sato of Osaka.
+    it('watching Sato of Tokyo does not also match Sato of Osaka', () => {
+      const osakaMatch = [
+        { id: 'm1', compId: 'c1', sideA: { id: 'sato-osaka', name: 'Sato', dojo: 'Osaka' }, sideB: { id: 'other', name: 'Someone', dojo: 'X' } },
+      ];
+      const picked = [{ id: 'sato-tokyo', name: 'Sato', dojo: 'Tokyo' }];
+      expect(applyFilters(osakaMatch, picked, '', 'all')).toHaveLength(0);
     });
   });
 
@@ -133,9 +158,16 @@ describe('Viewer Utils', () => {
       expect(matchHighlightedBy(tagged, [], 'A9')).toBe(false);
     });
 
-    it('highlights by name when picked id differs from match side id', () => {
-      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(true);
-      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Nobody' }], '')).toBe(false);
+    // bc-pnum (Opus review round): an id-less side matches by name; a side
+    // carrying a (different) real id never does, even when the name also
+    // happens to match -- never guess on a mixed pair.
+    it('an id-less side matches by name; a side carrying a different id does not', () => {
+      const idLessMatch = { sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } };
+      expect(matchHighlightedBy(idLessMatch, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(true);
+      expect(matchHighlightedBy(idLessMatch, [{ id: 'uuid-xxx', name: 'Nobody' }], '')).toBe(false);
+      // `match` (module-level fixture above) carries real ids on both sides:
+      // a same-named pick with a DIFFERENT id must never light it.
+      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(false);
     });
   });
 
@@ -203,9 +235,13 @@ describe('Viewer Utils', () => {
       expect(isFollowedPlayer({ id: 'uuid-alice', name: 'Alice' }, followed)).toBe(true);
     });
 
-    it('falls back to case-insensitive name when IDs differ (legacy/team fixture)', () => {
-      expect(isFollowedPlayer({ id: '', name: 'alice' }, followed)).toBe(true);
-      expect(isFollowedPlayer({ id: '', name: 'ALICE' }, followed)).toBe(true);
+    // bc-pnum (Opus review round): an id-less side is a MIXED pair against
+    // an id-carrying `followed` -- never guessed at by name, even on an
+    // exact (case-insensitive) match. Only a fully id-less pair on BOTH
+    // sides may fall back to name (see viewer_mymatch.test.jsx).
+    it('never falls back to name when the followed player carries an id and this side does not (mixed pair)', () => {
+      expect(isFollowedPlayer({ id: '', name: 'alice' }, followed)).toBe(false);
+      expect(isFollowedPlayer({ id: '', name: 'ALICE' }, followed)).toBe(false);
     });
 
     it('returns false when neither id nor name matches', () => {

@@ -49,6 +49,14 @@ export function usePrimaryWatch() {
 // scheduledAt ascending (empty/missing times sort last via "99:99" sentinel).
 // "Upcoming" = status !== "completed": we keep `running` matches in the
 // list so a coach can spot a watched player who just started.
+// bc-pnum (Opus review round): a side WITH an id matches only a watched id;
+// a side WITHOUT one matches by name only -- never an OR of both for the
+// SAME side (that let watching Sato of Tokyo also surface Sato of Osaka's
+// matches whenever the id compare missed).
+export function sideHitsWatchSet(id, name, watchedIds, watchedNames) {
+  return id ? watchedIds.has(id) : (!!name && watchedNames.has(name.trim().toLowerCase()));
+}
+
 export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
   const watchedIds = new Set();
   const watchedNames = new Set();
@@ -60,13 +68,9 @@ export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMI
   const list = Array.isArray(allMatches) ? allMatches : [];
   const upcoming = list.filter((m) => {
     if (!m || m.status === "completed") return false;
-    const [a, b] = matchParticipantIds(m);
-    if ((a && watchedIds.has(a)) || (b && watchedIds.has(b))) return true;
-    if (watchedNames.size > 0) {
-      const [aN, bN] = matchParticipantNames(m);
-      if ((aN && watchedNames.has(aN.trim().toLowerCase())) || (bN && watchedNames.has(bN.trim().toLowerCase()))) return true;
-    }
-    return false;
+    const [aId, bId] = matchParticipantIds(m);
+    const [aName, bName] = matchParticipantNames(m);
+    return sideHitsWatchSet(aId, aName, watchedIds, watchedNames) || sideHitsWatchSet(bId, bName, watchedIds, watchedNames);
   });
   upcoming.sort((x, y) => {
     const xt = x.scheduledAt || "99:99";
@@ -201,14 +205,29 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
   );
 }
 
+// Same RULE as sideHitsWatchSet above (id decides when the SIDE carries
+// one, name only when it doesn't), kept as a separate function because the
+// case-sensitivity convention differs: picked-player names here compare
+// exact-case (as applyFilters/matchHighlightedBy always did), while
+// sideHitsWatchSet's watchlist names compare case-insensitively (as
+// buildWatchlistUpcoming always did) -- merging the two would silently
+// change one or the other's matching behaviour. `.filter(Boolean)` on the
+// id set at each call site: a picked entry with no id must never
+// contribute an empty string that could coincidentally satisfy an id
+// lookup.
+function sideMatchesPickedSet(side, ids, names) {
+  if (!side) return false;
+  return side.id ? ids.has(side.id) : (!!side.name && names.has(side.name));
+}
+
 export function applyFilters(matches, picked, dojoText, compFilter) {
-  const ids = new Set(picked.map((p) => p.id));
+  const ids = new Set(picked.map((p) => p.id).filter(Boolean));
   const names = new Set(picked.map((p) => p.name).filter(Boolean));
   const dt = (dojoText || "").trim().toLowerCase();
   return matches.filter((m) => {
     if (compFilter !== "all" && m.compId !== compFilter) return false;
-    if (ids.size > 0) {
-      const hit = (m.sideA && (ids.has(m.sideA.id) || names.has(m.sideA.name))) || (m.sideB && (ids.has(m.sideB.id) || names.has(m.sideB.name)));
+    if (picked.length > 0) {
+      const hit = sideMatchesPickedSet(m.sideA, ids, names) || sideMatchesPickedSet(m.sideB, ids, names);
       if (!hit) return false;
     }
     if (dt) {
@@ -220,9 +239,9 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
 }
 
 export function matchHighlightedBy(m, picked, dojoText) {
-  const ids = new Set(picked.map((p) => p.id));
+  const ids = new Set(picked.map((p) => p.id).filter(Boolean));
   const names = new Set(picked.map((p) => p.name).filter(Boolean));
-  if (ids.size > 0 && ((m.sideA && (ids.has(m.sideA.id) || names.has(m.sideA.name))) || (m.sideB && (ids.has(m.sideB.id) || names.has(m.sideB.name))))) return true;
+  if (picked.length > 0 && (sideMatchesPickedSet(m.sideA, ids, names) || sideMatchesPickedSet(m.sideB, ids, names))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
   if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;
   return false;

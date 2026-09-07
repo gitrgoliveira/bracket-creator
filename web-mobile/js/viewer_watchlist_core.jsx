@@ -36,30 +36,64 @@ export function matchParticipantNames(m) {
   return [aName, bName];
 }
 
-// Check whether a participant object `p` refers to the followed player,
-// matching by ID first (UUID) then by name as a fallback for cases where
-// team-match sub-players or legacy fixtures key by display name only.
+// Check whether a participant object `p` refers to the followed player. An
+// id decides whenever BOTH carry one (sameCompetitor's rule, applied by
+// hand here rather than delegated so the pre-existing case-INSENSITIVE name
+// compare -- team-match sub-players or legacy fixtures key by display name
+// only, in any case -- is preserved); a mixed pair (one has an id, the
+// other doesn't) is never guessed at by name.
 export function isFollowedPlayer(p, followed) {
   if (!p || !followed) return false;
   const pId = (typeof p === "object" ? p.id : null) || "";
   const pName = (typeof p === "object" ? p.name : p) || "";
-  if (pId && followed.id && pId === followed.id) return true;
-  if (pName && followed.name && pName.trim().toLowerCase() === followed.name.trim().toLowerCase()) return true;
+  const fId = followed.id || "";
+  const fName = followed.name || "";
+  if (pId && fId) return pId === fId;
+  if (!pId && !fId) return !!pName && !!fName && pName.trim().toLowerCase() === fName.trim().toLowerCase();
   return false;
 }
 
-// mp-xhaa: is participant `p` in the watched set? `watched` is a Set holding
-// BOTH participant ids and lowercased display names, so this matches by id
-// first (canonical UUID) and falls back to name for legacy / team sub-bout
-// rows that key by name only. Drives highlighting across bracket, pool, and
-// schedule surfaces for EVERY watched player (not just one followed player).
+// mp-xhaa: is participant `p` in the watched set? `watched` is `{ids, names}`
+// -- ids from every watched entry that carries one, lowercased names from
+// every watched entry that DOESN'T (buildWatchedSets below). Drives
+// highlighting across bracket, pool, and schedule surfaces for EVERY watched
+// player (not just one followed player).
+//
+// bc-pnum (Opus review round): `p` decides which set to consult by its OWN
+// id presence -- an id-carrying `p` matches only a watched id, never
+// falling through to a name hit. The previous shape pooled ids and names
+// into ONE flat Set and checked either independently, so watching Sato of
+// Tokyo also highlighted Sato of Osaka's rows whenever the id check missed.
+// `watched` may also be a legacy empty array ([]) from callers with no
+// watchlist concept (admin console): the shape guard below reads that as
+// "nothing watched" rather than throwing.
 export function isPlayerWatched(p, watched) {
-  if (!p || !watched || typeof watched.has !== "function" || watched.size === 0) return false;
+  if (!p || !watched) return false;
   const id = (typeof p === "object" ? p.id : null) || "";
   const name = (typeof p === "object" ? p.name : p) || "";
-  if (id && watched.has(String(id))) return true;
-  if (name && watched.has(name.trim().toLowerCase())) return true;
-  return false;
+  if (id) return !!(watched.ids && typeof watched.ids.has === "function" && watched.ids.has(String(id)));
+  return !!name && !!(watched.names && typeof watched.names.has === "function" && watched.names.has(name.trim().toLowerCase()));
+}
+
+// buildWatchedSets: the {ids, names} shape isPlayerWatched consumes, from a
+// resolved watched-player list (resolveWatchedPlayers output, or any
+// {id,name} list). An entry WITH an id contributes to `ids` only; an entry
+// WITHOUT one contributes its lowercased name to `names` only -- the two
+// sets are mutually exclusive per entry, matching sameCompetitor's "id
+// decides when the record carries one" rule instead of pooling everything
+// into one lookup either check could satisfy.
+export function buildWatchedSets(resolvedWatched) {
+  const ids = new Set();
+  const names = new Set();
+  (Array.isArray(resolvedWatched) ? resolvedWatched : []).forEach((p) => {
+    if (!p) return;
+    if (p.id) ids.add(String(p.id));
+    else {
+      const n = (p.name || "").trim().toLowerCase();
+      if (n) names.add(n);
+    }
+  });
+  return { ids, names };
 }
 
 // LocalStorage keys for FR-020 / FR-024. Centralised so the deep-link

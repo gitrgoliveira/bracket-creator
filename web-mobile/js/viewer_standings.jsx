@@ -575,10 +575,18 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 // so it must not mark either cell won (an id-decided result
                 // is unaffected -- ids never collide this way).
                 const namesAmbiguous = rowPlayer.name === colPlayer.name;
-                const rowWon = wId
-                  ? sameCompetitor({ id: wId, name: winnerName }, rowPlayer)
-                  : !namesAmbiguous && sameCompetitor({ id: wId, name: winnerName }, rowPlayer);
+                const rowWon = (!!wId || !namesAmbiguous) && sameCompetitor({ id: wId, name: winnerName }, rowPlayer);
+                const colWon = (!!wId || !namesAmbiguous) && sameCompetitor({ id: wId, name: winnerName }, colPlayer);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
+                // Completed (this branch is only reached once the pending
+                // check above has passed) and not a draw, yet the winner
+                // attributes to NEITHER row nor column: a mixed pair
+                // sameCompetitor refuses to guess, or the match simply
+                // carries no resolvable winner. rowWon's own "else" used to
+                // assume colPlayer won whenever rowWon was false, painting
+                // this row --loss even though nothing here actually
+                // attributes the win to colPlayer either. Claim nothing.
+                const unattributed = !isDraw && !rowWon && !colWon;
 
                 let cellContent;
                 let resultLabel;
@@ -599,15 +607,21 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                   // (a number) instead: there are no ippon letters to show.
                   cellContent = <span className="league-matrix__win">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Win";
+                } else if (unattributed) {
+                  // Neutral: reuses the pending/empty cells' look (muted
+                  // text, no fill) rather than the red loss tint, since
+                  // nothing here actually says this row lost.
+                  cellContent = "–";
+                  resultLabel = "Result not attributed";
                 } else {
-                  // The loser's own ippons (red), or empty when they scored
-                  // none. Engi shows its own flag count instead.
+                  // colWon: the loser's own ippons (red), or empty when they
+                  // scored none. Engi shows its own flag count instead.
                   cellContent = <span className="league-matrix__loss">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 
                 return (
-                  <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : unattributed ? "league-matrix__cell--unattributed" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );

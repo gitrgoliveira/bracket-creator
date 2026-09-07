@@ -6864,6 +6864,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
 .league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
 .league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
+/* A completed, non-draw match whose winner attributes to neither row nor
+   column (sameCompetitor refused a mixed pair, or the match has no
+   resolvable winner at all): the pending/empty look, not a loss tint --
+   this cell claims nothing. */
+.league-matrix__cell--unattributed { background: var(--bg-2); color: var(--ink-3); }
 .league-matrix__cell[role="button"] { cursor: pointer; }
 .league-matrix__cell[role="button"]:hover { filter: brightness(0.92); }
 .league-matrix__cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

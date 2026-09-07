@@ -1239,7 +1239,13 @@ describe('LeagueMatrix (mp-f4xo)', () => {
   // sameCompetitor, which never guesses a mixed pair. Before this item, an
   // id-less winner fell through to a bare name compare against rowPlayer
   // regardless of whether rowPlayer itself carried a real id.
-  it('never guesses a mixed pair: an id-less winner beside id-carrying players shows no win cell', () => {
+  //
+  // Opus review (MEDIUM): rowWon's own "else" used to assume colPlayer won
+  // whenever rowWon was false, so refusing the win guess above painted BOTH
+  // off-diagonal cells --loss -- a claim just as unattributed as the win
+  // would have been. A completed, non-draw match with no resolvable winner
+  // must render a neutral --unattributed cell instead, on both sides.
+  it('never guesses a mixed pair: an id-less winner beside id-carrying players shows no win or loss cell, only unattributed', () => {
     const idPlayers = {
       poolName: 'Pool A',
       players: [
@@ -1259,6 +1265,16 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     const cells = allCells(tree);
     const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     expect(winCell).toBeFalsy();
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
+    expect(lossCell).toBeFalsy();
+    const unattributedCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--unattributed'));
+    // Both off-diagonal cells (Alice-vs-Bob and Bob-vs-Alice) are equally
+    // unattributed: neither player is confirmed as the winner.
+    expect(unattributedCells).toHaveLength(2);
+    unattributedCells.forEach(c => {
+      expect(c.props.title).toContain('Result not attributed');
+      expect(c.props['aria-label']).toContain('Result not attributed');
+    });
   });
 });
 

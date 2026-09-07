@@ -766,12 +766,15 @@ describe('LeagueMatrix (mp-f4xo)', () => {
   let PM;
   let savedIsHikiwake;
 
+  // bc-pnum: pool/league rows always carry ids on the real wire; the ids
+  // below match completedMatch/pendingMatch/runningMatch's sideA/sideB ids
+  // so the (now id-only) matchMap lookup finds them.
   const pool = {
     poolName: 'Pool A',
     players: [
-      { name: 'Alice' },
-      { name: 'Bob' },
-      { name: 'Charlie' },
+      { id: 'pA', name: 'Alice' },
+      { id: 'pB', name: 'Bob' },
+      { id: 'pC', name: 'Charlie' },
     ],
   };
 
@@ -1090,6 +1093,44 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     // Exactly one win (T1's row) and one loss (T2's row): NOT two wins.
     expect(wins).toHaveLength(1);
     expect(losses).toHaveLength(1);
+  });
+
+  // bc-pnum: matchMap used to ALSO index every match by its bare name-pair
+  // ("does not clobber an existing id entry" fallback), and the cell lookup
+  // consulted that name index whenever the id-pair lookup missed. Two same-
+  // name/different-dojo participants where only ONE of them actually played
+  // a given opponent exposed the hazard: the OTHER (unrelated) same-named
+  // participant's cell against that opponent fell back to the name-pair
+  // entry and borrowed the first participant's result. Ids are never absent
+  // here (both players and the match carry them), so the id-pair lookup
+  // must be the only lookup: a miss must render "not played", never a
+  // same-name borrow.
+  it('never borrows a same-name participant\'s match via the name-pair fallback', () => {
+    const twoSatos = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+        { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+        { id: 'B1', name: 'Bob', dojo: 'Kyoto' },
+      ],
+    };
+    // S1 (Tokyo) beat Bob. S2 (Osaka) never played Bob at all.
+    const s1BeatBob = {
+      id: 'Pool A-0', sideA: { id: 'S1', name: 'Sato' }, sideB: { id: 'B1', name: 'Bob' },
+      sideAId: 'S1', sideBId: 'B1', status: 'completed', winner: { id: 'S1', name: 'Sato' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: twoSatos, matches: [s1BeatBob], tweaks: {} });
+    const cells = allCells(tree);
+    // S1 (Tokyo) vs Bob: a real, correctly-attributed win.
+    const s1Cell = cells.find(c => (c.props?.title || '').startsWith('Sato (Tokyo) vs Bob (Kyoto)'));
+    expect(s1Cell.props.className).toContain('league-matrix__cell--win');
+    // S2 (Osaka) vs Bob: no such match exists. Must render as "not played",
+    // never as S1's result borrowed via the name-pair fallback.
+    const s2Cell = cells.find(c => (c.props?.title || '').startsWith('Sato (Osaka) vs Bob (Kyoto)'));
+    expect(s2Cell).toBeTruthy();
+    expect(s2Cell.props.className).toContain('league-matrix__cell--empty');
+    expect(s2Cell.props.title).toContain('not played');
   });
 });
 

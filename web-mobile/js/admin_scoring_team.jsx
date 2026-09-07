@@ -1070,16 +1070,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   //
   // bc-pnum: sideKey below prefers side.id over side.name -- a real id
   // decides, since a UUID never coincidentally equals another team's
-  // display name. Below, `pid` mirrors that same id-else-name preference
-  // for each CANDIDATE team, so the `pid === sideKey || pname === sideKey`
-  // compare only ever succeeds by name when BOTH sides of the compare
-  // already have no real id to offer; a real id on either side makes the
-  // opposite clause structurally unreachable (a UUID string cannot equal a
-  // display name). This is left as a string compare rather than switched to
-  // the id-decides-then-stop object form for the same reason as the sibling
-  // sideAKey/sideBKey composite above: resolveSide can still invent
-  // `id: name` for a side with no real id at all, and only the name-lookup
-  // path recovers the real id in that case.
+  // display name. `pid` mirrors that same id-else-name preference for each
+  // CANDIDATE team, so `pid === sideKey || pname === sideKey` matches by id
+  // whenever BOTH `side` and the candidate carry one. The name clause is
+  // unreachable ONLY when `side` itself carries a real id (sideKey is then
+  // a UUID, which a display name never coincidentally equals) -- it is NOT
+  // blocked merely because the CANDIDATE has an id: when `side` has none
+  // (sideKey falls back to its name), `pname === sideKey` can still match a
+  // DIFFERENT team that only shares that display name, even though that
+  // candidate carries a real id of its own. This is accepted, not a new
+  // gap: it is the same documented (name, dojo) collision resolveSide's
+  // invented `id: name` case already risks, and the name path must stay
+  // reachable for an id-less `side` to recover via that lookup at all. This
+  // is left as a string compare rather than switched to the id-decides-
+  // then-stop object form for the same reason as the sibling
+  // sideAKey/sideBKey composite above.
   const allPlayers =
     (compMeta?.players?.length ? compMeta.players : null)
     || (compMeta?.config?.players)

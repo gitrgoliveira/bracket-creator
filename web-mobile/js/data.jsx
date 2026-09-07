@@ -427,14 +427,18 @@ function arraysEqual(a, b) {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
-// checkinPid builds the server-bound participant identifier for the check-in,
-// uncheck, bulk check-in, and edit endpoints. Modern rows carry a stable UUID;
-// legacy UUID-less rosters (a participants.csv never re-saved through the app)
-// have no id, so we fall back to the composite "name|dojo" key the server
-// resolves on (pidPairKey / resolveParticipantIndex in
-// internal/state/participants.go). The dojo is included because (name, dojo):
-// not name alone: is the uniqueness invariant: the same name at a different
-// dojo is two distinct people. Keep in sync with the Go resolver.
+// checkinPid builds a LOCAL-ONLY participant key: react list keys, search
+// indexes, and optimistic-update matching. It is NOT the server-bound
+// identifier for the check-in, uncheck, bulk check-in, or edit endpoints --
+// that is checkinApiPid below (bc-pnum operator ruling: those writes are id
+// only, never a name/dojo fallback, since a stale/mutable composite could
+// misdirect a write). Modern rows carry a stable UUID; legacy UUID-less rows
+// (a participants.csv never re-saved through the app) have no id, so this
+// falls back to the composite "name|dojo" key -- safe here because a
+// stale/mutable composite merely mis-labels a UI row, it never reaches the
+// wire. The dojo is included because (name, dojo): not name alone: is the
+// uniqueness invariant: the same name at a different dojo is two distinct
+// people.
 //
 // `p.id ? p.id : fallback`, NOT `p.id ?? fallback`: the
 // chusen-candidates handler (handlers_competition.go) always emits an "id"

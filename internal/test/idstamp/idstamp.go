@@ -1,8 +1,12 @@
 // Package idstamp provides id-stamping helpers for hand-built test fixtures
-// across internal/engine, internal/export, internal/mobileapp and
-// internal/state, written before the bc-pnum operator ruling ("a record
-// that carries an id field is resolved by id only; an empty id resolves to
-// NOTHING"). It is a SEPARATE package from internal/test (rather than living
+// written before the bc-pnum operator ruling ("a record that carries an id
+// field is resolved by id only; an empty id resolves to NOTHING"). Only
+// internal/engine's test files import it today; internal/export,
+// internal/mobileapp and internal/state's own fixture repairs used
+// hand-added literal ids instead, so this package has one caller, not four
+// -- nothing about its own shape assumes otherwise, and a second caller is
+// free to import it exactly as internal/engine does. It is a SEPARATE
+// package from internal/test (rather than living
 // in internal/test/helpers.go alongside the domain-only fixtures there)
 // specifically because it needs internal/state and internal/helper types
 // (state.MatchResult, helper.Pool, state.PlayerStanding): internal/state's
@@ -79,19 +83,49 @@ func StampPlayerID(name, dojo string) string {
 // cannot tell the two sides apart -- that ambiguity is exactly what the
 // id-only resolution this helper exists to test is meant to resolve, so
 // StampIDs deliberately does not attempt to guess it.
+//
+// The SAME ambiguity applies to the SideAID/SideBID lookup itself, one
+// level up: byName is keyed by bare NAME (not (name, dojo)), so a roster
+// carrying two DIFFERENT players sharing a display name -- legal across
+// dojos -- would otherwise resolve every match row that relies on this
+// lookup for that name to whichever player was inserted LAST, silently. A
+// plain map assignment is last-write-wins with no signal that it happened;
+// the second player's own id would silently overwrite the first's map
+// entry, and any id-less match row meaning the FIRST namesake would then
+// stamp the SECOND's id instead. dupName below tracks which names collide;
+// the match loop panics ONLY when a row actually NEEDS byName to resolve
+// that ambiguous name (its own SideAID/SideBID/WinnerID is empty) -- a row
+// that already carries explicit ids for a same-name pair (the legitimate
+// pattern the Winner-side guard above exists for) never consults byName at
+// all and must not panic just because the ROSTER happens to contain a
+// duplicate name it never needed.
 func StampIDs(players []domain.Player, matches []state.MatchResult) {
 	byName := make(map[string]string, len(players))
+	dupName := make(map[string]bool, len(players))
 	for i := range players {
 		if players[i].ID == "" {
 			players[i].ID = StampPlayerID(players[i].Name, players[i].Dojo)
 		}
+		if _, seen := byName[players[i].Name]; seen {
+			dupName[players[i].Name] = true
+		}
 		byName[players[i].Name] = players[i].ID
+	}
+	requireUnambiguous := func(name string) {
+		if dupName[name] {
+			panic("idstamp.StampIDs: roster has two players named " + name +
+				" (legal across dojos), and a match row needs byName to resolve that " +
+				"ambiguous name -- a bare-name lookup cannot tell them apart, so stamp " +
+				"this fixture's match-side ids by hand instead of calling StampIDs")
+		}
 	}
 	for i := range matches {
 		if matches[i].SideAID == "" {
+			requireUnambiguous(matches[i].SideA)
 			matches[i].SideAID = byName[matches[i].SideA]
 		}
 		if matches[i].SideBID == "" {
+			requireUnambiguous(matches[i].SideB)
 			matches[i].SideBID = byName[matches[i].SideB]
 		}
 		// SideA != SideB guards the exact ambiguity this helper's own doc

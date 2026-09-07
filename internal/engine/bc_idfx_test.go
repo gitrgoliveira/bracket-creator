@@ -476,12 +476,18 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 //
 // Fixture: TanakaGhost (0-0-0, registered FIRST in roster order) and
 // TanakaReal (2-0, undefeated leader, registered LAST) share the name
-// "Tanaka" across different dojos. bctest.StampIDs's byName map is
-// last-write-wins, so both "Tanaka"-named match rows resolve to TanakaReal
-// (registered last), exactly as the original repro intended -- TanakaGhost
-// genuinely never appears in a match and stays at 0-0-0. Carol carries an
-// override unrelated to either Tanaka. Before the original fix this dropped
-// the 2-0 leader to rank 3 (probe-verified); after it she is rank 1.
+// "Tanaka" across different dojos. The two "Tanaka"-named match rows'
+// SideAID is stamped BY HAND to TanakaReal's id, exactly as production data
+// would (a real draw's SideAID names one specific competitor, never an
+// ambiguous bare name) -- TanakaGhost genuinely never appears in a match
+// and stays at 0-0-0. This is deliberately NOT bctest.StampIDs's own
+// same-name resolution: that helper now panics if a match row needs its
+// ambiguous byName lookup to resolve a duplicate roster name (bc-pnum
+// review finding 9), precisely because silently picking "whichever
+// namesake was registered last" is the class of bug this fixture exists to
+// rule out, not a mechanism to lean on. Carol carries an override unrelated
+// to either Tanaka. Before the original fix this dropped the 2-0 leader to
+// rank 3 (probe-verified); after it she is rank 1.
 func TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-namesake-collision"
@@ -503,6 +509,14 @@ func TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank(t 
 		{ID: "Pool A-1", SideA: "Tanaka", SideB: "Carol", Winner: "Tanaka", Status: state.MatchStatusCompleted},
 		{ID: "Pool A-2", SideA: "Bob", SideB: "Carol", Winner: "Bob", Status: state.MatchStatusCompleted},
 	}
+	// Stamp player ids first (nil matches: nothing to reconcile yet, so this
+	// cannot hit the ambiguous-name panic). Then hand-stamp the two "Tanaka"
+	// rows' SideAID directly to TanakaReal (players[3]) before the second
+	// call, which fills in Bob's/Carol's non-ambiguous ids as usual -- a row
+	// whose SideAID is already set never reaches byName at all.
+	bctest.StampIDs(players, nil)
+	matches[0].SideAID = players[3].ID
+	matches[1].SideAID = players[3].ID
 	bctest.StampIDs(players, matches)
 
 	require.NoError(t, store.SavePools(compID, []helper.Pool{

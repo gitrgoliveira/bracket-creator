@@ -71,6 +71,50 @@ func TestStampIDs_SameNameSideDoesNotGuessWinner(t *testing.T) {
 	assert.Empty(t, matches[0].WinnerID, "a same-name pairing's winner cannot be resolved by name and must be left for the fixture to set by hand")
 }
 
+// TestStampIDs_DuplicateRosterNamePanicsWhenActuallyConsulted pins bc-pnum
+// review finding 9: byName is keyed by bare NAME, so two DIFFERENT rows
+// naming the two same-name-different-dojo namesakes would otherwise both
+// silently resolve to whichever namesake was inserted LAST. A row that
+// genuinely needs the ambiguous lookup (its own SideAID is still empty)
+// must panic, loudly, rather than silently misattribute.
+func TestStampIDs_DuplicateRosterNamePanicsWhenActuallyConsulted(t *testing.T) {
+	players := []domain.Player{
+		{Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{Name: "Tanaka Kenji", Dojo: "Osaka"},
+	}
+	matches := []state.MatchResult{
+		// SideAID left empty on purpose: this row needs byName to resolve
+		// "Tanaka Kenji", which is exactly the ambiguous case.
+		{ID: "Pool A-0", SideA: "Tanaka Kenji", SideB: "Suzuki Hiro"},
+	}
+	assert.PanicsWithValue(t,
+		"idstamp.StampIDs: roster has two players named Tanaka Kenji (legal across dojos), "+
+			"and a match row needs byName to resolve that ambiguous name -- a bare-name lookup "+
+			"cannot tell them apart, so stamp this fixture's match-side ids by hand instead of calling StampIDs",
+		func() { StampIDs(players, matches) },
+	)
+}
+
+// TestStampIDs_DuplicateRosterNameNoPanicWhenNeverConsulted is the negative
+// twin: a same-name roster is perfectly legal on its own, and StampIDs must
+// not panic merely because the ROSTER contains a duplicate name -- only
+// when a match row actually relies on byName to resolve it. Every match
+// row here already carries explicit ids for the same-name pair (the
+// pattern TestStampIDs_SameNameSideDoesNotGuessWinner also exercises), so
+// byName is never consulted for the ambiguous name at all.
+func TestStampIDs_DuplicateRosterNameNoPanicWhenNeverConsulted(t *testing.T) {
+	players := []domain.Player{
+		{Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{Name: "Tanaka Kenji", Dojo: "Osaka"},
+	}
+	matches := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Tanaka Kenji", SideAID: "tokyo-id", SideB: "Tanaka Kenji", SideBID: "osaka-id"},
+	}
+	assert.NotPanics(t, func() { StampIDs(players, matches) })
+	assert.Equal(t, "tokyo-id", matches[0].SideAID, "an already-stamped ambiguous side must be left untouched")
+	assert.Equal(t, "osaka-id", matches[0].SideBID)
+}
+
 func TestStampPoolIDs(t *testing.T) {
 	pools := []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{

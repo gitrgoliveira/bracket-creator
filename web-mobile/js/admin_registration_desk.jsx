@@ -25,7 +25,8 @@
 // participants_updated subscription that reconciles other desks' changes, and
 // onUpdate() pushes back to the parent so navigating "Back" shows fresh data.
 
-import { checkinPid, checkinApiPid, NO_ID_HINT } from './data.jsx';
+import { checkinPid, checkinApiPid } from './data.jsx';
+import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 
 const { useState: useStateRD, useEffect: useEffectRD, useRef: useRefRD, useMemo: useMemoRD, useCallback: useCallbackRD } = React;
 
@@ -77,6 +78,14 @@ function rdPid(p) {
 // composite rule.
 function rdApiPid(p) {
   return checkinApiPid(p);
+}
+
+// skippedNoIdMsg: the pluralized "N entries have no id" clause, shared by
+// the check-in toasts that report how many entries checkPersonEntries
+// filtered out for having no id at all (rdApiPid returns "" for them, so a
+// write can only 404). Callers append their own remedy/consequence text.
+function skippedNoIdMsg(n) {
+  return `${n} ${n === 1 ? "entry has" : "entries have"} no id`;
 }
 
 // Subsequence score for one token against a normalized haystack. Returns null
@@ -384,7 +393,7 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
           {player.dojo && <span className="rd-row__dojo">{player.dojo}</span>}
           {danGrade && <span className="rd-row__dan">{danGrade}</span>}
           {player.seed ? <span className="rd-row__seed">Seed {player.seed}</span> : null}
-          {idLessCompRow && <span className="rd-row__noid" title={NO_ID_HINT}>{NO_ID_HINT}</span>}
+          {idLessCompRow && <NoIdHint />}
         </div>
         {mode === "all" && <RdOtherChips entries={entries} onToggle={onToggle} busy={busy} label="In" />}
         {mode === "comp" && others.length > 0 && <RdOtherChips entries={others} onToggle={onToggle} busy={busy} label="Also in" />}
@@ -724,13 +733,13 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     try {
       const { failed, total, skipped } = await checkPersonEntries(rec, makeChecked);
       if (total === 0) {
-        if (skipped) showToast(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id: save the roster once and retry`, "error");
+        if (skipped) showToast(`${skippedNoIdMsg(skipped)}: save the roster once and retry`, "error");
         return;
       }
       if (failed) {
         showToast(`${failed} of ${total} check-in(s) failed${skipped ? `, ${skipped} have no id` : ""}: reloading`, "error");
       } else {
-        if (skipped) showToast(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id and were skipped`, "error");
+        if (skipped) showToast(`${skippedNoIdMsg(skipped)} and were skipped`, "error");
         if (makeChecked) {
           announceHandoff(rec.name, rec.entries.filter(({ player }) => player.id).map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
         }
@@ -757,7 +766,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       if (failed || skipped) {
         const parts = [];
         if (failed) parts.push(`${failed} check-in(s) failed`);
-        if (skipped) parts.push(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id`);
+        if (skipped) parts.push(skippedNoIdMsg(skipped));
         showToast(`${parts.join(", ")}: reloading`, "error");
       }
       await refresh();

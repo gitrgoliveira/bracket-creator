@@ -13,6 +13,7 @@ import { nameOf } from './result_slot.jsx';
 // own truthiness check now closes that gap, so the banner delegates here
 // like every other identity-keyed surface.
 import { checkinPid } from './data.jsx';
+import { NO_ID_POOL_HINT, NoIdHint } from './data_integrity.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const EmptyState = window.EmptyState;
@@ -75,7 +76,12 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
     if (side && typeof side === "object") return side;
     if (!side) return { id: "", name: "" };
     const p = sideId ? playerMap[sideId] : playerMap[side];
-    return p || { id: sideId || side, name: side };
+    // bc-pnum: an unresolved side gets id "", never the name -- resolveSide
+    // (api_serializers.jsx) stopped inventing an id from the name, so this
+    // matches that contract instead of reintroducing it here. Consumers key
+    // on `side.id || side.name` (sideLookupKey), which already falls
+    // through to the name when id is "".
+    return p || { id: sideId || "", name: side };
   };
   // Pool daihyosen ("Pool X-DH-N") and tiebreaker ("Pool X-TB-N") bouts are
   // single representative/ippon-shobu matches, scored as INDIVIDUAL even in a
@@ -349,11 +355,11 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
         const groupKey = `${poolName}::${minPosition}`;
         const isBusy = !!chusenBusy[groupKey];
         const groupErrMsg = chusenGroupErr[groupKey] || null;
-        // overridePoolRank now requires playerId (operator ruling bc-pnum:
-        // the server resolves a pool member by id only and 400s outright
-        // without one); an id-less member here would otherwise let the
-        // operator submit a request shaped to fail. Mirrors the
-        // league-tiebreak buttons' own idsMissing gate below in this file.
+        // overridePoolRank requires playerId (operator ruling bc-pnum: the
+        // server resolves a pool member by id only and 400s outright
+        // without one). Disabling the button here, with NoIdHint's remedy,
+        // replaces letting the operator click through to that 400. Mirrors
+        // the league-tiebreak buttons' own idsMissing gate below.
         const idsMissing = members.some(m => !m.id);
 
         // Effective value for a member's input, keyed by the member's
@@ -487,7 +493,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                 Record chusen result
               </button>
               {idsMissing && (
-                <span className="field__hint">One of these teams has no id yet: re-save the roster, then retry.</span>
+                <NoIdHint text={NO_ID_POOL_HINT} />
               )}
             </div>
             {groupErrMsg && (
@@ -514,12 +520,9 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
       {tiebreakCandidates.map((group) => {
         const names = group.teamNames || [];
         const teamIds = groupTeamIds(group.teams, names);
-        // teamIds is REQUIRED by the server (operator ruling bc-pnum); an
-        // undefined teamIds means this group has an id-less team and the
-        // request can only 400. Disabling here, with a hint, replaces
-        // letting the operator click through to that 400 -- the competition
-        // Overview's missing-ids notice already reports this exact error
-        // state, so the hint below just points back at the same remedy.
+        // teamIds is REQUIRED the same way (operator ruling bc-pnum): see
+        // the chusen idsMissing comment above for why an id-less team
+        // disables the button instead of letting the write 400.
         const idsMissing = !teamIds;
         const hasDH = dhMatchExistsForGroup(names);
         const dhScored = hasDH && dhMatchScoredForGroup(names);
@@ -547,7 +550,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     Run tie-breaker
                   </button>
                   {idsMissing && (
-                    <span className="field__hint">One of these teams has no id yet: re-save the roster, then retry.</span>
+                    <NoIdHint text={NO_ID_POOL_HINT} />
                   )}
                 </>
               ) : (
@@ -562,7 +565,7 @@ function AdminPools({ c, pools, poolMatches, standings, tweaks, onEditScore, pas
                     Remove unscored tie-breaker
                   </button>
                   {idsMissing && (
-                    <span className="field__hint">One of these teams has no id yet: re-save the roster, then retry.</span>
+                    <NoIdHint text={NO_ID_POOL_HINT} />
                   )}
                   {dhScored && (
                     <span className="field__hint">Tie-breaker is running or already scored: score it to continue.</span>

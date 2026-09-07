@@ -671,15 +671,6 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
   );
 }
 
-// bc-pnum: does `side` (a match's sideA/sideB, {id,name}) refer to the
-// withdrawn player? Delegates to sameCompetitor (competitor_identity.jsx,
-// the one owner of the attribution rule): id decides whenever BOTH the
-// withdrawn player and this side carry one, name only when NEITHER does,
-// and the mixed case (one has an id, the other doesn't) is never guessed.
-function sideIsWithdrawnPlayer(side, withdrawnPlayer) {
-  return sameCompetitor(withdrawnPlayer, side);
-}
-
 // T098: "Remaining matches for [player]" panel. After a kiken decision lands,
 // look up every scheduled match where the just-withdrawn player still appears
 // and offer a one-click "Award default win to opponent" for each. The button
@@ -712,7 +703,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
           : [];
         const matchesForPlayer = all.filter(m => {
           if (m.status !== "scheduled") return false;
-          return sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer) || sideIsWithdrawnPlayer(m.sideB, withdrawnPlayer);
+          return sameCompetitor(m.sideA, withdrawnPlayer) || sameCompetitor(m.sideB, withdrawnPlayer);
         });
         setMatches(matchesForPlayer);
       } catch (e) {
@@ -726,7 +717,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     // Figure out which side the withdrawn player occupies in THIS match: 
     // that's the side that gets the fusenpai (default loss). Pool matches:
     // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
-    const isOnA = sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer);
+    const isOnA = sameCompetitor(m.sideA, withdrawnPlayer);
     const decisionBy = isOnA ? "aka" : "shiro";
     setBusyId(m.id);
     // Clear any previous verdict before this attempt. Without it the panel's
@@ -781,7 +772,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       {matches && matches.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
           {matches.map(m => {
-            const isOnA = sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer);
+            const isOnA = sameCompetitor(m.sideA, withdrawnPlayer);
             const opponent = isOnA ? m.sideB : m.sideA;
             return (
               <li key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -1144,7 +1135,6 @@ export {
   daihyosenEnchoFields,
   decideDrawToggle,
   shouldBlockScoringKeys,
-  sideIsWithdrawnPlayer,
   useAdoptFromServer,
   EnchoControl,
   DecisionPrompt,

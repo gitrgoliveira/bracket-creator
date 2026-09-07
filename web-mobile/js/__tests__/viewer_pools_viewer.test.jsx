@@ -758,6 +758,22 @@ describe('PoolNumberedMatchRow DH badge id-vs-name (bc-pnum)', () => {
     const shiroSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--shiro'));
     expect(findAll(shiroSide, n => n?.type === DHBadge)).toHaveLength(0);
   });
+
+  // bc-pnum item 1 (BEHAVIOUR CHANGE): sameCompetitor never guesses a mixed
+  // pair -- an id-less winner beside an id-carrying side badges NOTHING,
+  // rather than falling through to a name compare.
+  it('badges no side when the winner is id-less but a side carries an id (mixed pair, never guess)', () => {
+    const m = {
+      id: 'Pool A-DH-0',
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: '', name: 'Tanaka' },
+      winner: { id: '', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+    const dhBadges = findAll(tree, n => n?.type === DHBadge);
+    expect(dhBadges).toHaveLength(0);
+  });
 });
 
 // ------------------------------------------------------------------
@@ -808,6 +824,23 @@ describe('PoolMatchRow win highlight id-vs-name (bc-pnum)', () => {
     const tree = runtime.mount(PoolMatchRow, { m, onClick: null });
     const winSides = findAll(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-row__side--win'));
     expect(winSides).toHaveLength(1);
+  });
+
+  // bc-pnum item 1 (BEHAVIOUR CHANGE): routing through sameCompetitor means
+  // a mixed pair -- an id-less winner beside an id-carrying side -- is
+  // never guessed at by name. Before this item, aWin/bWin fell through to
+  // `winnerName === aRawName` whenever the winner carried no id at all,
+  // regardless of whether the side itself had one.
+  it('highlights no side when the winner is id-less but a side carries an id (mixed pair, never guess)', () => {
+    const m = {
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: '', name: 'Tanaka' },
+      winner: { id: '', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolMatchRow, { m, onClick: null });
+    const winSides = findAll(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-row__side--win'));
+    expect(winSides).toHaveLength(0);
   });
 });
 

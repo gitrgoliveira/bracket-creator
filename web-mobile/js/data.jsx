@@ -469,17 +469,6 @@ function checkinApiPid(p) {
   return (p && p.id) || "";
 }
 
-// NO_ID_HINT: the one operator-facing sentence for "this row has no id".
-// bc-pnum: admin_participants.jsx and
-// admin_registration_desk.jsx each defined their own byte-identical copy;
-// hoisted here since both already depend on this module for checkinPid/
-// checkinApiPid. Exact remedy sentence internal/helper/participant_ids.go
-// MissingParticipantIDsMessage uses (and 1b's Overview data-issues notice
-// renders verbatim), so an operator seeing any of these surfaces reads the
-// same words. checkinApiPid's own doc comment above explains WHY a row can
-// have no id at all; this is what every consumer says about it.
-const NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
-
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
@@ -487,11 +476,9 @@ export {
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
   assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid, checkinApiPid,
-  NO_ID_HINT
 };
 
 if (typeof window !== 'undefined') {
-  window.NO_ID_HINT = NO_ID_HINT;
   window.SAMPLE_TOURNAMENTS = SAMPLE_TOURNAMENTS;
   window.buildTournament = buildTournament;
   window.buildCompetition = buildCompetition;

@@ -1234,6 +1234,48 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(s2Cell.props.className).toContain('league-matrix__cell--empty');
     expect(s2Cell.props.title).toContain('not played');
   });
+
+  // bc-pnum item 1 (BEHAVIOUR CHANGE): rowWon now routes through
+  // sameCompetitor, which never guesses a mixed pair. Before this item, an
+  // id-less winner fell through to a bare name compare against rowPlayer
+  // regardless of whether rowPlayer itself carried a real id.
+  //
+  // Opus review (MEDIUM): rowWon's own "else" used to assume colPlayer won
+  // whenever rowWon was false, so refusing the win guess above painted BOTH
+  // off-diagonal cells --loss -- a claim just as unattributed as the win
+  // would have been. A completed, non-draw match with no resolvable winner
+  // must render a neutral --unattributed cell instead, on both sides.
+  it('never guesses a mixed pair: an id-less winner beside id-carrying players shows no win or loss cell, only unattributed', () => {
+    const idPlayers = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'pA', name: 'Alice' },
+        { id: 'pB', name: 'Bob' },
+      ],
+    };
+    const m = {
+      id: 'Pool A-1', sideA: { id: 'pA', name: 'Alice' }, sideB: { id: 'pB', name: 'Bob' },
+      status: 'completed',
+      // Winner recorded with no id at all even though both players carry
+      // real ids (e.g. a legacy write path): sameCompetitor refuses to guess.
+      winner: { id: '', name: 'Alice' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: idPlayers, matches: [m], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    expect(winCell).toBeFalsy();
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
+    expect(lossCell).toBeFalsy();
+    const unattributedCells = cells.filter(c => c.props?.className?.includes('league-matrix__cell--unattributed'));
+    // Both off-diagonal cells (Alice-vs-Bob and Bob-vs-Alice) are equally
+    // unattributed: neither player is confirmed as the winner.
+    expect(unattributedCells).toHaveLength(2);
+    unattributedCells.forEach(c => {
+      expect(c.props.title).toContain('Result not attributed');
+      expect(c.props['aria-label']).toContain('Result not attributed');
+    });
+  });
 });
 
 // mp-7x4n: ViewerOverview opens MatchViewerModal in self-run mode,

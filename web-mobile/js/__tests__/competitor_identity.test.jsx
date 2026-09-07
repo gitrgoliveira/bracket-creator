@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sameCompetitor, idOf, nameOf } from '../competitor_identity.jsx';
+import { sameCompetitor, idOf, nameOf, competitorKey } from '../competitor_identity.jsx';
 
 // bc-pnum: the ONE predicate for competitor-identity
 // attribution. both-id / neither-id / mixed, per the operator ruling.
@@ -43,5 +43,59 @@ describe('idOf / nameOf', () => {
     expect(idOf('Sato')).toBe('');
     expect(nameOf({ id: 'S1', name: 'Sato' })).toBe('Sato');
     expect(nameOf('Sato')).toBe('Sato');
+  });
+});
+
+// bc-pnum item 2: competitorKey is the id-decides-else-name rule as a
+// single string, so sameCompetitor is expressible as "equal non-empty
+// keys" and every consumer Set (watchlist, picked) builds off the same
+// primitive instead of restating the rule.
+describe('competitorKey', () => {
+  it('keys by id ("id:"+id) whenever the record carries one', () => {
+    expect(competitorKey({ id: 'S1', name: 'Sato' })).toBe('id:S1');
+  });
+
+  it('keys by name ("nm:"+name) whenever the record carries no id', () => {
+    expect(competitorKey({ id: '', name: 'Sato' })).toBe('nm:Sato');
+    expect(competitorKey('Sato')).toBe('nm:Sato');
+  });
+
+  it('is "" (unkeyable) for a record with neither an id nor a name', () => {
+    expect(competitorKey({ id: '', name: '' })).toBe('');
+    expect(competitorKey('')).toBe('');
+    expect(competitorKey(null)).toBe('');
+  });
+
+  it('applies the normalizer only to the name branch, never to an id', () => {
+    const upper = (s) => s.toUpperCase();
+    expect(competitorKey({ id: 'S1', name: 'sato' }, upper)).toBe('id:S1');
+    expect(competitorKey({ id: '', name: 'sato' }, upper)).toBe('nm:SATO');
+  });
+
+  it('sameCompetitor is exactly "equal non-empty keys" with the identity normaliser', () => {
+    expect(sameCompetitor({ id: 'S1', name: 'Sato' }, { id: 'S1', name: 'Sato' }))
+      .toBe(competitorKey({ id: 'S1', name: 'Sato' }) === competitorKey({ id: 'S1', name: 'Sato' }));
+    // Mixed pair: an "id:" key and a "nm:" key are never equal, whatever
+    // their values -- this is what makes sameCompetitor refuse to guess.
+    expect(competitorKey({ id: 'S1', name: 'Sato' })).not.toBe(competitorKey({ id: '', name: 'Sato' }));
+  });
+
+  // The watchlist Set (buildWatchedSets, viewer_watchlist_core.jsx) folds
+  // case/whitespace on the name branch; the picked-player Set
+  // (buildPickedSets, viewer_schedule.jsx) uses the identity normaliser
+  // (exact-case), on purpose (see that file's own comment on why). The two
+  // conventions must differ ONLY in that folding -- same "id:"/"nm:" shape,
+  // same mutual-exclusion behaviour -- never in the underlying rule.
+  it('the watchlist (case-insensitive) and picked (identity) key conventions differ only in case folding', () => {
+    const p = { id: '', name: 'SATO' };
+    const watchlistNormalize = (s) => s.trim().toLowerCase();
+    const watchlistKey = competitorKey(p, watchlistNormalize);
+    const pickedKey = competitorKey(p);
+    expect(watchlistKey).toBe('nm:sato');
+    expect(pickedKey).toBe('nm:SATO');
+    expect(watchlistKey).not.toBe(pickedKey);
+    // Same shape once folded: both are name-fallback keys for the same
+    // underlying name, differing only in case.
+    expect(watchlistKey).toBe(pickedKey.toLowerCase());
   });
 });

@@ -5,7 +5,7 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
-import { NO_ID_HINT } from './data.jsx';
+import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -1174,7 +1174,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                             hint. Distinct from the 1e ruling above, which is about
                             the id STRING display, not the disabled-control reason. */}
                         {!p.id && c.checkInEnabled && (
-                          <span className="seed-row__noid" title={NO_ID_HINT}> · {NO_ID_HINT}</span>
+                          <NoIdHint prefix=" · " />
                         )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"

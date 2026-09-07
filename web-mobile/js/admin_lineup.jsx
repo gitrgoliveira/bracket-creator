@@ -19,6 +19,7 @@
 // internal/helper/tournament.go).
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
+import { idOf, nameOf } from './competitor_identity.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
@@ -89,9 +90,13 @@ function mergeRosterWithAssigned(baseRoster, lineup) {
 
 // Resolve the team's stable ID. Backend uses player.id (UUID assigned
 // at first persist); pre-persist teams may not have one yet: fall back
-// to name as a best-effort key.
+// to name as a best-effort key. idOf/nameOf (competitor_identity.jsx) read
+// the lowercase id/name; the interleaved ID/Name fallback is a legacy/
+// malformed-shape defense whose PRECEDENCE (id, ID, name, Name -- pinned by
+// a dedicated test) sideLookupKey's simple id-else-name shape can't
+// reproduce, so this stays a local four-way chain rather than a single call.
 function teamIdOf(team) {
-  return team?.id || team?.ID || team?.name || team?.Name || "";
+  return idOf(team) || team?.ID || nameOf(team) || team?.Name || "";
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {

@@ -359,7 +359,7 @@ describe('AdminRegistrationDeskPage folds the id-less reason into aria-label and
     enterCompMode(container);
     const checkbox = getByRole('checkbox', { name: /check in kenji sato.*no id on file/i });
     expect(checkbox).toBeTruthy();
-    const inlineHint = container.querySelector('.rd-row__noid');
+    const inlineHint = container.querySelector('.noid-hint');
     expect(inlineHint?.textContent).toBe('No id on file. Save the roster once and the ids are assigned.');
   });
 
@@ -375,7 +375,7 @@ describe('AdminRegistrationDeskPage folds the id-less reason into aria-label and
     enterCompMode(container);
     const checkbox = getByRole('checkbox', { name: 'Check in Kenji Sato' });
     expect(checkbox).toBeTruthy();
-    expect(container.querySelector('.rd-row__noid')).toBeNull();
+    expect(container.querySelector('.noid-hint')).toBeNull();
   });
 });
 

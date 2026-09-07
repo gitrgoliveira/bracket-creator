@@ -1577,7 +1577,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
       if (!mountedRef.current) return;
       setResults(body.results || []);
       const hasErrors = (body.results || []).some(r => r.error);
-      // bc-pnum [review] round 2, item 2: a row can land with a WARNING
+      // bc-pnum: a row can land with a WARNING
       // (currently only the import-boundary prefix reassignment) rather
       // than an error -- the row succeeded, but every tag this
       // competition already had printed under the old prefix now names a
@@ -1738,7 +1738,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                       {importRowErrorText(r.error)}
                     </div>
                   )}
-                  {/* bc-pnum [review] round 2, item 2: the row succeeded (no
+                  {/* bc-pnum: the row succeeded (no
                       .import-result__error, no "not imported" badge), but
                       needs the operator's attention -- currently only the
                       import-boundary prefix reassignment, whose already-
@@ -1752,7 +1752,7 @@ function AdminImportPage({ tournament, onBack, onImported, onLogout, onViewerMod
                   )}
                 </div>
               ))}
-              {/* bc-pnum [review] round 2, item 2: the auto-navigate banner
+              {/* bc-pnum: the auto-navigate banner
                   only fires when nothing needs a second look. A row can
                   succeed with a warning (currently only a reassigned
                   import-boundary prefix), and navigating away then would

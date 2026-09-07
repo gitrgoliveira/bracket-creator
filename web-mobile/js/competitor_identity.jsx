@@ -24,10 +24,13 @@
 // the intentional recovery path for resolveSide's own "no id at all"
 // fallback (api_serializers.jsx), and is why callers like
 // match_scoreboard.jsx's useTeamLineups, admin_scoring_team.jsx's
-// sideAKey/rosterForSide/teamIdForSide, admin_schedule_lineup.jsx's
-// sideKey/matchesKey, and pickCopySource build an `id || name` key rather
-// than calling sameCompetitor. Keys and lookups may compose; comparisons of
-// two already-resolved records must go through sameCompetitor.
+// sideAKey/rosterForSide/teamIdForSide, and admin_schedule_lineup.jsx's
+// sideKey/matchesKey call sideLookupKey (below) rather than sameCompetitor.
+// admin_lineup.jsx's teamIdOf is the one exception: its legacy ID/Name
+// fallback has a precedence sideLookupKey's simple shape can't reproduce,
+// so it composes idOf/nameOf directly instead (see that function's own
+// comment). Keys and lookups may compose; comparisons of two
+// already-resolved records must go through sameCompetitor.
 //
 // Accepts a {id,name} object OR a bare name string (some callers -- team
 // sub-bout winners/sides -- carry no id concept on the wire at all, by
@@ -42,20 +45,28 @@ export function nameOf(x) {
   return (x && typeof x === "object" ? x.name : x) || "";
 }
 
-export function sameCompetitor(a, b) {
-  const aId = idOf(a);
-  const bId = idOf(b);
-  if (aId && bId) return aId === bId;
-  if (!aId && !bId) {
-    const an = nameOf(a);
-    const bn = nameOf(b);
-    return !!an && an === bn;
-  }
-  return false;
+// competitorKey: id-decides-else-name as a single string, so THE RULE above
+// falls out of comparing two keys rather than being restated at every call
+// site. "id:"+id when x carries one; else "nm:"+normalizeName(name) when x
+// carries a name; else "" (unkeyable). The "id:"/"nm:" prefixes are why a
+// mixed pair (one keyed, one not) can never collide: an id key and a name
+// key are never equal regardless of their values. `normalizeName` lets a
+// caller fold case/whitespace for a name-based Set (e.g. the watchlist);
+// sameCompetitor below passes none, since ATTRIBUTION compares exact names.
+export function competitorKey(x, normalizeName = (s) => s) {
+  const id = idOf(x);
+  if (id) return "id:" + id;
+  const name = normalizeName(nameOf(x));
+  return name ? "nm:" + name : "";
 }
 
-if (typeof window !== "undefined") {
-  window.sameCompetitor = sameCompetitor;
-  window.competitorIdOf = idOf;
-  window.competitorNameOf = nameOf;
+export function sameCompetitor(a, b) {
+  const ka = competitorKey(a);
+  return !!ka && ka === competitorKey(b);
+}
+
+// sideLookupKey: the LOOKUP counterpart to sameCompetitor -- id else name, a
+// roster/lineup key composite (not a peer comparison; see this file's header).
+export function sideLookupKey(side) {
+  return idOf(side) || nameOf(side);
 }

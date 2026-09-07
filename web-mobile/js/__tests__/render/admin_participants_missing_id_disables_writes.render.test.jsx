@@ -93,7 +93,10 @@ describe('AdminParticipants disables writes for an id-less row (bc-pnum)', () =>
 
     const checkbox = container.querySelector('input[type="checkbox"]');
     expect(checkbox.getAttribute('aria-label')).toContain('No id on file');
-    const inlineHint = container.querySelector('.seed-row__noid');
+    // NoIdHint's `prefix` prop (data_integrity.jsx) renders the " · "
+    // separator INSIDE the span, matching the sibling .seed-row__id's own
+    // leading separator.
+    const inlineHint = container.querySelector('.noid-hint');
     expect(inlineHint?.textContent).toBe(' · No id on file. Save the roster once and the ids are assigned.');
   });
 
@@ -107,6 +110,6 @@ describe('AdminParticipants disables writes for an id-less row (bc-pnum)', () =>
 
     const checkbox = container.querySelector('input[type="checkbox"]');
     expect(checkbox.getAttribute('aria-label')).not.toContain('No id on file');
-    expect(container.querySelector('.seed-row__noid')).toBeNull();
+    expect(container.querySelector('.noid-hint')).toBeNull();
   });
 });

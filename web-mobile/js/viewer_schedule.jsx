@@ -2,10 +2,10 @@
 // Pure file split. no behaviour change.
 
 import { poolLabel, tournamentMatches, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, sideIsWatched } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, matchParticipantNames, useWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildRoster, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { withNumber } from './match_scoreboard.jsx';
 import { MatchViewerModal, localQueueLabelCompact } from './viewer_match.jsx';
-import { sameCompetitor } from './competitor_identity.jsx';
+import { sameCompetitor, competitorKey } from './competitor_identity.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const EmptyState = window.EmptyState;
@@ -50,9 +50,9 @@ export function usePrimaryWatch() {
 // "Upcoming" = status !== "completed": we keep `running` matches in the
 // list so a coach can spot a watched player who just started.
 //
-// buildWatchedSets + sideIsWatched (viewer_watchlist_core.jsx) are THE ONE
-// producer + predicate every case-insensitive watch surface must share.
-// This used to build its own watchedIds/watchedNames pair inline,
+// buildWatchedSets + matchInvolvesWatchedSet (viewer_watchlist_core.jsx) are
+// THE ONE producer + predicate every case-insensitive watch surface must
+// share. This used to build its own watchedIds/watchedNames pair inline,
 // inclusively (an entry's name landed in watchedNames even when that same
 // entry also carried an id), so an id-less side sharing an id-carrying
 // watched entry's name surfaced here even though the highlight predicate
@@ -60,14 +60,9 @@ export function usePrimaryWatch() {
 // surface an id-less "Sato" row.
 export function buildWatchlistUpcoming(watched, allMatches, max = WATCHED_UPCOMING_MAX) {
   const sets = buildWatchedSets(watched);
-  if (sets.ids.size === 0 && sets.names.size === 0) return [];
+  if (sets.size === 0) return [];
   const list = Array.isArray(allMatches) ? allMatches : [];
-  const upcoming = list.filter((m) => {
-    if (!m || m.status === "completed") return false;
-    const [aId, bId] = matchParticipantIds(m);
-    const [aName, bName] = matchParticipantNames(m);
-    return sideIsWatched(aId, aName, sets) || sideIsWatched(bId, bName, sets);
-  });
+  const upcoming = list.filter((m) => m && m.status !== "completed" && matchInvolvesWatchedSet(m, sets));
   upcoming.sort((x, y) => {
     const xt = x.scheduledAt || "99:99";
     const yt = y.scheduledAt || "99:99";
@@ -202,46 +197,40 @@ export function PlayerMultiFilter({ tournament, picked, setPicked, dojoText, set
 }
 
 // Same RULE as sideIsWatched (viewer_watchlist_core.jsx: id decides when
-// the SIDE carries one, name only when it doesn't), kept as a separate
-// function because the case-sensitivity convention differs: picked-player
-// names here compare exact-case (as applyFilters/matchHighlightedBy always
-// did), while sideIsWatched's watchlist names compare case-insensitively
-// (as buildWatchlistUpcoming always did) -- merging the two would silently
-// change one or the other's matching behaviour.
-function sideMatchesPickedSet(side, ids, names) {
+// the SIDE carries one, name only when it doesn't), via the same
+// competitorKey primitive -- but with the IDENTITY name normaliser (no case
+// folding), not the watchlist's case-insensitive one: picked-player names
+// here compare exact-case (as applyFilters/matchHighlightedBy always did),
+// while the watchlist's names compare case-insensitively (as
+// buildWatchlistUpcoming always did). Passing a different normaliser to the
+// same key function is what keeps the two conventions apart without
+// restating the mutual-exclusion rule a second time.
+function sideMatchesPickedSet(side, pickedSet) {
   if (!side) return false;
-  return side.id ? ids.has(side.id) : (!!side.name && names.has(side.name));
+  const key = competitorKey(side);
+  return !!key && pickedSet.has(key);
 }
 
-// buildPickedSets: the {ids, names} shape sideMatchesPickedSet consults,
-// built EXCLUSIVELY per entry like buildWatchedSets (viewer_watchlist_core.jsx)
-// -- an entry WITH an id contributes to `ids` ONLY, one WITHOUT contributes
-// its name to `names` ONLY. the two inline builders
-// this replaced (one copy-pasted into each of applyFilters/matchHighlightedBy)
-// added a picked entry's name to `names` UNCONDITIONALLY, even when that
-// same entry also carried an id, so an id-less side sharing an id-carrying
-// picked entry's name matched by name -- a mixed pair sameCompetitor's rule
-// forbids everywhere else in this file. `.filter(Boolean)` is unnecessary
-// now: the `if (p.id) ... else if (p.name)` split already only adds a
-// truthy value to either set.
+// buildPickedSets: the Set sideMatchesPickedSet consults, keyed by
+// competitorKey exactly like buildWatchedSets (viewer_watchlist_core.jsx)
+// -- mutual exclusion per entry (an id-carrying entry can never ALSO
+// contribute a name key) falls out of the key shape. The two inline
+// builders this replaced (one copy-pasted into each of
+// applyFilters/matchHighlightedBy) added a picked entry's name
+// UNCONDITIONALLY, even when that same entry also carried an id, so an
+// id-less side sharing an id-carrying picked entry's name matched by name
+// -- a mixed pair sameCompetitor's rule forbids everywhere else in this file.
 function buildPickedSets(picked) {
-  const ids = new Set();
-  const names = new Set();
-  (Array.isArray(picked) ? picked : []).forEach((p) => {
-    if (!p) return;
-    if (p.id) ids.add(p.id);
-    else if (p.name) names.add(p.name);
-  });
-  return { ids, names };
+  return new Set((Array.isArray(picked) ? picked : []).map((p) => competitorKey(p)).filter(Boolean));
 }
 
 export function applyFilters(matches, picked, dojoText, compFilter) {
-  const { ids, names } = buildPickedSets(picked);
+  const pickedSet = buildPickedSets(picked);
   const dt = (dojoText || "").trim().toLowerCase();
   return matches.filter((m) => {
     if (compFilter !== "all" && m.compId !== compFilter) return false;
     if (picked.length > 0) {
-      const hit = sideMatchesPickedSet(m.sideA, ids, names) || sideMatchesPickedSet(m.sideB, ids, names);
+      const hit = sideMatchesPickedSet(m.sideA, pickedSet) || sideMatchesPickedSet(m.sideB, pickedSet);
       if (!hit) return false;
     }
     if (dt) {
@@ -253,8 +242,8 @@ export function applyFilters(matches, picked, dojoText, compFilter) {
 }
 
 export function matchHighlightedBy(m, picked, dojoText) {
-  const { ids, names } = buildPickedSets(picked);
-  if (picked.length > 0 && (sideMatchesPickedSet(m.sideA, ids, names) || sideMatchesPickedSet(m.sideB, ids, names))) return true;
+  const pickedSet = buildPickedSets(picked);
+  if (picked.length > 0 && (sideMatchesPickedSet(m.sideA, pickedSet) || sideMatchesPickedSet(m.sideB, pickedSet))) return true;
   const dt = (dojoText || "").trim().toLowerCase();
   if (dt && [m.sideA?.name, m.sideB?.name, m.sideA?.dojo, m.sideB?.dojo, m.sideA?.number, m.sideB?.number].some((s) => (s || "").toLowerCase().includes(dt))) return true;
   return false;
@@ -263,9 +252,10 @@ export function matchHighlightedBy(m, picked, dojoText) {
 export function TWMatch({ m, highlight, onClick }) {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
-  // once both are id-less).
-  const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
-  const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
+  // once both are id-less). No presence guard: sameCompetitor(null, x) is
+  // already false.
+  const aWin = sameCompetitor(m.winner, m.sideA);
+  const bWin = sameCompetitor(m.winner, m.sideB);
   const scoreStr = m.status === "completed" ? window.matchScoreStr(m) : null;
   // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the

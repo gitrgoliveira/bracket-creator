@@ -169,9 +169,10 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
-  // once both are id-less).
-  const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
-  const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
+  // once both are id-less). No presence guard: sameCompetitor(null, x) is
+  // already false.
+  const aWin = sameCompetitor(m.winner, m.sideA);
+  const bWin = sameCompetitor(m.winner, m.sideB);
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.

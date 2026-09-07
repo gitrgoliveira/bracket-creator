@@ -114,4 +114,27 @@ func TestPoolMatchesMissingSideIDsMessage(t *testing.T) {
 		assert.NotContains(t, msg, fmt.Sprintf("Side%dA vs Side%dB", helper.MaxNamedRows, helper.MaxNamedRows),
 			"a row past the naming cap is not individually named")
 	})
+
+	t.Run("one blank side names only the side that is present, never a dangling vs", func(t *testing.T) {
+		// A bye-shaped row: SideB is legitimately empty, but SideA itself
+		// has no id, so the row is still affected.
+		matches := []state.MatchResult{
+			{ID: "Pool A-0", SideA: "Alice", SideAID: "", SideB: ""},
+		}
+		msg := PoolMatchesMissingSideIDsMessage(matches)
+		assert.Contains(t, msg, "Alice")
+		assert.NotContains(t, msg, "Alice vs ", "must not print a dangling \"vs\" when SideB is blank")
+		assert.NotContains(t, msg, " vs ")
+	})
+
+	t.Run("both sides blank falls back to the match id", func(t *testing.T) {
+		// Only reachable via a hand-edited pool-matches.csv: a Winner name
+		// recorded with no WinnerID and no side names at all.
+		matches := []state.MatchResult{
+			{ID: "Pool A-7", SideA: "", SideB: "", Winner: "Ghost"},
+		}
+		msg := PoolMatchesMissingSideIDsMessage(matches)
+		assert.Contains(t, msg, "Pool A-7")
+		assert.NotContains(t, msg, " vs ", "must not print a bare \" vs \" when neither side is named")
+	})
 }

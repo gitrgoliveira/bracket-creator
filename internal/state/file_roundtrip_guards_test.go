@@ -280,7 +280,7 @@ func fillNonZero(v reflect.Value) {
 		elem := reflect.New(v.Type().Elem()).Elem()
 		fillNonZero(elem)
 		v.Set(reflect.Append(v, elem))
-	case reflect.Ptr:
+	case reflect.Pointer:
 		v.Set(reflect.New(v.Type().Elem()))
 		fillNonZero(v.Elem())
 	case reflect.Struct:

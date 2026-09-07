@@ -206,13 +206,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Key by (normalizedName, normalizedDojo), NOT name alone. Tier-1
 		// dedup allows two same-named competitors from different dojos, so a
-		// name-only key would transfer check-in state between distinct people.
-		checkInKey := func(name, dojo string) string {
-			return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
-		}
+		// name-only key would transfer check-in state between distinct
+		// people. helper.CompetitorKey("", name, dojo) is exactly that
+		// composite (with an "nd:" prefix, harmless here: the key never
+		// leaves this local map).
 		checkedInByKey := make(map[string]bool, len(existing))
 		for _, ep := range existing {
-			checkedInByKey[checkInKey(ep.Name, ep.Dojo)] = ep.CheckedIn
+			checkedInByKey[helper.CompetitorKey("", ep.Name, ep.Dojo)] = ep.CheckedIn
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -233,7 +233,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Metadata:     p.Metadata,
 				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
+				CheckedIn:    checkedInByKey[helper.CompetitorKey("", p.Name, p.Dojo)],
 			})
 		}
 

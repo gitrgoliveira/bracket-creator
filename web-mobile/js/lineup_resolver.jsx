@@ -41,34 +41,33 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
   return null;
 }
 
-// resolveLineupTeamId maps a match-side to the participant id that lineups
-// are stored under. Accepts EITHER the resolved side object ({id, name}, as
-// produced by api_serializers.jsx) or a bare name/id string for legacy
-// callers that only ever had one value. TeamLineups are keyed server-side by
-// the participant's real id; passing a bare name straight through can make
-// the lineup GET 404 and the per-match (and round) lineup never reaches the
-// scoring grid, so this maps a name-keyed side to its real id.
+// resolveLineupTeamId maps a match-side key to the participant id that
+// lineups are stored under. Depending on the API path, a match side's `id`
+// may be EITHER the participant's real id (a UUID) OR the team NAME (some
+// serializers set id = name). TeamLineups are keyed server-side by whatever
+// team key was used when the lineup was saved; in practice, that's the participant's
+// real id. Passing a bare name straight through can make the lineup GET
+// 404 and the per-match (and round) lineup never reaches the scoring grid.
+// We look the side up in the competition's participant list by id OR name and
+// return its real id, falling back to the original key when unmatched.
 //
-// bc-pnum: an id decides whenever the side carries one -- matched against
-// the roster by id ONLY, never falling back to a name compare that could
-// resolve a DIFFERENT participant/team sharing the same display name (a
-// documented restore-hole lets two teams collide on a name; two players
-// always can). Name is the fallback only for a bare string argument (a
-// caller that only ever had a name, not the resolved side object) or a side
-// object with no id at all (e.g. a bracket row, by design).
-export function resolveLineupTeamId(side, players) {
-  if (!side) return "";
+// bc-pnum (Opus review round): a side-OBJECT overload (id decides whenever
+// present, matched against the roster by id ONLY) was added here and then
+// removed (YAGNI): every production caller already collapses the side to a
+// bare key BEFORE calling -- match_scoreboard.jsx's useTeamLineups and
+// admin_scoring_team.jsx's sideAKey/sideBKey composite both prefer
+// `side.id || side.name`, on purpose, in a comment at each call site. That
+// composite is what still recovers the real id when resolveSide
+// (api_serializers.jsx) invents `id: name` for a side with no real id at
+// all: the id-decides-then-stop object form would treat that invented value
+// as real and never fall through to the name lookup below that recovers it.
+// Do not re-add an object overload without a caller that actually needs it.
+export function resolveLineupTeamId(sideKey, players) {
+  if (!sideKey) return "";
   const list = Array.isArray(players) ? players : [];
-  const isObj = side && typeof side === "object";
-  const id = isObj ? (side.id || "") : "";
-  const name = isObj ? (side.name || "") : side;
-  if (id) {
-    const p = list.find(pl => pl && (pl.id === id || pl.ID === id));
-    return (p && (p.id || p.ID)) || id;
-  }
-  if (!name) return "";
-  const p = list.find(pl => pl && (pl.name === name || pl.Name === name));
-  return (p && (p.id || p.ID)) || name;
+  const p = list.find(pl => pl
+    && (pl.id === sideKey || pl.ID === sideKey || pl.name === sideKey || pl.Name === sideKey));
+  return (p && (p.id || p.ID)) || sideKey;
 }
 
 // FIK named position KEYS for 5-person teams (index 0=senpo … 4=taisho).

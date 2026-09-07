@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -242,4 +243,244 @@ func TestViewerDetail_ReportsCorruptPoolsAndDoesNotFail(t *testing.T) {
 	assert.Equal(t, "corrupt-file", issue["kind"])
 	assert.Equal(t, "pools.csv", issue["file"])
 	assert.NotEmpty(t, issue["detail"])
+}
+
+// dataIssueByFile finds the dataIssues entry naming file, or nil.
+func dataIssueByFile(t *testing.T, issues []any, file string) map[string]any {
+	t.Helper()
+	for _, raw := range issues {
+		issue, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if issue["file"] == file {
+			return issue
+		}
+	}
+	return nil
+}
+
+// dataIssuesFromResponse fetches dataIssues (possibly absent/empty) from a
+// JSON response body shaped like either the aggregate's list entry or the
+// detail endpoint's single object.
+func dataIssuesFromResponse(t *testing.T, body []byte, isAggregate bool) []any {
+	t.Helper()
+	if isAggregate {
+		var payload []map[string]any
+		require.NoError(t, json.Unmarshal(body, &payload))
+		require.Len(t, payload, 1)
+		issues, _ := payload[0]["dataIssues"].([]any)
+		return issues
+	}
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(body, &payload))
+	issues, _ := payload["dataIssues"].([]any)
+	return issues
+}
+
+// TestViewerAggregateAndDetail_PoolsMissingIDsAgree pins bc-pnum review
+// finding 3/4: a legacy 7-column pools.csv (no id column at all, the
+// pre-bc-pnum on-disk shape) sitting alongside a fully modern (stamped)
+// participants.csv must raise the pools.csv "missing-ids" advisory, with
+// the SAME wording, on BOTH the aggregate list and the single-competition
+// detail endpoint.
+func TestViewerAggregateAndDetail_PoolsMissingIDsAgree(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools,
+	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo A"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
+	}))
+	// Legacy 7-column pools.csv: PoolName,Name,Position,DisplayName,Dojo,Seed,Number
+	// -- no 8th (id) column at all, the pre-bc-pnum on-disk shape.
+	legacyPools := "Pool A,Alice,0,,Dojo A,,\nPool A,Bob,1,,Dojo B,,\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "kendo", "pools.csv"), []byte(legacyPools), 0600))
+
+	getIssues := func(url string, isAggregate bool) []any {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		return dataIssuesFromResponse(t, w.Body.Bytes(), isAggregate)
+	}
+
+	aggIssues := getIssues("/api/viewer/competitions", true)
+	detIssues := getIssues("/api/viewer/competitions/kendo", false)
+
+	aggIssue := dataIssueByFile(t, aggIssues, "pools.csv")
+	detIssue := dataIssueByFile(t, detIssues, "pools.csv")
+	require.NotNil(t, aggIssue, "aggregate must report the pools.csv missing-ids issue")
+	require.NotNil(t, detIssue, "detail must report the identical pools.csv missing-ids issue")
+	assert.Equal(t, "missing-ids", aggIssue["kind"])
+	assert.Equal(t, "missing-ids", detIssue["kind"])
+	assert.Equal(t, aggIssue["detail"], detIssue["detail"], "both surfaces must use the exact same wording")
+	detail, _ := aggIssue["detail"].(string)
+	assert.Contains(t, detail, "Alice")
+	assert.Contains(t, detail, "Bob")
+	assert.Contains(t, detail, "regenerate the draw while it is still draw-ready")
+}
+
+// TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree pins the
+// pool-matches.csv twin: a completed match missing SideAID must raise the
+// "missing-ids" advisory identically on both surfaces.
+func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools,
+	}))
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "Dojo A"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
+	}))
+	require.NoError(t, store.SavePoolMatches("kendo", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: "", SideB: "Bob", SideBID: bobID,
+			Status: state.MatchStatusCompleted, Winner: "Bob", WinnerID: bobID},
+	}))
+
+	getIssues := func(url string, isAggregate bool) []any {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, url, nil)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		return dataIssuesFromResponse(t, w.Body.Bytes(), isAggregate)
+	}
+
+	aggIssue := dataIssueByFile(t, getIssues("/api/viewer/competitions", true), "pool-matches.csv")
+	detIssue := dataIssueByFile(t, getIssues("/api/viewer/competitions/kendo", false), "pool-matches.csv")
+	require.NotNil(t, aggIssue, "aggregate must report the pool-matches.csv missing-ids issue")
+	require.NotNil(t, detIssue, "detail must report the identical pool-matches.csv missing-ids issue")
+	assert.Equal(t, "missing-ids", aggIssue["kind"])
+	assert.Equal(t, aggIssue["detail"], detIssue["detail"])
+	detail, _ := aggIssue["detail"].(string)
+	assert.Contains(t, detail, "1 match(es)")
+	assert.Contains(t, detail, "re-enter the results once the sides have ids")
+}
+
+// TestViewerAggregateAndDetail_NoIssuesWhenFullyStamped is the negative
+// twin: a fully modern competition (every row on every one of the three
+// files carries its id) must raise NEITHER new advisory on EITHER surface.
+func TestViewerAggregateAndDetail_NoIssuesWhenFullyStamped(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools,
+	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo A"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
+	}))
+	require.NoError(t, store.SavePools("kendo", []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "Dojo A"},
+			{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
+		}},
+	}))
+	require.NoError(t, store.SavePoolMatches("kendo", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID,
+			Status: state.MatchStatusCompleted, Winner: "Alice", WinnerID: aliceID},
+	}))
+
+	for _, tc := range []struct {
+		name        string
+		url         string
+		isAggregate bool
+	}{
+		{"aggregate", "/api/viewer/competitions", true},
+		{"detail", "/api/viewer/competitions/kendo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate)
+			assert.Nil(t, dataIssueByFile(t, issues, "pools.csv"), "a fully-stamped pools.csv raises no issue")
+			assert.Nil(t, dataIssueByFile(t, issues, "pool-matches.csv"), "fully-stamped pool-matches raise no issue")
+		})
+	}
+}
+
+// TestViewerAggregateAndDetail_HikiwakeWithoutWinnerIDRaisesNoIssue pins the
+// draw exclusion: a drawn (hikiwake) match records no Winner at all, so its
+// empty WinnerID must NOT be mistaken for a missing-id row on either
+// surface.
+func TestViewerAggregateAndDetail_HikiwakeWithoutWinnerIDRaisesNoIssue(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools,
+	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo A"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
+	}))
+	require.NoError(t, store.SavePoolMatches("kendo", []state.MatchResult{
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID,
+			Status: state.MatchStatusCompleted, Decision: "hikiwake"},
+	}))
+
+	for _, tc := range []struct {
+		name        string
+		url         string
+		isAggregate bool
+	}{
+		{"aggregate", "/api/viewer/competitions", true},
+		{"detail", "/api/viewer/competitions/kendo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate)
+			assert.Nil(t, dataIssueByFile(t, issues, "pool-matches.csv"), "a hikiwake row with no Winner must not raise a missing-ids issue")
+		})
+	}
+}
+
+// TestViewerAggregateAndDetail_StraySetupPoolsCSVAgree pins bc-pnum review
+// finding 4: the aggregate gates its pools.csv read on
+// engine.CanGenerateDraw(comp.Status) (buildViewerCompetitionPayload) and
+// the detail endpoint must apply the SAME gate before feeding pools into
+// viewerDataIssues, or a setup-status competition with leftover pools.csv
+// bytes (a discarded draw, a hand-placed file) shows the missing-ids notice
+// on the detail endpoint only. Both must agree: NEITHER surface reports it
+// while the competition is still draw-ready.
+func TestViewerAggregateAndDetail_StraySetupPoolsCSVAgree(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "Dojo A"},
+		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "Dojo B"},
+	}))
+	// Stray, readable, id-less pools.csv left over from a discarded draw.
+	stray := "Pool A,Alice,0,,Dojo A,,\nPool A,Bob,1,,Dojo B,,\n"
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "kendo", "pools.csv"), []byte(stray), 0600))
+
+	for _, tc := range []struct {
+		name        string
+		url         string
+		isAggregate bool
+	}{
+		{"aggregate", "/api/viewer/competitions", true},
+		{"detail", "/api/viewer/competitions/kendo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate)
+			assert.Nil(t, dataIssueByFile(t, issues, "pools.csv"),
+				"a stray pools.csv on a still-draw-ready competition must raise NO issue on %s", tc.name)
+		})
+	}
 }

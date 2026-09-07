@@ -481,6 +481,20 @@ func poolMatchesMissingSideIDsIssue(matches []state.MatchResult) *gin.H {
 // or empty slice (competition not yet drawn, or a failed load already
 // logged by the caller) simply reports no issue from that record.
 //
+// pools is NOT unconditionally whatever the caller happened to load: BOTH
+// callers must gate it on engine.CanGenerateDraw(comp.Status) themselves
+// before calling this function, passing nil while the competition is still
+// draw-ready. pools.csv cannot exist before a real draw, so any bytes found
+// at that path while still draw-ready are leftovers (a discarded draw, a
+// hand-placed file) rather than an operator-actionable pools.csv, and must
+// not surface a "no id in the pool draw" notice for a draw that does not
+// exist yet. This function does not and cannot enforce that gate itself --
+// it only sees whatever slice it was handed -- so the two callers' output
+// is identical only as long as both apply it identically; see
+// buildViewerCompetitionPayload's own gate (above) and its mirror at the
+// GET /api/viewer/competitions/:id call site (below) for the two sites that
+// must stay in lockstep.
+//
 // Deliberately takes only pmErr/brErr/poolsErr for the CORRUPT-FILE half,
 // not every error a caller might have: the detail endpoint's own playersErr
 // and standingsErr are NOT passed in, even though standingsErr can carry the
@@ -488,10 +502,10 @@ func poolMatchesMissingSideIDsIssue(matches []state.MatchResult) *gin.H {
 // own internal LoadPools reads the same pools.csv) -- reporting both would
 // either double the entry or require a dedup rule this function would then
 // own alone. Passing exactly the three-error shape keeps the two callers'
-// output IDENTICAL by construction for the same on-disk state, which is
-// the property this extraction exists for; a caller with an error source
-// the other builder does not have is a caller that has drifted from the
-// contract, not one that needs a wider signature.
+// output IDENTICAL by construction for the same on-disk state PROVIDED the
+// pools gate above is also applied identically; a caller with an error
+// source the other builder does not have is a caller that has drifted from
+// the contract, not one that needs a wider signature.
 func viewerDataIssues(players []domain.Player, pools []helper.Pool, poolMatches []state.MatchResult, pmErr, brErr, poolsErr error) []gin.H {
 	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
 	if mi := missingParticipantIDsIssue(players); mi != nil {
@@ -671,6 +685,22 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// own payload shape; the SPA maps it onto detail.config.dataIssues
 			// (api_client.jsx normalizeCompetitionDetail) since that is the
 			// object AdminCompetitionOverview actually renders.
+			//
+			// poolsForIssues mirrors the aggregate's own
+			// engine.CanGenerateDraw gate (buildViewerCompetitionPayload,
+			// above): `pools` itself is loaded unconditionally a few lines up
+			// (the "pools" payload field and the number merge below both need
+			// it regardless of draw status), but the pools.csv missing-ids
+			// notice must not fire over LEFTOVER bytes from before a real
+			// draw exists. Without this, a setup-status competition with a
+			// stray pools.csv on disk (a discarded draw, a hand-placed file)
+			// showed the notice on the detail endpoint only -- the aggregate
+			// never even reads pools.csv in that state -- contradicting
+			// viewerDataIssues' own doc comment that the two callers agree.
+			poolsForIssues := pools
+			if engine.CanGenerateDraw(comp.Status) {
+				poolsForIssues = nil
+			}
 			payload := gin.H{
 				"config":      comp,
 				"pools":       pools,
@@ -678,7 +708,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"standings":   standings,
 				"bracket":     bracket,
 			}
-			if issues := viewerDataIssues(comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
+			if issues := viewerDataIssues(comp.Players, poolsForIssues, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues
 			}
 			return json.Marshal(payload)

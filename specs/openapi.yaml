@@ -3360,9 +3360,9 @@ paths:
         ruling bc-pnum: a league tie-break selection is a record resolved by
         id only) and must match exactly one group from
         `GET .../league-tiebreak/candidates` by participant id
-        (order-independent, no duplicates, no blanks). `teamNames` is accepted
-        for backward-compatible display only and never selects or
-        disambiguates anything.
+        (order-independent, no duplicates, no blanks). `teamNames` is
+        deprecated: accepted but ignored (bound for older clients, never
+        read) -- it never selects or disambiguates anything.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3398,9 +3398,9 @@ paths:
         Removes the unscored daihyosen matches for one tied group. Admin-gated.
         `teamIds` is REQUIRED (operator ruling bc-pnum) and must cover a
         complete tie-breaker group by participant id (no duplicates, no
-        blanks, no partial selection). `teamNames` is accepted for
-        backward-compatible display only and never selects or matches
-        anything.
+        blanks, no partial selection). `teamNames` is deprecated: accepted
+        but ignored (bound for older clients, never read) -- it never
+        selects or matches anything.
       security:
         - TournamentPassword: []
       requestBody:
@@ -5362,9 +5362,9 @@ components:
         entries, no blanks, no duplicates. It is matched against the
         candidate group's participant ids by `GET .../league-tiebreak/candidates`
         and against each daihyosen row's own `SideAID`/`SideBID`. `teamNames`
-        is accepted for backward-compatible display only; it is never used to
-        select a candidate group or to match a row, even when it would
-        otherwise be unambiguous.
+        is deprecated: accepted but ignored (bound for older clients, never
+        read); it is never used to select a candidate group or to match a
+        row, even when it would otherwise be unambiguous.
       required: [teamIds]
       properties:
         teamNames:

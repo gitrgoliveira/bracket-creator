@@ -352,8 +352,11 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
   // (rdBuildPeopleIndex groups by name+dojo, not by id); `player` here is
   // only entries[0]'s representative record, which may carry an id even
   // when a SIBLING entry doesn't, so this narrower disable does not extend
-  // to that mode -- checkPersonEntries already skips (rather than
-  // misdirects) any entry whose own id is missing.
+  // to that mode -- checkPersonEntries (2nd Opus review round) filters its
+  // own `targets` down to entries that carry an id, so a sibling entry's
+  // missing id is skipped rather than sent as a write that can only 404,
+  // and the skipped count is reported back through a toast rather than
+  // silently dropped.
   const idLessCompRow = mode === "comp" && !player.id;
 
   return (
@@ -688,19 +691,29 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   };
 
   // Core "set this person's check-in across every competition they entered":
-  // optimistic local writes + parallel API calls, returning the failure count.
-  // No busy/refresh side effects so callers can coordinate one bulk operation
-  // around many people without each clearing the shared busy flag early.
+  // optimistic local writes + parallel API calls, returning the failure and
+  // skip counts. No busy/refresh side effects so callers can coordinate one
+  // bulk operation around many people without each clearing the shared busy
+  // flag early.
+  //
+  // bc-pnum (2nd Opus review round): an entry whose OWN record carries no
+  // id (rdApiPid returns "" for it) has no safe wire identifier -- it is
+  // filtered out of `targets` here rather than sent as a write that can
+  // only 404 about a row the operator is looking at. `skipped` reports the
+  // count back so callers can tell the operator, rather than the write
+  // silently vanishing.
   const checkPersonEntries = async (rec, makeChecked) => {
-    const targets = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
-    if (!targets.length) return { failed: 0, total: 0 };
+    const relevant = rec.entries.filter(({ player }) => player.checkedIn !== makeChecked);
+    const targets = relevant.filter(({ player }) => !!player.id);
+    const skipped = relevant.length - targets.length;
+    if (!targets.length) return { failed: 0, total: 0, skipped };
     targets.forEach(({ comp, player }) => setLocal(comp.id, rdApiPid(player), makeChecked));
     inFlightRef.current += 1;
     try {
       const results = await Promise.allSettled(
         targets.map(({ comp, player }) => window.API.toggleCheckIn(comp.id, rdApiPid(player), makeChecked, password))
       );
-      return { failed: results.filter((r) => r.status === "rejected").length, total: targets.length };
+      return { failed: results.filter((r) => r.status === "rejected").length, total: targets.length, skipped };
     } finally {
       inFlightRef.current -= 1;
     }
@@ -711,11 +724,18 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     const makeChecked = rdPresence(rec.entries) !== "all"; // none/partial → check all; all → undo all
     setBusy(true);
     try {
-      const { failed, total } = await checkPersonEntries(rec, makeChecked);
-      if (total === 0) return;
-      if (failed) showToast(`${failed} of ${total} check-ins failed: reloading`, "error");
-      else if (makeChecked) {
-        announceHandoff(rec.name, rec.entries.map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
+      const { failed, total, skipped } = await checkPersonEntries(rec, makeChecked);
+      if (total === 0) {
+        if (skipped) showToast(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id: save the roster once and retry`, "error");
+        return;
+      }
+      if (failed) {
+        showToast(`${failed} of ${total} check-in(s) failed${skipped ? `, ${skipped} have no id` : ""}: reloading`, "error");
+      } else {
+        if (skipped) showToast(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id and were skipped`, "error");
+        if (makeChecked) {
+          announceHandoff(rec.name, rec.entries.filter(({ player }) => player.id).map(({ comp, player }) => ({ compName: comp.name, ...rdPlayerTag(comp, player) })));
+        }
       }
       await refresh();
     } finally {
@@ -735,7 +755,13 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
     try {
       const results = await Promise.allSettled(pending.map((rec) => checkPersonEntries(rec, true)));
       const failed = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.failed : 1), 0);
-      if (failed) showToast(`${failed} check-in(s) failed: reloading`, "error");
+      const skipped = results.reduce((n, r) => n + (r.status === "fulfilled" ? r.value.skipped : 0), 0);
+      if (failed || skipped) {
+        const parts = [];
+        if (failed) parts.push(`${failed} check-in(s) failed`);
+        if (skipped) parts.push(`${skipped} ${skipped === 1 ? "entry has" : "entries have"} no id`);
+        showToast(`${parts.join(", ")}: reloading`, "error");
+      }
       await refresh();
     } finally {
       inFlightRef.current -= 1;

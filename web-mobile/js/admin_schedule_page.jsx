@@ -11,6 +11,7 @@
 import { filterMatchesByCourt, CourtPacePanel } from './admin_schedule_pacing.jsx';
 import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
 import { DurationInput } from './duration.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
 
@@ -22,8 +23,11 @@ const hasBothSides = window.hasBothSides;
 const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange }) => {
   const [editingTime, setEditingTime] = useStateA(false);
   const [timeVal, setTimeVal] = useStateA(m.scheduledAt || "");
-  const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
-  const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+  // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
+  // bracket.jsx's MatchCard for why the naked equality lights both sides
+  // once both are id-less).
+  const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
+  const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
   const submitTime = (e) => {
     e.preventDefault();
     setEditingTime(false);

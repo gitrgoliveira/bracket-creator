@@ -98,19 +98,62 @@ describe('Viewer Utils', () => {
       expect(filtered[0].id).toBe('m1');
     });
 
-    it('matches by name when picked id differs from match side id (UUID vs name)', () => {
-      const uuidMatches = [
-        { id: 'm1', compId: 'c1', sideA: { id: 'Alice', name: 'Alice' }, sideB: { id: 'Bob', name: 'Bob' } },
+    // bc-pnum (Opus review round): a side WITHOUT an id (a placeholder, or
+    // an unresolved bracket row per api_serializers.resolveSide) matches by
+    // name only -- when the PICKED entry is itself id-less too. An id-less
+    // side is never guessed at by name against an id-CARRYING picked entry
+    // (see the mixed-pair test below): buildPickedSets is exclusive per
+    // entry, so an id-carrying pick's name never lands in the name Set.
+    it('an id-less side matches by name (unresolved bracket row) when the picked entry is itself id-less', () => {
+      const idLessMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } },
       ];
-      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
-      const filtered = applyFilters(uuidMatches, picked, '', 'all');
+      const picked = [{ id: '', name: 'Alice' }];
+      const filtered = applyFilters(idLessMatches, picked, '', 'all');
       expect(filtered.length).toBe(1);
     });
 
-    it('matches by name on sideB', () => {
-      const m = [{ id: 'm1', compId: 'c1', sideA: { id: 'x', name: 'X' }, sideB: { id: 'Bob', name: 'Bob' } }];
-      const filtered = applyFilters(m, [{ id: 'uuid-bbb', name: 'Bob' }], '', 'all');
+    it('an id-less side matches by name on sideB too', () => {
+      const m = [{ id: 'm1', compId: 'c1', sideA: { id: '', name: 'X' }, sideB: { id: '', name: 'Bob' } }];
+      const filtered = applyFilters(m, [{ id: '', name: 'Bob' }], '', 'all');
       expect(filtered.length).toBe(1);
+    });
+
+    // A side carrying a REAL (different) id never matches by name: never
+    // guess on a mixed id-present/id-present-but-different pair. Two
+    // competitors named "Alice" from different dojos must not collide.
+    it('a side carrying a different id does not match by name', () => {
+      const uuidMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: 'other-uuid', name: 'Alice' }, sideB: { id: 'bob-uuid', name: 'Bob' } },
+      ];
+      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
+      const filtered = applyFilters(uuidMatches, picked, '', 'all');
+      expect(filtered.length).toBe(0);
+    });
+
+    // bc-pnum (2nd Opus review round, MEDIUM): the other half of the mixed
+    // pair. A picked entry WITH a real id must never match an id-less side
+    // that merely shares its display name -- buildPickedSets must not let
+    // that id-carrying entry's name leak into the name Set. Before the fix
+    // this returned length 1 (the OLD inline builder added the picked
+    // entry's name unconditionally, even though it also had an id).
+    it('an id-carrying picked entry does not match an id-less side that merely shares its name', () => {
+      const idLessMatches = [
+        { id: 'm1', compId: 'c1', sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } },
+      ];
+      const picked = [{ id: 'uuid-aaa', name: 'Alice' }];
+      const filtered = applyFilters(idLessMatches, picked, '', 'all');
+      expect(filtered.length).toBe(0);
+    });
+
+    // Canonical bc-pnum case: watching Sato of Tokyo must never also filter
+    // in a match for the unrelated Sato of Osaka.
+    it('watching Sato of Tokyo does not also match Sato of Osaka', () => {
+      const osakaMatch = [
+        { id: 'm1', compId: 'c1', sideA: { id: 'sato-osaka', name: 'Sato', dojo: 'Osaka' }, sideB: { id: 'other', name: 'Someone', dojo: 'X' } },
+      ];
+      const picked = [{ id: 'sato-tokyo', name: 'Sato', dojo: 'Tokyo' }];
+      expect(applyFilters(osakaMatch, picked, '', 'all')).toHaveLength(0);
     });
   });
 
@@ -133,9 +176,27 @@ describe('Viewer Utils', () => {
       expect(matchHighlightedBy(tagged, [], 'A9')).toBe(false);
     });
 
-    it('highlights by name when picked id differs from match side id', () => {
-      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(true);
-      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Nobody' }], '')).toBe(false);
+    // bc-pnum (Opus review round): an id-less side matches by name when the
+    // picked entry is itself id-less too; a side carrying a (different)
+    // real id never does, even when the name also happens to match --
+    // never guess on a mixed pair.
+    it('an id-less side matches by name when the picked entry is id-less; a side carrying a different id does not', () => {
+      const idLessMatch = { sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } };
+      expect(matchHighlightedBy(idLessMatch, [{ id: '', name: 'Alice' }], '')).toBe(true);
+      expect(matchHighlightedBy(idLessMatch, [{ id: '', name: 'Nobody' }], '')).toBe(false);
+      // `match` (module-level fixture above) carries real ids on both sides:
+      // a same-named pick with a DIFFERENT id must never light it.
+      expect(matchHighlightedBy(match, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(false);
+    });
+
+    // bc-pnum (2nd Opus review round, MEDIUM): the other half of the mixed
+    // pair -- a picked entry WITH a real id must never light an id-less
+    // side that merely shares its display name. Before the fix this
+    // returned true (the OLD inline builder folded the picked entry's name
+    // into the name Set unconditionally, even though it also carried an id).
+    it('an id-carrying picked entry does not highlight an id-less side that merely shares its name', () => {
+      const idLessMatch = { sideA: { id: '', name: 'Alice' }, sideB: { id: '', name: 'Bob' } };
+      expect(matchHighlightedBy(idLessMatch, [{ id: 'uuid-xxx', name: 'Alice' }], '')).toBe(false);
     });
   });
 
@@ -203,9 +264,13 @@ describe('Viewer Utils', () => {
       expect(isFollowedPlayer({ id: 'uuid-alice', name: 'Alice' }, followed)).toBe(true);
     });
 
-    it('falls back to case-insensitive name when IDs differ (legacy/team fixture)', () => {
-      expect(isFollowedPlayer({ id: '', name: 'alice' }, followed)).toBe(true);
-      expect(isFollowedPlayer({ id: '', name: 'ALICE' }, followed)).toBe(true);
+    // bc-pnum (Opus review round): an id-less side is a MIXED pair against
+    // an id-carrying `followed` -- never guessed at by name, even on an
+    // exact (case-insensitive) match. Only a fully id-less pair on BOTH
+    // sides may fall back to name (see viewer_mymatch.test.jsx).
+    it('never falls back to name when the followed player carries an id and this side does not (mixed pair)', () => {
+      expect(isFollowedPlayer({ id: '', name: 'alice' }, followed)).toBe(false);
+      expect(isFollowedPlayer({ id: '', name: 'ALICE' }, followed)).toBe(false);
     });
 
     it('returns false when neither id nor name matches', () => {
@@ -766,12 +831,15 @@ describe('LeagueMatrix (mp-f4xo)', () => {
   let PM;
   let savedIsHikiwake;
 
+  // bc-pnum: pool/league rows always carry ids on the real wire; the ids
+  // below match completedMatch/pendingMatch/runningMatch's sideA/sideB ids
+  // so the (now id-only) matchMap lookup finds them.
   const pool = {
     poolName: 'Pool A',
     players: [
-      { name: 'Alice' },
-      { name: 'Bob' },
-      { name: 'Charlie' },
+      { id: 'pA', name: 'Alice' },
+      { id: 'pB', name: 'Bob' },
+      { id: 'pC', name: 'Charlie' },
     ],
   };
 
@@ -858,6 +926,43 @@ describe('LeagueMatrix (mp-f4xo)', () => {
 
   it('renders W/L cells for a completed match', () => {
     const tree = runtime.mount(PM, { pool, matches: [completedMatch], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
+    expect(winCell).toBeTruthy();
+    expect(lossCell).toBeTruthy();
+  });
+
+  // bc-pnum (Opus review round, item 7): the shared `pool` fixture above
+  // gained ids on every player specifically so the (now id-only) matchMap
+  // lookup would find completedMatch/pendingMatch/runningMatch, which
+  // dropped this suite's only coverage of a genuinely id-less roster (the
+  // pre-fix fixture had id-LESS players but still matched id-CARRYING match
+  // sides, so it exercised a player/match id mismatch resolved by name --
+  // not the same thing as neither side ever carrying an id at all). Pin
+  // that legacy participants.csv data predating UUID persistence -- pool
+  // players AND match sides both id-less -- still renders via the name-pair
+  // fallback pkey/matchMap use only when a side genuinely has no id.
+  it('renders W/L cells for a completed match when every id is empty (legacy fully-id-less data)', () => {
+    const idLessPool = {
+      poolName: 'Pool A',
+      players: [
+        { id: '', name: 'Alice' },
+        { id: '', name: 'Bob' },
+        { id: '', name: 'Charlie' },
+      ],
+    };
+    const idLessMatch = {
+      id: 'Pool A-1',
+      sideA: { id: '', name: 'Alice' },
+      sideB: { id: '', name: 'Bob' },
+      status: 'completed',
+      winner: { id: '', name: 'Alice' },
+      ipponsA: ['M'],
+      ipponsB: [],
+      decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: idLessPool, matches: [idLessMatch], tweaks: {} });
     const cells = allCells(tree);
     const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
     const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
@@ -1090,6 +1195,44 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     // Exactly one win (T1's row) and one loss (T2's row): NOT two wins.
     expect(wins).toHaveLength(1);
     expect(losses).toHaveLength(1);
+  });
+
+  // bc-pnum: matchMap used to ALSO index every match by its bare name-pair
+  // ("does not clobber an existing id entry" fallback), and the cell lookup
+  // consulted that name index whenever the id-pair lookup missed. Two same-
+  // name/different-dojo participants where only ONE of them actually played
+  // a given opponent exposed the hazard: the OTHER (unrelated) same-named
+  // participant's cell against that opponent fell back to the name-pair
+  // entry and borrowed the first participant's result. Ids are never absent
+  // here (both players and the match carry them), so the id-pair lookup
+  // must be the only lookup: a miss must render "not played", never a
+  // same-name borrow.
+  it('never borrows a same-name participant\'s match via the name-pair fallback', () => {
+    const twoSatos = {
+      poolName: 'Pool A',
+      players: [
+        { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+        { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+        { id: 'B1', name: 'Bob', dojo: 'Kyoto' },
+      ],
+    };
+    // S1 (Tokyo) beat Bob. S2 (Osaka) never played Bob at all.
+    const s1BeatBob = {
+      id: 'Pool A-0', sideA: { id: 'S1', name: 'Sato' }, sideB: { id: 'B1', name: 'Bob' },
+      sideAId: 'S1', sideBId: 'B1', status: 'completed', winner: { id: 'S1', name: 'Sato' },
+      ipponsA: ['M'], ipponsB: [], decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: twoSatos, matches: [s1BeatBob], tweaks: {} });
+    const cells = allCells(tree);
+    // S1 (Tokyo) vs Bob: a real, correctly-attributed win.
+    const s1Cell = cells.find(c => (c.props?.title || '').startsWith('Sato (Tokyo) vs Bob (Kyoto)'));
+    expect(s1Cell.props.className).toContain('league-matrix__cell--win');
+    // S2 (Osaka) vs Bob: no such match exists. Must render as "not played",
+    // never as S1's result borrowed via the name-pair fallback.
+    const s2Cell = cells.find(c => (c.props?.title || '').startsWith('Sato (Osaka) vs Bob (Kyoto)'));
+    expect(s2Cell).toBeTruthy();
+    expect(s2Cell.props.className).toContain('league-matrix__cell--empty');
+    expect(s2Cell.props.title).toContain('not played');
   });
 });
 

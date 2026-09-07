@@ -3034,10 +3034,13 @@ const API = {
         return res.json();
     },
     // Bulk check-in for one competition. participantIds is an array of pids as
-    // built by checkinPid: a stable UUID, or the composite "name|dojo" key for
-    // legacy UUID-less rows (the server resolves either). Returns { checkedIn,
-    // alreadyCheckedIn, notFound }. Used by the Registration desk's "check in a
-    // whole dojo" action.
+    // built by checkinApiPid/rdApiPid: a stable UUID, or "" for a legacy
+    // UUID-less row (bc-pnum operator ruling: this write is id only, never
+    // the "name|dojo" composite -- name and dojo are operator-editable after
+    // the draw, so that composite is not a safe wire identifier). An
+    // id-less pid resolves to nothing server-side and is reported back via
+    // notFound. Returns { checkedIn, alreadyCheckedIn, notFound }. Used by
+    // the Registration desk's "check in a whole dojo" action.
     async bulkCheckIn(compID, participantIds, password) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`, {
             method: 'POST',

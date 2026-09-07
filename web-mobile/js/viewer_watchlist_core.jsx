@@ -36,30 +36,75 @@ export function matchParticipantNames(m) {
   return [aName, bName];
 }
 
-// Check whether a participant object `p` refers to the followed player,
-// matching by ID first (UUID) then by name as a fallback for cases where
-// team-match sub-players or legacy fixtures key by display name only.
+// Check whether a participant object `p` refers to the followed player. An
+// id decides whenever BOTH carry one (sameCompetitor's rule, applied by
+// hand here rather than delegated so the pre-existing case-INSENSITIVE name
+// compare -- team-match sub-players or legacy fixtures key by display name
+// only, in any case -- is preserved); a mixed pair (one has an id, the
+// other doesn't) is never guessed at by name.
 export function isFollowedPlayer(p, followed) {
   if (!p || !followed) return false;
   const pId = (typeof p === "object" ? p.id : null) || "";
   const pName = (typeof p === "object" ? p.name : p) || "";
-  if (pId && followed.id && pId === followed.id) return true;
-  if (pName && followed.name && pName.trim().toLowerCase() === followed.name.trim().toLowerCase()) return true;
+  const fId = followed.id || "";
+  const fName = followed.name || "";
+  if (pId && fId) return pId === fId;
+  if (!pId && !fId) return !!pName && !!fName && pName.trim().toLowerCase() === fName.trim().toLowerCase();
   return false;
 }
 
-// mp-xhaa: is participant `p` in the watched set? `watched` is a Set holding
-// BOTH participant ids and lowercased display names, so this matches by id
-// first (canonical UUID) and falls back to name for legacy / team sub-bout
-// rows that key by name only. Drives highlighting across bracket, pool, and
-// schedule surfaces for EVERY watched player (not just one followed player).
+// sideIsWatched: does one id/name pair belong to the watched set? `watched`
+// is `{ids, names}` (buildWatchedSets below) -- ids from every watched entry
+// that carries one, lowercased names from every watched entry that DOESN'T.
+// THE single case-insensitive side predicate: decides by the CHECKED pair's
+// OWN id presence -- an id-carrying pair matches only a watched id, never
+// falling through to a name hit. A pooled "check id OR name independently"
+// shape let watching Sato of Tokyo also highlight/list/on-deck Sato of
+// Osaka's rows whenever the id check missed; this is the fix and the one
+// place it lives. Every case-insensitive watch surface (highlighting,
+// upcoming-list, on-deck banner, running/recent filtering) must consult
+// this on top of `buildWatchedSets`'s sets, not a hand-rolled equivalent,
+// or the surfaces can disagree on the same id-less side. `watched` may also
+// be a legacy empty array ([]) from callers with no watchlist concept
+// (admin console): the shape guard below reads that as "nothing watched"
+// rather than throwing.
+export function sideIsWatched(id, name, watched) {
+  if (!watched) return false;
+  if (id) return !!(watched.ids && typeof watched.ids.has === "function" && watched.ids.has(String(id)));
+  return !!name && !!(watched.names && typeof watched.names.has === "function" && watched.names.has(name.trim().toLowerCase()));
+}
+
+// mp-xhaa: is participant `p` in the watched set? Thin wrapper over
+// sideIsWatched for callers that already have a resolved {id,name} record
+// (or a bare name string) rather than the id/name pair split out. Drives
+// highlighting across bracket, pool, and schedule surfaces for EVERY watched
+// player (not just one followed player).
 export function isPlayerWatched(p, watched) {
-  if (!p || !watched || typeof watched.has !== "function" || watched.size === 0) return false;
+  if (!p) return false;
   const id = (typeof p === "object" ? p.id : null) || "";
   const name = (typeof p === "object" ? p.name : p) || "";
-  if (id && watched.has(String(id))) return true;
-  if (name && watched.has(name.trim().toLowerCase())) return true;
-  return false;
+  return sideIsWatched(id, name, watched);
+}
+
+// buildWatchedSets: the {ids, names} shape isPlayerWatched consumes, from a
+// resolved watched-player list (resolveWatchedPlayers output, or any
+// {id,name} list). An entry WITH an id contributes to `ids` only; an entry
+// WITHOUT one contributes its lowercased name to `names` only -- the two
+// sets are mutually exclusive per entry, matching sameCompetitor's "id
+// decides when the record carries one" rule instead of pooling everything
+// into one lookup either check could satisfy.
+export function buildWatchedSets(resolvedWatched) {
+  const ids = new Set();
+  const names = new Set();
+  (Array.isArray(resolvedWatched) ? resolvedWatched : []).forEach((p) => {
+    if (!p) return;
+    if (p.id) ids.add(String(p.id));
+    else {
+      const n = (p.name || "").trim().toLowerCase();
+      if (n) names.add(n);
+    }
+  });
+  return { ids, names };
 }
 
 // LocalStorage keys for FR-020 / FR-024. Centralised so the deep-link
@@ -232,29 +277,22 @@ export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
   if (ids.size === 0) return null;
   const list = Array.isArray(allMatches) ? allMatches : [];
   const pending = list.filter((m) => m && m.status !== "completed");
+  // bc-pnum (2nd Opus review round, HIGH regression fix): the primary
+  // entry always carries a real id (resolveEntryPlayerIds only ever returns
+  // roster-backed ids), so a match side with NO id is a MIXED pair and must
+  // never be guessed at by name -- sameCompetitor's rule. A removed name
+  // fallback used to activate whenever this id pass found nothing, matching
+  // ANY pending match whose side's name happened to equal a current
+  // member's roster name (or, for a player entry, the follower's own
+  // name), regardless of whether that side carried an id. On a legacy/
+  // id-less roster this could name the follower as their own opponent
+  // ("Alice ... vs Opponent: Alice", reported live) or surface a dojo-mate's
+  // unrelated match. Removed outright: a roster whose matches predate id
+  // persistence now shows no hero card rather than a wrong one.
   const mine = pending.filter((m) => {
     const [a, b] = matchParticipantIds(m);
     return (a && ids.has(a)) || (b && ids.has(b));
   });
-  if (mine.length === 0) {
-    const names = new Set();
-    const rosterArr = Array.isArray(roster) ? roster : [];
-    ids.forEach((id) => {
-      const p = rosterArr.find((r) => r && String(r.id) === id);
-      if (p && p.name) names.add(p.name.trim().toLowerCase());
-    });
-    if (primaryEntry.type === "player" && primaryEntry.name) {
-      names.add(primaryEntry.name.trim().toLowerCase());
-    }
-    if (names.size > 0) {
-      pending.forEach((m) => {
-        const [aN, bN] = matchParticipantNames(m);
-        if ((aN && names.has(aN.trim().toLowerCase())) || (bN && names.has(bN.trim().toLowerCase()))) {
-          mine.push(m);
-        }
-      });
-    }
-  }
   mine.sort((a, b) => {
     const ao = a.status === "running" ? 0 : 1;
     const bo = b.status === "running" ? 0 : 1;

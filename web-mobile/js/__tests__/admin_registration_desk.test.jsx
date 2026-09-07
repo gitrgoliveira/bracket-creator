@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  rdNorm, rdPersonKey, rdPid, rdTokenScore, rdQueryScore, rdPlayerTag,
+  rdNorm, rdPersonKey, rdPid, rdApiPid, rdTokenScore, rdQueryScore, rdPlayerTag,
   rdBuildPeopleIndex, rdHaystack, rdPresence, rdZekken,
 } from '../admin_registration_desk.jsx';
 
@@ -44,6 +44,23 @@ describe('rdPid', () => {
   });
   it('emits an empty dojo segment when dojo is missing', () => {
     expect(rdPid({ name: 'A' })).toBe('A|');
+  });
+});
+
+// bc-pnum: rdApiPid is the id-only counterpart used for every server-bound
+// check-in/replace call. Name and dojo are operator-editable after the
+// draw, so rdPid's "name|dojo" composite is not a safe wire identifier.
+describe('rdApiPid (bc-pnum: id-only wire identifier)', () => {
+  it('returns the id when present', () => {
+    expect(rdApiPid({ id: 'uuid-1', name: 'A', dojo: 'D' })).toBe('uuid-1');
+  });
+  it('returns "" for an id-less row, never the name|dojo composite', () => {
+    expect(rdApiPid({ name: 'A', dojo: 'D' })).toBe('');
+  });
+  it('differs from rdPid for an id-less row (the whole point of the split)', () => {
+    const p = { name: 'A', dojo: 'D' };
+    expect(rdApiPid(p)).toBe('');
+    expect(rdPid(p)).toBe('A|D');
   });
 });
 

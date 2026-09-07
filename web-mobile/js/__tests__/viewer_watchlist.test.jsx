@@ -119,4 +119,38 @@ describe('buildWatchlistUpcoming', () => {
     expect(globalRunning).toHaveLength(1);
     expect(globalRunning[0].compId).toBe('comp-B');
   });
+
+  // bc-pnum (Opus review round): a match side WITH an id must match only a
+  // watched id, never falling through to a name hit. Watching Sato of Tokyo
+  // must not also surface Sato of Osaka's (unrelated, real-id-carrying)
+  // matches just because the names coincide.
+  it('watching Sato of Tokyo does not also surface Sato of Osaka', () => {
+    const watched = [{ id: 'sato-tokyo', name: 'Sato' }];
+    const all = [
+      { id: 'm1', sideA: { id: 'sato-osaka', name: 'Sato' }, sideB: { id: 'other', name: 'Someone' }, status: 'scheduled', scheduledAt: '09:00' },
+    ];
+    expect(buildWatchlistUpcoming(watched, all)).toEqual([]);
+  });
+
+  it('an id-less watched entry still matches an id-less (unresolved bracket) side by name', () => {
+    const watched = [{ id: '', name: 'Sato' }];
+    const all = [
+      { id: 'm1', sideA: { id: '', name: 'Sato' }, sideB: { id: 'other', name: 'Someone' }, status: 'scheduled', scheduledAt: '09:00' },
+    ];
+    expect(buildWatchlistUpcoming(watched, all).map((m) => m.id)).toEqual(['m1']);
+  });
+
+  // bc-pnum (2nd Opus review round, MEDIUM): the case the two tests above
+  // don't cover. An id-CARRYING watched entry's name must never leak into
+  // the name fallback: an id-less side that merely shares that entry's
+  // display name is a mixed pair (the watched entry has a real id, this
+  // side doesn't) and must not match, exactly like watching Sato of Tokyo
+  // not surfacing an id-carrying Sato of Osaka above.
+  it('an id-carrying watched entry does not match an id-less side that merely shares its name', () => {
+    const watched = [{ id: 'sato-tokyo', name: 'Sato' }];
+    const all = [
+      { id: 'm1', sideA: { id: '', name: 'Sato' }, sideB: { id: 'other', name: 'Someone' }, status: 'scheduled', scheduledAt: '09:00' },
+    ];
+    expect(buildWatchlistUpcoming(watched, all)).toEqual([]);
+  });
 });

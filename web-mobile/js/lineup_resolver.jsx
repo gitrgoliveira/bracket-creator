@@ -50,6 +50,18 @@ export async function resolveMatchLineup(compId, teamId, matchId, round, { fetch
 // 404 and the per-match (and round) lineup never reaches the scoring grid.
 // We look the side up in the competition's participant list by id OR name and
 // return its real id, falling back to the original key when unmatched.
+//
+// bc-pnum (Opus review round): a side-OBJECT overload (id decides whenever
+// present, matched against the roster by id ONLY) was added here and then
+// removed (YAGNI): every production caller already collapses the side to a
+// bare key BEFORE calling -- match_scoreboard.jsx's useTeamLineups and
+// admin_scoring_team.jsx's sideAKey/sideBKey composite both prefer
+// `side.id || side.name`, on purpose, in a comment at each call site. That
+// composite is what still recovers the real id when resolveSide
+// (api_serializers.jsx) invents `id: name` for a side with no real id at
+// all: the id-decides-then-stop object form would treat that invented value
+// as real and never fall through to the name lookup below that recovers it.
+// Do not re-add an object overload without a caller that actually needs it.
 export function resolveLineupTeamId(sideKey, players) {
   if (!sideKey) return "";
   const list = Array.isArray(players) ? players : [];

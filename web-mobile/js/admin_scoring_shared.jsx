@@ -8,6 +8,7 @@ const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -378,12 +379,18 @@ function makeSubmitDecision({
         // Kiken keeps the modal open so the operator can walk through
         // RemainingMatchesPanel and award default wins to each remaining
         // scheduled match for the withdrawn player. Do NOT advance yet.
-        const winnerName = (updated?.winner || '').trim();
-        const loserName = winnerName === (updated?.sideA || '') ? (updated?.sideB || '') : (updated?.sideA || '');
-        const loser =
-          (match.sideA?.name === loserName) ? match.sideA :
-          (match.sideB?.name === loserName) ? match.sideB :
-          { id: '', name: loserName };
+        //
+        // bc-pnum: decisionBy ("aka"/"shiro") already names the withdrawn
+        // SIDE unambiguously and matches the server's own attribution
+        // exactly (scoring_tx.go: aka=sideA, shiro=sideB) -- no name
+        // comparison needed. Re-deriving the loser from the /decision
+        // response's plain winner/sideA/sideB NAME strings (the previous
+        // approach) goes wrong for a same-name/different-dojo pair: both
+        // sides' names are then identical, so a name compare always
+        // resolves to the SAME side regardless of who actually withdrew.
+        const loser = decisionBy === 'aka'
+          ? (match.sideA || { id: '', name: '' })
+          : (match.sideB || { id: '', name: '' });
         setWithdrawnPlayer(loser);
         setDecisionPromptKind('');
       } else if (!isComplete && onAfterDecision) {
@@ -664,6 +671,15 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
   );
 }
 
+// bc-pnum: does `side` (a match's sideA/sideB, {id,name}) refer to the
+// withdrawn player? Delegates to sameCompetitor (competitor_identity.jsx,
+// the one owner of the attribution rule): id decides whenever BOTH the
+// withdrawn player and this side carry one, name only when NEITHER does,
+// and the mixed case (one has an id, the other doesn't) is never guessed.
+function sideIsWithdrawnPlayer(side, withdrawnPlayer) {
+  return sameCompetitor(withdrawnPlayer, side);
+}
+
 // T098: "Remaining matches for [player]" panel. After a kiken decision lands,
 // look up every scheduled match where the just-withdrawn player still appears
 // and offer a one-click "Award default win to opponent" for each. The button
@@ -694,13 +710,9 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
         const all = window.compMatchesForCompetition
           ? window.compMatchesForCompetition(detail.config || detail, detail)
           : [];
-        const wname = (withdrawnPlayer?.name || "").trim();
-        const wid = withdrawnPlayer?.id || "";
         const matchesForPlayer = all.filter(m => {
           if (m.status !== "scheduled") return false;
-          const aMatch = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
-          const bMatch = (wid && m.sideB?.id === wid) || (wname && m.sideB?.name === wname);
-          return aMatch || bMatch;
+          return sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer) || sideIsWithdrawnPlayer(m.sideB, withdrawnPlayer);
         });
         setMatches(matchesForPlayer);
       } catch (e) {
@@ -714,9 +726,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     // Figure out which side the withdrawn player occupies in THIS match: 
     // that's the side that gets the fusenpai (default loss). Pool matches:
     // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
-    const wname = (withdrawnPlayer?.name || "").trim();
-    const wid = withdrawnPlayer?.id || "";
-    const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+    const isOnA = sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer);
     const decisionBy = isOnA ? "aka" : "shiro";
     setBusyId(m.id);
     // Clear any previous verdict before this attempt. Without it the panel's
@@ -771,9 +781,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       {matches && matches.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
           {matches.map(m => {
-            const wname = (withdrawnPlayer?.name || "").trim();
-            const wid = withdrawnPlayer?.id || "";
-            const isOnA = (wid && m.sideA?.id === wid) || (wname && m.sideA?.name === wname);
+            const isOnA = sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer);
             const opponent = isOnA ? m.sideB : m.sideA;
             return (
               <li key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12 }}>
@@ -1136,6 +1144,7 @@ export {
   daihyosenEnchoFields,
   decideDrawToggle,
   shouldBlockScoringKeys,
+  sideIsWithdrawnPlayer,
   useAdoptFromServer,
   EnchoControl,
   DecisionPrompt,

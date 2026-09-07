@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { render, act, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 // RENDER-SMOKE for the Registration desk (mp-25bk). The unit suite calls the
 // pure helpers directly but never MOUNTS the page, so a window.* dep that's
@@ -107,5 +107,210 @@ describe('AdminRegistrationDeskPage render-smoke', () => {
     const { getByText, unmount } = await mount(makeTournament({ competitions: [] }));
     expect(getByText('No competitions yet')).toBeTruthy();
     unmount();
+  });
+});
+
+// bc-pnum: the roster row's check-in control used to send rdPid(player) --
+// id when present, else the "name|dojo" composite -- to toggleCheckIn/
+// bulkCheckIn. Name and dojo are operator-editable after the draw, so that
+// composite is not a safe wire identifier. It must send the id ONLY
+// (rdApiPid); an id-less row has no safe wire identifier at all and the
+// write is left to the server to refuse.
+describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum)', () => {
+  let toggleCheckIn;
+  let savedFetchCompetitions;
+
+  beforeEach(() => {
+    toggleCheckIn = vi.fn().mockResolvedValue({});
+    window.API.toggleCheckIn = toggleCheckIn;
+    savedFetchCompetitions = window.API.fetchCompetitions;
+  });
+
+  afterEach(() => {
+    delete window.API.toggleCheckIn;
+    window.API.fetchCompetitions = savedFetchCompetitions;
+  });
+
+  it('sends the real id, not the name|dojo composite, for a stamped row', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-akira', name: 'Akira Tanaka', dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    const { getByRole } = await mount(tournament);
+    const checkbox = getByRole('checkbox', { name: /check in akira tanaka/i });
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw');
+  });
+
+  it('sends "" (never the name|dojo composite) for an id-less legacy row', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { getByRole } = await mount(tournament);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato/i });
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', '', true, 'pw');
+    expect(toggleCheckIn).not.toHaveBeenCalledWith('men', 'Kenji Sato|Mumeishi', true, 'pw');
+  });
+
+  // setLocal keys its optimistic update on rdApiPid's output (id-only), so
+  // an id-less write's pid is "". Without the `pid &&` guard, EVERY id-less
+  // row would match "" and get optimistically flipped together. The
+  // post-write `refresh()` re-fetches from the (mocked) server and would
+  // paper over the transient optimistic state either way, so this test
+  // makes refresh fail (console.warn expected and suppressed) to observe
+  // exactly what setLocal itself left behind.
+  it('does not optimistically flip every id-less row when one is clicked', async () => {
+    // Local spy replaces the outer beforeEach spy for this test's duration
+    // (same pattern as admin_shiaijo.render.test.jsx's intentional-throw
+    // test): mockRestore() before the test ends clears its recorded calls
+    // so the outer afterEach's fail-on-console.warn guard sees none.
+    const localWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    window.API.fetchCompetitions = vi.fn().mockRejectedValue(new Error('refresh disabled for this test'));
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [
+          { id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false },
+          { id: '', name: 'Yuki Ito', dojo: 'Tora', checkedIn: false },
+        ],
+      }],
+    });
+    try {
+      const { getByRole } = await mount(tournament);
+      const checkboxKenji = getByRole('checkbox', { name: /check in kenji sato/i });
+      await act(async () => { fireEvent.click(checkboxKenji); });
+      const checkboxYuki = getByRole('checkbox', { name: /check in yuki ito/i });
+      expect(checkboxYuki.getAttribute('aria-checked')).toBe('false');
+    } finally {
+      localWarn.mockRestore();
+    }
+  });
+});
+
+// bc-pnum (Opus review round, item 4): an id-less row's rdApiPid is "", so a
+// check-in / chip / edit-save write for it can only 404 (empty id segment
+// matches no route, or matches nothing on the server). All three controls
+// are disabled client-side for such a row instead, each with a hint mirroring
+// helper.MissingParticipantIDsMessage's remedy sentence. Unlike the "all"
+// mode checkbox exercised above, these three controls only appear/apply in
+// "comp" mode (a single competition selected via the rail), where `player`
+// unambiguously names one participant record.
+//
+// Enters "comp" mode for the FIRST real competition in the rail (index 0 is
+// always the pinned "All competitions" entry, per RdRail). Clicking by text
+// is ambiguous here: in "all" mode a person entered in only one competition
+// still gets a self-referential "In" chip naming that same competition, so
+// `getByText(comp.name)` can match both the rail item and the chip.
+function enterCompMode(container) {
+  const items = container.querySelectorAll('.rd-rail__item');
+  expect(items.length).toBeGreaterThan(1);
+  fireEvent.click(items[1]);
+}
+
+describe('AdminRegistrationDeskPage disables writes for an id-less row in comp mode (bc-pnum)', () => {
+  let toggleCheckIn;
+  let replaceParticipant;
+
+  beforeEach(() => {
+    toggleCheckIn = vi.fn().mockResolvedValue({});
+    replaceParticipant = vi.fn().mockResolvedValue({});
+    window.API.toggleCheckIn = toggleCheckIn;
+    window.API.replaceParticipant = replaceParticipant;
+    window.promptAdminPassword = vi.fn().mockResolvedValue('admin-pw');
+  });
+
+  afterEach(() => {
+    delete window.API.toggleCheckIn;
+    delete window.API.replaceParticipant;
+    delete window.promptAdminPassword;
+  });
+
+  it('disables the row check-in control for an id-less row and sends no request', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByRole } = await mount(tournament);
+    enterCompMode(container);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato/i });
+    expect(checkbox.disabled).toBe(true);
+    expect(checkbox.getAttribute('title')).toContain('No id on file');
+    fireEvent.click(checkbox);
+    expect(toggleCheckIn).not.toHaveBeenCalled();
+  });
+
+  it('leaves the row check-in control enabled for a stamped row in comp mode', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-kenji', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByRole } = await mount(tournament);
+    enterCompMode(container);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato/i });
+    expect(checkbox.disabled).toBe(false);
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(toggleCheckIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the "also in" chip for a cross-competition entry with no id and sends no request', async () => {
+    const tournament = makeTournament({
+      competitions: [
+        {
+          id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+          checkInEnabled: true,
+          players: [{ id: 'uuid-kenji', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+        },
+        {
+          id: 'kata', name: 'Kata Individual', kind: 'individual', status: 'draw-ready',
+          checkInEnabled: true,
+          players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+        },
+      ],
+    });
+    const { container, getByTitle } = await mount(tournament);
+    enterCompMode(container); // Kenji's row in "men" shows an "Also in" chip for Kata
+    const chip = getByTitle('No id on file. Save the roster once and the ids are assigned.');
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.disabled).toBe(true);
+    fireEvent.click(chip);
+    expect(toggleCheckIn).not.toHaveBeenCalled();
+  });
+
+  it('disables the Edit modal Save button for an id-less row and sends no request', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByText } = await mount(tournament);
+    enterCompMode(container);
+    const editButton = container.querySelector('button[aria-label="Edit Kenji Sato"]');
+    expect(editButton).toBeTruthy();
+    fireEvent.click(editButton);
+
+    const saveButton = getByText('Save changes');
+    expect(saveButton.disabled).toBe(true);
+    expect(saveButton.getAttribute('title')).toContain('No id on file');
+    expect(getByText('No id on file. Save the roster once and the ids are assigned.')).toBeTruthy();
+
+    fireEvent.click(saveButton);
+    expect(replaceParticipant).not.toHaveBeenCalled();
   });
 });

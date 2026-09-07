@@ -22,6 +22,7 @@
 // unified `score` object the bracket card renderer can consume.
 
 import { realIppons, hanteiDecided, placeHtForWinner, stripHt } from './result_slot.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -105,21 +106,24 @@ function toBackendMatchResult(patch, match) {
         if (winnerName === sideAName && winnerName !== sideBName) winnerId = sideAId || "";
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
-    // only put winnerId on the wire when it is an id the SERVER
-    // itself supplied for the winning side (match.sideAId / match.sideBId,
-    // the raw flat fields -- not sideAId/sideBId above, which are read off
-    // the resolved side OBJECTS and can themselves carry the same invented
-    // fallback). Both derivations of winnerId above can land on
-    // buildPlayerMap's own invented id (`id: norm.id || norm.name`) for a
-    // side the server sent with NO id at all -- e.g. a partially-stamped
-    // legacy roster (SideAID "", SideBID set) -- in which case winnerId
-    // would be the competitor's NAME. Sending that as winnerId tells the
-    // engine's forward-write gate a name string is a participant UUID, and
-    // the write is rejected outright, so the match could never be scored.
-    // A real same-name pair where the server DID supply both flat ids still
-    // sends winnerId here (it will equal one of the two real ids): that is
-    // the one channel that disambiguates the pair, and this gate does not
-    // touch it.
+    // Only put winnerId on the wire when it equals the flat sideAId/
+    // sideBId the SERVER associated with THIS match (match.sideAId /
+    // match.sideBId, the raw fields -- not sideAId/sideBId above, which are
+    // read off the resolved side OBJECTS). resolveSide (this file's
+    // normalizeMatch) never invents an id from a name: an unresolved side
+    // carries the match's own flatId, or "" -- never the competitor's NAME.
+    // So a winnerId derived above is always a genuine id or empty, never a
+    // name string masquerading as one. The gate still matters for a
+    // different reason: a resolved side's id can come from a playerMap
+    // lookup BY NAME (a real id belonging to some other row that merely
+    // shares this side's display name), which need not be the id the
+    // server itself filed against THIS match. Forwarding that would tell
+    // the engine's forward-write gate this is the winner's id for this
+    // match when the server never made that association, misattributing
+    // the mark to a different, same-named participant. A real same-name
+    // pair where the server DID supply both flat ids still sends winnerId
+    // here (it will equal one of the two real ids): that is the one
+    // channel that disambiguates the pair, and this gate does not touch it.
     const winnerIdIsServerSupplied = !!winnerId && (
         (!!match?.sideAId && winnerId === match.sideAId) ||
         (!!match?.sideBId && winnerId === match.sideBId)
@@ -136,24 +140,27 @@ function toBackendMatchResult(patch, match) {
     // name-only fallback. Omitted (not sent as "") when a side carries no
     // id at all, matching every other optional field in this payload.
     //
-    // Send back ONLY an id the server itself supplied. The locals above are
-    // not always participant UUIDs: normalizeMatch's resolveSide falls back to
-    // `{ id: flatId || name }`, so a match the server sends WITHOUT flat side
-    // ids - a bracket match, which persists none, or a legacy pool row written
-    // before the id columns existed - yields sides whose id IS the display
-    // name. That is fine for this function's own placement (the fallback
-    // applies to all three values at once, so domain.AttributeWinnerSide's id
-    // branch compares name against name and answers exactly as its name branch
-    // would), but it must not go on the wire: a pool write persists the ids
-    // verbatim, so an invented one would be stored as though it were a real
-    // participant UUID, and buildPlayerMap collapses a same-name pair onto one
-    // entry, so BOTH sides would be stored under the SAME invented id.
+    // Send back ONLY an id the server associated with THIS match.
+    // resolveSide (this file's normalizeMatch) never invents an id from a
+    // name (bc-pnum fix): its per-side fallback is `{ id: flatId || "" }`,
+    // so a match the server sends WITHOUT flat side ids -- a bracket match,
+    // which persists none, or a legacy pool row written before the id
+    // columns existed -- now yields sides whose id is simply "", never the
+    // display name. That alone would make sideAId/sideBId above safe to
+    // forward unconditionally in THAT case, but it doesn't cover every
+    // case: sideAId/sideBId can still be a GENUINE id sourced from a
+    // playerMap lookup BY NAME (a real id belonging to some other row that
+    // merely shares this side's display name), which the server never
+    // filed against THIS match's own flat fields. Sending that id would
+    // misattribute the mark to a different, same-named participant.
     //
-    // Gating on the flat id the server sent, rather than on the resolved side
-    // object, keeps the case this was added for (a real same-name pair, whose
-    // mark can only be attributed by id) and drops exactly the invented case.
-    // With nothing sent, the server backfills from the stored match and falls
-    // back to name attribution, which is what it did before these were added.
+    // Gating on the flat id the server sent for THIS match (match?.sideAId
+    // / match?.sideBId), rather than on the resolved side object, keeps the
+    // case this was added for (a real same-name pair, whose mark can only
+    // be attributed by id) and drops exactly the case where the resolved
+    // side's id did not come from this match's own record. With nothing
+    // sent, the server backfills from the stored match and falls back to
+    // name attribution, which is what it did before these were added.
     if (match?.sideAId && sideAId) result.sideAId = sideAId;
     if (match?.sideBId && sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry
@@ -257,7 +264,13 @@ function normalizeMatch(m, playerMap) {
             const byName = playerMap?.[name];
             if (byName && (!flatId || byName.id === flatId)) p = byName;
         }
-        const base = p ? { ...p } : { id: flatId || name, name };
+        // bc-pnum (Opus review round): never invent an id from the name. A
+        // side absent from the player map entirely (not found by flat id or
+        // by name) keeps id "" -- exactly like buildPlayerMap now does for
+        // an id-less participant -- so every downstream "does this side
+        // carry an id" check reads it truthfully instead of matching itself
+        // to any other side that happens to share the display name.
+        const base = p ? { ...p } : { id: flatId || "", name };
         if (flatId) base.id = flatId;
         return base;
     };
@@ -287,20 +300,12 @@ function normalizeMatch(m, playerMap) {
         // surface agreeing on one side beats surfaces disagreeing.
         norm.winner = resolveSide(norm.winner, m.winnerId);
     }
-    // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
-    // {id,name} above with the server's authoritative flat ids), so same-name /
-    // different-dojo finalists don't collide onto the wrong side and swap the
-    // displayed winner/loser tallies. Fall back to name only when an id isn't
-    // present on both.
-    const sideAWon = (w, a) => {
-        if (!w || !a) return false;
-        const wId = typeof w === "object" ? w.id || "" : "";
-        const aId = typeof a === "object" ? a.id || "" : "";
-        if (wId && aId) return wId === aId;
-        const wn = typeof w === "object" ? w.name : w;
-        const an = typeof a === "object" ? a.name : a;
-        return wn === an;
-    };
+    // Did sideA win? sameCompetitor (competitor_identity.jsx, the one owner
+    // of the attribution rule): id decides whenever BOTH sideA and winner
+    // carry one (same-name/different-dojo finalists never collide onto the
+    // wrong side), name only when NEITHER does, and a mixed pair is never
+    // guessed at.
+    const sideAWon = (w, a) => !!w && !!a && sameCompetitor(w, a);
     // Build score from ipponsA/ipponsB. Pool and bracket matches converge on
     // this one shape (both carry ipponsA/ipponsB arrays; scoreA/scoreB
     // strings never appear on the wire), so one branch covers both.
@@ -353,7 +358,14 @@ function buildPlayerMap(comp) {
         // as the pool/schedule cards. Previously only {id,name,dojo,seed} were
         // carried, so a qualifier lost their number and zekken in the bracket.
         const entry = {
-            id: norm.id || norm.name,
+            // bc-pnum: never invent an id from the display name. Name and
+            // dojo are operator-editable after the draw (they are not a
+            // stable identity), so a participant with no real UUID must
+            // read as id-less ("") downstream, not as if "id" happened to
+            // equal its own name. Every "does this side carry an id"
+            // check (LeagueMatrix, enrichPoolMatchWithComp, lineup
+            // resolution, etc.) depends on this being truthful.
+            id: norm.id || "",
             name: norm.name,
             dojo: norm.dojo || "",
             seed: norm.seed ?? 0,

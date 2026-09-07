@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, matchParticipantNames, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, sideIsWatched } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -30,6 +30,33 @@ const hasBothSides = (m) => window.hasBothSides(m);
 // compareDmy (DD-MM-YYYY date comparator) is imported from viewer_utils.jsx.
 
 const pluralize = window.pluralize;
+
+// filterSecondaryOnDeck: on-deck matches for NON-primary watched players
+// (the quiet, rate-limited banner path on ViewerHome). A match involving
+// the primary watched player is excluded (the loud path already covers it).
+//
+// buildWatchedSets (viewer_watchlist_core.jsx) is THE ONE producer of the
+// {ids, names} shape, and sideIsWatched (same file) THE ONE side predicate
+// deciding by the SIDE's own id presence -- never an OR of id-hit-or-
+// name-hit for the same side, which let watching Sato of Tokyo also surface
+// Sato of Osaka's on-deck match. 2nd Opus review round: this used to build
+// its OWN watchedIds/watchedNames pair inline, inclusively (every entry's
+// name landed in watchedNames even when that entry also carried an id), so
+// an id-less side sharing an id-carrying watched entry's name fired this
+// on-deck banner while that SAME entry's card correctly refused to
+// highlight it (buildWatchedSets is mutually exclusive per entry).
+// Exported for unit testing.
+export function filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primaryIds) {
+  if (resolvedWatched.length === 0) return [];
+  const watched = buildWatchedSets(resolvedWatched);
+  return bothSidesMatches.filter((m) => {
+    if (!isFollowedMatchOnDeck(m)) return false;
+    const [a, b] = matchParticipantIds(m);
+    if ((a && primaryIds.has(a)) || (b && primaryIds.has(b))) return false;
+    const [aName, bName] = matchParticipantNames(m);
+    return sideIsWatched(a, aName, watched) || sideIsWatched(b, bName, watched);
+  });
+}
 
 // shouldShowRegister returns true when a "Register for this competition" button
 // should be shown on a competition card. Extracted for unit testability (mp-e5j).
@@ -175,22 +202,10 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   // On-deck matches for NON-primary watched players (the quiet, rate-limited
   // banner path). A match that involves the primary is handled by the loud
   // path, so it is excluded here.
-  const secondaryOnDeck = useMemo(() => {
-    if (resolvedWatched.length === 0) return [];
-    const watchedIds = new Set(resolvedWatched.map((p) => p.id));
-    const watchedNames = new Set(resolvedWatched.map((p) => (p.name || "").trim().toLowerCase()).filter(Boolean));
-    return bothSidesMatches.filter((m) => {
-      if (!isFollowedMatchOnDeck(m)) return false;
-      const [a, b] = matchParticipantIds(m);
-      if ((a && primaryIds.has(a)) || (b && primaryIds.has(b))) return false;
-      if ((a && watchedIds.has(a)) || (b && watchedIds.has(b))) return true;
-      if (watchedNames.size > 0) {
-        const [aN, bN] = matchParticipantNames(m);
-        if ((aN && watchedNames.has(aN.trim().toLowerCase())) || (bN && watchedNames.has(bN.trim().toLowerCase()))) return true;
-      }
-      return false;
-    });
-  }, [bothSidesMatches, resolvedWatched, primaryIds]);
+  const secondaryOnDeck = useMemo(
+    () => filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primaryIds),
+    [bothSidesMatches, resolvedWatched, primaryIds]
+  );
 
   // mp-xhaa: primary loud alert (chime + title flash + banner) + secondary
   // quiet, rate-limited banner.

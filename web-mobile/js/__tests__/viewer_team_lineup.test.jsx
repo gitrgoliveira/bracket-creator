@@ -53,6 +53,13 @@ describe('lineup_resolver: resolveLineupTeamId', () => {
     expect(resolveLineupTeamId('any-key', null)).toBe('any-key');
     expect(resolveLineupTeamId('any-key', undefined)).toBe('any-key');
   });
+
+  // bc-pnum (Opus review round): an object-form overload (id decides when
+  // present) was added here, found to have no production caller (YAGNI),
+  // and removed -- see lineup_resolver.jsx's header comment on
+  // resolveLineupTeamId for why every real caller collapses the side to a
+  // bare key before calling. These three cases are gone with it, not
+  // converted: the string form has no id/name split to decide between.
 });
 
 describe('lineup_resolver: pickFromLineup', () => {

@@ -193,4 +193,37 @@ describe('buildPrimaryNextMatch', () => {
   it('returns null for a null primary', () => {
     expect(buildPrimaryNextMatch(null, roster, matches)).toBeNull();
   });
+
+  // bc-pnum (2nd Opus review round, HIGH regression from c23ea84e): the
+  // primary entry always carries a real id (resolveEntryPlayerIds only ever
+  // returns roster-backed ids), so an id-less match side is a MIXED pair
+  // and must never be guessed at by name -- sameCompetitor's rule. The
+  // removed name fallback (activated whenever the id pass found nothing)
+  // matched ANY pending match by name regardless of whether that side
+  // carried an id, so a legacy/id-less roster showed the wrong hero card
+  // instead of none.
+  it('never falls back to a name match for a dojo primary: an id-less side named after a dojo-mate gets no card', () => {
+    // Hagane Dojo's members are Akira (a1) and Aoi (a2). Neither carries an
+    // id on this legacy match, but one side happens to be named "Aoi" --
+    // the OLD fallback built its name set from every CURRENT dojo member's
+    // roster name, so it matched this dojo-mate's name even though this
+    // specific match never carried her id.
+    const legacyMatches = [
+      { id: 'legacy1', sideA: { id: '', name: 'Aoi' }, sideB: { id: '', name: 'Someone Else' }, status: 'scheduled', scheduledAt: '09:00' },
+    ];
+    expect(buildPrimaryNextMatch({ type: 'dojo', dojo: 'Hagane Dojo' }, roster, legacyMatches)).toBeNull();
+  });
+
+  // Reproduces the live bug report verbatim: Akira (id a1) is followed. The
+  // only pending match is an id-less legacy row where one side happens to
+  // be named "Akira" too (a data quirk / bracket placeholder echoing the
+  // follower's own name). The id pass finds nothing (neither side carries
+  // a1); there must be no name fallback to fall into and name the follower
+  // as their own opponent.
+  it('never names the follower as their own opponent via a same-name id-less side', () => {
+    const selfNamedMatch = [
+      { id: 'weird', sideA: { id: '', name: 'Akira' }, sideB: { id: '', name: 'Someone Else' }, status: 'scheduled', scheduledAt: '09:00' },
+    ];
+    expect(buildPrimaryNextMatch({ type: 'player', id: 'a1', name: 'Akira' }, roster, selfNamedMatch)).toBeNull();
+  });
 });

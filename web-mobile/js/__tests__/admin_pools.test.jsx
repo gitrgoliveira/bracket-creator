@@ -152,6 +152,35 @@ describe('enrichPoolMatchWithComp', () => {
     }
   });
 
+  // bc-pnum: pool matches carry sideAId/sideBId (state.MatchResult flat
+  // fields) alongside the plain-string sideA/sideB. toPlayer used to look
+  // the side up in playerMap by NAME alone, which collapses two same-name/
+  // different-dojo participants onto whichever one buildPlayerMap added
+  // last under the shared name key. Resolving by sideAId (when present)
+  // must pick the CORRECT participant instead.
+  it('resolves sideA by sideAId, not by the name-collapsed map entry, when two participants share a name (bc-pnum)', () => {
+    const prev = window.buildPlayerMap;
+    try {
+      window.buildPlayerMap = () => ({
+        // The plain "Sato" name key collapses to whichever participant was
+        // added LAST (Osaka here) -- exactly the trap toPlayer must avoid.
+        Sato: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+        S1: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+        S2: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+      });
+      const m = { id: 'A-0', status: 'scheduled', sideA: 'Sato', sideAId: 'S1', sideB: 'Bob' };
+      const enriched = enrichPoolMatchWithComp(m, comp);
+      // sideAId names S1 (Tokyo), not the name-collapsed S2 (Osaka).
+      expect(enriched.sideA).toEqual({ id: 'S1', name: 'Sato', dojo: 'Tokyo' });
+    } finally {
+      if (prev === undefined) {
+        delete window.buildPlayerMap;
+      } else {
+        window.buildPlayerMap = prev;
+      }
+    }
+  });
+
   it('converts falsy sideA/sideB to {id:"",name:""} (bye/TBD slot)', () => {
     const m = { id: 'A-0', status: 'scheduled', sideA: '', sideB: null };
     const enriched = enrichPoolMatchWithComp(m, comp);

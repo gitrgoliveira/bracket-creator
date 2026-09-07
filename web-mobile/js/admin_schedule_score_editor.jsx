@@ -5,6 +5,7 @@ import { writeDidNotLand } from './write_result.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -175,8 +176,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           </div>
         )}
         {filtered.map((m) => {
-          const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
-          const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+          // bc-pnum: sameCompetitor, never a bare `winner.id === side.id`
+          // (see bracket.jsx's MatchCard for why the naked equality lights
+          // both sides once both are id-less).
+          const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
+          const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
           const isCorrection = m.status === "completed" && m.score?.corrected;
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under

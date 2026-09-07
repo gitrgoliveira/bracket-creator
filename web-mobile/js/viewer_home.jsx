@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, sideIsWatched } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -35,17 +35,13 @@ const pluralize = window.pluralize;
 // (the quiet, rate-limited banner path on ViewerHome). A match involving
 // the primary watched player is excluded (the loud path already covers it).
 //
-// buildWatchedSets (viewer_watchlist_core.jsx) is THE ONE producer of the
-// {ids, names} shape, and sideIsWatched (same file) THE ONE side predicate
-// deciding by the SIDE's own id presence -- never an OR of id-hit-or-
-// name-hit for the same side, which let watching Sato of Tokyo also surface
-// Sato of Osaka's on-deck match. this used to build
-// its OWN watchedIds/watchedNames pair inline, inclusively (every entry's
-// name landed in watchedNames even when that entry also carried an id), so
-// an id-less side sharing an id-carrying watched entry's name fired this
-// on-deck banner while that SAME entry's card correctly refused to
-// highlight it (buildWatchedSets is mutually exclusive per entry).
-// Exported for unit testing.
+// buildWatchedSets + matchInvolvesWatchedSet (viewer_watchlist_core.jsx) are
+// THE ONE producer + predicate every case-insensitive watch surface shares:
+// a hand-rolled copy here once built its OWN watchedIds/watchedNames pair
+// inclusively (every entry's name landed in watchedNames even when that
+// entry also carried an id), so an id-less side sharing an id-carrying
+// watched entry's name fired this on-deck banner while that SAME entry's
+// card correctly refused to highlight it. Exported for unit testing.
 export function filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primaryIds) {
   if (resolvedWatched.length === 0) return [];
   const watched = buildWatchedSets(resolvedWatched);
@@ -53,8 +49,7 @@ export function filterSecondaryOnDeck(bothSidesMatches, resolvedWatched, primary
     if (!isFollowedMatchOnDeck(m)) return false;
     const [a, b] = matchParticipantIds(m);
     if ((a && primaryIds.has(a)) || (b && primaryIds.has(b))) return false;
-    const [aName, bName] = matchParticipantNames(m);
-    return sideIsWatched(a, aName, watched) || sideIsWatched(b, bName, watched);
+    return matchInvolvesWatchedSet(m, watched);
   });
 }
 

@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 9). Pure split, no behavior change.
 
 import { TermV, competitionKindLabel, poolLabel, compMatchesForCompetition } from './viewer_utils.jsx';
-import { matchParticipantIds, matchParticipantNames, isFollowedPlayer, isPlayerWatched, sideIsWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets } from './viewer_watchlist_core.jsx';
+import { isFollowedPlayer, isPlayerWatched, entryKey, resolveWatchedPlayers, findPrimaryEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { MatchDetailCard, VSchedItem, MatchViewerModal } from './viewer_match.jsx';
 import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, DHBadge, matchWinnerName } from './viewer_standings.jsx';
 import { AwardsView } from './viewer_awards.jsx';
@@ -17,21 +17,6 @@ const EmptyState = window.EmptyState;
 // Lazy callable: window.hasBothSides is set by admin_helpers.js which loads
 // AFTER viewer scripts. By the time any React render runs, it is defined.
 const hasBothSides = (m) => window.hasBothSides(m);
-
-// `watched` is the {ids, names} shape buildWatchedSets produces. Routes
-// through sideIsWatched (viewer_watchlist_core.jsx), THE single
-// case-insensitive side predicate, rather than a hand-rolled equivalent:
-// a separate inline copy here once consulted its OWN watchedIds/watchedNames
-// pair, built inclusively (an id-carrying entry's name leaked into
-// watchedNames too), so an id-less side sharing that name was listed in the
-// running/upcoming/recent filters even though highlightPlayers (same
-// resolvedWatched list, via buildWatchedSets) correctly refused to
-// highlight its card. Exported for unit testing.
-export function matchInvolvesWatchedSet(m, watched) {
-  const [aId, bId] = matchParticipantIds(m);
-  const [aName, bName] = matchParticipantNames(m);
-  return sideIsWatched(aId, aName, watched) || sideIsWatched(bId, bName, watched);
-}
 
 // bracketRoundsContain: is this match id drawn INSIDE BracketTree? The bronze
 // (3rd-place) playoff is a sibling of bracket.rounds and is rendered below the
@@ -114,18 +99,12 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
   const myUpcoming = useMemo(() => buildPrimaryNextMatch(primaryEntry, compRoster, allMatches.filter(hasBothSides)), [primaryEntry, compRoster, allMatches]);
 
   // mp-xhaa: the highlight set covers ALL watched players (dojo entries
-  // expanded to members). This is the upgrade over the old single-followed-
-  // player highlight. bc-pnum: {ids, names} (buildWatchedSets), not one
-  // pooled Set -- isPlayerWatched/sideIsWatched decide which to consult by
-  // the CHECKED side's own id presence, never both independently.
-  //
-  // this is now the ONLY set built from
-  // resolvedWatched. A separate watchedIds/watchedNames pair used to be
-  // built here purely for matchInvolvesWatchedSet, inclusively (every
-  // entry's name landed in watchedNames even when that entry also carried
-  // an id), so an id-less side could be listed in the running/upcoming/
-  // recent filters below while this SAME highlightPlayers correctly refused
-  // to highlight its card. Both now read from this one producer.
+  // expanded to members), the upgrade over the old single-followed-player
+  // highlight. buildWatchedSets keys each entry by competitorKey (id-decides-
+  // else-name), so isPlayerWatched/matchInvolvesWatchedSet below and this
+  // component's own highlighting all read from the ONE set built from
+  // resolvedWatched, rather than each building its own watchedIds/
+  // watchedNames pair that could drift out of sync on the same id-less side.
   const highlightPlayers = useMemo(() => buildWatchedSets(resolvedWatched), [resolvedWatched]);
 
   const { runningMatches, upcomingMatches, recentMatches } = useMemo(() => {

@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { matchInvolvesWatchedSet } from '../viewer_competition.jsx';
-import { buildWatchedSets } from '../viewer_watchlist_core.jsx';
+import { matchInvolvesWatchedSet, buildWatchedSets } from '../viewer_watchlist_core.jsx';
 
-// bc-pnum: matchInvolvesWatchedSet backs
-// ViewerCompetition's running/upcoming/recent match filtering by watchlist.
-// A side WITH an id must match only a watched id; a side WITHOUT one
-// matches by name only -- never an OR of both for the same side.
+// bc-pnum: matchInvolvesWatchedSet backs every match-level watch filter
+// (ViewerCompetition's running/upcoming/recent, viewer_home.jsx's
+// filterSecondaryOnDeck, viewer_schedule.jsx's buildWatchlistUpcoming). A
+// side WITH an id must match only a watched id; a side WITHOUT one matches
+// by name only -- never an OR of both for the same side.
 //
-// `watched` is built via buildWatchedSets (the ONE producer of the {ids,
-// names} shape every case-insensitive watch surface consults), fed a
+// `watched` is built via buildWatchedSets (the ONE producer of the Set
+// every case-insensitive watch surface consults), fed a
 // realistic resolvedWatched list, rather than hand-assembled Sets: the old
 // version of this file passed hand-picked Sets (an empty watchedIds
 // alongside a hand-added name) that never exercised buildWatchedSets' own

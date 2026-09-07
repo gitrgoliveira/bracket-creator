@@ -5,8 +5,8 @@ import { isPlayerWatched, buildWatchedSets } from '../viewer_watchlist_core.jsx'
 // lowercased names into ONE flat Set and accept a hit on either
 // independently, so watching Sato of Tokyo also highlighted Sato of Osaka's
 // rows in the bracket/pool/schedule wherever the id check missed. `watched`
-// is now {ids, names} (buildWatchedSets): the CHECKED player decides which
-// set to consult by its own id presence.
+// is now a single Set keyed by competitorKey (buildWatchedSets): the
+// CHECKED player's own id presence decides which key it can match.
 describe('isPlayerWatched', () => {
   it('an id-carrying player matches only a watched id, never falling through to name', () => {
     const watched = buildWatchedSets([{ id: 'sato-tokyo', name: 'Sato' }]);
@@ -48,18 +48,18 @@ describe('isPlayerWatched', () => {
 });
 
 describe('buildWatchedSets', () => {
-  it('routes an id-carrying entry to ids only, an id-less entry to names only', () => {
-    const { ids, names } = buildWatchedSets([
+  it('keys an id-carrying entry by id only, an id-less entry by name only', () => {
+    const set = buildWatchedSets([
       { id: 'S1', name: 'Sato' },
       { id: '', name: 'Tanaka' },
     ]);
-    expect(ids.has('S1')).toBe(true);
-    expect(names.has('sato')).toBe(false); // id-carrying entry's name is NOT duplicated into names
-    expect(names.has('tanaka')).toBe(true);
+    expect(set.has('id:S1')).toBe(true);
+    expect(set.has('nm:sato')).toBe(false); // id-carrying entry's name is NOT also keyed
+    expect(set.has('nm:tanaka')).toBe(true);
   });
 
   it('tolerates a non-array input', () => {
-    expect(buildWatchedSets(null).ids.size).toBe(0);
-    expect(buildWatchedSets(undefined).names.size).toBe(0);
+    expect(buildWatchedSets(null).size).toBe(0);
+    expect(buildWatchedSets(undefined).size).toBe(0);
   });
 });

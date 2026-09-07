@@ -42,16 +42,24 @@ export function nameOf(x) {
   return (x && typeof x === "object" ? x.name : x) || "";
 }
 
+// competitorKey: id-decides-else-name as a single string, so THE RULE above
+// falls out of comparing two keys rather than being restated at every call
+// site. "id:"+id when x carries one; else "nm:"+normalizeName(name) when x
+// carries a name; else "" (unkeyable). The "id:"/"nm:" prefixes are why a
+// mixed pair (one keyed, one not) can never collide: an id key and a name
+// key are never equal regardless of their values. `normalizeName` lets a
+// caller fold case/whitespace for a name-based Set (e.g. the watchlist);
+// sameCompetitor below passes none, since ATTRIBUTION compares exact names.
+export function competitorKey(x, normalizeName = (s) => s) {
+  const id = idOf(x);
+  if (id) return "id:" + id;
+  const name = normalizeName(nameOf(x));
+  return name ? "nm:" + name : "";
+}
+
 export function sameCompetitor(a, b) {
-  const aId = idOf(a);
-  const bId = idOf(b);
-  if (aId && bId) return aId === bId;
-  if (!aId && !bId) {
-    const an = nameOf(a);
-    const bn = nameOf(b);
-    return !!an && an === bn;
-  }
-  return false;
+  const ka = competitorKey(a);
+  return !!ka && ka === competitorKey(b);
 }
 
 if (typeof window !== "undefined") {

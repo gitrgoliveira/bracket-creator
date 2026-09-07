@@ -225,7 +225,7 @@ func TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing(t *testing.T) {
 // competition), exercised here through currentMatchPlayers
 // (handlers_display.go), the court-overlay read path, for a POOLED
 // competition instead. pools.csv unreadable must show as MISSING numbers,
-// never as composed ones (D1): numbersFromDraw returns the LoadPools error
+// never as composed ones (D1): numbersFromDrawWithBracket returns the LoadPools error
 // rather than merging against a nil/empty pools slice, which
 // applyDrawNumbers would otherwise read as "no draw yet".
 //
@@ -245,8 +245,7 @@ func TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing(t *testing.T) {
 // TestViewerCompetitionsList_CorruptBracketShowsNoNumbers for that format's
 // own read-error case, over bracket.json instead, and
 // TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers below for
-// the aggregate-payload counterpart of THIS test, via
-// numbersFromDrawWithBracket rather than numbersFromDraw).
+// the aggregate-payload counterpart of THIS test).
 func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
@@ -310,7 +309,7 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 // placed) must never be read for this competition, corrupt or not. Before
 // engine.DrawSourceFor existed, numberingApplies did not exclude Swiss (it
 // fell through the same default branch as mixed/league), so
-// currentMatchPlayers' numbersFromDraw call attempted to parse the stray
+// currentMatchPlayers' numbersFromDrawWithBracket call attempted to parse the stray
 // file and logged the failure as "load draw" -- RED without the fix.
 func TestCourtCurrentSwissNeverReadsPoolsFile(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)

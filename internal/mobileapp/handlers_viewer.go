@@ -95,13 +95,11 @@ func drawInPoolsFile(comp *state.Competition) bool {
 }
 
 // numberingApplies is the ONE place that states the guard chain every
-// caller of applyDrawNumbers' I/O wrappers must agree on: a nil comp or an
+// caller of applyDrawNumbers' I/O wrapper must agree on: a nil comp or an
 // empty prefix means "do nothing, no I/O, no number" (ok=false), same as a
 // DrawNone competition (no draw yet, or Swiss -- see engine.DrawSourceFor).
 // Otherwise ok is true and needsBracket says which file the draw actually
-// needs: DrawInBracket's DrawOrder, or pools.csv for DrawInPools. Shared by
-// numbersFromDraw and numbersFromDrawWithBracket below so the rule cannot
-// drift between the two.
+// needs: DrawInBracket's DrawOrder, or pools.csv for DrawInPools.
 func numberingApplies(comp *state.Competition) (needsBracket, ok bool) {
 	if comp == nil || comp.EffectiveNumberPrefix() == "" {
 		return false, false
@@ -116,71 +114,37 @@ func numberingApplies(comp *state.Competition) (needsBracket, ok bool) {
 	}
 }
 
-// numbersFromDraw is applyDrawNumbers' I/O-performing wrapper (renamed from
-// numbersFromPools, bc-pnum ruling 2 successor to PR #416 finding 3): a
-// caller that wants players' Number field filled from the draw's
-// assignment, and has loaded NEITHER pools nor the bracket for its own
-// purposes, calls this rather than hand-rolling the format switch, the
-// prefix/no-draw-yet skip, and the read itself. currentMatchPlayers
-// (handlers_display.go) is that caller.
+// numbersFromDrawWithBracket is applyDrawNumbers' I/O-performing wrapper
+// (bc-pnum ruling 2 successor to PR #416 finding 3): a caller that wants
+// players' Number field filled from the draw's assignment calls this rather
+// than hand-rolling the format switch, the prefix/no-draw-yet skip, and the
+// read itself.
 //
-// A thin front door: it runs the shared guard (numberingApplies), loads the
-// bracket itself ONLY when the format actually needs one, and delegates
-// everything else -- the pools.csv read for every other format, and the
-// merge itself -- to numbersFromDrawWithBracket, so neither function has to
-// restate the guard chain or the format switch on its own.
+// bracket is the caller's own already-loaded read when it has one (nil
+// otherwise, meaning "load it here only if the format needs it"):
+// buildViewerCompetitionPayload (below) loads it unconditionally for the
+// court-feed match check before numbering is ever computed, and
+// currentMatchPlayers (handlers_display.go) holds one on its bracket-branch
+// calls but not its pool-branch call. Passing bracket verbatim -- nil
+// exactly when the caller's own read failed, which the caller reports
+// itself -- means this never retries a failed read: retrying would both
+// cost a second bracket.json read and report the identical corrupt-file
+// error a second time.
 //
-// Skips ALL reads (pools or bracket) when the competition has no draw yet:
-// pools.csv/bracket.json cannot exist yet for a competition that has never
-// drawn, so the read is a guaranteed-empty stat -- and, more importantly,
-// any bytes found at that path for such a competition are noise (a stray
-// fixture/leftover from another run), not an operator-actionable file, so
-// they must never surface as a data issue or a log line.
+// Only the playoffs branch can skip an I/O read this way (bracket is the
+// ONLY file that format ever needs for numbering); every other format still
+// performs its own pools.csv read here. Skips ALL reads (pools or bracket)
+// when the competition has no draw yet: pools.csv/bracket.json cannot exist
+// yet for a competition that has never drawn, so the read is a
+// guaranteed-empty stat -- and, more importantly, any bytes found at that
+// path for such a competition are noise (a stray fixture/leftover from
+// another run), not an operator-actionable file, so they must never surface
+// as a data issue or a log line.
 //
 // On a genuine read/parse error the merge is skipped (numbers are never
 // composed from a partial/corrupt read) and the error is returned so a
 // caller that maintains a dataIssues list can fold it in; other callers log
 // it directly.
-//
-// A caller that has ALREADY attempted to load the bracket for its own
-// purposes (buildViewerCompetitionPayload, below) must NOT call this: doing
-// so would re-attempt the identical read on a failure and report the same
-// corrupt-file error a second time, once under its own brErr and once under
-// this function's return. numbersFromDrawWithBracket is that caller's own
-// door instead.
-func numbersFromDraw(store *state.Store, comp *state.Competition, players []domain.Player) error {
-	needsBracket, ok := numberingApplies(comp)
-	if !ok {
-		return nil
-	}
-	var bracket *state.Bracket
-	if needsBracket {
-		var err error
-		bracket, err = store.LoadBracket(comp.ID)
-		if err != nil {
-			return err
-		}
-	}
-	return numbersFromDrawWithBracket(store, comp, players, bracket)
-}
-
-// numbersFromDrawWithBracket is numbersFromDraw's sibling for a caller that
-// has ALREADY attempted to load the bracket for its own purposes:
-// buildViewerCompetitionPayload loads it unconditionally for the court-feed
-// match check before numbering is ever computed. bracket is that read's
-// result verbatim -- nil exactly when the read failed, which the caller
-// reports itself (its own brErr), so this never retries it: retrying would
-// both cost a second bracket.json read and report the identical corrupt-file
-// error a second time in the payload's dataIssues.
-//
-// Only the playoffs branch can skip an I/O read this way (bracket is the
-// ONLY file that format ever needs for numbering); every other format still
-// performs its own pools.csv read here, since the caller has not loaded
-// one. Same guard as numbersFromDraw (numberingApplies), which is also this
-// function's own direct caller's gate -- numbersFromDraw delegates here
-// after running it once, so stating it again costs nothing wrong, only a
-// second cheap boolean check, and this function still needs its own copy
-// for the callers that reach it directly (buildViewerCompetitionPayload).
 func numbersFromDrawWithBracket(store *state.Store, comp *state.Competition, players []domain.Player, bracket *state.Bracket) error {
 	needsBracket, ok := numberingApplies(comp)
 	if !ok {
@@ -648,7 +612,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// on the TV display, streaming overlay, and viewer card. `pools`
 			// and `bracket` are already loaded above (both are also this
 			// payload's own fields), so this calls the pure, no-I/O
-			// applyDrawNumbers directly rather than numbersFromDraw
+			// applyDrawNumbers directly rather than numbersFromDrawWithBracket
 			// (bc-pnum ruling 2 successor to PR #416 finding 3), which would
 			// re-read pools.csv/bracket.json a second time. A read error
 			// degrades (above) rather than aborting, so `pools`/`bracket` may

@@ -303,6 +303,62 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	assert.Emptyf(t, resp.SideB.Number, "sideB must show NO number over an unreadable pools.csv, got %q", resp.SideB.Number)
 }
 
+// TestCourtCurrentSwissNeverReadsPoolsFile pins engine.DrawSourceFor's
+// agreement with drawInPoolsFile (bc-pnum item 2): a Swiss competition
+// writes its rounds to pool-matches.csv only and never has a pools.csv, so
+// a stray/leftover one (e.g. left behind by a format change, or hand
+// placed) must never be read for this competition, corrupt or not. Before
+// engine.DrawSourceFor existed, numberingApplies did not exclude Swiss (it
+// fell through the same default branch as mixed/league), so
+// currentMatchPlayers' numbersFromDraw call attempted to parse the stray
+// file and logged the failure as "load draw" -- RED without the fix.
+func TestCourtCurrentSwissNeverReadsPoolsFile(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "swiss-stray-pools-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Swiss Stray Pools Current", Format: state.CompFormatSwiss, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K",
+	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	// A stray, CORRUPT pools.csv: Swiss never writes this file, so any bytes
+	// found here are leftovers, not an operator-actionable file (matches
+	// drawInPoolsFile's own rule for the aggregate/detail viewer payloads).
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "Swiss-R1-1", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusRunning, Court: "A"},
+	}))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.NotContains(t, logBuf.String(), "load draw",
+		"a Swiss competition must never attempt to read pools.csv at all, corrupt or not")
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Emptyf(t, resp.SideA.Number, "Swiss never assigns a Number, got %q", resp.SideA.Number)
+	assert.Emptyf(t, resp.SideB.Number, "Swiss never assigns a Number, got %q", resp.SideB.Number)
+}
+
 // TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins the logged participants error:
 // currentMatchPlayers used to discard LoadParticipantsOpt's error outright
 // (`players, _ := ...`), unlike the pools load just below it in the same

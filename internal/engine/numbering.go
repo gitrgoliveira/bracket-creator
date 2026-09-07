@@ -11,6 +11,45 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// DrawSource identifies where a competition's currently-generated draw
+// lives on disk. The one answer every caller that merges assigned numbers,
+// or decides whether pools.csv is worth reading at all, must agree on --
+// mobileapp's numberingApplies and drawInPoolsFile used to derive this
+// independently, and could (and did) drift: only drawInPoolsFile excluded
+// Swiss.
+type DrawSource int
+
+const (
+	// DrawNone: no draw has been generated yet (engine.CanGenerateDraw(comp.Status)),
+	// or the competition is Swiss, which never writes a draw to pools.csv or
+	// bracket.json's DrawOrder -- Swiss rounds live in pool-matches.csv only.
+	DrawNone DrawSource = iota
+	// DrawInPools: a pooled format (mixed, league) whose draw has been
+	// generated; competitor numbers and pool membership live in pools.csv.
+	DrawInPools
+	// DrawInBracket: a standalone knockout (playoffs, or an unset Format,
+	// which generation treats identically) whose draw has been generated;
+	// competitor numbers are composed from bracket.json's DrawOrder.
+	DrawInBracket
+)
+
+// DrawSourceFor derives comp's DrawSource from its status and effective
+// format (comp.EffectiveFormat(), never comp.Format directly: an unset
+// Format ("") is standalone playoffs too).
+func DrawSourceFor(comp *state.Competition) DrawSource {
+	if comp == nil || CanGenerateDraw(comp.Status) {
+		return DrawNone
+	}
+	switch comp.EffectiveFormat() {
+	case state.CompFormatPlayoffs:
+		return DrawInBracket
+	case state.CompFormatSwiss:
+		return DrawNone
+	default:
+		return DrawInPools
+	}
+}
+
 // NumberKnockoutParticipants is the ONE derivation of a knockout-only
 // competition's numbers (bc-pnum ruling 2): a number belongs to a POSITION
 // in the draw, so it composes players[i].Number from drawOrder, the
@@ -128,6 +167,18 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 //
 // Returns (nil, nil) -- not an error -- when the competition is not this
 // shape, so a caller can use the result without a branch of its own.
+//
+// Deliberately checks EffectiveFormat directly rather than
+// DrawSourceFor(comp) == DrawInBracket: ExportCompetitionXlsx (the
+// blank-template export) is reachable BEFORE a draw exists, precisely so an
+// operator can print name tags and blank score sheets ahead of the
+// tournament, and DrawSourceFor returns DrawNone for a not-yet-drawn
+// playoffs competition exactly as it does for one with no draw at all --
+// gating on it here would blank the Names-to-Print/Tags sheets pre-draw.
+// bracket may therefore be the tolerant empty value LoadBracket returns for
+// a competition that has never drawn (NumberedParticipantsFor's own nil
+// handling), which is fine: NumberKnockoutParticipants is a no-op over an
+// empty DrawOrder, so the roster comes back unnumbered rather than absent.
 func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) ([]helper.Player, error) {
 	if comp.EffectiveFormat() != state.CompFormatPlayoffs || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
 		return nil, nil
@@ -152,19 +203,15 @@ func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Po
 //
 // pools.csv column 7 is the only persisted home of Player.Number
 // (participants.csv does not persist it either), so rewriting the pools
-// file renumbers every surface for a POOLED competition. This function is
-// pools-only and does not touch a playoffs (knockout-only) competition's
-// numbers at all: those are composed at read time from the bracket's
-// DrawOrder (bc-pnum ruling 2, engine.NumberKnockoutParticipants), and a
-// prefix change is reflected on the next read with no rewrite needed --
-// BracketMatch carries no Number field to rewrite in the first place. "No
-// pools file" is not the same thing as "playoffs-only": a mixed or league
-// competition that has not been drawn YET has none either, because
-// SavePools has not run; and a Swiss competition NEVER has one (its draw
-// writes rounds to pool-matches.csv and never calls SavePools), so Swiss
-// competitors carry no number on any surface and this call is a permanent
-// no-op for them, a pre-existing gap this bead names rather than closes. In
-// every case there is nothing on disk to rewrite, so this returns (false,
+// file renumbers every surface for a POOLED competition (DrawSourceFor ==
+// DrawInPools). This function is pools-only: a DrawInBracket competition's
+// numbers are composed at read time from the bracket's DrawOrder instead
+// (bc-pnum ruling 2, engine.NumberKnockoutParticipants) -- BracketMatch
+// carries no Number field to rewrite in the first place -- and a
+// DrawNone competition (no draw yet, or Swiss, which never calls SavePools
+// at all) has no pools.csv to rewrite either, a pre-existing gap for Swiss
+// this bead names rather than closes. In every DrawSource other than
+// DrawInPools there is nothing on disk to rewrite, so this returns (false,
 // nil).
 //
 // The load and the save share one WithTransaction, so a concurrent score write

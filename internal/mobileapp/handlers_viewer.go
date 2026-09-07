@@ -59,76 +59,61 @@ func mergePoolNumbersIntoPlayersSlice(comp *state.Competition, players []domain.
 // applyDrawNumbers is the pure, no-I/O core of "numbers come from the draw"
 // (bc-pnum ruling 2): given comp and the caller's own already-loaded pools
 // and/or bracket (either or both nil when the caller has neither, or when
-// the competition's format does not use that file), it fills players'
-// Number field exactly as the draw assigned it -- pools.csv for a pooled
-// competition (mergePoolNumbersIntoPlayersSlice, id-only), the bracket's
-// DrawOrder for a standalone knockout (engine.NumberKnockoutParticipants).
-//
-// comp supplies both NumberPrefix and the EFFECTIVE format
-// (comp.EffectiveFormat(), never comp.Format directly: an unset Format ("")
-// is standalone playoffs too, generation's default case falls to
-// generatePlayoffs for it identically), so every caller derives the same
-// answer from the same source instead of restating the caveat locally.
-//
-// No-ops when comp is nil, its NumberPrefix is empty, or the competition has
-// no draw yet (engine.CanGenerateDraw(comp.Status)): a knockout-only
-// competitor shows NO number before the draw, exactly like a pooled one
-// (bc-pnum operator ruling) -- there is deliberately no participant-order or
-// name-based fallback of any kind.
+// engine.DrawSourceFor(comp) says the competition does not use that file),
+// it fills players' Number field exactly as the draw assigned it --
+// pools.csv for DrawInPools (mergePoolNumbersIntoPlayersSlice, id-only),
+// the bracket's DrawOrder for DrawInBracket
+// (engine.NumberKnockoutParticipants). No-op for DrawNone (no draw yet, or
+// Swiss): a knockout-only competitor shows NO number before the draw,
+// exactly like a pooled one (bc-pnum operator ruling) -- there is
+// deliberately no participant-order or name-based fallback of any kind, and
+// Swiss never assigns one at all.
 func applyDrawNumbers(comp *state.Competition, players []domain.Player, pools []helper.Pool, bracket *state.Bracket) {
 	if comp == nil || comp.EffectiveNumberPrefix() == "" {
 		return
 	}
-	if engine.CanGenerateDraw(comp.Status) {
-		return
-	}
-	if comp.EffectiveFormat() == state.CompFormatPlayoffs {
+	switch engine.DrawSourceFor(comp) {
+	case engine.DrawInBracket:
 		var drawOrder []string
 		if bracket != nil {
 			drawOrder = bracket.DrawOrder
 		}
 		engine.NumberKnockoutParticipants(comp, drawOrder, players)
-		return
+	case engine.DrawInPools:
+		mergePoolNumbersIntoPlayersSlice(comp, players, pools)
 	}
-	mergePoolNumbersIntoPlayersSlice(comp, players, pools)
 }
 
-// drawInPoolsFile reports whether comp's draw lives in pools.csv right now:
-// a pooled format (mixed, league) whose draw has been generated. Before the
-// draw (engine.CanGenerateDraw) the file cannot exist; a standalone knockout
-// keeps its draw in bracket.json and a Swiss competition writes rounds to
-// pool-matches.csv only, so neither ever has one. Both public viewer payload
-// builders gate their pools.csv read AND its error on this one predicate,
-// which is what keeps a corrupt or stray pools.csv reported identically on
-// the dashboard list and on the competition page: bytes found at that path
-// in any other state are leftovers, not an operator-actionable file.
+// drawInPoolsFile reports whether comp's draw lives in pools.csv right now.
+// Both public viewer payload builders gate their pools.csv read AND its
+// error on this one predicate, which is what keeps a corrupt or stray
+// pools.csv reported identically on the dashboard list and on the
+// competition page: bytes found at that path for any other DrawSource are
+// leftovers, not an operator-actionable file.
 func drawInPoolsFile(comp *state.Competition) bool {
-	if comp == nil || engine.CanGenerateDraw(comp.Status) {
-		return false
-	}
-	switch comp.EffectiveFormat() {
-	case state.CompFormatPlayoffs, state.CompFormatSwiss:
-		return false
-	}
-	return true
+	return engine.DrawSourceFor(comp) == engine.DrawInPools
 }
 
 // numberingApplies is the ONE place that states the guard chain every
-// caller of applyDrawNumbers' I/O wrappers must agree on: a nil comp, an
-// empty prefix, or a competition with no draw yet (engine.CanGenerateDraw)
-// means "do nothing, no I/O, no number" (ok=false). Otherwise ok is true
-// and needsBracket says which file the draw actually needs for comp's
-// EFFECTIVE format (comp.EffectiveFormat(), never comp.Format directly: an
-// unset Format ("") is standalone playoffs too) -- the bracket's DrawOrder
-// for a standalone knockout, pools.csv for everything else. Shared by
+// caller of applyDrawNumbers' I/O wrappers must agree on: a nil comp or an
+// empty prefix means "do nothing, no I/O, no number" (ok=false), same as a
+// DrawNone competition (no draw yet, or Swiss -- see engine.DrawSourceFor).
+// Otherwise ok is true and needsBracket says which file the draw actually
+// needs: DrawInBracket's DrawOrder, or pools.csv for DrawInPools. Shared by
 // numbersFromDraw and numbersFromDrawWithBracket below so the rule cannot
-// drift between the two: before this existed, each spelled out the same
-// three checks independently.
+// drift between the two.
 func numberingApplies(comp *state.Competition) (needsBracket, ok bool) {
-	if comp == nil || comp.EffectiveNumberPrefix() == "" || engine.CanGenerateDraw(comp.Status) {
+	if comp == nil || comp.EffectiveNumberPrefix() == "" {
 		return false, false
 	}
-	return comp.EffectiveFormat() == state.CompFormatPlayoffs, true
+	switch engine.DrawSourceFor(comp) {
+	case engine.DrawInBracket:
+		return true, true
+	case engine.DrawInPools:
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 // numbersFromDraw is applyDrawNumbers' I/O-performing wrapper (renamed from

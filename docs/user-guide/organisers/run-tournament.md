@@ -168,6 +168,13 @@ Click **Paste clipboard** to read a tab-separated selection from the clipboard a
 
 Applying the list gives every competitor a participant id, shown beside the row in the working roster (hover it for the full value). Competitor numbers come later: a pooled competition numbers its competitors when the draw is generated, and nothing is shown before that; see [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app whose list has no ids shows a notice on its **Overview** naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
 
+Two more notices can appear on the **Overview** for the same reason, once a competition has drawn:
+
+- A notice naming pool members with no id. Those competitors show no competitor number. Regenerate the draw, while it is still draw-ready, to fix it.
+- A notice naming pool matches with no id on a side or a winner. Those matches are not counted in the standings. Re-enter the result once the sides have ids.
+
+Both notices are advisory, not blocking: the competition keeps running, and nothing you have already recorded is lost.
+
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
 The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:

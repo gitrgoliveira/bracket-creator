@@ -31,49 +31,61 @@ var ErrMissingParticipantIDsInDraw = errors.New("cannot draw: every competitor m
 // other is advance warning before the operator ever tries to draw, and they
 // must not drift into two different accounts of the same defect.
 func MissingParticipantIDsMessage(players []Player) string {
-	var missing []Player
+	count := 0
+	var labels []string
 	for _, p := range players {
 		if strings.TrimSpace(p.ID) == "" {
-			missing = append(missing, p)
+			count++
+			if len(labels) < MaxNamedRows {
+				labels = append(labels, playerLabel(p))
+			}
 		}
 	}
-	return namedPlayersMessage(missing, "no id on file. Save the roster once and the ids are assigned.")
+	return NamedLabelsMessage(TruncatedLabels(count, labels, "competitors"), "no id on file. Save the roster once and the ids are assigned.")
 }
 
-// namedPlayersMessage composes the "<who>: <consequenceAndRemedy>" sentence
-// shared by every missing-id notice (participants.csv, pools.csv, and
-// pool-matches.csv's own composer in internal/engine): a competition's
-// data-issues banner and the draw pre-flight must describe the same
-// condition with the same words, so the naming/truncation rule lives in ONE
-// place. Returns "" when missing is empty.
-//
-// Names at most the first three affected rows, followed by the total count,
-// for a large roster: an operator doesn't need every name to understand what
-// happened, and a wall of names would bury the remedy.
-func namedPlayersMessage(missing []Player, consequenceAndRemedy string) string {
-	const maxNamed = 3
-	if len(missing) == 0 {
+// MaxNamedRows is the most affected rows any missing-id/no-id notice names
+// individually before folding the rest into a "N <noun>, including" count.
+const MaxNamedRows = 3
+
+// playerLabel is the "Name (Dojo)" (or bare "Name" when Dojo is blank)
+// label every player-identified notice names an affected row by.
+func playerLabel(p Player) string {
+	if p.Dojo != "" {
+		return fmt.Sprintf("%s (%s)", p.Name, p.Dojo)
+	}
+	return p.Name
+}
+
+// TruncatedLabels collapses a count/first-three-labels pair into the
+// []string NamedLabelsMessage expects: labels verbatim when count already
+// fits within them, or a single pre-composed "N <noun>, including <label>,
+// <label>, <label>" element when count exceeds len(labels) -- collapsing
+// here (rather than inside NamedLabelsMessage) is what lets each caller use
+// its own noun ("competitors" here, "match(es)" for
+// engine.PoolMatchesMissingSideIDsMessage) while still sharing the same
+// join-and-append-tail primitive. Returns nil when count is 0.
+func TruncatedLabels(count int, labels []string, noun string) []string {
+	if count == 0 {
+		return nil
+	}
+	if count <= len(labels) {
+		return labels
+	}
+	return []string{fmt.Sprintf("%d %s, including %s", count, noun, strings.Join(labels, ", "))}
+}
+
+// NamedLabelsMessage composes the "<who>: <tail>" sentence shared by every
+// missing-id/no-id notice in this codebase -- participants.csv and
+// pools.csv's collectors below (via TruncatedLabels), plus
+// engine.PoolMatchesMissingSideIDsMessage (which maps its own affected rows
+// to "SideA vs SideB" labels and collapses them the same way, with its own
+// noun). Returns "" when labels is empty.
+func NamedLabelsMessage(labels []string, tail string) string {
+	if len(labels) == 0 {
 		return ""
 	}
-	label := func(p Player) string {
-		if p.Dojo != "" {
-			return fmt.Sprintf("%s (%s)", p.Name, p.Dojo)
-		}
-		return p.Name
-	}
-	named := missing
-	if len(named) > maxNamed {
-		named = named[:maxNamed]
-	}
-	names := make([]string, len(named))
-	for i, p := range named {
-		names[i] = label(p)
-	}
-	who := strings.Join(names, ", ")
-	if len(missing) > maxNamed {
-		who = fmt.Sprintf("%d competitors, including %s", len(missing), who)
-	}
-	return fmt.Sprintf("%s: %s", who, consequenceAndRemedy)
+	return fmt.Sprintf("%s: %s", strings.Join(labels, ", "), tail)
 }
 
 // PoolsMissingParticipantIDsMessage names pools.csv rows (drawn pool
@@ -91,15 +103,19 @@ func namedPlayersMessage(missing []Player, consequenceAndRemedy string) string {
 // to regenerate the draw while the competition is still draw-ready, not a
 // participants.csv re-save (which does not touch pools.csv at all).
 func PoolsMissingParticipantIDsMessage(pools []Pool) string {
-	var missing []Player
+	count := 0
+	var labels []string
 	for _, p := range pools {
 		for _, pl := range p.Players {
 			if strings.TrimSpace(pl.ID) == "" {
-				missing = append(missing, pl)
+				count++
+				if len(labels) < MaxNamedRows {
+					labels = append(labels, playerLabel(pl))
+				}
 			}
 		}
 	}
-	return namedPlayersMessage(missing, "no id in the pool draw. No player number is assigned; regenerate the draw while it is still draw-ready.")
+	return NamedLabelsMessage(TruncatedLabels(count, labels, "competitors"), "no id in the pool draw. No player number is assigned; regenerate the draw while it is still draw-ready.")
 }
 
 // ValidateNoMissingParticipantIDs is the draw pre-flight for bc-pnum ruling

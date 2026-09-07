@@ -357,7 +357,7 @@ func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
 	assert.Equal(t, "missing-ids", aggIssue["kind"])
 	assert.Equal(t, aggIssue["detail"], detIssue["detail"])
 	detail, _ := aggIssue["detail"].(string)
-	assert.Contains(t, detail, "1 match(es)")
+	assert.Contains(t, detail, "Alice vs Bob")
 	assert.Contains(t, detail, "re-enter the results once the sides have ids")
 }
 

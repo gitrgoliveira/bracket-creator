@@ -61,9 +61,3 @@ export function sameCompetitor(a, b) {
   const ka = competitorKey(a);
   return !!ka && ka === competitorKey(b);
 }
-
-if (typeof window !== "undefined") {
-  window.sameCompetitor = sameCompetitor;
-  window.competitorIdOf = idOf;
-  window.competitorNameOf = nameOf;
-}

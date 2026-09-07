@@ -899,6 +899,29 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 // result.SideAID/SideBID directly, exactly as before -- that distinction is
 // about what the CALLER does with an unresolved loss, not about how the loss
 // itself is attributed, so it stays out of this function.
+//
+// Known consequence of the tier 3/4 id gate (bc-pnum review round 2,
+// finding 3): a PRIOR row that carries SideAID/SideBID but was hand-edited
+// (or otherwise written outside this app) to a kiken/fusenpai Decision with
+// NEITHER WinnerSide NOR WinnerID set resolves to ok=false here -- tiers 1-2
+// have nothing to go on, and the id gate blocks tiers 3/4 from guessing.
+// RecordDecisionTx's hadPriorLoser check (scoring_tx.go) treats ok=false as
+// "no prior loser to protect" and skips the T103 downstream-match lock,
+// which FAILS OPEN: a genuine prior withdrawal could be undone even though a
+// downstream match has since started, when the lock exists specifically to
+// prevent that. This is not reachable through the app itself -- every write
+// path that can set Decision to kiken/fusenpai also stamps an
+// attributable id (backfillMatchIdentity fills WinnerID via the stored
+// SideAID/SideBID, and RecordDecisionTx always stamps WinnerSide directly
+// from the operator's decisionBy choice) -- so the gap is confined to a
+// hand-edited or externally-written pool-matches.csv. The direction (id
+// gate wins, even at the cost of this narrow fail-open) is deliberate: it
+// keeps the SAME rule that stops tiers 3/4 from mis-attributing a
+// same-name pair's loss in the reachable (app-driven) cases, rather than
+// carving out a fail-closed exception for a scenario the app cannot
+// produce. See TestLosingSide's "id-carrying prior with no
+// WinnerSide/WinnerID" case, which pins ok=false as the intended answer,
+// not a bug to fix here.
 func losingSide(result *state.MatchResult) (id, name string, ok bool) {
 	switch result.WinnerSide {
 	case "A":

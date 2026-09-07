@@ -737,6 +737,17 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		// that itself came through RecordDecisionTx -- and so already
 		// carries WinnerSide -- is attributed by that authoritative hint
 		// rather than an ambiguous name/ippon guess (PR #416 findings 4/5).
+		//
+		// hadPriorLoser=false (skipping the T103 lock below, i.e. failing
+		// OPEN) is losingSide's answer whenever it cannot attribute the
+		// loss at all -- including an id-carrying prior whose tiers 3/4
+		// are gated off (bc-pnum review round 2, finding 3) with no
+		// WinnerSide/WinnerID to fall back on. Only reachable via a
+		// hand-edited pool-matches.csv: every write path this engine
+		// itself takes to a kiken/fusenpai Decision stamps one or the
+		// other (backfillMatchIdentity fills WinnerID;
+		// RecordDecisionTx always stamps WinnerSide). See losingSide's
+		// own doc comment for why the id gate wins anyway.
 		_, name, ok := losingSide(prior)
 		hadPriorLoser = ok && name != ""
 	}

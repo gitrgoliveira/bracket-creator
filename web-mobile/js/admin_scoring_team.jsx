@@ -986,12 +986,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // display name. resolveLineupTeamId's bare-string branch then either
     // confirms it against the roster by name or, finding nothing, returns
     // it unchanged. Deliberately a STRING, not the side object:
-    // resolveSide (api_serializers.jsx) can still invent `id: name` for a
-    // side with no real id at all when the player map lookup misses
-    // entirely (an accepted residual gap, kept by design); the object
-    // form's id-decides branch would treat that invented value as a real
-    // id and stop, never recovering the real id via the name lookup this
-    // string form still performs.
+    // resolveSide (api_serializers.jsx) never invents an id from the name
+    // -- a side with no real id at all (the player map lookup misses
+    // entirely) carries id "" -- so the object form's id-decides branch
+    // would stop at that empty id and never fall through to the name
+    // lookup this string form still performs.
     const sideAKey = m.sideA?.id || m.sideA?.name || (typeof m.sideA === "string" ? m.sideA : "");
     const sideBKey = m.sideB?.id || m.sideB?.name || (typeof m.sideB === "string" ? m.sideB : "");
     (async () => {
@@ -1076,15 +1075,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // unreachable ONLY when `side` itself carries a real id (sideKey is then
   // a UUID, which a display name never coincidentally equals) -- it is NOT
   // blocked merely because the CANDIDATE has an id: when `side` has none
-  // (sideKey falls back to its name), `pname === sideKey` can still match a
-  // DIFFERENT team that only shares that display name, even though that
-  // candidate carries a real id of its own. This is accepted, not a new
-  // gap: it is the same documented (name, dojo) collision resolveSide's
-  // invented `id: name` case already risks, and the name path must stay
-  // reachable for an id-less `side` to recover via that lookup at all. This
-  // is left as a string compare rather than switched to the id-decides-
-  // then-stop object form for the same reason as the sibling
-  // sideAKey/sideBKey composite above.
+  // (sideKey falls back to its name, since resolveSide never invents one --
+  // an unresolved side's id is simply ""), `pname === sideKey` can still
+  // match a DIFFERENT team that only shares that display name, even though
+  // that candidate carries a real id of its own. This is accepted, not a
+  // new gap: it is the same documented (name, dojo) collision an id-less
+  // side already risks anywhere it falls back to a name lookup, and the
+  // name path must stay reachable for an id-less `side` to recover via
+  // that lookup at all. This is left as a string compare rather than
+  // switched to the id-decides-then-stop object form for the same reason
+  // as the sibling sideAKey/sideBKey composite above.
   const allPlayers =
     (compMeta?.players?.length ? compMeta.players : null)
     || (compMeta?.config?.players)

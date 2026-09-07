@@ -553,6 +553,72 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 	assert.Equal(t, []string{"K1", "K2", "K3", "K4", ""}, gotNumbers)
 }
 
+// TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered pins the
+// deliberate pre-draw exception documented on PlayoffsNamesToPrint
+// (numbering.go): the blank-template export is reachable BEFORE a draw
+// exists, precisely so an operator can print name tags and blank score
+// sheets ahead of the tournament. A never-started, setup-status
+// knockout-only competition must still get its Names to Print sheet, with
+// one row per entrant in roster order -- but no number, since there is no
+// DrawOrder yet to derive one from.
+//
+// This is the guard's only pin: mutating PlayoffsNamesToPrint's check from
+// comp.EffectiveFormat() != state.CompFormatPlayoffs to
+// DrawSourceFor(comp) != DrawInBracket (requiring an existing draw) leaves
+// the rest of the suite green while silently dropping this sheet for every
+// not-yet-drawn playoffs competition, since DrawSourceFor returns DrawNone
+// identically for "not drawn yet" and "Swiss".
+func TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "predraw-playoffs-names"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Player01", Dojo: "DojoA"},
+		{Name: "Player02", Dojo: "DojoB"},
+		{Name: "Player03", Dojo: "DojoC"},
+		{Name: "Player04", Dojo: "DojoD"},
+	}))
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompetitionStatus("setup"), comp.Status, "premise: never started, no draw exists")
+
+	f := openExportedWorkbook(t, eng, compID)
+
+	sheetList := f.GetSheetList()
+	var namesSheet string
+	for _, s := range sheetList {
+		if strings.HasPrefix(s, helper.SheetNamesToPrint) {
+			namesSheet = s
+			break
+		}
+	}
+	require.NotEmpty(t, namesSheet, "a not-yet-drawn playoffs competition must still get a Names to Print sheet")
+
+	nameRows, err := f.GetRows(namesSheet)
+	require.NoError(t, err)
+	assert.Len(t, nameRows, 4, "one row per entrant, roster order (no draw position to sort by yet)")
+
+	// Column A (the number) carries NO formula pre-draw: every entrant's
+	// Number is still "", so AddPlayerDataToSheet's hasNumber gate never
+	// opens a Number column on the Data sheet, and printNameEntries leaves
+	// the position cell entirely unwritten rather than referencing an
+	// empty one. Column B (the name) is still a live formula reference to
+	// the Data sheet, so the sheet is genuinely populated, not merely
+	// present with blank rows.
+	for i := range nameRows {
+		row := i + 1
+		numberFormula, ferr := f.GetCellFormula(namesSheet, fmt.Sprintf("A%d", row))
+		require.NoError(t, ferr)
+		assert.Emptyf(t, numberFormula, "row %d's number cell must carry no formula before the draw", row)
+		nameFormula, nerr := f.GetCellFormula(namesSheet, fmt.Sprintf("B%d", row))
+		require.NoError(t, nerr)
+		assert.NotEmptyf(t, nameFormula, "row %d's name cell must still reference the roster", row)
+	}
+}
+
 // captureStdout redirects os.Stdout for the duration of fn and returns
 // everything written to it, for pinning helper.finishDataSheet's
 // fmt.Printf("Data added to spreadsheet\n") call count below.

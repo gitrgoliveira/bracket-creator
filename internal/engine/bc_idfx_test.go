@@ -92,9 +92,10 @@ func TestApplyTiebreakSort_ForeignIDNeverCreditsWrongMember(t *testing.T) {
 // TestNewGroupKeyResolver_FullyLegacyGroupFallsThroughForeignIDToName pinned
 // the bc-idfx review's nit 20 fix (a fully id-less group fell through to a
 // bare-name index). That name-fallback subject no longer exists: the
-// operator ruling bc-pnum removed newGroupKeyResolver's byName index
-// entirely, so a fully id-less group now resolves NOTHING, by id or by
-// name. Deleted (not converted) because there is no fallback path left for
+// operator ruling bc-pnum removed groupMemberIDs' (formerly
+// newGroupKeyResolver's) byName index entirely, so a fully id-less group
+// now resolves NOTHING, by id or by name. Deleted (not converted) because
+// there is no fallback path left for
 // a replacement test to exercise; see
 // TestApplyTiebreakSort_IDlessGroupNeverResolvesBout for the group's new,
 // opposite behaviour end-to-end.

@@ -143,6 +143,45 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 	require.Len(t, matches, 2, "TeamA-TeamB already exists; only other 2 pairs generated")
 }
 
+// TestGeneratePoolDaihyosenMatches_DuplicateIDRowStaysIdempotent pins that
+// the existingRows dedup scan recognizes a stored SELF-REFERENTIAL row
+// (SideAID == SideBID) as already existing. That shape is reachable when
+// two DISTINCT tiedGroup entries share a corrupted/hand-edited duplicate
+// participant id: generation itself pairs them by INDEX (i < j), not by
+// id, so it emits a row for that pair like any other, and the row's own
+// SideAID/SideBID both read the shared id back.
+//
+// The dedup scan is deliberately id-only (ids[m.SideAID] && ids[m.SideBID]),
+// with NO m.SideAID != m.SideBID guard: that guard belongs to the three
+// real self-pair PREVENTION sites (groupNeedsChusen, leagueGroupHasDH,
+// applyTiebreakSort), which decide whether a bout counts toward a win or a
+// needs-chusen verdict -- not whether a row already on disk is remembered.
+// Adding it here instead would make re-injection over the same group
+// regenerate the self-referential pair on every call.
+func TestGeneratePoolDaihyosenMatches_DuplicateIDRowStaysIdempotent(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "dup-id", Name: "TeamA", Dojo: "Dojo TeamA"}},
+		{Player: domain.Player{ID: "team-b-id", Name: "TeamB", Dojo: "Dojo TeamB"}},
+		{Player: domain.Player{ID: "dup-id", Name: "TeamA-Clone", Dojo: "Dojo TeamA"}},
+	}
+
+	first := generatePoolDaihyosenMatches("Pool X", group, 0, "A", nil)
+	require.Len(t, first, 3, "3-way round-robin: 3 pairs")
+
+	var selfPaired int
+	for _, m := range first {
+		if m.SideAID == m.SideBID {
+			selfPaired++
+		}
+	}
+	require.Equal(t, 1, selfPaired, "premise: the (TeamA, TeamA-Clone) pair shares the duplicate id, so its own generated row is genuinely self-referential")
+
+	// Re-injecting over the SAME tiedGroup, with `first` now on disk, must
+	// add nothing -- including for the self-referential pair.
+	second := generatePoolDaihyosenMatches("Pool X", group, len(first), "A", first)
+	assert.Empty(t, second, "re-injection over the same tied group must be idempotent, including the duplicate-id pair")
+}
+
 // TestGeneratePoolDaihyosenMatches_NamesakeTeamsGenerated is the regression
 // guard for the finding that a tied group of two SAME-NAME teams (the
 // unique-team-name rule has documented enforcement holes,

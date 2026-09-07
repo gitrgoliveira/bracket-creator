@@ -22,7 +22,8 @@ import {
   teamResultLabel,
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
-import { makeSubmitDecision, sideIsWithdrawnPlayer } from '../admin_scoring_shared.jsx';
+import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { sameCompetitor } from '../competitor_identity.jsx';
 import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
 import { defaultWinMaru } from '../bracket.jsx';
@@ -1361,18 +1362,19 @@ describe('item 7: non-points decisions advance to next match', () => {
   });
 });
 
-// bc-pnum: sideIsWithdrawnPlayer backs RemainingMatchesPanel's match filter,
-// award() side resolution, and its opponent-render lookup. It delegates to
-// sameCompetitor (competitor_identity.jsx), the one owner of the id/name
-// attribution rule -- never an OR that could count a name hit even when
-// both sides carry ids and differ.
-describe('sideIsWithdrawnPlayer (RemainingMatchesPanel identity, bc-pnum)', () => {
+// bc-pnum: RemainingMatchesPanel's match filter, award() side resolution,
+// and its opponent-render lookup all call sameCompetitor (competitor_
+// identity.jsx) directly to decide whether a match side is the withdrawn
+// player -- never an OR that could count a name hit even when both sides
+// carry ids and differ. These fixtures pin that call-site usage, on top of
+// sameCompetitor's own coverage in competitor_identity.test.jsx.
+describe('sameCompetitor (RemainingMatchesPanel identity, bc-pnum)', () => {
   it('decides by id when both the withdrawn player and the side carry one', () => {
     const side = { id: 'S2', name: 'Sato' };
     // Same name, different id: an id compare must say "no", never fall
     // through to the name hit.
-    expect(sideIsWithdrawnPlayer(side, { id: 'S1', name: 'Sato' })).toBe(false);
-    expect(sideIsWithdrawnPlayer(side, { id: 'S2', name: 'Sato' })).toBe(true);
+    expect(sameCompetitor(side, { id: 'S1', name: 'Sato' })).toBe(false);
+    expect(sameCompetitor(side, { id: 'S2', name: 'Sato' })).toBe(true);
   });
 
   // Canonical bc-pnum case: two "Sato" entries from different dojos. The
@@ -1382,20 +1384,20 @@ describe('sideIsWithdrawnPlayer (RemainingMatchesPanel identity, bc-pnum)', () =
   it('never lights an unrelated same-name/different-dojo participant', () => {
     const withdrawn = { id: 'S1', name: 'Sato', dojo: 'Tokyo' };
     const otherSideSameName = { id: 'S2', name: 'Sato', dojo: 'Osaka' };
-    expect(sideIsWithdrawnPlayer(otherSideSameName, withdrawn)).toBe(false);
+    expect(sameCompetitor(otherSideSameName, withdrawn)).toBe(false);
   });
 
   it('falls back to name only when NEITHER side carries an id', () => {
-    expect(sideIsWithdrawnPlayer({ name: 'Sato' }, { id: '', name: 'Sato' })).toBe(true);
-    expect(sideIsWithdrawnPlayer({ name: 'Tanaka' }, { id: '', name: 'Sato' })).toBe(false);
+    expect(sameCompetitor({ name: 'Sato' }, { id: '', name: 'Sato' })).toBe(true);
+    expect(sameCompetitor({ name: 'Tanaka' }, { id: '', name: 'Sato' })).toBe(false);
   });
 
   it('resolves to false (never guesses by name) when only one side carries an id', () => {
     // Withdrawn player has a real id, but this match side has none (e.g. a
     // bracket row): no id to decide with, and a name guess is not safe.
-    expect(sideIsWithdrawnPlayer({ name: 'Sato' }, { id: 'S1', name: 'Sato' })).toBe(false);
+    expect(sameCompetitor({ name: 'Sato' }, { id: 'S1', name: 'Sato' })).toBe(false);
     // Reverse: this side has an id but the withdrawn player record doesn't.
-    expect(sideIsWithdrawnPlayer({ id: 'S2', name: 'Sato' }, { id: '', name: 'Sato' })).toBe(false);
+    expect(sameCompetitor({ id: 'S2', name: 'Sato' }, { id: '', name: 'Sato' })).toBe(false);
   });
 
   // Item 7 (UI-reachable fixture): the same mixed-case refusal, exercised
@@ -1417,7 +1419,7 @@ describe('sideIsWithdrawnPlayer (RemainingMatchesPanel identity, bc-pnum)', () =
     // the name in production; here we model the ALREADY id-less shape a
     // caller must not misattribute).
     const remainingMatchSide = { id: '', name: 'Sato' };
-    expect(sideIsWithdrawnPlayer(remainingMatchSide, withdrawnPlayer)).toBe(false);
+    expect(sameCompetitor(remainingMatchSide, withdrawnPlayer)).toBe(false);
   });
 });
 

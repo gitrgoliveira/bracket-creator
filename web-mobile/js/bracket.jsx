@@ -477,9 +477,10 @@ const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, 
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` -- with
   // both sides id-less (buildPlayerMap keeps id "" for an id-less
   // participant), the naked equality compared two empty strings and lit
-  // BOTH sides as winner.
-  const aWin = !!match.winner && !!match.sideA && sameCompetitor(match.winner, match.sideA);
-  const bWin = !!match.winner && !!match.sideB && sameCompetitor(match.winner, match.sideB);
+  // BOTH sides as winner. No `!!match.winner && !!match.sideA` guard:
+  // sameCompetitor(null, x) is already false.
+  const aWin = sameCompetitor(match.winner, match.sideA);
+  const bWin = sameCompetitor(match.winner, match.sideB);
   const running = match.status === "running";
   // score.type === "bye" is CLIENT-ONLY: the sole producers are the sample-data
   // generators in data.jsx (advanceByes / simulateRounds), never a server

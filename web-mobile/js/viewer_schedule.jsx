@@ -252,9 +252,10 @@ export function matchHighlightedBy(m, picked, dojoText) {
 export function TWMatch({ m, highlight, onClick }) {
   // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
   // bracket.jsx's MatchCard for why the naked equality lights both sides
-  // once both are id-less).
-  const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
-  const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
+  // once both are id-less). No presence guard: sameCompetitor(null, x) is
+  // already false.
+  const aWin = sameCompetitor(m.winner, m.sideA);
+  const bWin = sameCompetitor(m.winner, m.sideB);
   const scoreStr = m.status === "completed" ? window.matchScoreStr(m) : null;
   // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the

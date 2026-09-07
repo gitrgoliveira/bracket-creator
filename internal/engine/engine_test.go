@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -426,9 +427,13 @@ func TestStartCompetition_LeagueFormat(t *testing.T) {
 	assert.Len(t, matches, 10, "5-player round-robin must produce 10 matches")
 
 	// Mark all matches completed; MaybeAutoCompletePools should transition to complete.
+	// WinnerID is stamped from the already-populated SideAID (standings
+	// resolution is id-only, operator ruling bc-pnum), or every player's win
+	// tally stays zero and the league reads as one big unresolved tie.
 	for i := range matches {
 		matches[i].Status = state.MatchStatusCompleted
 		matches[i].Winner = matches[i].SideA
+		matches[i].WinnerID = matches[i].SideAID
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
@@ -1030,6 +1035,16 @@ func TestCalculatePoolStandings_Basic(t *testing.T) {
 			winner = m.SideA
 		}
 		matches[i].Winner = winner
+		// Standings resolution is id-only (operator ruling bc-pnum): stamp
+		// WinnerID from the roster-derived SideAID/SideBID (already present
+		// on every loaded match, since SaveParticipants mints ids on write),
+		// or Alice's wins below would never tally.
+		switch winner {
+		case matches[i].SideA:
+			matches[i].WinnerID = matches[i].SideAID
+		case matches[i].SideB:
+			matches[i].WinnerID = matches[i].SideBID
+		}
 		matches[i].Status = state.MatchStatusCompleted
 		matches[i].IpponsA = []string{"M"}
 		matches[i].IpponsB = []string{}
@@ -1207,6 +1222,16 @@ func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
 				matches[i].IpponsB = []string{"M"}
 			}
 		}
+		// Standings resolution is id-only (operator ruling bc-pnum): stamp
+		// WinnerID from the roster-derived SideAID/SideBID (already present
+		// on every loaded match, since SaveParticipants mints ids on write),
+		// or every Wins/Losses tally below stays zero.
+		switch matches[i].Winner {
+		case matches[i].SideA:
+			matches[i].WinnerID = matches[i].SideAID
+		case matches[i].SideB:
+			matches[i].WinnerID = matches[i].SideBID
+		}
 		matches[i].Status = state.MatchStatusCompleted
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -1299,6 +1324,16 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 				{Position: 2, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"K"}, Winner: "TeamC"},
 				{Position: 3, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"D"}, Winner: "TeamB"},
 			}
+		}
+		// Standings resolution is id-only (operator ruling bc-pnum): stamp
+		// WinnerID from the roster-derived SideAID/SideBID (already present
+		// on every loaded match, since SaveParticipants mints ids on write),
+		// or every team's Wins/Losses tally below stays zero.
+		switch matches[i].Winner {
+		case matches[i].SideA:
+			matches[i].WinnerID = matches[i].SideAID
+		case matches[i].SideB:
+			matches[i].WinnerID = matches[i].SideBID
 		}
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -1733,14 +1768,23 @@ func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
 
 	pools, _ := store.LoadPools(compID)
 	poolName := pools[0].PoolName
+	byName := make(map[string]domain.Player, len(pools[0].Players))
+	for _, p := range pools[0].Players {
+		byName[p.Name] = p
+	}
 
-	// Manually override Bob to rank 1, Alice to rank 2, Charlie to rank 3
+	// Manually override Bob to rank 1, Alice to rank 2, Charlie to rank 3.
+	// Overrides are keyed by helper.PlayerKey (== helper.CompetitorKey(id,
+	// name, dojo)), id-only once an id exists: lookupPoolRankOverride
+	// dropped the pre-bc-cse bare-name fallback (operator ruling bc-pnum), so
+	// a plain "Bob" key here would never resolve now that SaveParticipants
+	// has minted every roster entry a real id.
 	overrides := &state.Overrides{
 		PoolRanks: map[string]map[string]int{
 			poolName: {
-				"Bob":     1,
-				"Alice":   2,
-				"Charlie": 3,
+				helper.PlayerKey(byName["Bob"]):     1,
+				helper.PlayerKey(byName["Alice"]):   2,
+				helper.PlayerKey(byName["Charlie"]): 3,
 			},
 		},
 	}

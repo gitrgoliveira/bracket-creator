@@ -49,29 +49,15 @@ func TestReplaceParticipantInDraw_DojoConflictUsesNormalisedDojo(t *testing.T) {
 	assert.Contains(t, warnings[0], "Pool A")
 }
 
-// TestMatchesParticipant_NormalizedDojoComparison is the bc-pnum review's
-// first half: an id-less pools.csv row's identity match must use the SAME
-// dojo normalisation (case, diacritics, whitespace) as the dojo-conflict
-// warning above, rather than a raw string compare that disagrees with it.
-func TestMatchesParticipant_NormalizedDojoComparison(t *testing.T) {
-	tests := []struct {
-		name             string
-		rowDojo, oldDojo string
-		wantMatch        bool
-	}{
-		{"exact match", "Mumeishi", "Mumeishi", true},
-		{"trailing whitespace", "Mumeishi ", "Mumeishi", true},
-		{"case variant", "mumeishi", "Mumeishi", true},
-		{"leading/trailing whitespace and case", " MUMEISHI ", "mumeishi", true},
-		{"genuinely different dojo", "Seishin", "Mumeishi", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := matchesParticipant("", "Alice", tc.rowDojo, "", "Alice", tc.oldDojo)
-			assert.Equal(t, tc.wantMatch, got)
-		})
-	}
-}
+// TestMatchesParticipant_NormalizedDojoComparison pinned the bc-pnum review's
+// first half: an id-less pools.csv row's identity match used to fall back to
+// a normalized (name, dojo) comparison. That fallback is removed by the
+// bc-pnum operator ruling (matchesParticipant is now id-only: `rowID != ""
+// && pid != "" && rowID == pid`, see replace_participant.go), so there is no
+// dojo normalisation left in this function to test -- an id-less row simply
+// never matches, regardless of name or dojo. Deleted rather than converted:
+// a "does an id-less row ever match" test would just restate
+// matchesParticipant's one line.
 
 // TestReplaceParticipantInDraw_LegacyDojoOnlyEdit_NoSelfAmbiguityWarning is
 // the bc-pnum review's second half. A legacy id-less roster's single "Alice"

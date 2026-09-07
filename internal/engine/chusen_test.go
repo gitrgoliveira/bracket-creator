@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 // TestChusenCandidates_CycleNeedsChusen: three teams tied on every criterion play
@@ -81,11 +82,17 @@ func TestChusenCandidates_ResolvedByOverride(t *testing.T) {
 		}
 		return sideA
 	})
-	require.NoError(t, store.SaveOverrides(compID, &state.Overrides{
-		PoolRanks: map[string]map[string]int{
-			"Pool A": {"Alpha": 1, "Beta": 2, "Gamma": 3},
-		},
-	}))
+	// Recorded via SaveRankOverride (the real operator path, identity-keyed:
+	// helper.CompetitorKey(id, name, dojo)), not a raw bare-name literal --
+	// PoolRanks lookup is id-preferred/(name,dojo)-fallback per lookupPoolRankOverride,
+	// never a legacy bare-name key alone (operator ruling bc-pnum; see
+	// TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable in
+	// pool_rank_override_test.go for a bare-name override going the other,
+	// unresolvable way). setupTeamPoolComp's roster carries "Dojo <Name>"
+	// dojos, so the ids match bctest.StampPlayerID's derivation exactly.
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Alpha", "Dojo Alpha"), "Alpha", "Dojo Alpha", 1))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Beta", "Dojo Beta"), "Beta", "Dojo Beta", 2))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Gamma", "Dojo Gamma"), "Gamma", "Dojo Gamma", 3))
 	eng.standingsCache.Delete(compID)
 	eng.standingsFlight.Delete(compID)
 

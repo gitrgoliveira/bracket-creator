@@ -7,6 +7,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -208,16 +209,14 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"},
+	}
 
 	// Team match is a draw (Winner==""), one sub-bout is also a draw:
 	// 1-1 ippons with time expired, valid in best-of-3 (neither side
 	// reached 2 before the clock ran out).
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{
 			ID:     "Pool A-0",
 			SideA:  "TeamA",
@@ -230,7 +229,15 @@ func TestCalculatePoolStandings_TeamSubDraw(t *testing.T) {
 					Winner: ""},
 			},
 		},
+	}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp the pool roster and match with ids so the draw is
+	// actually attributed, rather than skipped as unresolvable.
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)

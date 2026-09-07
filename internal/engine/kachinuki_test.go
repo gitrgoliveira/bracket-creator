@@ -6,6 +6,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -2943,14 +2944,18 @@ func saveMixedKachinukiCompForReopenTest(t *testing.T) (*Engine, *state.Store, s
 		TeamSize:      2,
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 	}))
+	bctest.StampPoolIDs(pools)
 	require.NoError(t, store.SavePools(compID, pools))
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+	players := []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	}
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
-	}))
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)

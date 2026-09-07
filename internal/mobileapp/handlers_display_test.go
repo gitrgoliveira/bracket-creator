@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,6 +113,59 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 	require.NotNil(t, resp.SideB, "sideB must be present on current payload")
 	assert.Equal(t, "Takeshi Yamada", resp.SideA.Name)
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
+}
+
+// TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos pins buildSide's
+// id-only resolution for a POOL match (operator ruling bc-pnum): when the
+// source MatchResult carries SideAID/SideBID, the roster entry is matched by
+// Player.ID ONLY, never by name. Every other pool-match fixture in this file
+// leaves SideAID/SideBID empty, which only exercises buildSide's unchanged
+// name-fallback branch (id == ""); this test is the one that actually drives
+// the id-only branch end to end through the handler. Two "Sam"s from
+// different dojos are a legal roster (name uniqueness is only enforced
+// within (name, dojo)), and the South entry is listed FIRST so that a
+// name-based lookup for "Sam" would find the wrong dojo first: the
+// assertions below can only pass if resolution went by id.
+func TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "same-name-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Same Name Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+
+	northID := helper.NewUUID4()
+	southID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: southID, Name: "Sam", Dojo: "South"},
+		{ID: northID, Name: "Sam", Dojo: "North"},
+	}))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "Sam", SideAID: northID, SideB: "Sam", SideBID: southID,
+			Status: state.MatchStatusRunning, Court: "A",
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "North", resp.SideA.Dojo, "SideAID must resolve to the North Sam, not whichever Sam the roster lists first")
+	assert.Equal(t, "South", resp.SideB.Dojo, "SideBID must resolve to the South Sam")
+	assert.Equal(t, northID, resp.SideA.PlayerID)
+	assert.Equal(t, southID, resp.SideB.PlayerID)
 }
 
 // TestCourtCurrentUnreadablePoolsShowsNoNumbers pins bc-pnum D3: the same

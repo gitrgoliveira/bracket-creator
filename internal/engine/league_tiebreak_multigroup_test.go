@@ -6,9 +6,35 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// teamIDsByName resolves competitor names to their participant ids by reading
+// them back off the saved pools, rather than assuming a particular id scheme:
+// GenerateLeagueTiebreakMatches now selects the tied group by id only
+// (operator ruling bc-pnum; teamNames is accepted but never used to select),
+// so every caller here must hand it real ids.
+func teamIDsByName(t *testing.T, store *state.Store, compID string, names []string) []string {
+	t.Helper()
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	byName := make(map[string]string)
+	for _, p := range pools {
+		for _, pl := range p.Players {
+			byName[pl.Name] = pl.ID
+		}
+	}
+	ids := make([]string, len(names))
+	for i, n := range names {
+		id, ok := byName[n]
+		require.True(t, ok, "no player named %q in saved pools for %s", n, compID)
+		require.NotEmpty(t, id, "player %q has no id in saved pools for %s", n, compID)
+		ids[i] = id
+	}
+	return ids
+}
 
 // setupTwoTiedGroupLeague builds a 4-team team-league with TWO separate
 // consequential tied groups: {Alpha,Beta} tied for 1st–2nd and {Gamma,Delta}
@@ -28,11 +54,9 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 		Courts:   []string{"A"},
 		TeamSize: 2,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"}, {Name: "Delta", Dojo: "Dojo Delta"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"}, {Name: "Delta", Dojo: "Dojo Delta"},
+	}
 
 	draw := string(domain.DecisionHikiwake)
 	win := func(id, a, b, winner string) state.MatchResult {
@@ -60,6 +84,8 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 		win("Pool A-4", "Beta", "Delta", "Beta"),
 		win("Pool A-5", "Gamma", "Delta", ""), // bottom group draw
 	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store
 }
@@ -69,7 +95,11 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 // running + scoring a tie-breaker.
 func scoreGroupDH(t *testing.T, eng *Engine, store *state.Store, compID string, teams []string, winner string) {
 	t.Helper()
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teams, nil)
+	// Selection is id-only now (operator ruling bc-pnum): teams (names) is
+	// accepted but never used to select, so resolve real ids off the saved
+	// pools first.
+	teamIDs := teamIDsByName(t, store, compID, teams)
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teams, teamIDs)
 	require.NoError(t, err)
 	require.NotEmpty(t, injected, "expected DH matches to be generated for %v", teams)
 
@@ -81,6 +111,15 @@ func scoreGroupDH(t *testing.T, eng *Engine, store *state.Store, compID string, 
 			if set[teams[0]] && set[teams[1]] {
 				all[i].Status = state.MatchStatusCompleted
 				all[i].Winner = winner
+				// WinnerID too: resolveWinnerSide resolves the winner by id
+				// only (operator ruling bc-pnum), so a name-only Winner would
+				// read as an unresolved DH.
+				switch winner {
+				case all[i].SideA:
+					all[i].WinnerID = all[i].SideAID
+				case all[i].SideB:
+					all[i].WinnerID = all[i].SideBID
+				}
 			}
 		}
 	}
@@ -148,8 +187,10 @@ func TestMaybeAutoCompletePools_SingleGroupNoWedge(t *testing.T) {
 	require.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
 
 	// Operator runs the full 3-way round-robin tie-breaker with a clear order
-	// (Alpha > Beta > Gamma, Alpha > Gamma): no cycle.
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"}, nil)
+	// (Alpha > Beta > Gamma, Alpha > Gamma): no cycle. Selection is id-only
+	// (operator ruling bc-pnum), so resolve real ids off the saved pools.
+	teamIDs := teamIDsByName(t, store, compID, []string{"Alpha", "Beta", "Gamma"})
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"}, teamIDs)
 	require.NoError(t, err)
 	require.Len(t, injected, 3)
 	all, err := store.LoadPoolMatches(compID)
@@ -167,6 +208,14 @@ func TestMaybeAutoCompletePools_SingleGroupNoWedge(t *testing.T) {
 			w := pick(all[i].SideA, all[i].SideB)
 			all[i].Status = state.MatchStatusCompleted
 			all[i].Winner = w
+			// WinnerID too: resolveWinnerSide resolves the winner by id only
+			// (operator ruling bc-pnum).
+			switch w {
+			case all[i].SideA:
+				all[i].WinnerID = all[i].SideAID
+			case all[i].SideB:
+				all[i].WinnerID = all[i].SideBID
+			}
 			winners[all[i].ID] = w
 		}
 	}

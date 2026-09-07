@@ -14,7 +14,10 @@ import (
 
 // buildLeagueMatches builds a []state.MatchResult for all n*(n-1)/2 pairs
 // using CircleMethodRounds so each match carries its Round number. Players
-// are named "P0".."P{n-1}".
+// are named "P0".."P{n-1}" and carry a matching participant id
+// ("id-P0".."id-P{n-1}"): scheduleLeagueSlots resolves the rest guarantee by
+// SideAID/SideBID (operator ruling bc-pnum), so a fixture with no ids would
+// have every player collapse onto the same empty-string bucket.
 func buildLeagueMatches(n int) []state.MatchResult {
 	rounds := helper.CircleMethodRounds(n)
 	var matches []state.MatchResult
@@ -22,11 +25,13 @@ func buildLeagueMatches(n int) []state.MatchResult {
 	for ri, round := range rounds {
 		for _, pair := range round {
 			matches = append(matches, state.MatchResult{
-				ID:     fmt.Sprintf("m%03d", k),
-				SideA:  fmt.Sprintf("P%d", pair.A),
-				SideB:  fmt.Sprintf("P%d", pair.B),
-				Round:  ri,
-				Status: state.MatchStatusScheduled,
+				ID:      fmt.Sprintf("m%03d", k),
+				SideA:   fmt.Sprintf("P%d", pair.A),
+				SideB:   fmt.Sprintf("P%d", pair.B),
+				SideAID: fmt.Sprintf("id-P%d", pair.A),
+				SideBID: fmt.Sprintf("id-P%d", pair.B),
+				Round:   ri,
+				Status:  state.MatchStatusScheduled,
 			})
 			k++
 		}

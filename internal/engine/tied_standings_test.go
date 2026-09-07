@@ -6,6 +6,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -52,6 +53,25 @@ func rosterIndexFrom(sorted []state.PlayerStanding) map[string]*state.PlayerStan
 	}
 	byKey, _ := newStandingsIndex(players)
 	return byKey
+}
+
+// stampStandingsAndMatchIDs is bctest.StampIDs adapted to []state.PlayerStanding
+// (StampIDs itself takes []domain.Player): markTiedStandingsLeague resolves a
+// match side and the emerging-tie completion tally by participant id only
+// (operator ruling bc-pnum, see the doc comment on markTiedStandingsLeague),
+// so a league fixture built from bare names via tiedStanding/completedMatch/
+// scheduledMatch/leagueRoundRobin needs ids stamped on before it can exercise
+// that trigger at all. Mutates sorted's Player.ID and matches' Side*ID/WinnerID
+// in place, exactly like StampIDs.
+func stampStandingsAndMatchIDs(sorted []state.PlayerStanding, matches []state.MatchResult) {
+	players := make([]domain.Player, len(sorted))
+	for i := range sorted {
+		players[i] = sorted[i].Player
+	}
+	bctest.StampIDs(players, matches)
+	for i := range sorted {
+		sorted[i].Player = players[i]
+	}
 }
 
 // TestMarkTiedStandings_Pools covers the pools (non-league) gate: amber appears
@@ -137,6 +157,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 				sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 100), tiedStanding("C", 50), tiedStanding("D", 40)}
 				// All matches scheduled → nobody has finished their fixtures.
 				matches := leagueRoundRobin([]string{"A", "B", "C", "D"}, false)
+				stampStandingsAndMatchIDs(sorted, matches)
 				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 				assert.Empty(t, tiedNames(sorted))
 			})
@@ -148,6 +169,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 					completedMatch(0, "A", "B"), completedMatch(1, "A", "C"), completedMatch(2, "A", "D"),
 					scheduledMatch(3, "B", "C"), scheduledMatch(4, "B", "D"), scheduledMatch(5, "C", "D"),
 				}
+				stampStandingsAndMatchIDs(sorted, matches)
 				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 				assert.Equal(t, map[string]bool{"A": true, "B": true}, tiedNames(sorted),
 					"emerging trigger fires once a top-N competitor is done, even though B isn't")
@@ -160,6 +182,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 					tiedStanding("D", 50), tiedStanding("E", 50),
 				}
 				matches := leagueRoundRobin([]string{"A", "B", "C", "D", "E"}, true)
+				stampStandingsAndMatchIDs(sorted, matches)
 				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 				assert.Empty(t, tiedNames(sorted), "a tie below the top-N band is not consequential")
 			})
@@ -167,6 +190,7 @@ func TestMarkTiedStandings_League(t *testing.T) {
 			t.Run("no tie → nothing marked even after trigger", func(t *testing.T) {
 				sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 80)}
 				matches := leagueRoundRobin([]string{"A", "B", "C"}, true)
+				stampStandingsAndMatchIDs(sorted, matches)
 				markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 				assert.Empty(t, tiedNames(sorted))
 			})
@@ -230,6 +254,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 	t.Run("exemption on → pure 3rd/4th tie not marked", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: true}
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 50), tiedStanding("D", 50)}
+		stampStandingsAndMatchIDs(sorted, matches)
 		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 		assert.Empty(t, tiedNames(sorted), "joint-3rd tie needs no decider when two-third-places is enabled")
 	})
@@ -237,6 +262,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 	t.Run("exemption off → same 3rd/4th tie IS marked", func(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 4, LeagueTwoThirdPlaces: false}
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 90), tiedStanding("C", 50), tiedStanding("D", 50)}
+		stampStandingsAndMatchIDs(sorted, matches)
 		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 		assert.Equal(t, map[string]bool{"C": true, "D": true}, tiedNames(sorted))
 	})
@@ -245,6 +271,7 @@ func TestMarkTiedStandings_TwoThirdPlacesExemption(t *testing.T) {
 		comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 3, LeagueTwoThirdPlaces: true}
 		// Tie at positions 2-3 (MinPosition 2 < 3): a decider IS needed for 2nd.
 		sorted := []state.PlayerStanding{tiedStanding("A", 100), tiedStanding("B", 80), tiedStanding("C", 80), tiedStanding("D", 40)}
+		stampStandingsAndMatchIDs(sorted, matches)
 		markTiedStandings(comp, sorted, matches, rosterIndexFrom(sorted))
 		assert.Equal(t, map[string]bool{"B": true, "C": true}, tiedNames(sorted))
 	})

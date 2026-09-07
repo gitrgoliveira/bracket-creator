@@ -1047,13 +1047,20 @@ func TestScoreHandler_CorruptOverrides_TerminalErrorThenRepairable(t *testing.T)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Format: state.CompFormatMixed, PoolWinners: 2, Courts: []string{"A"},
 	}))
+	// SideAID/SideBID are stamped (operator ruling bc-pnum): standings
+	// resolution is id-only, so an id-less pool/match would have Alice's win
+	// below resolve to nobody, leaving both players 0-0-0 and spuriously
+	// TIED -- which would inject an unwanted "Pool A-TB-0" tiebreaker match
+	// and break this test's "exactly one stored match" assertion for a
+	// reason unrelated to what it is testing (the corrupt-overrides gate).
+	aliceID, bobID := "alice-id", "bob-id"
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice", Dojo: "DojoA"}, {Name: "Bob", Dojo: "DojoB"},
+			{ID: aliceID, Name: "Alice", Dojo: "DojoA"}, {ID: bobID, Name: "Bob", Dojo: "DojoB"},
 		}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusScheduled},
 	}))
 
 	// Corrupt overrides.json directly (mirrors engine's corruptOverridesFile
@@ -1333,11 +1340,17 @@ func TestQuickScoreHandler(t *testing.T) {
 
 	comp := state.Competition{ID: "c1", TeamSize: 3}
 	store.SaveCompetition(&comp)
+	// SideAID/SideBID are stamped (operator ruling bc-pnum): standings
+	// resolution is id-only, so an id-less match would never attribute
+	// TeamA's sub-bout wins below to anyone, leaving pool[0]'s
+	// IndividualWins/IndividualDraws at zero for a reason unrelated to
+	// quick-score itself.
+	teamAID, teamBID := "team-a-id", "team-b-id"
 	store.SavePoolMatches("c1", []state.MatchResult{
-		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
+		{ID: "PoolA-1", SideA: "TeamA", SideAID: teamAID, SideB: "TeamB", SideBID: teamBID},
 	})
 	store.SavePools("c1", []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
+		{PoolName: "PoolA", Players: []helper.Player{{ID: teamAID, Name: "TeamA", Dojo: "Dojo TeamA"}, {ID: teamBID, Name: "TeamB", Dojo: "Dojo TeamB"}}},
 	})
 
 	t.Run("team A wins", func(t *testing.T) {
@@ -2289,12 +2302,22 @@ func TestQuickScoreHandler_CompletionBroadcastContract(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: "qs1", Format: state.CompFormatLeague, Status: state.CompStatusPools, TeamSize: 3,
 	}))
+	// SideAID/SideBID/roster ids are stamped (operator ruling bc-pnum):
+	// standings resolution is id-only, so id-less matches would never
+	// attribute a win to anyone, leaving all three teams tied at 0-0-0 --
+	// which would defer completion via a tiebreaker injection instead of
+	// completing directly, for a reason unrelated to what this test checks.
+	teamAID, teamBID, teamCID := "team-a-id", "team-b-id", "team-c-id"
 	require.NoError(t, store.SavePools("qs1", []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}, {Name: "TeamC", Dojo: "Dojo TeamC"}}},
+		{PoolName: "PoolA", Players: []helper.Player{
+			{ID: teamAID, Name: "TeamA", Dojo: "Dojo TeamA"},
+			{ID: teamBID, Name: "TeamB", Dojo: "Dojo TeamB"},
+			{ID: teamCID, Name: "TeamC", Dojo: "Dojo TeamC"},
+		}},
 	}))
 	require.NoError(t, store.SavePoolMatches("qs1", []state.MatchResult{
-		{ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB"},
-		{ID: "PoolA-2", SideA: "TeamA", SideB: "TeamC"},
+		{ID: "PoolA-1", SideA: "TeamA", SideAID: teamAID, SideB: "TeamB", SideBID: teamBID},
+		{ID: "PoolA-2", SideA: "TeamA", SideAID: teamAID, SideB: "TeamC", SideBID: teamCID},
 	}))
 
 	ch := hub.Subscribe()

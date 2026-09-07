@@ -23,48 +23,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestResolvePoolOverrideTarget is a direct unit test of the resolver bc-cse
-// FIX 1 and FIX 2 changed: NO FALLBACKS for an off-roster playerName (must
-// error, never return a resolvable-looking empty id/dojo pair), and a
-// playerId/playerName cross-check when both are supplied. Exercised directly
-// because the HTTP handler around it (PUT .../override-rank) has its own
-// unconditional "playerName is required" gate, which would make "id of A +
-// empty name" un-reachable through the handler even though the resolver
-// itself must accept it (id alone is a complete identity).
+// TestResolvePoolOverrideTarget is a direct unit test of the resolver.
+// ID-only (operator ruling bc-pnum): playerId is REQUIRED and is the ONLY
+// selector -- the old playerName/playerDojo narrowing (bc-cse FIX 1/FIX 2)
+// is gone, since a pool-rank override is a record resolved by id only.
 func TestResolvePoolOverrideTarget(t *testing.T) {
 	players := []domain.Player{
 		{ID: "member-a", Name: "Member A", Dojo: "Dojo A"},
 		{ID: "member-b", Name: "Member B", Dojo: "Dojo B"},
 	}
 
-	t.Run("FIX 1: off-roster playerName is rejected, not silently empty", func(t *testing.T) {
-		id, dojo, err := resolvePoolOverrideTarget(players, "", "Nobody Here", "")
-		require.Error(t, err, "an off-roster playerName must error rather than resolve to an unreadable empty key")
-		assert.Contains(t, err.Error(), "Nobody Here")
-		assert.Empty(t, id)
+	t.Run("empty playerId is rejected", func(t *testing.T) {
+		name, dojo, err := resolvePoolOverrideTarget(players, "")
+		require.Error(t, err, "playerId is required")
+		assert.Empty(t, name)
 		assert.Empty(t, dojo)
 	})
 
-	t.Run("FIX 2: playerId of A + playerName of B is rejected", func(t *testing.T) {
-		id, dojo, err := resolvePoolOverrideTarget(players, "member-a", "Member B", "")
-		require.Error(t, err, "a playerId/playerName pair naming two different pool members must be rejected")
-		assert.Contains(t, err.Error(), "member-a")
-		assert.Contains(t, err.Error(), "Member B")
-		assert.Empty(t, id)
+	t.Run("off-roster playerId is rejected, not silently empty", func(t *testing.T) {
+		name, dojo, err := resolvePoolOverrideTarget(players, "no-such-id")
+		require.Error(t, err, "an off-roster playerId must error rather than resolve to an unreadable empty key")
+		assert.Contains(t, err.Error(), "no-such-id")
+		assert.Empty(t, name)
 		assert.Empty(t, dojo)
 	})
 
-	t.Run("FIX 2: playerId of A + empty playerName is accepted", func(t *testing.T) {
-		id, dojo, err := resolvePoolOverrideTarget(players, "member-a", "", "")
-		require.NoError(t, err, "id alone is a complete identity; an empty playerName must not block it")
-		assert.Equal(t, "member-a", id)
-		assert.Equal(t, "Dojo A", dojo)
-	})
-
-	t.Run("FIX 2: playerId of A + matching playerName of A is accepted", func(t *testing.T) {
-		id, dojo, err := resolvePoolOverrideTarget(players, "member-a", "Member A", "")
-		require.NoError(t, err, "a matching id/name pair must be accepted")
-		assert.Equal(t, "member-a", id)
+	t.Run("on-roster playerId resolves to that member's name and dojo", func(t *testing.T) {
+		name, dojo, err := resolvePoolOverrideTarget(players, "member-a")
+		require.NoError(t, err)
+		assert.Equal(t, "Member A", name)
 		assert.Equal(t, "Dojo A", dojo)
 	})
 }
@@ -138,14 +125,16 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		comp := state.Competition{ID: "rank-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		// Seed a pool so the new pool-size validation can find pool-1
-		// (rank within a pool is bounded by len(pool.Players)).
+		// (rank within a pool is bounded by len(pool.Players)). playerId is
+		// required (operator ruling bc-pnum), so Player 1 carries a real id.
 		require.NoError(t, store.SavePools("rank-comp", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{
-				{Name: "Player 1", Dojo: "Dojo Player 1"}, {Name: "Player 2", Dojo: "Dojo Player 2"}, {Name: "Player 3", Dojo: "Dojo Player 3"},
+				{ID: "rank-comp-p1", Name: "Player 1", Dojo: "Dojo Player 1"}, {Name: "Player 2", Dojo: "Dojo Player 2"}, {Name: "Player 3", Dojo: "Dojo Player 3"},
 			}},
 		}))
 
 		reqBody, _ := json.Marshal(map[string]any{
+			"playerId":   "rank-comp-p1",
 			"playerName": "Player 1",
 			"rank":       1,
 		})
@@ -156,14 +145,12 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("Override Rank Trims Whitespace From Player Name", func(t *testing.T) {
-		// Padded names must be resolved (and looked up against the roster)
-		// under the TRIMMED name, so the override lands on the same
-		// competitor a subsequent read resolves. Since bc-cse the override
-		// key itself is the competitor's identity key (helper.CompetitorKey),
-		// not the bare name -- "Player Trim" is placed in the roster with a
-		// real id/dojo so this also exercises that resolution, not just the
-		// trim.
+	t.Run("Override Rank Ignores PlayerName Padding, Selection Is By PlayerId", func(t *testing.T) {
+		// playerId selects (operator ruling bc-pnum); playerName is accepted
+		// only for backward-compatible display and never affects the
+		// override's identity key, which is helper.CompetitorKey(id, name,
+		// dojo) and degrades to "id:"+id once an id is known -- so a padded
+		// playerName must have no effect on where the override lands.
 		comp := state.Competition{ID: "rank-trim-comp", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		// Seed a pool with at least 7 players (rank=7 below), the 7th being
@@ -178,6 +165,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}))
 
 		reqBody, _ := json.Marshal(map[string]any{
+			"playerId":   "trim-player-id",
 			"playerName": "  Player Trim  ",
 			"rank":       7,
 		})
@@ -187,16 +175,15 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code)
 
-		// Read the persisted override back; key must be the resolved
-		// competitor's identity key, built from the TRIMMED name matched
-		// against the roster (not the padded request string, and not a bare
-		// name).
+		// The persisted key is derived from the id (CompetitorKey degrades
+		// to "id:"+id once an id is known), never from the raw or padded
+		// playerName.
 		overrides, err := store.LoadOverrides("rank-trim-comp")
 		require.NoError(t, err)
 		require.NotNil(t, overrides)
-		trimmedKey := helper.CompetitorKey("trim-player-id", "Player Trim", "Trim Dojo")
-		_, hasTrimmed := overrides.PoolRanks["pool-1"][trimmedKey]
-		assert.True(t, hasTrimmed, "rank override should be keyed under the resolved competitor's identity key")
+		idKey := helper.CompetitorKey("trim-player-id", "Player Trim", "Trim Dojo")
+		_, hasIDKey := overrides.PoolRanks["pool-1"][idKey]
+		assert.True(t, hasIDKey, "rank override should be keyed under the id-derived identity key")
 		_, hasPadded := overrides.PoolRanks["pool-1"]["  Player Trim  "]
 		assert.False(t, hasPadded, "rank override should not be keyed under the padded raw name")
 		_, hasBareName := overrides.PoolRanks["pool-1"]["Player Trim"]
@@ -209,10 +196,13 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		// Seed a pool so cases that pass the rank cap checks reach the
 		// pool-size validation (rank=99999 fails earlier at the absolute
 		// MaxRankOverride cap; rank=4-against-3-player-pool fails the
-		// pool-size check).
+		// pool-size check). Every case carries a valid playerId (rank-bad-p1)
+		// so the rank-specific validation under test is actually reached,
+		// rather than short-circuiting on the (also-400) "playerId is
+		// required" gate.
 		require.NoError(t, store.SavePools("rank-bad-comp", []helper.Pool{
 			{PoolName: "pool-1", Players: []helper.Player{
-				{Name: "Player 1", Dojo: "Dojo Player 1"}, {Name: "Player 2", Dojo: "Dojo Player 2"}, {Name: "Player 3", Dojo: "Dojo Player 3"},
+				{ID: "rank-bad-p1", Name: "Player 1", Dojo: "Dojo Player 1"}, {Name: "Player 2", Dojo: "Dojo Player 2"}, {Name: "Player 3", Dojo: "Dojo Player 3"},
 			}},
 		}))
 
@@ -220,13 +210,12 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			name string
 			body map[string]any
 		}{
-			{"empty player name", map[string]any{"playerName": "", "rank": 1}},
-			{"whitespace-only player name", map[string]any{"playerName": "   ", "rank": 1}},
-			{"tab-only player name", map[string]any{"playerName": "\t\t", "rank": 1}},
-			{"zero rank", map[string]any{"playerName": "Player 1", "rank": 0}},
-			{"negative rank", map[string]any{"playerName": "Player 1", "rank": -3}},
-			{"absurdly large rank (over MaxRankOverride)", map[string]any{"playerName": "Player 1", "rank": 99999}},
-			{"rank exceeds pool size", map[string]any{"playerName": "Player 1", "rank": 4}},
+			{"zero rank", map[string]any{"playerId": "rank-bad-p1", "rank": 0}},
+			{"negative rank", map[string]any{"playerId": "rank-bad-p1", "rank": -3}},
+			{"absurdly large rank (over MaxRankOverride)", map[string]any{"playerId": "rank-bad-p1", "rank": 99999}},
+			{"rank exceeds pool size", map[string]any{"playerId": "rank-bad-p1", "rank": 4}},
+			{"empty playerId", map[string]any{"playerId": "", "rank": 1}},
+			{"whitespace-only playerId", map[string]any{"playerId": "   ", "rank": 1}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -240,6 +229,33 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 	})
 
+	t.Run("Override Rank Rejects Off-Roster PlayerId With 400", func(t *testing.T) {
+		comp := state.Competition{ID: "rank-off-roster", Status: state.CompStatusPools}
+		store.SaveCompetition(&comp)
+		require.NoError(t, store.SavePools("rank-off-roster", []helper.Pool{
+			{PoolName: "pool-1", Players: []helper.Player{
+				{ID: "p1", Name: "Player 1", Dojo: "Dojo 1"},
+			}},
+		}))
+
+		// bc-pnum: a playerId with no roster match is a 400, never silently
+		// stored under an unreadable key (the same "NO FALLBACKS" rule that
+		// used to be enforced for an off-roster playerName, now id-only).
+		reqBody, _ := json.Marshal(map[string]any{"playerId": "no-such-id", "rank": 1})
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", "/api/competitions/rank-off-roster/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusBadRequest, w.Code,
+			"a playerId with no roster match must be refused, not silently stored under an unreadable key")
+		assert.Contains(t, w.Body.String(), "no-such-id",
+			"the error should name the unmatched playerId")
+
+		overridesPath := filepath.Join(tempDir, "competitions", "rank-off-roster", "overrides.json")
+		_, statErr := os.Stat(overridesPath)
+		assert.True(t, os.IsNotExist(statErr), "overrides.json must not be created/modified by a refused override")
+	})
+
 	t.Run("Override Rank Rejects Unknown Pool With 404", func(t *testing.T) {
 		// Pool-size validation requires looking up the pool by name.
 		// A bogus: poolId (no matching Pool.PoolName) returns 404.
@@ -248,10 +264,10 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		comp := state.Competition{ID: "rank-unknown-pool", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
 		require.NoError(t, store.SavePools("rank-unknown-pool", []helper.Pool{
-			{PoolName: "pool-a", Players: []helper.Player{{Name: "P1", Dojo: "Dojo P1"}}},
+			{PoolName: "pool-a", Players: []helper.Player{{ID: "p1", Name: "P1", Dojo: "Dojo P1"}}},
 		}))
 
-		reqBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
+		reqBody, _ := json.Marshal(map[string]any{"playerId": "p1", "rank": 1})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("PUT", "/api/competitions/rank-unknown-pool/pools/pool-z/override-rank", bytes.NewBuffer(reqBody))
 		req.Header.Set("Content-Type", "application/json")
@@ -263,7 +279,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 	})
 
 	t.Run("Override Rank Rejects Wrong Competition Status With 409", func(t *testing.T) {
-		validBody, _ := json.Marshal(map[string]any{"playerName": "P1", "rank": 1})
+		validBody, _ := json.Marshal(map[string]any{"playerId": "p1", "rank": 1})
 		for _, status := range []state.CompetitionStatus{
 			state.CompStatusSetup,
 			state.CompStatusPlayoffs,
@@ -274,7 +290,7 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 			c := state.Competition{ID: compID, Status: status}
 			require.NoError(t, store.SaveCompetition(&c))
 			require.NoError(t, store.SavePools(compID, []helper.Pool{
-				{PoolName: "pool-1", Players: []helper.Player{{Name: "P1", Dojo: "Dojo P1"}}},
+				{PoolName: "pool-1", Players: []helper.Player{{ID: "p1", Name: "P1", Dojo: "Dojo P1"}}},
 			}))
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/pools/pool-1/override-rank", bytes.NewBuffer(validBody))
@@ -287,11 +303,13 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		}
 	})
 
-	// Same-name-different-dojo disambiguation (bc-cse): two pool members can
-	// legally share a display name (operator identity rule is (name, dojo),
-	// not name -- helper.CheckDuplicateEntriesByNameDojo only refuses a true
-	// (name, dojo) collision). The override-rank endpoint must resolve each
-	// request to exactly one of them, never both.
+	// Same-name-different-dojo disambiguation (operator ruling bc-pnum): two
+	// pool members can legally share a display name (operator identity rule
+	// is (name, dojo), not name -- helper.CheckDuplicateEntriesByNameDojo
+	// only refuses a true (name, dojo) collision). The override-rank
+	// endpoint resolves each request to exactly one of them by playerId
+	// ONLY; there is no playerDojo narrowing left (that fallback existed
+	// only for a client with no id, which can no longer select at all).
 	t.Run("Override Rank Disambiguates Same-Name Different-Dojo By PlayerId", func(t *testing.T) {
 		comp := state.Competition{ID: "rank-dup-id", Status: state.CompStatusPools}
 		store.SaveCompetition(&comp)
@@ -324,153 +342,26 @@ func TestCompetitionHandlers_Extended(t *testing.T) {
 		assert.False(t, hasTokyo, "the namesake Tokyo Tanaka must not receive an override meant for Osaka")
 	})
 
-	t.Run("Override Rank Disambiguates Same-Name Different-Dojo By PlayerDojo", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-dup-dojo", Status: state.CompStatusPools}
-		store.SaveCompetition(&comp)
-		require.NoError(t, store.SavePools("rank-dup-dojo", []helper.Pool{
-			{PoolName: "pool-1", Players: []helper.Player{
-				{ID: "dup2-tokyo", Name: "Tanaka Kenji", Dojo: "Tokyo"},
-				{ID: "dup2-osaka", Name: "Tanaka Kenji", Dojo: "Osaka"},
-				{ID: "dup2-third", Name: "Suzuki Hiro", Dojo: "Nagoya"},
-			}},
-		}))
+	// TestOverrideRank_DisambiguatesByPlayerDojo and
+	// TestOverrideRank_RejectsAmbiguousSameNameRequest used to live here,
+	// pinning the removed playerDojo-narrowing and no-id "ambiguous" 400
+	// paths (bc-cse). The operator ruling bc-pnum removed both: playerId is
+	// now REQUIRED, so a request naming a same-name pair by playerDojo alone
+	// (no playerId) or by bare playerName alone now 400s on "playerId is
+	// required" before ever reaching the removed disambiguation logic --
+	// already covered by "Override Rank Rejects Invalid Input" above and by
+	// TestResolvePoolOverrideTarget's own "empty playerId is rejected" case,
+	// so there is no distinct scenario left for a converted test to add.
 
-		// No playerId, only playerDojo -- exercises the name+dojo resolution
-		// branch a client that only knows the dojo (not the id) would take.
-		reqBody, _ := json.Marshal(map[string]any{
-			"playerName": "Tanaka Kenji",
-			"playerDojo": "Tokyo",
-			"rank":       2,
-		})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/rank-dup-dojo/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		require.Equal(t, http.StatusOK, w.Code)
-
-		overrides, err := store.LoadOverrides("rank-dup-dojo")
-		require.NoError(t, err)
-		tokyoKey := helper.CompetitorKey("dup2-tokyo", "Tanaka Kenji", "Tokyo")
-		osakaKey := helper.CompetitorKey("dup2-osaka", "Tanaka Kenji", "Osaka")
-		_, hasTokyo := overrides.PoolRanks["pool-1"][tokyoKey]
-		assert.True(t, hasTokyo, "the override must land under the dojo-identified Tokyo Tanaka")
-		_, hasOsaka := overrides.PoolRanks["pool-1"][osakaKey]
-		assert.False(t, hasOsaka, "the namesake Osaka Tanaka must not receive an override meant for Tokyo")
-	})
-
-	t.Run("Override Rank Rejects Ambiguous Same-Name Request With 400", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-dup-ambiguous", Status: state.CompStatusPools}
-		store.SaveCompetition(&comp)
-		require.NoError(t, store.SavePools("rank-dup-ambiguous", []helper.Pool{
-			{PoolName: "pool-1", Players: []helper.Player{
-				{ID: "dup3-tokyo", Name: "Tanaka Kenji", Dojo: "Tokyo"},
-				{ID: "dup3-osaka", Name: "Tanaka Kenji", Dojo: "Osaka"},
-			}},
-		}))
-
-		// No playerId, no playerDojo: the request cannot disambiguate which
-		// Tanaka Kenji it means, so it must be rejected rather than silently
-		// applied to an arbitrary one of them (the exact bug bc-cse closes).
-		reqBody, _ := json.Marshal(map[string]any{"playerName": "Tanaka Kenji", "rank": 1})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/rank-dup-ambiguous/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code)
-		assert.Contains(t, w.Body.String(), "ambiguous")
-	})
-
-	// bc-cse FIX 1: a playerName that matches NO roster entry used to
-	// resolve to ("", "", nil), which the handler then stored under
-	// helper.CompetitorKey("", name, "") -- a key no read path
-	// (lookupPoolRankOverride) ever derives, silently discarding the
-	// operator's override. NO FALLBACKS: this must be a 400, and the write
-	// must never reach disk.
-	t.Run("Override Rank Rejects Off-Roster PlayerName With 400", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-off-roster", Status: state.CompStatusPools}
-		store.SaveCompetition(&comp)
-		require.NoError(t, store.SavePools("rank-off-roster", []helper.Pool{
-			{PoolName: "pool-1", Players: []helper.Player{
-				{ID: "p1", Name: "Player 1", Dojo: "Dojo 1"},
-			}},
-		}))
-
-		reqBody, _ := json.Marshal(map[string]any{"playerName": "Nobody Here", "rank": 1})
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/rank-off-roster/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusBadRequest, w.Code,
-			"a playerName with no roster match must be refused, not silently stored under an unreadable key")
-		assert.Contains(t, w.Body.String(), "Nobody Here",
-			"the error should name the unmatched playerName")
-
-		overridesPath := filepath.Join(tempDir, "competitions", "rank-off-roster", "overrides.json")
-		_, statErr := os.Stat(overridesPath)
-		assert.True(t, os.IsNotExist(statErr), "overrides.json must not be created/modified by a refused override")
-	})
-
-	// bc-cse FIX 2: the playerID branch used to return as soon as the id
-	// matched a pool member, ignoring the request's playerName entirely --
-	// so a confidently-wrong id/name pair silently wrote a rank against the
-	// WRONG competitor with a 200. Cross-check id against name whenever
-	// both are given.
-	t.Run("Override Rank Cross-Checks PlayerId Against PlayerName", func(t *testing.T) {
-		comp := state.Competition{ID: "rank-id-name-mismatch", Status: state.CompStatusPools}
-		store.SaveCompetition(&comp)
-		require.NoError(t, store.SavePools("rank-id-name-mismatch", []helper.Pool{
-			{PoolName: "pool-1", Players: []helper.Player{
-				{ID: "member-a", Name: "Member A", Dojo: "Dojo A"},
-				{ID: "member-b", Name: "Member B", Dojo: "Dojo B"},
-			}},
-		}))
-
-		t.Run("id of A + name of B is rejected", func(t *testing.T) {
-			reqBody, _ := json.Marshal(map[string]any{
-				"playerId":   "member-a",
-				"playerName": "Member B",
-				"rank":       1,
-			})
-			w := httptest.NewRecorder()
-			req, _ := http.NewRequest("PUT", "/api/competitions/rank-id-name-mismatch/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
-			req.Header.Set("Content-Type", "application/json")
-			r.ServeHTTP(w, req)
-			assert.Equal(t, http.StatusBadRequest, w.Code,
-				"a playerId/playerName pair naming two different pool members must be rejected")
-			assert.Contains(t, w.Body.String(), "member-a")
-			assert.Contains(t, w.Body.String(), "Member B")
-
-			overrides, err := store.LoadOverrides("rank-id-name-mismatch")
-			require.NoError(t, err)
-			assert.Empty(t, overrides.PoolRanks["pool-1"], "the mismatched request must not have written any override")
-		})
-
-		// "id of A + empty name" is exercised as a unit test of
-		// resolvePoolOverrideTarget directly (TestResolvePoolOverrideTarget
-		// below), not through this HTTP handler: the handler has its OWN
-		// unconditional "playerName is required" gate (checked before
-		// resolvePoolOverrideTarget is ever called), so an HTTP request with
-		// a valid playerId and no playerName always 400s on that gate, for a
-		// reason unrelated to the id/name cross-check this fix adds.
-
-		t.Run("id of A + name of A is accepted", func(t *testing.T) {
-			reqBody, _ := json.Marshal(map[string]any{
-				"playerId":   "member-a",
-				"playerName": "Member A",
-				"rank":       2,
-			})
-			w := httptest.NewRecorder()
-			req, _ := http.NewRequest("PUT", "/api/competitions/rank-id-name-mismatch/pools/pool-1/override-rank", bytes.NewBuffer(reqBody))
-			req.Header.Set("Content-Type", "application/json")
-			r.ServeHTTP(w, req)
-			require.Equal(t, http.StatusOK, w.Code, "a matching id/name pair must be accepted")
-
-			overrides, err := store.LoadOverrides("rank-id-name-mismatch")
-			require.NoError(t, err)
-			key := helper.CompetitorKey("member-a", "Member A", "Dojo A")
-			assert.Equal(t, 2, overrides.PoolRanks["pool-1"][key])
-		})
-	})
+	//
+	// TestOverrideRank_CrossChecksPlayerIdAgainstPlayerName also used to live
+	// here, pinning the removed playerId/playerName cross-check (bc-cse FIX
+	// 2): a mismatched pair used to 400, and a matching pair used to 200.
+	// playerName no longer selects or is compared against anything at all
+	// (see the request struct's own doc comment in handlers_competition.go),
+	// so a mismatched pair like "id of A + name of B" is now silently
+	// ACCEPTED -- the id alone decides, and there is no cross-check left to
+	// pin a converted test on.
 
 	t.Run("Reset Overrides", func(t *testing.T) {
 		comp := state.Competition{ID: "reset-comp"}

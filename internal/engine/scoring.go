@@ -1056,27 +1056,12 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 // withdrawal never wipes the sub-bouts already fought (both teams' results
 // stand and continue to count in IV/PW standings via accrueTeamSubResults).
 //
-// prior is the match state before the decision. Two record classes reach
-// here and are compared differently, which is the same split CLAUDE.md
-// documents for every id resolution in this file:
-//
-//   - A record that carries a side id (the POOL class -- generation-time
-//     SideAID/SideBID, stamped even before the match is ever scored) is
-//     compared BY ID ONLY (operator ruling bc-pnum): a drifted or
-//     re-oriented prior must not mis-attribute points, so a mismatch, or
-//     only one side carrying an id, is treated as a non-match -- no
-//     preservation, not a guess.
-//   - A record that carries NO id field at all (the BRACKET class --
-//     BracketMatch persists no per-side id, so bracketMatchAsResult's
-//     projection leaves every id empty on both sides) falls back to the
-//     pre-bc-pnum name comparison. This is the one legitimate "record with
-//     no id field at all" case, not a name fallback sitting beside an id
-//     lookup on the SAME record: comparing two empty-string ids would look
-//     like a match but proves nothing, so the id branch must never be
-//     reached for this class. Before this split, a kiken on a bracket
-//     match hit the id branch, found both sides id-less, and returned
-//     early -- erasing the withdrawer's already-struck ippons outright, a
-//     regression against FIK Art. 32 (bc-pnum review finding 1).
+// prior is the match state before the decision. When either record carries
+// a side id (CarriesSideIDs, the POOL class), both records' ids must be
+// present and equal or nothing is preserved -- a drifted or re-oriented
+// prior must not mis-attribute points, so a mismatch is a non-match, not a
+// guess. Otherwise (the BRACKET class: BracketMatch persists no per-side id
+// at all) SideA/SideB are compared by name instead.
 //
 // decisionBy names the WITHDRAWING side ("shiro" = SideB/Shiro, "aka" =
 // SideA/Aka). Shared by the two RecordDecision twins.
@@ -1084,9 +1069,7 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 	if prior == nil {
 		return
 	}
-	if prior.SideAID != "" || prior.SideBID != "" || result.SideAID != "" || result.SideBID != "" {
-		// At least one side carries an id: this is the pool class. Every id
-		// must be present and every id must match, or nothing is preserved.
+	if prior.CarriesSideIDs() || result.CarriesSideIDs() {
 		if prior.SideAID == "" || prior.SideBID == "" || result.SideAID == "" || result.SideBID == "" {
 			return
 		}
@@ -1094,8 +1077,6 @@ func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
 			return
 		}
 	} else if prior.SideA != result.SideA || prior.SideB != result.SideB {
-		// Bracket class (no id field at all): fall back to the name
-		// comparison this function used before the bc-pnum id-only pass.
 		return
 	}
 	result.SubResults = prior.SubResults

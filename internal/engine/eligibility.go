@@ -724,20 +724,9 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 }
 
 // losingSide is the ONE owner of "which side lost" attribution for a
-// kiken/fusenpai/withdrawal decision (PR #416 findings 4/5). It replaces
-// three independent spellings of the same question that used to live in
-// loserSideName (name/ippon-only), loserPlayerID (id-preferred via
-// resolveWinnerSide, which never consulted result.WinnerSide), and
-// RecordDecisionTx's own decisionBy-derived loserName/loserID -- none of
-// which ever read result.WinnerSide, even though RecordDecisionTx stamps it
-// on every decision it records. On a same-name pairing whose loser was
-// already pinned by WinnerSide but had no disambiguating WinnerID, the old
-// loserPlayerID fell through to an ambiguous id/name tie-break that silently
-// assumed side A won, so recordIneligibilityFromDecision could mark the
-// actual WINNER ineligible instead of the loser.
-//
-// Preference order, each step trusted completely once it applies, and each
-// step decides by SIDE, never by re-matching a NAME against both sides:
+// kiken/fusenpai/withdrawal decision. Preference order, each step trusted
+// completely once it applies, and each step decides by SIDE, never by
+// re-matching a NAME against both sides:
 //
 //  1. result.WinnerSide ("A" or "B") -- the one explicit, unambiguous hint a
 //     producer stamps directly from the operator's own choice (e.g.
@@ -749,56 +738,31 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 //     so it stays correct even when both sides share a display name (two
 //     competitors from different dojos, which this project allows).
 //  3. result.Winner compared against the two side names -- but ONLY when
-//     SideA != SideB, AND ONLY when result.SideAID == "" && result.SideBID
-//     == "" (bc-pnum review finding 6): the record carries no id field at
-//     all, the one legitimate class a name comparison may resolve. A
-//     same-name pairing makes Winner match BOTH sides identically;
-//     comparing a name against two equal strings always takes whichever
-//     branch is checked first, which is how this used to silently
-//     attribute the loss to side A regardless of who actually won. Before
-//     finding 6, this tier ALSO ran on a pool row that carries
-//     SideAID/SideBID but happens to have no WinnerID -- resolving by name
-//     beside an id lookup on the SAME record, which the id-only ruling
-//     forbids: such a row must resolve NOTHING, not a name-matched guess.
+//     SideA != SideB, AND ONLY when !result.CarriesSideIDs() (the record
+//     carries no id field at all, the one legitimate class a name
+//     comparison may resolve). A same-name pairing makes Winner match BOTH
+//     sides identically, so a pool row that carries SideAID/SideBID but
+//     happens to have no WinnerID must resolve NOTHING here, not a
+//     name-matched guess.
 //  4. The legacy ippon-emptiness heuristic (one side has struck ippons, the
 //     other has none), gated by the SAME no-id precondition as tier 3, for
-//     a row with no winner-attribution data at all. This returns the empty
-//     side's OWN id/name directly rather than a name that then has to be
-//     matched back to a side, which is exactly the mapping step that used
-//     to re-introduce the same-name ambiguity: a returned name equal to
-//     both SideA and SideB matched the first-declared case regardless of
-//     which side the heuristic actually meant.
+//     a row with no winner-attribution data at all. Returns the empty
+//     side's OWN id/name directly, never a name that then has to be
+//     matched back to a side.
 //
-// ok reports whether the loss could be attributed; false replaces the old
-// sideUnresolved/"" signals. A caller like recordIneligibilityFromDecision
-// that needs to tell "no identity data at all" (safe no-op) from "ids
-// present but genuinely ambiguous" (reject) still does so from
-// result.SideAID/SideBID directly, exactly as before -- that distinction is
-// about what the CALLER does with an unresolved loss, not about how the loss
+// ok reports whether the loss could be attributed. A caller like
+// recordIneligibilityFromDecision that needs to tell "no identity data at
+// all" (safe no-op) from "ids present but genuinely ambiguous" (reject)
+// does so from result.SideAID/SideBID directly -- that distinction is about
+// what the CALLER does with an unresolved loss, not about how the loss
 // itself is attributed, so it stays out of this function.
 //
-// Known consequence of the tier 3/4 id gate (bc-pnum review round 2,
-// finding 3): a PRIOR row that carries SideAID/SideBID but was hand-edited
-// (or otherwise written outside this app) to a kiken/fusenpai Decision with
-// NEITHER WinnerSide NOR WinnerID set resolves to ok=false here -- tiers 1-2
-// have nothing to go on, and the id gate blocks tiers 3/4 from guessing.
-// RecordDecisionTx's hadPriorLoser check (scoring_tx.go) treats ok=false as
-// "no prior loser to protect" and skips the T103 downstream-match lock,
-// which FAILS OPEN: a genuine prior withdrawal could be undone even though a
-// downstream match has since started, when the lock exists specifically to
-// prevent that. This is not reachable through the app itself -- every write
-// path that can set Decision to kiken/fusenpai also stamps an
-// attributable id (backfillMatchIdentity fills WinnerID via the stored
-// SideAID/SideBID, and RecordDecisionTx always stamps WinnerSide directly
-// from the operator's decisionBy choice) -- so the gap is confined to a
-// hand-edited or externally-written pool-matches.csv. The direction (id
-// gate wins, even at the cost of this narrow fail-open) is deliberate: it
-// keeps the SAME rule that stops tiers 3/4 from mis-attributing a
-// same-name pair's loss in the reachable (app-driven) cases, rather than
-// carving out a fail-closed exception for a scenario the app cannot
-// produce. See TestLosingSide's "id-carrying prior with no
-// WinnerSide/WinnerID" case, which pins ok=false as the intended answer,
-// not a bug to fix here.
+// The tier 3/4 id gate has one known, narrow consequence: a PRIOR row that
+// carries side ids but was hand-edited to a kiken/fusenpai Decision with
+// neither WinnerSide nor WinnerID set resolves to ok=false, which makes
+// RecordDecisionTx's T103 downstream-match lock fail OPEN for that row --
+// unreachable through any write path this app itself takes (see
+// TestLosingSide's "id-carrying prior with no WinnerSide/WinnerID" case).
 func losingSide(result *state.MatchResult) (id, name string, ok bool) {
 	switch result.WinnerSide {
 	case "A":
@@ -815,10 +779,11 @@ func losingSide(result *state.MatchResult) (id, name string, ok bool) {
 		}
 	}
 	// Tiers 3 and 4 are name/ippon-based, so they may only resolve a record
-	// that carries NO id field at all (the bracket class); a pool row's
-	// SideAID/SideBID being unfilled for THIS decision (no WinnerID yet)
-	// must not fall back to guessing by name or scoreline shape.
-	if result.SideAID != "" || result.SideBID != "" {
+	// that carries NO id field at all (CarriesSideIDs false, the bracket
+	// class); a pool row's SideAID/SideBID being unfilled for THIS decision
+	// (no WinnerID yet) must not fall back to guessing by name or scoreline
+	// shape.
+	if result.CarriesSideIDs() {
 		return "", "", false
 	}
 	if result.Winner != "" && result.SideA != result.SideB {

@@ -591,13 +591,14 @@ func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
 	assert.True(t, found, "the competition must still be listed")
 }
 
-// TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins numbersFromPools'
-// setup-status skip (PR #416 finding 3): a competition that has never drawn
-// cannot legitimately have a pools.csv, so the read must not even be
-// attempted -- garbage bytes left at that path (a stray fixture/leftover, not
-// an operator-actionable file) must surface as neither a dataIssue nor a log
-// line, unlike TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers's DRAWN
-// competition, where the identical bytes DO produce both.
+// TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins numbersFromDraw's
+// (formerly numbersFromPools') setup-status skip (PR #416 finding 3): a
+// competition that has never drawn cannot legitimately have a pools.csv, so
+// the read must not even be attempted -- garbage bytes left at that path (a
+// stray fixture/leftover, not an operator-actionable file) must surface as
+// neither a dataIssue nor a log line. TestCourtCurrentUnreadablePoolsShowsNoNumbers
+// (handlers_display_test.go) is the DRAWN-competition counterpart, where the
+// identical bytes DO produce both.
 func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
 	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)

@@ -16,6 +16,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// legacyPoolsCSVNoIDColumn is the pre-bc-pnum 7-column pools.csv shape
+// (PoolName,Name,Position,DisplayName,Dojo,Seed,Number -- no 8th id column
+// at all), shared by the two fixtures that need a readable, legitimately
+// id-less pools.csv: one asserts the missing-ids advisory fires over it
+// (drawn), the other that it does NOT (still draw-ready, so the bytes are
+// a stray leftover).
+const legacyPoolsCSVNoIDColumn = "Pool A,Alice,0,,Dojo A,,\nPool A,Bob,1,,Dojo B,,\n"
+
 // The aggregate deliberately swallows a per-file load failure and serves what
 // it got, so one unreadable file cannot blank a whole competition view. That
 // left the operator with a silently half-empty competition and no way to learn
@@ -37,13 +45,8 @@ func TestViewerAggregateReportsACorruptFile(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code,
 		"one unreadable file must not blank the whole view")
 
-	var payload []map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-	require.Len(t, payload, 1)
-
-	issues, ok := payload[0]["dataIssues"].([]any)
-	require.True(t, ok, "the competition carries its data issues, got %#v", payload[0]["dataIssues"])
-	require.Len(t, issues, 1)
+	issues := dataIssuesFromResponse(t, w.Body.Bytes(), true, "kendo")
+	require.Len(t, issues, 1, "the competition carries its data issues, got %#v", issues)
 	issue := issues[0].(map[string]any)
 	assert.Equal(t, "corrupt-file", issue["kind"], "PR #416 finding 9: the kind must be explicit, not left for a consumer to infer from its absence")
 	assert.Equal(t, "bracket.json", issue["file"])
@@ -104,13 +107,8 @@ func TestViewerAggregateReportsParticipantsMissingIDs(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var payload []map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-	require.Len(t, payload, 1)
-
-	issues, ok := payload[0]["dataIssues"].([]any)
-	require.True(t, ok, "the competition carries its data issues, got %#v", payload[0]["dataIssues"])
-	require.Len(t, issues, 1)
+	issues := dataIssuesFromResponse(t, w.Body.Bytes(), true, "kendo")
+	require.Len(t, issues, 1, "the competition carries its data issues, got %#v", issues)
 	issue := issues[0].(map[string]any)
 	assert.Equal(t, "missing-ids", issue["kind"])
 	assert.Equal(t, "participants.csv", issue["file"])
@@ -191,11 +189,8 @@ func TestViewerDetail_ReportsParticipantsMissingIDs(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
 
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-	issues, ok := payload["dataIssues"].([]any)
-	require.True(t, ok, "the detail payload carries dataIssues, got %#v", payload["dataIssues"])
-	require.Len(t, issues, 1)
+	issues := dataIssuesFromResponse(t, w.Body.Bytes(), false, "kendo")
+	require.Len(t, issues, 1, "the detail payload carries dataIssues, got %#v", issues)
 	issue := issues[0].(map[string]any)
 	assert.Equal(t, "missing-ids", issue["kind"])
 	detail, _ := issue["detail"].(string)
@@ -234,10 +229,7 @@ func TestViewerDetail_ReportsCorruptPoolsAndDoesNotFail(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code,
 		"an unparseable pools.csv must degrade, not fail the whole detail request; body: %s", w.Body.String())
 
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-	issues, ok := payload["dataIssues"].([]any)
-	require.True(t, ok, "the detail payload carries dataIssues, got %#v", payload["dataIssues"])
+	issues := dataIssuesFromResponse(t, w.Body.Bytes(), false, "corrupt-pools-detail")
 	require.Len(t, issues, 1, "poolsErr and standingsErr report the identical fault and must not double up: %#v", issues)
 	issue := issues[0].(map[string]any)
 	assert.Equal(t, "corrupt-file", issue["kind"])
@@ -261,21 +253,31 @@ func dataIssueByFile(t *testing.T, issues []any, file string) map[string]any {
 }
 
 // dataIssuesFromResponse fetches dataIssues (possibly absent/empty) from a
-// JSON response body shaped like either the aggregate's list entry or the
-// detail endpoint's single object.
-func dataIssuesFromResponse(t *testing.T, body []byte, isAggregate bool) []any {
+// JSON response body shaped like either the aggregate's list (isAggregate
+// true, filtered to the entry naming compID -- the ONE extractor every
+// aggregate-or-detail test in this file goes through, whether the aggregate
+// holds one competition or several) or the detail endpoint's single object
+// (isAggregate false, compID unused).
+func dataIssuesFromResponse(t *testing.T, body []byte, isAggregate bool, compID string) []any {
 	t.Helper()
-	if isAggregate {
-		var payload []map[string]any
+	if !isAggregate {
+		var payload map[string]any
 		require.NoError(t, json.Unmarshal(body, &payload))
-		require.Len(t, payload, 1)
-		issues, _ := payload[0]["dataIssues"].([]any)
+		issues, _ := payload["dataIssues"].([]any)
 		return issues
 	}
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(body, &payload))
-	issues, _ := payload["dataIssues"].([]any)
-	return issues
+	var list []map[string]any
+	require.NoError(t, json.Unmarshal(body, &list))
+	for _, entry := range list {
+		cfg, _ := entry["config"].(map[string]any)
+		if cfg == nil || cfg["id"] != compID {
+			continue
+		}
+		issues, _ := entry["dataIssues"].([]any)
+		return issues
+	}
+	t.Fatalf("competition %q not in the aggregate payload", compID)
+	return nil
 }
 
 // TestViewerAggregateAndDetail_PoolsMissingIDsAgree pins bc-pnum review
@@ -294,9 +296,7 @@ func TestViewerAggregateAndDetail_PoolsMissingIDsAgree(t *testing.T) {
 		{ID: aliceID, Name: "Alice", Dojo: "Dojo A"},
 		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
 	}))
-	// Legacy 7-column pools.csv: PoolName,Name,Position,DisplayName,Dojo,Seed,Number
-	// -- no 8th (id) column at all, the pre-bc-pnum on-disk shape.
-	legacyPools := "Pool A,Alice,0,,Dojo A,,\nPool A,Bob,1,,Dojo B,,\n"
+	legacyPools := legacyPoolsCSVNoIDColumn
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "competitions", "kendo", "pools.csv"), []byte(legacyPools), 0600))
 
@@ -305,7 +305,7 @@ func TestViewerAggregateAndDetail_PoolsMissingIDsAgree(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-		return dataIssuesFromResponse(t, w.Body.Bytes(), isAggregate)
+		return dataIssuesFromResponse(t, w.Body.Bytes(), isAggregate, "kendo")
 	}
 
 	aggIssues := getIssues("/api/viewer/competitions", true)
@@ -347,7 +347,7 @@ func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		r.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-		return dataIssuesFromResponse(t, w.Body.Bytes(), isAggregate)
+		return dataIssuesFromResponse(t, w.Body.Bytes(), isAggregate, "kendo")
 	}
 
 	aggIssue := dataIssueByFile(t, getIssues("/api/viewer/competitions", true), "pool-matches.csv")
@@ -398,7 +398,7 @@ func TestViewerAggregateAndDetail_NoIssuesWhenFullyStamped(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
 			r.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate)
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate, "kendo")
 			assert.Nil(t, dataIssueByFile(t, issues, "pools.csv"), "a fully-stamped pools.csv raises no issue")
 			assert.Nil(t, dataIssueByFile(t, issues, "pool-matches.csv"), "fully-stamped pool-matches raise no issue")
 		})
@@ -437,7 +437,7 @@ func TestViewerAggregateAndDetail_HikiwakeWithoutWinnerIDRaisesNoIssue(t *testin
 			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
 			r.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate)
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate, "kendo")
 			assert.Nil(t, dataIssueByFile(t, issues, "pool-matches.csv"), "a hikiwake row with no Winner must not raise a missing-ids issue")
 		})
 	}
@@ -461,7 +461,7 @@ func TestViewerAggregateAndDetail_StraySetupPoolsCSVAgree(t *testing.T) {
 		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "Dojo B"},
 	}))
 	// Stray, readable, id-less pools.csv left over from a discarded draw.
-	stray := "Pool A,Alice,0,,Dojo A,,\nPool A,Bob,1,,Dojo B,,\n"
+	stray := legacyPoolsCSVNoIDColumn
 	require.NoError(t, os.WriteFile(
 		filepath.Join(dir, "competitions", "kendo", "pools.csv"), []byte(stray), 0600))
 
@@ -478,7 +478,7 @@ func TestViewerAggregateAndDetail_StraySetupPoolsCSVAgree(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
 			r.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate)
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate, "kendo")
 			assert.Nil(t, dataIssueByFile(t, issues, "pools.csv"),
 				"a stray pools.csv on a still-draw-ready competition must raise NO issue on %s", tc.name)
 		})
@@ -528,12 +528,7 @@ func TestViewerAggregateAndDetail_CorruptPoolsCSVAgree(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodGet, tc.url, nil)
 			r.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
-			var issues []any
-			if tc.isAggregate {
-				issues = aggregateDataIssuesFor(t, w.Body.Bytes(), tc.compID)
-			} else {
-				issues = dataIssuesFromResponse(t, w.Body.Bytes(), false)
-			}
+			issues := dataIssuesFromResponse(t, w.Body.Bytes(), tc.isAggregate, tc.compID)
 			issue := dataIssueByFile(t, issues, "pools.csv")
 			if !tc.wantIssue {
 				assert.Nil(t, issue, "a knockout-only competition's draw is bracket.json; bytes at pools.csv are leftovers and must raise NO issue on %s", tc.name)
@@ -543,22 +538,4 @@ func TestViewerAggregateAndDetail_CorruptPoolsCSVAgree(t *testing.T) {
 			assert.Equal(t, "corrupt-file", issue["kind"])
 		})
 	}
-}
-
-// aggregateDataIssuesFor picks one competition's dataIssues out of the
-// aggregate list payload, so a test can hold several competitions at once.
-func aggregateDataIssuesFor(t *testing.T, body []byte, compID string) []any {
-	t.Helper()
-	var list []map[string]any
-	require.NoError(t, json.Unmarshal(body, &list))
-	for _, entry := range list {
-		cfg, _ := entry["config"].(map[string]any)
-		if cfg == nil || cfg["id"] != compID {
-			continue
-		}
-		issues, _ := entry["dataIssues"].([]any)
-		return issues
-	}
-	t.Fatalf("competition %q not in the aggregate payload", compID)
-	return nil
 }

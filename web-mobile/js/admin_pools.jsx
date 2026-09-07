@@ -65,11 +65,17 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   if (!m) return m;
   const derivedPoolName = poolNameOverride || poolNameOf(m.id);
   const playerMap = window.buildPlayerMap ? window.buildPlayerMap(comp) : {};
-  const toPlayer = (side) => {
+  // bc-pnum: pool matches carry sideAId/sideBId (state.MatchResult flat
+  // fields) alongside the plain-string side. Resolve by that id first: the
+  // plain-name playerMap key collapses two same-name/different-dojo
+  // participants onto whichever one buildPlayerMap added last, so a name-
+  // only lookup can attach the WRONG dojo/number to this side. Name lookup
+  // is the fallback only when the match carries no id for this side at all.
+  const toPlayer = (side, sideId) => {
     if (side && typeof side === "object") return side;
     if (!side) return { id: "", name: "" };
-    const p = playerMap[side];
-    return p || { id: side, name: side };
+    const p = sideId ? playerMap[sideId] : playerMap[side];
+    return p || { id: sideId || side, name: side };
   };
   // Pool daihyosen ("Pool X-DH-N") and tiebreaker ("Pool X-TB-N") bouts are
   // single representative/ippon-shobu matches, scored as INDIVIDUAL even in a
@@ -96,8 +102,8 @@ function enrichPoolMatchWithComp(m, comp, poolNameOverride) {
   }
   return {
     ...m,
-    sideA: toPlayer(m.sideA),
-    sideB: toPlayer(m.sideB),
+    sideA: toPlayer(m.sideA, m.sideAId),
+    sideB: toPlayer(m.sideB, m.sideBId),
     compId: m.compId || (comp && comp.id) || "",
     compName: m.compName || (comp && comp.name) || "",
     compFormat: m.compFormat || (comp && comp.format) || "",

@@ -500,7 +500,7 @@ describe('AdminPools chusen banner: legacy (UUID-less) members share an empty id
     await screen.findByText('Chusen (drawing lots) required');
     const recordBtn = screen.getByRole('button', { name: /Record chusen result/ });
     expect(recordBtn.disabled).toBe(true);
-    expect(screen.getByText(/has no id yet/)).toBeTruthy();
+    expect(screen.getByText(/has no id in the pool draw/)).toBeTruthy();
 
     recordBtn.click();
     expect(api.overridePoolRank).not.toHaveBeenCalled();

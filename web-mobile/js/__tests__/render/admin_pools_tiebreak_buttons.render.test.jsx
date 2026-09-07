@@ -109,7 +109,7 @@ describe('AdminPools league-tiebreak buttons: id-less tied group', () => {
 
     const btn = await screen.findByRole('button', { name: /Run tie-breaker/ });
     expect(btn.disabled).toBe(true);
-    expect(screen.getByText(/One of these teams has no id yet/)).toBeTruthy();
+    expect(screen.getByText(/has no id in the pool draw/)).toBeTruthy();
   });
 
   it('never calls leagueTiebreakGenerate when the button is disabled', async () => {
@@ -132,7 +132,7 @@ describe('AdminPools league-tiebreak buttons: fully id-stamped tied group', () =
 
     const btn = await screen.findByRole('button', { name: /Run tie-breaker/ });
     expect(btn.disabled).toBe(false);
-    expect(screen.queryByText(/One of these teams has no id yet/)).toBeNull();
+    expect(screen.queryByText(/has no id in the pool draw/)).toBeNull();
   });
 
   it('calls leagueTiebreakGenerate with the resolved teamIds on click', async () => {

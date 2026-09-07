@@ -51,6 +51,33 @@
 // competition banner below is the one exception and keeps `role="alert"`: it
 // appears to say scoring is blocked, which is worth interrupting for.
 
+// NO_ID_HINT: the one operator-facing sentence for "this row has no id" (the
+// ADVISORY class described above). Exact remedy sentence
+// internal/helper/participant_ids.go MissingParticipantIDsMessage uses (and
+// MissingParticipantIDsNotice below renders verbatim), so an operator seeing
+// any of these surfaces reads the same words.
+export const NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
+
+// noIdControlProps: the {disabled, title} pair for an id-less CONTROL (a
+// check-in checkbox, a Save/edit button) -- disabled with NO_ID_HINT as the
+// hover title whenever the row has no id, both blank when it does.
+export function noIdControlProps(hasId) {
+  return { disabled: !hasId, title: hasId ? undefined : NO_ID_HINT };
+}
+
+// NoIdHint: the inline warning span naming an id-less row. `text` defaults
+// to NO_ID_HINT; admin_pools.jsx passes NO_ID_POOL_HINT instead, since a
+// pool-draw row's remedy (regenerate the draw) differs from a roster save.
+export function NoIdHint({ text = NO_ID_HINT }) {
+  return <span className="noid-hint" title={text}>{text}</span>;
+}
+
+// NO_ID_POOL_HINT: the pool-draw counterpart to NO_ID_HINT. A team missing
+// an id in pools.csv can't be fixed by re-saving the roster (the draw
+// already happened): the remedy is to regenerate the draw while it is
+// still draw-ready, matching the server's own pools.csv notice.
+export const NO_ID_POOL_HINT = "A team here has no id in the pool draw. See the notice on the Overview.";
+
 // matchDataUnreadable: the ONE test for "this match lost its bouts to a cell
 // that would not parse". Everything else asks this rather than reading the
 // field, so a rename or a change of shape lands in one place.

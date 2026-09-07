@@ -93,8 +93,12 @@ describe('AdminParticipants disables writes for an id-less row (bc-pnum)', () =>
 
     const checkbox = container.querySelector('input[type="checkbox"]');
     expect(checkbox.getAttribute('aria-label')).toContain('No id on file');
-    const inlineHint = container.querySelector('.seed-row__noid');
-    expect(inlineHint?.textContent).toBe(' · No id on file. Save the roster once and the ids are assigned.');
+    // NoIdHint (data_integrity.jsx) renders only the hint text; the " · "
+    // separator is a sibling text node the row adds itself, not part of the
+    // shared component's own content.
+    const inlineHint = container.querySelector('.noid-hint');
+    expect(inlineHint?.textContent).toBe('No id on file. Save the roster once and the ids are assigned.');
+    expect(inlineHint?.previousSibling?.textContent).toBe(' · ');
   });
 
   it('does not fold a reason into the aria-label, nor render an inline hint, for a stamped row', async () => {
@@ -107,6 +111,6 @@ describe('AdminParticipants disables writes for an id-less row (bc-pnum)', () =>
 
     const checkbox = container.querySelector('input[type="checkbox"]');
     expect(checkbox.getAttribute('aria-label')).not.toContain('No id on file');
-    expect(container.querySelector('.seed-row__noid')).toBeNull();
+    expect(container.querySelector('.noid-hint')).toBeNull();
   });
 });

@@ -668,8 +668,11 @@ describe('API Utils', () => {
       const map = buildPlayerMap(comp);
       // The map carries the full competitor identity (incl. displayName/number)
       // so bracket sides resolved by name show zekken + number as players qualify.
-      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
-      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
+      // bc-pnum: neither fixture player has a real id, so `id` stays "" --
+      // buildPlayerMap must never invent one from the name (see the
+      // "does not invent an id from the name" test below for why).
+      expect(map['Alice']).toEqual({ id: '', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
+      expect(map['Bob']).toEqual({ id: '', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
     });
 
     it('carries displayName and number into the map (qualifier identity in bracket)', () => {
@@ -732,10 +735,38 @@ describe('API Utils', () => {
       expect(m.winner).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan' });
     });
 
-    it('falls back to name as id when no id field', () => {
+    // bc-pnum: `id: norm.id || norm.name` used to invent an id from the
+    // display name for a participant with no real UUID. That invented value
+    // then rode all the way through resolveSide/normalizeMatch onto the
+    // match side object, so downstream "does this side carry an id" checks
+    // (LeagueMatrix, enrichPoolMatchWithComp, lineup resolution, etc.) wrongly
+    // read an id-less side as id-carrying. An entry without an id now keeps
+    // id "" so every consumer can tell the two cases apart.
+    it('does NOT invent an id from the name when the player has none', () => {
       const comp = { players: [{ name: 'Carol', dojo: 'Dojo C' }] };
       const map = buildPlayerMap(comp);
-      expect(map['Carol'].id).toBe('Carol');
+      expect(map['Carol'].id).toBe('');
+    });
+
+    // Canonical bc-pnum regression case: two participants sharing a display
+    // name from different dojos, NEITHER with a real id. Before the fix,
+    // both entries collapsed onto id === name (the SAME invented string) for
+    // whichever one wins the last-added name-key slot; a name-keyed id-only
+    // consumer could then attribute the wrong dojo. After the fix, neither
+    // entry carries an id at all, so a downstream id-decides check correctly
+    // recognises there is no id to decide with, rather than reading two
+    // distinct-but-invented "ids" as if they meant something.
+    it('two same-name/different-dojo participants with no real id both keep id ""', () => {
+      const comp = {
+        players: [
+          { name: 'Sato', dojo: 'Dojo A' },
+          { name: 'Sato', dojo: 'Dojo B' },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      // Name key collapses to whichever was added last (existing, unrelated
+      // behavior); the point under test is that its id is empty, not a name.
+      expect(map['Sato'].id).toBe('');
     });
   });
 

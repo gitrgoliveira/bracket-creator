@@ -353,7 +353,14 @@ function buildPlayerMap(comp) {
         // as the pool/schedule cards. Previously only {id,name,dojo,seed} were
         // carried, so a qualifier lost their number and zekken in the bracket.
         const entry = {
-            id: norm.id || norm.name,
+            // bc-pnum: never invent an id from the display name. Name and
+            // dojo are operator-editable after the draw (they are not a
+            // stable identity), so a participant with no real UUID must
+            // read as id-less ("") downstream, not as if "id" happened to
+            // equal its own name. Every "does this side carry an id"
+            // check (LeagueMatrix, enrichPoolMatchWithComp, lineup
+            // resolution, etc.) depends on this being truthful.
+            id: norm.id || "",
             name: norm.name,
             dojo: norm.dojo || "",
             seed: norm.seed ?? 0,

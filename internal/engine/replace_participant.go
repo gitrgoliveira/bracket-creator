@@ -18,15 +18,16 @@ import (
 // route param), used to disambiguate two participants who currently share
 // oldName -- e.g. two "Tanaka Kenji" from different dojos, legal per
 // CheckDuplicateEntriesByNameDojo. A pools.csv row (helper.Player.ID, column
-// 8) or a pool-matches.csv side (MatchResult.SideAID/SideBID/WinnerID) that
-// CARRIES an id is matched ONLY by id == pid, never by falling back to name:
-// a row whose id differs from pid names a DIFFERENT competitor and must be
-// left untouched even when its display name still matches oldName. Only a
-// row with NO id at all (legacy data predating id-stamped generation) falls
-// back to matching by (oldName, oldDojo). bracket.json carries no per-side id
-// or dojo at all (BracketMatch has neither field), so a plain-name match
-// there is unavoidably ambiguous whenever oldName is shared by more than one
-// CURRENT participant; see the ambiguity guard below.
+// 8) and a pool-matches.csv side (MatchResult.SideAID/SideBID/WinnerID) are
+// records that carry an id field, so both are resolved BY ID ONLY (operator
+// ruling bc-pnum): a row whose id differs from pid names a DIFFERENT
+// competitor and must be left untouched even when its display name still
+// matches oldName, and a row with NO id at all is simply never matched --
+// there is no (name, dojo) fallback. bracket.json carries no per-side id or
+// dojo at all (BracketMatch has neither field, out of scope for bc-pnum), so
+// a plain-name match there is unavoidably ambiguous whenever oldName is
+// shared by more than one CURRENT participant; see the ambiguity guard
+// below, which stays for that bracket branch only.
 //
 // Returns warnings (e.g. dojo conflicts, an ambiguous bracket rename skipped)
 // and an error on failure.
@@ -86,7 +87,7 @@ func (e *Engine) ReplaceParticipantInDraw(
 		affectedPools := map[string]bool{}
 		for i, pool := range pools {
 			for j, player := range pool.Players {
-				if !matchesParticipant(player.ID, player.Name, player.Dojo, pid, oldName, oldDojo) {
+				if !matchesParticipant(player.ID, pid) {
 					continue
 				}
 				pools[i].Players[j].Name = newName
@@ -223,68 +224,26 @@ func (e *Engine) ReplaceParticipantInDraw(
 			return fmt.Errorf("loading pool matches: %w", err)
 		}
 		matchesChanged := false
-		poolMatchesAmbiguous := false
 		for i, m := range poolMatches {
-			// the bc-pnum review: an id-less side falls back to matching by
-			// NAME ALONE (MatchResult carries no per-side dojo). Two guards
-			// gate that fallback, on top of the id-carrying identity check
-			// applySide already applies below:
-			//  1. The row's own pool must be one the pools.csv pass above
-			//     actually touched for THIS rename (affectedPools) -- a
-			//     same-named row in an UNRELATED pool (e.g. a different
-			//     dojo's namesake who was never the rename target, reachable
-			//     because pools.csv's own match is (name, dojo)-scoped but
-			//     pool-matches rows carry no dojo to repeat that scoping)
-			//     must not be rewritten just because the name matches.
-			//  2. Even within the right pool, if oldNameAmbiguous AND that
-			//     SAME pool (post-rename) still holds another player named
-			//     oldName (poolHasNamesake), a name-only row cannot tell the
-			//     two apart -- skip it and warn, mirroring the bracket
-			//     branch, rather than guessing.
-			// An id-carrying side is unaffected by either guard: its
-			// identity is already unambiguous.
-			pn, pnOK := poolNameFromMatchID(m.ID)
-			inAffectedPool := pnOK && affectedPools[pn]
-
-			applySide := func(rowID, rowName string, setName func(string)) error {
-				if rowID != "" {
-					if pid != "" && rowID == pid {
-						setName(newName)
-						matchesChanged = true
-						matchesFound = true
-					}
-					return nil
-				}
-				if rowName != oldName || !inAffectedPool {
-					return nil
-				}
-				amb, aerr := oldNameAmbiguous()
-				if aerr != nil {
-					return aerr
-				}
-				if amb && poolHasNamesake(pools, pn, oldName) {
+			// ID-only (operator ruling bc-pnum): a pool-matches row is a
+			// record that carries an id field (SideAID/SideBID/WinnerID), so
+			// it is resolved by id only. A row with no id for a given side
+			// is simply never renamed here -- there is no name-only
+			// fallback: the prior version compared bare names within the
+			// rename's own pool (affectedPools) and warned on ambiguity via
+			// poolHasNamesake; both the fallback and its guard are removed,
+			// not merely made unreachable.
+			applySide := func(rowID string, setName func(string)) {
+				if rowID != "" && pid != "" && rowID == pid {
+					setName(newName)
+					matchesChanged = true
 					matchesFound = true
-					poolMatchesAmbiguous = true
-					return nil
 				}
-				setName(newName)
-				matchesChanged = true
-				matchesFound = true
-				return nil
 			}
 
-			if err := applySide(m.SideAID, m.SideA, func(n string) { poolMatches[i].SideA = n }); err != nil {
-				return err
-			}
-			if err := applySide(m.SideBID, m.SideB, func(n string) { poolMatches[i].SideB = n }); err != nil {
-				return err
-			}
-			if err := applySide(m.WinnerID, m.Winner, func(n string) { poolMatches[i].Winner = n }); err != nil {
-				return err
-			}
-		}
-		if poolMatchesAmbiguous {
-			warnings = append(warnings, fmt.Sprintf("pool-match entries named %q are ambiguous within a pool and were left unchanged; correct them manually if needed", oldName))
+			applySide(m.SideAID, func(n string) { poolMatches[i].SideA = n })
+			applySide(m.SideBID, func(n string) { poolMatches[i].SideB = n })
+			applySide(m.WinnerID, func(n string) { poolMatches[i].Winner = n })
 		}
 		if matchesChanged {
 			if err := tx.SavePoolMatches(compID, poolMatches); err != nil {
@@ -312,22 +271,15 @@ func (e *Engine) ReplaceParticipantInDraw(
 	return warnings, nil
 }
 
-// matchesParticipant reports whether a pools.csv row (rowID, rowName,
-// rowDojo) is the participant being renamed (pid, oldName, oldDojo). A row
-// that CARRIES an id (rowID != "") matches ONLY by id -- never by falling
-// back to name+dojo, even when those happen to agree -- so a row belonging
-// to a DIFFERENT competitor who merely shares the old display name and dojo
-// is never rewritten. A row with NO id at all (legacy data predating
-// id-stamped generation) falls back to the pre-identity (name, dojo) match,
-// compared via helper.CompetitorKey (the bc-pnum review) so this identity
-// match and the dojo-conflict warning above use ONE normalisation (case,
-// diacritics, whitespace) rather than this raw string compare disagreeing
-// with the warning's helper.NormalizeParticipantName-based one.
-func matchesParticipant(rowID, rowName, rowDojo, pid, oldName, oldDojo string) bool {
-	if rowID != "" {
-		return pid != "" && rowID == pid
-	}
-	return helper.CompetitorKey("", rowName, rowDojo) == helper.CompetitorKey("", oldName, oldDojo)
+// matchesParticipant reports whether a pools.csv row (rowID) is the
+// participant being renamed (pid). ID-only (operator ruling bc-pnum): a
+// pools.csv row carries an id field (helper.Player.ID, column 8), so it is
+// resolved by id only. A row with no id at all never matches -- there is no
+// (name, dojo) fallback -- so a row belonging to a DIFFERENT competitor who
+// merely shares the old display name and dojo is never rewritten, and an
+// id-less legacy row simply cannot be found by this rename cascade.
+func matchesParticipant(rowID, pid string) bool {
+	return rowID != "" && pid != "" && rowID == pid
 }
 
 // forEachBracketSide calls fn once for each of a bracket's per-side name
@@ -351,26 +303,4 @@ func forEachBracketSide(b *state.Bracket, fn func(*string)) {
 		fn(&bm.SideB)
 		fn(&bm.Winner)
 	}
-}
-
-// poolHasNamesake reports whether pool poolName still holds a player named
-// name, evaluated AFTER the pools.csv rename pass has already run (PR #416
-// the review finding). Because the rename target's OWN pools.csv row has by this
-// point already been rewritten to newName, a remaining player still named
-// `name` in the same pool is necessarily a DIFFERENT competitor, not a stale
-// read of the just-renamed row -- used by the pool-matches ambiguity guard
-// to tell whether an id-less match row's name-only resolution is trustworthy
-// within that specific pool.
-func poolHasNamesake(pools []helper.Pool, poolName, name string) bool {
-	for _, pool := range pools {
-		if pool.PoolName != poolName {
-			continue
-		}
-		for _, p := range pool.Players {
-			if p.Name == name {
-				return true
-			}
-		}
-	}
-	return false
 }

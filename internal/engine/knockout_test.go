@@ -7,6 +7,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,20 +62,30 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "incremental"
 
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB},
 	}
+	// Pool A round-robin done (A1 > A2); Pool B still scheduled.
+	matches := []state.MatchResult{
+		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
+	}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp each pool's roster (mutating playersA/playersB in
+	// place, so the pools built above pick the ids up too) and fill in the
+	// matching match rows, one pool at a time so a Pool B row is not left
+	// unresolved by a StampIDs call that only saw Pool A's roster.
+	bctest.StampIDs(playersA, matches)
+	bctest.StampIDs(playersB, matches)
+
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
-
-	// Pool A round-robin done (A1 > A2); Pool B still scheduled.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
-	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	resolvedNow, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
@@ -95,10 +106,13 @@ func TestResolveQualifiedPools_Incremental(t *testing.T) {
 	assert.Equal(t, state.CompStatusPools, comp.Status)
 
 	// Now finish Pool B.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches2 := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches2)
+	bctest.StampIDs(playersB, matches2)
+	require.NoError(t, store.SavePoolMatches(compID, matches2))
 	_, allResolved, err = eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
 	assert.True(t, allResolved, "with both pools finished, every placeholder must be resolved")
@@ -118,9 +132,17 @@ func TestResolveQualifiedPools_ReSeedAfterRescore(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "reseed"
 
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum), so the rescore below (which must flip who ranks 1st) needs
+	// real ids stamped on, or the tie-break would fall back to name order
+	// and never move. Stamped BEFORE saveMixedScaffold, which persists the
+	// pool rosters as they stand at call time.
+	bctest.StampPoolIDs([]helper.Pool{{Players: playersA}, {Players: playersB}})
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -145,10 +167,13 @@ func TestResolveQualifiedPools_ReSeedAfterRescore(t *testing.T) {
 	require.GreaterOrEqual(t, idxA2nd, 0, "template must contain Pool A-2nd")
 
 	// First scoring: A1 beats A2 (A1 is 1st), B1 beats B2. Seed.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches1 := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches1)
+	bctest.StampIDs(playersB, matches1)
+	require.NoError(t, store.SavePoolMatches(compID, matches1))
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
 	require.True(t, allResolved)
@@ -161,10 +186,13 @@ func TestResolveQualifiedPools_ReSeedAfterRescore(t *testing.T) {
 
 	// RE-SCORE Pool A so A2 now wins (A2 becomes 1st, A1 becomes 2nd) while the
 	// comp is still in the pool phase. This is a routine operator correction.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches2 := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A2", IpponsB: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches2)
+	bctest.StampIDs(playersB, matches2)
+	require.NoError(t, store.SavePoolMatches(compID, matches2))
 	resolvedNow, _, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
 	assert.Greater(t, resolvedNow, 0, "re-score must re-seed the changed slots")
@@ -185,18 +213,26 @@ func TestResolveQualifiedPools_LonePoolNoMatches(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "lone-pool"
 
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp the rosters before saveMixedScaffold persists them, so
+	// Pool A's match below can actually attribute A1's win.
+	bctest.StampPoolIDs([]helper.Pool{{Players: playersA}, {Players: playersB}})
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}}}, // lone qualifier, no matches
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB}, // lone qualifier, no matches
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"},
 	}))
 	// Only Pool A has a match; Pool B has none (size 1).
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches)
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
@@ -221,17 +257,24 @@ func TestResolveQualifiedPools_DegeneratePoolClampsBye(t *testing.T) {
 
 	// Pool A has 2 players (normal), Pool B has 1 player (degenerate when
 	// poolWinners=2: can only supply a 1st-place finisher, not a 2nd).
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp before saveMixedScaffold persists the rosters.
+	bctest.StampPoolIDs([]helper.Pool{{Players: playersA}, {Players: playersB}})
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}}},
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"},
 	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches)
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err, "degenerate pool must not return an error, clamp to bye instead")
@@ -289,9 +332,16 @@ func TestResolveQualifiedPools_CrossSeedOrder(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "crossseed"
 
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "A3", Dojo: "Dojo A3"}, {Name: "A4", Dojo: "Dojo A4"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}, {Name: "B3", Dojo: "Dojo B3"}, {Name: "B4", Dojo: "Dojo B4"}}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp before saveMixedScaffold persists the rosters, so the
+	// distinct win-count ranking below (A1>A2>A3>A4, B1>B2>B3>B4) is actually
+	// attributed rather than falling back to alphabetical order.
+	bctest.StampPoolIDs([]helper.Pool{{Players: playersA}, {Players: playersB}})
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "A3", Dojo: "Dojo A3"}, {Name: "A4", Dojo: "Dojo A4"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}, {Name: "B3", Dojo: "Dojo B3"}, {Name: "B4", Dojo: "Dojo B4"}}},
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB},
 	}
 	saveMixedScaffold(t, store, compID, pools, 2)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -303,12 +353,15 @@ func TestResolveQualifiedPools_CrossSeedOrder(t *testing.T) {
 		return state.MatchResult{ID: id, SideA: a, SideB: b, Winner: w, IpponsA: []string{"M"}, Status: state.MatchStatusCompleted}
 	}
 	// Distinct win counts → A1>A2>A3>A4 and B1>B2>B3>B4 (no ties → no tiebreakers).
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		win("Pool A-0", "A1", "A2", "A1"), win("Pool A-1", "A1", "A3", "A1"), win("Pool A-2", "A1", "A4", "A1"),
 		win("Pool A-3", "A2", "A3", "A2"), win("Pool A-4", "A2", "A4", "A2"), win("Pool A-5", "A3", "A4", "A3"),
 		win("Pool B-0", "B1", "B2", "B1"), win("Pool B-1", "B1", "B3", "B1"), win("Pool B-2", "B1", "B4", "B1"),
 		win("Pool B-3", "B2", "B3", "B2"), win("Pool B-4", "B2", "B4", "B2"), win("Pool B-5", "B3", "B4", "B3"),
-	}))
+	}
+	bctest.StampIDs(playersA, matches)
+	bctest.StampIDs(playersB, matches)
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
@@ -332,20 +385,32 @@ func TestResolveQualifiedPools_ByeWinnerField(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bye"
 
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}
+	playersC := []helper.Player{{Name: "C1", Dojo: "Dojo C1"}, {Name: "C2", Dojo: "Dojo C2"}}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp before saveMixedScaffold persists the rosters, or every
+	// pool reads as a false (unattributed) tie and ResolveQualifiedPools
+	// leaves the placeholder rather than picking a finisher.
+	bctest.StampPoolIDs([]helper.Pool{{Players: playersA}, {Players: playersB}, {Players: playersC}})
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
-		{PoolName: "Pool C", Players: []helper.Player{{Name: "C1", Dojo: "Dojo C1"}, {Name: "C2", Dojo: "Dojo C2"}}},
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB},
+		{PoolName: "Pool C", Players: playersC},
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}, {Name: "C1", Dojo: "Dojo C1"}, {Name: "C2", Dojo: "Dojo C2"},
 	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool C-0", SideA: "C1", SideB: "C2", Winner: "C1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches)
+	bctest.StampIDs(playersB, matches)
+	bctest.StampIDs(playersC, matches)
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	_, allResolved, err := eng.ResolveQualifiedPools(compID)
 	require.NoError(t, err)
@@ -485,18 +550,28 @@ func TestMaybeAutoCompletePools_MixedStaysInPoolsWhileScheduled(t *testing.T) {
 func TestMaybeAutoCompletePools_MixedFlipsWhenAllPoolsDone(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "mixed-flip"
+	playersA := []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}
+	playersB := []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp before saveMixedScaffold persists the rosters, or both
+	// pools read as a false (unattributed) tie and never resolve, leaving
+	// the comp stuck in pools instead of flipping to playoffs.
+	bctest.StampPoolIDs([]helper.Pool{{Players: playersA}, {Players: playersB}})
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
-		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
+		{PoolName: "Pool A", Players: playersA},
+		{PoolName: "Pool B", Players: playersB},
 	}
 	saveMixedScaffold(t, store, compID, pools, 1)
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
 	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(playersA, matches)
+	bctest.StampIDs(playersB, matches)
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
@@ -592,15 +667,20 @@ func unbalancedPools(n int) ([]helper.Pool, []domain.Player, []state.MatchResult
 		letter := string(rune('A' + i))
 		first, second := letter+"1", letter+"2"
 		name := "Pool " + letter
-		pools = append(pools, helper.Pool{
-			PoolName: name,
-			Players:  []helper.Player{{Name: first, Dojo: "Dojo " + first}, {Name: second, Dojo: "Dojo " + second}},
-		})
-		participants = append(participants, domain.Player{Name: first, Dojo: "Dojo " + first}, domain.Player{Name: second, Dojo: "Dojo " + second})
-		results = append(results, state.MatchResult{
+		poolPlayers := []helper.Player{{Name: first, Dojo: "Dojo " + first}, {Name: second, Dojo: "Dojo " + second}}
+		match := state.MatchResult{
 			ID: name + "-0", SideA: first, SideB: second, Winner: first,
 			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted,
-		})
+		}
+		// Standings resolve a match side by SideAID/SideBID only (operator
+		// ruling bc-pnum): stamp this pool's own roster + match before
+		// appending, or the pool's winner/runner-up read as a false tie and
+		// ResolveQualifiedPools never seeds a finisher for it.
+		matches := []state.MatchResult{match}
+		bctest.StampIDs(poolPlayers, matches)
+		pools = append(pools, helper.Pool{PoolName: name, Players: poolPlayers})
+		participants = append(participants, poolPlayers[0], poolPlayers[1])
+		results = append(results, matches[0])
 	}
 	return pools, participants, results
 }

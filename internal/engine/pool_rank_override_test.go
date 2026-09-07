@@ -91,15 +91,23 @@ func TestCalculatePoolStandings_Override_SameNameDifferentDojo(t *testing.T) {
 		"the namesake from a DIFFERENT dojo must NOT inherit an override meant for the other Tanaka Kenji")
 }
 
-// TestCalculatePoolStandings_Override_LegacyBareNameKey loads an
-// overrides.json shaped exactly as one written BEFORE bc-cse: PoolRanks
-// keyed by bare player name, no identity at all. The read path
-// (lookupPoolRankOverride) must still honour it -- a live tournament's
-// existing overrides must not be silently dropped by the upgrade -- so this
-// pins the READ-ONLY compatibility decision: legacy entries are never
-// rewritten, only ever recognised as a fallback when the identity-keyed
-// lookup misses.
-func TestCalculatePoolStandings_Override_LegacyBareNameKey(t *testing.T) {
+// TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable loads
+// an overrides.json shaped exactly as one written BEFORE bc-cse: PoolRanks
+// keyed by bare player name, no identity at all. Before bc-pnum,
+// lookupPoolRankOverride fell back to that bare-name key when the
+// identity-keyed lookup missed, so a live tournament's pre-bc-cse overrides
+// kept applying without a migration step.
+//
+// The bc-pnum operator ruling removed that fallback: a record that carries
+// an id field is resolved by id only, and an empty/absent id resolves to
+// nothing rather than a name. A pool-rank override is exactly such a
+// record (state.Overrides.PoolRanks is written keyed by
+// helper.CompetitorKey(id, name, dojo), which degrades to "id:"+id once an
+// id is known), so a legacy bare-name entry -- which never carried an id at
+// all -- is no longer read back by anyone: this pins that the override
+// simply does not apply, rather than silently reappearing under the old
+// fallback.
+func TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "pool-override-legacy"
 
@@ -126,8 +134,8 @@ func TestCalculatePoolStandings_Override_LegacyBareNameKey(t *testing.T) {
 	}))
 
 	// Written directly via SaveOverrides (bypassing SaveRankOverride*, which
-	// always writes the NEW identity-keyed form) to simulate a file on disk
-	// from before this fix existed.
+	// always writes the identity-keyed form) to simulate a file on disk from
+	// before identity keys existed at all.
 	require.NoError(t, store.SaveOverrides(compID, &state.Overrides{
 		PoolRanks: map[string]map[string]int{
 			"Pool A": {"Alice": 1},
@@ -144,7 +152,6 @@ func TestCalculatePoolStandings_Override_LegacyBareNameKey(t *testing.T) {
 	for _, s := range poolA {
 		byID[s.Player.ID] = s
 	}
-	assert.True(t, byID["legacy-p1"].IsOverridden, "a legacy bare-name-keyed override must still apply")
-	assert.Equal(t, 1, byID["legacy-p1"].Rank)
-	assert.False(t, byID["legacy-p2"].IsOverridden, "the override must not spuriously apply to the other competitor")
+	assert.False(t, byID["legacy-p1"].IsOverridden, "a legacy bare-name-keyed override no longer resolves (operator ruling bc-pnum)")
+	assert.False(t, byID["legacy-p2"].IsOverridden)
 }

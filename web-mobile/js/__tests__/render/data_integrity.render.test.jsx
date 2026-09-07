@@ -111,6 +111,26 @@ describe('DataIssueBanner', () => {
     expect(screen.getByRole('status').textContent).toContain('Save the roster once and the ids are assigned.');
   });
 
+  // Operator ruling bc-pnum: participants.csv, pools.csv and pool-matches.csv
+  // are each checked and reported independently, so an operator repairing
+  // the roster must still see the OTHER two notices rather than have them
+  // silently hidden by a single-entry picker.
+  it('renders one notice line per missing-ids entry when multiple files are affected', () => {
+    const threeIssues = [
+      { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file. Save the roster once and the ids are assigned.' },
+      { kind: 'missing-ids', file: 'pools.csv', detail: '2 competitors: no id in the pool draw. No player number is assigned; regenerate the draw while it is still draw-ready.' },
+      { kind: 'missing-ids', file: 'pool-matches.csv', detail: '1 match(es): a side or winner has no id. They are not counted in standings; re-enter the results once the sides have ids.' },
+    ];
+    render(<DataIssueBanner issues={threeIssues} competition={{ format: 'mixed' }} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    const notices = screen.getAllByRole('status');
+    expect(notices).toHaveLength(3);
+    const text = notices.map((n) => n.textContent).join(' | ');
+    expect(text).toContain('Dave: no id on file');
+    expect(text).toContain('no id in the pool draw');
+    expect(text).toContain('a side or winner has no id');
+  });
+
   it('renders nothing when there are no issues at all (missing-ids absent too)', () => {
     const { container } = render(<DataIssueBanner issues={[]} competition={{ format: 'mixed' }} />);
     expect(container.firstChild).toBeNull();
@@ -119,12 +139,28 @@ describe('DataIssueBanner', () => {
 
 describe('MissingParticipantIDsNotice', () => {
   it('renders the server-supplied sentence verbatim', () => {
-    render(<MissingParticipantIDsNotice issue={{ detail: 'Alice (Dojo A): no id on file. Save the roster once and the ids are assigned.' }} />);
+    render(<MissingParticipantIDsNotice issues={[{ file: 'participants.csv', detail: 'Alice (Dojo A): no id on file. Save the roster once and the ids are assigned.' }]} />);
     expect(screen.getByRole('status').textContent).toContain('Alice (Dojo A)');
   });
 
-  it('renders nothing without an issue', () => {
-    const { container } = render(<MissingParticipantIDsNotice issue={null} />);
+  it('renders one status line per entry, in order', () => {
+    render(<MissingParticipantIDsNotice issues={[
+      { file: 'participants.csv', detail: 'first notice' },
+      { file: 'pools.csv', detail: 'second notice' },
+    ]} />);
+    const notices = screen.getAllByRole('status');
+    expect(notices).toHaveLength(2);
+    expect(notices[0].textContent).toContain('first notice');
+    expect(notices[1].textContent).toContain('second notice');
+  });
+
+  it('renders nothing without any issues', () => {
+    const { container } = render(<MissingParticipantIDsNotice issues={null} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders nothing for an empty issues array', () => {
+    const { container } = render(<MissingParticipantIDsNotice issues={[]} />);
     expect(container.firstChild).toBeNull();
   });
 });

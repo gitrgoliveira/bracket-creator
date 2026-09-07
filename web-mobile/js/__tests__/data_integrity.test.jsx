@@ -7,7 +7,7 @@ import {
   bracketRecoveryKind,
   bracketResetPrompt,
   bracketResetToast,
-  missingIDsIssue,
+  missingIDsIssues,
   isAdvisoryIssue,
   isLoudIssue,
   BRACKET_RECOVERY_REBUILD,
@@ -59,18 +59,28 @@ describe('dataIssueText: a line an operator can act on', () => {
   });
 });
 
-describe('missingIDsIssue: picking the ADVISORY entry out of dataIssues', () => {
+describe('missingIDsIssues: picking every ADVISORY entry out of dataIssues', () => {
   it('finds the one entry whose kind is missing-ids', () => {
     const corrupt = { file: 'bracket.json', line: 1, column: 1, detail: 'bad' };
     const missing = { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file.' };
-    expect(missingIDsIssue([corrupt, missing])).toBe(missing);
+    expect(missingIDsIssues([corrupt, missing])).toEqual([missing]);
   });
 
-  it('is null when there is no such entry, or no list at all', () => {
-    expect(missingIDsIssue([{ file: 'bracket.json', line: 1, column: 1, detail: 'bad' }])).toBeNull();
-    expect(missingIDsIssue([])).toBeNull();
-    expect(missingIDsIssue(null)).toBeNull();
-    expect(missingIDsIssue(undefined)).toBeNull();
+  // Operator ruling bc-pnum: participants.csv, pools.csv and pool-matches.csv
+  // are checked and reported independently, so all three can be present at
+  // once; a single-entry picker would silently drop two of them.
+  it('finds every missing-ids entry, not just the first', () => {
+    const participants = { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file.' };
+    const pools = { kind: 'missing-ids', file: 'pools.csv', detail: '2 competitors: no id in the pool draw.' };
+    const poolMatches = { kind: 'missing-ids', file: 'pool-matches.csv', detail: '1 match(es): a side or winner has no id.' };
+    expect(missingIDsIssues([participants, pools, poolMatches])).toEqual([participants, pools, poolMatches]);
+  });
+
+  it('is empty when there is no such entry, or no list at all', () => {
+    expect(missingIDsIssues([{ file: 'bracket.json', line: 1, column: 1, detail: 'bad' }])).toEqual([]);
+    expect(missingIDsIssues([])).toEqual([]);
+    expect(missingIDsIssues(null)).toEqual([]);
+    expect(missingIDsIssues(undefined)).toEqual([]);
   });
 });
 

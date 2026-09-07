@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,110 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
 }
 
+// TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos pins buildSide's
+// id-only resolution for a POOL match (operator ruling bc-pnum): when the
+// source MatchResult carries SideAID/SideBID, the roster entry is matched by
+// Player.ID ONLY, never by name. Every other pool-match fixture in this file
+// leaves SideAID/SideBID empty, which only exercises buildSide's unchanged
+// name-fallback branch (id == ""); this test is the one that actually drives
+// the id-only branch end to end through the handler. Two "Sam"s from
+// different dojos are a legal roster (name uniqueness is only enforced
+// within (name, dojo)), and the South entry is listed FIRST so that a
+// name-based lookup for "Sam" would find the wrong dojo first: the
+// assertions below can only pass if resolution went by id.
+func TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "same-name-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Same Name Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+
+	northID := helper.NewUUID4()
+	southID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: southID, Name: "Sam", Dojo: "South"},
+		{ID: northID, Name: "Sam", Dojo: "North"},
+	}))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "Sam", SideAID: northID, SideB: "Sam", SideBID: southID,
+			Status: state.MatchStatusRunning, Court: "A",
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "North", resp.SideA.Dojo, "SideAID must resolve to the North Sam, not whichever Sam the roster lists first")
+	assert.Equal(t, "South", resp.SideB.Dojo, "SideBID must resolve to the South Sam")
+	assert.Equal(t, northID, resp.SideA.PlayerID)
+	assert.Equal(t, southID, resp.SideB.PlayerID)
+}
+
+// TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing pins bc-pnum review
+// finding 2: buildSideByID must NEVER fall back to a name match when a pool
+// row's SideAID/SideBID is empty (a legacy row stamped before that field
+// existed). The old single buildSide fell back to scanning players[i].Name
+// == name whenever id == "" -- reachable from a POOL row just as easily as
+// from a genuinely id-less record -- so a legacy id-less row could silently
+// resolve to the wrong same-name competitor. Two "Sam"s from different
+// dojos, exactly like the sibling id-resolves test above, but here NEITHER
+// side carries an id: the assertions below can only pass if resolution
+// stayed BY ID (finding nothing) rather than falling back to a name scan
+// (which would find the first-listed "Sam").
+func TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "empty-side-id-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Empty Side Id Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Sam", Dojo: "South"},
+		{ID: helper.NewUUID4(), Name: "Sam", Dojo: "North"},
+	}))
+	// SideAID/SideBID left empty on purpose (the legacy-row shape).
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Sam", SideB: "Sam", Status: state.MatchStatusRunning, Court: "A"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "Sam", resp.SideA.Name, "the raw match-row name is still echoed")
+	assert.Empty(t, resp.SideA.Dojo, "an empty SideAID must resolve NO dojo, never a name-matched guess")
+	assert.Empty(t, resp.SideA.PlayerID, "an empty SideAID must resolve NO playerId")
+	assert.Empty(t, resp.SideA.Number, "an empty SideAID must resolve NO number")
+	assert.Empty(t, resp.SideB.Dojo, "an empty SideBID must resolve NO dojo, never a name-matched guess")
+	assert.Empty(t, resp.SideB.PlayerID, "an empty SideBID must resolve NO playerId")
+	assert.Empty(t, resp.SideB.Number, "an empty SideBID must resolve NO number")
+}
+
 // TestCourtCurrentUnreadablePoolsShowsNoNumbers pins bc-pnum D3: the same
 // corrupt-pools scenario TestViewerCompetitionsList_CorruptBracketShowsNoNumbers
 // pins for the aggregate viewer payload (over bracket.json, for a playoffs
@@ -155,9 +260,10 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 		ID: cid, Name: "Corrupt Pools Current", Format: state.CompFormatMixed, Kind: "individual",
 		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K",
 	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
-		{Name: "Alice", Dojo: "Dojo Alice"},
-		{Name: "Bob", Dojo: "Dojo Bob"},
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo Bob"},
 	}))
 	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
 	// A running MATCH on court A, shaped as a pool match (MatchResult), so the
@@ -165,8 +271,14 @@ func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
 	// falling through to the bracket branch. Nothing about the endpoint cares
 	// whether the competition's OWN format normally has pool matches; this
 	// pins the merge's read-error handling, not the format/match-type pairing.
+	//
+	// SideAID/SideBID stamped so each side IS resolvable by id (buildSideByID,
+	// bc-pnum): the assertion below must show the unreadable pools.csv still
+	// suppresses the number for a side the roster CAN otherwise resolve,
+	// rather than merely showing "an unresolved side has no number" (which an
+	// id-less fixture would prove trivially and for the wrong reason).
 	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
-		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+		{ID: "PoolA-1", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusRunning, Court: "A"},
 	}))
 
 	var logBuf bytes.Buffer
@@ -476,17 +588,24 @@ func TestCourtCurrentRespectsZekkenName(t *testing.T) {
 		WithZekkenName: true,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
+	yamadaID, tanakaID := helper.NewUUID4(), helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants("zekken-comp", []domain.Player{
-		{Name: "Takeshi Yamada", DisplayName: "Yamada", Dojo: "Nakano Kendo Club"},
-		{Name: "Ichiro Tanaka", DisplayName: "Tanaka", Dojo: "Setagaya Dojo"},
+		{ID: yamadaID, Name: "Takeshi Yamada", DisplayName: "Yamada", Dojo: "Nakano Kendo Club"},
+		{ID: tanakaID, Name: "Ichiro Tanaka", DisplayName: "Tanaka", Dojo: "Setagaya Dojo"},
 	}))
+	// SideAID/SideBID stamped: buildSideByID (bc-pnum) resolves a pool
+	// side BY ID ONLY, so a real (modern) roster/match pair -- ids minted
+	// for every row at draw time -- must carry them for this test to keep
+	// exercising the zekken/displayName lookup at all.
 	require.NoError(t, store.SavePoolMatches("zekken-comp", []state.MatchResult{
 		{
-			ID:     "PoolA-1",
-			SideA:  "Takeshi Yamada",
-			SideB:  "Ichiro Tanaka",
-			Status: state.MatchStatusRunning,
-			Court:  "A",
+			ID:      "PoolA-1",
+			SideA:   "Takeshi Yamada",
+			SideAID: yamadaID,
+			SideB:   "Ichiro Tanaka",
+			SideBID: tanakaID,
+			Status:  state.MatchStatusRunning,
+			Court:   "A",
 		},
 	}))
 

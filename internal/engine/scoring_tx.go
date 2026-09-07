@@ -60,14 +60,15 @@ import (
 )
 
 // topNFinisher pairs a top-N finisher's IDENTITY key (standingsPlayerKey:
-// id-preferring, name fallback) with their bare display name. The mp-e2k1
-// displaced-qualifier guard below needs both: membership in the pre/post
-// top-N sets must be decided by identity (two competitors sharing a display
-// name from different dojos are explicitly legal, CheckDuplicateEntriesByNameDojo,
-// so a bare-name set would not notice a re-score swapping WHICH namesake
-// holds a qualifying rank), while hasStartedKnockoutMatchTx's bracket lookup
-// only has names to match against (BracketMatch carries no per-side id), so
-// the reported Finisher must still be a name.
+// id-only, operator ruling bc-pnum) with their bare display name. The
+// mp-e2k1 displaced-qualifier guard below needs both: membership in the
+// pre/post top-N sets must be decided by identity (two competitors sharing a
+// display name from different dojos are explicitly legal,
+// CheckDuplicateEntriesByNameDojo, so a bare-name set would not notice a
+// re-score swapping WHICH namesake holds a qualifying rank), while
+// hasStartedKnockoutMatchTx's bracket lookup only has names to match against
+// (BracketMatch carries no per-side id, out of scope for bc-pnum), so the
+// reported Finisher must still be a name.
 type topNFinisher struct {
 	key  string
 	name string
@@ -163,7 +164,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 				ps := preStandings[pn]
 				for i := 0; i < poolWinners && i < len(ps); i++ {
 					p := ps[i].Player
-					oldTopN = append(oldTopN, topNFinisher{key: standingsPlayerKey(p.ID, p.Name), name: p.Name})
+					oldTopN = append(oldTopN, topNFinisher{key: standingsPlayerKey(p.ID), name: p.Name})
 				}
 			}
 		}
@@ -194,8 +195,8 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 		ps := postStandings[poolRescoredName]
 		// Build the new top-N set and find displaced finishers, keyed by
-		// IDENTITY (standingsPlayerKey: id-preferring, name fallback) rather
-		// than bare name. Two competitors sharing a display name from
+		// IDENTITY (standingsPlayerKey: id-only, operator ruling bc-pnum)
+		// rather than bare name. Two competitors sharing a display name from
 		// different dojos are explicitly legal (CheckDuplicateEntriesByNameDojo),
 		// so a re-score that swaps WHICH namesake holds a qualifying rank
 		// changes the identity at that rank without changing the bare name
@@ -208,7 +209,7 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		newSet := make(map[string]struct{}, poolWinners)
 		for i := 0; i < poolWinners && i < len(ps); i++ {
 			p := ps[i].Player
-			newSet[standingsPlayerKey(p.ID, p.Name)] = struct{}{}
+			newSet[standingsPlayerKey(p.ID)] = struct{}{}
 		}
 		// displaced carries bare NAMES (not keys): hasStartedKnockoutMatchTx
 		// below matches bracket sides by name only (BracketMatch carries no
@@ -354,21 +355,33 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 		return nil
 	}
 
-	idA, idB := resolvePlayerIDsTx(tx, compID, sideA, sideB)
+	idA, idB, rawIDA, rawIDB := resolvePlayerIDsTx(tx, compID, sideA, sideB)
 
+	// Pool-vs-pool half: id only (operator ruling bc-pnum). A side with no
+	// resolvable roster id (rawIDA/rawIDB == "") never matches any other
+	// pool match here -- there is no name fallback.
 	poolMatches, err := tx.LoadPoolMatches(compID)
 	if err == nil {
+		// currentPoolMatchSideIDs (eligibility.go) supersedes
+		// resolvePlayerIDsTx's name-derived guess with the CURRENT match's
+		// own stored SideAID/SideBID when it is itself a pool match -- see
+		// that function's doc comment for why a name re-derivation
+		// misattributes a same-name-different-dojo pairing. A bracket match
+		// (ok == false) keeps the name-derived pair, unchanged.
+		if ownIDA, ownIDB, ok := currentPoolMatchSideIDs(poolMatches, matchID); ok {
+			rawIDA, rawIDB = ownIDA, ownIDB
+		}
 		for _, m := range poolMatches {
 			if m.ID == matchID || m.Status != state.MatchStatusRunning {
 				continue
 			}
-			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
 				return &IneligibleCompetitorError{
 					PlayerID: idA,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
-			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
 				return &IneligibleCompetitorError{
 					PlayerID: idB,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
@@ -377,6 +390,8 @@ func (e *Engine) checkSimultaneousMatchTx(tx state.StoreTx, compID, matchID stri
 		}
 	}
 
+	// Bracket half: name-based, out of scope for bc-pnum (BracketMatch
+	// carries no per-side id).
 	bracket, berr := tx.LoadBracket(compID)
 	if berr == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
@@ -546,26 +561,30 @@ func courtOccupied(poolMatches []state.MatchResult, bracket *state.Bracket, cour
 	return nil
 }
 
-func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (string, string) {
+// resolvePlayerIDsTx is the tx-aware twin of resolvePlayerIDs; see that
+// function's doc comment for the (idA, idB, rawIDA, rawIDB) contract.
+func resolvePlayerIDsTx(tx state.StoreTx, compID, sideA, sideB string) (idA, idB, rawIDA, rawIDB string) {
 	comp, err := tx.LoadCompetition(compID)
 	if err != nil || comp == nil {
-		return sideA, sideB
+		return sideA, sideB, "", ""
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
 	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
-		return sideA, sideB
+		return sideA, sideB, "", ""
 	}
 	pool := combinedPlayerPool(comp.Players, participants)
-	idA := lookupPlayerID(pool, sideA)
+	rawIDA = lookupPlayerID(pool, sideA)
+	idA = rawIDA
 	if idA == "" {
 		idA = sideA
 	}
-	idB := lookupPlayerID(pool, sideB)
+	rawIDB = lookupPlayerID(pool, sideB)
+	idB = rawIDB
 	if idB == "" {
 		idB = sideB
 	}
-	return idA, idB
+	return idA, idB, rawIDA, rawIDB
 }
 
 // hasStartedKnockoutMatchTx reports whether any BRACKET (knockout) match

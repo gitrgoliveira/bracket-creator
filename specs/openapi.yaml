@@ -1671,27 +1671,25 @@ paths:
           application/json:
             schema:
               type: object
-              required: [playerName, rank]
+              required: [playerId, rank]
               properties:
-                playerName:
-                  type: string
-                  maxLength: 100
                 playerId:
                   type: string
                   description: >
-                    Optional. Pins the override to one competitor's stable id
-                    instead of resolving by name alone, so two pool members
-                    who share a display name from different dojos (competitor
-                    identity is (name, dojo), never bare name) can each be
-                    overridden individually. An older client that only ever
-                    sends playerName still works whenever the name is unique
-                    within this pool.
-                playerDojo:
+                    Required. A pool-rank override is a record resolved by id
+                    only (operator ruling bc-pnum): playerId must name a
+                    competitor actually in this pool. There is no
+                    playerName/playerDojo narrowing left to select with two
+                    pool members who share a display name from different
+                    dojos (competitor identity is (name, dojo), never bare
+                    name) -- the id is what disambiguates them.
+                playerName:
                   type: string
+                  maxLength: 100
                   description: >
-                    Optional. Narrows the playerName match to one dojo when
-                    playerId is not supplied and the name collides with
-                    another pool member's.
+                    Optional, accepted for backward-compatible display only.
+                    It is never used to select or disambiguate a competitor;
+                    playerId is the only selector.
                 rank:
                   type: integer
                   description: >
@@ -1702,12 +1700,10 @@ paths:
           description: Rank override saved.
         '400':
           description: >
-            playerName is missing, blank, or exceeds the length cap; rank is
-            not a positive integer, exceeds the pool's player count, or
-            exceeds the absolute override cap; or playerName/playerId/
-            playerDojo could not be resolved to exactly one competitor in
-            this pool (e.g. two same-name, different-dojo members and no
-            playerId/playerDojo to tell them apart).
+            playerId is missing, blank, or does not name a competitor in this
+            pool; playerName exceeds the length cap; or rank is not a
+            positive integer, exceeds the pool's player count, or exceeds the
+            absolute override cap.
           content:
             application/json:
               schema:
@@ -3361,13 +3357,13 @@ paths:
       summary: Generate a league tie-breaker for a tied group
       description: >
         Generates the round-robin daihyosen (representative-bout) matches for one
-        consequential tied group. Admin-gated. `teamNames` must match exactly one
-        group from `GET .../league-tiebreak/candidates` (order-independent, no
-        duplicates). Optional `teamIds` selects the group by participant id
-        instead of name, needed to disambiguate a tied group holding two
-        same-named teams (a namesake collision reachable through the
-        documented `checkNewTeamNameCollisions` restore hole); when present it
-        takes priority over `teamNames` for matching the candidate group.
+        consequential tied group. Admin-gated. `teamIds` is REQUIRED (operator
+        ruling bc-pnum: a league tie-break selection is a record resolved by
+        id only) and must match exactly one group from
+        `GET .../league-tiebreak/candidates` by participant id
+        (order-independent, no duplicates, no blanks). `teamNames` is accepted
+        for backward-compatible display only and never selects or
+        disambiguates anything.
       security:
         - TournamentPassword: []
       requestBody:
@@ -3401,13 +3397,11 @@ paths:
       summary: Remove unscored league tie-breaker matches for a group
       description: >
         Removes the unscored daihyosen matches for one tied group. Admin-gated.
-        `teamNames` must cover a complete tie-breaker group (no duplicates
-        unless `teamIds` is also present, no partial selection). Optional
-        `teamIds` selects and matches the group's daihyosen rows by
-        participant id instead of name, needed to remove a tied group holding
-        two same-named teams (the same namesake collision `POST` disambiguates
-        with `teamIds`) -- such a group can only ever be created via
-        `teamIds`, so this must accept it too.
+        `teamIds` is REQUIRED (operator ruling bc-pnum) and must cover a
+        complete tie-breaker group by participant id (no duplicates, no
+        blanks, no partial selection). `teamNames` is accepted for
+        backward-compatible display only and never selects or matches
+        anything.
       security:
         - TournamentPassword: []
       requestBody:
@@ -5294,12 +5288,11 @@ components:
           description: >
             Full identity of each still-tied team, positionally parallel to
             teamNames. Present so the client can call
-            `PUT .../override-rank` with playerId (falling back to
-            playerDojo) rather than a bare name, which disambiguates two
-            teams that share a display name from different dojos (team names
-            are supposed to be unique even across dojos, but one documented
-            enforcement hole in that check can still let a collision reach
-            disk).
+            `PUT .../override-rank` with playerId, which is REQUIRED there
+            (operator ruling bc-pnum) and disambiguates two teams that share
+            a display name from different dojos (team names are supposed to
+            be unique even across dojos, but one documented enforcement hole
+            in that check can still let a collision reach disk).
           items:
             type: object
             properties:
@@ -5365,22 +5358,18 @@ components:
       type: object
       description: >
         Selects exactly one tied group for the league tie-breaker POST/DELETE
-        endpoints. `teamNames` is always required (order-independent,
-        duplicates rejected unless `teamIds` is also present -- a namesake
-        pair legitimately repeats a name). `teamIds` is optional and, when
-        present, must be the same length as `teamNames`; it is honoured by
-        both `POST .../league-tiebreak` (matching the candidate group and
-        resolving it) and `DELETE .../league-tiebreak` (matching the group's
-        daihyosen rows by `SideAID`/`SideBID` instead of by name), letting a
-        namesake-holding group be selected, created, and removed where
-        `teamNames` alone is ambiguous. A namesake group can only be created
-        via `teamIds` in the first place, so `DELETE` must accept it too or
-        such a group could never be removed again.
-      required: [teamNames]
+        endpoints. `teamIds` is REQUIRED (operator ruling bc-pnum: a league
+        tie-break selection is a record resolved by id only): at least two
+        entries, no blanks, no duplicates. It is matched against the
+        candidate group's participant ids by `GET .../league-tiebreak/candidates`
+        and against each daihyosen row's own `SideAID`/`SideBID`. `teamNames`
+        is accepted for backward-compatible display only; it is never used to
+        select a candidate group or to match a row, even when it would
+        otherwise be unambiguous.
+      required: [teamIds]
       properties:
         teamNames:
           type: array
-          minItems: 2
           items:
             type: string
         teamIds:

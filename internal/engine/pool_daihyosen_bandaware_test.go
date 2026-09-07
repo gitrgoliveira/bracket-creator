@@ -8,6 +8,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 // These tests pin the band-aware rule for the pool daihyosen: a supplementary
@@ -33,6 +34,11 @@ func setupTeamPoolWinners(t *testing.T, compID string, teams []string, poolWinne
 	for i, n := range teams {
 		players[i] = helper.Player{Name: n}
 	}
+	// Regular-match attribution and DH tied-group resolution are both
+	// id-only (operator ruling bc-pnum); an id-less roster reads every
+	// team as unresolvable and collapses them into one spurious all-tied
+	// group instead of the fixture's intended advancement bands.
+	bctest.StampIDs(players, matches)
 	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store

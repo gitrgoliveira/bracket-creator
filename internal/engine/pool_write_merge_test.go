@@ -528,8 +528,14 @@ func TestTimestampGuardAppliesToBothBranches(t *testing.T) {
 // stripInvalidHantei into a 400. Mutating struckIppons to keep the mark must
 // fail this test.
 func TestPreserveLoserScoreDropsTheHanteiMark(t *testing.T) {
+	// preserveLoserScore's drift guard (bc-pnum) only inherits the loser's
+	// struck points when prior and result carry matching, non-empty
+	// SideAID/SideBID; an id-less pair never matches, so both fixtures below
+	// stamp the same ids.
+	aliceID, bobID := "id-alice", "id-bob"
 	prior := &state.MatchResult{
 		ID: "Pool A-1", SideA: "Alice", SideB: "Bob", Winner: "Alice",
+		SideAID: aliceID, SideBID: bobID,
 		Status:  state.MatchStatusCompleted,
 		IpponsA: []string{"M", domain.HanteiMark}, IpponsB: []string{"K"},
 	}
@@ -544,6 +550,7 @@ func TestPreserveLoserScoreDropsTheHanteiMark(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := &state.MatchResult{
 				ID: "Pool A-1", SideA: "Alice", SideB: "Bob",
+				SideAID: aliceID, SideBID: bobID,
 				Decision: "kiken-voluntary", DecisionBy: tc.decisionBy,
 				Status: state.MatchStatusCompleted,
 			}

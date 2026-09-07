@@ -1,10 +1,13 @@
-// Tests for API.leagueTiebreakGenerate / API.leagueTiebreakRemove
-// (second-Opus-pass nit 7): teamIds must be sent alongside teamNames when
-// the caller has one (so a namesake-holding tied group can be selected and
-// removed at all, not just created via curl), and OMITTED entirely --
-// never sent as an empty array or padded with blanks -- when the caller has
-// none, since the server now rejects a blank teamIds entry outright
-// (second-Opus-pass item 4).
+// Tests for API.leagueTiebreakGenerate / API.leagueTiebreakRemove.
+// teamIds is REQUIRED by the server now (operator ruling bc-pnum: the tied
+// group is selected by id only), so the client sends whatever it is given
+// verbatim -- the caller (admin_pools.jsx's groupTeamIds + the disabled
+// "Run tie-breaker" / "Remove unscored tie-breaker" buttons) is responsible
+// for never invoking these with a missing or incomplete teamIds; these
+// functions no longer special-case an empty/absent array. Passing no
+// teamIds argument at all still omits the key (JSON.stringify drops an
+// undefined property), which is what a caller that never learned about the
+// parameter produces; it is not a supported "safe to omit" path.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
@@ -33,7 +36,7 @@ describe('API.leagueTiebreakGenerate', () => {
     expect(JSON.parse(opts.body)).toEqual({ teamNames: ['Team X', 'Team X'], teamIds: ['id-a', 'id-b'] });
   });
 
-  it('omits teamIds entirely when the caller passes none (legacy id-less group)', async () => {
+  it('a caller passing no teamIds argument at all sends no teamIds key (JSON.stringify drops undefined)', async () => {
     global.fetch = mockFetch(201, { matches: [] });
     await API.leagueTiebreakGenerate('c1', ['Team A', 'Team B'], 'secret');
     const [, opts] = global.fetch.mock.calls[0];
@@ -42,11 +45,11 @@ describe('API.leagueTiebreakGenerate', () => {
     expect(body).not.toHaveProperty('teamIds');
   });
 
-  it('omits teamIds when the caller passes an empty array', async () => {
+  it('sends an empty teamIds array through verbatim (the server, not this function, rejects it)', async () => {
     global.fetch = mockFetch(201, { matches: [] });
     await API.leagueTiebreakGenerate('c1', ['Team A', 'Team B'], 'secret', []);
     const [, opts] = global.fetch.mock.calls[0];
-    expect(JSON.parse(opts.body)).not.toHaveProperty('teamIds');
+    expect(JSON.parse(opts.body)).toEqual({ teamNames: ['Team A', 'Team B'], teamIds: [] });
   });
 });
 
@@ -64,12 +67,19 @@ describe('API.leagueTiebreakRemove', () => {
     expect(JSON.parse(opts.body)).toEqual({ teamNames: ['Team X', 'Team X'], teamIds: ['id-a', 'id-b'] });
   });
 
-  it('omits teamIds entirely when the caller passes none (legacy id-less group)', async () => {
+  it('a caller passing no teamIds argument at all sends no teamIds key (JSON.stringify drops undefined)', async () => {
     global.fetch = mockFetch(200, { deleted: 1 });
     await API.leagueTiebreakRemove('c1', ['Team A', 'Team B'], 'secret');
     const [, opts] = global.fetch.mock.calls[0];
     const body = JSON.parse(opts.body);
     expect(body).toEqual({ teamNames: ['Team A', 'Team B'] });
     expect(body).not.toHaveProperty('teamIds');
+  });
+
+  it('sends an empty teamIds array through verbatim (the server, not this function, rejects it)', async () => {
+    global.fetch = mockFetch(200, { deleted: 1 });
+    await API.leagueTiebreakRemove('c1', ['Team A', 'Team B'], 'secret', []);
+    const [, opts] = global.fetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({ teamNames: ['Team A', 'Team B'], teamIds: [] });
   });
 });

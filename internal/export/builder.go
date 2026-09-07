@@ -238,10 +238,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 // (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
 //
 // Each side is resolved to its pool Player by the authoritative SideAID/SideBID
-// UUID first, which disambiguates same-name-different-dojo participants. Legacy
-// results written before side UUIDs existed fall back to name matching (last
-// write wins in the name map), so exact-duplicate names in such old data can
-// still be conflated; current data always carries the UUIDs.
+// UUID ONLY (operator ruling bc-pnum): a pool-matches.csv row and a pools.csv
+// Player both carry an id field, so there is no name fallback. A row with no
+// id for a side, or an id this pool's own roster does not carry, resolves to
+// no Player at all and the match is skipped below.
 func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
 	poolOrdinals := make(map[string][]int, len(pools))
 	for pi := range pools {
@@ -266,32 +266,29 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) ma
 		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
 
 		byID := make(map[string]*helper.Player, len(p.Players))
-		byName := make(map[string]*helper.Player, len(p.Players))
 		for i := range p.Players {
 			pl := &p.Players[i]
 			if pl.ID != "" {
 				byID[pl.ID] = pl
 			}
-			byName[pl.Name] = pl
 		}
-		// Prefer the authoritative side UUID (SideAID/SideBID from pool-matches.csv)
-		// and fall back to the display name. Names are not unique within a
-		// competition (same name, different dojo is allowed), so a name-only lookup
-		// could attach the wrong Player and mislabel the grid; the UUID disambiguates.
-		resolve := func(id, name string) *helper.Player {
-			if id != "" {
-				if pl, ok := byID[id]; ok {
-					return pl
-				}
+		// ID-only (operator ruling bc-pnum): the side UUID (SideAID/SideBID
+		// from pool-matches.csv) is the only resolution path. Names are not
+		// unique within a competition (same name, different dojo is
+		// allowed), so a name-only lookup could attach the wrong Player and
+		// mislabel the grid; an empty or foreign id simply resolves to nil.
+		resolve := func(id string) *helper.Player {
+			if id == "" {
+				return nil
 			}
-			return byName[name]
+			return byID[id]
 		}
 
 		p.Matches = make([]helper.Match, 0, len(mine))
 		ords := make([]int, 0, len(mine))
 		for _, ir := range mine {
-			sideA := resolve(ir.mr.SideAID, ir.mr.SideA)
-			sideB := resolve(ir.mr.SideBID, ir.mr.SideB)
+			sideA := resolve(ir.mr.SideAID)
+			sideB := resolve(ir.mr.SideBID)
 			// A side that resolves to no pool member (e.g. a participant removed
 			// after the match was recorded, or partially-written state) would be a
 			// nil *Player, which PrintPoolMatches dereferences unconditionally and
@@ -716,7 +713,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 			if !ok {
 				continue
 			}
-			byName := standingMap(poolStandings)
+			byID := standingMap(poolStandings)
 			// Scope the header map to THIS court's 8-column band. Pool Matches
 			// repeats the W/L/T/PW/PL/Rank headers once per court, and a whole-row
 			// map keeps only the first occurrence, so on a multi-court sheet every
@@ -730,7 +727,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				if dataRowIdx >= len(rows) {
 					break
 				}
-				ps, ok := byName[standingKey(player)]
+				ps, ok := byID[standingKey(player)]
 				if !ok {
 					continue
 				}
@@ -859,7 +856,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 			if !ok {
 				continue
 			}
-			byName := standingMap(poolStandings)
+			byID := standingMap(poolStandings)
 
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt // 1-based
 			wCol := colNum(courtStartCol + 1)
@@ -874,7 +871,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 
 			nPlayers := len(pool.Players)
 			for i, player := range pool.Players {
-				ps, ok := byName[standingKey(player)]
+				ps, ok := byID[standingKey(player)]
 				if !ok {
 					continue
 				}
@@ -1212,25 +1209,29 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 	return m
 }
 
-// standingMap keys standings by participant ID (falling back to name for legacy
-// state without UUIDs) so two same-name competitors in one pool don't collapse
-// onto a single entry. Look up with standingKey(player).
+// standingMap keys standings by participant ID ONLY (operator ruling
+// bc-pnum: a state.PlayerStanding carries an id field, so it is resolved by
+// id only) so two same-name competitors in one pool don't collapse onto a
+// single entry. An id-less standing is never inserted, matching
+// attachPoolMatches' own id-only resolution. Look up with
+// standingKey(player).
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
+		if ps.Player.ID == "" {
+			continue
+		}
 		m[standingKey(ps.Player)] = ps
 	}
 	return m
 }
 
-// standingKey returns the lookup key for standingMap: the player's UUID when
-// present, else the display name (legacy data). Mirrors the ID-first, name-
-// fallback resolution used by attachPoolMatches.
+// standingKey returns the lookup key for standingMap: the player's
+// participant id, and nothing else (operator ruling bc-pnum). An id-less
+// player (Player.ID == "") returns "" and never resolves, since
+// standingMap never inserts a "" key.
 func standingKey(p helper.Player) string {
-	if p.ID != "" {
-		return p.ID
-	}
-	return p.Name
+	return p.ID
 }
 
 // buildBracketMatchIndex maps MatchNumber -> match for O(1) lookup by the printed

@@ -373,40 +373,35 @@ func (e *Engine) advanceMixedPools(compID string, comp *state.Competition) (Auto
 // that tie-breaker actually resolved the order is then verified by
 // dhCycleExists.
 //
-// Membership is resolved via newGroupKeyResolver (id-preferring, name
-// fallback), mirroring groupNeedsChusen's identical conversion (chusen.go) --
-// the two functions ask the same question of the same kind of data. A bare
-// display-name membership test collapses two SAME-NAME group members (the
-// unique-team-name rule has documented enforcement holes,
-// checkNewTeamNameCollisions) into one map entry, so a row that actually
-// pairs ONE of those members against THEMSELVES (SideA and SideB both
-// resolving to the identical group member -- corrupted/self-referential
-// data) would satisfy `names[m.SideA] && names[m.SideB]` under the old test
-// even though it is not a bout between two DIFFERENT group members at all.
-// The keyA != keyB guard rejects that self-pairing explicitly.
+// Membership is resolved via newGroupKeyResolver (id-only, operator ruling
+// bc-pnum), mirroring groupNeedsChusen's identical conversion (chusen.go) --
+// the two functions ask the same question of the same kind of data. An
+// id-only membership test correctly rejects a row that pairs ONE group
+// member against THEMSELVES (SideA and SideB both resolving to the
+// identical group member -- corrupted/self-referential data): the keyA !=
+// keyB guard below catches it because resolve() returns the participant id
+// verbatim, so a self-pairing produces keyA == keyB regardless of how the
+// row got that way.
 //
-// That same guard also has a second, legitimate false negative: two id-less
-// GROUP MEMBERS who genuinely share a display name (again the namesake
-// collision the unique-team-name rule doesn't fully close) both resolve to
-// the SAME fallback key, because newGroupKeyResolver's name index is
-// last-write-wins and cannot tell two id-less same-name members apart from
-// the name alone. A REAL DH row played between those two competitors then
-// also reads keyA == keyB and is rejected as if it were the corrupted
-// self-pair above, even though it is a genuine tie-breaker. This fails
-// CLOSED, which is the safe direction for this guard: the group is reported
-// as still lacking a tie-breaker, so MaybeAutoCompletePools keeps returning
-// AwaitingLeagueTiebreak / AutoCompleteNoChange instead of advancing on a
-// result this function cannot actually verify belongs to two distinct
-// competitors, and the operator sees the group still needs action rather
-// than the competition silently completing on an unverifiable DH.
+// A group member with no id (Player.ID == "") is never inserted into
+// newGroupKeyResolver's key set, so no DH row can ever resolve to it; a
+// genuine tie-breaker played between two id-less same-name members is
+// therefore reported as NOT having a DH, exactly like the corrupted
+// self-pair case above. This fails CLOSED, which is the safe direction for
+// this guard: the group is reported as still lacking a tie-breaker, so
+// MaybeAutoCompletePools keeps returning AwaitingLeagueTiebreak /
+// AutoCompleteNoChange instead of advancing on a result this function
+// cannot actually verify belongs to two distinct competitors, and the
+// operator sees the group still needs action rather than the competition
+// silently completing on an unverifiable DH.
 func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResult) bool {
 	resolve := newGroupKeyResolver(group)
 	for _, m := range allMatches {
 		if !IsPoolDaihyosenMatchID(m.ID) {
 			continue
 		}
-		keyA, okA := resolve(m.SideAID, m.SideA)
-		keyB, okB := resolve(m.SideBID, m.SideB)
+		keyA, okA := resolve(m.SideAID)
+		keyB, okB := resolve(m.SideBID)
 		if okA && okB && keyA != keyB {
 			return true
 		}
@@ -422,9 +417,11 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 // group has no DH bouts and groupNeedsChusen returns false. When it does return
 // true the operator resolves the group via the chusen (drawing lots) panel,
 // which writes poolRanks (pool name -> helper.CompetitorKey(id, name, dojo) ->
-// rank; lookupPoolRankOverride also honours a legacy bare-name key for
-// pre-identity overrides.json data, see its own doc comment); a group whose
-// every member has an override is resolved and no longer blocks completion.
+// rank; lookupPoolRankOverride reads ONLY that key -- the separate legacy
+// bare-name overrides[name] fallback for pre-identity overrides.json data was
+// removed under bc-pnum, see lookupPoolRankOverride's own doc comment); a
+// group whose every member has an override is resolved and no longer blocks
+// completion.
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {

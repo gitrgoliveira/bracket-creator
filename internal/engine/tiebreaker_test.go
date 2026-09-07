@@ -8,6 +8,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -342,7 +343,10 @@ func TestGenerateTiebreakerMatches_SkipsExistingPairs(t *testing.T) {
 		{Player: domain.Player{Name: "B", Dojo: "Dojo B"}},
 		{Player: domain.Player{Name: "C", Dojo: "Dojo C"}},
 	}
-	existingRows := []state.MatchResult{{SideA: "A", SideB: "B"}}
+	bctest.StampStandingIDs(group)
+	// The dedup resolver is id-only (operator ruling bc-pnum), so the
+	// existing row must carry the same ids the group was just stamped with.
+	existingRows := []state.MatchResult{{SideA: "A", SideB: "B", SideAID: group[0].Player.ID, SideBID: group[1].Player.ID}}
 	matches := generateTiebreakerMatches("Pool X", group, 1, "A", existingRows)
 	// Only A-C and B-C should be generated
 	require.Len(t, matches, 2)
@@ -433,17 +437,20 @@ func TestInjectTiebreakerMatches_NoTie(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
+	}
 	// Alice wins both, Bob beats Charlie, distinct standings, no tie
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice"},
 		{ID: "Pool A-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob"},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	injected, err := eng.InjectTiebreakerMatches(compID)
 	require.NoError(t, err)
@@ -461,18 +468,21 @@ func TestInjectTiebreakerMatches_TwoWayTie(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
+	}
 	// Alice wins both, Bob and Charlie both lose once, both 0 ippons: tie
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A"},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice", Court: "A"},
 		{ID: "Pool A-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "",
 			Decision: string(domain.DecisionHikiwake), Court: "A"},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	injected, err := eng.InjectTiebreakerMatches(compID)
 	require.NoError(t, err)
@@ -496,16 +506,19 @@ func TestInjectTiebreakerMatches_Idempotent(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"},
+	}
 	// A draw → both have identical stats → tie
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "",
 			Decision: string(domain.DecisionHikiwake)},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	first, err := eng.InjectTiebreakerMatches(compID)
 	require.NoError(t, err)
@@ -640,16 +653,19 @@ func TestComputeStandings_TBExcludedFromStats(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
-	}))
+	players := []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}
 	// Regular draw + TB win for Alice
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "",
 			Decision: string(domain.DecisionHikiwake)},
 		{ID: "Pool A-TB-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice",
 			Decision: string(domain.DecisionIpponShobu)},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -732,17 +748,20 @@ func TestMaybeAutoCompletePools_NoTies(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
+	}
 	// Alice wins all → distinct standings (no tie)
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice"},
 		{ID: "Pool A-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob"},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	outcome, err := eng.MaybeAutoCompletePools(compID)
 	require.NoError(t, err)
@@ -778,16 +797,14 @@ func TestComputeStandings_MultiGroupTBSortIsolation(t *testing.T) {
 		Courts: []string{"A"},
 	}))
 	// 5-player pool: Alpha first, then {Beta,Gamma} tied, then {Delta,Epsilon} tied.
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
-			{Name: "Delta", Dojo: "Dojo Delta"}, {Name: "Epsilon", Dojo: "Dojo Epsilon"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
+		{Name: "Delta", Dojo: "Dojo Delta"}, {Name: "Epsilon", Dojo: "Dojo Epsilon"},
+	}
 	// Alpha beats everyone. Beta and Gamma both beat Delta and Epsilon and
 	// draw each other → same Points. Delta and Epsilon draw each other and
 	// both lose the same matches → same (lower) Points.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		// Alpha wins all regular matches
 		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
 		{ID: "Pool A-1", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Alpha"},
@@ -808,7 +825,12 @@ func TestComputeStandings_MultiGroupTBSortIsolation(t *testing.T) {
 		{ID: "Pool A-TB-0", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
 		// TB match for group 2: Epsilon beats Delta
 		{ID: "Pool A-TB-1", SideA: "Delta", SideB: "Epsilon", Status: state.MatchStatusCompleted, Winner: "Epsilon"},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -833,21 +855,29 @@ func TestComputeStandings_TBSecondarySort(t *testing.T) {
 		Status: state.CompStatusPools,
 		Courts: []string{"A"},
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Charlie", Dojo: "Dojo Charlie"},
+	}
 	// Alice wins all regular matches; Bob and Charlie draw → tie
 	// TB: Alice won (irrelevant to tie-breaking), Bob beats Charlie in tiebreaker
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
 		{ID: "Pool A-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice"},
 		{ID: "Pool A-2", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "",
 			Decision: string(domain.DecisionHikiwake)},
 		{ID: "Pool A-TB-0", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob",
 			Decision: string(domain.DecisionIpponShobu)},
+	}
+	// Stamp ids: without them (id-only resolution, bc-pnum) neither the
+	// regular matches nor the TB bout would attribute to anyone, and the
+	// assertions below would pass by coincidence (the pool's on-disk order
+	// already happens to equal the expected ranking) rather than proving
+	// the TB win actually broke the tie.
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -881,10 +911,13 @@ func setupIndividualPoolTB(t *testing.T, compID string, poolWinners int) (*Engin
 		ID: compID, Name: "TB band-aware", Format: state.CompFormatMixed,
 		Status: state.CompStatusPools, Courts: []string{"A"}, PoolWinners: poolWinners,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+	players := []helper.Player{
 		{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}, {Name: "Carol", Dojo: "Dojo Carol"}, {Name: "Dave", Dojo: "Dojo Dave"},
-	}}}))
-	require.NoError(t, store.SavePoolMatches(compID, fourPlayerOneTiedPairTB()))
+	}
+	matches := fourPlayerOneTiedPairTB()
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 // These tests pin the behaviour the closing-ceremony / advancement rules
@@ -45,6 +46,12 @@ func teamPoolMatch(id, court, sideA, sideB, winner string) state.MatchResult {
 // scoreInjectedDH marks every injected pool-DH match Completed and sets its
 // Winner via pick(sideA, sideB). It then invalidates the standings cache so
 // the next CalculatePoolStandings recomputes with the DH results applied.
+//
+// WinnerID is resolved alongside Winner: applyTiebreakSort/resolveWinnerSide
+// attribute a DH win by id only (operator ruling bc-pnum), and
+// generatePoolDaihyosenMatches already stamped SideAID/SideBID on the
+// injected row, so leaving WinnerID empty here would make the DH bout read
+// as winnerless and silently fail to move anyone in the standings.
 func scoreInjectedDH(t *testing.T, eng *Engine, store *state.Store, compID string, pick func(sideA, sideB string) string) {
 	t.Helper()
 	all, err := store.LoadPoolMatches(compID)
@@ -55,7 +62,14 @@ func scoreInjectedDH(t *testing.T, eng *Engine, store *state.Store, compID strin
 			continue
 		}
 		all[i].Status = state.MatchStatusCompleted
-		all[i].Winner = pick(all[i].SideA, all[i].SideB)
+		winner := pick(all[i].SideA, all[i].SideB)
+		all[i].Winner = winner
+		switch winner {
+		case all[i].SideA:
+			all[i].WinnerID = all[i].SideAID
+		case all[i].SideB:
+			all[i].WinnerID = all[i].SideBID
+		}
 		scored++
 	}
 	require.Positive(t, scored, "expected at least one injected DH match to score")
@@ -91,6 +105,11 @@ func setupTeamPool(t *testing.T, compID string, teams []string, matches []state.
 	for i, n := range teams {
 		players[i] = helper.Player{Name: n}
 	}
+	// Regular-match win/loss/draw attribution and the DH tied-group
+	// resolution are both id-only (operator ruling bc-pnum): an id-less
+	// roster reads every team as unresolvable and collapses them into one
+	// spurious all-tied group instead of the fixture's intended bands.
+	bctest.StampIDs(players, matches)
 	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store

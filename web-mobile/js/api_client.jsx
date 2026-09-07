@@ -2435,16 +2435,15 @@ const API = {
         }
         return res.json();
     },
-    // playerId and playerDojo are OPTIONAL (bc-cse): two pool members can
-    // legally share a display name from different dojos (operator identity
-    // rule), so playerName alone cannot always tell them apart. When known,
-    // pass the competitor's id (preferred) and/or dojo so the server resolves
-    // the override unambiguously; omit them and only playerName is sent,
-    // exactly as before, for a caller that doesn't have that information.
-    async overridePoolRank(compID, poolID, playerName, rank, password, playerId, playerDojo) {
-        const body = { playerName, rank };
-        if (playerId) body.playerId = playerId;
-        if (playerDojo) body.playerDojo = playerDojo;
+    // playerId is REQUIRED (operator ruling bc-pnum): the server resolves a
+    // pool member by id only (resolvePoolOverrideTarget,
+    // handlers_competition.go) and rejects the request with 400 when it is
+    // missing -- two pool members can legally share a display name from
+    // different dojos, so playerName alone can never disambiguate them.
+    // playerDojo is NOT sent: the server never read it (id-only resolution
+    // has no use for it), so a caller has nothing to gain by supplying it.
+    async overridePoolRank(compID, poolID, playerName, rank, password, playerId) {
+        const body = { playerName, rank, playerId };
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',
             headers: {
@@ -3206,21 +3205,20 @@ const API = {
     },
 
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak
-    // Body: { teamNames: string[], teamIds?: string[] }: the tied group to
-    // break the tie. teamIds (bc-idfx, second-Opus-pass nit 7) is optional
-    // and, when the caller passes a non-empty array, is sent alongside
-    // teamNames so a namesake-holding group (two tied teams sharing a
-    // display name across dojos) can be selected at all -- teamNames alone
-    // is ambiguous for that shape and the server rejects the duplicate
-    // outright. Only include it when the caller has a REAL id for every
-    // team: the server also rejects a blank entry (second-Opus-pass item 4),
-    // so omit teamIds entirely rather than pad it with empties for a
-    // legacy id-less group.
+    // Body: { teamNames: string[], teamIds: string[] }. teamIds is REQUIRED
+    // (operator ruling bc-pnum): the server selects the tied group by id
+    // only and 400s outright when teamIds is missing, has fewer than two
+    // entries, carries a blank entry, or has a duplicate -- teamNames alone
+    // is ambiguous the moment two tied teams share a display name across
+    // dojos, which this project explicitly allows. The caller MUST NOT
+    // invoke this without a real id for every team (admin_pools.jsx gates
+    // the "Run tie-breaker" button on groupTeamIds(...) !== undefined for
+    // exactly this reason, disabling it rather than sending a request that
+    // can only 400).
     // Returns { matches: MatchResult[] } on 201.
     // Throws on 400 (invalid group), 409 (matches already exist).
     async leagueTiebreakGenerate(compID, teamNames, password, teamIds) {
-        const body = { teamNames };
-        if (teamIds && teamIds.length > 0) body.teamIds = teamIds;
+        const body = { teamNames, teamIds };
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
@@ -3236,16 +3234,17 @@ const API = {
     },
 
     // leagueTiebreakRemove: DELETE /competitions/:id/league-tiebreak
-    // Body: { teamNames: string[], teamIds?: string[] }: the tied group
-    // whose unscored matches to remove. teamIds is optional, same contract
-    // as leagueTiebreakGenerate above -- a namesake-holding group can only
-    // ever have been CREATED via teamIds, so it must be removable the same
-    // way or it could never be deleted again.
+    // Body: { teamNames: string[], teamIds: string[] }: the tied group whose
+    // unscored matches to remove. teamIds is REQUIRED, same contract as
+    // leagueTiebreakGenerate above -- a namesake-holding group can only ever
+    // have been CREATED via teamIds, so it must be removable the same way
+    // or it could never be deleted again. Same UI-level gating applies: the
+    // "Remove unscored tie-breaker" button is disabled when groupTeamIds(...)
+    // is undefined.
     // Returns { deleted: number } on 200.
     // Throws on 404 (no matches found), 409 (any match already scored).
     async leagueTiebreakRemove(compID, teamNames, password, teamIds) {
-        const body = { teamNames };
-        if (teamIds && teamIds.length > 0) body.teamIds = teamIds;
+        const body = { teamNames, teamIds };
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },

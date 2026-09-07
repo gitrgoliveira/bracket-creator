@@ -11,6 +11,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -599,6 +600,7 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
 		{PoolName: "Pool B", Players: []helper.Player{{Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"}}},
 	}
+	bctest.StampPoolIDs(pools)
 	// Build competition.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:          compID,
@@ -612,15 +614,18 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 		TeamSize:    teamSize,
 	}))
 	require.NoError(t, store.SavePools(compID, pools))
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+	players := []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
-	}))
-
-	// Save the initial scheduled pool matches.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	}
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Status: state.MatchStatusScheduled},
-	}))
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	// Save the initial scheduled pool matches.
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	// Build the preview bracket from the pools.
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
@@ -1086,15 +1091,19 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 		Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 1,
 	}))
+	bctest.StampPoolIDs(pools)
 	require.NoError(t, store.SavePools(compID, pools))
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+	players := []domain.Player{
 		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}, {Name: "B1", Dojo: "Dojo B1"}, {Name: "B2", Dojo: "Dojo B2"},
-	}))
+	}
 	// Both pools already decided: A1 1st in Pool A, B1 1st in Pool B.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 		{ID: "Pool B-0", SideA: "B1", SideB: "B2", Winner: "B1", IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
-	}))
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SaveParticipants(compID, players))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	// Build + save a valid bracket, then corrupt it on disk. The tx read path
 	// (loadBracketLocked) parses the file directly (no cache), so the corrupt

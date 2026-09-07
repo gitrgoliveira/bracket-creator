@@ -14,6 +14,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 func TestScoring_OverrideBracketWinner(t *testing.T) {
@@ -144,16 +145,19 @@ func TestScoreSummary_Individual(t *testing.T) {
 
 	compID := "ind-summary"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Ind", TeamSize: 0}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "Alice", SideB: "Bob",
 			Winner: "Alice", IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
 			Status: state.MatchStatusCompleted,
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -180,10 +184,8 @@ func TestScoreSummary_Team(t *testing.T) {
 
 	compID := "team-summary"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Team", TeamSize: 3}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
 			Winner: "TeamA", Status: state.MatchStatusCompleted,
@@ -193,7 +195,12 @@ func TestScoreSummary_Team(t *testing.T) {
 				{Position: 3, Winner: "TeamB"},
 			},
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -223,10 +230,8 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 		ID: compID, Name: "Team", TeamSize: 3,
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
 			Winner: "", Decision: "hikiwake",
@@ -237,7 +242,12 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 				{Position: 3, Winner: ""},
 			},
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -282,10 +292,8 @@ func TestTeamStandings_PlaceholderIpponsDontInflatePoints(t *testing.T) {
 		ID: compID, Name: "Team", TeamSize: 2,
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
 			Winner: "TeamA", Status: state.MatchStatusCompleted,
@@ -297,7 +305,12 @@ func TestTeamStandings_PlaceholderIpponsDontInflatePoints(t *testing.T) {
 				{Position: 2, Winner: "TeamB", IpponsA: []string{"•", "•"}, IpponsB: []string{"K"}},
 			},
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)

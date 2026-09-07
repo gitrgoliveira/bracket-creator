@@ -295,6 +295,32 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 	return "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
+// currentPoolMatchSideIDs finds matchID's OWN SideAID/SideBID within an
+// already-loaded pool-matches slice. ok is false when matchID is not among
+// them (a bracket match, out of scope for bc-pnum -- BracketMatch carries
+// no per-side id at all).
+//
+// checkSimultaneousMatch(Tx) uses this instead of re-deriving the CURRENT
+// match's identity from its bare SideA/SideB names via a roster scan
+// (resolvePlayerIDs/lookupPlayerID): a pool row already carries its own
+// SideAID/SideBID, so reading them directly is strictly better than
+// guessing from a name that two different competitors can share. Before
+// this, two "Sam"s from different dojos would misattribute: the target
+// match's OWN row correctly names, say, "Sam" (North)'s id, but
+// resolvePlayerIDs re-derived rawIDA from the bare name "Sam" against the
+// full roster and picked WHICHEVER "Sam" a name lookup found first --
+// wrongly blocking North's Sam from starting because South's Sam happened
+// to be running elsewhere, the exact same-name misattribution bc-pnum
+// exists to close.
+func currentPoolMatchSideIDs(poolMatches []state.MatchResult, matchID string) (idA, idB string, ok bool) {
+	for _, m := range poolMatches {
+		if m.ID == matchID {
+			return m.SideAID, m.SideBID, true
+		}
+	}
+	return "", "", false
+}
+
 // checkSimultaneousMatch returns an *IneligibleCompetitorError if either
 // participant in matchID is currently Running in a different match within
 // the same competition. Pool matches and bracket matches are both checked.
@@ -309,21 +335,32 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 		return nil
 	}
 
-	idA, idB := e.resolvePlayerIDs(compID, sideA, sideB)
+	idA, idB, rawIDA, rawIDB := e.resolvePlayerIDs(compID, sideA, sideB)
 
+	// Pool-vs-pool half: id only (operator ruling bc-pnum). A side with no
+	// resolvable roster id (rawIDA/rawIDB == "") never matches any other
+	// pool match here -- there is no name fallback.
 	poolMatches, err := e.store.LoadPoolMatches(compID)
 	if err == nil {
+		// When matchID is itself a pool match, its own stored SideAID/SideBID
+		// (currentPoolMatchSideIDs, see its doc comment) supersede
+		// resolvePlayerIDs' name-derived guess for THIS comparison. A bracket
+		// match (ok == false) keeps the name-derived pair -- out of scope,
+		// bracket has no id field to prefer instead.
+		if ownIDA, ownIDB, ok := currentPoolMatchSideIDs(poolMatches, matchID); ok {
+			rawIDA, rawIDB = ownIDA, ownIDB
+		}
 		for _, m := range poolMatches {
 			if m.ID == matchID || m.Status != state.MatchStatusRunning {
 				continue
 			}
-			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
 				return &IneligibleCompetitorError{
 					PlayerID: idA,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
-			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
 				return &IneligibleCompetitorError{
 					PlayerID: idB,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
@@ -332,6 +369,8 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 		}
 	}
 
+	// Bracket half: name-based, out of scope for bc-pnum (BracketMatch
+	// carries no per-side id).
 	bracket, berr := e.store.LoadBracket(compID)
 	if berr == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
@@ -372,26 +411,40 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 	return nil
 }
 
-func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) {
+// resolvePlayerIDs resolves sideA/sideB (display names) against the
+// competition's roster and returns two pairs: (idA, idB), which fall back to
+// the bare name when no participant id is found (kept for the
+// IneligibleCompetitorError.PlayerID reporting field, which has always
+// preferred SOME identifier over a blank one), and (rawIDA, rawIDB), which
+// are "" on the same miss with NO fallback. checkSimultaneousMatch's
+// pool-vs-pool comparison must use the raw pair (operator ruling bc-pnum): a
+// record with an id field -- state.MatchResult.SideAID/SideBID -- is
+// resolved by id only, and a name silently substituted for a missing id
+// would never legitimately equal a real SideAID/SideBID value, so using the
+// name-fallback pair there wouldn't create a false match, but it would be
+// comparing the wrong kind of value for the wrong reason.
+func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (idA, idB, rawIDA, rawIDB string) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil || comp == nil {
-		return sideA, sideB
+		return sideA, sideB, "", ""
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
 	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
-		return sideA, sideB
+		return sideA, sideB, "", ""
 	}
 	pool := combinedPlayerPool(comp.Players, participants)
-	idA := lookupPlayerID(pool, sideA)
+	rawIDA = lookupPlayerID(pool, sideA)
+	idA = rawIDA
 	if idA == "" {
 		idA = sideA
 	}
-	idB := lookupPlayerID(pool, sideB)
+	rawIDB = lookupPlayerID(pool, sideB)
+	idB = rawIDB
 	if idB == "" {
 		idB = sideB
 	}
-	return idA, idB
+	return idA, idB, rawIDA, rawIDB
 }
 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips
@@ -819,17 +872,25 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 //     so it stays correct even when both sides share a display name (two
 //     competitors from different dojos, which this project allows).
 //  3. result.Winner compared against the two side names -- but ONLY when
-//     SideA != SideB. A same-name pairing makes Winner match BOTH sides
-//     identically; comparing a name against two equal strings always takes
-//     whichever branch is checked first, which is how this used to silently
-//     attribute the loss to side A regardless of who actually won.
+//     SideA != SideB, AND ONLY when result.SideAID == "" && result.SideBID
+//     == "" (bc-pnum review finding 6): the record carries no id field at
+//     all, the one legitimate class a name comparison may resolve. A
+//     same-name pairing makes Winner match BOTH sides identically;
+//     comparing a name against two equal strings always takes whichever
+//     branch is checked first, which is how this used to silently
+//     attribute the loss to side A regardless of who actually won. Before
+//     finding 6, this tier ALSO ran on a pool row that carries
+//     SideAID/SideBID but happens to have no WinnerID -- resolving by name
+//     beside an id lookup on the SAME record, which the id-only ruling
+//     forbids: such a row must resolve NOTHING, not a name-matched guess.
 //  4. The legacy ippon-emptiness heuristic (one side has struck ippons, the
-//     other has none) for a row with no winner-attribution data at all. This
-//     returns the empty side's OWN id/name directly rather than a name that
-//     then has to be matched back to a side, which is exactly the mapping
-//     step that used to re-introduce the same-name ambiguity: a returned
-//     name equal to both SideA and SideB matched the first-declared case
-//     regardless of which side the heuristic actually meant.
+//     other has none), gated by the SAME no-id precondition as tier 3, for
+//     a row with no winner-attribution data at all. This returns the empty
+//     side's OWN id/name directly rather than a name that then has to be
+//     matched back to a side, which is exactly the mapping step that used
+//     to re-introduce the same-name ambiguity: a returned name equal to
+//     both SideA and SideB matched the first-declared case regardless of
+//     which side the heuristic actually meant.
 //
 // ok reports whether the loss could be attributed; false replaces the old
 // sideUnresolved/"" signals. A caller like recordIneligibilityFromDecision
@@ -852,6 +913,13 @@ func losingSide(result *state.MatchResult) (id, name string, ok bool) {
 		case result.SideBID:
 			return result.SideAID, result.SideA, true
 		}
+	}
+	// Tiers 3 and 4 are name/ippon-based, so they may only resolve a record
+	// that carries NO id field at all (the bracket class); a pool row's
+	// SideAID/SideBID being unfilled for THIS decision (no WinnerID yet)
+	// must not fall back to guessing by name or scoreline shape.
+	if result.SideAID != "" || result.SideBID != "" {
+		return "", "", false
 	}
 	if result.Winner != "" && result.SideA != result.SideB {
 		switch result.Winner {

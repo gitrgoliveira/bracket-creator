@@ -11,28 +11,31 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
-// TestReplaceParticipantInDraw_IDLessCrossPoolNamesake_OnlyTargetPoolRewritten
-// is the bc-pnum review's repro. For id-less pool-matches.csv rows, the
+// TestReplaceParticipantInDraw_IDLessCrossPoolRow_NeverRenamed is the bc-pnum
+// CONVERSION of the former TestReplaceParticipantInDraw_IDLessCrossPoolNamesake_OnlyTargetPoolRewritten.
+// That test pinned a pre-bc-pnum fix: for id-less pool-matches.csv rows, the
 // rename used to fall back to `rowName == oldName` with no dojo and no
-// per-pool scope, so renaming one of two cross-dojo namesakes rewrote the
-// OTHER namesake's pool-matches row too: pools.csv (name, dojo)-scoped by
-// matchesParticipant correctly leaves the untouched pool alone, but
-// pool-matches.csv (no per-side dojo at all) disagreed with it in the same
-// write, and the untouched namesake's results then vanish from standings
-// (lookupStandingsPlayer nil -> continue).
+// per-pool scope, so renaming one of two cross-dojo namesakes could rewrite
+// the OTHER namesake's pool-matches row too; the fix scoped that fallback to
+// the target's own pool.
 //
-// Reachable in production exactly as described: a draw over an id-less
-// legacy roster (runDrawPipeline never backfills ids) writes pools.csv and
-// pool-matches.csv without ids, then a participant PUT backfills a UUID for
-// the edited row (SaveParticipants mints one for any id-less row on write)
-// and calls this cascade with the synthetic "name|dojo" pid
-// (state.resolveParticipantIndex's own fallback for a legacy lookup).
-func TestReplaceParticipantInDraw_IDLessCrossPoolNamesake_OnlyTargetPoolRewritten(t *testing.T) {
+// The bc-pnum operator ruling removed the fallback itself, for BOTH
+// pools.csv and pool-matches.csv: matchesParticipant (replace_participant.go)
+// is now `rowID != "" && pid != "" && rowID == pid`, so a row with no id at
+// all is simply never matched, in either file, by this rename cascade --
+// there is no (name, dojo) or per-pool scoping left to test, because there
+// is no fallback path left to reach. This asserts the new, opposite
+// behaviour: a synthetic "name|dojo" pid (the pre-bc-pnum legacy lookup key)
+// matches no row anywhere, so NEITHER pool's roster nor pool-matches row is
+// touched, and the generic "not found in draw artifacts" warning fires
+// instead of the old empty-warnings happy path.
+func TestReplaceParticipantInDraw_IDLessCrossPoolRow_NeverRenamed(t *testing.T) {
 	eng, store, compID := setupLegacyIDLessMixedTwoPools(t)
 
 	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice|DojoX", "Alice", "DojoX", "", "Alicia", "DojoX", "")
 	require.NoError(t, err)
-	assert.Empty(t, warnings, "no ambiguity within Pool A itself: Pool A's own namesake was already renamed")
+	require.Len(t, warnings, 1, "an id-less pid matches no row anywhere, so the generic not-found warning fires")
+	assert.Contains(t, warnings[0], "not found in draw artifacts")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
@@ -47,21 +50,34 @@ func TestReplaceParticipantInDraw_IDLessCrossPoolNamesake_OnlyTargetPoolRewritte
 	}
 	require.NotNil(t, poolAMatch, "Pool A-0 must exist")
 	require.NotNil(t, poolBMatch, "Pool B-0 must exist")
-	assert.Equal(t, "Alicia", poolAMatch.SideA, "Pool A's own match must be rewritten")
-	assert.Equal(t, "Alice", poolBMatch.SideA, "Pool B's UNRELATED namesake match must be left untouched")
+	assert.Equal(t, "Alice", poolAMatch.SideA, "an id-less row is never matched, so Pool A's own match is left exactly as it was")
+	assert.Equal(t, "Alice", poolBMatch.SideA, "Pool B's unrelated namesake match is likewise untouched")
 
 	poolsAfter, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	require.Len(t, poolsAfter, 2)
-	assert.Equal(t, "Alicia", poolsAfter[0].Players[0].Name, "Pool A's own roster row is renamed")
-	assert.Equal(t, "Alice", poolsAfter[1].Players[0].Name, "Pool B's namesake roster row is untouched (already correct before this fix)")
+	assert.Equal(t, "Alice", poolsAfter[0].Players[0].Name, "pools.csv rows are id-only too (matchesParticipant): the id-less row is never matched")
+	assert.Equal(t, "Alice", poolsAfter[1].Players[0].Name, "Pool B's namesake roster row is likewise untouched")
 }
 
-// TestReplaceParticipantInDraw_IDLessSamePoolNamesake_SkippedWithWarning is
-// the review finding's same-pool variant: two id-less "Alice" rows IN THE SAME POOL
-// cannot be told apart by a pool-matches row that carries only a name, so
-// the rewrite must be skipped and warned about rather than guessed.
-func TestReplaceParticipantInDraw_IDLessSamePoolNamesake_SkippedWithWarning(t *testing.T) {
+// TestReplaceParticipantInDraw_IDLessSamePoolRow_NeverRenamed is the bc-pnum
+// CONVERSION of the former TestReplaceParticipantInDraw_IDLessSamePoolNamesake_SkippedWithWarning.
+// That test pinned the same-pool variant of the review finding above: two
+// id-less "Alice" rows in the SAME pool could not be told apart by a
+// pool-matches row carrying only a name, so the fix skipped the rewrite and
+// returned a specific "ambiguous" warning rather than guessing.
+//
+// Under the bc-pnum operator ruling there is no longer any name-based
+// lookup for an id-less row to be ambiguous ABOUT: matchesParticipant never
+// even reaches the point of comparing names, since the row's id is empty.
+// The specific "ambiguous same-pool namesake" diagnosis this test pinned is
+// therefore gone -- see TestReplaceParticipantInDraw_IDLessCrossPoolRow_NeverRenamed
+// above for the identical reasoning applied to the cross-pool shape. This
+// asserts the new, opposite behaviour: nothing is renamed anywhere (pools.csv
+// included, which the pre-bc-pnum version DID rewrite via its dojo-scoped
+// exact match) and the warning is the generic "not found in draw artifacts",
+// not "ambiguous".
+func TestReplaceParticipantInDraw_IDLessSamePoolRow_NeverRenamed(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "legacy-idless-same-pool"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -87,24 +103,19 @@ func TestReplaceParticipantInDraw_IDLessSamePoolNamesake_SkippedWithWarning(t *t
 
 	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice|DojoX", "Alice", "DojoX", "", "Alicia", "DojoX", "")
 	require.NoError(t, err)
-	require.NotEmpty(t, warnings, "an ambiguous same-pool namesake row must be warned about")
-	joined := ""
-	for _, w := range warnings {
-		joined += w + "\n"
-	}
-	assert.Contains(t, joined, "ambiguous")
-	assert.Contains(t, joined, "Alice")
+	require.Len(t, warnings, 1, "an id-less pid matches no row anywhere, so the generic not-found warning fires")
+	assert.Contains(t, warnings[0], "not found in draw artifacts")
 
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	assert.Equal(t, "Alice", matches[0].SideA, "an ambiguous same-pool namesake row must be left unchanged, not guessed")
+	assert.Equal(t, "Alice", matches[0].SideA, "an id-less row is never matched, so it is left exactly as it was")
 
 	poolsAfter, err := store.LoadPools(compID)
 	require.NoError(t, err)
 	require.Len(t, poolsAfter, 1)
-	assert.Equal(t, "Alicia", poolsAfter[0].Players[0].Name, "pools.csv itself is dojo-scoped and unaffected by this ambiguity: it still renames the exact (name, dojo) row")
-	assert.Equal(t, "Alice", poolsAfter[0].Players[1].Name, "the other DojoY namesake's own row is untouched")
+	assert.Equal(t, "Alice", poolsAfter[0].Players[0].Name, "pools.csv rows are id-only too (matchesParticipant): the id-less row is never matched, even the exact (name, dojo) one the pre-bc-pnum version rewrote")
+	assert.Equal(t, "Alice", poolsAfter[0].Players[1].Name, "the other DojoY namesake's own row is likewise untouched")
 }
 
 // setupLegacyIDLessMixedTwoPools builds a draw-ready MIXED competition with

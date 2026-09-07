@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"crypto/md5" //nolint:gosec // fixture id derivation only, not a security use
 	"fmt"
 	"testing"
 
@@ -11,13 +12,39 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// deterministicParticipantUUID derives a UUID-v4-SHAPED id (the
+// state/participants.go uuidRE shape check, 8-4-4-4-12 lowercase hex; no
+// version/variant nibble enforcement) from name alone, so repeated calls
+// across multiple saveParticipantsWithCheckIn calls for the SAME name
+// produce the SAME id. That stability matters here: some tests in this file
+// re-save the roster mid-test (e.g. to flip a late check-in), and Swiss
+// round-2+ resolves prior-round match sides back to the CURRENT roster by id
+// (buildSwissRosterIndex / swissFieldKeysFromMatches, operator ruling
+// bc-pnum) -- a fresh random id on each save would make every earlier round
+// unresolvable against the re-saved roster.
+func deterministicParticipantUUID(name string) string {
+	sum := md5.Sum([]byte(name)) //nolint:gosec // fixture id derivation only, not a security use
+	h := fmt.Sprintf("%x", sum)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", h[0:8], h[8:12], h[12:16], h[16:20], h[20:32])
+}
+
 // saveParticipantsWithCheckIn writes participants where names listed in
 // checkedIn are flagged CheckedIn=true. Used by the mp-w7x exclusion tests.
+//
+// Each player is stamped with deterministicParticipantUUID: the
+// participants.csv parser's has-ids sniff requires the first field to match
+// the UUID v4 shape (internal/state/participants.go's uuidRE), so a
+// non-UUID-shaped id (e.g. bctest.StampPlayerID's "id-name-dojo" slug) makes
+// the file round-trip as the LEGACY column layout instead, silently shifting
+// every field one column over. Swiss round-2+ separately needs these ids to
+// be non-empty AND stable across a mid-test re-save (see
+// deterministicParticipantUUID's own doc comment).
 func saveParticipantsWithCheckIn(t *testing.T, store *state.Store, compID string, names []string, checkedIn map[string]bool) {
 	t.Helper()
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
 		players[i] = domain.Player{
+			ID:        deterministicParticipantUUID(n),
 			Name:      n,
 			Dojo:      "Dojo" + string(rune('A'+i%5)),
 			CheckedIn: checkedIn[n],

@@ -13,6 +13,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -31,8 +32,10 @@ func corruptOverridesFile(t *testing.T, store *state.Store, compID string) {
 
 // TestNewGroupKeyResolver_NonMemberIDDoesNotFallThroughToName pins the
 // resolver contract directly: a NON-EMPTY id that does not belong to any
-// member of the group must resolve to ("", false), never fall through to the
-// bare-name index. Only an EMPTY id takes the name path.
+// member of the group must resolve to ("", false), never fall through to a
+// name match. An EMPTY id ALSO resolves to ("", false) (operator ruling
+// bc-pnum, converted from the pre-ruling behaviour: an empty id used to take
+// a bare-name path; there is no name path left at all now).
 func TestNewGroupKeyResolver_NonMemberIDDoesNotFallThroughToName(t *testing.T) {
 	group := []state.PlayerStanding{
 		{Player: domain.Player{ID: "id-x-a", Name: "X", Dojo: "Dojo A"}},
@@ -45,14 +48,15 @@ func TestNewGroupKeyResolver_NonMemberIDDoesNotFallThroughToName(t *testing.T) {
 	// correction moved the consequential tie). Resolving it must fail
 	// outright rather than silently attributing it to X@DojoA merely
 	// because they share the display name "X".
-	key, ok := resolve("id-x-b", "X")
+	key, ok := resolve("id-x-b")
 	assert.False(t, ok, "a non-member id must not resolve, even when the name matches a group member")
 	assert.Empty(t, key)
 
-	// An EMPTY id still takes the name path (legacy row with no id stamped).
-	key, ok = resolve("", "X")
-	assert.True(t, ok)
-	assert.Equal(t, "id:id-x-a", key)
+	// An EMPTY id resolves to nothing (operator ruling bc-pnum: no name
+	// fallback survives, even for a group that DOES carry ids).
+	key, ok = resolve("")
+	assert.False(t, ok, "an empty id must resolve to nothing, never to a name match")
+	assert.Empty(t, key)
 }
 
 // TestApplyTiebreakSort_ForeignIDNeverCreditsWrongMember is the end-to-end
@@ -89,46 +93,25 @@ func TestApplyTiebreakSort_ForeignIDNeverCreditsWrongMember(t *testing.T) {
 	assert.Equal(t, "id2", sorted[1].Player.ID)
 }
 
-// TestNewGroupKeyResolver_FullyLegacyGroupFallsThroughForeignIDToName pins the
-// bc-idfx review's nit 20 fix: the strict foreign-id rejection above only
-// makes sense when the GROUP itself has at least one id-carrying member --
-// otherwise there is nothing to check a bout's id against, ids simply are not
-// authoritative for this group at all. A fully legacy group (neither member
-// carries an id, e.g. a pool never regenerated since before ids were
-// stamped) must fall through to the bare-name index even when the bout row
-// happens to carry a non-empty id, rather than refusing to resolve a bout
-// the name index could have handled just fine.
-func TestNewGroupKeyResolver_FullyLegacyGroupFallsThroughForeignIDToName(t *testing.T) {
-	group := []state.PlayerStanding{
-		{Player: domain.Player{Name: "X", Dojo: "Dojo A"}}, // no ID
-		{Player: domain.Player{Name: "Y", Dojo: "Dojo Y"}}, // no ID
-	}
-	resolve := newGroupKeyResolver(group)
+// TestNewGroupKeyResolver_FullyLegacyGroupFallsThroughForeignIDToName pinned
+// the bc-idfx review's nit 20 fix (a fully id-less group fell through to a
+// bare-name index). That name-fallback subject no longer exists: the
+// operator ruling bc-pnum removed newGroupKeyResolver's byName index
+// entirely, so a fully id-less group now resolves NOTHING, by id or by
+// name. Deleted (not converted) because there is no fallback path left for
+// a replacement test to exercise; see
+// TestApplyTiebreakSort_IDlessGroupNeverResolvesBout for the group's new,
+// opposite behaviour end-to-end.
 
-	// The bout row carries an id ("some-id") that belongs to NEITHER member
-	// (neither has one at all). Because the GROUP has no ids to compare
-	// against, this must fall through to the name index and resolve X by
-	// name, not fail outright the way it would for an id-aware group.
-	key, ok := resolve("some-id", "X")
-	assert.True(t, ok, "a fully legacy group must fall through to the name index even when the bout row carries an id")
-	assert.Equal(t, "name:X", key)
-}
-
-// TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID is the
-// end-to-end twin: a pool with no ids anywhere, but a supplementary bout row
-// that (e.g. from a different data source, or hand-edited data) carries a
-// non-empty SideAID. Before the nit-20 fix this bout would fail to resolve
-// for either side and be silently skipped, leaving the tie unbroken even
-// though the names alone are enough to identify both competitors.
-//
-// sorted starts as [X, Y] (input order) while Y is the BOUT WINNER: a
-// resolved bout must move Y to first place, while a skipped bout (the
-// pre-fix behaviour) leaves the input order untouched -- deliberately
-// chosen so the two outcomes are distinguishable. An earlier draft of this
-// test put the winner already in the position a no-op would also produce,
-// which stayed green under the pre-fix mutation and pinned nothing; caught
-// and fixed via mutation testing before landing.
-func TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID(t *testing.T) {
+// TestApplyTiebreakSort_IDlessGroupNeverResolvesBout is the converted twin
+// of the deleted TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID
+// (which pinned the pre-bc-pnum name-fallback: a fully id-less group's
+// supplementary bout resolved by name despite the bout row carrying a stray
+// id). Under the operator ruling, a group with no id-carrying members has
+// nothing to resolve a bout side against, by id or otherwise -- there is no
+// name fallback left -- so the bout is skipped entirely and the input order
+// stands, even though the bout names a winner.
+func TestApplyTiebreakSort_IDlessGroupNeverResolvesBout(t *testing.T) {
 	sorted := []state.PlayerStanding{
 		{Player: domain.Player{Name: "X", Dojo: "Dojo A"}, Points: 100},
 		{Player: domain.Player{Name: "Y", Dojo: "Dojo Y"}, Points: 100},
@@ -138,7 +121,7 @@ func TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID(t *testing.T)
 			ID:    "Pool P-TB-0",
 			SideA: "X", SideAID: "some-stray-id", // stray id, group has none
 			SideB:  "Y",
-			Winner: "Y",
+			Winner: "Y", WinnerID: "some-stray-id-2",
 			Status: state.MatchStatusCompleted,
 		},
 	}
@@ -146,8 +129,8 @@ func TestApplyTiebreakSort_FullyLegacyGroupResolvesBoutWithStrayID(t *testing.T)
 	applyTiebreakSort(sorted, matches, IsTiebreakerMatchID)
 
 	require.Len(t, sorted, 2)
-	assert.Equal(t, "Y", sorted[0].Player.Name, "Y won the TB bout and must sort first, even though SideA's row carried a stray id the group has nothing to compare it against")
-	assert.Equal(t, "X", sorted[1].Player.Name)
+	assert.Equal(t, "X", sorted[0].Player.Name, "neither group member carries an id, so the bout cannot resolve for either side and the input order is unchanged")
+	assert.Equal(t, "Y", sorted[1].Player.Name)
 }
 
 // --- Finding 2: eligibility resolution must use side ids, not the first namesake ---
@@ -471,54 +454,78 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 	})
 }
 
-// TestComputeStandingsFrom_OverrideSort_IDlessNamesakesDoNotCollideOnNaturalRank
-// is the BLOCKER from the Opus review round 2 of this bead: naturalRank was a
-// map keyed by standingsPlayerKey(ID, Name), so two id-less namesakes (legal
-// across dojos, CheckDuplicateEntriesByNameDojo) collapse onto ONE map entry
-// -- whichever is processed LAST in points-sorted order overwrites the
-// natural rank the FIRST one had just written. An unrelated override
-// elsewhere in the pool is enough to expose it: the undefeated leader's own
-// natural rank silently becomes her lower-placed namesake's, and she sorts
-// below rows that never legitimately outrank her.
+// TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank
+// converts the BLOCKER from the Opus review round 2 of this bead. Originally
+// reproduced with ID-LESS namesakes (naturalRank was a map keyed by
+// standingsPlayerKey(ID, Name), so two id-less namesakes -- legal across
+// dojos, CheckDuplicateEntriesByNameDojo -- collapsed onto ONE map entry,
+// whichever was processed LAST in points-sorted order overwriting the
+// natural rank the FIRST one had just written).
+//
+// Standings resolution is now id-only (operator ruling bc-pnum): an id-less
+// match row no longer contributes to anyone's record at all (it is simply
+// skipped), so the original id-less fixture can no longer reach the same
+// win/loss data. Converted to stamp both Tanakas with real, distinct ids
+// (bctest.StampIDs) so their matches resolve and accrue wins exactly as
+// production data would; this still exercises the SAME production fix (the
+// pairing-struct natural-rank capture in computeStandingsFrom, which never
+// actually used standingsPlayerKey as a map key -- that was the REJECTED
+// design this comment and the fix's own doc comment describe) against a
+// same-name-different-dojo pair, which is the scenario the regression
+// itself is about, independent of whether the pair happens to carry ids.
 //
 // Fixture: TanakaGhost (0-0-0, registered FIRST in roster order) and
 // TanakaReal (2-0, undefeated leader, registered LAST) share the name
-// "Tanaka" across different dojos and carry no id. Because match sides are
-// id-less, both "Tanaka"-named match rows resolve via the roster's
-// last-write-wins name index to TanakaReal, exactly as computeStandingsFrom's
-// own win/loss accrual already does -- TanakaGhost genuinely never appears in
-// a match and stays at 0-0-0. Carol carries an override unrelated to either
-// Tanaka. Before the fix this drops the 2-0 leader to rank 3 (probe-verified);
-// after it she is rank 1.
-func TestComputeStandingsFrom_OverrideSort_IDlessNamesakesDoNotCollideOnNaturalRank(t *testing.T) {
+// "Tanaka" across different dojos. The two "Tanaka"-named match rows'
+// SideAID is stamped BY HAND to TanakaReal's id, exactly as production data
+// would (a real draw's SideAID names one specific competitor, never an
+// ambiguous bare name) -- TanakaGhost genuinely never appears in a match
+// and stays at 0-0-0. This is deliberately NOT bctest.StampIDs's own
+// same-name resolution: that helper now panics if a match row needs its
+// ambiguous byName lookup to resolve a duplicate roster name (bc-pnum
+// review finding 9), precisely because silently picking "whichever
+// namesake was registered last" is the class of bug this fixture exists to
+// rule out, not a mechanism to lean on. Carol carries an override unrelated
+// to either Tanaka. Before the original fix this dropped the 2-0 leader to
+// rank 3 (probe-verified); after it she is rank 1.
+func TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "override-idless-namesake-collision"
+	compID := "override-namesake-collision"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "IDless Namesake Collision", Format: state.CompFormatMixed,
+		ID: compID, Name: "Namesake Collision", Format: state.CompFormatMixed,
 		Status: state.CompStatusPools, Courts: []string{"A"},
 	}))
 
-	// Roster order matters: TanakaGhost registered BEFORE TanakaReal, neither
-	// carries an id (legacy data).
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Tanaka", Dojo: "DojoGhost"},
-			{Name: "Bob", Dojo: "DojoBob"},
-			{Name: "Carol", Dojo: "DojoCarol"},
-			{Name: "Tanaka", Dojo: "DojoReal"},
-		}},
-	}))
-	// "Tanaka" always resolves to the last-registered roster entry
-	// (TanakaReal), exactly as the standings accrual itself resolves it.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	// Roster order matters: TanakaGhost registered BEFORE TanakaReal.
+	players := []helper.Player{
+		{Name: "Tanaka", Dojo: "DojoGhost"},
+		{Name: "Bob", Dojo: "DojoBob"},
+		{Name: "Carol", Dojo: "DojoCarol"},
+		{Name: "Tanaka", Dojo: "DojoReal"},
+	}
+	matches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Tanaka", SideB: "Bob", Winner: "Tanaka", Status: state.MatchStatusCompleted},
 		{ID: "Pool A-1", SideA: "Tanaka", SideB: "Carol", Winner: "Tanaka", Status: state.MatchStatusCompleted},
 		{ID: "Pool A-2", SideA: "Bob", SideB: "Carol", Winner: "Bob", Status: state.MatchStatusCompleted},
+	}
+	// Stamp player ids first (nil matches: nothing to reconcile yet, so this
+	// cannot hit the ambiguous-name panic). Then hand-stamp the two "Tanaka"
+	// rows' SideAID directly to TanakaReal (players[3]) before the second
+	// call, which fills in Bob's/Carol's non-ambiguous ids as usual -- a row
+	// whose SideAID is already set never reaches byName at all.
+	bctest.StampIDs(players, nil)
+	matches[0].SideAID = players[3].ID
+	matches[1].SideAID = players[3].ID
+	bctest.StampIDs(players, matches)
+
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 	// Carol's override is unrelated to either Tanaka; its mere presence is
 	// enough to enter the override-sort code path.
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", "", "Carol", "DojoCarol", 2))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", players[2].ID, "Carol", "DojoCarol", 2))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -533,7 +540,7 @@ func TestComputeStandingsFrom_OverrideSort_IDlessNamesakesDoNotCollideOnNaturalR
 	require.Contains(t, byDojo, "DojoReal")
 	assert.Equal(t, 0, byDojo["DojoGhost"].Wins, "the ghost Tanaka never appears in a match and must stay 0-0-0")
 	assert.Equal(t, 2, byDojo["DojoReal"].Wins, "the real Tanaka is the 2-0 undefeated leader")
-	assert.Equal(t, 1, byDojo["DojoReal"].Rank, "the undefeated leader must be rank 1, not collide with her id-less namesake's natural rank")
+	assert.Equal(t, 1, byDojo["DojoReal"].Rank, "the undefeated leader must be rank 1, not collide with her namesake's natural rank")
 }
 
 // --- Finding 5: RecordDecisionTx must attribute WinnerID by side, not by name ---
@@ -597,24 +604,18 @@ func TestRecordDecisionTx_SameNamePairing_AttributesWinnerBySide(t *testing.T) {
 
 // --- Finding 6: groupNeedsChusen must attribute daihyosen wins exactly as applyTiebreakSort does ---
 
-// TestGroupNeedsChusen_HanteiDHWithNoWinnerID_AttributesBySide is the bead's
-// repro: three "Team X" (a namesake collision reachable through the
-// documented checkNewTeamNameCollisions restore hole) are tied and play a
-// full daihyosen round-robin, every bout decided by hantei with WinnerID left
-// empty (the exact shape RecordDecisionTx produced before finding 5's fix).
-// Before this fix, groupNeedsChusen resolved each bout's winner via
-// resolve(m.WinnerID, m.Winner) directly: with WinnerID empty and every row
-// sharing the ambiguous name "Team X", that falls straight to the group's
-// bare-name index, which returns the SAME single member (whoever is
-// registered LAST) for every bout, regardless of which two members actually
-// played it or which SIDE the row's own ids name as the winner. That
-// phantom-credits Dojo C three times (even for the two bouts she isn't even
-// in) and leaves Dojo A and Dojo B tied at zero, so a genuinely decisive
-// round (A beats B, A beats C, B beats C: strict order 2-1-0) reads as an
-// unresolved duplicate and wrongly surfaces a chusen. After the fix,
-// attribution mirrors applyTiebreakSort exactly (resolveWinnerSide over the
-// SIDE ids + resolveGroupMatchKey), producing the correct strict order.
-func TestGroupNeedsChusen_HanteiDHWithNoWinnerID_AttributesBySide(t *testing.T) {
+// TestGroupNeedsChusen_HanteiDHWithNoWinnerID_AttributesBySide pinned, before
+// the operator ruling bc-pnum, that a daihyosen bout with an unstamped
+// WinnerID could still be attributed to a winner "by side" (resolveWinnerSide
+// used to fall back to a name/side comparison when WinnerID was empty). That
+// fallback no longer exists: resolveWinnerSide is id-only now (engi.go) --
+// `if m.WinnerID == "" { return false, false }`, full stop, regardless of
+// what Winner/SideA/SideB say. Converted to assert the opposite: a fully
+// decisive round whose bouts all lack a WinnerID contributes NO wins to
+// anyone, so every member ties at 0 and the group correctly reads as still
+// needing a chusen -- an empty id resolves to nothing, even when the round
+// was genuinely decisive on paper.
+func TestGroupNeedsChusen_HanteiDHWithNoWinnerID_NeedsChusen(t *testing.T) {
 	group := []state.PlayerStanding{
 		{Player: domain.Player{ID: "id-dojo-a", Name: "Team X", Dojo: "Dojo A"}},
 		{Player: domain.Player{ID: "id-dojo-b", Name: "Team X", Dojo: "Dojo B"}},
@@ -622,8 +623,8 @@ func TestGroupNeedsChusen_HanteiDHWithNoWinnerID_AttributesBySide(t *testing.T) 
 	}
 	// Every bout: WinnerID empty, Winner name ambiguously equal to BOTH
 	// sides (same display name "Team X" throughout) -- the exact
-	// unstamped-hantei shape. Dojo A is SideA in both her bouts and wins
-	// both; Dojo B is SideA against Dojo C and wins.
+	// unstamped-hantei shape. On paper Dojo A wins both her bouts and Dojo B
+	// wins hers (a strict 2-1-0 order), but none of that reaches WinnerID.
 	dh := func(idx int, sideAID, sideBID string) state.MatchResult {
 		return state.MatchResult{
 			ID:    fmt.Sprintf("Pool A-DH-%d", idx),
@@ -634,13 +635,14 @@ func TestGroupNeedsChusen_HanteiDHWithNoWinnerID_AttributesBySide(t *testing.T) 
 		}
 	}
 	matches := []state.MatchResult{
-		dh(0, "id-dojo-a", "id-dojo-b"), // A beats B
-		dh(1, "id-dojo-a", "id-dojo-c"), // A beats C
-		dh(2, "id-dojo-b", "id-dojo-c"), // B beats C
+		dh(0, "id-dojo-a", "id-dojo-b"), // A beats B on paper
+		dh(1, "id-dojo-a", "id-dojo-c"), // A beats C on paper
+		dh(2, "id-dojo-b", "id-dojo-c"), // B beats C on paper
 	}
-	// Strict 2-1-0 order (A=2, B=1, C=0): decisive, no chusen needed.
-	assert.False(t, groupNeedsChusen(group, matches, nil),
-		"a decisive strict-order daihyosen round must not need a chusen, even when every bout's WinnerID is unstamped")
+	// No WinnerID anywhere: every member accrues 0 wins and ties, so a
+	// chusen is (correctly) still needed despite the round being complete.
+	assert.True(t, groupNeedsChusen(group, matches, nil),
+		"a daihyosen round with no WinnerID anywhere resolves no wins at all, so every member ties and still needs a chusen")
 }
 
 // --- Finding 7: GenerateSwissRound must tally a resolvable winner independently of the other side ---
@@ -715,207 +717,22 @@ func TestGenerateSwissRound_WinnerTalliedEvenWhenOpponentRemoved(t *testing.T) {
 	assert.Equal(t, idC, bOpponent, "B (round-1 winner, 1 win) must be paired with a fellow 1-win player (C), not with D (0 wins)")
 }
 
-// --- Finding 8: markTiedStandingsLeague must resolve id-less namesakes via the SAME roster order computeStandingsFrom used ---
-
-// TestComputeStandingsFrom_League_IDlessNamesakeDoesNotSuppressUnrelatedTie is
-// the bead's repro: a legacy id-less league roster with two "Tanaka" entries
-// (last-write-wins resolution depends on roster ORDER) must not leave a real,
-// unrelated Suzuki/Yamada tie unmarked. Before the fix, markTiedStandingsLeague
-// rebuilt its own identity index from the POINTS-sorted `sorted` slice rather
-// than reusing computeStandingsFrom's roster-order index, so the two id-less
-// Tanaka rows could resolve to a DIFFERENT namesake than the one whose
-// Wins/Losses the original computation actually credited -- corrupting the
-// per-competitor completion counters used by the emerging-tie trigger and, in
-// this fixture, keeping the trigger from ever firing.
-func TestComputeStandingsFrom_League_IDlessNamesakeDoesNotSuppressUnrelatedTie(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "league-idless-namesake"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Idless Namesake League", Format: state.CompFormatLeague,
-		Status: state.CompStatusPools, Courts: []string{"A"},
-	}))
-
-	// Roster order matters: Tanaka1 (dojo D1) registered BEFORE Tanaka2
-	// (dojo D2), neither carries an id (legacy data).
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Tanaka", Dojo: "D1"},
-			{Name: "Tanaka", Dojo: "D2"},
-			{Name: "Suzuki", Dojo: "D3"},
-			{Name: "Yamada", Dojo: "D4"},
-			{Name: "Filler", Dojo: "D5"},
-		}},
-	}))
-
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		// Tanaka's one completed win (id-less name resolves to the LAST
-		// registered "Tanaka" in roster order -- Tanaka@D2 -- exactly as
-		// computeStandingsFrom's own original resolution does).
-		{ID: "Pool A-0", SideA: "Tanaka", SideB: "Filler", Winner: "Tanaka", Status: state.MatchStatusCompleted},
-		// Suzuki and Yamada's fixtures against Filler are still SCHEDULED
-		// (not yet played), so neither individually satisfies the
-		// emerging-tie trigger on her own.
-		{ID: "Pool A-1", SideA: "Suzuki", SideB: "Filler", Status: state.MatchStatusScheduled},
-		{ID: "Pool A-2", SideA: "Yamada", SideB: "Filler", Status: state.MatchStatusScheduled},
-		// Suzuki and Yamada draw each other (completed): they finish TIED,
-		// a real, consequential tie within the default top-3 band.
-		{ID: "Pool A-3", SideA: "Suzuki", SideB: "Yamada", Winner: "", Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake)},
-	}))
-
-	standings, err := eng.CalculatePoolStandings(compID)
-	require.NoError(t, err)
-	poolA := standings["Pool A"]
-	require.Len(t, poolA, 5)
-
-	tiedNames := map[string]bool{}
-	for _, s := range poolA {
-		if s.Tied {
-			tiedNames[s.Player.Dojo] = true
-		}
-	}
-	assert.True(t, tiedNames["D3"] || tiedNames["D4"], "the real Suzuki/Yamada tie must be marked once the round-1 Tanaka winner's own fixtures (her only fixture) are all complete")
-	assert.True(t, tiedNames["D3"] && tiedNames["D4"], "both Suzuki and Yamada must be marked, not just one")
-}
-
-// TestComputeStandingsFrom_League_IDCarryingRosterIDlessMatchRowsResolveByRosterOrder
-// is the round-2 review's requested companion to the test above: an
-// ID-CARRYING roster (every participant has a real UUID) whose MATCH ROWS
-// still lack side ids (SideAID/SideBID empty on the wire -- legacy data
-// written before that stamping existed, or any other id-less-row shape). A
-// MatchResult side carries a bare NAME only, no dojo, so resolving an
-// id-less row still depends on which identity index performs the lookup,
-// exactly as it does for a fully id-less roster: roster order (which
-// computeStandingsFrom's own accrual used) and points order (what a locally
-// rebuilt index would produce) diverge the moment any match is played.
-// Unlike the id-less-roster case, an id-carrying mismatch here has no
-// coincidental save -- CompetitorKey is id-preferred, so crediting the WRONG
-// same-named competitor lands the completion count in a bucket keyed by her
-// own distinct real id, an unambiguous wrong answer. This is the test that
-// actually needs rosterIndex (mutation-verified: rebuilding a local
-// points-order index in its place turns this test red).
-func TestComputeStandingsFrom_League_IDCarryingRosterIDlessMatchRowsResolveByRosterOrder(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "league-idcarrying-idless-rows"
-
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "ID-carrying Roster, ID-less Rows", Format: state.CompFormatLeague,
-		Status: state.CompStatusPools, Courts: []string{"A"},
-	}))
-
-	// Every participant has a real id; roster order still matters, because
-	// the MATCH ROWS below carry none.
-	tanakaGhostID := helper.NewUUID4()
-	tanakaRealID := helper.NewUUID4()
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{ID: tanakaGhostID, Name: "Tanaka", Dojo: "D1"},
-			{ID: tanakaRealID, Name: "Tanaka", Dojo: "D2"},
-			{ID: helper.NewUUID4(), Name: "Suzuki", Dojo: "D3"},
-			{ID: helper.NewUUID4(), Name: "Yamada", Dojo: "D4"},
-			{ID: helper.NewUUID4(), Name: "Filler", Dojo: "D5"},
-		}},
-	}))
-
-	// No SideAID/SideBID on any row: id-less on the wire despite the roster
-	// carrying real ids.
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Tanaka", SideB: "Filler", Winner: "Tanaka", Status: state.MatchStatusCompleted},
-		{ID: "Pool A-1", SideA: "Suzuki", SideB: "Filler", Status: state.MatchStatusScheduled},
-		{ID: "Pool A-2", SideA: "Yamada", SideB: "Filler", Status: state.MatchStatusScheduled},
-		{ID: "Pool A-3", SideA: "Suzuki", SideB: "Yamada", Winner: "", Status: state.MatchStatusCompleted, Decision: string(domain.DecisionHikiwake)},
-	}))
-
-	standings, err := eng.CalculatePoolStandings(compID)
-	require.NoError(t, err)
-	poolA := standings["Pool A"]
-	require.Len(t, poolA, 5)
-
-	byID := map[string]state.PlayerStanding{}
-	for _, s := range poolA {
-		byID[s.Player.ID] = s
-	}
-	require.Equal(t, 1, byID[tanakaRealID].Wins, "the id-less match row must still resolve to the roster-order Tanaka computeStandingsFrom itself credited")
-	require.Equal(t, 0, byID[tanakaGhostID].Wins)
-
-	tiedNames := map[string]bool{}
-	for _, s := range poolA {
-		if s.Tied {
-			tiedNames[s.Player.Dojo] = true
-		}
-	}
-	assert.True(t, tiedNames["D3"] && tiedNames["D4"], "both Suzuki and Yamada must be marked once the real Tanaka's own (id-less) fixture is correctly seen as complete")
-}
-
-// TestMarkTiedStandingsLeague_IDlessNamesakeBucketsStaySeparate is a
-// WHITE-BOX isolation test for the "re-key" half of the round-2 review's
-// finding 6 (the half the two tests above cannot reach): statusFor must
-// bucket completion counts by helper.CompetitorKey(ID, Name, Dojo), not
-// standingsPlayerKey(ID, Name), so two id-less namesakes from different
-// dojos never share one completion bucket.
+// --- Finding 8: markTiedStandingsLeague must resolve id-less namesakes via
+// the SAME roster order computeStandingsFrom used ---
 //
-// This CANNOT be reproduced by driving real match data through
-// computeStandingsFrom, and that is itself worth recording: id-less
-// resolution (lookupStandingsPlayer's name-only branch) is a SINGLE map
-// lookup keyed on the bare name, so every match naming that bare name
-// resolves to the SAME one roster entry, regardless of which index performs
-// the lookup or how many "Tanaka"-named matches exist. A second id-less
-// "Tanaka" can therefore never accrue independently-attributable match
-// activity through the realistic pipeline -- she is structurally always a
-// zero-activity ghost, and merging a zero-activity ghost's bucket into
-// another's changes nothing (the tests above prove rosterIndex is load-
-// bearing, but cannot tell CompetitorKey and standingsPlayerKey apart:
-// mutation-verified, reverting bucketing alone to standingsPlayerKey while
-// keeping rosterIndex leaves both green).
-//
-// This test instead calls markTiedStandingsLeague directly with a
-// HAND-BUILT rosterIndex carrying explicit id-keyed entries for both
-// Tanakas (simulating a resolution layer able to tell them apart, which is
-// what matters for isolating the BUCKET STORAGE question), so each can
-// carry her OWN genuine, independent, and different completion state:
-// Tanaka@DojoA's own fixture is complete; Tanaka@DojoB's is not. With
-// buckets correctly separated, Tanaka@DojoA (checked first, topN=1) fires
-// the trigger on her own genuinely complete fixture. With buckets merged
-// (the reverted standingsPlayerKey scheme), her bucket also carries
-// Tanaka@DojoB's incomplete fixture, so the merged total no longer equals
-// the merged completed count, and the trigger wrongly fails to fire.
-func TestMarkTiedStandingsLeague_IDlessNamesakeBucketsStaySeparate(t *testing.T) {
-	comp := &state.Competition{Format: state.CompFormatLeague, LeagueTiebreakTopN: 1}
-
-	// Both Tanakas are id-less in the DISPLAY data (sorted), mirroring real
-	// legacy rosters; Player.ID is "" on both.
-	tanakaA := domain.Player{Name: "Tanaka", Dojo: "DojoA"}
-	tanakaB := domain.Player{Name: "Tanaka", Dojo: "DojoB"}
-	other := domain.Player{Name: "Other", Dojo: "DojoC"}
-	sorted := []state.PlayerStanding{
-		{Player: tanakaA, Points: 100},
-		{Player: tanakaB, Points: 100},
-		{Player: other, Points: 50},
-	}
-
-	// Hand-built rosterIndex: id-keyed entries let each match below resolve
-	// to a SPECIFIC Tanaka, bypassing the "one name, one slot" constraint
-	// that a real id-less roster is subject to -- this isolates the bucket
-	// storage question from the resolution question the other two tests
-	// already cover.
-	rosterIndex := map[string]*state.PlayerStanding{
-		"id:lookup-tanaka-a": &sorted[0],
-		"id:lookup-tanaka-b": &sorted[1],
-		"name:Other":         &sorted[2],
-	}
-
-	regularMatches := []state.MatchResult{
-		// Tanaka@DojoA's OWN fixture: complete.
-		{ID: "Pool A-0", SideAID: "lookup-tanaka-a", SideA: "Tanaka", SideB: "Other", Status: state.MatchStatusCompleted},
-		// Tanaka@DojoB's OWN fixture: still scheduled.
-		{ID: "Pool A-1", SideAID: "lookup-tanaka-b", SideA: "Tanaka", SideB: "Other", Status: state.MatchStatusScheduled},
-	}
-
-	markTiedStandingsLeague(comp, sorted, regularMatches, rosterIndex)
-
-	assert.True(t, sorted[0].Tied, "Tanaka@DojoA finished her own (and only her own) fixture; the trigger must fire on her genuinely complete bucket")
-	assert.True(t, sorted[1].Tied, "the whole tied group (both Tanakas, tied on Points) is marked once the trigger fires")
-}
+// The three tests that used to live here (TestComputeStandingsFrom_League_
+// IDlessNamesakeDoesNotSuppressUnrelatedTie,
+// TestComputeStandingsFrom_League_IDCarryingRosterIDlessMatchRowsResolveByRosterOrder,
+// TestMarkTiedStandingsLeague_IDlessNamesakeBucketsStaySeparate) all pinned
+// resolution of an ID-LESS match row via a name-based rosterIndex/
+// CompetitorKey lookup -- roster order vs. points order, and bucket
+// separation for two id-less namesakes. The operator ruling bc-pnum removed
+// that resolution path entirely: lookupStandingsPlayer is id-only, so an
+// id-less match row (or an id-less roster entry) now resolves to NOTHING,
+// regardless of which index performs the lookup or how the bucket is keyed.
+// There is no replacement scenario for these tests to pin (a fixture with
+// no ids anywhere no longer exercises rosterIndex threading at all), so
+// they are deleted rather than converted.
 
 // --- Finding 9: LoadOverrides errors must propagate, not be silently swallowed ---
 
@@ -1068,14 +885,24 @@ func TestMaybeAutoCompletePools_CorruptOverrides_PropagatesError(t *testing.T) {
 		Status: state.CompStatusPools, Courts: []string{"A"}, TeamSize: 2, Kind: "team",
 		Engi: true,
 	}))
+	// SideAID/SideBID/WinnerID and roster ids are stamped (operator ruling
+	// bc-pnum): leagueGroupHasDH resolves the DH row against the group's
+	// OWN member ids (newGroupKeyResolver, id-only), so an id-less roster
+	// and DH row would never resolve, and MaybeAutoCompletePools would
+	// short-circuit at AwaitingLeagueTiebreak BEFORE ever reaching the
+	// LoadOverrides call this test targets -- for a reason unrelated to
+	// what it is testing.
+	teamAID, teamBID := "team-a-id", "team-b-id"
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
 		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "TeamA", Dojo: "DojoA"}, {Name: "TeamB", Dojo: "DojoB"},
+			{ID: teamAID, Name: "TeamA", Dojo: "DojoA"}, {ID: teamBID, Name: "TeamB", Dojo: "DojoB"},
 		}},
 	}))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
-		{ID: "Pool A-DH-0", SideA: "TeamA", SideB: "TeamB", Winner: "TeamA", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-0", SideA: "TeamA", SideAID: teamAID, SideB: "TeamB", SideBID: teamBID,
+			Winner: "TeamA", WinnerID: teamAID, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-DH-0", SideA: "TeamA", SideAID: teamAID, SideB: "TeamB", SideBID: teamBID,
+			Winner: "TeamA", WinnerID: teamAID, Status: state.MatchStatusCompleted},
 	}))
 
 	corruptOverridesFile(t, store, compID)

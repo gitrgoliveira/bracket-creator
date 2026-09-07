@@ -48,8 +48,13 @@ func TestMpN6keStandingsCacheInvalidatedOnSameTickPoolMatchSave(t *testing.T) {
 		require.NoError(t, os.Chtimes(poolMatchesPath, frozen, frozen))
 	}
 
+	// Real ids (operator ruling bc-pnum): standings resolution is id-only,
+	// so an id-less roster/match would never attribute A1's win below to
+	// anyone, masking the very cache-invalidation behaviour this test pins
+	// behind an unrelated "nobody ever wins" symptom.
+	a1ID, a2ID := "a1-id", "a2-id"
 	pools := []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{ID: a1ID, Name: "A1", Dojo: "Dojo A1"}, {ID: a2ID, Name: "A2", Dojo: "Dojo A2"}}},
 	}
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: compID, Kind: "individual",
@@ -58,12 +63,12 @@ func TestMpN6keStandingsCacheInvalidatedOnSameTickPoolMatchSave(t *testing.T) {
 	}))
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"},
+		{ID: a1ID, Name: "A1", Dojo: "Dojo A1"}, {ID: a2ID, Name: "A2", Dojo: "Dojo A2"},
 	}))
 
 	// First save: the bout is still scheduled, so both players sit at 0 wins.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-0", SideA: "A1", SideAID: a1ID, SideB: "A2", SideBID: a2ID, Status: state.MatchStatusScheduled},
 	}))
 	freezeMtime()
 	first, err := eng.CalculatePoolStandings(compID)
@@ -76,7 +81,7 @@ func TestMpN6keStandingsCacheInvalidatedOnSameTickPoolMatchSave(t *testing.T) {
 	// Second save in the SAME millisecond: A1 now beat A2. Pre-fix this write
 	// was invisible because pool-matches.csv kept its mtime.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1",
+		{ID: "Pool A-0", SideA: "A1", SideAID: a1ID, SideB: "A2", SideBID: a2ID, Winner: "A1", WinnerID: a1ID,
 			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 	freezeMtime()
@@ -125,17 +130,22 @@ func TestMpN6keLoserOfFlightRaceRejectsStaleSnapshot(t *testing.T) {
 		Format: state.CompFormatMixed, Status: state.CompStatusPools,
 		Courts: []string{"A"}, StartTime: "09:00", PoolWinners: 2,
 	}))
+	// Real ids (operator ruling bc-pnum): standings resolution is id-only,
+	// so an id-less roster/match would never attribute A1's win below to
+	// anyone, masking the very stale-snapshot behaviour this test pins
+	// behind an unrelated "nobody ever wins" symptom.
+	a1ID, a2ID := "a1-id", "a2-id"
 	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"}}},
+		{PoolName: "Pool A", Players: []helper.Player{{ID: a1ID, Name: "A1", Dojo: "Dojo A1"}, {ID: a2ID, Name: "A2", Dojo: "Dojo A2"}}},
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{Name: "A1", Dojo: "Dojo A1"}, {Name: "A2", Dojo: "Dojo A2"},
+		{ID: a1ID, Name: "A1", Dojo: "Dojo A1"}, {ID: a2ID, Name: "A2", Dojo: "Dojo A2"},
 	}))
 
 	// Warm the cache while the bout is unscored. This entry stands in for the
 	// snapshot a flight winner would have stamped.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-0", SideA: "A1", SideAID: a1ID, SideB: "A2", SideBID: a2ID, Status: state.MatchStatusScheduled},
 	}))
 	warm, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -143,7 +153,7 @@ func TestMpN6keLoserOfFlightRaceRejectsStaleSnapshot(t *testing.T) {
 
 	// Our write: A1 won. The cache now holds a snapshot older than our tokens.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "A1", SideB: "A2", Winner: "A1",
+		{ID: "Pool A-0", SideA: "A1", SideAID: a1ID, SideB: "A2", SideBID: a2ID, Winner: "A1", WinnerID: a1ID,
 			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted},
 	}))
 

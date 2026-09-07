@@ -61,129 +61,63 @@ func parseSwissMatchRound(id string) (int, bool) {
 	return n, true
 }
 
-// buildSwissRosterIndex builds identity-lookup tables over roster (the FULL
-// participant list for the competition, not yet narrowed to this round's
-// active/eligible set): byID maps a participant ID straight to its
-// CompetitorKey (trivial, but keeps every lookup going through one helper);
-// byName maps a display name to every CompetitorKey sharing that name, in
-// roster order.
+// buildSwissRosterIndex builds the identity-lookup table over roster (the
+// FULL participant list for the competition, not yet narrowed to this
+// round's active/eligible set): byID maps a participant ID straight to its
+// CompetitorKey (trivial, but keeps every lookup going through one helper).
 //
-// The byName fallback exists for resolving a Swiss match SIDE that predates
-// this fix (bc-cse): before buildSwissMatches stamped SideAID/SideBID, a
-// persisted Swiss row carried only a name. Once every match this engine
-// generates carries an id for a roster member who has one (effectively
-// always -- see CompetitorKey), the byID branch of resolveSwissRosterKey is
-// what actually resolves it; byName is the legacy fallback for a name-only
-// row. The true OLD behaviour, before identity keys existed at all, was a
-// single MERGED standings/pairing entry for every namesake -- not a
-// deterministic pick of one of them -- so byName cannot "reproduce" it;
-// resolveSwissRosterKey's last-registered pick (see its doc comment) is a
-// new, arbitrary-but-consistent tie-break on data that no longer carries
-// enough information to decide correctly. Retroactively re-keying
-// already-persisted rounds is out of scope.
-func buildSwissRosterIndex(roster []domain.Player) (byID map[string]string, byName map[string][]string) {
-	byID = make(map[string]string, len(roster))
-	byName = make(map[string][]string, len(roster))
+// ID-only (operator ruling bc-pnum): a roster entry with no id is simply not
+// inserted, and resolveSwissRosterKey below returns not-found for any match
+// side that carries no id, or one this index has never seen. There is no
+// name fallback. Every Swiss match this engine generates stamps
+// SideAID/SideBID/WinnerID (buildSwissMatches, mirroring pools.go), so a
+// match this engine wrote always resolves; a hand-edited or pre-bc-pnum row
+// with no side id simply contributes nothing to wins/byes/prior-pairing
+// tracking, which is the documented consequence of an empty id resolving to
+// nothing rather than a data loss bug to work around here.
+func buildSwissRosterIndex(roster []domain.Player) map[string]string {
+	byID := make(map[string]string, len(roster))
 	for _, p := range roster {
-		k := helper.PlayerKey(p)
-		if p.ID != "" {
-			byID[p.ID] = k
+		if p.ID == "" {
+			continue
 		}
-		byName[p.Name] = append(byName[p.Name], k)
+		byID[p.ID] = helper.PlayerKey(p)
 	}
-	return byID, byName
+	return byID
 }
 
-// resolveSwissRosterKey resolves a Swiss match side (id, name) to a SINGLE
-// roster identity key from buildSwissRosterIndex. See that function's doc
-// comment for why the id branch is authoritative and the name branch is a
-// legacy-only fallback.
-//
-// A win, a bye, or a prior-pairing record can only be attributed to ONE
-// competitor, so the id-less fallback must make a single, deterministic
-// pick among same-name roster entries. It picks the LAST-registered one
-// (ks[len(ks)-1], not ks[0]) to align with every other consumer of an
-// id-less legacy row: registerStandingsPlayer's name key is last-write-wins
-// by construction (a later map assignment overwrites an earlier one), and
-// tiebreaker.go's newGroupKeyResolver builds its name index the same way.
-// Before this alignment, a single id-less row resolved to the FIRST
-// namesake here but the LAST namesake in standings/tiebreak, so
-// GenerateSwissRound and SwissStandings deterministically disagreed about
-// who a legacy row's win belonged to. Picking "first" instead of "last"
-// would have been equally arbitrary; what matters is that every consumer
-// picks the SAME one.
-func resolveSwissRosterKey(byID map[string]string, byName map[string][]string, id, name string) (string, bool) {
-	if id != "" {
-		if k, ok := byID[id]; ok {
-			return k, true
-		}
+// resolveSwissRosterKey resolves a Swiss match side's id to a roster
+// identity key from buildSwissRosterIndex. ID-only (operator ruling
+// bc-pnum): an empty id, or one this index never registered (stale/foreign
+// data), returns ("", false) rather than falling back to a name lookup.
+func resolveSwissRosterKey(byID map[string]string, id string) (string, bool) {
+	if id == "" {
+		return "", false
 	}
-	if ks := byName[name]; len(ks) > 0 {
-		return ks[len(ks)-1], true
-	}
-	return "", false
+	k, ok := byID[id]
+	return k, ok
 }
 
 // swissFieldKeysFromMatches returns the set of competitor identity keys
-// (CompetitorKey, resolved against byID/byName) that have appeared in prior
-// Swiss matches (players and bye recipients alike), i.e. the frozen round-1
-// field. Used by GenerateSwissRound for rounds > 1 to keep the field stable
-// across rounds regardless of later check-in toggles (mp-w7x; PR #199
-// review).
+// (CompetitorKey, resolved against byID) that have appeared in prior Swiss
+// matches (players and bye recipients alike), i.e. the frozen round-1 field.
+// Used by GenerateSwissRound for rounds > 1 to keep the field stable across
+// rounds regardless of later check-in toggles (mp-w7x; PR #199 review).
 //
-// bc-cse: this used to be keyed by bare name (swissFieldNamesFromMatches),
-// which silently merged two same-name-different-dojo participants into one
-// field slot -- the app's actual duplicate rule is name+dojo (helper.
-// CheckDuplicateEntriesByNameDojo), which explicitly permits such namesakes.
-// Keying by identity (id-preferred, see resolveSwissRosterKey) keeps the two
-// distinct.
-//
-// An id-less side is deliberately NOT resolved via resolveSwissRosterKey's
-// single-pick policy here: that policy exists because a win/bye/pairing must
-// land on exactly one competitor, but field membership asks a different
-// question -- "was this name part of the round-1 draw" -- where admitting
-// only one namesake would wrongly evict the other from every later round
-// (they never earn a fresh id-less row of their own to reclaim a slot, since
-// a frozen field member no longer appears as an active participant to pair).
-// So an id-less side admits EVERY roster key sharing its name. A row that
-// DOES carry an id resolves to that one competitor exactly only on a byID
-// HIT; on a MISS (e.g. a replaced participant's id, now stale because it no
-// longer appears in the current roster's byID index) admit falls through to
-// the same byName loop below and, exactly like an id-less row, admits every
-// namesake sharing that name -- correct for that case too, since a stale id
-// gives no more information than no id at all about which specific
-// competitor's slot was replaced.
-//
-// This deliberately creates an asymmetry with resolveSwissRosterKey for an
-// id-less (or stale-id) row: THIS function admits BOTH namesakes to the
-// frozen field, but GenerateSwissRound's win/bye/prior-pairing counters
-// (wins, hadBye, priorPair below, built via resolveSwissRosterKey) can only
-// attribute that row's outcome to ONE of them -- the last-registered key.
-// The other namesake therefore stays in the field with a clean slate (zero
-// wins, no recorded bye, no recorded prior opponent) and can be re-paired in
-// a later round against someone she has, in reality, already faced. This is
-// correct given the data, not a bug to reconcile: an id-less row carries no
-// way to tell the two namesakes apart, so crediting a win/bye/pairing to a
-// second, arbitrarily-chosen key would be no more accurate than crediting
-// the first, while field MEMBERSHIP must stay conservative because wrongly
-// evicting a namesake here is unrecoverable (she never earns a fresh row of
-// her own to reclaim a slot). Do not "fix" one half without the other:
-// making resolveSwissRosterKey multi-admit too would break wins/byes (one
-// row cannot credit two competitors), and making this function single-pick
-// would start silently evicting namesakes from later rounds.
-func swissFieldKeysFromMatches(matches []state.MatchResult, byID map[string]string, byName map[string][]string) map[string]bool {
+// ID-only (operator ruling bc-pnum): a match side with no id, or an id
+// buildSwissRosterIndex never registered (stale/foreign data, e.g. a
+// replaced participant's now-superseded id), simply is not admitted to the
+// field. This is a change from the pre-bc-pnum behaviour, which admitted
+// every roster entry sharing that side's bare NAME as a conservative
+// fallback (to avoid wrongly evicting a namesake who could never re-earn a
+// slot). Every Swiss match this engine generates carries SideAID/SideBID
+// (buildSwissMatches), so this only affects hand-edited or pre-existing
+// id-less data, which the operator ruling treats as unresolvable rather than
+// as data to preserve field membership for.
+func swissFieldKeysFromMatches(matches []state.MatchResult, byID map[string]string) map[string]bool {
 	field := make(map[string]bool)
-	admit := func(id, name string) {
-		if name == "" {
-			return
-		}
-		if id != "" {
-			if k, ok := byID[id]; ok {
-				field[k] = true
-				return
-			}
-		}
-		for _, k := range byName[name] {
+	admit := func(id string) {
+		if k, ok := resolveSwissRosterKey(byID, id); ok {
 			field[k] = true
 		}
 	}
@@ -191,8 +125,8 @@ func swissFieldKeysFromMatches(matches []state.MatchResult, byID map[string]stri
 		if _, ok := parseSwissMatchRound(m.ID); !ok {
 			continue
 		}
-		admit(m.SideAID, m.SideA)
-		admit(m.SideBID, m.SideB)
+		admit(m.SideAID)
+		admit(m.SideBID)
 	}
 	return field
 }
@@ -258,7 +192,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 	// Identity index over the FULL roster (before any round-scoping filter
 	// below), used to resolve prior Swiss matches' sides back to a stable
 	// competitor identity (bc-cse). See buildSwissRosterIndex's doc comment.
-	rosterByID, rosterByName := buildSwissRosterIndex(participants)
+	rosterByID := buildSwissRosterIndex(participants)
 
 	// Filter out kiken/fusenpai players (FR-050f). LoadCompetitorStatus
 	// returns an empty map when the file is missing (== "all eligible")
@@ -291,7 +225,7 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 			participants = filterCheckedIn(participants)
 		}
 	} else {
-		field := swissFieldKeysFromMatches(priorMatches, rosterByID, rosterByName)
+		field := swissFieldKeysFromMatches(priorMatches, rosterByID)
 		frozen := make([]domain.Player, 0, len(participants))
 		for _, p := range participants {
 			if field[helper.PlayerKey(p)] {
@@ -348,18 +282,18 @@ func (e *Engine) GenerateSwissRound(compID string, roundNumber int) ([]state.Mat
 		// opponent's identity no longer resolves against the current roster.
 		// This runs BEFORE (independently of) the side-A resolution below,
 		// which the bye/prior-pairing tracking still needs both sides for.
-		if m.Status == state.MatchStatusCompleted && m.Winner != "" {
-			if winnerKey, ok := resolveSwissRosterKey(rosterByID, rosterByName, m.WinnerID, m.Winner); ok {
+		if m.Status == state.MatchStatusCompleted && m.WinnerID != "" {
+			if winnerKey, ok := resolveSwissRosterKey(rosterByID, m.WinnerID); ok {
 				wins[winnerKey]++
 			}
 		}
-		keyA, okA := resolveSwissRosterKey(rosterByID, rosterByName, m.SideAID, m.SideA)
+		keyA, okA := resolveSwissRosterKey(rosterByID, m.SideAID)
 		if !okA {
 			continue
 		}
 		if m.SideB == "" {
 			hadBye[keyA] = true
-		} else if keyB, okB := resolveSwissRosterKey(rosterByID, rosterByName, m.SideBID, m.SideB); okB {
+		} else if keyB, okB := resolveSwissRosterKey(rosterByID, m.SideBID); okB {
 			priorPair[tiebreakerPairKey(keyA, keyB)] = true
 		}
 	}
@@ -811,11 +745,11 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 	// rows (a stray pool-match in the file would otherwise contribute
 	// to Swiss standings, defensive but should never happen if the
 	// engine is the only writer). Match sides resolve via
-	// lookupStandingsPlayer (id-preferred, name fallback): buildSwissMatches
-	// now stamps SideAID/SideBID (bc-cse) exactly like pools.go, so this
-	// resolves unambiguously for any match this engine generates going
-	// forward; a pre-fix persisted Swiss row with no side ids still falls
-	// back to name, matching the old behaviour for that legacy data.
+	// lookupStandingsPlayer, ID-ONLY (operator ruling bc-pnum):
+	// buildSwissMatches stamps SideAID/SideBID on every match it generates
+	// (mirroring pools.go), so this resolves unambiguously for any match this
+	// engine generates; a row with no side id (hand-edited, or predating
+	// id-stamping) resolves to nothing and contributes nothing to standings.
 	headToHead := make(map[string]map[string]string) // winner key → opponent key → winner key
 	for _, m := range matches {
 		if _, ok := parseSwissMatchRound(m.ID); !ok {
@@ -823,7 +757,7 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 		}
 		// Bye matches: SideA wins, no points scored, no head-to-head.
 		if m.SideB == "" {
-			if sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA); sA != nil {
+			if sA := lookupStandingsPlayer(byKey, m.SideAID); sA != nil {
 				sA.Wins++
 			}
 			continue
@@ -831,8 +765,8 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 		if m.Status != state.MatchStatusCompleted {
 			continue
 		}
-		sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA)
-		sB := lookupStandingsPlayer(byKey, m.SideBID, m.SideB)
+		sA := lookupStandingsPlayer(byKey, m.SideAID)
+		sB := lookupStandingsPlayer(byKey, m.SideBID)
 		if sA == nil || sB == nil {
 			continue
 		}
@@ -853,10 +787,10 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 			sB.IpponsTaken += countScoringIppons(m.IpponsA)
 		}
 
-		// Winner by id where recorded, else by name; see resolveWinnerSide.
+		// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
-		keyA := standingsPlayerKey(sA.Player.ID, sA.Player.Name)
-		keyB := standingsPlayerKey(sB.Player.ID, sB.Player.Name)
+		keyA := standingsPlayerKey(sA.Player.ID)
+		keyB := standingsPlayerKey(sB.Player.ID)
 		switch {
 		case winnerIsA:
 			sA.Wins++
@@ -906,8 +840,8 @@ func (e *Engine) SwissStandings(compID string) ([]state.PlayerStanding, error) {
 			}
 		}
 		// Head-to-head: if a beat b directly, a ranks higher.
-		keyA := standingsPlayerKey(a.Player.ID, a.Player.Name)
-		keyB := standingsPlayerKey(b.Player.ID, b.Player.Name)
+		keyA := standingsPlayerKey(a.Player.ID)
+		keyB := standingsPlayerKey(b.Player.ID)
 		if winner, ok := lookupH2H(headToHead, keyA, keyB); ok {
 			if winner == keyA {
 				return true

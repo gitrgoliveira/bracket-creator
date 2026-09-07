@@ -93,15 +93,16 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // between members of the same tied group, so an unrelated group's results never
 // bleed across; a group with no decided supplementary bouts is left untouched.
 //
-// Group membership and win attribution are keyed by standingsPlayerKey
-// (id-preferring, name fallback): two tied competitors can share a display
-// name across dojos (CheckDuplicateEntriesByNameDojo), and a bare-name key
-// would both misclassify group membership (a same-named, unrelated
-// competitor elsewhere in the pool falsely counted as "in this group") and
-// cross-attribute a supplementary win between the two namesakes.
-// generateTiebreakerMatches / generatePoolDaihyosenMatches stamp
-// SideAID/SideBID at generation so the id half is actually populated for
-// TB/DH rows going forward.
+// Group membership and win attribution are keyed by participant id ONLY
+// (operator ruling bc-pnum, via newGroupKeyResolver): two tied competitors
+// can share a display name across dojos (CheckDuplicateEntriesByNameDojo),
+// so a bare-name key would both misclassify group membership (a
+// same-named, unrelated competitor elsewhere in the pool falsely counted as
+// "in this group") and cross-attribute a supplementary win between the two
+// namesakes. generateTiebreakerMatches / generatePoolDaihyosenMatches stamp
+// SideAID/SideBID at generation, so every TB/DH row this engine writes
+// carries the ids this resolution needs; a row with no side id (hand-edited,
+// or predating id-stamping) simply cannot be attributed to any member.
 //
 // The sort comparator below recomputes each element's key FRESH from
 // sorted[i+a]/sorted[i+b] on every call rather than caching a
@@ -116,17 +117,11 @@ func standingsAt(standings []state.PlayerStanding, positions []int) []state.Play
 // stale.
 //
 // A match side is resolved to a group member's canonical key via
-// resolveGroupMatchKey: when the match carries an id for that side, the key
-// is symmetric (both a member's own key and a match's believed key for the
-// same id compute to the identical "id:<uuid>" string, so no lookup table is
-// needed for that path -- only membership in this specific tied group is
-// verified). When the match carries no id for that side (a pre-fix TB/DH
-// row, or any other legacy data), resolution falls back to a name lookup
-// built from the group's own members; a genuine same-name collision with NO
-// id on the match to disambiguate degrades to the same "last one registered
-// wins" behavior standings always had before ids existed -- there is no data
-// left to do better with -- but a correctly id-stamped match is never
-// misattributed merely because some OTHER row in the same pool lacks one.
+// resolveGroupMatchKey: the match must carry an id for that side, and it
+// must be one of THIS group's members (only membership in this specific
+// tied group is verified, the id itself is the key). A match side with no
+// id, or a foreign id (not a group member's), resolves to ("", false) and
+// contributes nothing -- there is no name-based fallback attribution.
 func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResult, isSupplementaryID func(string) bool) {
 	for _, positions := range detectPoolTies(sorted) {
 		i := positions[0]
@@ -136,15 +131,15 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 
 		groupWins := map[string]int{}
 		for _, m := range matches {
-			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.Winner == "" {
+			if !isSupplementaryID(m.ID) || m.Status != state.MatchStatusCompleted || m.WinnerID == "" {
 				continue
 			}
-			keyA, aOK := resolveGroupMatchKey(m.SideAID, m.SideA)
-			keyB, bOK := resolveGroupMatchKey(m.SideBID, m.SideB)
+			keyA, aOK := resolveGroupMatchKey(m.SideAID)
+			keyB, bOK := resolveGroupMatchKey(m.SideBID)
 			if !aOK || !bOK || keyA == keyB {
 				continue
 			}
-			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
@@ -155,8 +150,8 @@ func applyTiebreakSort(sorted []state.PlayerStanding, matches []state.MatchResul
 		}
 		if len(groupWins) > 0 {
 			sort.SliceStable(sorted[i:j], func(a, b int) bool {
-				keyA := standingsPlayerKey(sorted[i+a].Player.ID, sorted[i+a].Player.Name)
-				keyB := standingsPlayerKey(sorted[i+b].Player.ID, sorted[i+b].Player.Name)
+				keyA := standingsPlayerKey(sorted[i+a].Player.ID)
+				keyB := standingsPlayerKey(sorted[i+b].Player.ID)
 				return groupWins[keyA] > groupWins[keyB]
 			})
 		}
@@ -252,21 +247,21 @@ func tiebreakerPairKey(a, b string) string {
 // named.
 //
 // Dedup against existingRows resolves each row's sides to a group member's
-// canonical identity key via newGroupKeyResolver (id-preferring, name
-// fallback -- the same resolver applyTiebreakSort uses), so the two
+// canonical identity key via newGroupKeyResolver (id-only, operator ruling
+// bc-pnum -- the same resolver applyTiebreakSort uses), so the two
 // namesake-involving pairs above are tracked as the distinct pairs they are,
 // never merged under one bare-name bucket.
 //
 // Stamps SideAID/SideBID from the tied competitors' participant ids (mirrors
 // pools.go's regular-match generation), so applyTiebreakSort can resolve the
-// winning side by id rather than by name when two tied competitors share a
-// display name (allowed across dojos, CheckDuplicateEntriesByNameDojo).
+// winning side by id when two tied competitors share a display name
+// (allowed across dojos, CheckDuplicateEntriesByNameDojo).
 func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding, existingTBCount int, court string, existingRows []state.MatchResult) []state.MatchResult {
 	resolve := newGroupKeyResolver(tiedGroup)
 	existingPairs := make(map[string]bool, len(existingRows))
 	for _, m := range existingRows {
-		keyA, okA := resolve(m.SideAID, m.SideA)
-		keyB, okB := resolve(m.SideBID, m.SideB)
+		keyA, okA := resolve(m.SideAID)
+		keyB, okB := resolve(m.SideBID)
 		if okA && okB {
 			existingPairs[tiebreakerPairKey(keyA, keyB)] = true
 		}
@@ -277,8 +272,8 @@ func generateTiebreakerMatches(poolName string, tiedGroup []state.PlayerStanding
 	for i := 0; i < len(tiedGroup); i++ {
 		for j := i + 1; j < len(tiedGroup); j++ {
 			a, b := tiedGroup[i], tiedGroup[j]
-			keyA := standingsPlayerKey(a.Player.ID, a.Player.Name)
-			keyB := standingsPlayerKey(b.Player.ID, b.Player.Name)
+			keyA := standingsPlayerKey(a.Player.ID)
+			keyB := standingsPlayerKey(b.Player.ID)
 			if existingPairs[tiebreakerPairKey(keyA, keyB)] {
 				continue
 			}
@@ -474,63 +469,35 @@ func (e *Engine) InjectTiebreakerMatches(compID string) ([]state.MatchResult, er
 	return injected, nil
 }
 
-// newGroupKeyResolver indexes a tied group and returns the (id, name) ->
-// canonical member key resolution
-// shared by applyTiebreakSort and groupNeedsChusen (chusen.go). Both ask the
-// same question of the same kind of data: a supplementary bout names two sides,
-// and the caller needs to know which member of THIS tied group each side is.
+// newGroupKeyResolver indexes a tied group and returns the id -> canonical
+// member key resolution shared by applyTiebreakSort and groupNeedsChusen
+// (chusen.go). Both ask the same question of the same kind of data: a
+// supplementary bout names two sides, and the caller needs to know which
+// member of THIS tied group each side is.
 //
-// An id is preferred because two members can share a display name across dojos
-// (competitor identity is name+dojo, never name alone). A non-empty id that is
-// NOT one of this group's members -- foreign or stale data, e.g. a TB/DH row
-// generated for a tie that a later score correction has since reshaped --
-// resolves to ("", false) outright: it must NEVER fall through to the bare-name
-// index, because that would silently attribute the row to whichever OTHER
-// member of THIS group happens to share the foreign id's display name (operator
-// ruling: no fallback may invent an attribution). Repro: a pool has X@A, X@B and
-// Y; a TB bout is stamped (X@B, Y) and played; a score correction later moves
-// the CONSEQUENTIAL tie to (X@A, Y). Falling through on X@B's foreign id would
-// resolve it to X@A (same bare name "X"), crediting X@A with a bout X@A never
-// fought and reordering the group on it. Only an EMPTY id takes the name path:
-// when the bout carries no id for that side at all (a row written before
-// TB/DH generation stamped them), the name lookup is all there is, and a
-// genuine same-name collision there degrades to the single entry byName holds,
-// which is exactly the behaviour that predates ids. A correctly stamped bout is
-// never misattributed just because some other row in the same pool lacks an id.
-//
-// The strict foreign-id rejection above is gated on the GROUP carrying at
-// least one id, not on the bout row alone (bc-idfx nit 20). A fully legacy
-// group -- every member's own Player.ID is empty, e.g. a pool never
-// regenerated since before ids were stamped -- has no ids anywhere to compare
-// a bout's id against, so a non-empty id on the bout row is not evidence of
-// "foreign" the way it is for an id-aware group; ids simply are not
-// authoritative here at all, and rejecting on one would refuse a bout that
-// the bare-name index could resolve just fine. Only when the group itself
-// has at least one id-carrying member does an id become the trusted
-// disambiguator, and only then does a foreign id on the bout row correctly
-// mean "this cannot be resolved, do not guess" rather than "there is nothing
-// to check this against, fall back to name".
-func newGroupKeyResolver(members []state.PlayerStanding) func(id, name string) (string, bool) {
+// ID-only (operator ruling bc-pnum): a bout side with no id, or a non-empty
+// id that is NOT one of this group's members (foreign or stale data, e.g. a
+// TB/DH row generated for a tie that a later score correction has since
+// reshaped), resolves to ("", false). There is no name fallback: falling
+// through to a bare-name lookup would risk attributing the row to whichever
+// OTHER member of THIS group happens to share a display name (two members
+// can share a name across dojos), which is exactly the misattribution the
+// operator ruling forbids. A member with no id (Player.ID == "") is simply
+// never inserted into the group's key set, so no bout side can ever resolve
+// to it by id; that member still appears in the group for sorting/output
+// purposes, it just cannot be credited a supplementary win.
+func newGroupKeyResolver(members []state.PlayerStanding) func(id string) (string, bool) {
 	groupKeys := make(map[string]bool, len(members))
-	byName := make(map[string]string, len(members))
-	groupHasIDs := false
 	for _, s := range members {
-		ck := standingsPlayerKey(s.Player.ID, s.Player.Name)
-		groupKeys[ck] = true
-		byName[standingsPlayerKey("", s.Player.Name)] = ck
-		if s.Player.ID != "" {
-			groupHasIDs = true
+		if s.Player.ID == "" {
+			continue
 		}
+		groupKeys[s.Player.ID] = true
 	}
-	return func(id, name string) (string, bool) {
-		if id != "" && groupHasIDs {
-			ck := standingsPlayerKey(id, "")
-			if groupKeys[ck] {
-				return ck, true
-			}
+	return func(id string) (string, bool) {
+		if id == "" || !groupKeys[id] {
 			return "", false
 		}
-		ck, ok := byName[standingsPlayerKey("", name)]
-		return ck, ok
+		return id, true
 	}
 }

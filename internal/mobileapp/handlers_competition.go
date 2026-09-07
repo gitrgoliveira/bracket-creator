@@ -609,80 +609,22 @@ func checkUniqueCompFieldsTolerant(eng *engine.Engine, name, prefix, excludeID s
 }
 
 // resolvePoolOverrideTarget resolves the pool-rank override request's target
-// competitor to a canonical (id, dojo) pair, looked up against the pool's OWN
-// roster rather than trusted verbatim from the request (bc-cse). This is what
-// lets the PUT .../override-rank handler disambiguate two same-name,
-// different-dojo pool members: the operator identity rule (CLAUDE.md) is
-// (name, dojo), not name, so a bare playerName is not enough on its own to
-// pick one of them.
-//
-// Resolution order:
-//  1. playerID, when given, must name a player actually in this pool; that
-//     player's own id/dojo is returned. (Wrong/foreign id is a 400, not a
-//     silent fallback to name matching -- a client that HAS an id and gets it
-//     wrong should be told, not silently corrected.) When playerName is ALSO
-//     given (non-empty) it must match that same player's roster name, or the
-//     request is rejected: a confidently-wrong id/name pair is exactly the
-//     kind of client bug that must not be allowed to silently write a rank
-//     against the wrong competitor. An empty playerName alongside a valid id
-//     is accepted (id alone is a complete identity).
-//  2. Otherwise, match by playerName against the pool roster. Exactly one
-//     match resolves immediately -- this is what keeps an older client that
-//     sends only playerName working: most pools have no name collision at
-//     all, so nothing else needs to change for them.
-//  3. Two or more players share playerName in this pool (a genuine
-//     same-name-different-dojo pair): playerDojo, when it narrows the match
-//     set to exactly one, resolves it.
-//  4. Anything left ambiguous (no playerDojo, or a playerDojo that still
-//     matches more than one, or matches none) is a 400: writing an override
-//     under an arbitrarily-chosen namesake would silently misapply a chusen
-//     result to the wrong competitor, which is the exact bug bc-cse closes.
-//
-// A playerName with NO roster match at all (case 0) is also a 400 (NO
-// FALLBACKS): writing the override anyway would key it via
-// CompetitorKey("", name, "") -- a key no read path ever derives, since
-// lookupPoolRankOverride only tries the resolved identity key or the raw
-// bare name. That write would be stored under a key nothing can ever read
-// back, silently discarding the operator's override. The caller must
-// re-issue the request once the roster actually contains this competitor
-// (e.g. after the pool draw regenerates).
-func resolvePoolOverrideTarget(players []domain.Player, playerID, playerName, playerDojo string) (id, dojo string, err error) {
-	if playerID != "" {
-		for _, p := range players {
-			if p.ID != playerID {
-				continue
-			}
-			if playerName != "" && p.Name != playerName {
-				return "", "", fmt.Errorf("playerId %q belongs to %q in this pool, not playerName %q", playerID, p.Name, playerName)
-			}
-			return p.ID, p.Dojo, nil
-		}
-		return "", "", fmt.Errorf("playerId %q not found in this pool", playerID)
+// competitor to their canonical dojo, looked up against the pool's OWN
+// roster rather than trusted verbatim from the request. playerID is
+// REQUIRED (operator ruling bc-pnum): a pool-rank override is a record
+// resolved by id only, so there is no playerName/playerDojo narrowing path
+// left to fall back to. playerID must name a player actually in this pool;
+// a wrong/foreign/blank id is a 400, never a silent name-based guess.
+func resolvePoolOverrideTarget(players []domain.Player, playerID string) (name, dojo string, err error) {
+	if playerID == "" {
+		return "", "", fmt.Errorf("playerId is required")
 	}
-	var matches []domain.Player
 	for _, p := range players {
-		if p.Name == playerName {
-			matches = append(matches, p)
+		if p.ID == playerID {
+			return p.Name, p.Dojo, nil
 		}
 	}
-	switch len(matches) {
-	case 0:
-		return "", "", fmt.Errorf("playerName %q not found in this pool", playerName)
-	case 1:
-		return matches[0].ID, matches[0].Dojo, nil
-	}
-	if playerDojo != "" {
-		var dojoMatches []domain.Player
-		for _, p := range matches {
-			if p.Dojo == playerDojo {
-				dojoMatches = append(dojoMatches, p)
-			}
-		}
-		if len(dojoMatches) == 1 {
-			return dojoMatches[0].ID, dojoMatches[0].Dojo, nil
-		}
-	}
-	return "", "", fmt.Errorf("playerName %q is ambiguous in pool: multiple competitors share this name; include playerId or playerDojo to disambiguate", playerName)
+	return "", "", fmt.Errorf("playerId %q not found in this pool", playerID)
 }
 
 // loadAllCompetitions lists every competition id on disk and loads its
@@ -2625,39 +2567,36 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		poolId := c.Param("poolId")
 		var req struct {
+			// PlayerName is accepted for backward-compatible display only
+			// (operator ruling bc-pnum): it is never used to select or
+			// disambiguate a competitor. PlayerID is what selects.
 			PlayerName string `json:"playerName"`
-			// PlayerID and PlayerDojo are optional (bc-cse), added so the
-			// operator's rank override can be pinned to one competitor even
-			// when two pool members share a display name from different
-			// dojos (operator identity rule: (name, dojo), not name -- see
-			// helper.CompetitorKey). An older client that only ever sends
-			// playerName still works: it is resolved below against the
-			// pool's own roster, which disambiguates automatically whenever
-			// the name happens to be unique in this pool (the common case).
-			PlayerID   string `json:"playerId"`
-			PlayerDojo string `json:"playerDojo"`
-			Rank       int    `json:"rank"`
+			// PlayerID is REQUIRED (bc-pnum): a pool-rank override is a
+			// record resolved by id only, so there is no playerName/
+			// playerDojo narrowing path left. The candidates returned by
+			// GET .../chusen-candidates and GET .../league-tiebreak/candidates
+			// both carry an id for every competitor, so every caller has one
+			// to send.
+			PlayerID string `json:"playerId"`
+			Rank     int    `json:"rank"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		// Defense-in-depth: the JS client already guards isNaN/<=0, but a stale
-		// or hand-crafted request could persist garbage rank values. Reject
-		// non-positive ranks here. Trim whitespace from the player name so
-		// "   " doesn't slip through the empty check and so padded names
-		// don't create keys that miss later lookups.
-		playerName := strings.TrimSpace(req.PlayerName)
-		if playerName == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "playerName is required"})
+		playerID := strings.TrimSpace(req.PlayerID)
+		if playerID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "playerId is required"})
 			return
 		}
+		// playerName is accepted only for length defense-in-depth and is
+		// never used to resolve the target (see the request struct's own
+		// comment above).
+		playerName := strings.TrimSpace(req.PlayerName)
 		if err := validateMaxLen("playerName", playerName, MaxLenPlayerName); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		playerID := strings.TrimSpace(req.PlayerID)
-		playerDojo := strings.TrimSpace(req.PlayerDojo)
 		if req.Rank <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "rank must be a positive integer"})
 			return
@@ -2713,19 +2652,19 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Resolve the override target's canonical identity from the pool's
-		// OWN roster rather than trusting the client's playerDojo outright:
-		// this is what lets an unmodified legacy client (playerName only)
-		// still disambiguate correctly whenever the name is unique in this
-		// pool, and it is the sole place that can tell a genuine same-name
-		// collision from an ordinary single match.
-		resolvedID, resolvedDojo, resolveErr := resolvePoolOverrideTarget(targetPool.Players, playerID, playerName, playerDojo)
+		// Resolve the override target's canonical dojo from the pool's OWN
+		// roster (id-only, operator ruling bc-pnum): playerId must name a
+		// player actually in this pool, or the request is rejected.
+		resolvedName, resolvedDojo, resolveErr := resolvePoolOverrideTarget(targetPool.Players, playerID)
 		if resolveErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
 			return
 		}
+		if playerName == "" {
+			playerName = resolvedName
+		}
 
-		changed, err := store.SaveRankOverrideChanged(id, poolId, resolvedID, playerName, resolvedDojo, req.Rank)
+		changed, err := store.SaveRankOverrideChanged(id, poolId, playerID, playerName, resolvedDojo, req.Rank)
 		if err != nil {
 			internalError(c, err)
 			return

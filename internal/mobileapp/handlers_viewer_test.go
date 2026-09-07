@@ -627,7 +627,7 @@ func TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers(t *testing.T) 
 	r.ServeHTTP(w, req)
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
-	assert.Contains(t, logBuf.String(), "load draw",
+	assert.Contains(t, logBuf.String(), "load pools",
 		"an unreadable pools.csv must leave a server-side log breadcrumb naming the read that failed, not be silently swallowed")
 	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
 

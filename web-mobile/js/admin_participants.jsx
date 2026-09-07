@@ -258,7 +258,7 @@ function participantFormError({ name, dojo, engi }) {
   return null;
 }
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onBack }) {
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
@@ -803,10 +803,17 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       setImportSummary(null);
       const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
       setNearDupPending(hasWarnings ? { pairs: warnings } : null);
-      // Return to the dashboard after a clean apply so the operator lands back
-      // on the competition list. When the save surfaced near-duplicate warnings,
-      // stay put so they can review the banner before navigating away.
-      if (!hasWarnings && onBack) onBack();
+      // Navigate to the next action after a clean apply, rather than back to
+      // the dashboard (operator ruling): a competition still in setup goes to
+      // the Overview checklist (it names the next step: seeds and settings,
+      // then generate the draw); a started competition goes to Scoring (the
+      // same destination as this page's own "Go to Scoring" CTA). When the
+      // save surfaced near-duplicate warnings, stay put so they can review
+      // the banner before navigating away.
+      if (!hasWarnings && onSection) {
+        if (isSetup) onSection("overview");
+        else if (isStarted) onSection("scores");
+      }
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack

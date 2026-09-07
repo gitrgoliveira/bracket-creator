@@ -50,8 +50,10 @@ export function makeParticipantsCompetition(overrides = {}) {
 }
 
 // Mounts AdminParticipants for `c` and returns whatever
-// @testing-library/react's render() returned.
-export async function mountParticipants(c) {
+// @testing-library/react's render() returned. `overrides` lets a test
+// substitute its own onUpdate/onSection (e.g. to spy on post-Apply
+// navigation); anything not given falls back to a noop.
+export async function mountParticipants(c, overrides = {}) {
   if (!AdminParticipants) {
     throw new Error(
       'mountParticipants: AdminParticipants is not loaded. Call installParticipantsHarness() ' +
@@ -64,11 +66,10 @@ export async function mountParticipants(c) {
       <AdminParticipants
         c={c}
         tournament={{ name: 'Spring Taikai', courts: ['A'] }}
-        onUpdate={noop}
+        onUpdate={overrides.onUpdate || noop}
         password=""
-        showToast={noop}
-        onSection={noop}
-        onBack={noop}
+        showToast={overrides.showToast || noop}
+        onSection={overrides.onSection || noop}
       />
     );
   });

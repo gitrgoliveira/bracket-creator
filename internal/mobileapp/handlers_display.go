@@ -96,7 +96,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// sideA/sideB; the representative fighter for each side lives in
 				// RepPlayerA/B. Empty for every regular match (mp-62vr).
 				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-					m.SideA, m.SideB, m.IpponsA, m.IpponsB, m.HansokuA, m.HansokuB,
+					m.SideA, m.SideB, m.SideAID, m.SideBID, m.IpponsA, m.IpponsB, m.HansokuA, m.HansokuB,
 					phaseFromMatchID(m.ID), m.RepPlayerA, m.RepPlayerB))
 				return
 			}
@@ -118,8 +118,11 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 						continue
 					}
 					players := currentMatchPlayers(store, comp)
+					// BracketMatch carries no per-side id (out of scope for
+					// bc-pnum), so sideAID/sideBID are "" and buildSide falls
+					// back to name resolution for this call.
 					c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-						bm.SideA, bm.SideB, bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
+						bm.SideA, bm.SideB, "", "", bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
 						phaseFromMatchID(bm.ID), "", ""))
 					return
 				}
@@ -139,8 +142,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// stable literal label instead of deriving one from the ID
 				// (matches the "3rd Place Match" label kachinuki_export.go
 				// uses for the same match).
+				// ThirdPlaceMatch is a BracketMatch too: no per-side id, so
+				// buildSide falls back to name resolution here as well.
 				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-					bm.SideA, bm.SideB, ipponsA, ipponsB, hansokuA, hansokuB,
+					bm.SideA, bm.SideB, "", "", ipponsA, ipponsB, hansokuA, hansokuB,
 					"3rd Place Match", "", ""))
 				return
 			}
@@ -328,8 +333,13 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.P
 // currentMatchPayload builds the GET /court/:court/current "current" body shared
 // by the pool and bracket branches. repA/repB are the representative-bout
 // fighters for a pool daihyosen (empty for regular and bracket matches).
+// sideAID/sideBID are the side's participant ids when the source record
+// carries them (a pool MatchResult's SideAID/SideBID); callers building this
+// from a BracketMatch (which carries no per-side id, out of scope for
+// bc-pnum) pass "" for both, and buildSide falls back to name resolution for
+// that case -- see buildSide's own doc comment.
 func currentMatchPayload(court string, comp *state.Competition, players []domain.Player,
-	sideAName, sideBName string, ipponsA, ipponsB []string, hansokuA, hansokuB int,
+	sideAName, sideBName, sideAID, sideBID string, ipponsA, ipponsB []string, hansokuA, hansokuB int,
 	phase, repA, repB string) gin.H {
 	return gin.H{
 		"court":  court,
@@ -339,8 +349,8 @@ func currentMatchPayload(court string, comp *state.Competition, players []domain
 			"name": comp.Name,
 		},
 		"phase": phase,
-		"sideA": buildSide(sideAName, players, comp.EffectiveWithZekkenName()),
-		"sideB": buildSide(sideBName, players, comp.EffectiveWithZekkenName()),
+		"sideA": buildSide(sideAName, sideAID, players, comp.EffectiveWithZekkenName()),
+		"sideB": buildSide(sideBName, sideBID, players, comp.EffectiveWithZekkenName()),
 		// Normalize nil → [] so the JSON encodes empty arrays, not null: the
 		// contract models ipponsA/ipponsB as arrays and overlay clients assume
 		// []. A nil slice reaches here from an unscored pool match or a
@@ -366,25 +376,53 @@ func emptyIfNil(s []string) []string {
 	return s
 }
 
-// buildSide turns a participant name (which is what MatchResult.SideA/SideB
-// carries, see state/models.go) into the per-side payload defined by the
-// court-current contract. When the participants list cannot resolve the name
-// we fall back to a name-only side so the overlay can still render
+// buildSide turns a match side into the per-side payload defined by the
+// court-current contract, enriched (dojo/id/number) from the roster.
+//
+// id is the side's participant id, when the caller's source record carries
+// one: a POOL match's SideAID/SideBID (state.MatchResult has an id field).
+// When id is non-empty, resolution is BY ID ONLY (operator ruling bc-pnum):
+// the roster is matched on Player.ID == id and nothing else, so a foreign or
+// stale id (naming nobody in the current roster) resolves to a name-only
+// side rather than falling back to a name match that could silently pick a
+// different competitor sharing the same display name across dojos.
+//
+// A BracketMatch side carries no per-side id at all (out of scope for
+// bc-pnum, see CLAUDE.md), so its callers pass id == "" -- for that case
+// (and for a pool row predating SideAID/SideBID stamping), resolution falls
+// back to matching by name, the only information available; name is what
+// MatchResult.SideA/SideB and BracketMatch.SideA/SideB carry (see
+// state/models.go). When the participants list cannot resolve the name
+// either, we fall back to a name-only side so the overlay can still render
 // "Player vs Player" rather than blanking out.
-func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H {
+func buildSide(name, id string, players []domain.Player, withZekkenName bool) gin.H {
 	displayName := name
 	dojo := ""
 	playerID := ""
 	number := ""
-	for i := range players {
-		if players[i].Name == name {
-			if withZekkenName && players[i].DisplayName != "" {
-				displayName = players[i].DisplayName
+	if id != "" {
+		for i := range players {
+			if players[i].ID == id {
+				if withZekkenName && players[i].DisplayName != "" {
+					displayName = players[i].DisplayName
+				}
+				dojo = players[i].Dojo
+				playerID = players[i].ID
+				number = players[i].Number
+				break
 			}
-			dojo = players[i].Dojo
-			playerID = players[i].ID
-			number = players[i].Number
-			break
+		}
+	} else {
+		for i := range players {
+			if players[i].Name == name {
+				if withZekkenName && players[i].DisplayName != "" {
+					displayName = players[i].DisplayName
+				}
+				dojo = players[i].Dojo
+				playerID = players[i].ID
+				number = players[i].Number
+				break
+			}
 		}
 	}
 	return gin.H{

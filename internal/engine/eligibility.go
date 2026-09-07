@@ -309,21 +309,24 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 		return nil
 	}
 
-	idA, idB := e.resolvePlayerIDs(compID, sideA, sideB)
+	idA, idB, rawIDA, rawIDB := e.resolvePlayerIDs(compID, sideA, sideB)
 
+	// Pool-vs-pool half: id only (operator ruling bc-pnum). A side with no
+	// resolvable roster id (rawIDA/rawIDB == "") never matches any other
+	// pool match here -- there is no name fallback.
 	poolMatches, err := e.store.LoadPoolMatches(compID)
 	if err == nil {
 		for _, m := range poolMatches {
 			if m.ID == matchID || m.Status != state.MatchStatusRunning {
 				continue
 			}
-			if sideA != "" && (m.SideA == sideA || m.SideB == sideA) {
+			if rawIDA != "" && (m.SideAID == rawIDA || m.SideBID == rawIDA) {
 				return &IneligibleCompetitorError{
 					PlayerID: idA,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
 				}
 			}
-			if sideB != "" && (m.SideA == sideB || m.SideB == sideB) {
+			if rawIDB != "" && (m.SideAID == rawIDB || m.SideBID == rawIDB) {
 				return &IneligibleCompetitorError{
 					PlayerID: idB,
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", m.ID, m.Court),
@@ -332,6 +335,8 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 		}
 	}
 
+	// Bracket half: name-based, out of scope for bc-pnum (BracketMatch
+	// carries no per-side id).
 	bracket, berr := e.store.LoadBracket(compID)
 	if berr == nil && bracket != nil {
 		for _, round := range bracket.Rounds {
@@ -372,26 +377,40 @@ func (e *Engine) checkSimultaneousMatch(compID, matchID string) error {
 	return nil
 }
 
-func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (string, string) {
+// resolvePlayerIDs resolves sideA/sideB (display names) against the
+// competition's roster and returns two pairs: (idA, idB), which fall back to
+// the bare name when no participant id is found (kept for the
+// IneligibleCompetitorError.PlayerID reporting field, which has always
+// preferred SOME identifier over a blank one), and (rawIDA, rawIDB), which
+// are "" on the same miss with NO fallback. checkSimultaneousMatch's
+// pool-vs-pool comparison must use the raw pair (operator ruling bc-pnum): a
+// record with an id field -- state.MatchResult.SideAID/SideBID -- is
+// resolved by id only, and a name silently substituted for a missing id
+// would never legitimately equal a real SideAID/SideBID value, so using the
+// name-fallback pair there wouldn't create a false match, but it would be
+// comparing the wrong kind of value for the wrong reason.
+func (e *Engine) resolvePlayerIDs(compID, sideA, sideB string) (idA, idB, rawIDA, rawIDB string) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil || comp == nil {
-		return sideA, sideB
+		return sideA, sideB, "", ""
 	}
 	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
 	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
 	if err != nil {
-		return sideA, sideB
+		return sideA, sideB, "", ""
 	}
 	pool := combinedPlayerPool(comp.Players, participants)
-	idA := lookupPlayerID(pool, sideA)
+	rawIDA = lookupPlayerID(pool, sideA)
+	idA = rawIDA
 	if idA == "" {
 		idA = sideA
 	}
-	idB := lookupPlayerID(pool, sideB)
+	rawIDB = lookupPlayerID(pool, sideB)
+	idB = rawIDB
 	if idB == "" {
 		idB = sideB
 	}
-	return idA, idB
+	return idA, idB, rawIDA, rawIDB
 }
 
 // checkEligibilityExcludingMatch is like CheckEligibility but skips

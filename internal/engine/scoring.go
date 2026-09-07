@@ -1053,12 +1053,21 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 // stand and continue to count in IV/PW standings via accrueTeamSubResults).
 //
 // prior is the match state before the decision; nothing is preserved unless
-// its sides still match — a drifted or re-oriented prior must not
-// mis-attribute points. decisionBy names the WITHDRAWING side
-// ("shiro" = SideB/Shiro, "aka" = SideA/Aka). Shared by the two
-// RecordDecision twins.
+// its sides still match BY ID (operator ruling bc-pnum) -- a drifted or
+// re-oriented prior must not mis-attribute points, and a prior (or incoming
+// result) that carries no side id at all can never be proven to match, so
+// it is treated as a non-match rather than falling back to a name
+// comparison: no preservation, not a guess. decisionBy names the
+// WITHDRAWING side ("shiro" = SideB/Shiro, "aka" = SideA/Aka). Shared by the
+// two RecordDecision twins.
 func preserveLoserScore(result, prior *state.MatchResult, decisionBy string) {
-	if prior == nil || prior.SideA != result.SideA || prior.SideB != result.SideB {
+	if prior == nil {
+		return
+	}
+	if prior.SideAID == "" || prior.SideBID == "" || result.SideAID == "" || result.SideBID == "" {
+		return
+	}
+	if prior.SideAID != result.SideAID || prior.SideBID != result.SideBID {
 		return
 	}
 	result.SubResults = prior.SubResults
@@ -1407,13 +1416,13 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			sA := lookupStandingsPlayer(playerStandings, m.SideAID, m.SideA)
-			sB := lookupStandingsPlayer(playerStandings, m.SideBID, m.SideB)
+			sA := lookupStandingsPlayer(playerStandings, m.SideAID)
+			sB := lookupStandingsPlayer(playerStandings, m.SideBID)
 			if sA == nil || sB == nil {
 				continue
 			}
 
-			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
@@ -1726,41 +1735,24 @@ func markTiedStandingsPools(sorted []state.PlayerStanding, regularMatches []stat
 // still read "done" often enough to pass the one fixture that existed):
 //
 //  1. Completion buckets (statusFor) are keyed by helper.CompetitorKey(ID,
-//     Name, Dojo) -- id-preferred, NAME+DOJO fallback -- never by
-//     standingsPlayerKey(ID, Name) alone. Two id-less league competitors can
-//     share a display name across dojos (CheckDuplicateEntriesByNameDojo
-//     only rejects same-name AND same-dojo); standingsPlayerKey ignores
-//     dojo, so both namesakes' completion counts silently merged into ONE
-//     bucket. A merged bucket can read "done" from the SUM of two
-//     competitors' fixtures even when neither one individually finished her
-//     own -- or, as it happened to in the original repro fixture, merges a
-//     genuine 1/1 with an untouched 0/0 and still reads correctly by
-//     coincidence, which is exactly why that fixture alone could not tell
-//     this bug from a correct implementation. CompetitorKey's dojo fallback
-//     keeps the two namesakes' buckets distinct.
+//     Name, Dojo), not by standingsPlayerKey(ID) alone: rosterIndex's own
+//     lookup below is id-only (operator ruling bc-pnum), so once a match
+//     side resolves at all it names exactly one roster entry; the roster
+//     may nonetheless carry an entry with no id yet, and CompetitorKey's
+//     (name, dojo) composite is what keeps that entry from colliding with an
+//     unrelated namesake in a DIFFERENT dojo (CompetitorKey's identity rule
+//     -- (name, dojo), never bare name -- is a general helper, not the
+//     match-side resolution this doc comment is otherwise about).
 //
 //  2. rosterIndex resolves a match side to the roster entry
 //     computeStandingsFrom itself used to accrue that side's Wins/Losses in
 //     the first place (its playerStandings map, built from p.Players in the
-//     pool's ON-DISK ROSTER order) -- REQUIRED once buckets are correctly
-//     separated, because separate buckets only help if the match is
-//     credited to the RIGHT one. A match row with no side id names a
-//     competitor by bare NAME ALONE (no dojo on a MatchResult side), so
-//     resolving it still depends on which roster index does the lookup:
-//     registerStandingsPlayer's id-less name key is last-write-wins, so
-//     which of two same-name roster entries (id-less, OR id-carrying with an
-//     id-less match row -- e.g. legacy data written before SideAID/SideBID
-//     stamping existed) a bare name resolves to depends on the order they
-//     were indexed in. Rebuilding a second index from `sorted` (POINTS
-//     order, which diverges from roster order the moment any match is
-//     played) can therefore resolve to a DIFFERENT competitor than the one
-//     computeStandingsFrom's own roster-order resolution credited -- and
-//     unlike the id-less-namesake case above, an id-carrying mismatch lands
-//     the increment in a bucket keyed by the WRONG real id, an unambiguous
-//     wrong answer with no coincidental save. Threading through the SAME
-//     index computeStandingsFrom used removes that second, independently
-//     ordered index entirely: there is only ever one resolution of "who does
-//     this match side mean" per pool.
+//     pool's ON-DISK ROSTER order) -- REQUIRED so the match is credited to
+//     the SAME roster entry computeStandingsFrom itself credited, not a
+//     second, independently-ordered index. A match side with no id
+//     (SideAID/SideBID blank) resolves to nothing here (lookupStandingsPlayer
+//     is id-only), exactly as it contributes nothing to computeStandingsFrom's
+//     own tally, so the two never disagree about who a match side means.
 func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStanding, regularMatches []state.MatchResult, rosterIndex map[string]*state.PlayerStanding) {
 	topN := min(effectiveTopN(comp), len(sorted))
 
@@ -1778,21 +1770,21 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 	for _, s := range sorted {
 		statusFor[helper.PlayerKey(s.Player)] = &compStatus{}
 	}
-	tally := func(id, name string) *compStatus {
-		st := lookupStandingsPlayer(rosterIndex, id, name)
+	tally := func(id string) *compStatus {
+		st := lookupStandingsPlayer(rosterIndex, id)
 		if st == nil {
 			return nil
 		}
 		return statusFor[helper.PlayerKey(st.Player)]
 	}
 	for _, m := range regularMatches {
-		if cs := tally(m.SideAID, m.SideA); cs != nil {
+		if cs := tally(m.SideAID); cs != nil {
 			cs.total++
 			if m.Status == state.MatchStatusCompleted {
 				cs.completed++
 			}
 		}
-		if cs := tally(m.SideBID, m.SideB); cs != nil {
+		if cs := tally(m.SideBID); cs != nil {
 			cs.total++
 			if m.Status == state.MatchStatusCompleted {
 				cs.completed++

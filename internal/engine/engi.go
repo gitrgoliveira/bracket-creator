@@ -211,89 +211,48 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 	}
 }
 
-// standingsPlayerKey returns the id-based or name-based encoding used by
-// registerStandingsPlayer / lookupStandingsPlayer below. Same-name
-// participants from different dojos are explicitly allowed
-// (CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo), so
-// keying by name alone silently merges distinct competitors into one
-// standings row.
+// standingsPlayerKey returns the identity key used by registerStandingsPlayer
+// / lookupStandingsPlayer below. Every record this package resolves a
+// competitor from (state.MatchResult's SideAID/SideBID/WinnerID,
+// state.PlayerStanding's Player.ID) carries an id field, so resolution is
+// ID-ONLY (operator ruling bc-pnum): there is no name or (name, dojo)
+// fallback here.
 //
-// Used by kendo SwissStandings (bc-cse) as well as the pool/league standings
-// core, and by computeEngiSwissStandings below: buildSwissMatches now stamps
-// SideAID/SideBID on every match it generates (mirroring pools.go), so the id
-// branch is populated for Swiss exactly as it is for pools, kendo and engi
-// alike.
-func standingsPlayerKey(id, name string) string {
-	if id != "" {
-		return "id:" + id
-	}
-	return "name:" + name
+// An empty id yields "" as the key, but registerStandingsPlayer never
+// inserts a "" entry into the lookup map, so a lookup with id == "" always
+// misses. Two competitors that both carry no id can therefore never
+// spuriously collide with each other through this key: neither one is ever
+// found via it, they are simply unresolvable, which is what an empty id
+// means under the operator ruling ("an empty id resolves to NOTHING").
+func standingsPlayerKey(id string) string {
+	return id
 }
 
-// resolveWinnerSide reports which side of a match won, preferring the winner's
-// participant id over the display name.
+// resolveWinnerSide reports which side of a match won, by participant id
+// only (operator ruling bc-pnum). A match with no WinnerID resolves to no
+// win at all, even when Winner/SideA/SideB carry names that would otherwise
+// look like a match: "m.Winner == m.SideA" can be true for BOTH sides of a
+// same-name pairing (legal when the dojos differ), so a name comparison
+// could credit the loser. There is no such ambiguity by id.
 //
-// The name comparison alone is not enough: "m.Winner == m.SideA" is true for
-// BOTH sides of a same-name pairing (legal when the dojos differ), so the
-// loser could be credited. When an id is recorded it decides; when it is not
-// -- a row written before ids existed -- the name comparison is all there is,
-// which is the behaviour those rows always had.
-//
-// The id comparison is only meaningful when at least one side id is actually
-// on the row: comparing WinnerID against two empty strings is not "no match",
-// it is a vacuous comparison that can never succeed regardless of who won.
-// That shape is exactly what a pre-bc-cse client wrote for every Swiss/TB/DH
-// result: winnerId resolved against the roster, but sideAId/sideBId never
-// stamped. Gating on "WinnerID != """ alone (the old condition) took that
-// vacuous branch and silently credited nobody; gating on side-id presence
-// instead falls through to the name comparison for exactly those rows, which
-// resolves correctly whenever the names are unique (unresolvable only for the
-// genuine namesake-vs-namesake case, which has no data left to decide it
-// either way).
-//
-// Both results can be false: an unfinished match, a draw, or a winner naming
-// neither side. Callers treat that as "no win to award" rather than as an
-// error.
+// Both results can be false: an unfinished match, a draw, a winner naming
+// neither side, or a row with no WinnerID at all (unresolvable by the
+// operator ruling, not a fallback case). Callers treat that as "no win to
+// award" rather than as an error.
 func resolveWinnerSide(m state.MatchResult) (winnerIsA, winnerIsB bool) {
-	if m.WinnerID != "" && (m.SideAID != "" || m.SideBID != "") {
-		return m.WinnerID == m.SideAID, m.WinnerID == m.SideBID
+	if m.WinnerID == "" {
+		return false, false
 	}
-	return m.Winner != "" && m.Winner == m.SideA, m.Winner != "" && m.Winner == m.SideB
+	return m.WinnerID == m.SideAID, m.WinnerID == m.SideBID
 }
-
-// THE TWO KEY SCHEMES, and why they are not one.
-//
-// helper.CompetitorKey(id, name, dojo) falls back to a normalized name+dojo
-// composite. standingsPlayerKey(id, name) above falls back to the bare name.
-// standingsPlayerKey does NOT call CompetitorKey and is not a narrower alias
-// for it; they answer different questions and cannot be merged:
-//
-//   - CompetitorKey keys a ROSTER against another ROSTER, where both sides
-//     know the dojo. Swiss pairing and state.Overrides.PoolRanks use it. (It
-//     lives in helper, not here, because internal/state cannot import
-//     internal/engine without a cycle.)
-//   - standingsPlayerKey keys a roster against MATCH SIDES, and a
-//     state.MatchResult carries an id and a name per side but never a dojo.
-//     A dojo-aware roster key would therefore be unfindable by any match
-//     lookup: the roster entry would be filed under "nd:name|dojo" and the
-//     lookup could only ever ask for "name:name". Adding dojo here would not
-//     disambiguate anything, it would break every id-less lookup.
-//
-// That is why registerStandingsPlayer files each competitor under BOTH keys:
-// the id key disambiguates namesakes whenever the match carries ids, and the
-// name key keeps id-less (legacy) matches resolving as they always did. If
-// MatchResult ever grows a per-side dojo, this distinction disappears and the
-// two schemes should become one.
 
 // newStandingsIndex builds the standings lookup for a roster and returns it
 // alongside the same pointers in roster order.
 //
-// Both halves are needed and the second is easy to forget: the map indexes
-// each competitor under TWO keys (id and name, see registerStandingsPlayer),
-// so ranging over its values visits -- and would append -- every competitor
-// twice. Callers assemble their output from the returned slice, never from the
-// map. Returning them together is what stops each call site having to know
-// that, and having to say so in its own comment.
+// Callers assemble their output from the returned slice (order), never from
+// the map: a roster entry with no id is appended to order but never indexed
+// into byKey at all (see registerStandingsPlayer), so ranging over the map's
+// values would silently skip every id-less competitor.
 func newStandingsIndex(players []domain.Player) (map[string]*state.PlayerStanding, []*state.PlayerStanding) {
 	byKey := make(map[string]*state.PlayerStanding, len(players))
 	order := make([]*state.PlayerStanding, 0, len(players))
@@ -304,55 +263,36 @@ func newStandingsIndex(players []domain.Player) (map[string]*state.PlayerStandin
 }
 
 // registerStandingsPlayer indexes a fresh *state.PlayerStanding for player
-// into m under BOTH its name key AND (when player.ID is non-empty) its id
-// key, and returns the standing so the caller can keep populating it.
+// into m under its id key (when player.ID is non-empty), and returns the
+// standing so the caller can keep populating it.
 //
-// Registering both, rather than only the id-preferred single key, is what
-// makes lookupStandingsPlayer resilient to a roster whose participants carry
-// real ids while some of the MATCHES that reference them don't (a
-// competition drawn before per-side ids existed on a given match shape, or a
-// TB/DH row generated before generateTiebreakerMatches /
-// generatePoolDaihyosenMatches started stamping SideAID/SideBID): the id key
-// simply goes unused for those matches and lookup falls through to the name
-// key, exactly as it always did before ids existed. A single symmetric key
-// (id-preferred on BOTH sides) does not degrade this way: if the roster
-// entry resolves via "id:<uuid>" but the match carries no id for that side,
-// the match's key is "name:<name>", which never equals the roster's key, and
-// EVERY match missing a side id -- not just the same-name case -- silently
-// stops contributing to standings. That regression was caught by
-// internal/export's hand-built fixtures (real participant ids, no
-// SideAID/SideBID on the match) before it could reach production data drawn
-// the same way (e.g. a mid-tournament upgrade whose TB/DH rows predate the
-// id-stamping fix).
-//
-// The name key is last-write-wins on a genuine collision (two roster entries
-// sharing a name with no id on either side to disambiguate): that is the
-// SAME degraded behavior standings always had before ids existed, not a new
-// gap -- it only matters when a match referencing one of them ALSO carries
-// no id, at which point there is no data left to disambiguate correctly.
+// An id-less player is intentionally NOT inserted into m at all: inserting
+// it under a "" key would make it resolvable by ANY id-less match side,
+// including one that actually names a different, unrelated competitor, and
+// would make two id-less roster entries collide with each other on the same
+// key. Per the operator ruling, an empty id resolves to nothing, so the
+// correct map contribution for an id-less player is none. That player is
+// still present in the `order` slice newStandingsIndex returns, so it still
+// appears in the standings output, it just cannot be matched to a bare match
+// side that carries no id.
 func registerStandingsPlayer(m map[string]*state.PlayerStanding, player domain.Player) *state.PlayerStanding {
 	st := &state.PlayerStanding{Player: player}
-	m[standingsPlayerKey("", player.Name)] = st
 	if player.ID != "" {
-		m[standingsPlayerKey(player.ID, "")] = st
+		m[standingsPlayerKey(player.ID)] = st
 	}
 	return st
 }
 
-// lookupStandingsPlayer resolves a match side (id, name) to the
-// *state.PlayerStanding registered by registerStandingsPlayer. Prefers the
-// id key when id is non-empty AND that key was actually registered
-// (unambiguous even when two roster entries share a display name); falls
-// back to the name key otherwise -- when the match carries no id for this
-// side, or carries one that doesn't match any registered roster id (stale/
-// foreign data; degrading to name is preferable to resolving nothing).
-func lookupStandingsPlayer(m map[string]*state.PlayerStanding, id, name string) *state.PlayerStanding {
-	if id != "" {
-		if st, ok := m[standingsPlayerKey(id, "")]; ok {
-			return st
-		}
+// lookupStandingsPlayer resolves a match side's id to the
+// *state.PlayerStanding registered by registerStandingsPlayer. ID-only
+// (operator ruling bc-pnum): an empty id, or an id that was never
+// registered (stale/foreign data), returns nil rather than falling back to
+// a name lookup.
+func lookupStandingsPlayer(m map[string]*state.PlayerStanding, id string) *state.PlayerStanding {
+	if id == "" {
+		return nil
 	}
-	return m[standingsPlayerKey("", name)]
+	return m[standingsPlayerKey(id)]
 }
 
 // engiScoreSummary renders the human-readable score cell for an engi
@@ -406,12 +346,12 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 			if IsTiebreakerMatchID(m.ID) || IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			sA := lookupStandingsPlayer(playerStandings, m.SideAID, m.SideA)
-			sB := lookupStandingsPlayer(playerStandings, m.SideBID, m.SideB)
+			sA := lookupStandingsPlayer(playerStandings, m.SideAID)
+			sB := lookupStandingsPlayer(playerStandings, m.SideBID)
 			if sA == nil || sB == nil {
 				continue
 			}
-			// Winner by id where recorded, else by name; see resolveWinnerSide.
+			// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 			winnerIsA, winnerIsB := resolveWinnerSide(m)
 			switch {
 			case winnerIsA:
@@ -463,21 +403,18 @@ func (e *Engine) computeEngiStandings(loader poolStandingsLoader, compID string)
 // exactly like the pool/league computeEngiStandings.
 //
 // Identity is keyed via standingsPlayerKey / registerStandingsPlayer /
-// lookupStandingsPlayer, id-preferred with a name fallback for legacy rows,
-// exactly like the kendo SwissStandings it twins (bc-cse). This function
-// used to be keyed by bare display name: at the time, the premise was that
-// buildSwissMatches persisted no per-side id at all, so an id-aware scheme
-// would have had nothing to key on. That premise no longer holds --
-// buildSwissMatches now stamps SideAID/SideBID on every match it generates
-// (mirroring pools.go), including engi Swiss matches, since
-// GenerateSwissRound has no engi/kendo fork and the same generator produces
-// both -- so a same-name-different-dojo pair in an engi Swiss field no
-// longer collapses to one standings row.
+// lookupStandingsPlayer, ID-ONLY (operator ruling bc-pnum), exactly like the
+// kendo SwissStandings it twins. buildSwissMatches stamps SideAID/SideBID on
+// every match it generates (mirroring pools.go), including engi Swiss
+// matches, since GenerateSwissRound has no engi/kendo fork and the same
+// generator produces both -- so a same-name-different-dojo pair in an engi
+// Swiss field never collapses to one standings row, and a match with no
+// side id simply resolves to nothing.
 func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches []state.MatchResult) ([]state.PlayerStanding, error) {
 	// order holds one *PlayerStanding per participant, in roster order: the
 	// assembly loop below ranges over THIS, not over byKey's values, because
-	// byKey double-registers each competitor (see newStandingsIndex's own
-	// "Both halves are needed" paragraph).
+	// an id-less participant is never inserted into byKey at all (see
+	// registerStandingsPlayer).
 	byKey, order := newStandingsIndex(participants)
 
 	headToHead := make(map[string]map[string]string) // winner key → opponent key → winner key
@@ -487,7 +424,7 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 		}
 		// Bye: SideA wins, no flags accrued, no head-to-head.
 		if m.SideB == "" {
-			if sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA); sA != nil {
+			if sA := lookupStandingsPlayer(byKey, m.SideAID); sA != nil {
 				sA.Wins++
 			}
 			continue
@@ -495,15 +432,15 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 		if m.Status != state.MatchStatusCompleted {
 			continue
 		}
-		sA := lookupStandingsPlayer(byKey, m.SideAID, m.SideA)
-		sB := lookupStandingsPlayer(byKey, m.SideBID, m.SideB)
+		sA := lookupStandingsPlayer(byKey, m.SideAID)
+		sB := lookupStandingsPlayer(byKey, m.SideBID)
 		if sA == nil || sB == nil {
 			continue
 		}
-		// Winner by id where recorded, else by name; see resolveWinnerSide.
+		// Winner by id only (operator ruling bc-pnum); see resolveWinnerSide.
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
-		keyA := standingsPlayerKey(sA.Player.ID, sA.Player.Name)
-		keyB := standingsPlayerKey(sB.Player.ID, sB.Player.Name)
+		keyA := standingsPlayerKey(sA.Player.ID)
+		keyB := standingsPlayerKey(sB.Player.ID)
 		switch {
 		case winnerIsA:
 			sA.Wins++
@@ -532,8 +469,8 @@ func (e *Engine) computeEngiSwissStandings(participants []domain.Player, matches
 			return a.Flags > b.Flags
 		}
 		// Head-to-head: if a beat b directly, a ranks higher.
-		keyA := standingsPlayerKey(a.Player.ID, a.Player.Name)
-		keyB := standingsPlayerKey(b.Player.ID, b.Player.Name)
+		keyA := standingsPlayerKey(a.Player.ID)
+		keyB := standingsPlayerKey(b.Player.ID)
 		if winner, ok := lookupH2H(headToHead, keyA, keyB); ok {
 			if winner == keyA {
 				return true

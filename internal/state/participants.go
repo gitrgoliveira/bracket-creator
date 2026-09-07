@@ -461,50 +461,21 @@ func (s *Store) withZekkenNameLocked(compID string) (bool, *Competition, error) 
 	return comp.EffectiveWithZekkenName(), comp, nil
 }
 
-// participantPairKey is the (normalizedName, normalizedDojo) identity key used
-// to resolve a participant when no stable UUID is available. It mirrors the
-// Tier-1 dedup key (NormalizeParticipantName on both halves joined by "|"), so
-// the pair is unique across a roster by construction; name alone is NOT unique
-// (same name at a different dojo is allowed). Keep in sync with checkInKey in
-// handlers_participants.go and checkinPid in web-mobile/js/data.jsx.
-func participantPairKey(name, dojo string) string {
-	return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
-}
-
-// pidPairKey derives the (normalizedName, normalizedDojo) key from a composite
-// "name|dojo" pid sent by the client for legacy UUID-less rows. The raw pid is
-// split on the FIRST "|" and each half normalized separately; splitting before
-// normalizing trims whitespace around the delimiter, which normalizing the whole
-// string would not. A pid with no "|" resolves as a name with an empty dojo.
-func pidPairKey(pid string) string {
-	name, dojo, _ := strings.Cut(pid, "|")
-	return participantPairKey(name, dojo)
-}
-
-// resolveParticipantIndex finds the index of the participant addressed by pid.
-// It matches a stable UUID first; failing that; legacy participants.csv files
-// loaded without a UUID column have empty IDs (loadParticipantsNoLock mints
-// none; the first write via saveParticipantsNoLock migrates those rows to UUIDs
-// because marshalParticipantsCSV backfills empty IDs); it falls back to
-// matching the composite "name|dojo" key the client sends for ID-less rows. The
-// fallback is restricted to ID-less rows (UUID rows are only addressable by
-// their id) and the (name, dojo) pair is unique per roster, so resolution is
-// unambiguous. Returns -1 when no participant matches.
+// resolveParticipantIndex finds the index of the participant addressed by
+// pid. ID-only (operator ruling bc-pnum): a participant is a record that
+// carries an id field, so resolution matches a stable UUID and nothing
+// else. An empty pid, or one that names no participant in this roster
+// (including a legacy composite "name|dojo" string a pre-bc-pnum client
+// might still send for an ID-less row), resolves to nothing -- returns -1 --
+// rather than falling back to a name/dojo match. Callers surface that as
+// ErrParticipantNotFound (see updateParticipantNoLock), whatever the HTTP
+// handler already does for an unknown id.
 func resolveParticipantIndex(players []domain.Player, pid string) int {
 	if pid == "" {
 		return -1
 	}
 	for i := range players {
 		if players[i].ID != "" && players[i].ID == pid {
-			return i
-		}
-	}
-	want := pidPairKey(pid)
-	for i := range players {
-		if players[i].ID != "" {
-			continue
-		}
-		if participantPairKey(players[i].Name, players[i].Dojo) == want {
 			return i
 		}
 	}
@@ -537,22 +508,20 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 		return BulkCheckInResult{}, err
 	}
 
-	// Two lookup maps so resolution matches resolveParticipantIndex: UUID rows
-	// by their stable id, legacy UUID-less rows by their (name, dojo) pair key.
+	// ID-only lookup (operator ruling bc-pnum): a participant is resolved by
+	// stable id and nothing else. A pid naming no participant's id --
+	// including a legacy composite "name|dojo" string a pre-bc-pnum client
+	// might still send for an ID-less row -- is simply not found.
 	byID := make(map[string]int, len(players))
-	byKey := make(map[string]int, len(players))
 	for i := range players {
 		if players[i].ID != "" {
 			byID[players[i].ID] = i
-		} else {
-			byKey[participantPairKey(players[i].Name, players[i].Dojo)] = i
 		}
 	}
 
-	// Deduplicate by resolved participant index so that semantically equivalent
-	// pids (same normalized name|dojo with different whitespace/case) don't count
-	// the same participant twice. NotFound pids are deduped by raw string because
-	// there is no index to compare against.
+	// Deduplicate by resolved participant index so that a pid repeated in the
+	// request doesn't count the same participant twice. NotFound pids are
+	// deduped by raw string because there is no index to compare against.
 	seenIdx := make(map[int]struct{}, len(pids))
 	seenNotFound := make(map[string]struct{})
 	result := BulkCheckInResult{NotFound: []string{}}
@@ -561,9 +530,6 @@ func (s *Store) BulkCheckIn(compID string, pids []string) (BulkCheckInResult, er
 			continue
 		}
 		idx, ok := byID[pid]
-		if !ok {
-			idx, ok = byKey[pidPairKey(pid)]
-		}
 		if !ok {
 			if _, dup := seenNotFound[pid]; !dup {
 				result.NotFound = append(result.NotFound, pid)

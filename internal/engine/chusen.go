@@ -57,19 +57,20 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 			return false
 		}
 	}
-	// Membership and win counts key on competitor IDENTITY rather than the
-	// display name, matching applyTiebreakSort next door. Note what this is
-	// and is not: chusen is team-only (ChusenCandidates returns nil for an
-	// individual competition) and two TEAMS may not share a name even across
-	// dojos (checkNewTeamNameCollisions, state/participants.go), so unlike the
-	// individual tiebreak path this is NOT a routinely reachable collision.
-	// It is kept because the team-name rule has one documented hole -- an
-	// unreadable config.md disables it for that write, logged and allowed
-	// through -- and because a bare-name key would then credit one namesake's
-	// daihyosen win to the other, reading a decided group as still tied or a
-	// genuine tie as decided; either answer changes who advances.
-	// generatePoolDaihyosenMatches stamps SideAID/SideBID/WinnerID, so the
-	// ids are there to key on and the hardening costs nothing.
+	// Membership and win counts key on competitor identity by participant id
+	// ONLY (operator ruling bc-pnum), matching applyTiebreakSort next door.
+	// Note what this is and is not: chusen is team-only (ChusenCandidates
+	// returns nil for an individual competition) and two TEAMS may not share
+	// a name even across dojos (checkNewTeamNameCollisions,
+	// state/participants.go), so unlike the individual tiebreak path this is
+	// NOT a routinely reachable collision. It is kept because the team-name
+	// rule has one documented hole -- an unreadable config.md disables it for
+	// that write, logged and allowed through -- and because a bare-name key
+	// would then credit one namesake's daihyosen win to the other, reading a
+	// decided group as still tied or a genuine tie as decided; either answer
+	// changes who advances. generatePoolDaihyosenMatches stamps
+	// SideAID/SideBID/WinnerID, so the ids are there to key on and there is
+	// no fallback if they were ever missing.
 	resolve := newGroupKeyResolver(group)
 
 	dhWins := make(map[string]int, len(group))
@@ -78,31 +79,19 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 		if !IsPoolDaihyosenMatchID(m.ID) || m.Status != state.MatchStatusCompleted {
 			continue
 		}
-		keyA, okA := resolve(m.SideAID, m.SideA)
-		keyB, okB := resolve(m.SideBID, m.SideB)
+		keyA, okA := resolve(m.SideAID)
+		keyB, okB := resolve(m.SideBID)
 		if !okA || !okB || keyA == keyB {
 			continue
 		}
 		dhCompleted++
 		// The winner is attributed EXACTLY as applyTiebreakSort attributes a
-		// TB/DH win: resolveWinnerSide over the SIDE ids/names (never
-		// resolve(m.WinnerID, m.Winner) directly, which -- with WinnerID
-		// unstamped, e.g. a hantei-decided bout before RecordDecisionTx's own
-		// fix -- falls straight to the group's bare-name index and can pick a
-		// member who isn't even one of THIS bout's two sides). A hikiwake
-		// (Winner == "", or a mark that resolves to neither side) counts
-		// toward round completeness but adds no win, so an all-drawn round
-		// leaves every member on 0 wins - a duplicate, which correctly
-		// surfaces as needing chusen below.
+		// TB/DH win: resolveWinnerSide over the SIDE ids (id-only, operator
+		// ruling bc-pnum). A hikiwake (WinnerID == "", or a mark that
+		// resolves to neither side) counts toward round completeness but
+		// adds no win, so an all-drawn round leaves every member on 0 wins -
+		// a duplicate, which correctly surfaces as needing chusen below.
 		winnerIsA, winnerIsB := resolveWinnerSide(m)
-		// A same-name pairing (both sides share a display name, no ids to
-		// tell them apart) can make Winner match SideA and SideB at once, so
-		// resolveWinnerSide returns (true, true) rather than one true. The
-		// switch below tries winnerIsA FIRST, so that degenerate row credits
-		// AKA (SideA) by convention -- the same aka-first tie-break Go's
-		// isWinForSide/TeamResultFrom/SideMarksLR and the JS mirror
-		// (subWinnerSides) apply for the identical reason -- rather than
-		// crediting nobody or picking arbitrarily.
 		switch {
 		case winnerIsA:
 			dhWins[keyA]++
@@ -125,7 +114,7 @@ func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResu
 	}
 	seen := make(map[int]bool, len(group))
 	for _, s := range group {
-		count := dhWins[standingsPlayerKey(s.Player.ID, s.Player.Name)]
+		count := dhWins[standingsPlayerKey(s.Player.ID)]
 		if seen[count] {
 			return true
 		}

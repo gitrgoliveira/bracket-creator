@@ -79,6 +79,16 @@ function rdApiPid(p) {
   return checkinApiPid(p);
 }
 
+// bc-pnum (Opus review round): an id-less row has no safe wire identifier
+// (rdApiPid returns "" for it). The check-in control and RdEditModal's Save
+// are disabled for such a row rather than sending a write that can only
+// 404 or hit no route; this is the exact remedy sentence
+// internal/helper/participant_ids.go MissingParticipantIDsMessage uses (and
+// the Overview data-issues notice renders verbatim), mirrored here so an
+// operator seeing either surface reads the same words. Same constant as
+// admin_participants.jsx's NO_ID_HINT.
+const RD_NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
+
 // Subsequence score for one token against a normalized haystack. Returns null
 // when the token isn't even a subsequence; otherwise a score where lower is a
 // better match (contiguous substrings beat scattered subsequences, and earlier
@@ -289,13 +299,16 @@ function RdOtherChips({ entries, onToggle, busy, label }) {
         // which is already the row's name, so we don't repeat it on the chip.
         const tag = rdPlayerTag(comp, player);
         const num = tag.kind === "number" ? tag.value : null;
+        // bc-pnum: each chip is one participant record in ONE OTHER
+        // competition, so id-less here is as unambiguous as the main row.
+        const idLess = !player.id;
         return (
           <button
             type="button"
             key={comp.id}
             className={`rd-chip${checked ? " is-checked" : ""}`}
-            disabled={busy}
-            title={checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`}
+            disabled={busy || idLess}
+            title={idLess ? RD_NO_ID_HINT : (checked ? `Checked in: ${comp.name}` : `Check in for ${comp.name}`)}
             onClick={() => !checked && onToggle(comp.id, rdApiPid(player), true)}
           >
             <span className="rd-chip__mark" aria-hidden="true">{checked ? <RdCheckIcon /> : null}</span>
@@ -332,6 +345,17 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
     ? (presence === "all" ? "true" : presence === "partial" ? "mixed" : "false")
     : checked;
 
+  // bc-pnum (Opus review round): a "comp" row is exactly one participant in
+  // one competition, so an id-less row can never check in (rdApiPid returns
+  // "" for it -- disable rather than send a write that can only 404).
+  // "all" mode aggregates one PERSON across every competition they entered
+  // (rdBuildPeopleIndex groups by name+dojo, not by id); `player` here is
+  // only entries[0]'s representative record, which may carry an id even
+  // when a SIBLING entry doesn't, so this narrower disable does not extend
+  // to that mode -- checkPersonEntries already skips (rather than
+  // misdirects) any entry whose own id is missing.
+  const idLessCompRow = mode === "comp" && !player.id;
+
   return (
     <div className={`rd-row ${stateClass}${isLast ? " rd-row--last" : ""}`}>
       <button
@@ -340,7 +364,8 @@ function RdRow({ mode, comp, player, zekken, entries, others, checked, presence,
         role="checkbox"
         aria-checked={ariaChecked}
         aria-label={checkLabel}
-        disabled={busy}
+        disabled={busy || idLessCompRow}
+        title={idLessCompRow ? RD_NO_ID_HINT : undefined}
         onClick={onPrimary}
       >
         <span className="rd-check__box" aria-hidden="true">
@@ -500,6 +525,12 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
     }
   };
 
+  // bc-pnum (Opus review round): PUT .../participants/ with an empty id
+  // segment (rdApiPid returns "" for this row) matches no route at all;
+  // block the write client-side rather than toasting the resulting generic
+  // failure.
+  const idLess = !player.id;
+
   return (
     <Modal
       title={`Edit ${isTeam ? "team" : "competitor"}`}
@@ -507,9 +538,10 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
       dismissable={!busy}
       footer={<>
         <button type="button" className="btn btn--ghost" onClick={onClose} disabled={busy}>Cancel</button>
-        <button type="button" className="btn btn--primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
+        <button type="button" className="btn btn--primary" onClick={save} disabled={busy || idLess} title={idLess ? RD_NO_ID_HINT : undefined}>{busy ? "Saving…" : "Save changes"}</button>
       </>}
     >
+      {idLess && <p className="rd-edit__note">{RD_NO_ID_HINT}</p>}
       <div className="rd-walkup__grid">
         <label className="field">
           <span className="field__label">{isTeam ? "Team name" : "Name"}</span>

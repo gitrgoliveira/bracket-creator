@@ -11,6 +11,19 @@ const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: u
 const pluralize = window.pluralize;
 const EmptyState = window.EmptyState;
 
+// bc-pnum (Opus review round): an id-less row (checkinApiPid returns "" for
+// it) has no safe wire identifier at all. Sending its check-in or replace
+// write anyway reaches the wrong outcome either way: PUT
+// .../participants//checkin hits the handler and 404s "participant not
+// found" about a row the operator is looking right at; PUT
+// .../participants/ (empty id segment) matches no route at all and toasts a
+// generic failure. Both controls are disabled client-side instead, with
+// this hint -- the exact remedy sentence internal/helper/participant_ids.go
+// MissingParticipantIDsMessage uses (and 1b's Overview data-issues notice
+// renders verbatim), so an operator seeing either surface reads the same
+// words.
+const NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
+
 // EscapeListener: registers the global Escape→onClose handler only while
 // it's mounted. Used inside conditionally-rendered modals so the listener's
 // lifetime tracks the modal's, avoiding the "always-active preventDefault"
@@ -1044,10 +1057,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div className="field__label">Dan grade</div>
                     <input className="input" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
-                  <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
+                  {replaceTarget.id ? (
+                    <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
+                  ) : (
+                    // bc-pnum: PUT .../participants/ with an empty id segment
+                    // matches no route at all (checkinApiPid returns "" for
+                    // this row); block the write client-side rather than
+                    // toasting the resulting generic failure.
+                    <div className="field__hint">{NO_ID_HINT}</div>
+                  )}
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button type="button" className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
-                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
+                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim() || !replaceTarget.id} title={replaceTarget.id ? undefined : NO_ID_HINT} onClick={handleReplaceParticipant}>
                       {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
@@ -1107,9 +1128,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
+                          disabled={!p.id}
                           onChange={(e) => toggleCheckIn(window.checkinApiPid(p), e.target.checked)}
-                          style={{ width: 18, height: 18, cursor: "pointer" }}
+                          style={{ width: 18, height: 18, cursor: p.id ? "pointer" : "not-allowed" }}
                           aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
+                          title={p.id ? undefined : NO_ID_HINT}
                         />
                       </div>
                     )}

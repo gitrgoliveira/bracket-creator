@@ -195,3 +195,122 @@ describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum
     }
   });
 });
+
+// bc-pnum (Opus review round, item 4): an id-less row's rdApiPid is "", so a
+// check-in / chip / edit-save write for it can only 404 (empty id segment
+// matches no route, or matches nothing on the server). All three controls
+// are disabled client-side for such a row instead, each with a hint mirroring
+// helper.MissingParticipantIDsMessage's remedy sentence. Unlike the "all"
+// mode checkbox exercised above, these three controls only appear/apply in
+// "comp" mode (a single competition selected via the rail), where `player`
+// unambiguously names one participant record.
+//
+// Enters "comp" mode for the FIRST real competition in the rail (index 0 is
+// always the pinned "All competitions" entry, per RdRail). Clicking by text
+// is ambiguous here: in "all" mode a person entered in only one competition
+// still gets a self-referential "In" chip naming that same competition, so
+// `getByText(comp.name)` can match both the rail item and the chip.
+function enterCompMode(container) {
+  const items = container.querySelectorAll('.rd-rail__item');
+  expect(items.length).toBeGreaterThan(1);
+  fireEvent.click(items[1]);
+}
+
+describe('AdminRegistrationDeskPage disables writes for an id-less row in comp mode (bc-pnum)', () => {
+  let toggleCheckIn;
+  let replaceParticipant;
+
+  beforeEach(() => {
+    toggleCheckIn = vi.fn().mockResolvedValue({});
+    replaceParticipant = vi.fn().mockResolvedValue({});
+    window.API.toggleCheckIn = toggleCheckIn;
+    window.API.replaceParticipant = replaceParticipant;
+    window.promptAdminPassword = vi.fn().mockResolvedValue('admin-pw');
+  });
+
+  afterEach(() => {
+    delete window.API.toggleCheckIn;
+    delete window.API.replaceParticipant;
+    delete window.promptAdminPassword;
+  });
+
+  it('disables the row check-in control for an id-less row and sends no request', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByRole } = await mount(tournament);
+    enterCompMode(container);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato/i });
+    expect(checkbox.disabled).toBe(true);
+    expect(checkbox.getAttribute('title')).toContain('No id on file');
+    fireEvent.click(checkbox);
+    expect(toggleCheckIn).not.toHaveBeenCalled();
+  });
+
+  it('leaves the row check-in control enabled for a stamped row in comp mode', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-kenji', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByRole } = await mount(tournament);
+    enterCompMode(container);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato/i });
+    expect(checkbox.disabled).toBe(false);
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(toggleCheckIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the "also in" chip for a cross-competition entry with no id and sends no request', async () => {
+    const tournament = makeTournament({
+      competitions: [
+        {
+          id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+          checkInEnabled: true,
+          players: [{ id: 'uuid-kenji', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+        },
+        {
+          id: 'kata', name: 'Kata Individual', kind: 'individual', status: 'draw-ready',
+          checkInEnabled: true,
+          players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+        },
+      ],
+    });
+    const { container, getByTitle } = await mount(tournament);
+    enterCompMode(container); // Kenji's row in "men" shows an "Also in" chip for Kata
+    const chip = getByTitle('No id on file. Save the roster once and the ids are assigned.');
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.disabled).toBe(true);
+    fireEvent.click(chip);
+    expect(toggleCheckIn).not.toHaveBeenCalled();
+  });
+
+  it('disables the Edit modal Save button for an id-less row and sends no request', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { container, getByText } = await mount(tournament);
+    enterCompMode(container);
+    const editButton = container.querySelector('button[aria-label="Edit Kenji Sato"]');
+    expect(editButton).toBeTruthy();
+    fireEvent.click(editButton);
+
+    const saveButton = getByText('Save changes');
+    expect(saveButton.disabled).toBe(true);
+    expect(saveButton.getAttribute('title')).toContain('No id on file');
+    expect(getByText('No id on file. Save the roster once and the ids are assigned.')).toBeTruthy();
+
+    fireEvent.click(saveButton);
+    expect(replaceParticipant).not.toHaveBeenCalled();
+  });
+});

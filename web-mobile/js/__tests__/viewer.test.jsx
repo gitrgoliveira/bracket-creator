@@ -904,6 +904,43 @@ describe('LeagueMatrix (mp-f4xo)', () => {
     expect(lossCell).toBeTruthy();
   });
 
+  // bc-pnum (Opus review round, item 7): the shared `pool` fixture above
+  // gained ids on every player specifically so the (now id-only) matchMap
+  // lookup would find completedMatch/pendingMatch/runningMatch, which
+  // dropped this suite's only coverage of a genuinely id-less roster (the
+  // pre-fix fixture had id-LESS players but still matched id-CARRYING match
+  // sides, so it exercised a player/match id mismatch resolved by name --
+  // not the same thing as neither side ever carrying an id at all). Pin
+  // that legacy participants.csv data predating UUID persistence -- pool
+  // players AND match sides both id-less -- still renders via the name-pair
+  // fallback pkey/matchMap use only when a side genuinely has no id.
+  it('renders W/L cells for a completed match when every id is empty (legacy fully-id-less data)', () => {
+    const idLessPool = {
+      poolName: 'Pool A',
+      players: [
+        { id: '', name: 'Alice' },
+        { id: '', name: 'Bob' },
+        { id: '', name: 'Charlie' },
+      ],
+    };
+    const idLessMatch = {
+      id: 'Pool A-1',
+      sideA: { id: '', name: 'Alice' },
+      sideB: { id: '', name: 'Bob' },
+      status: 'completed',
+      winner: { id: '', name: 'Alice' },
+      ipponsA: ['M'],
+      ipponsB: [],
+      decision: 'fought',
+    };
+    const tree = runtime.mount(PM, { pool: idLessPool, matches: [idLessMatch], tweaks: {} });
+    const cells = allCells(tree);
+    const winCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--win'));
+    const lossCell = cells.find(c => c.props?.className?.includes('league-matrix__cell--loss'));
+    expect(winCell).toBeTruthy();
+    expect(lossCell).toBeTruthy();
+  });
+
   // Engi (flag-count scoring) is the ONLY competition type where a matrix
   // cell shows a NUMBER; every other type shows ippon letters (tested
   // above via completedMatch's "M"). flagsA=sideA=Aka, flagsB=sideB=Shiro.

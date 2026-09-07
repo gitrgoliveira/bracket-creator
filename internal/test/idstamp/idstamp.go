@@ -1,13 +1,8 @@
 // Package idstamp provides id-stamping helpers for hand-built test fixtures
 // written before the bc-pnum operator ruling ("a record that carries an id
-// field is resolved by id only; an empty id resolves to NOTHING"). Only
-// internal/engine's test files import it today; internal/export,
-// internal/mobileapp and internal/state's own fixture repairs used
-// hand-added literal ids instead, so this package has one caller, not four
-// -- nothing about its own shape assumes otherwise, and a second caller is
-// free to import it exactly as internal/engine does. It is a SEPARATE
-// package from internal/test (rather than living
-// in internal/test/helpers.go alongside the domain-only fixtures there)
+// field is resolved by id only; an empty id resolves to NOTHING"). It is a
+// SEPARATE package from internal/test (rather than living in
+// internal/test/helpers.go alongside the domain-only fixtures there)
 // specifically because it needs internal/state and internal/helper types
 // (state.MatchResult, helper.Pool, state.PlayerStanding): internal/state's
 // and internal/helper's OWN in-package test files (package state / package

@@ -1362,16 +1362,17 @@ describe('item 7: non-points decisions advance to next match', () => {
 });
 
 // bc-pnum: sideIsWithdrawnPlayer backs RemainingMatchesPanel's match filter,
-// award() side resolution, and its opponent-render lookup. It used to be
-// three copies of `(wid && side.id===wid) || (wname && side.name===wname)`,
-// an OR that counts a name hit even when both sides carry ids and differ.
+// award() side resolution, and its opponent-render lookup. It delegates to
+// sameCompetitor (competitor_identity.jsx), the one owner of the id/name
+// attribution rule -- never an OR that could count a name hit even when
+// both sides carry ids and differ.
 describe('sideIsWithdrawnPlayer (RemainingMatchesPanel identity, bc-pnum)', () => {
   it('decides by id when both the withdrawn player and the side carry one', () => {
     const side = { id: 'S2', name: 'Sato' };
     // Same name, different id: an id compare must say "no", never fall
     // through to the name hit.
-    expect(sideIsWithdrawnPlayer(side, 'S1', 'Sato')).toBe(false);
-    expect(sideIsWithdrawnPlayer(side, 'S2', 'Sato')).toBe(true);
+    expect(sideIsWithdrawnPlayer(side, { id: 'S1', name: 'Sato' })).toBe(false);
+    expect(sideIsWithdrawnPlayer(side, { id: 'S2', name: 'Sato' })).toBe(true);
   });
 
   // Canonical bc-pnum case: two "Sato" entries from different dojos. The
@@ -1381,20 +1382,42 @@ describe('sideIsWithdrawnPlayer (RemainingMatchesPanel identity, bc-pnum)', () =
   it('never lights an unrelated same-name/different-dojo participant', () => {
     const withdrawn = { id: 'S1', name: 'Sato', dojo: 'Tokyo' };
     const otherSideSameName = { id: 'S2', name: 'Sato', dojo: 'Osaka' };
-    expect(sideIsWithdrawnPlayer(otherSideSameName, withdrawn.id, withdrawn.name)).toBe(false);
+    expect(sideIsWithdrawnPlayer(otherSideSameName, withdrawn)).toBe(false);
   });
 
   it('falls back to name only when NEITHER side carries an id', () => {
-    expect(sideIsWithdrawnPlayer({ name: 'Sato' }, '', 'Sato')).toBe(true);
-    expect(sideIsWithdrawnPlayer({ name: 'Tanaka' }, '', 'Sato')).toBe(false);
+    expect(sideIsWithdrawnPlayer({ name: 'Sato' }, { id: '', name: 'Sato' })).toBe(true);
+    expect(sideIsWithdrawnPlayer({ name: 'Tanaka' }, { id: '', name: 'Sato' })).toBe(false);
   });
 
   it('resolves to false (never guesses by name) when only one side carries an id', () => {
     // Withdrawn player has a real id, but this match side has none (e.g. a
     // bracket row): no id to decide with, and a name guess is not safe.
-    expect(sideIsWithdrawnPlayer({ name: 'Sato' }, 'S1', 'Sato')).toBe(false);
+    expect(sideIsWithdrawnPlayer({ name: 'Sato' }, { id: 'S1', name: 'Sato' })).toBe(false);
     // Reverse: this side has an id but the withdrawn player record doesn't.
-    expect(sideIsWithdrawnPlayer({ id: 'S2', name: 'Sato' }, '', 'Sato')).toBe(false);
+    expect(sideIsWithdrawnPlayer({ id: 'S2', name: 'Sato' }, { id: '', name: 'Sato' })).toBe(false);
+  });
+
+  // Item 7 (UI-reachable fixture): the same mixed-case refusal, exercised
+  // through the SAME shape RemainingMatchesPanel actually builds --
+  // withdrawnPlayer as resolved by makeSubmitDecision's kiken branch
+  // (match.sideA/sideB, an {id,name} object with a real UUID) against a
+  // remaining match's side that resolveSide left id-less (a bracket row
+  // api_serializers.jsx could not resolve at all).
+  it('UI-reachable: a kiken-resolved withdrawn player never lights an id-less remaining-match side sharing its name', () => {
+    // Shape makeSubmitDecision's kiken branch actually produces (see that
+    // test file's own withdrawn-player assertions): match.sideA/sideB.
+    const originatingMatch = {
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: 'S9', name: 'Someone Else', dojo: 'Nagoya' },
+    };
+    const withdrawnPlayer = originatingMatch.sideA; // aka withdrew.
+    // A different, later bracket round match whose side never got a real id
+    // (resolveSide's own residual "not found" fallback would invent one from
+    // the name in production; here we model the ALREADY id-less shape a
+    // caller must not misattribute).
+    const remainingMatchSide = { id: '', name: 'Sato' };
+    expect(sideIsWithdrawnPlayer(remainingMatchSide, withdrawnPlayer)).toBe(false);
   });
 });
 

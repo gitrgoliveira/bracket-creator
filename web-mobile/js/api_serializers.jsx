@@ -22,6 +22,7 @@
 // unified `score` object the bracket card renderer can consume.
 
 import { realIppons, hanteiDecided, placeHtForWinner, stripHt } from './result_slot.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -266,7 +267,13 @@ function normalizeMatch(m, playerMap) {
             const byName = playerMap?.[name];
             if (byName && (!flatId || byName.id === flatId)) p = byName;
         }
-        const base = p ? { ...p } : { id: flatId || name, name };
+        // bc-pnum (Opus review round): never invent an id from the name. A
+        // side absent from the player map entirely (not found by flat id or
+        // by name) keeps id "" -- exactly like buildPlayerMap now does for
+        // an id-less participant -- so every downstream "does this side
+        // carry an id" check reads it truthfully instead of matching itself
+        // to any other side that happens to share the display name.
+        const base = p ? { ...p } : { id: flatId || "", name };
         if (flatId) base.id = flatId;
         return base;
     };
@@ -296,20 +303,12 @@ function normalizeMatch(m, playerMap) {
         // surface agreeing on one side beats surfaces disagreeing.
         norm.winner = resolveSide(norm.winner, m.winnerId);
     }
-    // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
-    // {id,name} above with the server's authoritative flat ids), so same-name /
-    // different-dojo finalists don't collide onto the wrong side and swap the
-    // displayed winner/loser tallies. Fall back to name only when an id isn't
-    // present on both.
-    const sideAWon = (w, a) => {
-        if (!w || !a) return false;
-        const wId = typeof w === "object" ? w.id || "" : "";
-        const aId = typeof a === "object" ? a.id || "" : "";
-        if (wId && aId) return wId === aId;
-        const wn = typeof w === "object" ? w.name : w;
-        const an = typeof a === "object" ? a.name : a;
-        return wn === an;
-    };
+    // Did sideA win? sameCompetitor (competitor_identity.jsx, the one owner
+    // of the attribution rule): id decides whenever BOTH sideA and winner
+    // carry one (same-name/different-dojo finalists never collide onto the
+    // wrong side), name only when NEITHER does, and a mixed pair is never
+    // guessed at.
+    const sideAWon = (w, a) => !!w && !!a && sameCompetitor(w, a);
     // Build score from ipponsA/ipponsB. Pool and bracket matches converge on
     // this one shape (both carry ipponsA/ipponsB arrays; scoreA/scoreB
     // strings never appear on the wire), so one branch covers both.

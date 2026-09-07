@@ -16,6 +16,7 @@ import { writeDidNotLand } from './write_result.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 const { useState, useRef: useRefV, useCallback } = React;
 
@@ -166,8 +167,11 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // ---------------------------------------------------------------------------
 
 export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
-  const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
-  const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+  // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
+  // bracket.jsx's MatchCard for why the naked equality lights both sides
+  // once both are id-less).
+  const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
+  const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.

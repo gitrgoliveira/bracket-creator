@@ -6,6 +6,7 @@ const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEff
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { realIppons } from './result_slot.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -282,24 +283,15 @@ function sideMarks(decision, decidedByHantei) {
 
 // winnerSideLR: which DISPLAY side won, under the SHIRO-left convention every
 // score string uses (sideB = Shiro = left, sideA = Aka = right). Returns
-// "left" | "right" | null (no winner recorded, or drifted data). Accepts both
-// object sides ({id, name}) and bare name strings.
+// "left" | "right" | null (no winner recorded, drifted data, or a mixed
+// id/no-id pair that sameCompetitor refuses to guess on). Accepts both
+// object sides ({id, name}) and bare name strings (routed through
+// sameCompetitor, competitor_identity.jsx — the one owner of the id/name
+// attribution rule).
 function winnerSideLR(m) {
   if (!m || !m.winner) return null;
-  const idOf = s => (s && typeof s === "object" ? s.id : null);
-  const nameOf = s => (s && typeof s === "object" ? s.name : s);
-  const wId = idOf(m.winner);
-  const wName = nameOf(m.winner);
-  // Prefer id equality: two different-dojo competitors may share a display
-  // name, so a name match must NEVER override the ids that disambiguate them
-  // (mirrors sideAWon in api_serializers.jsx). Fall back to name only when an
-  // id is absent on the winner or on that side.
-  const matchesSide = side => {
-    const sId = idOf(side);
-    return (wId && sId) ? wId === sId : (!!wName && wName === nameOf(side));
-  };
-  if (matchesSide(m.sideB)) return "left";
-  if (matchesSide(m.sideA)) return "right";
+  if (sameCompetitor(m.winner, m.sideB)) return "left";
+  if (sameCompetitor(m.winner, m.sideA)) return "right";
   return null;
 }
 
@@ -482,8 +474,12 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
 PlayerLine.displayName = "PlayerLine";
 
 const MatchCard = React.memo(({ match, variant, showDojo, onClick, highlighted, matchRef, highlightPlayers, matchNum, isEngi, slotLabel }) => {
-  const aWin = match.winner && match.sideA && match.winner.id === match.sideA.id;
-  const bWin = match.winner && match.sideB && match.winner.id === match.sideB.id;
+  // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` -- with
+  // both sides id-less (buildPlayerMap keeps id "" for an id-less
+  // participant), the naked equality compared two empty strings and lit
+  // BOTH sides as winner.
+  const aWin = !!match.winner && !!match.sideA && sameCompetitor(match.winner, match.sideA);
+  const bWin = !!match.winner && !!match.sideB && sameCompetitor(match.winner, match.sideB);
   const running = match.status === "running";
   // score.type === "bye" is CLIENT-ONLY: the sole producers are the sample-data
   // generators in data.jsx (advanceByes / simulateRounds), never a server

@@ -416,9 +416,17 @@ describe('winnerSideLR: id disambiguates same-name opponents', () => {
     expect(s).toBe('Kiken vs ○○');
   });
 
-  it('falls back to name when an id is absent (bare-string winner / legacy data)', () => {
-    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: 'Bob' })).toBe('left');
+  it('falls back to name only when NEITHER side nor the winner carries an id (fully id-less legacy data)', () => {
     expect(winnerSideLR({ sideA: 'Alice', sideB: 'Bob', winner: 'Alice' })).toBe('right');
+  });
+
+  // bc-pnum (Opus review round): sameCompetitor never guesses on a MIXED
+  // pair. A bare-string winner carries no id (same as an object whose id is
+  // ""), so pairing it against an id-carrying side is exactly the mixed
+  // case: winnerSideLR now returns null rather than falling back to name,
+  // even though the id-less winner's name happens to match one side.
+  it('returns null (never guesses) when the winner carries no id but the sides do', () => {
+    expect(winnerSideLR({ sideA: { id: 'a1', name: 'Alice' }, sideB: { id: 'b1', name: 'Bob' }, winner: 'Bob' })).toBe(null);
   });
 
   it('returns null with no winner or a drifted winner', () => {

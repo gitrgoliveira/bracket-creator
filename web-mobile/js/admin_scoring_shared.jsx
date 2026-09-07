@@ -8,6 +8,7 @@ const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { writeDidNotLand, writeWasSuperseded, SUPERSEDED_REASON, SUPERSEDED_ADVICE } from './write_result.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 // Kendo best-of-3 cap. Mirrors the server-side `maxIpponsPerSide` in
 // internal/mobileapp/validation.go: the bout ends when one side reaches
@@ -671,22 +672,12 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
 }
 
 // bc-pnum: does `side` (a match's sideA/sideB, {id,name}) refer to the
-// withdrawn player identified by (wid, wname)? An id decides whenever
-// BOTH the withdrawn player and this side carry one -- never an OR with
-// name, which would count a name hit even when both ids are present and
-// differ (the previous shape: `(wid && side.id===wid) || (wname &&
-// side.name===wname)` -- the second clause fires independently of the
-// first, so a same-name/different-dojo participant on this side is
-// wrongly read as the withdrawn player whenever the id compare fails).
-// Name is the fallback only when NEITHER carries an id; the mixed case
-// (one has an id, the other doesn't) has no id to decide with and no
-// name-only case to safely fall back on, so it resolves to false rather
-// than guessing.
-function sideIsWithdrawnPlayer(side, wid, wname) {
-  const sid = side?.id || "";
-  if (wid && sid) return wid === sid;
-  if (!wid && !sid) return !!wname && side?.name === wname;
-  return false;
+// withdrawn player? Delegates to sameCompetitor (competitor_identity.jsx,
+// the one owner of the attribution rule): id decides whenever BOTH the
+// withdrawn player and this side carry one, name only when NEITHER does,
+// and the mixed case (one has an id, the other doesn't) is never guessed.
+function sideIsWithdrawnPlayer(side, withdrawnPlayer) {
+  return sameCompetitor(withdrawnPlayer, side);
 }
 
 // T098: "Remaining matches for [player]" panel. After a kiken decision lands,
@@ -719,11 +710,9 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
         const all = window.compMatchesForCompetition
           ? window.compMatchesForCompetition(detail.config || detail, detail)
           : [];
-        const wname = (withdrawnPlayer?.name || "").trim();
-        const wid = withdrawnPlayer?.id || "";
         const matchesForPlayer = all.filter(m => {
           if (m.status !== "scheduled") return false;
-          return sideIsWithdrawnPlayer(m.sideA, wid, wname) || sideIsWithdrawnPlayer(m.sideB, wid, wname);
+          return sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer) || sideIsWithdrawnPlayer(m.sideB, withdrawnPlayer);
         });
         setMatches(matchesForPlayer);
       } catch (e) {
@@ -737,9 +726,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
     // Figure out which side the withdrawn player occupies in THIS match: 
     // that's the side that gets the fusenpai (default loss). Pool matches:
     // sideA = Aka, sideB = Shiro. Same wire mapping in bracket matches.
-    const wname = (withdrawnPlayer?.name || "").trim();
-    const wid = withdrawnPlayer?.id || "";
-    const isOnA = sideIsWithdrawnPlayer(m.sideA, wid, wname);
+    const isOnA = sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer);
     const decisionBy = isOnA ? "aka" : "shiro";
     setBusyId(m.id);
     // Clear any previous verdict before this attempt. Without it the panel's
@@ -794,9 +781,7 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
       {matches && matches.length > 0 && (
         <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 6 }}>
           {matches.map(m => {
-            const wname = (withdrawnPlayer?.name || "").trim();
-            const wid = withdrawnPlayer?.id || "";
-            const isOnA = sideIsWithdrawnPlayer(m.sideA, wid, wname);
+            const isOnA = sideIsWithdrawnPlayer(m.sideA, withdrawnPlayer);
             const opponent = isOnA ? m.sideB : m.sideA;
             return (
               <li key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12 }}>

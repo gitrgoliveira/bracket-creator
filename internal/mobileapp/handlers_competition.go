@@ -2567,9 +2567,11 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		poolId := c.Param("poolId")
 		var req struct {
-			// PlayerName is accepted for backward-compatible display only
-			// (operator ruling bc-pnum): it is never used to select or
-			// disambiguate a competitor. PlayerID is what selects.
+			// PlayerName is DEPRECATED: bound for older clients that still
+			// send it, but accepted and ignored entirely -- it is never
+			// validated, never used to select or disambiguate a competitor,
+			// and never persisted. A pool-rank override is a record
+			// resolved by id only (operator ruling bc-pnum).
 			PlayerName string `json:"playerName"`
 			// PlayerID is REQUIRED (bc-pnum): a pool-rank override is a
 			// record resolved by id only, so there is no playerName/
@@ -2587,14 +2589,6 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		playerID := strings.TrimSpace(req.PlayerID)
 		if playerID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "playerId is required"})
-			return
-		}
-		// playerName is accepted only for length defense-in-depth and is
-		// never used to resolve the target (see the request struct's own
-		// comment above).
-		playerName := strings.TrimSpace(req.PlayerName)
-		if err := validateMaxLen("playerName", playerName, MaxLenPlayerName); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 		if req.Rank <= 0 {
@@ -2652,19 +2646,16 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Resolve the override target's canonical dojo from the pool's OWN
-		// roster (id-only, operator ruling bc-pnum): playerId must name a
-		// player actually in this pool, or the request is rejected.
-		resolvedName, resolvedDojo, resolveErr := resolvePoolOverrideTarget(targetPool.Players, playerID)
-		if resolveErr != nil {
+		// Validate playerId names a player actually in this pool (id-only,
+		// operator ruling bc-pnum), or the request is rejected. The
+		// resolved name/dojo are not needed past this check: the override
+		// is saved keyed by playerId alone (SaveRankOverrideChanged).
+		if _, _, resolveErr := resolvePoolOverrideTarget(targetPool.Players, playerID); resolveErr != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
 			return
 		}
-		if playerName == "" {
-			playerName = resolvedName
-		}
 
-		changed, err := store.SaveRankOverrideChanged(id, poolId, playerID, playerName, resolvedDojo, req.Rank)
+		changed, err := store.SaveRankOverrideChanged(id, poolId, playerID, req.Rank)
 		if err != nil {
 			internalError(c, err)
 			return

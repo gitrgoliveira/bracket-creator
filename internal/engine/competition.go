@@ -413,12 +413,9 @@ func leagueGroupHasDH(group []state.PlayerStanding, allMatches []state.MatchResu
 // matches are injected only for advancement-affecting groups, so a below-cut
 // group has no DH bouts and groupNeedsChusen returns false. When it does return
 // true the operator resolves the group via the chusen (drawing lots) panel,
-// which writes poolRanks (pool name -> helper.CompetitorKey(id, name, dojo) ->
-// rank; lookupPoolRankOverride reads ONLY that key -- the separate legacy
-// bare-name overrides[name] fallback for pre-identity overrides.json data was
-// removed under bc-pnum, see lookupPoolRankOverride's own doc comment); a
-// group whose every member has an override is resolved and no longer blocks
-// completion.
+// which writes poolRanks (pool name -> helper.CompetitorKey(id, "", "") ->
+// rank, i.e. participant id only, bc-pnum); a group whose every member has
+// an override is resolved and no longer blocks completion.
 func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []state.MatchResult, poolRanks map[string]map[string]int) bool {
 	for poolName, poolStandings := range standings {
 		for _, positions := range detectPoolTies(poolStandings) {

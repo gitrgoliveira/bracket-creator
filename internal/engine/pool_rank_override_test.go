@@ -69,9 +69,9 @@ func TestCalculatePoolStandings_Override_SameNameDifferentDojo(t *testing.T) {
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	// Operator records a chusen (drawing-lots) result for OSAKA Tanaka Kenji
-	// only, using her real id/dojo exactly as the mobileapp handler's
-	// resolvePoolOverrideTarget would resolve them from the pool roster.
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", snIDOsaka, "Tanaka Kenji", "Osaka", 1))
+	// only, by her real id, exactly as the mobileapp handler resolves it
+	// from the pool roster.
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", snIDOsaka, 1))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)

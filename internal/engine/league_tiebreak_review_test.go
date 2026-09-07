@@ -52,10 +52,9 @@ func TestLeagueTiebreakCandidates_EmptyUntilRegularComplete(t *testing.T) {
 
 // TestGenerateLeagueTiebreakMatches_RejectsBadIDs is the bc-pnum conversion of
 // the former TestGenerateLeagueTiebreakMatches_RejectsBadNames: selection is
-// now id-only (operator ruling bc-pnum -- tiedTeamNames is accepted but never
-// used to select), so "duplicate or unknown" is now a property of
-// tiedTeamIDs, not of names. An unknown or duplicate NAME can no longer reach
-// this validation at all, since names are never looked at.
+// now id-only (operator ruling bc-pnum), so "duplicate or unknown" is a
+// property of tiedTeamIDs, not of names. An unknown or duplicate NAME can no
+// longer reach this validation at all, since names are never looked at.
 func TestGenerateLeagueTiebreakMatches_RejectsBadIDs(t *testing.T) {
 	compID := "lt-badids"
 	eng, store := setupTeamPoolComp(t, compID, true) // Alpha/Beta/Gamma all tied, complete
@@ -63,15 +62,15 @@ func TestGenerateLeagueTiebreakMatches_RejectsBadIDs(t *testing.T) {
 	alphaID, betaID, gammaID := ids[0], ids[1], ids[2]
 
 	t.Run("unknown team id", func(t *testing.T) {
-		_, err := eng.GenerateLeagueTiebreakMatches(compID, nil, []string{alphaID, "id-does-not-exist"})
+		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{alphaID, "id-does-not-exist"})
 		require.Error(t, err, "an unknown team id must be rejected, not silently dropped")
 	})
 	t.Run("duplicate team id", func(t *testing.T) {
-		_, err := eng.GenerateLeagueTiebreakMatches(compID, nil, []string{alphaID, alphaID})
+		_, err := eng.GenerateLeagueTiebreakMatches(compID, []string{alphaID, alphaID})
 		require.Error(t, err, "a duplicate team id must be rejected")
 	})
 	t.Run("valid group succeeds", func(t *testing.T) {
-		injected, err := eng.GenerateLeagueTiebreakMatches(compID, nil, []string{alphaID, betaID, gammaID})
+		injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{alphaID, betaID, gammaID})
 		require.NoError(t, err)
 		assert.Len(t, injected, 3, "3-team round-robin → 3 tie-break bouts")
 	})
@@ -115,7 +114,7 @@ func TestGenerateLeagueTiebreakMatches_TeamIDsResolveNamesakeCollision(t *testin
 		}},
 	}))
 
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Team X", "Team X"}, []string{"id-team-x-dojo-a", "id-team-x-dojo-b"})
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"id-team-x-dojo-a", "id-team-x-dojo-b"})
 	require.NoError(t, err, "selecting by id must resolve the exact same collision name selection cannot")
 	require.Len(t, injected, 1, "a 2-team round-robin is exactly one DH bout")
 	m := injected[0]

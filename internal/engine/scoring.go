@@ -1511,13 +1511,11 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		markTiedStandings(comp, sorted, poolResults[p.PoolName], playerStandings)
 
 		// Apply manual rank overrides. Overrides are keyed by competitor
-		// IDENTITY (helper.CompetitorKey: id-preferred, name+dojo fallback),
-		// not bare name (bc-cse). lookupPoolRankOverride tries ONLY that
-		// key: the separate legacy bare-name overrides[name] fallback was
-		// removed (operator ruling bc-pnum -- see that function's own doc
-		// comment), so a pre-bc-cse overrides.json entry keyed by bare name
-		// alone is unresolvable until the operator re-records it through the
-		// current chusen/override-rank flow.
+		// participant id ONLY (bc-cse, bc-pnum), not bare name:
+		// lookupPoolRankOverride resolves nothing for an id-less row, so a
+		// pre-bc-cse overrides.json entry keyed by bare name alone is
+		// unresolvable until the operator re-records it through the current
+		// chusen/override-rank flow.
 		// `overrides` itself is loaded ONCE above this loop, not per pool.
 		var poolOverrides map[string]int
 		if overrides != nil {
@@ -1596,7 +1594,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 				wrapped[i] = poolRankPairing{standing: s, nat: i + 1}
 			}
 			rankFor := func(w *poolRankPairing) (rank int, overridden bool) {
-				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID, w.standing.Player.Name, w.standing.Player.Dojo); ok {
+				if r, ok := lookupPoolRankOverride(poolOverrides, w.standing.Player.ID); ok {
 					return r, true
 				}
 				return w.nat, false
@@ -1621,7 +1619,7 @@ func (e *Engine) computeStandingsFrom(loader poolStandingsLoader, compId string)
 		for i := range sorted {
 			sorted[i].Rank = i + 1
 			if poolHasOverrides {
-				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID, sorted[i].Player.Name, sorted[i].Player.Dojo); ok {
+				if _, ok := lookupPoolRankOverride(poolOverrides, sorted[i].Player.ID); ok {
 					sorted[i].IsOverridden = true
 				}
 			}

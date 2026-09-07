@@ -173,18 +173,16 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 // the documented checkNewTeamNameCollisions restore hole (an unreadable
 // config.md disables the uniqueness check for that write, logged and
 // allowed through), so name-based selection could not always disambiguate,
-// and there is no longer a name-based fallback path to fall back to.
-// tiedTeamNames is accepted for backward-compatible display only and is
-// never read here. Idempotency dedup against existing DH rows is done
-// downstream by generatePoolDaihyosenMatches, which resolves existing rows
-// against tiedGroup (the resolved standings entries), not against the raw
-// id request parameters.
+// and there is no name-based fallback path. Idempotency dedup against
+// existing DH rows is done downstream by generatePoolDaihyosenMatches,
+// which resolves existing rows against tiedGroup (the resolved standings
+// entries), not against the raw id request parameters.
 //
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.
 // Idempotent: pairs that already exist in the store are skipped. For league
 // competitions it operates on the single league pool.
-func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string, tiedTeamIDs []string) ([]state.MatchResult, error) {
+func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -231,9 +229,9 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 	if len(tiedGroup) != len(idSet) {
 		return nil, validationErrorf("one or more requested team ids not found in standings for competition %s", compID)
 	}
-	if len(tiedGroup) < 2 {
-		return nil, validationErrorf("a tie-break group needs at least two teams (competition %s)", compID)
-	}
+	// No separate len(tiedGroup) < 2 check: idSet has at least the two
+	// non-empty, deduplicated entries the loop above already enforced, and
+	// the match just above pins len(tiedGroup) == len(idSet).
 
 	// Determine the court from existing matches. existingRows are handed to
 	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map

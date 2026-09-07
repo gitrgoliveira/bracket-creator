@@ -1685,10 +1685,10 @@ paths:
                     name) -- the id is what disambiguates them.
                 playerName:
                   type: string
-                  maxLength: 100
                   description: >
-                    Optional, accepted for backward-compatible display only.
-                    It is never used to select or disambiguate a competitor;
+                    Deprecated. Optional; accepted for older clients but
+                    ignored entirely -- not validated, never used to select
+                    or disambiguate a competitor, and never persisted.
                     playerId is the only selector.
                 rank:
                   type: integer
@@ -1701,9 +1701,8 @@ paths:
         '400':
           description: >
             playerId is missing, blank, or does not name a competitor in this
-            pool; playerName exceeds the length cap; or rank is not a
-            positive integer, exceeds the pool's player count, or exceeds the
-            absolute override cap.
+            pool; or rank is not a positive integer, exceeds the pool's
+            player count, or exceeds the absolute override cap.
           content:
             application/json:
               schema:

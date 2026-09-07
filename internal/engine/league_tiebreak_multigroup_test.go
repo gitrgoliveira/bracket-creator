@@ -95,11 +95,10 @@ func setupTwoTiedGroupLeague(t *testing.T, compID string) (*Engine, *state.Store
 // running + scoring a tie-breaker.
 func scoreGroupDH(t *testing.T, eng *Engine, store *state.Store, compID string, teams []string, winner string) {
 	t.Helper()
-	// Selection is id-only now (operator ruling bc-pnum): teams (names) is
-	// accepted but never used to select, so resolve real ids off the saved
-	// pools first.
+	// Selection is id-only now (operator ruling bc-pnum): resolve real ids
+	// off the saved pools first.
 	teamIDs := teamIDsByName(t, store, compID, teams)
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teams, teamIDs)
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teamIDs)
 	require.NoError(t, err)
 	require.NotEmpty(t, injected, "expected DH matches to be generated for %v", teams)
 
@@ -190,7 +189,7 @@ func TestMaybeAutoCompletePools_SingleGroupNoWedge(t *testing.T) {
 	// (Alpha > Beta > Gamma, Alpha > Gamma): no cycle. Selection is id-only
 	// (operator ruling bc-pnum), so resolve real ids off the saved pools.
 	teamIDs := teamIDsByName(t, store, compID, []string{"Alpha", "Beta", "Gamma"})
-	injected, err := eng.GenerateLeagueTiebreakMatches(compID, []string{"Alpha", "Beta", "Gamma"}, teamIDs)
+	injected, err := eng.GenerateLeagueTiebreakMatches(compID, teamIDs)
 	require.NoError(t, err)
 	require.Len(t, injected, 3)
 	all, err := store.LoadPoolMatches(compID)

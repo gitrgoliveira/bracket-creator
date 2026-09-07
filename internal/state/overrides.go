@@ -24,15 +24,14 @@ import (
 var ErrCorruptOverrides = errors.New("overrides.json is corrupt")
 
 // Overrides.PoolRanks is keyed PoolID -> overrideKey -> Rank. overrideKey is
-// helper.CompetitorKey(id, name, dojo) for every override written since
-// bc-cse (id-preferred, normalized name+dojo composite fallback -- see that
-// function's doc comment for the operator identity rule: (name, dojo), not
-// name, so two same-name competitors from different dojos never share one
-// override entry). A file written BEFORE bc-cse instead holds bare player
-// names as keys: those legacy entries are never rewritten (read-only
-// compatibility, see lookupPoolRankOverride in internal/engine for the
-// read-side fallback and the tradeoff it documents) -- SaveRankOverride*
-// below always writes the new identity-keyed form.
+// helper.CompetitorKey(id, "", "") for every override written since bc-cse,
+// which resolves to "id:"+id (playerID is REQUIRED, bc-pnum): two same-name
+// competitors from different dojos never share one override entry, since
+// each carries a distinct id. A file written BEFORE bc-cse instead holds
+// bare player names as keys: those legacy entries are never rewritten and,
+// per the bc-pnum operator ruling, are no longer read back either (see
+// lookupPoolRankOverride in internal/engine) -- SaveRankOverride* below
+// always writes the current identity-keyed form.
 type Overrides struct {
 	PoolRanks map[string]map[string]int `json:"poolRanks"`
 	Winners   map[string]string         `json:"winners"` // MatchID -> WinnerName
@@ -147,22 +146,17 @@ func (s *Store) modifyOverrides(compID string, fn func(*Overrides)) error {
 }
 
 // SaveRankOverrideChanged saves a manual pool-rank override for one
-// competitor and reports whether the overrides file actually changed. Use
-// this to gate broadcasts.
+// competitor, identified by playerID ONLY, and reports whether the
+// overrides file actually changed. Use this to gate broadcasts.
 //
-// The override is keyed by helper.CompetitorKey(playerID, playerName,
-// playerDojo) (bc-cse), never by bare playerName: two competitors sharing a
-// display name from different dojos are legal (operator identity rule,
-// CLAUDE.md) and must not collide on one override entry. playerID and
-// playerDojo may be empty (an older API client sending only playerName), in
-// which case CompetitorKey degrades to its normalized-name(+empty dojo)
-// composite -- callers that can resolve the competitor's real id/dojo from
-// the roster before calling this (as the mobileapp handler does) should
-// always do so, since that is what actually disambiguates a same-name pair.
-// This function never touches a pre-existing legacy bare-name key; see
-// Overrides.PoolRanks' doc comment for the read-side compatibility story.
-func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID, playerName, playerDojo string, rank int) (bool, error) {
-	key := helper.CompetitorKey(playerID, playerName, playerDojo)
+// The override is keyed by helper.CompetitorKey(playerID, "", "") (bc-cse),
+// which resolves to "id:"+playerID: playerID is REQUIRED (bc-pnum) by every
+// caller (the mobileapp override-rank handler rejects a request with no
+// playerId before this is ever reached), so the name/dojo composite branch
+// CompetitorKey falls back to for an empty id is dead code from this
+// caller's side and is not exposed here.
+func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID string, rank int) (bool, error) {
+	key := helper.CompetitorKey(playerID, "", "")
 	return s.modifyOverridesChanged(compID, func(o *Overrides) {
 		if o.PoolRanks[poolID] == nil {
 			o.PoolRanks[poolID] = make(map[string]int)
@@ -171,8 +165,8 @@ func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID, playerName, pl
 	})
 }
 
-func (s *Store) SaveRankOverride(compID, poolID, playerID, playerName, playerDojo string, rank int) error {
-	_, err := s.SaveRankOverrideChanged(compID, poolID, playerID, playerName, playerDojo, rank)
+func (s *Store) SaveRankOverride(compID, poolID, playerID string, rank int) error {
+	_, err := s.SaveRankOverrideChanged(compID, poolID, playerID, rank)
 	return err
 }
 

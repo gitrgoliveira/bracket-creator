@@ -38,18 +38,15 @@ type ChusenGroup struct {
 // (a true win/loss cycle, an all-drawn round, or any other partial tie) so the
 // order is undetermined.
 //
-// groupOverrides is resolved per member via lookupPoolRankOverride (bc-cse):
-// identity-keyed only (id-preferred, name+dojo fallback within
-// helper.CompetitorKey itself; the separate legacy bare-name overrides[name]
-// fallback was removed under bc-pnum -- see lookupPoolRankOverride's own doc
-// comment). Two same-name, different-dojo teammates in one tied group
-// therefore no longer share a single "already recorded" verdict -- each is
-// checked against its own override entry.
+// groupOverrides is resolved per member via lookupPoolRankOverride, keyed by
+// participant id ONLY (bc-cse, bc-pnum). Two same-name, different-dojo
+// teammates in one tied group therefore never share a single "already
+// recorded" verdict -- each is checked against its own override entry.
 func groupNeedsChusen(group []state.PlayerStanding, allMatches []state.MatchResult, groupOverrides map[string]int) bool {
 	if len(groupOverrides) > 0 {
 		allOverridden := true
 		for _, s := range group {
-			if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID, s.Player.Name, s.Player.Dojo); !ok {
+			if _, ok := lookupPoolRankOverride(groupOverrides, s.Player.ID); !ok {
 				allOverridden = false
 				break
 			}

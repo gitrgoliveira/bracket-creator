@@ -34,13 +34,14 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.PoolRanks)
 	assert.Empty(t, overrides.Winners)
 
-	// 2. Save rank override. No id/dojo (an older/plumbing-only caller): the
-	// key is helper.CompetitorKey("", "Alice", ""), NOT the bare name -- see
-	// Overrides.PoolRanks' doc comment. Identity is verified in
-	// TestSaveRankOverride_SameNameDifferentDojo below; this test is plumbing
-	// only.
-	aliceKey := helper.CompetitorKey("", "Alice", "")
-	err = store.SaveRankOverride(compID, "Pool A", "", "Alice", "", 1)
+	// 2. Save rank override, keyed by participant id (bc-pnum: playerID is
+	// the only identity SaveRankOverrideChanged accepts); the key is
+	// helper.CompetitorKey("alice-id", "", ""), i.e. "id:alice-id" -- see
+	// Overrides.PoolRanks' doc comment. Same-name-different-dojo identity is
+	// verified in engine's TestCalculatePoolStandings_Override_SameNameDifferentDojo;
+	// this test is plumbing only.
+	aliceKey := helper.CompetitorKey("alice-id", "", "")
+	err = store.SaveRankOverride(compID, "Pool A", "alice-id", 1)
 	require.NoError(t, err)
 
 	// 3. Load overrides after save
@@ -192,12 +193,12 @@ func TestModifyOverridesChanged_NoChange(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "No Change"}))
 
 	// First save sets a rank
-	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "", "Alice", "", 1)
+	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "alice-id", 1)
 	require.NoError(t, err)
 	assert.True(t, changed1)
 
 	// Saving the same value again should return false (no change)
-	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "", "Alice", "", 1)
+	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "alice-id", 1)
 	require.NoError(t, err)
 	assert.False(t, changed2)
 }

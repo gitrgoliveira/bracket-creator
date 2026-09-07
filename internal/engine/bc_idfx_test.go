@@ -377,7 +377,7 @@ func TestComputeStandingsFrom_OverrideSort_LargePoolDoesNotScrambleNaturalOrder(
 	// A single override on the LAST-placed player (an operator chusen that
 	// has nothing to do with the points leader) is enough to enter the
 	// override-sort code path.
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", players[n-1].ID, players[n-1].Name, players[n-1].Dojo, n))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", players[n-1].ID, n))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -426,8 +426,8 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 
 	t.Run("full chusen: Alpha 1, Yank 2, Xray 3", func(t *testing.T) {
 		eng, store, compID := setup(t)
-		require.NoError(t, store.SaveRankOverride(compID, "Pool A", "id-1-yank", "Yank", "DojoYank", 2))
-		require.NoError(t, store.SaveRankOverride(compID, "Pool A", "id-2-xray", "Xray", "DojoXray", 3))
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", "id-1-yank", 2))
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", "id-2-xray", 3))
 
 		standings, err := eng.CalculatePoolStandings(compID)
 		require.NoError(t, err)
@@ -439,7 +439,7 @@ func TestComputeStandingsFrom_OverrideSort_NaturalRankBeatsUnrankedOverride(t *t
 
 	t.Run("partial chusen (only Yank=2 recorded): group stays adjacent", func(t *testing.T) {
 		eng, store, compID := setup(t)
-		require.NoError(t, store.SaveRankOverride(compID, "Pool A", "id-1-yank", "Yank", "DojoYank", 2))
+		require.NoError(t, store.SaveRankOverride(compID, "Pool A", "id-1-yank", 2))
 
 		standings, err := eng.CalculatePoolStandings(compID)
 		require.NoError(t, err)
@@ -516,7 +516,7 @@ func TestComputeStandingsFrom_OverrideSort_NamesakesDoNotCollideOnNaturalRank(t 
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	// Carol's override is unrelated to either Tanaka; its mere presence is
 	// enough to enter the override-sort code path.
-	require.NoError(t, store.SaveRankOverride(compID, "Pool A", players[2].ID, "Carol", "DojoCarol", 2))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", players[2].ID, 2))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)

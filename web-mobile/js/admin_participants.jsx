@@ -604,7 +604,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
     if (!(await window.confirmDialog({ message: `Mark all ${targets.length} participants from ${dojo} as checked-in?`, confirmLabel: "Check in all" }))) return;
 
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinPid(p), true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinApiPid(p), true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -618,7 +618,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const bulkCheckInAll = async () => {
     const targets = (c.players || []).filter(p => !p.checkedIn);
     if (targets.length === 0) { showToast("All participants already checked in"); return; }
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinPid(p), true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinApiPid(p), true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -668,7 +668,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
     const oldName = replaceTarget.name;
-    const targetPid = window.checkinPid(replaceTarget);
+    const targetPid = window.checkinApiPid(replaceTarget);
     const targetSource = replaceTarget.source || "";
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
@@ -1107,7 +1107,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
-                          onChange={(e) => toggleCheckIn(window.checkinPid(p), e.target.checked)}
+                          onChange={(e) => toggleCheckIn(window.checkinApiPid(p), e.target.checked)}
                           style={{ width: 18, height: 18, cursor: "pointer" }}
                           aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
                         />

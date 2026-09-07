@@ -5,7 +5,7 @@ import {
   standardSeedOrder, nextPow2, buildBracket, advanceByes,
   buildPools, poolLetterName, computeStandings, parseParticipantLines
 } from '../data.jsx';
-import { checkinPid } from '../data.jsx';
+import { checkinPid, checkinApiPid } from '../data.jsx';
 
 describe('Data Utils', () => {
   describe('standardSeedOrder', () => {
@@ -217,5 +217,30 @@ describe('checkinPid', () => {
 
   it('degrades a missing dojo to an empty string in the composite key', () => {
     expect(checkinPid({ name: 'A' })).toBe('A|');
+  });
+});
+
+// bc-pnum: checkinPid's "name|dojo" composite is a safe LOCAL fallback for
+// react keys and search indexes, but name and dojo are operator-editable
+// after the draw, so they are not a safe wire identifier for a server-bound
+// write. checkinApiPid is the id-only counterpart for check-in, bulk
+// check-in, and replace-participant calls: an id-less row has no safe wire
+// identifier at all, and the request is left to fail server-side rather
+// than synthesizing one from mutable fields.
+describe('checkinApiPid (bc-pnum: id-only wire identifier)', () => {
+  it('returns the id when present', () => {
+    expect(checkinApiPid({ id: 'uuid-1', name: 'A', dojo: 'D' })).toBe('uuid-1');
+  });
+
+  it('returns "" for an id-less row, never the name|dojo composite', () => {
+    expect(checkinApiPid({ name: 'A', dojo: 'D' })).toBe('');
+    expect(checkinApiPid({ id: '', name: 'A', dojo: 'D' })).toBe('');
+  });
+
+  it('differs from checkinPid for an id-less row (the whole point of the split)', () => {
+    const p = { name: 'A', dojo: 'D' };
+    expect(checkinApiPid(p)).toBe('');
+    expect(checkinPid(p)).toBe('A|D');
+    expect(checkinApiPid(p)).not.toBe(checkinPid(p));
   });
 });

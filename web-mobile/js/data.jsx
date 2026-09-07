@@ -449,13 +449,29 @@ function checkinPid(p) {
   return p.id ? p.id : `${p.name}|${p.dojo ?? ""}`;
 }
 
+// checkinApiPid: the id-only counterpart to checkinPid, for every
+// server-bound identify-a-participant call (check-in, bulk check-in,
+// replace-participant). Name and dojo are operator-editable AFTER the draw
+// (bc-pnum operator ruling: "this needs to be ID only"), so the
+// "name|dojo" composite is not a safe wire identifier -- a write built from
+// it could target the wrong row if either field has since been edited, or
+// simply never resolve. An id-less row (legacy data predating UUID
+// adoption) has no safe wire identifier at all: this returns "" and the
+// request is left to fail server-side rather than synthesizing one from
+// mutable fields. checkinPid remains the id-else-composite helper for
+// LOCAL uses only: react keys and search indexes, where a stale/mutable
+// composite merely mis-labels a UI row instead of misdirecting a write.
+function checkinApiPid(p) {
+  return (p && p.id) || "";
+}
+
 export {
   makePlayer, makeTeam, makeCompetitors, standardSeedOrder, nextPow2, newMatchId,
   buildBracket, advanceByes, pickIppons, simulateRounds, scheduleRound, addMinutes, diffMinutes,
   buildPools, poolLetterName, simulatePools, computeStandings, poolWinners,
   buildEmptyCompetition, applyFormat, buildCompetition,
   buildTournament, competitionStatus, SAMPLE_TOURNAMENTS, parseParticipantLines,
-  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid
+  assignCourt, arraysEqual, mergeMatchPatch, normalizeParticipantName, checkinPid, checkinApiPid
 };
 
 if (typeof window !== 'undefined') {
@@ -476,4 +492,5 @@ if (typeof window !== 'undefined') {
   window.diffMinutes = diffMinutes;
   window.arraysEqual = arraysEqual;
   window.checkinPid = checkinPid;
+  window.checkinApiPid = checkinApiPid;
 }

@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, act } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { render, act, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 // RENDER-SMOKE for the Registration desk (mp-25bk). The unit suite calls the
 // pure helpers directly but never MOUNTS the page, so a window.* dep that's
@@ -107,5 +107,91 @@ describe('AdminRegistrationDeskPage render-smoke', () => {
     const { getByText, unmount } = await mount(makeTournament({ competitions: [] }));
     expect(getByText('No competitions yet')).toBeTruthy();
     unmount();
+  });
+});
+
+// bc-pnum: the roster row's check-in control used to send rdPid(player) --
+// id when present, else the "name|dojo" composite -- to toggleCheckIn/
+// bulkCheckIn. Name and dojo are operator-editable after the draw, so that
+// composite is not a safe wire identifier. It must send the id ONLY
+// (rdApiPid); an id-less row has no safe wire identifier at all and the
+// write is left to the server to refuse.
+describe('AdminRegistrationDeskPage check-in sends the id-only wire pid (bc-pnum)', () => {
+  let toggleCheckIn;
+  let savedFetchCompetitions;
+
+  beforeEach(() => {
+    toggleCheckIn = vi.fn().mockResolvedValue({});
+    window.API.toggleCheckIn = toggleCheckIn;
+    savedFetchCompetitions = window.API.fetchCompetitions;
+  });
+
+  afterEach(() => {
+    delete window.API.toggleCheckIn;
+    window.API.fetchCompetitions = savedFetchCompetitions;
+  });
+
+  it('sends the real id, not the name|dojo composite, for a stamped row', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: 'uuid-akira', name: 'Akira Tanaka', dojo: 'Gyokusen', checkedIn: false }],
+      }],
+    });
+    const { getByRole } = await mount(tournament);
+    const checkbox = getByRole('checkbox', { name: /check in akira tanaka/i });
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', 'uuid-akira', true, 'pw');
+  });
+
+  it('sends "" (never the name|dojo composite) for an id-less legacy row', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [{ id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { getByRole } = await mount(tournament);
+    const checkbox = getByRole('checkbox', { name: /check in kenji sato/i });
+    await act(async () => { fireEvent.click(checkbox); });
+    expect(toggleCheckIn).toHaveBeenCalledWith('men', '', true, 'pw');
+    expect(toggleCheckIn).not.toHaveBeenCalledWith('men', 'Kenji Sato|Mumeishi', true, 'pw');
+  });
+
+  // setLocal keys its optimistic update on rdApiPid's output (id-only), so
+  // an id-less write's pid is "". Without the `pid &&` guard, EVERY id-less
+  // row would match "" and get optimistically flipped together. The
+  // post-write `refresh()` re-fetches from the (mocked) server and would
+  // paper over the transient optimistic state either way, so this test
+  // makes refresh fail (console.warn expected and suppressed) to observe
+  // exactly what setLocal itself left behind.
+  it('does not optimistically flip every id-less row when one is clicked', async () => {
+    // Local spy replaces the outer beforeEach spy for this test's duration
+    // (same pattern as admin_shiaijo.render.test.jsx's intentional-throw
+    // test): mockRestore() before the test ends clears its recorded calls
+    // so the outer afterEach's fail-on-console.warn guard sees none.
+    const localWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    window.API.fetchCompetitions = vi.fn().mockRejectedValue(new Error('refresh disabled for this test'));
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready',
+        checkInEnabled: true,
+        players: [
+          { id: '', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false },
+          { id: '', name: 'Yuki Ito', dojo: 'Tora', checkedIn: false },
+        ],
+      }],
+    });
+    try {
+      const { getByRole } = await mount(tournament);
+      const checkboxKenji = getByRole('checkbox', { name: /check in kenji sato/i });
+      await act(async () => { fireEvent.click(checkboxKenji); });
+      const checkboxYuki = getByRole('checkbox', { name: /check in yuki ito/i });
+      expect(checkboxYuki.getAttribute('aria-checked')).toBe('false');
+    } finally {
+      localWarn.mockRestore();
+    }
   });
 });

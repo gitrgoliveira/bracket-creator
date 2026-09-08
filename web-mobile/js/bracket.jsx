@@ -1,6 +1,11 @@
 // Shared bracket rendering with SVG connector overlay.
 // Connectors are drawn after layout via an effect that measures actual match
 // card positions, so they always line up correctly regardless of card height.
+// Each elbow's vertical run sits in the gap immediately before the PARENT's
+// column (see elbowXFor/connectorPath below), not at the feeder's own
+// midpoint: a feeder that skips a hidden column (a bye auto-advance) crosses
+// the skipped column at its own height instead of cutting across that
+// column's card.
 
 const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEffect: useEffectBC } = React;
 
@@ -814,12 +819,60 @@ function computeMetaTops(columns, feedersById, heights, offsets = {}) {
   return tops;
 }
 
+// elbowXFor: the x-coordinate (tree-relative px) of a connector's vertical
+// run. `gap` is the inter-column gap measured immediately before the PARENT's
+// column (mLeft minus the previous column's right edge), so the elbow always
+// sits centred in that gap, never at the feeder's own midpoint. In an uneven
+// effective-round layout a feeder can be TWO OR MORE columns before its
+// parent (a bye auto-advance elides the columns between), and the old
+// feeder/parent midpoint rule landed the elbow's vertical run inside the
+// skipped column's card. Routing it in the gap before the parent instead
+// means the feeder's horizontal run crosses every skipped column at its OWN
+// height (empty space above/below the skipped card) and only turns once,
+// merging with any column-adjacent sibling feeder at the same x. Pure
+// geometry, no DOM access, so this is unit-testable without a real layout
+// engine.
+function elbowXFor(mLeft, gap) {
+  return mLeft - gap / 2;
+}
+
+// connectorPath: the SVG path for one feeder→parent elbow, given the anchors
+// and the elbow x from elbowXFor. Pure geometry, exported alongside
+// elbowXFor for the same reason.
+function connectorPath({ fRight, fMidY, mLeft, mMidY, elbowX }) {
+  return `M ${fRight} ${fMidY} L ${elbowX} ${fMidY} L ${elbowX} ${mMidY} L ${mLeft} ${mMidY}`;
+}
+
+// columnRightEdge: the right edge (tree-relative px) of the first mounted
+// card in `col`, or null if col is empty/unmounted. Every card in a column
+// shares the same right edge (.bc-match and .bc-bye-slot both fill their
+// .bc-match-wrap, which spans the full width of the round column via
+// left:0/right:0 — see .bc-round-matches--abs in styles.css), so any one
+// member's rect gives the whole column's edge.
+function columnRightEdge(col, refMap, treeRect) {
+  if (!col) return null;
+  for (const m of col) {
+    const el = refMap.current[m.id];
+    if (el) return el.getBoundingClientRect().right - treeRect.left;
+  }
+  return null;
+}
+
 // BracketConnectorsMeta draws feeder→parent elbows for the effective-round
 // layout (mp-7f2w). Unlike the legacy BracketConnectors it pairs by the explicit
 // feeder graph, not binary (2i, 2i+1) positions, so uneven columns connect
 // correctly. Bye-slot placeholder cards (isByeSlot) appear in the feeder graph
-// and in refMap, so they DO receive connector lines from their parent match: 
+// and in refMap, so they DO receive connector lines from their parent match:
 // the elbow terminates at the bye card, mirroring the Excel Tree sheet.
+//
+// Every elbow routes through the gap immediately before the PARENT's column
+// (elbowXFor), measured from the DOM rather than the CSS `.bc-tree` gap
+// literal so a future layout/variant change can't drift the two out of sync.
+// `gapBefore` is computed once per column (from its own mLeft and the
+// previous column's right edge) and shared by every match in that column:
+// every non-leaf column has a populated previous column (see the "columns
+// run displayRound maxDR→1" contiguity note on BracketTreeMeta), so this is
+// always defined whenever there's a feeder to connect.
 function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version, showDojo, variant }) {
   const [paths, setPaths] = useStateBC([]);
   const [size, setSize] = useStateBC({ w: 0, h: 0 });
@@ -830,24 +883,35 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
       if (!tree) return;
       const treeRect = tree.getBoundingClientRect();
       const out = [];
-      columns.forEach((col) => col.forEach((m) => {
-        const fs = (feedersById[m.id] || []).filter(Boolean);
-        if (fs.length === 0) return;
-        const mEl = refMap.current[m.id];
-        if (!mEl) return;
-        const mR = mEl.getBoundingClientRect();
-        const mLeft = mR.left - treeRect.left;
-        const mMidY = anchorY(mEl, mR, treeRect.top);
-        fs.forEach((fid) => {
-          const fEl = refMap.current[fid];
-          if (!fEl) return;
-          const fR = fEl.getBoundingClientRect();
-          const fRight = fR.right - treeRect.left;
-          const fMidY = anchorY(fEl, fR, treeRect.top);
-          const midX = (fRight + mLeft) / 2;
-          out.push({ key: `${fid}->${m.id}`, d: `M ${fRight} ${fMidY} L ${midX} ${fMidY} L ${midX} ${mMidY} L ${mLeft} ${mMidY}` });
+      columns.forEach((col, ci) => {
+        let gapBefore = null;
+        col.forEach((m) => {
+          const fs = (feedersById[m.id] || []).filter(Boolean);
+          if (fs.length === 0) return;
+          const mEl = refMap.current[m.id];
+          if (!mEl) return;
+          const mR = mEl.getBoundingClientRect();
+          const mLeft = mR.left - treeRect.left;
+          const mMidY = anchorY(mEl, mR, treeRect.top);
+          if (gapBefore == null) {
+            const prevRight = columnRightEdge(columns[ci - 1], refMap, treeRect);
+            if (prevRight != null) gapBefore = mLeft - prevRight;
+          }
+          // Previous column not mounted yet: skip, mirroring the mEl/fEl
+          // bail-outs elsewhere in this effect. Recomputed on the next match
+          // in this column and on the next measure pass.
+          if (gapBefore == null) return;
+          const elbowX = elbowXFor(mLeft, gapBefore);
+          fs.forEach((fid) => {
+            const fEl = refMap.current[fid];
+            if (!fEl) return;
+            const fR = fEl.getBoundingClientRect();
+            const fRight = fR.right - treeRect.left;
+            const fMidY = anchorY(fEl, fR, treeRect.top);
+            out.push({ key: `${fid}->${m.id}`, d: connectorPath({ fRight, fMidY, mLeft, mMidY, elbowX }) });
+          });
         });
-      }));
+      });
       setPaths(out);
       setSize({ w: tree.scrollWidth, h: tree.scrollHeight });
     };
@@ -1257,4 +1321,4 @@ window.matchMiddleMark = matchMiddleMark;
 window.winnerSideLR = winnerSideLR;
 window.sideLabel = sideLabel;
 
-export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree };
+export { formatIpponsScore, enchoLabel, boutMiddle, defaultWinMaru, matchMiddleMark, winnerSideLR, sideLabel, roundLabel, bracketRoundLabel, teamIVScore, teamIVPWScore, engiFlagScore, matchScoreStr, matchStateCell, buildDisplayModel, computeMetaTops, bronzeUnderFinalStyle, PlayerLine, slotDisplayName, makeSlotLabeller, bracketSlotLabeller, MatchCard, BracketTree, elbowXFor, connectorPath };

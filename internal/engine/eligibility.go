@@ -634,7 +634,7 @@ func (e *Engine) recordIneligibilityFromDecision(h state.StoreTx, compID, matchI
 	if result == nil {
 		return nil, nil
 	}
-	if !domain.IsKikenDecisionStr(result.Decision) && result.Decision != string(domain.DecisionFusenpai) {
+	if !domain.IsWithdrawalDecisionStr(result.Decision) {
 		return nil, nil
 	}
 	playerID, loser, ok := losingSide(result)

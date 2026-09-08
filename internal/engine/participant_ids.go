@@ -7,8 +7,8 @@ import (
 
 // PoolMatchesMissingSideIDsMessage names pool-matches.csv rows that are
 // missing a side id for a side that IS named, or that record a winner
-// (a non-draw result) with no WinnerID, and states the consequence and
-// remedy. Returns "" when no row is affected.
+// (a non-draw result) with no WinnerID, and states the consequence and the
+// residual remedy. Returns "" when no row is affected.
 //
 // Mirrors helper.MissingParticipantIDsMessage /
 // helper.PoolsMissingParticipantIDsMessage's role for the third and last
@@ -33,20 +33,24 @@ import (
 // pool-matches.csv naming a Winner with no SideA/SideB at all) falls back
 // to the match's own ID so the row is still identifiable.
 //
-// This can only affect pool-matches rows written before id-only resolution
-// went live, or a hand-edited file: every match this engine generates
-// stamps SideAID/SideBID at creation and WinnerID at score time. Remedy:
-// re-enter the result once the sides carry ids -- regenerating the draw
-// (helper.PoolsMissingParticipantIDsMessage's remedy) is what actually
-// assigns those ids to the roster in the first place.
+// A legacy pool-matches.csv row predating these columns is now repaired
+// automatically at load time (state.upgradePoolMatchSideIDsLocked resolves
+// a named side against the roster when its name is unique there, and
+// derives WinnerID from the row's own resolved side, never the roster).
+// This message therefore only ever names the residue that repair could not
+// resolve -- most often two or more competitors sharing that exact name (an
+// individual competition, since team names must stay unique), which is not
+// a bug to fix here, the operator ruling above is precisely that an
+// ambiguous name resolves to nothing rather than a guess -- but this
+// function only knows WHICH rows are still affected, not why any one of
+// them is, so the returned message states the rows, the consequence, and
+// the remedy, and leaves the cause unstated. A hand-edited file can produce
+// the same residue.
 func PoolMatchesMissingSideIDsMessage(matches []state.MatchResult) string {
 	count := 0
 	var labels []string
 	for _, m := range matches {
-		affected := (m.SideA != "" && m.SideAID == "") ||
-			(m.SideB != "" && m.SideBID == "") ||
-			(m.Winner != "" && m.WinnerID == "")
-		if !affected {
+		if !m.MissingSideOrWinnerID() {
 			continue
 		}
 		count++
@@ -55,7 +59,7 @@ func PoolMatchesMissingSideIDsMessage(matches []state.MatchResult) string {
 		}
 	}
 	return helper.NamedLabelsMessage(helper.TruncatedLabels(count, labels, "match(es)"),
-		"a side or winner has no id. They are not counted in standings; re-enter the result to assign a winner id, and regenerate the draw while it is still draw-ready to restore a missing side id.")
+		"a side or winner has no id and could not be resolved automatically. They are not counted in standings; re-enter the result to assign a winner id, and regenerate the draw while it is still draw-ready to restore a missing side id.")
 }
 
 // matchLabel names a pool-matches.csv row for a data-issues notice: "SideA

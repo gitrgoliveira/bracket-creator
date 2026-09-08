@@ -19,6 +19,21 @@ import (
 // one-time snapshot of the roster at that instant.
 var ErrMissingParticipantIDsInDraw = errors.New("cannot draw: every competitor must have an id")
 
+// ParticipantIDMissing reports whether id counts as "no id" -- blank, or
+// whitespace-only. The ONE predicate the two notices below AND the load-time
+// legacy repair (internal/state/legacy_upgrade.go) test a PARTICIPANT id
+// against: the three used to disagree (both notices trimmed whitespace, the
+// repair's own "does this row need work" scan did not), so a whitespace-only
+// id was named by a notice the repair would never actually attempt to fix.
+//
+// Deliberately NOT the owner for the pool-matches notice: that one asks a
+// different question, whether a MATCH ROW is missing a side or winner id,
+// and it shares state.MatchResult.MissingSideOrWinnerID with its own half of
+// the repair, so those two agree with each other rather than with this.
+func ParticipantIDMissing(id string) bool {
+	return strings.TrimSpace(id) == ""
+}
+
 // MissingParticipantIDsMessage names the id-less rows in players and states
 // the remedy (a re-save mints one, participants.csv's one write chokepoint
 // -- see internal/state/participants.go marshalParticipantsCSV), or returns
@@ -34,7 +49,7 @@ func MissingParticipantIDsMessage(players []Player) string {
 	count := 0
 	var labels []string
 	for _, p := range players {
-		if strings.TrimSpace(p.ID) == "" {
+		if ParticipantIDMissing(p.ID) {
 			count++
 			if len(labels) < MaxNamedRows {
 				labels = append(labels, playerLabel(p))
@@ -89,8 +104,8 @@ func NamedLabelsMessage(labels []string, tail string) string {
 }
 
 // PoolsMissingParticipantIDsMessage names pools.csv rows (drawn pool
-// members) that carry no participant id, and states the consequence and
-// remedy, or returns "" when every member already has one.
+// members) that carry no participant id, and states the consequence and the
+// residual remedy, or returns "" when every member already has one.
 //
 // A pools.csv row (helper.Pool.Players, column 8 on disk) is a record that
 // carries an id field, so downstream consumers -- the numberPrefix-derived
@@ -98,16 +113,27 @@ func NamedLabelsMessage(labels []string, tail string) string {
 // only (operator ruling bc-pnum): a member missing here gets no number and
 // contributes nothing to any of those. The draw pipeline stamps ids on every
 // drawn row and refuses to run over an id-less roster
-// (ValidateNoMissingParticipantIDs), so a pools.csv row missing one is
-// leftover data from before that fix, or a hand-edited file -- the remedy is
-// to regenerate the draw while the competition is still draw-ready, not a
-// participants.csv re-save (which does not touch pools.csv at all).
+// (ValidateNoMissingParticipantIDs), so a legacy pools.csv predating the id
+// column is now repaired automatically at load time
+// (state.upgradePoolParticipantIDsLocked resolves each row against
+// participants.csv by an exact name+dojo match when the row's own dojo is
+// non-empty, or the unique-bare-name fallback when it is blank -- see that
+// function's own doc comment). This message therefore only ever names the
+// residue that repair could not resolve: a row whose name/dojo does not
+// match any current roster entry -- a hand edit, or a participant no longer
+// on the roster -- not the whole legacy population. The remedy that still
+// works for that residue is the same one that produced the ids in the first
+// place: regenerate the draw while the competition is still draw-ready.
 func PoolsMissingParticipantIDsMessage(pools []Pool) string {
 	count := 0
 	var labels []string
 	for _, p := range pools {
 		for _, pl := range p.Players {
-			if strings.TrimSpace(pl.ID) == "" {
+			// pl.Name != "" matches the load-time repair's own
+			// poolMemberMissingID gate (internal/state/legacy_upgrade.go):
+			// a nameless row is an empty slot, not a competitor missing an
+			// id, so it is neither attempted by the repair nor named here.
+			if pl.Name != "" && ParticipantIDMissing(pl.ID) {
 				count++
 				if len(labels) < MaxNamedRows {
 					labels = append(labels, playerLabel(pl))
@@ -115,7 +141,7 @@ func PoolsMissingParticipantIDsMessage(pools []Pool) string {
 			}
 		}
 	}
-	return NamedLabelsMessage(TruncatedLabels(count, labels, "competitors"), "no id in the pool draw. No player number is assigned; regenerate the draw while it is still draw-ready.")
+	return NamedLabelsMessage(TruncatedLabels(count, labels, "competitors"), "no id in the pool draw and could not be matched to a participant automatically. No player number is assigned; regenerate the draw while it is still draw-ready to fix it.")
 }
 
 // ValidateNoMissingParticipantIDs is the draw pre-flight for bc-pnum ruling

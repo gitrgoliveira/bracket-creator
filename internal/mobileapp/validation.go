@@ -1098,7 +1098,7 @@ func validateWithdrawalNamesDisambiguated(decision, sideA, sideB, winnerID, side
 	if sideA == "" || sideB == "" || sideA != sideB {
 		return nil
 	}
-	if !domain.IsKikenDecisionStr(decision) && decision != string(domain.DecisionFusenpai) {
+	if !domain.IsWithdrawalDecisionStr(decision) {
 		return nil
 	}
 	// domain.WinnerIDNamesASide treats an EMPTY winnerID as trivially
@@ -1226,7 +1226,7 @@ func ipponEntriesWellFormed(field string, ippons []string) error {
 // path validates a state.MatchResult rather than a ScoreRequest, so the rule
 // takes the two fields it actually reads instead of a receiver.
 func requireWinnerForDecision(decision, winner string) error {
-	if !domain.IsKikenDecisionStr(decision) && decision != string(domain.DecisionFusenpai) {
+	if !domain.IsWithdrawalDecisionStr(decision) {
 		return nil
 	}
 	if winner != "" {

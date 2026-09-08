@@ -1078,6 +1078,26 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// matrix mp-p7n round-6 split into.
 	s.invalidateParticipantCaches(compID)
 
+	// Re-arm EnsureLegacyUpgraded's once-per-process gate (bc-pnum): the
+	// pools.csv/pool-matches.csv repair copies ids FROM the roster this
+	// write just changed, but the once-map only clears on DeleteCompetition.
+	// A genuinely legacy competition has no ids on ITS roster either, so the
+	// FIRST read finds nothing to copy, repairs nothing, and (pre-fix)
+	// permanently marked the competition done -- even though THIS save is
+	// exactly the "apply the participant list once" remedy the participant
+	// setup notice already tells the operator to use, and it is what mints
+	// the ids the repair needs. Clearing the once-map entry here means the
+	// NEXT read retries the repair against the roster this write produced,
+	// without requiring a restart. saveParticipantsNoLock is the one
+	// chokepoint every roster write funnels through (SaveParticipants,
+	// SaveParticipantsRestored, BulkCheckIn's write-back, UpdateParticipant,
+	// AddParticipant), and every one of those callers already holds the
+	// same per-comp lock EnsureLegacyUpgraded acquires, so a Delete here
+	// cannot race the repair reading a half-written file: sync.Map.Delete
+	// itself needs no external lock, and the NEXT EnsureLegacyUpgraded call
+	// will acquire that same per-comp lock before it re-checks the map.
+	s.legacyUpgraded.Delete(compID)
+
 	return nil
 }
 

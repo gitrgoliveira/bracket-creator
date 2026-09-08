@@ -52,6 +52,7 @@ func TestPoolMatchesMissingSideIDsMessage(t *testing.T) {
 		msg := PoolMatchesMissingSideIDsMessage(matches)
 		assert.Contains(t, msg, "Alice vs Bob")
 		assert.Contains(t, msg, "not counted in standings")
+		assert.Contains(t, msg, "could not be resolved automatically")
 		assert.Contains(t, msg, "re-enter the result to assign a winner id, and regenerate the draw while it is still draw-ready to restore a missing side id")
 		// At or under helper.MaxNamedRows, the count is not restated (mirrors
 		// the two helper notices' own shape): the "N match(es), including"

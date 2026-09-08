@@ -19,6 +19,12 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		return nil, err
 	}
 
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	// Must NOT run from loadPoolsLocked or any caller that already holds the
+	// per-comp lock (e.g. storeTx.LoadPools, WithTransaction bodies).
+	s.EnsureLegacyUpgraded(compID)
+
 	data, err := s.loadCached(compID, "pools.csv", parsePoolsFile)
 	if err != nil {
 		return nil, err
@@ -247,6 +253,13 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
+
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	// Must NOT run from LoadPoolMatchesLocked or any caller that already
+	// holds the per-comp lock (e.g. storeTx.LoadPoolMatches, WithTransaction
+	// bodies).
+	s.EnsureLegacyUpgraded(compID)
 
 	matches, err := s.cachedPoolMatches(compID)
 	if err != nil {

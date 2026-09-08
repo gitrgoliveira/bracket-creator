@@ -740,13 +740,13 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		loserName = sideA
 		loserID = sideAID
 	}
-	if domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai) {
+	if domain.IsWithdrawalDecisionStr(decision) {
 		if cerr := e.checkConcurrentIneligibility(tx, compID, matchID, loserID, loserName); cerr != nil {
 			return nil, nil, cerr
 		}
 	}
 	hadPriorLoser := false
-	if domain.IsKikenDecisionStr(prior.Decision) || prior.Decision == string(domain.DecisionFusenpai) {
+	if domain.IsWithdrawalDecisionStr(prior.Decision) {
 		// losingSide, so a prior decision that itself came through
 		// RecordDecisionTx -- and so already carries WinnerSide -- is
 		// attributed by that authoritative hint rather than an ambiguous
@@ -853,7 +853,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// new decision is NOT a withdrawal (the "fought"/undo path this loop
 	// exists for) or when a status WAS resolved (the write settled who,
 	// this match, is currently the loser).
-	newIsWithdrawal := domain.IsKikenDecisionStr(decision) || decision == string(domain.DecisionFusenpai)
+	newIsWithdrawal := domain.IsWithdrawalDecisionStr(decision)
 	switch {
 	case newIsWithdrawal && status == nil:
 		log.Printf("engine: RecordDecisionTx compId=%s matchId=%s: new decision %q is a withdrawal but recordIneligibilityFromDecision did not resolve/write a loser; skipping the stale-eligibility restore (no MatchID==%s record is provably stale)",

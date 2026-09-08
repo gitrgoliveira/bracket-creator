@@ -1111,11 +1111,13 @@ type MatchResult struct {
 	// three fields, never through SideA/SideB/Winner directly, and an empty
 	// id resolves to NOTHING rather than falling back to the name -- a
 	// legacy row missing them (written before this field existed) is
-	// therefore not counted in standings until it is re-entered (see
-	// engine.PoolMatchesMissingSideIDsMessage, the operator-facing notice
-	// for exactly this gap). omitempty + append-only CSV columns keep old
-	// files/readers fully compatible on read; they no longer keep old
-	// BEHAVIOR compatible, which is the point.
+	// repaired automatically at load time when its side names resolve
+	// unambiguously against the roster (state.upgradePoolMatchSideIDsLocked);
+	// a row that repair could not resolve is not counted in standings until
+	// it is re-entered (see engine.PoolMatchesMissingSideIDsMessage, the
+	// operator-facing notice for exactly this residue). omitempty +
+	// append-only CSV columns keep old files/readers fully compatible on
+	// read; they no longer keep old BEHAVIOR compatible, which is the point.
 	SideAID  string `json:"sideAId,omitempty"`
 	SideBID  string `json:"sideBId,omitempty"`
 	WinnerID string `json:"winnerId,omitempty"`
@@ -1278,6 +1280,21 @@ func (m *MatchResult) HanteiDecided() bool {
 // proves nothing.
 func (m *MatchResult) CarriesSideIDs() bool {
 	return m.SideAID != "" || m.SideBID != ""
+}
+
+// MissingSideOrWinnerID reports whether m has a side or winner named but not
+// id-stamped: SideA/SideB non-empty with SideAID/SideBID empty, or Winner
+// non-empty (a non-draw result) with WinnerID empty. Promoted here (bc-pnum
+// review) as the ONE owner of "does this row still need an id fixed",
+// shared by the load-time legacy repair's own "does this row need work"
+// scan (state.upgradePoolMatchSideIDsLocked) and
+// engine.PoolMatchesMissingSideIDsMessage's "is this row still a problem"
+// notice -- previously hand-duplicated in both places and kept in sync only
+// by a comment.
+func (m *MatchResult) MissingSideOrWinnerID() bool {
+	return (m.SideA != "" && m.SideAID == "") ||
+		(m.SideB != "" && m.SideBID == "") ||
+		(m.Winner != "" && m.WinnerID == "")
 }
 
 // EnchoMetadata records overtime / sudden-death periods played in a

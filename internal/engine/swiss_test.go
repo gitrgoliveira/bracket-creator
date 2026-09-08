@@ -1229,24 +1229,28 @@ func TestSwissFieldKeysFromMatches_IDlessRow_AdmitsNobody(t *testing.T) {
 	assert.Empty(t, field, "an id-less prior row must admit NOBODY to the frozen field, win or bye alike")
 }
 
-// TestGenerateSwissRound_IDlessWinnerIDContributesNoWin isolates the WIN
-// half of finding 5 from field/bye admission: SideAID/SideBID are both
-// present (so field admission, rematch history and pairing all resolve
-// normally), but the row's WinnerID is empty even though Winner names a
-// side. The winner's win must not be credited, exactly as if the match had
-// never been won -- proven observably through round 2's pairing, the same
-// technique TestSwissRound2PairsByWins uses for a normal (fully-credited)
-// win.
-func TestGenerateSwissRound_IDlessWinnerIDContributesNoWin(t *testing.T) {
+// TestGenerateSwissRound_LegacyWinnerIDRepairedOnLoad used to pin the
+// opposite: SideAID/SideBID present but WinnerID blank meant the winner's
+// win was never credited (TestGenerateSwissRound_IDlessWinnerIDContributesNoWin,
+// pre-bc-pnum). The bc-pnum load-time repair (state's
+// upgradePoolMatchSideIDsLocked, wired into the public Store.LoadPoolMatches
+// GenerateSwissRound calls to read priorMatches) closes exactly this gap:
+// Winner=="Alice"==SideA and SideAID is already on the row, so WinnerID is
+// derived from the row's OWN side id, never the roster -- the id-only rule
+// from legacy_upgrade.go's header comment holds throughout, this only moves
+// WHEN the id lands (on load, once, onto the persisted row) rather than
+// leaving the row permanently unresolvable. Alice's win over Bob is
+// therefore credited from here on.
+func TestGenerateSwissRound_LegacyWinnerIDRepairedOnLoad(t *testing.T) {
 	names := []string{"Alice", "Bob", "Carol", "Dave", "Eve", "Fay"}
 	seeds := map[string]int{"Alice": 1, "Bob": 2, "Carol": 3, "Dave": 4, "Eve": 5, "Fay": 6}
 	eng, store, compID, byName := setupSwissCompetition(t, names, seeds, 3)
 
 	round1 := []state.MatchResult{
-		// Alice "won" over Bob, but WinnerID is empty: the win must not count.
+		// Alice beat Bob, but the legacy row never got a WinnerID stamped
+		// even though SideAID/SideBID are both present.
 		{ID: "Swiss-R1-0", SideA: "Alice", SideAID: byName["Alice"].ID, SideB: "Bob", SideBID: byName["Bob"].ID,
 			Winner: "Alice", WinnerID: "", Status: state.MatchStatusCompleted},
-		// Carol and Eve win normally (WinnerID stamped), for comparison.
 		{ID: "Swiss-R1-1", SideA: "Carol", SideAID: byName["Carol"].ID, SideB: "Dave", SideBID: byName["Dave"].ID,
 			Winner: "Carol", WinnerID: byName["Carol"].ID, Status: state.MatchStatusCompleted},
 		{ID: "Swiss-R1-2", SideA: "Eve", SideAID: byName["Eve"].ID, SideB: "Fay", SideBID: byName["Fay"].ID,
@@ -1258,24 +1262,39 @@ func TestGenerateSwissRound_IDlessWinnerIDContributesNoWin(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, r2, 3, "6 active players -> 3 matches")
 
-	oneWinGroup := map[string]bool{"Carol": true, "Eve": true}
-	for _, m := range r2 {
-		aIsWinner, bIsWinner := oneWinGroup[m.SideA], oneWinGroup[m.SideB]
-		if aIsWinner || bIsWinner {
-			assert.True(t, aIsWinner && bIsWinner,
-				"the 1-win group (Carol, Eve) must pair with each other, not with a 0-win player: got %s vs %s", m.SideA, m.SideB)
+	// The repair lands on disk the moment GenerateSwissRound's internal
+	// LoadPoolMatches call reads round 1 back, so it is visible to a plain
+	// reload afterwards too -- proving this is a persisted repair, not a
+	// read-time-only computation.
+	repaired, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var r1m0 *state.MatchResult
+	for i := range repaired {
+		if repaired[i].ID == "Swiss-R1-0" {
+			r1m0 = &repaired[i]
 		}
-		// Alice must never face Bob again (rematch avoidance -- proves the
-		// ids on THIS row still drove pairing history normally) and must
-		// never be paired with Carol or Eve (which would mean her claimed
-		// win over Bob was, wrongly, credited).
+	}
+	require.NotNil(t, r1m0, "round-1 match must still be on disk")
+	assert.Equal(t, byName["Alice"].ID, r1m0.WinnerID,
+		"WinnerID is repaired from the row's own SideAID (Winner==SideA), not left blank")
+
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	byID := make(map[string]state.PlayerStanding, len(standings))
+	for _, s := range standings {
+		byID[s.Player.ID] = s
+	}
+	assert.Equal(t, 1, byID[byName["Alice"].ID].Wins, "the repaired WinnerID credits Alice's win")
+	assert.Equal(t, 1, byID[byName["Bob"].ID].Losses, "and Bob's loss")
+
+	// Rematch avoidance is orthogonal to win-crediting and must hold either way.
+	for _, m := range r2 {
 		if m.SideA == "Alice" || m.SideB == "Alice" {
 			other := m.SideB
 			if m.SideA != "Alice" {
 				other = m.SideA
 			}
 			assert.NotEqual(t, "Bob", other, "round 2 must not replay Alice vs Bob")
-			assert.False(t, oneWinGroup[other], "Alice's uncredited win must not place her in the 1-win group (paired with %s)", other)
 		}
 	}
 }

@@ -2040,7 +2040,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 		}
 
-		isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
+		isWithdrawal := domain.IsWithdrawalDecisionStr(result.Decision)
 
 		// isCorrection: a completed -> completed overwrite (the operator is
 		// fixing an already-finished result, e.g. via the shiaijo console's or

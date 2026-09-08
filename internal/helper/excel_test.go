@@ -772,9 +772,9 @@ func TestCreateNamesToPrint(t *testing.T) {
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
-	assert.Equal(t, "", valA1, "no numberCell in pCoords: the position cell must be left empty, never a fallback")
+	assert.Equal(t, "", valA1, "Player1's position cell: no numberCell in pCoords, must be left empty, never a fallback")
 	valA2, _ := f.GetCellValue(sheet, "A2")
-	assert.Equal(t, "", valA2, "no numberCell in pCoords: the position cell must be left empty, never a fallback")
+	assert.Equal(t, "", valA2, "Player2's position cell: no numberCell in pCoords, must be left empty, never a fallback")
 
 	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
 	assert.Equal(t, -1, idx, "template sheet should be deleted")
@@ -1130,9 +1130,9 @@ func TestCreateNamesWithPoolToPrint(t *testing.T) {
 
 	sheet := "Names to Print A"
 	valA1, _ := f.GetCellValue(sheet, "A1")
-	assert.Equal(t, "", valA1, "no numberCell in pCoords: the position cell must be left empty, never a pool-letter fallback")
+	assert.Equal(t, "", valA1, "Player1's position cell: no numberCell in pCoords, must be left empty, never a pool-letter fallback")
 	valA2, _ := f.GetCellValue(sheet, "A2")
-	assert.Equal(t, "", valA2, "no numberCell in pCoords: the position cell must be left empty, never a pool-letter fallback")
+	assert.Equal(t, "", valA2, "Player2's position cell: no numberCell in pCoords, must be left empty, never a pool-letter fallback")
 
 	idx, _ := f.GetSheetIndex(SheetNamesToPrint)
 	assert.Equal(t, -1, idx, "template sheet should be deleted")

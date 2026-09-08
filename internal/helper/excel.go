@@ -1888,6 +1888,21 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 	defaultPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
 
+	// The stacked style's only argument, the prefix's rune count, is
+	// LOOP-INVARIANT: splitNumberLines/stackedNumberPrefix guarantee that
+	// whenever a row is stacked, `letters` is exactly numberPrefix verbatim,
+	// so utf8.RuneCountInString(letters) is the same value on every stacked
+	// row on this sheet. Resolved lazily on the first stacked row and reused
+	// after that, rather than re-resolving the same cached style ID (via
+	// getCachedStyle's map+mutex) on every stacked row. This does not change
+	// the first-request ORDER those styles are assigned in -- getCachedStyle
+	// still returns the SAME id the second and later requests would have
+	// gotten, and the first request still happens at the same point in the
+	// iteration either way, which is what the committed example workbooks
+	// are byte-pinned on.
+	var stackedPositionStyle int
+	stackedStyleResolved := false
+
 	for i, player := range players {
 		row := i + 1
 		positionCell := fmt.Sprintf("A%d", row)
@@ -1923,20 +1938,28 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 		letters, _, stacked := splitNumberLines(player.Number, numberPrefix)
 		nameIDPositionStyle := defaultPositionStyle
 		if stacked {
-			letterCount := utf8.RuneCountInString(letters)
-			nameIDPositionStyle = getNameIDPositionStackedStyle(f, letterCount)
-			if coord.numberCell != "" {
+			if !stackedStyleResolved {
+				stackedPositionStyle = getNameIDPositionStackedStyle(f, utf8.RuneCountInString(letters))
+				stackedStyleResolved = true
+			}
+			nameIDPositionStyle = stackedPositionStyle
+		}
+		// Single outer guard: a player with no number cell (a competition
+		// that hasn't been numbered) gets an EMPTY position cell either way,
+		// stacked or not (D1). The inner `stacked` branch only decides WHICH
+		// formula to write into that one cell.
+		if coord.numberCell != "" {
+			ref := sheetRef(coord.sheetName, coord.numberCell)
+			formula := ref
+			if stacked {
 				// LIVE formula, not a static split: the referenced Data-sheet
 				// cell is the number's one source of truth (bc-pnum), so the
 				// stacked display recomputes from it rather than caching a
 				// value that could drift.
-				ref := sheetRef(coord.sheetName, coord.numberCell)
-				formula := fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, letterCount, ref, letterCount+1)
-				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))
+				letterCount := utf8.RuneCountInString(letters)
+				formula = fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, letterCount, ref, letterCount+1)
 			}
-		} else if coord.numberCell != "" {
-			ref := sheetRef(coord.sheetName, coord.numberCell)
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, ref))
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 

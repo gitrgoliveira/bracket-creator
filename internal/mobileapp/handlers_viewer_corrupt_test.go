@@ -345,10 +345,15 @@ func dataIssuesFromResponse(t *testing.T, body []byte, isAggregate bool, compID 
 
 // TestViewerAggregateAndDetail_PoolsMissingIDsAgree pins bc-pnum review
 // finding 3/4: a legacy 7-column pools.csv (no id column at all, the
-// pre-bc-pnum on-disk shape) sitting alongside a fully modern (stamped)
-// participants.csv must raise the pools.csv "missing-ids" advisory, with
-// the SAME wording, on BOTH the aggregate list and the single-competition
-// detail endpoint.
+// pre-bc-pnum on-disk shape) that the load-time repair (bc-pnum,
+// state.upgradePoolParticipantIDsLocked) still cannot resolve must raise
+// the pools.csv "missing-ids" advisory, with the SAME wording, on BOTH the
+// aggregate list and the single-competition detail endpoint.
+//
+// The roster's dojos deliberately do NOT match legacyPoolsCSVNoIDColumn's
+// rows: the repair resolves a legacy row by an EXACT name+dojo match, so a
+// mismatched dojo is what keeps this row genuinely unresolved (the residue
+// case) rather than silently repaired out from under this test.
 func TestViewerAggregateAndDetail_PoolsMissingIDsAgree(t *testing.T) {
 	r, store, _, _, dir := setupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -356,8 +361,8 @@ func TestViewerAggregateAndDetail_PoolsMissingIDsAgree(t *testing.T) {
 	}))
 	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
-		{ID: aliceID, Name: "Alice", Dojo: "Dojo A"},
-		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo Z"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo Z"},
 	}))
 	legacyPools := legacyPoolsCSVNoIDColumn
 	require.NoError(t, os.WriteFile(
@@ -384,12 +389,20 @@ func TestViewerAggregateAndDetail_PoolsMissingIDsAgree(t *testing.T) {
 	detail, _ := aggIssue["detail"].(string)
 	assert.Contains(t, detail, "Alice")
 	assert.Contains(t, detail, "Bob")
-	assert.Contains(t, detail, "regenerate the draw while it is still draw-ready")
+	assert.Contains(t, detail, "could not be matched to a participant automatically")
 }
 
 // TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree pins the
-// pool-matches.csv twin: a completed match missing SideAID must raise the
-// "missing-ids" advisory identically on both surfaces.
+// pool-matches.csv twin: a completed match missing SideAID that the
+// load-time repair (bc-pnum, state.upgradePoolMatchSideIDsLocked) still
+// cannot resolve must raise the "missing-ids" advisory identically on both
+// surfaces.
+//
+// Two roster entries deliberately share the name "Alice" (different
+// dojos): the repair only resolves a bare side name when it is UNIQUE
+// across the roster, so this ambiguity is what keeps SideAID genuinely
+// unresolved (the residue case) rather than silently repaired out from
+// under this test.
 func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
 	r, store, _, _, _ := setupTestRouter(t)
 	require.NoError(t, store.SaveCompetition(&state.Competition{
@@ -398,6 +411,7 @@ func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
 	bobID := helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants("kendo", []domain.Player{
 		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "Dojo A"},
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "Dojo C"},
 		{ID: bobID, Name: "Bob", Dojo: "Dojo B"},
 	}))
 	require.NoError(t, store.SavePoolMatches("kendo", []state.MatchResult{
@@ -421,6 +435,7 @@ func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
 	assert.Equal(t, aggIssue["detail"], detIssue["detail"])
 	detail, _ := aggIssue["detail"].(string)
 	assert.Contains(t, detail, "Alice vs Bob")
+	assert.Contains(t, detail, "could not be resolved automatically")
 	assert.Contains(t, detail, "regenerate the draw while it is still draw-ready to restore a missing side id")
 }
 

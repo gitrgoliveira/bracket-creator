@@ -79,6 +79,39 @@ func TestPoolsMissingParticipantIDsMessage(t *testing.T) {
 		assert.Empty(t, PoolsMissingParticipantIDsMessage([]Pool{}))
 	})
 
+	// A nameless row is an empty slot, not a competitor missing an id. This
+	// pins the narrowing that made the notice agree with the load-time
+	// repair's own scan (poolMemberMissingID, internal/state/legacy_upgrade.go):
+	// the repair CANNOT attempt such a row, because a pools row's only
+	// resolution key is its name, so naming it told the operator the app had
+	// tried and failed when it never looked. It also read badly -- playerLabel
+	// renders a nameless row as "" or " (Dojo)", so the notice emitted a
+	// sentence beginning with a bare colon. Not reachable through any app
+	// write path (every draw fills the name); a hand-edited pools.csv line is
+	// the only producer, which is exactly why it needs a test rather than an
+	// argument.
+	t.Run("a nameless row is an empty slot, not a competitor to name", func(t *testing.T) {
+		pools := []Pool{
+			{PoolName: "Pool A", Players: []Player{
+				{Name: "", Dojo: "Dojo A"},
+				{Name: "Bob", Dojo: "Dojo B"},
+			}},
+		}
+		msg := PoolsMissingParticipantIDsMessage(pools)
+		assert.Contains(t, msg, "Bob (Dojo B)", "the named id-less member is still reported")
+		assert.NotContains(t, msg, "(Dojo A)",
+			"the nameless row must not be named: playerLabel renders it as a bare dojo")
+		assert.NotContains(t, msg, "2 competitors", "the nameless row must not inflate the count")
+	})
+
+	t.Run("a pool of nothing but nameless rows reports nothing at all", func(t *testing.T) {
+		pools := []Pool{
+			{PoolName: "Pool A", Players: []Player{{Name: "", Dojo: "Dojo A"}, {Name: ""}}},
+		}
+		assert.Empty(t, PoolsMissingParticipantIDsMessage(pools),
+			"empty slots are not competitors, so there is nothing to tell the operator")
+	})
+
 	t.Run("names a single missing member across two pools and states the remedy", func(t *testing.T) {
 		pools := []Pool{
 			{PoolName: "Pool A", Players: []Player{
@@ -92,7 +125,7 @@ func TestPoolsMissingParticipantIDsMessage(t *testing.T) {
 		assert.Contains(t, msg, "Bob (Dojo B)")
 		assert.NotContains(t, msg, "Alice", "a member that already has an id is not named")
 		assert.Contains(t, msg, "no id in the pool draw")
-		assert.Contains(t, msg, "regenerate the draw while it is still draw-ready")
+		assert.Contains(t, msg, "could not be matched to a participant automatically")
 	})
 
 	t.Run("names only the first three and states the total count across pools", func(t *testing.T) {

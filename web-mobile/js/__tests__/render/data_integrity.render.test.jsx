@@ -118,8 +118,8 @@ describe('DataIssueBanner', () => {
   it('renders one notice line per missing-ids entry when multiple files are affected', () => {
     const threeIssues = [
       { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file. Save the roster once and the ids are assigned.' },
-      { kind: 'missing-ids', file: 'pools.csv', detail: '2 competitors: no id in the pool draw. No player number is assigned; regenerate the draw while it is still draw-ready.' },
-      { kind: 'missing-ids', file: 'pool-matches.csv', detail: '1 match(es): a side or winner has no id. They are not counted in standings; re-enter the result to assign a winner id, and regenerate the draw while it is still draw-ready to restore a missing side id.' },
+      { kind: 'missing-ids', file: 'pools.csv', detail: '2 competitors: no id in the pool draw and could not be matched to a participant automatically. No player number is assigned; regenerate the draw while it is still draw-ready to fix it.' },
+      { kind: 'missing-ids', file: 'pool-matches.csv', detail: '1 match(es): a side or winner has no id and could not be resolved automatically. They are not counted in standings; re-enter the result to assign a winner id, and regenerate the draw while it is still draw-ready to restore a missing side id.' },
     ];
     render(<DataIssueBanner issues={threeIssues} competition={{ format: 'mixed' }} />);
     expect(screen.queryByRole('alert')).toBeNull();

@@ -403,10 +403,16 @@ func dataIssuesFrom(errs ...error) []gin.H {
 // consumer), and pool-matches.csv (a row missing a side id, or recording a
 // winner with no WinnerID, is not counted in standings) -- all operator
 // ruling bc-pnum. Nothing is broken and no write is refused in any of the
-// three cases -- the remedy is a re-save or a regenerated draw, not a
-// repair -- so this carries its own "kind" rather than folding into the
-// corrupt-file entries dataIssuesFrom builds, which the console renders
-// with "a file could not be read" framing that would misdescribe all three.
+// three cases. participants.csv's remedy stays a re-save (marshalParticipantsCSV
+// mints ids only on write); pools.csv and pool-matches.csv are instead
+// repaired automatically at load time when their rows resolve unambiguously
+// against the roster (state.upgradePoolParticipantIDsLocked,
+// state.upgradePoolMatchSideIDsLocked), so this issue now only ever
+// surfaces for the residue that repair could not resolve, whose remedy is a
+// regenerated draw or a re-entered result. This carries its own "kind"
+// rather than folding into the corrupt-file entries dataIssuesFrom builds,
+// which the console renders with "a file could not be read" framing that
+// would misdescribe all three.
 //
 // The detail message itself is composed by the caller, via
 // helper.MissingParticipantIDsMessage (the SAME function the draw

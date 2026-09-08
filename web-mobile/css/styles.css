@@ -6344,10 +6344,14 @@ button.pool-match-row {
 
 /* ---------- Import results rows (.import-result) ----------
    One competition per row: a head line carrying the name and the
-   imported/not-imported tag, and, when the server refused it, the reason as
-   ordinary body text on its own line beneath.
+   imported/not-imported tag, and, beneath it, either of two server-sent
+   messages as ordinary body text on its own line: the reason when the
+   server refused the row outright (.import-result__error, danger ink) or a
+   non-blocking warning about the row it DID import (.import-result__warning,
+   e.g. a reassigned number prefix -- warn ink). Same shape, different ink,
+   so the two share every declaration except color.
 
-   The reason used to render inside .tag-badge--warn, which is 10px, uppercase
+   The text used to render inside .tag-badge--warn, which is 10px, uppercase
    and letter-spaced: correct for a one- or two-word tag, and unreadable for
    the shiaijo-count sentence, which is over 200 characters. It also sat inside
    the flex head, so at tablet width it wrapped to three shouted lines. Full
@@ -6363,13 +6367,21 @@ button.pool-match-row {
   align-items: center;
 }
 
-.import-result__error {
+.import-result__error,
+.import-result__warning {
   margin-top: 4px;
   font-size: 13px;
   line-height: 1.45;
-  color: var(--danger-ink);
   text-transform: none;
   letter-spacing: normal;
+}
+
+.import-result__error {
+  color: var(--danger-ink);
+}
+
+.import-result__warning {
+  color: var(--warn-ink);
 }
 
 .alert {

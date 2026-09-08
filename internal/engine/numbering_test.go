@@ -253,6 +253,49 @@ func TestRenumberCompetitors_NotFound(t *testing.T) {
 	assert.ErrorAs(t, err, &nfe, "unknown compID must return NotFoundError")
 }
 
+// TestEnsureNumberPrefix_SaveFailure_ReportsNotAssigned pins the bc-pnum fix:
+// assigned must be true only once a prefix has actually been SAVED. The
+// transform inside EnsureNumberPrefix sets assigned = true BEFORE the save
+// runs, so without the fix a failed config.md write (a full disk, a
+// read-only competition directory) still reports assigned == true alongside
+// the write error -- which would make the HTTP layer
+// (respondNumberPrefixPreflightError) broadcast a change that never
+// happened and tell the operator to repair pools.csv, which was never
+// opened.
+func TestEnsureNumberPrefix_SaveFailure_ReportsNotAssigned(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0500 isn't enforced on Windows the same way")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root bypasses file permission restrictions")
+	}
+
+	eng, store, dir := setupTestEngine(t)
+	const compID = "ensure-prefix-save-failure"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Ensure Prefix Save Failure", Kind: "individual", Format: "mixed",
+		Status: "setup", NumberPrefix: "",
+	}))
+
+	compDir := filepath.Join(dir, "competitions", compID)
+	// MkdirAll succeeds (the directory already exists) and the read succeeds
+	// (r-x is enough to open and stat config.md); only the atomic temp-file
+	// create -- which needs write permission on the directory -- fails.
+	require.NoError(t, os.Chmod(compDir, 0o500))
+	defer func() { _ = os.Chmod(compDir, 0o700) }() // let t.TempDir()/os.RemoveAll cleanup remove it
+
+	assigned, err := eng.EnsureNumberPrefix(compID, CanGenerateDraw, true)
+	require.Error(t, err, "a config.md write failure must surface as an error")
+	assert.False(t, assigned, "assigned must be false when the prefix was never actually saved")
+
+	require.NoError(t, os.Chmod(compDir, 0o700))
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.NotNil(t, comp)
+	assert.Empty(t, comp.NumberPrefix, "the failed write must leave config.md without a saved prefix")
+}
+
 // TestMigrateNumberPrefixes pins the load-time migration: competitions saved
 // without a prefix get the derived default, unique against every other
 // competition INCLUDING the ones assigned in the same pass, their pools.csv

@@ -1894,3 +1894,30 @@ func TestMaxLenCompetitionNumberPrefixMatchesHelper(t *testing.T) {
 	assert.Equal(t, helper.MaxNumberPrefixLen, MaxLenCompetitionNumberPrefix,
 		"helper.MaxNumberPrefixLen and mobileapp.MaxLenCompetitionNumberPrefix must stay in lockstep: a derived prefix must never exceed the length this package's own validator enforces")
 }
+
+// TestValidateWinnerIDMatchesSide_KnownSidesRejectsUnattributableWinner pins
+// the boundary copy of the bc-pnum ruling 1d check directly (bc-pnum review
+// finding B): validateWinnerIDMatchesSide now delegates to the shared
+// domain.WinnerIDAcceptable rather than hand-deriving its own
+// bothSideIDsUnknown local, and this package previously had no unit test
+// exercising the function at all -- only integration coverage through the
+// HTTP handler. With both side ids KNOWN, a winnerId matching neither must
+// still be rejected.
+func TestValidateWinnerIDMatchesSide_KnownSidesRejectsUnattributableWinner(t *testing.T) {
+	err := validateWinnerIDMatchesSide("charlie-id", "alice-id", "bob-id")
+	require.Error(t, err, "a winnerId naming neither known side must be rejected")
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "winnerId", verr.Field)
+}
+
+// TestValidateWinnerIDMatchesSide_BothSidesUnknownAccepts is the accepted
+// twin: when NEITHER side id is known (a legacy pool row drawn before ids
+// were minted, or every bracket match at this HTTP boundary --
+// domain.WinnerIDAcceptable's doc comment), there is no known pairing for
+// winnerId to have missed, so the write is accepted rather than rejected
+// against data this check cannot evaluate.
+func TestValidateWinnerIDMatchesSide_BothSidesUnknownAccepts(t *testing.T) {
+	err := validateWinnerIDMatchesSide("charlie-id", "", "")
+	assert.NoError(t, err, "a winnerId cannot be checked against two unknown side ids, so it must be accepted")
+}

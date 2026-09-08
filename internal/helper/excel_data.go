@@ -191,7 +191,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 }
 
 // AddDataToSheetForExport is RenderCompetitionWorkbook's step 1 (bc-pnum
-// A8/[review]): the ONE writer of the Data sheet for that shared pipeline,
+// A8): the ONE writer of the Data sheet for that shared pipeline,
 // so a caller never has to run AddPoolDataToSheet and then separately
 // AddPlayerDataToSheet on the same workbook to cover the one shape
 // (playoffs-only, no pools.csv) that needs the latter. namesToPrintPlayers

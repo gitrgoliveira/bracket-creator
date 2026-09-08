@@ -495,7 +495,7 @@ func (e *Engine) EnsureNumberPrefix(compID string, allowed func(state.Competitio
 	var assignedPrefix string
 	var skipRenumber bool
 	err = e.store.WithCompetitionRenameLock(func() error {
-		_, updateErr := e.store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
+		changed, updateErr := e.store.UpdateCompetitionChanged(compID, func(current *state.Competition) (*state.Competition, error) {
 			if current == nil || !allowed(current.Status) {
 				skipRenumber = true
 				return nil, nil
@@ -523,6 +523,14 @@ func (e *Engine) EnsureNumberPrefix(compID string, allowed func(state.Competitio
 			assignedPrefix = prefix
 			return current, nil
 		})
+		// assigned was set inside the transform above, which runs BEFORE the
+		// save; only `changed` (returned by UpdateCompetitionChanged once the
+		// bytes have actually landed) tells us the assignment was persisted.
+		// A failed config.md write (full disk, read-only directory) returns
+		// changed == false alongside the error, so this gate must run even on
+		// the error path below -- a prefix that was never saved must never be
+		// reported as assigned.
+		assigned = assigned && changed
 		if updateErr != nil {
 			return updateErr
 		}

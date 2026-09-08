@@ -105,6 +105,36 @@ func corruptCSV(file string, err error) error {
 	return c
 }
 
+// corruptJSONWithSentinel is corruptJSON plus a caller-specific sentinel: some
+// callers (today: overrides.json) need their failure to answer BOTH questions
+// the codebase asks about a bad file independently -- state.AsCorruptFile,
+// which every reader that degrades on an operator-repairable file checks, and
+// errors.Is against the caller's own sentinel, which that caller's own
+// terminal-response mapping checks (e.g. respondIfCorruptOverrides's 422).
+// Reuses corruptJSON for the location logic rather than duplicating the
+// offset-to-line-column resolution.
+//
+// When corruptJSON manages to locate the fault, its *CorruptFileError is
+// returned with Err re-pointed at a wrapper carrying BOTH the sentinel and
+// the original parse error via two %w verbs, so errors.Is still finds the
+// sentinel (through CorruptFileError.Unwrap) and errors.As can still reach
+// e.g. the underlying *json.SyntaxError. When corruptJSON's default arm
+// declines to locate the fault (not a json.SyntaxError/UnmarshalTypeError),
+// the sentinel is still owed, just un-located: the raw err is wrapped with
+// the sentinel and returned directly, so AsCorruptFile correctly reports
+// false for it.
+func corruptJSONWithSentinel(sentinel error, file string, raw []byte, err error) error {
+	if err == nil {
+		return nil
+	}
+	located := corruptJSON(file, raw, err)
+	if cf, ok := located.(*CorruptFileError); ok {
+		cf.Err = fmt.Errorf("%w: %w", sentinel, err)
+		return cf
+	}
+	return fmt.Errorf("%w: %w", sentinel, err)
+}
+
 // offsetToLineColumn resolves a 0-based byte offset into a 1-based line and
 // column. An offset past the end (json reports one for a truncated document,
 // which is what half a hand edit looks like) resolves to the final position

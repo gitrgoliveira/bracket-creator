@@ -581,7 +581,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			}
 
 			// bc-pnum ruling 1e follow-up: a corrupt-file error (pools.csv,
-			// pool-matches.csv, bracket.json, participants.csv, or one
+			// pool-matches.csv, bracket.json, or one
 			// engine.CalculatePoolStandings' own reads surfaces, e.g.
 			// overrides.json) DEGRADES rather than failing the whole
 			// detail request -- the aggregate has never failed the whole
@@ -589,17 +589,61 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// failing here was exactly why the corrupt-pools-csv case
 			// this pin covers never reached the operator: the request
 			// 500'd before dataIssues (below) ever got a chance to name
-			// it. Any OTHER error (a genuine I/O fault the operator
-			// cannot fix by editing a file) still aborts, unchanged from
-			// before.
-			for _, e := range []error{playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr} {
-				if e == nil {
+			// it. participants.csv is deliberately NOT in this class: its
+			// loader (state.LoadParticipantsOpt) returns either the raw
+			// helper.ReadCSVFile error or a plain fmt.Errorf from
+			// helper.CreatePlayersFromRecords (duplicate-entry, bad-format),
+			// neither of which is ever a *state.CorruptFileError, so
+			// state.AsCorruptFile(playersErr) is always false and a
+			// participants.csv fault still aborts the request below
+			// (already logged, via internalError, on that path) -- unchanged
+			// from before this comment. A future change that starts wrapping
+			// that loader with corruptCSV would be a deliberate decision, not
+			// something this comment already sanctions. Any OTHER error (a
+			// genuine I/O fault the operator cannot fix by editing a file)
+			// still aborts, unchanged from before.
+			//
+			// Every degraded error is logged below, inside the continue branch,
+			// naming the competition and which read hit it -- trading a loud
+			// failure for a silent one was never the intent, only trading a 500
+			// for a 200 that still leaves a server-side breadcrumb.
+			//
+			// standingsErr is deliberately the ONE of the five never folded into
+			// viewerDataIssues (compare the call a few lines down, which passes
+			// poolMatchesErr and bracketErr but not standingsErr): this endpoint
+			// is the only one that ever computes standings at all -- the
+			// aggregate (buildViewerCompetitionPayload) never calls
+			// engine.CalculatePoolStandings -- so feeding standingsErr into the
+			// SHARED viewerDataIssues builder would make the two surfaces report
+			// different issues for the identical competition, which
+			// viewerDataIssues' own doc comment (above) says they must never do.
+			// The fault standingsErr actually carries here (a corrupt
+			// overrides.json, via CalculatePoolStandings' own internal
+			// LoadOverrides) already has a loud, actionable operator channel of
+			// its own: EVERY write path answers 422 naming the file with a
+			// repair instruction (respondIfCorruptOverrides, errors.go),
+			// including the DELETE .../overrides repair door. This read surface
+			// degrading, plus the log line below, is the deliberate answer for a
+			// GET -- not an oversight.
+			degradedReads := []struct {
+				name string
+				err  error
+			}{
+				{"participants", playersErr},
+				{"pools", poolsErr},
+				{"pool matches", poolMatchesErr},
+				{"standings", standingsErr},
+				{"bracket", bracketErr},
+			}
+			for _, dr := range degradedReads {
+				if dr.err == nil {
 					continue
 				}
-				if _, ok := state.AsCorruptFile(e); ok {
+				if _, ok := state.AsCorruptFile(dr.err); ok {
+					log.Printf("mobileapp: viewer payload %s: load %s: %v", id, dr.name, dr.err)
 					continue
 				}
-				return nil, e
+				return nil, dr.err
 			}
 
 			// FR-025, T036: derive per-court queue position at serve time,

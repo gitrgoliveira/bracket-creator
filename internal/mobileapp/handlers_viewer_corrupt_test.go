@@ -237,6 +237,69 @@ func TestViewerDetail_ReportsCorruptPoolsAndDoesNotFail(t *testing.T) {
 	assert.NotEmpty(t, issue["detail"])
 }
 
+// TestViewerDetail_CorruptOverridesDegradesInsteadOfFailing is the
+// overrides.json half of the same degrade pin as
+// TestViewerDetail_ReportsCorruptPoolsAndDoesNotFail (bc-pnum FIX 1). Before
+// the fix, loadOverridesLocked wrapped a JSON parse failure only in the
+// plain state.ErrCorruptOverrides sentinel (errors.New, not a
+// state.CorruptFileError), and computeStandingsFrom's own propagation of
+// that error meant the detail endpoint's standingsErr carried it too --
+// but state.AsCorruptFile could never match a bare sentinel, so the degrade
+// loop's `if _, ok := state.AsCorruptFile(e); ok { continue }` fell through
+// to its abort arm and the endpoint answered 500, exactly contradicting
+// that loop's own comment naming overrides.json as a case that must
+// degrade. This does not touch the write-path 422
+// (respondIfCorruptOverrides); that mapping is asserted separately in
+// handlers_match_test.go / handlers_league_tiebreak_test.go and is expected
+// to still pass unchanged.
+//
+// Renamed from TestViewerDetail_ReportsCorruptOverridesAndDoesNotFail
+// (bc-pnum review finding A): the old name promised the endpoint "reports"
+// the corrupt overrides.json, but the body only ever asserted the 200
+// status -- it pinned nothing about the degrade shape itself. standingsErr
+// is the one carrier of this fault and is deliberately NEVER folded into
+// dataIssues (see the degrade loop's own comment in handlers_viewer.go: the
+// aggregate never computes standings, so doing so would make the two
+// surfaces disagree about the same competition, and a corrupt
+// overrides.json already has its own loud write-path 422 instead). So what
+// this test now pins is the degrade SHAPE: standings comes back
+// absent/null, no dataIssues entry is raised for it, and the REST of the
+// payload -- config in particular -- is still genuinely served rather than
+// the whole request failing.
+func TestViewerDetail_CorruptOverridesDegradesInsteadOfFailing(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "corrupt-overrides-detail", Name: "Corrupt Overrides", Status: state.CompStatusPools, Format: state.CompFormatMixed,
+		Kind: "individual", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveParticipants("corrupt-overrides-detail", []domain.Player{
+		{Name: "Alice", Dojo: "Dojo Alice"},
+		{Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, "competitions", "corrupt-overrides-detail", "overrides.json"),
+		[]byte("{not valid json"), 0600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/viewer/competitions/corrupt-overrides-detail", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"a corrupt overrides.json must degrade the read path, not fail the whole detail request; body: %s", w.Body.String())
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+
+	standings, hasStandings := payload["standings"]
+	assert.Nil(t, standings, "standings must be absent or null when overrides.json is corrupt, got %#v (key present=%v)", standings, hasStandings)
+
+	cfg, _ := payload["config"].(map[string]any)
+	require.NotNil(t, cfg, "the rest of the payload must still be served despite the corrupt overrides.json")
+	assert.Equal(t, "corrupt-overrides-detail", cfg["id"], "config must still be the real competition, not a stub")
+
+	_, hasIssue := payload["dataIssues"]
+	assert.False(t, hasIssue, "a corrupt overrides.json must not raise a dataIssues entry: it already has its own write-path 422 channel")
+}
+
 // dataIssueByFile finds the dataIssues entry naming file, or nil.
 func dataIssueByFile(t *testing.T, issues []any, file string) map[string]any {
 	t.Helper()
@@ -358,7 +421,7 @@ func TestViewerAggregateAndDetail_PoolMatchesMissingIDsAgree(t *testing.T) {
 	assert.Equal(t, aggIssue["detail"], detIssue["detail"])
 	detail, _ := aggIssue["detail"].(string)
 	assert.Contains(t, detail, "Alice vs Bob")
-	assert.Contains(t, detail, "re-enter the results once the sides have ids")
+	assert.Contains(t, detail, "regenerate the draw while it is still draw-ready to restore a missing side id")
 }
 
 // TestViewerAggregateAndDetail_NoIssuesWhenFullyStamped is the negative

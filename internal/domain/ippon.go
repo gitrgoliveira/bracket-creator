@@ -215,10 +215,22 @@ func AttributeWinnerSide(a WinnerAttribution) MatchSide {
 
 // WinnerIDNamesASide reports whether winnerID is either empty (nothing to
 // check) or names one of the two given side ids (bc-pnum ruling 1d). This is
-// the ONE gate for whether an incoming WinnerID is acceptable: every
-// WinnerID-vs-side-id consistency check in the codebase should call this
-// rather than re-deriving its own comparison, so the surfaces that check it
-// can never drift apart.
+// the strict primitive every WinnerID-vs-side-id consistency check in the
+// codebase is built from: it applies NO exemption for the sides being
+// unknown, so a non-empty WinnerID naming neither side is rejected by this
+// function specifically, unconditionally, not inferred around.
+//
+// Call this directly when that unconditional strictness is exactly what's
+// wanted: validateWithdrawalNamesDisambiguated
+// (internal/mobileapp/validation.go) does, on purpose, because a same-name
+// withdrawal with both side ids empty must keep rejecting an unattributable
+// winnerId -- folding an exemption in here would silently reopen that
+// ambiguity for it too. A caller that instead wants the narrow
+// both-sides-unknown exemption (a legacy pool row drawn before ids were
+// minted, or a bracket match, where there is no known pairing for winnerId
+// to have missed) calls the wrapper WinnerIDAcceptable, rather than
+// re-deriving its own `sideAID == "" && sideBID == ""` comparison -- see that
+// function's doc comment for the exemption's own rationale and scope.
 //
 // Ids are minted for every roster row at write time (participants.csv's one
 // write chokepoint, internal/state/participants.go marshalParticipantsCSV)
@@ -229,11 +241,42 @@ func AttributeWinnerSide(a WinnerAttribution) MatchSide {
 // WinnerID matching neither side used to be silently DROPPED rather than
 // rejected whenever only one side id was known, on the theory that it might
 // simply be the other side's still-absent id. With ids guaranteed complete
-// by the time a match exists, that theory no longer holds — a non-empty
-// WinnerID naming neither side is invalid on its face and is rejected, not
-// inferred around.
+// by the time a match exists, that theory no longer holds.
 func WinnerIDNamesASide(winnerID, sideAID, sideBID string) bool {
 	return winnerID == "" || winnerID == sideAID || winnerID == sideBID
+}
+
+// WinnerIDAcceptable is WinnerIDNamesASide widened by ONE narrow exemption:
+// when BOTH side ids are unknown (sideAID == "" && sideBID == ""), there is
+// no known pairing for winnerId to have missed, so the write is accepted
+// rather than rejected against data this check cannot evaluate. This is the
+// ONE owner of that exemption -- internal/engine/scoring.go's
+// backfillMatchIdentity and internal/mobileapp/validation.go's
+// validateWinnerIDMatchesSide each used to hand-derive their own
+// `bothSideIDsUnknown` local and OR it with WinnerIDNamesASide; call this
+// instead of re-deriving that comparison a third time.
+//
+// Deliberately NOT folded into WinnerIDNamesASide itself: see that function's
+// doc comment for why validateWithdrawalNamesDisambiguated needs the strict,
+// unconditional form directly and would be silently weakened by this
+// exemption.
+//
+// The exemption covers two shapes of data, one bounded and one permanent.
+// The bounded one is a legacy pool row drawn before ids were minted (ids
+// were backfilled going forward only, never onto existing rows). The
+// permanent one is every bracket match write at the HTTP boundary:
+// state.BracketMatch persists no side ids at all, so
+// state.Store.MatchSidesByID returns two empty strings for EVERY bracket
+// match, not just a legacy one (see that function's own doc comment) -- so
+// this exemption is permanently "on" for the whole bracket branch, not a
+// transitional carve-out. That is harmless: applyBracketMatchResult
+// (internal/engine/scoring.go) derives the persisted winner from
+// result.Winner (the name) and never reads result.WinnerID at all --
+// state.BracketMatch has no WinnerID field to receive it -- so an
+// unattributable winnerId on a bracket write is silently discarded, not
+// misapplied to the stored result.
+func WinnerIDAcceptable(winnerID, sideAID, sideBID string) bool {
+	return (sideAID == "" && sideBID == "") || WinnerIDNamesASide(winnerID, sideAID, sideBID)
 }
 
 // HanteiTiedScoreline reports whether two ippon arrays hold an equal number of

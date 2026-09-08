@@ -634,7 +634,7 @@ competitions:
 	})
 
 	// mp-yin4 originally required this to reject, matching POST/PUT's
-	// uniqueness gate. bc-pnum A1 ([review] nit d) narrowed that at the
+	// uniqueness gate. bc-pnum A1 narrowed that at the
 	// IMPORT boundary specifically: a restored archive can legally carry a
 	// prefix pair that predates the ambiguity/uniqueness rule (this bead's
 	// own governing rule: on legacy data we ASSIGN, never reject), so a
@@ -643,13 +643,13 @@ competitions:
 	// for the focused unit coverage (including the ambiguous, not just
 	// exact-duplicate, case) below the HTTP layer.
 	//
-	// [review] round 2, nit (b): this reassignment PRESERVES mp-yin4's
+	// This reassignment PRESERVES mp-yin4's
 	// invariant rather than abandoning it -- prefix+number stays globally
 	// unique across every competition, which is what lets the viewer's
 	// `?playerNumber=` deep link (mp-yin4 tag QR, viewer_home.jsx) resolve
 	// to exactly one competitor. Rejecting the row would also have
 	// preserved it, just by refusing the collision instead of resolving it;
-	// re-validating the re-derived prefix ([review] round 2, item 1) is
+	// re-validating the re-derived prefix is
 	// what keeps a SUCCESSFUL reassignment from silently reintroducing the
 	// exact ambiguity this invariant forbids.
 	t.Run("Duplicate Number Prefix Across Import And Existing Comp Reassigned, Not Rejected", func(t *testing.T) {
@@ -690,7 +690,7 @@ competitions:
 		assert.NotEqual(t, "I", stored.NumberPrefix, "the colliding prefix must have been reassigned, not saved as-is")
 		assert.NotEmpty(t, stored.NumberPrefix, "a reassignment must still leave the competition WITH a prefix")
 
-		// [review] round 2, item 2: the wire payload (raw JSON over the
+		// The wire payload (raw JSON over the
 		// real HTTP endpoint, not just the Go struct) must carry the
 		// warning, or the SPA never sees it. Asserted on the RAW body too,
 		// not only the decoded struct, since json:",omitempty" silently
@@ -1113,7 +1113,7 @@ func TestImportCompetition_AssignsDefaultNumberPrefix(t *testing.T) {
 }
 
 // TestImportCompetition_AssignsFreshPrefixOnRestoredCollision pins bc-pnum
-// A1's import-boundary rule ([review] nit d): a restored archive with two
+// A1's import-boundary rule: a restored archive with two
 // competitions whose explicit number_prefix values collide -- either an
 // EXACT duplicate, or an AMBIGUOUS pair like "K"/"K2" that was legal before
 // the ambiguity rule existed -- must not fail the second row. The governing
@@ -1199,7 +1199,7 @@ func TestImportCompetition_AssignsFreshPrefixOnRestoredCollision(t *testing.T) {
 		assert.Contains(t, res2.Error, "already exists")
 	})
 
-	// [review] round 2, item 1: DefaultNumberPrefixFor's own contract
+	// DefaultNumberPrefixFor's own contract
 	// (helper/numbers.go) is a best-effort SUGGESTION, not a uniqueness
 	// guarantee -- once every candidate up to the length cap is exhausted it
 	// returns the LAST one tried, unmodified, which can itself already be
@@ -1243,8 +1243,8 @@ func TestImportCompetition_AssignsFreshPrefixOnRestoredCollision(t *testing.T) {
 	})
 }
 
-// TestImportCompetition_ReassignmentSetsWarning pins [review] round 2, item
-// 2: a reassigned prefix invalidates every tag the archive's competition
+// TestImportCompetition_ReassignmentSetsWarning pins the rule that a
+// reassigned prefix invalidates every tag the archive's competition
 // already had printed under the OLD prefix (mp-yin4's prefix+number
 // global-uniqueness invariant is PRESERVED by the reassignment, see the
 // updated comment above TestRegisterImportHandlers' duplicate-prefix

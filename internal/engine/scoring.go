@@ -1002,17 +1002,40 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 	// would otherwise be persisted verbatim (the early return just below
 	// trusted it outright) and counted for nobody in standings -- a
 	// completed match with a winner nobody can find. Checked on every
-	// FORWARD (client) write via domain.WinnerIDNamesASide (bc-pnum ruling
+	// FORWARD (client) write via domain.WinnerIDAcceptable (bc-pnum ruling
 	// 1d) -- a RESTORE never rejects (see the doc comment above).
 	//
 	// Ids are minted for every roster row at write time and the draw itself
 	// now refuses to run over a roster that still has an id-less row (bc-pnum
-	// ruling 1c), so a drawn match's side ids are never partially known in
-	// current data; the tolerance this used to have for that case (silently
-	// DROPPING an unattributable WinnerID instead of rejecting it, added for
-	// PR #416 finding 6) is no longer warranted and has been removed --
-	// domain.WinnerIDNamesASide's own doc comment has the full history.
-	if policy == matchWriteForward && !domain.WinnerIDNamesASide(result.WinnerID, result.SideAID, result.SideBID) {
+	// ruling 1c), so a NEWLY drawn match's side ids are never partially known
+	// in current data; the tolerance this used to have for that case
+	// (silently DROPPING an unattributable WinnerID instead of rejecting it,
+	// added for PR #416 finding 6) is no longer warranted and has been
+	// removed -- domain.WinnerIDNamesASide's own doc comment has the full
+	// history.
+	//
+	// A competition drawn BEFORE ruling 1c existed can still have BOTH
+	// SideAID and SideBID empty on a stored pool row -- ids were never
+	// backfilled onto existing rows, only minted going forward -- and when
+	// NEITHER side has a known id, "this winnerId names neither side" is not
+	// a claim this check can support: there is no known pairing at all for it
+	// to have missed. Rejecting there would 400 a legacy/queued write that
+	// the SPA itself never produces this way (its serializer only sends
+	// winnerId once it matches a server-supplied id), so the client discards
+	// a score the operator entered offline.
+	//
+	// This exemption is deliberately narrow (BOTH unknown, not "at least one
+	// unknown"): the PARTIALLY-stamped case -- one side id known, the other
+	// not -- keeps rejecting unconditionally, exactly as PR #416 finding 6
+	// pinned it (TestBackfillMatchIdentity_OneSideIDKnown,
+	// TestScoreHandler_MixedIDRosterInventedWinnerIDRejected): a known side
+	// id IS enough pairing information to say winnerId does not name it, and
+	// a WinnerID invented from a name (the old SPA behaviour that finding
+	// closed) must still be caught there. domain.WinnerIDAcceptable is the
+	// ONE owner of the both-unknown exemption (bc-pnum review): do not
+	// re-derive a local `bothSideIDsUnknown` here.
+	if policy == matchWriteForward &&
+		!domain.WinnerIDAcceptable(result.WinnerID, result.SideAID, result.SideBID) {
 		return validationErrorf("match %s: winnerId %q does not match sideAId %q or sideBId %q",
 			result.ID, result.WinnerID, result.SideAID, result.SideBID)
 	}

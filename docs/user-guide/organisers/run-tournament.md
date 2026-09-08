@@ -171,7 +171,7 @@ Applying the list gives every competitor a participant id, shown beside the row 
 Two more notices can appear on the **Overview** for the same reason, once a competition has drawn:
 
 - A notice naming pool members with no id. Those competitors show no competitor number. Regenerate the draw, while it is still draw-ready, to fix it.
-- A notice naming pool matches with no id on a side or a winner. Those matches are not counted in the standings. Re-enter the result once the sides have ids.
+- A notice naming pool matches with no id on a side or a winner. Those matches are not counted in the standings. Re-entering the result assigns a missing winner id. Regenerating the draw, while it is still draw-ready, restores a missing side id.
 
 Both notices are advisory, not blocking: the competition keeps running, and nothing you have already recorded is lost.
 

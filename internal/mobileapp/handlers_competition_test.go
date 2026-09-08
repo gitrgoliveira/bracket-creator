@@ -23,36 +23,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestResolvePoolOverrideTarget is a direct unit test of the resolver.
-// ID-only (operator ruling bc-pnum): playerId is REQUIRED and is the ONLY
-// selector -- the old playerName/playerDojo narrowing (bc-cse FIX 1/FIX 2)
-// is gone, since a pool-rank override is a record resolved by id only.
-func TestResolvePoolOverrideTarget(t *testing.T) {
+// TestPoolHasPlayerID is a direct unit test of the validator. ID-only
+// (operator ruling bc-pnum): playerId is REQUIRED and is the ONLY selector --
+// the old playerName/playerDojo narrowing (bc-cse FIX 1/FIX 2) is gone, since
+// a pool-rank override is a record resolved by id only.
+func TestPoolHasPlayerID(t *testing.T) {
 	players := []domain.Player{
 		{ID: "member-a", Name: "Member A", Dojo: "Dojo A"},
 		{ID: "member-b", Name: "Member B", Dojo: "Dojo B"},
 	}
 
 	t.Run("empty playerId is rejected", func(t *testing.T) {
-		name, dojo, err := resolvePoolOverrideTarget(players, "")
+		err := poolHasPlayerID(players, "")
 		require.Error(t, err, "playerId is required")
-		assert.Empty(t, name)
-		assert.Empty(t, dojo)
 	})
 
 	t.Run("off-roster playerId is rejected, not silently empty", func(t *testing.T) {
-		name, dojo, err := resolvePoolOverrideTarget(players, "no-such-id")
+		err := poolHasPlayerID(players, "no-such-id")
 		require.Error(t, err, "an off-roster playerId must error rather than resolve to an unreadable empty key")
 		assert.Contains(t, err.Error(), "no-such-id")
-		assert.Empty(t, name)
-		assert.Empty(t, dojo)
 	})
 
-	t.Run("on-roster playerId resolves to that member's name and dojo", func(t *testing.T) {
-		name, dojo, err := resolvePoolOverrideTarget(players, "member-a")
+	t.Run("on-roster playerId is accepted", func(t *testing.T) {
+		err := poolHasPlayerID(players, "member-a")
 		require.NoError(t, err)
-		assert.Equal(t, "Member A", name)
-		assert.Equal(t, "Dojo A", dojo)
 	})
 }
 
@@ -2207,7 +2201,7 @@ func TestPOSTStartAndGenerateDraw_LegacyEmptyPrefix_AssignBeforeDrawing(t *testi
 		}
 	})
 
-	// bc-pnum A5(a) [review]: the RETRY this fix exists for. The previous
+	// bc-pnum A5(a): the RETRY this fix exists for. The previous
 	// subtest pins the FIRST call (500, prefix saved, renumber failed). This
 	// one continues past it: once the operator repairs pools.csv (here,
 	// simulated by re-saving it with valid-but-unnumbered players, the exact
@@ -2680,7 +2674,7 @@ func TestResolvePutNumberPrefix_MovedPrefixStillValidatedAgainstCollision(t *tes
 	// stays "Z" verbatim, simulating "this write's own prefix is Z" without
 	// going through DefaultNumberPrefix's collision-avoiding search.
 	target := &state.Competition{ID: "m1-target", Name: "Target", NumberPrefix: "Z"}
-	moved, infraErr, validationErr := resolvePutNumberPrefix(store, eng, target, "" /* storedPrefix: blank -> moved */, "", "m1-target")
+	moved, infraErr, validationErr := resolvePutNumberPrefix(eng, target, "" /* storedPrefix: blank -> moved */, "", "m1-target")
 
 	require.NoError(t, infraErr)
 	assert.True(t, moved, "storedPrefix was blank and target now carries \"Z\": this call DID move it")
@@ -4441,7 +4435,7 @@ func TestPUTCompetition_RenumberFailurePolicy(t *testing.T) {
 		assert.Len(t, players, 2, "participants.csv must have landed despite the broken pools.csv")
 	})
 
-	// bc-pnum [review]: the sibling of "prefix moved: 500..." above, but
+	// bc-pnum: the sibling of "prefix moved: 500..." above, but
 	// on the ROSTER-only branch. A roster-only PUT CAN move the prefix --
 	// when it heals a blank stored one (bc-pnum A3) -- and when it does, a
 	// renumber failure right after is this write's own damage exactly like

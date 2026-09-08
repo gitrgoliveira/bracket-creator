@@ -69,7 +69,7 @@ type ImportResult struct {
 	Error            string `json:"error,omitempty"`
 	// Warning is non-empty when the row imported successfully but with a
 	// caveat the operator must act on -- currently only the import-boundary
-	// prefix reassignment ([review] round 2, item 2): the row landed, but
+	// prefix reassignment: the row landed, but
 	// under a DIFFERENT number prefix than the archive requested, so every
 	// tag this competition already had printed (under the old prefix) now
 	// names a number it no longer has. A bare Error-only result would let
@@ -480,7 +480,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 			res.Error = nameErr.Error()
 			return nil
 		}
-		// bc-pnum A1 (import boundary, [review] nit d): a restored archive
+		// bc-pnum A1 (import boundary): a restored archive
 		// can legally carry a prefix pair that predates the ambiguity rule
 		// -- e.g. "K" and "K2", both saved back when only an EXACT duplicate
 		// was refused. Rejecting this row would silently drop half of a
@@ -508,7 +508,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 			if deriveErr != nil {
 				return deriveErr
 			}
-			// [review] round 2, item 1: DefaultNumberPrefixFor's own contract
+			// DefaultNumberPrefixFor's own contract
 			// (helper/numbers.go) is an explicit best-effort SUGGESTION, not a
 			// uniqueness guarantee -- once every candidate up to the length
 			// cap is exhausted it returns the LAST one tried, unmodified,
@@ -533,7 +533,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 			log.Printf("mobileapp: import %s: number prefix %q collided on restore (%v); reassigned %q",
 				comp.ID, oldPrefix, prefixErr, newPrefix)
 			comp.NumberPrefix = newPrefix
-			// [review] round 2, item 2: the reassignment PRESERVES mp-yin4's
+			// The reassignment PRESERVES mp-yin4's
 			// global prefix+number uniqueness invariant, but every tag this
 			// competition already had printed under oldPrefix now names a
 			// number it no longer has. ImportResult.Error would make the SPA
@@ -559,7 +559,7 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 	if res.Error != "" {
 		return res
 	}
-	// bc-pnum A1 ([review] nit d): renumber whatever this row already has on
+	// bc-pnum A1: renumber whatever this row already has on
 	// disk under its (possibly just-reassigned) prefix, the same pairing
 	// every other assignment site uses. A no-op today -- this manifest
 	// format never restores pools.csv, so RenumberCompetitors' own

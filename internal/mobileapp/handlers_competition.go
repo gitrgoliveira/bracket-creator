@@ -550,7 +550,7 @@ func inheritOrAssignNumberPrefix(eng *engine.Engine, target *state.Competition, 
 // but skipping the call altogether here also skips paying for building the
 // (empty) arguments and keeps the "nothing to validate" case visible at the
 // call site, not just inside the callee.
-func resolvePutNumberPrefix(store *state.Store, eng *engine.Engine, target *state.Competition, storedPrefix, validateName, id string) (moved bool, infraErr, validationErr error) {
+func resolvePutNumberPrefix(eng *engine.Engine, target *state.Competition, storedPrefix, validateName, id string) (moved bool, infraErr, validationErr error) {
 	if err := inheritOrAssignNumberPrefix(eng, target, storedPrefix, id); err != nil {
 		return false, err, nil
 	}
@@ -608,23 +608,25 @@ func checkUniqueCompFieldsTolerant(eng *engine.Engine, name, prefix, excludeID s
 	return eng.CheckUniqueCompFields(name, prefix, excludeID, true)
 }
 
-// resolvePoolOverrideTarget resolves the pool-rank override request's target
-// competitor to their canonical dojo, looked up against the pool's OWN
-// roster rather than trusted verbatim from the request. playerID is
-// REQUIRED (operator ruling bc-pnum): a pool-rank override is a record
-// resolved by id only, so there is no playerName/playerDojo narrowing path
-// left to fall back to. playerID must name a player actually in this pool;
-// a wrong/foreign/blank id is a 400, never a silent name-based guess.
-func resolvePoolOverrideTarget(players []domain.Player, playerID string) (name, dojo string, err error) {
+// poolHasPlayerID validates the pool-rank override request's target id
+// against the pool's OWN roster rather than trusting it verbatim from the
+// request. playerID is REQUIRED (operator ruling bc-pnum): a pool-rank
+// override is a record resolved by id only, so there is no
+// playerName/playerDojo narrowing path left to fall back to. playerID must
+// name a player actually in this pool; a wrong/foreign/blank id is a 400,
+// never a silent name-based guess. The override is then saved keyed by
+// playerID alone (SaveRankOverrideChanged), so no name/dojo lookup is
+// needed once this check passes.
+func poolHasPlayerID(players []domain.Player, playerID string) error {
 	if playerID == "" {
-		return "", "", fmt.Errorf("playerId is required")
+		return fmt.Errorf("playerId is required")
 	}
 	for _, p := range players {
 		if p.ID == playerID {
-			return p.Name, p.Dojo, nil
+			return nil
 		}
 	}
-	return "", "", fmt.Errorf("playerId %q not found in this pool", playerID)
+	return fmt.Errorf("playerId %q not found in this pool", playerID)
 }
 
 // loadAllCompetitions lists every competition id on disk and loads its
@@ -644,7 +646,16 @@ func loadAllCompetitions(store *state.Store) ([]*state.Competition, error) {
 	comps := make([]*state.Competition, 0, len(ids))
 	for _, id := range ids {
 		comp, err := store.LoadCompetition(id)
-		if err == nil && comp != nil {
+		if err != nil {
+			// A missing config.md returns (nil, nil), never here -- only a
+			// genuine load error (unparseable YAML, an I/O fault) reaches
+			// this branch, and the doc comment above promises exactly this
+			// breadcrumb: keep the competition list available, but log which
+			// one silently vanished from it.
+			log.Printf("mobileapp: loadAllCompetitions %s: load competition: %v", id, err)
+			continue
+		}
+		if comp != nil {
 			comps = append(comps, comp)
 		}
 	}
@@ -1490,7 +1501,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					// helper, its doc comment covers the target/excludeID
 					// choice here).
 					var infraErr error
-					numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(store, eng, current, current.NumberPrefix, "", id)
+					numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(eng, current, current.NumberPrefix, "", id)
 					if infraErr != nil {
 						return nil, infraErr
 					}
@@ -1748,7 +1759,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 					validateName = comp.Name
 				}
 				var infraErr error
-				numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(store, eng, &comp, current.NumberPrefix, validateName, id)
+				numberPrefixMoved, infraErr, validationErr = resolvePutNumberPrefix(eng, &comp, current.NumberPrefix, validateName, id)
 				if infraErr != nil {
 					return nil, infraErr
 				}
@@ -2646,12 +2657,9 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 
-		// Validate playerId names a player actually in this pool (id-only,
-		// operator ruling bc-pnum), or the request is rejected. The
-		// resolved name/dojo are not needed past this check: the override
-		// is saved keyed by playerId alone (SaveRankOverrideChanged).
-		if _, _, resolveErr := resolvePoolOverrideTarget(targetPool.Players, playerID); resolveErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": resolveErr.Error()})
+		// poolHasPlayerID's own doc comment has the id-only rationale.
+		if err := poolHasPlayerID(targetPool.Players, playerID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 

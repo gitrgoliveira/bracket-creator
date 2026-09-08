@@ -419,7 +419,7 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 // helper.AssignPlayerNumbers composition the public viewer merge uses), so
 // the numbers on the printed tags must equal what the app already shows.
 //
-// [review] narrowed what this test can prove: it derives wantNumbers by
+// What this test can prove is narrow: it derives wantNumbers by
 // calling eng.NumberedParticipantsFor, the exact function ExportCompetitionXlsx
 // itself calls, so it can only catch the export disagreeing with ITSELF, not
 // with the public viewer payload. This package cannot hold the stronger
@@ -631,7 +631,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	defer func() { os.Stdout = old }()
 	defer r.Close()
 
-	// [review] nit (a): drain the pipe CONCURRENTLY, started before fn()
+	// Drain the pipe CONCURRENTLY, started before fn()
 	// runs. A pipe's kernel buffer is bounded (64 KiB on Linux); fn() used
 	// to run to completion before anything read from r, so an export
 	// printing more than that in one call would block the writer forever --
@@ -654,7 +654,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce pins the
-// [review] nit (a): a playoffs-only export (no pools.csv) used to call
+// double-write fix: a playoffs-only export (no pools.csv) used to call
 // helper.AddPoolDataToSheet inside RenderCompetitionWorkbook's step 1 (over
 // the empty pools slice, writing only headers) and THEN call
 // helper.AddPlayerDataToSheet a second time in ExportCompetitionXlsx itself,

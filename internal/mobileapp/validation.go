@@ -1001,24 +1001,31 @@ func winningScoreline(ipponsA, ipponsB []string, n int) bool {
 // competitors), and shared by both score-writing HTTP paths (validateWithOptions,
 // validateBulkScoreLengths) so the check cannot drift between them.
 //
-// bc-pnum ruling 1d: checked via domain.WinnerIDNamesASide, which passes
-// whenever winnerID is empty (nothing to check) and otherwise requires it to
-// equal one of sideAID/sideBID -- unconditionally, with no "only when both
-// are already known" exemption (that used to tolerate a winnerId matching
+// bc-pnum ruling 1d: checked via domain.WinnerIDAcceptable, which passes
+// whenever winnerID is empty (nothing to check), otherwise requires it to
+// equal one of sideAID/sideBID -- with no "only when at least one side is
+// already known" exemption (that used to tolerate a winnerId matching
 // neither side when only one side id was on the wire, PR #416 finding 6; see
 // domain.WinnerIDNamesASide's own doc comment for why that tolerance no
-// longer holds). SideAID/SideBID are NOT required BY THE WIRE FORMAT
-// (specs/openapi.yaml) -- the caller (backfillMatchIdentityForHantei,
+// longer holds) -- except the one narrow case domain.WinnerIDAcceptable
+// itself carves out: when BOTH side ids are unknown (a legacy pool row drawn
+// before ids were minted, or every bracket match at this HTTP boundary --
+// see that function's own doc comment for why the bracket case is permanent
+// and harmless), there is no known pairing for winnerId to have missed, so
+// the rejection is skipped rather than firing on data it cannot evaluate.
+// SideAID/SideBID are NOT required BY THE WIRE FORMAT (specs/openapi.yaml)
+// -- the caller (backfillMatchIdentityForHantei,
 // internal/mobileapp/handlers_match.go) backfills them from the STORED match
 // whenever the payload names a WinnerID, specifically so this check always
 // has the real pairing to validate against, not just whatever the client
 // happened to send. The engine's backfillMatchIdentity (internal/engine/
-// scoring.go) re-runs the identical check as a second, authoritative gate
-// once its own stored-id backfill has run, so a write that somehow reaches
-// this point without the caller's backfill (e.g. a stored match not found)
-// is still caught there.
+// scoring.go) re-runs the identical check (via the same domain.WinnerIDAcceptable,
+// including its both-unknown exemption) as a second, authoritative gate once
+// its own stored-id backfill has run, so a write that somehow reaches this
+// point without the caller's backfill (e.g. a stored match not found) is
+// still caught there.
 func validateWinnerIDMatchesSide(winnerID, sideAID, sideBID string) error {
-	if domain.WinnerIDNamesASide(winnerID, sideAID, sideBID) {
+	if domain.WinnerIDAcceptable(winnerID, sideAID, sideBID) {
 		return nil
 	}
 	return &ValidationError{

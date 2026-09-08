@@ -1875,28 +1875,17 @@ func CreateNamesWithPoolToPrint(f *excelize.File, pools []Pool, sanitized bool, 
 func printNameEntries(f *excelize.File, sheetName string, players []Player, sanitized bool, pCoords map[string]playerCellCoord, numberPrefix string) {
 	setupNamesToPrintLayout(f, sheetName)
 
-	// The sheet's number layout is decided from the competition's own
-	// number prefix, not by re-scanning players for one (bc-pnum operator
-	// ruling -- a prefix of more than one CHARACTER prints as two stacked
-	// lines, "KO" over "20"; a one-character prefix keeps the plain
-	// cross-sheet reference on one line, "K20"; bc-pnum review -- see
-	// splitNumberLines, numbers.go, for why re-deriving this from a
-	// representative player's Number breaks on a digit-bearing prefix like
-	// "KO2").
-	//
-	// prefixLen is a rune COUNT, not a byte length (bc-pnum review): Excel's
-	// LEFT/MID formulas below count characters, and a byte length disagrees
-	// with that for any multi-byte prefix letter (e.g. "Ö" is one character
-	// but two UTF-8 bytes), which split the formula's output at the wrong
-	// character while the Tags sheet -- which just slices the Go string, not
-	// an Excel formula -- showed the correct letters. utf8.RuneCountInString
-	// is what keeps the two print sites agreeing.
-	prefixLen := utf8.RuneCountInString(numberPrefix)
-	stacked := stackedNumberPrefix(numberPrefix)
-	nameIDPositionStyle := getNameIDPositionStyle(f)
-	if stacked {
-		nameIDPositionStyle = getNameIDPositionStackedStyle(f, prefixLen)
-	}
+	// Both requested up front, in the same order as before this function
+	// decided the stacked/single-line split per row (bc-pnum review): styles
+	// are excelize file-scoped and cache-keyed (getCachedStyle), so their IDs
+	// are assigned in FIRST-REQUEST order. Requesting the plain position
+	// style and the name style here, unconditionally, keeps that order
+	// (and therefore every sheet's serialized bytes) identical to before for
+	// every row that turns out non-stacked -- which is every row on every
+	// sheet a one-letter (or absent) prefix produces, the common case. The
+	// stacked style is requested lazily, from inside the loop, only for a
+	// row that actually needs it.
+	defaultPositionStyle := getNameIDPositionStyle(f)
 	nameIDStyle := getNameIDStyle(f)
 
 	for i, player := range players {
@@ -1911,20 +1900,43 @@ func printNameEntries(f *excelize.File, sheetName string, players []Player, sani
 		// used to write has been removed outright, not just made unreachable,
 		// so it cannot silently come back.
 		coord := pCoords[playerCoordKey(player)]
-		if coord.numberCell != "" {
-			ref := sheetRef(coord.sheetName, coord.numberCell)
-			formula := ref
-			if stacked {
+
+		// The two-line-vs-one-line decision, and the split OFFSET, are made
+		// PER ROW through splitNumberLines (numbers.go) -- the ONE owner of
+		// this decision, shared with the Tags sheet (excel_tags.go) -- rather
+		// than once per sheet from the prefix alone (bc-pnum review). A
+		// sheet-wide decision fabricated a split for any row whose stored
+		// Number does not actually carry the competition's own prefix
+		// (hand-edited or legacy data): splitNumberLines' own D1 rule is to
+		// report that mismatch by falling back to a single line, never a
+		// fabricated cut. Deciding from player.Number rather than the live
+		// cell's eventual value is safe because writePlayer (excel_data.go)
+		// writes this same player.Number into the referenced Data-sheet
+		// cell, so the two can never disagree.
+		//
+		// letters is a rune-length prefix (bc-pnum review): Excel's LEFT/MID
+		// formula below counts characters, and a byte length disagrees with
+		// that for any multi-byte prefix letter (e.g. "Ö" is one character
+		// but two UTF-8 bytes). utf8.RuneCountInString is what keeps this
+		// site agreeing with the Tags sheet, which just slices the Go
+		// string rather than building an Excel formula.
+		letters, _, stacked := splitNumberLines(player.Number, numberPrefix)
+		nameIDPositionStyle := defaultPositionStyle
+		if stacked {
+			letterCount := utf8.RuneCountInString(letters)
+			nameIDPositionStyle = getNameIDPositionStackedStyle(f, letterCount)
+			if coord.numberCell != "" {
 				// LIVE formula, not a static split: the referenced Data-sheet
 				// cell is the number's one source of truth (bc-pnum), so the
 				// stacked display recomputes from it rather than caching a
-				// value that could drift. prefixLen is the competition's own
-				// prefix rune count; every player's own number shares that
-				// same prefix, so splitting THIS player's reference at that
-				// offset is correct for every player on the sheet.
-				formula = fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, prefixLen, ref, prefixLen+1)
+				// value that could drift.
+				ref := sheetRef(coord.sheetName, coord.numberCell)
+				formula := fmt.Sprintf("LEFT(%s,%d)&CHAR(10)&MID(%s,%d,99)", ref, letterCount, ref, letterCount+1)
+				handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))
 			}
-			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, formula))
+		} else if coord.numberCell != "" {
+			ref := sheetRef(coord.sheetName, coord.numberCell)
+			handleExcelError("SetCellFormula", f.SetCellFormula(sheetName, positionCell, ref))
 		}
 		handleExcelError("SetCellStyle", f.SetCellStyle(sheetName, positionCell, positionCell, nameIDPositionStyle))
 

@@ -55,7 +55,7 @@ func PoolMatchesMissingSideIDsMessage(matches []state.MatchResult) string {
 		}
 	}
 	return helper.NamedLabelsMessage(helper.TruncatedLabels(count, labels, "match(es)"),
-		"a side or winner has no id. They are not counted in standings; re-enter the results once the sides have ids.")
+		"a side or winner has no id. They are not counted in standings; re-enter the result to assign a winner id, and regenerate the draw while it is still draw-ready to restore a missing side id.")
 }
 
 // matchLabel names a pool-matches.csv row for a data-issues notice: "SideA

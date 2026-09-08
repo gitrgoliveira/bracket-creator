@@ -1903,6 +1903,61 @@ func TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide(t *testin
 	assert.Equal(t, idB, result.WinnerID, "a winnerId matching the one known side is trusted outright")
 }
 
+// TestBackfillMatchIdentity_BothSideIDsUnknown_WinnerIDAccepted is the
+// legacy-competition case: a pool row drawn before ids were minted (bc-pnum
+// ruling 1c predates the roster) has BOTH SideAID and SideBID empty on
+// `stored` -- ids are minted going forward, never backfilled onto existing
+// rows. A forward write carrying a winnerId (e.g. replayed from an offline
+// queue by a pre-upgrade SPA bundle, whose serializer used to send winnerId
+// unconditionally) cannot be rejected as "names neither side": with neither
+// side id known there is no known pairing for it to have missed, so the
+// claim is unsound and the write must be accepted.
+func TestBackfillMatchIdentity_BothSideIDsUnknown_WinnerIDAccepted(t *testing.T) {
+	stored := &state.MatchResult{SideAID: "", SideBID: ""}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "some-client-invented-id",
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.NoError(t, err, "a winnerId cannot be rejected as unattributable when neither side id is known")
+	assert.Equal(t, "some-client-invented-id", result.WinnerID, "the write is accepted as-is, not rewritten")
+	assert.Equal(t, "", result.SideAID, "SideAID stays empty; stored never had one to backfill")
+	assert.Equal(t, "", result.SideBID, "SideBID stays empty; stored never had one to backfill")
+}
+
+// TestBackfillMatchIdentity_BothSideIDsKnown_WinnerIDMatchingNeither_StillRejected
+// is the companion boundary case: once BOTH side ids are actually known, a
+// winnerId matching neither of them is exactly the invalid-data case bc-idfx
+// exists to catch, and must still be rejected.
+//
+// This only pins the check against widening into an ALWAYS-ACCEPT
+// exemption: with both ids known here, an any-side-unknown mutant (the
+// both-unknown guard loosened to `sideAID == "" || sideBID == ""`) would
+// still correctly reject this case too, since neither id is empty, so it
+// passes unchanged even under that widening and cannot catch it. It is
+// TestBackfillMatchIdentity_OneSideIDKnown (one id known, the other not)
+// that actually pins the any-side-unknown boundary -- that is the shape
+// where "any unknown" wrongly accepts but the real both-unknown exemption
+// correctly keeps rejecting. Do not delete that test believing this one
+// covers it.
+func TestBackfillMatchIdentity_BothSideIDsKnown_WinnerIDMatchingNeither_StillRejected(t *testing.T) {
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+	stored := &state.MatchResult{SideAID: idA, SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "not-a-side-id",
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.Error(t, err, "a winnerId naming neither side must still be rejected once both side ids are known")
+}
+
 // TestBackfillMatchIdentity_RepPlayers pins the daihyosen rep-player preserve-
 // on-empty rule (mp-62vr): a score write that omits the rep players must NOT
 // wipe a previously-recorded pick, but an explicit value always overrides.

@@ -19,7 +19,7 @@ import (
 )
 
 // TestExportedTagsNumbersMatchActualViewerPayload is the cross-package half
-// of bc-pnum A8/[review]: engine.TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint
+// of bc-pnum A8: engine.TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint
 // derives its expectation by calling eng.NumberedParticipantsFor -- the very
 // function under test -- so it can never catch the viewer surface silently
 // deriving a DIFFERENT number for the same competitor; it can only catch the

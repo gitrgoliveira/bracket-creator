@@ -1016,6 +1016,63 @@ func TestCreateNamesToPrint_DigitBearingPrefixSplitsAtThePrefix(t *testing.T) {
 	assert.Equal(t, "KO2\n1", valA1)
 }
 
+// TestCreateNamesToPrint_PerRowPrefixMismatchStaysSingleLine pins the bc-pnum
+// review fix: the two-line-vs-one-line decision is made PER ROW through
+// splitNumberLines, not once per sheet from the numberPrefix argument alone.
+// Under stacked prefix "KO", a row whose stored Number does not actually
+// carry that prefix (hand-edited or legacy data, e.g. "X99") must render a
+// plain single-line cross-sheet reference -- never a fabricated split at the
+// sheet-wide prefix length ("X"/"99", which would misreport "X" as this
+// row's prefix). A sibling row whose Number DOES carry the prefix still gets
+// the stacked LEFT/MID formula, proving the two rows are decided
+// independently rather than the sheet falling back to single-line for
+// everyone the moment one row disagrees.
+func TestCreateNamesToPrint_PerRowPrefixMismatchStaysSingleLine(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	f.NewSheet("Pool1")
+	f.NewSheet(SheetNamesToPrint)
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A2", "KO20"))
+	handleExcelError("SetCellValue", f.SetCellValue("Pool1", "A3", "X99"))
+
+	players := []Player{
+		{Name: "Player1", PoolPosition: 1, Number: "KO20"},
+		{Name: "Player2", PoolPosition: 2, Number: "X99"},
+	}
+	pCoords := map[string]playerCellCoord{
+		playerCoordKey(players[0]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B2"}, numberCell: "$A$2"},
+		playerCoordKey(players[1]): {cellCoord: cellCoord{sheetName: "Pool1", cell: "B3"}, numberCell: "$A$3"},
+	}
+
+	CreateNamesToPrint(f, players, false, CourtLabels(1), pCoords, "KO")
+
+	sheet := "Names to Print A"
+
+	formulaA1, err := f.GetCellFormula(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, `LEFT('Pool1'!$A$2,2)&CHAR(10)&MID('Pool1'!$A$2,3,99)`, formulaA1,
+		"row carrying the sheet's prefix still gets the stacked split")
+	valA1, err := f.CalcCellValue(sheet, "A1")
+	require.NoError(t, err)
+	assert.Equal(t, "KO\n20", valA1)
+
+	formulaA2, err := f.GetCellFormula(sheet, "A2")
+	require.NoError(t, err)
+	assert.Equal(t, `'Pool1'!$A$3`, formulaA2,
+		"row NOT carrying the sheet's prefix must fall back to a plain single-line reference, never a fabricated split")
+	valA2, err := f.CalcCellValue(sheet, "A2")
+	require.NoError(t, err)
+	assert.Equal(t, "X99", valA2)
+
+	styleID2, err := f.GetCellStyle(sheet, "A2")
+	require.NoError(t, err)
+	style2, err := f.GetStyle(styleID2)
+	require.NoError(t, err)
+	require.NotNil(t, style2.Alignment)
+	assert.False(t, style2.Alignment.WrapText, "the mismatched row's style must be the single-line style, not the stacked one")
+	assert.True(t, style2.Alignment.ShrinkToFit, "the mismatched row's style must be the single-line style, not the stacked one")
+}
+
 func TestCreateNamesToPrint_MultiCourt(t *testing.T) {
 	f := excelize.NewFile()
 	defer f.Close()

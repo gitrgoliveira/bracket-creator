@@ -152,7 +152,7 @@ func CreateTagsSheet(f *excelize.File, pools []Pool, publicURL string, numberPre
 	// overflow pages in the reproduction that surfaced this. row-1 is the
 	// last row actually written (the loop above leaves row one past it).
 	//
-	// Guarded on row > 1 (bc-pnum [review]): with zero players (reachable --
+	// Guarded on row > 1 (bc-pnum): with zero players (reachable --
 	// an export of a mixed competition still in setup, before any pool has a
 	// member) the loop above never runs and row stays at its initial 1, so
 	// row-1 is 0 and SetPrintArea would define the invalid range

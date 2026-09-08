@@ -114,6 +114,16 @@ func TestLoadOverrides_InvalidJSON(t *testing.T) {
 	_, err = store.LoadOverrides(compID)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrCorruptOverrides), "a JSON parse failure must be wrapped in ErrCorruptOverrides so callers can recognise and repair it")
+
+	// bc-pnum FIX 1: the same error must ALSO satisfy AsCorruptFile, located,
+	// so every reader that degrades on an operator-repairable file (e.g. the
+	// public viewer detail endpoint) recognises it too. Before the fix,
+	// ErrCorruptOverrides was a plain errors.New sentinel wrapped with %w, not
+	// a *CorruptFileError, so AsCorruptFile could never match it.
+	cf, ok := AsCorruptFile(err)
+	require.True(t, ok, "a corrupt overrides.json must be a located CorruptFileError, not just a bare sentinel")
+	assert.Equal(t, "overrides.json", cf.File)
+	assert.NotZero(t, cf.Line, "a JSON syntax error must resolve to a line an operator can open")
 }
 
 // TestResetOverridesForce_RepairsCorruptFile is PR #416 finding 10: every

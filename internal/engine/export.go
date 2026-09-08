@@ -39,14 +39,15 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// AddPlayerDataToSheet degrade silently (that is D1's own
 	// report-over-fabricate rule -- no fabricated number is ever printed),
 	// so nothing downstream would otherwise say WHY a competitor's Player
-	// Number / tag / Names-to-Print cell came out blank. comp.NumberPrefix
-	// == "" is excluded on purpose: a Swiss competition is unnumbered by
-	// design (see NumberPools/AssignPlayerNumbers's own doc comments), so
-	// an empty Number there is normal, not a gap to report.
-	if comp.NumberPrefix != "" {
+	// Number / tag / Names-to-Print cell came out blank. An empty
+	// comp.EffectiveNumberPrefix() is excluded on purpose: a Swiss
+	// competition is unnumbered by design (see NumberPools/
+	// AssignPlayerNumbers's own doc comments), so an empty Number there is
+	// normal, not a gap to report.
+	if effectiveNumberPrefix := comp.EffectiveNumberPrefix(); effectiveNumberPrefix != "" {
 		if name, dojo, ok := firstUnnumberedPooledCompetitor(pools); ok {
 			log.Printf("engine: ExportCompetitionXlsx compId=%s: competitor %q (dojo %q) has no Number under prefix %q; its tag/Player-Number/Names-to-Print cells will print blank",
-				id, name, dojo, comp.NumberPrefix)
+				id, name, dojo, effectiveNumberPrefix)
 		}
 	}
 
@@ -118,7 +119,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
 	// steps and order to internal/export.BuildResultsWorkbook.
 	// RenderCompetitionWorkbook derives namesToPrintPlayers via
-	// PlayoffsNamesToPrint (numbering.go, bc-pnum A8/[review]: a
+	// PlayoffsNamesToPrint (numbering.go, bc-pnum A8: a
 	// playoffs-only competition never has a pools.csv, so feeding it the
 	// empty pools slice alone would make its Data and Names-to-Print steps
 	// no-ops) -- internal/export.BuildResultsWorkbook resolves through the
@@ -151,7 +152,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 		// never read by this sheet.
 		tagsPools = []helper.Pool{{Players: namesToPrintPlayers}}
 	}
-	if err := helper.CreateTagsSheet(f, tagsPools, publicURL, comp.NumberPrefix); err != nil {
+	if err := helper.CreateTagsSheet(f, tagsPools, publicURL, comp.EffectiveNumberPrefix()); err != nil {
 		return nil, err
 	}
 

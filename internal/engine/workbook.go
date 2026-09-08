@@ -81,7 +81,7 @@ import (
 // them have run, so returning them would be dead weight at every call site.
 //
 // namesToPrintPlayers is derived internally, via e.PlayoffsNamesToPrint(comp,
-// pools) -- bc-pnum A8/[review]'s single guarded branch for a playoffs-only
+// pools) -- bc-pnum A8's single guarded branch for a playoffs-only
 // competition (never has a pools.csv, so nothing above would otherwise
 // populate the Data / Names-to-Print sheets at all): non-nil only for that
 // one shape, nil for every other competition. Unlike draw and
@@ -252,9 +252,9 @@ func (e *Engine) RenderCompetitionWorkbook(
 	//    CreateNamesWithPoolToPrint's empty-pools no-op (which used to leave
 	//    this sheet missing entirely, see bc-pnum A8).
 	if len(namesToPrintPlayers) > 0 {
-		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords, comp.NumberPrefix)
+		helper.CreateNamesToPrint(f, namesToPrintPlayers, comp.EffectiveWithZekkenName(), courts, playerCoords, comp.EffectiveNumberPrefix())
 	} else {
-		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.NumberPrefix)
+		helper.CreateNamesWithPoolToPrint(f, pools, comp.EffectiveWithZekkenName(), courts, courtOfPool, playerCoords, comp.EffectiveNumberPrefix())
 	}
 
 	// 7. Kachinuki Detail sheet (T195-T203, CHK037). Opt-in: only emitted

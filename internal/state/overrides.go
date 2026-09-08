@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -64,7 +63,13 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 	}
 	var o Overrides
 	if err := json.Unmarshal(data, &o); err != nil {
-		return nil, fmt.Errorf("%w: overrides.json: %v", ErrCorruptOverrides, err)
+		// corruptJSONWithSentinel gives the failure ONE representation that
+		// answers both questions the codebase asks about it: AsCorruptFile
+		// (so readers that degrade on an operator-repairable file, e.g. the
+		// public viewer detail endpoint, recognise it) and
+		// errors.Is(err, ErrCorruptOverrides) (so respondIfCorruptOverrides
+		// and the other sentinel checks below keep matching).
+		return nil, corruptJSONWithSentinel(ErrCorruptOverrides, "overrides.json", data, err)
 	}
 	if o.PoolRanks == nil {
 		o.PoolRanks = make(map[string]map[string]int)

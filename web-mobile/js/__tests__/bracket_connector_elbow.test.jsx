@@ -16,18 +16,19 @@ import { elbowXFor, connectorPath } from '../bracket.jsx';
 //   M5: left=286, right=516, top=166, anchor y=234.75
 //   M7: left=572, anchor y=166.875
 //   column gap: 56 (adjacent elbows sit at fRight+28 == mLeft-28)
+// These are pure-function unit tests, so they exercise elbowXFor/connectorPath
+// directly and can't pin how BracketConnectorsMeta actually CALLS them (a
+// mutation that restores the old `(fRight + mLeft) / 2` at the out.push
+// call site, leaving these helpers defined but uncalled for that value,
+// keeps the tests below green). The merge property -- that a skipping
+// feeder's connector shares its vertical x with a column-adjacent sibling's,
+// as produced by the real component -- is pinned by the render-project test
+// bracket_connector_elbow.render.test.jsx instead.
 describe('connector elbow: routes through the gap before the PARENT column', () => {
   const gap = 56;
 
   it('elbowXFor centres the elbow in the gap before the parent (mLeft - gap/2)', () => {
     expect(elbowXFor(572, gap)).toBe(544);
-  });
-
-  it('a skipping feeder (M1->M7) gets the SAME elbow x as its column-adjacent sibling (M5->M7)', () => {
-    const m1ToM7 = elbowXFor(572, gap);
-    const m5ToM7 = elbowXFor(572, gap);
-    expect(m1ToM7).toBe(544);
-    expect(m1ToM7).toBe(m5ToM7);
   });
 
   it('produces the exact M1->M7 path, crossing the skipped column at its own height', () => {

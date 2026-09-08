@@ -654,6 +654,12 @@ func validateBulkScoreLengths(r *state.MatchResult, allowNumberedEncho bool) err
 	if err := validateWithdrawalNamesDisambiguated(r.Decision, r.SideA, r.SideB, r.WinnerID, r.SideAID, r.SideBID); err != nil {
 		return err
 	}
+	// The bulk path does not run ScoreRequest.Validate, so it needs this
+	// rule explicitly; without it a batch entry could record a withdrawal
+	// that names nobody and silently write no ineligibility.
+	if err := requireWinnerForDecision(r.Decision, r.Winner); err != nil {
+		return err
+	}
 	if r.FlagsA < 0 {
 		return &ValidationError{Field: "flagsA", Message: "must not be negative"}
 	}
@@ -975,7 +981,7 @@ func (r *ScoreRequest) validateDecision() error {
 				Message: fmt.Sprintf("%s requires %d-0 scoreline", r.Decision, need),
 			}
 		}
-		if err := r.requireWinnerForDecision(); err != nil {
+		if err := requireWinnerForDecision(r.Decision, r.Winner); err != nil {
 			return err
 		}
 	case "fusensho":
@@ -1203,19 +1209,33 @@ func ipponEntriesWellFormed(field string, ippons []string) error {
 	return nil
 }
 
-// requireWinnerForDecision enforces that Winner is set when a kiken/
-// fusenpai is recorded, the engine's eligibility side effect uses
-// Winner as the canonical surviving side. Without this, a bulk-score
-// or hand-crafted request could record an ineligibility against the
-// wrong player.
-func (r *ScoreRequest) requireWinnerForDecision() error {
-	if r.Winner == "" {
-		return &ValidationError{
-			Field:   "winner",
-			Message: fmt.Sprintf("required when decision is %s (names the surviving side)", r.Decision),
-		}
+// requireWinnerForDecision enforces that Winner is set when a kiken/fusenpai
+// is recorded: the engine's eligibility side effect uses Winner as the
+// canonical surviving side. Without it, the engine's losingSide cannot
+// resolve who withdrew, recordIneligibilityFromDecision returns a
+// *ValidationError, and BOTH engine write paths log and swallow that error
+// rather than fail the primary write ("a write answers for what it
+// introduces, not for what it inherited"). The score is then stored at 200
+// with NO CompetitorStatus written, so the competitor who withdrew stays
+// eligible and can be started in a later match.
+//
+// Self-guards on the decision so BOTH score-writing paths can call it
+// unconditionally. It used to be a *ScoreRequest method reached only from
+// validateWithOptions' kiken/fusenpai branch, which left the bulk-score path
+// uncovered -- the very case this function's original comment named. The bulk
+// path validates a state.MatchResult rather than a ScoreRequest, so the rule
+// takes the two fields it actually reads instead of a receiver.
+func requireWinnerForDecision(decision, winner string) error {
+	if !domain.IsKikenDecisionStr(decision) && decision != string(domain.DecisionFusenpai) {
+		return nil
 	}
-	return nil
+	if winner != "" {
+		return nil
+	}
+	return &ValidationError{
+		Field:   "winner",
+		Message: fmt.Sprintf("required when decision is %s (names the surviving side)", decision),
+	}
 }
 
 // AsMatchResult returns the underlying state.MatchResult value so the

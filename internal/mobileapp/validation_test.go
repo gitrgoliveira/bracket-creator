@@ -1921,3 +1921,49 @@ func TestValidateWinnerIDMatchesSide_BothSidesUnknownAccepts(t *testing.T) {
 	err := validateWinnerIDMatchesSide("charlie-id", "", "")
 	assert.NoError(t, err, "a winnerId cannot be checked against two unknown side ids, so it must be accepted")
 }
+
+// TestBulkScore_WithdrawalMustNameTheWinner pins the gap requireWinnerForDecision's
+// own comment always named but never covered: the rule lived on
+// validateWithOptions' kiken/fusenpai branch, and the BULK path
+// (validateBulkScoreLengths, the only validation POST .../matches/bulk-score
+// runs) never reached it. A batch entry recording a withdrawal that names
+// nobody was stored at 200 while the engine's losingSide failed to resolve
+// the withdrawer and both write paths logged and swallowed that failure, so
+// no CompetitorStatus was written and the competitor who withdrew stayed
+// eligible for a later match.
+//
+// Scoped to the withdrawal decisions on purpose: an ordinary result may
+// legitimately omit Winner (a draw, or a running write the operator has not
+// finished), and only kiken/fusenpai carry the eligibility side effect that
+// needs a surviving side named.
+func TestBulkScore_WithdrawalMustNameTheWinner(t *testing.T) {
+	for _, decision := range []string{"kiken-voluntary", "kiken-injury", "fusenpai"} {
+		t.Run(decision+"/no winner is rejected", func(t *testing.T) {
+			r := &state.MatchResult{
+				SideA: "Alice", SideB: "Bob",
+				Decision: decision,
+				IpponsA:  []string{"\u25cb", "\u25cb"},
+			}
+			err := validateBulkScoreLengths(r, false)
+			require.Error(t, err, "a withdrawal naming no surviving side must not be accepted")
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, "winner", verr.Field)
+		})
+		t.Run(decision+"/named winner is accepted", func(t *testing.T) {
+			r := &state.MatchResult{
+				SideA: "Alice", SideB: "Bob", Winner: "Alice",
+				Decision: decision,
+				IpponsA:  []string{"\u25cb", "\u25cb"},
+			}
+			assert.NoError(t, validateBulkScoreLengths(r, false),
+				"naming the surviving side is all this rule asks for")
+		})
+	}
+
+	t.Run("an ordinary result may still omit the winner", func(t *testing.T) {
+		r := &state.MatchResult{SideA: "Alice", SideB: "Bob", Decision: "hikiwake"}
+		assert.NoError(t, validateBulkScoreLengths(r, false),
+			"only a withdrawal carries the eligibility side effect this rule protects")
+	})
+}

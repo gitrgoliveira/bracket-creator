@@ -124,15 +124,16 @@ func corruptCSV(file string, err error) error {
 // the sentinel and returned directly, so AsCorruptFile correctly reports
 // false for it.
 func corruptJSONWithSentinel(sentinel error, file string, raw []byte, err error) error {
-	if err == nil {
-		return nil
-	}
-	located := corruptJSON(file, raw, err)
-	if cf, ok := located.(*CorruptFileError); ok {
-		cf.Err = fmt.Errorf("%w: %w", sentinel, err)
+	// No nil guard: the one caller reports a json.Unmarshal failure it has
+	// already tested, and a nil err here would mean a caller asking for an
+	// error value for a decode that succeeded, which is a bug to surface
+	// rather than to paper over with a nil return.
+	tagged := fmt.Errorf("%w: %w", sentinel, err)
+	if cf, ok := corruptJSON(file, raw, err).(*CorruptFileError); ok {
+		cf.Err = tagged
 		return cf
 	}
-	return fmt.Errorf("%w: %w", sentinel, err)
+	return tagged
 }
 
 // offsetToLineColumn resolves a 0-based byte offset into a 1-based line and

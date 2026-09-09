@@ -994,7 +994,23 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 	if !changed {
 		return nil
 	}
-	return s.saveSquadsLocked(compID, squads, s.directWrite)
+	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+		return err
+	}
+	// Drop the shared lazy squad cache: this call just changed squads.yaml,
+	// and the sub-bout and lineup repairs that follow resolve against it.
+	// Today nothing reads squads before this step, so this is a no-op -- and
+	// that is exactly the point. It makes the ordering above a property of
+	// the code rather than of the current step list, because the failure it
+	// prevents is silent: a stale map reports "no squad" for the very team
+	// this step just built one for, and the repair is skipped for a whole
+	// extra load with nothing logged. Same safe direction bumpFileVersion
+	// takes (store.go) -- an unnecessary invalidation costs one re-parse, a
+	// missed one serves stale data.
+	roster.squadsLoaded = false
+	roster.squadsData = nil
+	roster.squadsErr = nil
+	return nil
 }
 
 // upgradeLineupMemberIDsLocked completes a legacy (or otherwise unrepaired)

@@ -323,3 +323,41 @@ func TestSquadMigration_SurvivesMetadataBlankingWriteEvenWhenNeverMigratedBefore
 	require.Len(t, stored, 1)
 	assert.Equal(t, []string{""}, stored[0].Metadata)
 }
+
+// TestSquadMigration_InvalidatesTheSharedLazyCache pins the cache-coherence
+// half of EnsureLegacyUpgraded's step ordering. The sub-bout and lineup
+// member-id repairs resolve against a squads.yaml the squad migration may
+// have just written, and they read it through legacyUpgradeRoster's shared
+// lazy accessor. If that accessor was materialised before the migration ran,
+// it holds the PRE-migration map, and every downstream repair sees "no
+// squad" for the very team the migration just built one for -- skipped
+// silently, for a whole extra load, with nothing logged.
+//
+// Materialising squads() first is what a squad-reading step inserted above
+// the migration would do, which is why the ordering must not be the only
+// thing standing between this code and a stale read.
+func TestSquadMigration_InvalidatesTheSharedLazyCache(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	teamID := "22222222-2222-4222-8222-222222222222"
+
+	participantsPath := filepath.Join(s.GetFolder(), "competitions", id, "participants.csv")
+	raw := teamID + ",Tora A,Tora Dojo,Alice,Bob,Carol\n"
+	require.NoError(t, os.WriteFile(participantsPath, []byte(raw), 0o600))
+
+	roster := &legacyUpgradeRoster{store: s, compID: id}
+
+	before, err := roster.squads()
+	require.NoError(t, err)
+	require.Empty(t, before[teamID], "precondition: the team has no squad before the migration")
+
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster))
+
+	after, err := roster.squads()
+	require.NoError(t, err)
+	names := make([]string, 0, len(after[teamID]))
+	for _, m := range after[teamID] {
+		names = append(names, m.Name)
+	}
+	assert.Equal(t, []string{"Alice", "Bob", "Carol"}, names,
+		"a repair reading squads after the migration must see what the migration wrote")
+}

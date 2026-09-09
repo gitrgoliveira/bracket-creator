@@ -149,9 +149,9 @@ function resolveMemberIdForName(squad, name) {
 
 // resolveMemberIdsForPositions resolves a WHOLE positions map (posKey →
 // name) to its memberIds counterpart against an already-loaded `squad`,
-// MINTING a new member for any name with no match -- operator ruling for
-// this gap-closure pass: typing a new name into a lineup slot creates the
-// member and its id in that one step, the same as this file's own
+// MINTING a new member for any name with no match. That much IS the
+// operator's ruling for this bead: typing a new name into a lineup slot
+// creates the member and its id in that one step, the same as this file's own
 // "+ Add new member…" picker option (commitAdd above). Shared by BOTH
 // match-scoped lineup writers (admin_schedule_lineup.jsx's free-text panel
 // and admin_scoring_team.jsx's inline in-modal picker) so the resolve/mint
@@ -163,9 +163,13 @@ function resolveMemberIdForName(squad, name) {
 // the server would refuse anyway.
 //
 // A mint failure (offline venue wifi, exactly the condition these panels
-// are used under) is swallowed, NOT surfaced: per operator ruling this must
-// never block the write. That position's id is simply omitted from the
-// result -- the lineup write still proceeds with whatever ids resolved, and
+// are used under) is swallowed, NOT surfaced. That part is an engineering
+// call, not something the operator ruled on, so it is open to revisiting:
+// the reasoning is that a lineup slot's NAME is the load-bearing half and
+// the id is an enhancement over it, so losing an operator's edit to a
+// failed identity lookup trades the important half away for the lesser one.
+// That position's id is simply omitted from the result -- the lineup write
+// still proceeds with whatever ids resolved, and
 // the load-time legacy-upgrade repair (EnsureLegacyUpgraded) fills the rest
 // in once a participants.csv write re-arms it.
 //

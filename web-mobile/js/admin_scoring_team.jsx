@@ -115,11 +115,14 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
         resolvedId = resolved.memberIds[posKey] || null;
       }
     } catch (_e) {
-      // Defense in depth on top of the helper's own per-position mint
-      // catch: even an unexpected failure IN the resolver itself must not
-      // block the write (operator ruling). mergeLineupIdsForPosition below
-      // then simply clears this position's id, same as any other
-      // unresolved name.
+      // On top of the helper's own per-position mint catch, because this
+      // runs on the live scoring path: an operator swapping a fighter
+      // mid-encounter must not lose the swap because identity resolution
+      // failed. The NAME is the load-bearing half of a lineup slot and the
+      // id is an enhancement over it, so the write proceeds either way;
+      // mergeLineupIdsForPosition below clears this position's id, the same
+      // as any other unresolved name, and the load-time repair fills it in
+      // later from the squad.
     }
   }
   const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);

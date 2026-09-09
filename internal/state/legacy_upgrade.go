@@ -11,13 +11,21 @@ import (
 // (operator policy, 2026-08-21). WHICH boundary depends on whether the legacy
 // shape can be recognised without guessing:
 //
-//   - seeds.csv rows without a dojo (pre-Dojo builds) convert ON READ, below.
-//     Seeds columns are located by header name, so the legacy shape is
-//     unambiguous, and the dojo is half of the seed's identity
-//     (domain.SeedKey): a legacy row is completed from the roster only when
-//     the name is unique there, exactly the fallback the matchers apply. An
-//     unresolvable row (duplicate name) is left alone: inventing a dojo would
-//     guess, and AssignSeeds refuses that seeding either way.
+//   - seeds.csv rows missing a dojo (pre-Dojo builds) or a participant id
+//     (pre-id-column builds, bc-sdid) convert ON READ, below, in the SAME
+//     pass. Seeds columns are located by header name, so either legacy shape
+//     is unambiguous. The dojo is completed from the roster only when the
+//     name is unique there, exactly the fallback the matchers apply; an
+//     unresolvable row (duplicate name) is left alone -- inventing a dojo
+//     would guess, and every seed-row matcher refuses that seeding either
+//     way. The id is then stamped from whichever roster entry the row (now
+//     dojo-complete, if it needed to be) resolves to: an exact (name, dojo)
+//     match when the row carries a dojo, or -- gated EXPLICITLY on
+//     domain.RosterIndex.NameCount rather than left to RosterIndex.Lookup's
+//     own dojo=="" branch, for the identical reason the pools.csv bullet
+//     below gives -- the same unique-bare-name fallback when it does not. A
+//     row neither resolves keeps an empty id; the (name, dojo) fallback
+//     every matcher shares keeps serving it.
 //
 //   - pools.csv rows with an empty id (pre-append-column builds) convert ON
 //     READ, below (bc-pnum). The id is column 8 of an explicit, positional
@@ -161,8 +169,8 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// itself, so the roster this instance already loaded stays accurate for
 	// the pools/pool-matches/bracket steps that follow it in the same call.
 	roster := &legacyUpgradeRoster{store: s, compID: compID}
-	if err := s.upgradeSeedDojosLocked(compID, roster); err != nil {
-		log.Printf("state: legacy seed-dojo upgrade for %s: %v", compID, err)
+	if err := s.upgradeSeedRowsLocked(compID, roster); err != nil {
+		log.Printf("state: legacy seed-row upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradePoolParticipantIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy pool-participant-id upgrade for %s: %v", compID, err)
@@ -230,9 +238,13 @@ func (s *Store) ParticipantsFingerprint(compID string) (participantsMtime, seeds
 	return s.FileMtime(compID, "participants.csv"), s.FileMtime(compID, "seeds.csv")
 }
 
-// upgradeSeedDojosLocked completes legacy (name-only) seeds.csv rows with the
-// roster dojo where the name is unique. Caller holds the per-comp lock.
-func (s *Store) upgradeSeedDojosLocked(compID string, roster *legacyUpgradeRoster) error {
+// upgradeSeedRowsLocked completes legacy seeds.csv rows in ONE pass: a
+// missing dojo (name-only, pre-Dojo builds) is backfilled where the name is
+// unique in the roster, and a missing participant id (pre-id-column builds,
+// bc-sdid) is then stamped from whichever roster entry the row -- now
+// dojo-complete, if it needed to be -- resolves to. Caller holds the
+// per-comp lock. See the header comment above for the full rationale.
+func (s *Store) upgradeSeedRowsLocked(compID string, roster *legacyUpgradeRoster) error {
 	path := s.compPath(compID, "seeds.csv")
 	seeds, err := helper.ReadSeedsFileRaw(path)
 	if err != nil || len(seeds) == 0 {
@@ -240,7 +252,7 @@ func (s *Store) upgradeSeedDojosLocked(compID string, roster *legacyUpgradeRoste
 	}
 	needs := false
 	for i := range seeds {
-		if seeds[i].Dojo == "" {
+		if seeds[i].Dojo == "" || helper.ParticipantIDMissing(seeds[i].ID) {
 			needs = true
 			break
 		}
@@ -256,20 +268,45 @@ func (s *Store) upgradeSeedDojosLocked(compID string, roster *legacyUpgradeRoste
 	if err != nil || idx == nil {
 		return err
 	}
-	// Same shared resolver every other matcher uses (domain.RosterIndex):
-	// Lookup(name, "") tries the exact (name, "") key first, then falls back
-	// to the unique-bare-name match. Either way the guard below only ever
-	// completes a row from a NON-empty roster dojo, so a legacy row that
-	// matches a roster entry whose own dojo is also blank is correctly left
-	// alone (nothing to backfill).
 	changed := false
 	for i := range seeds {
-		if seeds[i].Dojo != "" {
+		row := &seeds[i]
+		if row.Dojo == "" {
+			// NameCount(name) == 1 is checked EXPLICITLY before Lookup ever
+			// runs, rather than relying on Lookup's own dojo=="" fallback
+			// gate: a roster entry whose OWN dojo genuinely IS blank would
+			// otherwise score an exact hit on Lookup's first branch
+			// (SeedKey(name, "") == "name|") and resolve BEFORE the
+			// uniqueness check runs, silently attributing this row's id to
+			// that specific blank-dojo competitor by coincidence even when a
+			// second, non-blank-dojo namesake also exists (the same trap the
+			// pools.csv/pool-matches.csv/bracket.json upgrades below guard
+			// against). A row that fails this check is left alone entirely --
+			// dojo AND id both stay as read.
+			if idx.NameCount(row.Name) != 1 {
+				continue
+			}
+			p, ok := idx.Lookup(row.Name, "")
+			if !ok {
+				continue
+			}
+			if p.Dojo != "" {
+				row.Dojo = p.Dojo
+				changed = true
+			}
+			if helper.ParticipantIDMissing(row.ID) && p.ID != "" {
+				row.ID = p.ID
+				changed = true
+			}
 			continue
 		}
-		if p, ok := idx.Lookup(seeds[i].Name, ""); ok && p.Dojo != "" {
-			seeds[i].Dojo = p.Dojo
-			changed = true
+		// The row's own dojo is non-empty: an exact (name, dojo) pair, which
+		// the roster refuses to save twice, so this can never be ambiguous.
+		if helper.ParticipantIDMissing(row.ID) {
+			if p, ok := idx.Lookup(row.Name, row.Dojo); ok && p.ID != "" {
+				row.ID = p.ID
+				changed = true
+			}
 		}
 	}
 	if !changed {

@@ -117,6 +117,12 @@ func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLine
 	out := make(map[string]domain.TeamLineup, len(in))
 	for k, l := range in {
 		l.Positions = maps.Clone(l.Positions)
+		// MemberIDs (bc-tmid pass 2) is a map too, and cloned for the exact
+		// reason Positions is: callers of LoadTeamLineups mutate the
+		// returned map in load-mutate-save flows (setTeamLineupLocked), so
+		// an unclosed map here would alias the cache. maps.Clone(nil) is
+		// nil, matching an unrepaired/legacy lineup that never had one.
+		l.MemberIDs = maps.Clone(l.MemberIDs)
 		out[k] = l
 	}
 	return out

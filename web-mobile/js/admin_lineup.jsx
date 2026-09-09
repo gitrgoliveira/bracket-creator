@@ -25,9 +25,20 @@
 // into a position, ADD a new name in a position (which creates the member
 // and mints its id in that one step), and RENAME a member (which keeps
 // their id). There is no member-removal operation.
+//
+// bc-pnum gap closure: the OTHER two lineup-writing surfaces --
+// admin_schedule_lineup.jsx's free-text match-scoped panel and
+// admin_scoring_team.jsx's inline in-modal picker -- carry no select-by-id
+// affordance of their own; an operator there types or picks a bare NAME.
+// resolveMemberIdForName / resolveMemberIdsForPositions below are the ONE
+// place that turns such a name into a squad member id (matching an
+// existing member, or minting one via the SAME ADD operation this file's
+// "+ Add new member…" option uses), so both surfaces share the resolve/mint
+// contract instead of each growing their own.
 
 import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadMemberLabel } from './squad_member_label.jsx';
+import { normalizeParticipantName } from './data.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
 
@@ -119,6 +130,67 @@ function teamIdOf(team) {
 // component.
 function squadMemberOptions(squad) {
   return (Array.isArray(squad) ? squad : []).slice().sort((a, b) => (a.index || 0) - (b.index || 0));
+}
+
+// resolveMemberIdForName finds the squad member whose name matches `name`
+// under the SAME normalization the server's duplicate-name floor
+// (bc-tmdup, helper.DuplicateNamesWithKeys / NormalizeParticipantName) uses
+// to enforce squad-wide uniqueness: case/diacritic-insensitive, trimmed,
+// whitespace-collapsed. Because that normalization is exactly what refuses
+// a second member with a colliding name, at most one squad member can ever
+// match a given key -- this needs no ambiguity guard, unlike a bare
+// substring search. Returns the member object, or null when nothing matches.
+function resolveMemberIdForName(squad, name) {
+  const key = normalizeParticipantName(name);
+  if (!key) return null;
+  const list = Array.isArray(squad) ? squad : [];
+  return list.find(m => normalizeParticipantName(m?.name) === key) || null;
+}
+
+// resolveMemberIdsForPositions resolves a WHOLE positions map (posKey →
+// name) to its memberIds counterpart against an already-loaded `squad`,
+// MINTING a new member for any name with no match -- operator ruling for
+// this gap-closure pass: typing a new name into a lineup slot creates the
+// member and its id in that one step, the same as this file's own
+// "+ Add new member…" picker option (commitAdd above). Shared by BOTH
+// match-scoped lineup writers (admin_schedule_lineup.jsx's free-text panel
+// and admin_scoring_team.jsx's inline in-modal picker) so the resolve/mint
+// contract lives once.
+//
+// Sequential, not parallel: two positions typed with the SAME new name
+// must mint it only once -- the second lookup then finds the first mint's
+// member in the growing local squad copy instead of racing a duplicate add
+// the server would refuse anyway.
+//
+// A mint failure (offline venue wifi, exactly the condition these panels
+// are used under) is swallowed, NOT surfaced: per operator ruling this must
+// never block the write. That position's id is simply omitted from the
+// result -- the lineup write still proceeds with whatever ids resolved, and
+// the load-time legacy-upgrade repair (EnsureLegacyUpgraded) fills the rest
+// in once a participants.csv write re-arms it.
+//
+// Returns { memberIds, squad }: `squad` is handed back (possibly extended
+// by a mint) so the caller can cache it without a second fetch.
+async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password) {
+  let currentSquad = Array.isArray(squad) ? squad : [];
+  const memberIds = {};
+  for (const [posKey, rawName] of Object.entries(positions || {})) {
+    const name = (rawName || "").trim();
+    if (!name) continue;
+    const existing = resolveMemberIdForName(currentSquad, name);
+    if (existing) {
+      memberIds[posKey] = existing.id;
+      continue;
+    }
+    try {
+      const member = await window.API.addTeamMember(compId, teamId, name, password);
+      currentSquad = [...currentSquad, member];
+      memberIds[posKey] = member.id;
+    } catch (_e) {
+      // Minting failed: leave this position's id unresolved (see doc above).
+    }
+  }
+  return { memberIds, squad: currentSquad };
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
@@ -552,10 +624,13 @@ if (typeof window !== "undefined") {
   // via window.AdminLineupHelpers without creating a cross-module import
   // dependency (both files are type="module" but share the window object
   // at runtime in the browser and in the esbuild bundle).
-  window.AdminLineupHelpers = { positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf };
+  window.AdminLineupHelpers = {
+    positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
+    resolveMemberIdForName, resolveMemberIdsForPositions,
+  };
 }
 
 export {
   AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
-  squadMemberOptions,
+  squadMemberOptions, resolveMemberIdForName, resolveMemberIdsForPositions,
 };

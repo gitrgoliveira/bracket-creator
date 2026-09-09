@@ -66,6 +66,66 @@ export function teamBoutIsDraw(s, t) {
   return t.winner === null && !!(s.draw || t.aTotal > 0 || t.bTotal > 0);
 }
 
+// mergeLineupIdsForPosition composes the WHOLE memberIds map an inline
+// lineup write sends: carries `existingIds` forward untouched, then either
+// sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
+// the operator cleared the position (no name, so nothing to resolve) and
+// when a name was typed/picked but resolution/minting failed (offline venue
+// wifi). Either way a stale id must never survive under a position it no
+// longer names: kachinuki retirement keys on the member id (CLAUDE.md §
+// Team Lineups & Kachinuki), so a stale id left behind would attribute a
+// bout to whoever used to occupy that slot. Exported so this exact rule is
+// pinned without mounting TeamScoreEditorModal.
+export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
+  const updated = { ...existingIds };
+  if (resolvedId) updated[posKey] = resolvedId;
+  else delete updated[posKey];
+  return updated;
+}
+
+// buildInlineLineupWrite computes exactly what the inline lineup picker
+// (submitInlineLineup, inside TeamScoreEditorModal below) sends to
+// putMatchLineup: the WHOLE positions map (existing + the one changed
+// position, deleted when `value` is falsy) and its memberIds counterpart,
+// resolved/minted via resolveMemberIdsForPositions (admin_lineup.jsx,
+// reached here via window.AdminLineupHelpers -- see that file's header for
+// why this stays a window lookup rather than an ES import) and merged via
+// mergeLineupIdsForPosition above. A name is only resolved when `value` is
+// truthy: a cleared position has no name to look up, and
+// mergeLineupIdsForPosition's own clear-on-falsy-id branch handles it.
+// Exported (and pulled out of the component) so this exact value-in/
+// body-out contract -- including "a mint failure never blocks the write"
+// -- is pinned directly, without mounting TeamScoreEditorModal, which
+// vitest's hook stubs cannot drive through a full interaction (see
+// tie_button_no_term.test.jsx).
+export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password) {
+  const existing = lineup?.positions || {};
+  const positions = { ...existing };
+  if (value) positions[posKey] = value;
+  else delete positions[posKey];
+
+  let resolvedId = null;
+  let nextSquad = Array.isArray(squad) ? squad : [];
+  if (value) {
+    try {
+      const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
+      if (typeof resolver === "function") {
+        const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password);
+        nextSquad = resolved.squad;
+        resolvedId = resolved.memberIds[posKey] || null;
+      }
+    } catch (_e) {
+      // Defense in depth on top of the helper's own per-position mint
+      // catch: even an unexpected failure IN the resolver itself must not
+      // block the write (operator ruling). mergeLineupIdsForPosition below
+      // then simply clears this position's id, same as any other
+      // unresolved name.
+    }
+  }
+  const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
+  return { positions, memberIds, squad: nextSquad };
+}
+
 function renderTeamBoutMiddle(s, t, isDaihyoRow) {
   const isDraw = teamBoutIsDraw(s, t);
   const mid = boutMiddle(
@@ -803,6 +863,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // lineup hasn't been submitted yet (404 → null).
   const [lineupA, setLineupA] = useStateA(null);
   const [lineupB, setLineupB] = useStateA(null);
+  // bc-pnum gap closure: each side's squad, so the inline lineup picker
+  // below (submitInlineLineup / buildInlineLineupWrite) can resolve a
+  // name typed or picked in THIS modal to its squad member id -- this is
+  // the THIRD lineup-writing surface (round-scoped AdminLineup and the
+  // per-match MatchLineupPanel were converted in earlier passes), and the
+  // one most likely to matter for kachinuki retirement: a substitution
+  // made here, mid-encounter, is exactly when a slot's occupant changes.
+  const [squadA, setSquadA] = useStateA([]);
+  const [squadB, setSquadB] = useStateA([]);
   // T136 / T141: competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
   // knockout-format precondition. Falls back to compKind/teamSize when
@@ -1128,25 +1197,49 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return teamObj ? (teamObj.id || teamObj.ID || teamObj.name || teamObj.Name || sideKey) : sideKey;
   };
 
+  // bc-pnum gap closure: load each side's squad once compMeta (and
+  // therefore allPlayers / teamIdForSide) has resolved, so submitInlineLineup
+  // below can resolve a name typed or picked in this modal to its squad
+  // member id. Keyed on compMeta rather than the raw sideA/sideB keys so
+  // this re-runs once the real team ids are known; a squad fetch failure
+  // must not block scoring, so it is swallowed (the resolver then simply
+  // mints for every name it cannot find against an empty list).
+  useEffectA(() => {
+    let cancelled = false;
+    const teamAId = teamIdForSide(m.sideA);
+    const teamBId = teamIdForSide(m.sideB);
+    if (!m.compId || (!teamAId && !teamBId)) return;
+    (async () => {
+      try {
+        const squads = await window.API.fetchSquads(m.compId, password);
+        if (cancelled) return;
+        if (teamAId) setSquadA((squads && squads[teamAId]) || []);
+        if (teamBId) setSquadB((squads && squads[teamBId]) || []);
+      } catch (_e) { /* best-effort: resolver mints when nothing is loaded */ }
+    })();
+    return () => { cancelled = true; };
+  }, [m.compId, compMeta]);
+
   // Submit an inline position change: builds the full positions map from the
-  // existing lineup + the changed key→value, then PUTs. Lineups are always
-  // editable; no force/reason needed.
-  const submitInlineLineup = async (teamId, lineup, posKey, value) => {
+  // existing lineup + the changed key→value, resolves/mints that position's
+  // member id (see buildInlineLineupWrite), then PUTs both. Lineups are
+  // always editable; no force/reason needed.
+  const submitInlineLineup = async (teamId, lineup, squad, setSquad, posKey, value) => {
     setInlineLineupSaving(true);
     try {
-      const existing = lineup?.positions || {};
-      const updated = { ...existing };
-      if (value) updated[posKey] = value;
-      else delete updated[posKey];
-      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password);
+      const { positions: updated, memberIds: updatedIds, squad: nextSquad } =
+        await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password);
+      if (typeof setSquad === "function") setSquad(nextSquad);
+      const hasMemberIds = Object.keys(updatedIds).length > 0;
+      await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, hasMemberIds ? updatedIds : undefined);
       // Refresh lineup state from the response is deferred: on next open the
       // modal re-fetches. For immediate feedback we do a partial reload of
       // lineup state for the affected side.
       if (!mountedRef.current) return;
       if (teamId === teamIdForSide(m.sideA)) {
-        setLineupA(prev => ({ ...prev, positions: updated }));
+        setLineupA(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
       } else {
-        setLineupB(prev => ({ ...prev, positions: updated }));
+        setLineupB(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
       }
     } catch (e) {
       // Surface error briefly: can't use a toast from inside the modal so
@@ -2443,8 +2536,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const teamIdA = teamIdForSide(m.sideA); // AKA = right
             const rosterB = rosterForSide(m.sideB, lineupB);
             const rosterA = rosterForSide(m.sideA, lineupA);
-            const pickPlayer = (teamId, lineup) => (value) => {
-              submitInlineLineup(teamId, lineup, lineupPosKey, value);
+            const pickPlayer = (teamId, lineup, squad, setSquad) => (value) => {
+              submitInlineLineup(teamId, lineup, squad, setSquad, lineupPosKey, value);
             };
             // mp-gmcg: a manually-added bout has no lineup key (positions
             // beyond teamSize are not valid lineup keys) and no server
@@ -2498,7 +2591,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
                 playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow || freeNameB,
-                onSelectName: (isManualRow || freeNameB) ? pickManual("bName") : pickPlayer(teamIdB, lineupB),
+                onSelectName: (isManualRow || freeNameB) ? pickManual("bName") : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
@@ -2511,7 +2604,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
                 playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow || freeNameA,
-                onSelectName: (isManualRow || freeNameA) ? pickManual("aName") : pickPlayer(teamIdA, lineupA),
+                onSelectName: (isManualRow || freeNameA) ? pickManual("aName") : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
               },
             ];
 

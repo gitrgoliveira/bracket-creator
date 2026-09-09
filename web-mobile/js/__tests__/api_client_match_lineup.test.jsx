@@ -72,6 +72,60 @@ describe('API.putMatchLineup', () => {
   });
 });
 
+// bc-pnum gap closure: putMatchLineup grows an optional trailing memberIds
+// argument, mirroring putTeamLineup's own treatment exactly (see that
+// function's comment in api_client.jsx). These three cases are the ones
+// that matter: sent when given, omitted (not just falsy/undefined) when
+// not given so an old caller's wire body is byte-identical, and carried
+// into the offline queue too (bc-pnum: a client on unreliable venue wifi
+// must not silently lose the ids on reconnect replay).
+describe('API.putMatchLineup: memberIds (bc-pnum gap closure)', () => {
+  let originalFetch;
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    localStorage.removeItem('bc_write_queue');
+  });
+  afterEach(async () => {
+    global.fetch = originalFetch;
+    API.clearQueue();
+  });
+
+  it('sends memberIds in the body when provided', async () => {
+    global.fetch = mockFetch(200, { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' }, memberIds: { senpo: 'mem-1' } });
+    await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw', { senpo: 'mem-1' });
+    const [, opts] = global.fetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.memberIds).toEqual({ senpo: 'mem-1' });
+  });
+
+  it('omits the memberIds key entirely when not provided (byte-identical old body)', async () => {
+    global.fetch = mockFetch(200, { teamId: 't1', matchId: 'm1', positions: { senpo: 'Bob' } });
+    await API.putMatchLineup('c1', 't1', 'm1', { senpo: 'Bob' }, 'pw');
+    const [, opts] = global.fetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body).toEqual({ teamId: 't1', competitionId: 'c1', matchId: 'm1', positions: { senpo: 'Bob' } });
+    expect('memberIds' in body).toBe(false);
+  });
+
+  it('carries memberIds into the offline-queued body on network failure', async () => {
+    global.fetch = vi.fn(() => Promise.reject(new TypeError('network error')));
+    const result = await API.putMatchLineup('c1', 't-queue', 'm-queue', { senpo: 'Bob' }, 'pw', { senpo: 'mem-9' });
+    expect(result).toEqual({ queued: true });
+    const raw = localStorage.getItem('bc_write_queue');
+    expect(raw).not.toBeNull();
+    const entries = JSON.parse(raw);
+    const found = entries.find(([key]) => key.includes('m-queue'));
+    expect(found).toBeTruthy();
+    expect(found[1].payload.memberIds).toEqual({ senpo: 'mem-9' });
+    // Drain the immediate background retry api_client fires on enqueue (it
+    // also fails against this same rejecting mock), then cancel any
+    // resulting backoff timer so it cannot fire during a LATER test in this
+    // file: this file does not use fake timers, unlike sync_queue.test.jsx.
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    API.clearQueue();
+  });
+});
+
 describe('API.deleteMatchLineup', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });

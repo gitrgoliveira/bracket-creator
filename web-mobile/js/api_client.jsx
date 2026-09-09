@@ -2947,8 +2947,17 @@ const API = {
         }
         return res.json();
     },
-    async putMatchLineup(compID, teamId, matchId, positions, password) {
-        const matchLineupBody = { teamId, competitionId: compID, matchId, positions };
+    // memberIds (bc-pnum gap closure) is optional and keyed by the same
+    // position as positions, exactly like putTeamLineup's own memberIds
+    // above: the squad member id half of a lineup, sent alongside the name
+    // so the server can persist both together. Omitted entirely when the
+    // caller passes nothing, so a caller that never adopted squad members
+    // (or an older bundle) round-trips exactly as before -- including into
+    // the offline queue: matchLineupBody (built once, below) is the SAME
+    // object fed to both the live fetch and _enqueueTerminalWrite, so a
+    // replayed lineup write carries the ids too.
+    async putMatchLineup(compID, teamId, matchId, positions, password, memberIds) {
+        const matchLineupBody = { teamId, competitionId: compID, matchId, positions, ...(memberIds ? { memberIds } : {}) };
         const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
         // F5: per-match lineup key: distinct from round-scoped lineups.
         const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;

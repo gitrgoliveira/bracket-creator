@@ -119,6 +119,28 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
 
+  // bc-pnum gap closure: this team's squad, loaded once so save() can
+  // resolve a typed/picked name to its member id (see doSave below) --
+  // this panel is free-text (LineupNameInput), unlike the round-scoped
+  // AdminLineup form's select-by-id picker, so a name→id lookup is needed
+  // here at all. Independent of the lineup-load effect below: a squad
+  // fetch failure must not block loading OR saving the lineup itself, so
+  // it is swallowed and the resolver (window.AdminLineupHelpers.
+  // resolveMemberIdsForPositions) simply mints for every name it cannot
+  // find against an empty list.
+  const [squad, setSquad] = useStateA([]);
+  useEffectA(() => {
+    let cancelled = false;
+    if (!compId || !teamId) return;
+    (async () => {
+      try {
+        const squads = await window.API.fetchSquads(compId, password);
+        if (!cancelled) setSquad((squads && squads[teamId]) || []);
+      } catch (_e) { /* best-effort: resolver mints when nothing is loaded */ }
+    })();
+    return () => { cancelled = true; };
+  }, [compId, teamId]);
+
   // Load per-match lineup on mount; record whether it was a real hit.
   useEffectA(() => {
     let cancelled = false;
@@ -167,7 +189,34 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     setError("");
     setSaving(true);
     try {
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      // bc-pnum gap closure: resolve each occupied position's name to a
+      // squad member id before writing. A name not on the squad is a
+      // substitute typed straight into the slot; per operator ruling,
+      // adding a new name in a position MINTS the member in that one step
+      // (see resolveMemberIdsForPositions, admin_lineup.jsx -- the ONE
+      // place this resolve/mint contract lives, shared with the inline
+      // in-modal picker in admin_scoring_team.jsx). A resolve/mint failure
+      // (offline venue wifi -- this panel's whole reason for existing) must
+      // never block the save: the helper simply omits that position's id
+      // and the write proceeds with the names alone, exactly as it
+      // behaves today.
+      let memberIdsOut = {};
+      try {
+        const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
+        if (typeof resolver === "function") {
+          const resolved = await resolver(compId, teamId, positionsOut, squad, password);
+          memberIdsOut = resolved.memberIds || {};
+          setSquad(resolved.squad);
+        }
+      } catch (_e) {
+        // Defense in depth on top of the helper's own per-position mint
+        // catch: even an unexpected failure IN the resolver itself must
+        // not block the save. Proceed with the names alone.
+      }
+      const hasMemberIds = Object.keys(memberIdsOut).length > 0;
+      const updated = await window.API.putMatchLineup(
+        compId, teamId, matchId, positionsOut, password, hasMemberIds ? memberIdsOut : undefined
+      );
       // F5: a queued (offline/transient) write is NOT confirmed. Do NOT rebuild
       // the form from updated.positions (which is absent, would clear every
       // field) or show success; keep the operator's entered values and report

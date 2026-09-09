@@ -1086,6 +1086,27 @@ type SubMatchResult struct {
 	// uniformly).
 	DecidedByHantei *bool          `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
+	// SideAMemberID/SideBMemberID/WinnerMemberID carry the squad MEMBER id
+	// (domain.TeamMember.ID, bc-tmid pass 2) for each side and the winner
+	// of this bout, mirroring MatchResult's SideAID/SideBID/WinnerID triple
+	// for the TEAM participants one level up. SideA/SideB/Winner above stay
+	// bare fighter NAMES, written and read exactly as before; these three
+	// fields are the id half, added BESIDE them. A record that carries an
+	// id field is resolved BY ID ONLY (operator ruling bc-pnum): kachinuki
+	// retirement (engine.RetiredPlayersFromBoutLog / IsMemberRetired) keys
+	// on the member id whenever a fighter's slot carries one, falling back
+	// to the NAME only for a row a repair has not yet reached -- which is
+	// what closes the rename defect this pass exists for (renaming a
+	// member mid-match no longer re-queues someone who already fought and
+	// lost, because the id, unlike the name, does not change under them).
+	// omitempty keeps a file written before these fields existed, and every
+	// reader of one, fully compatible; a legacy row is repaired on load
+	// (state.upgradePoolMatchSideIDsLocked / upgradeBracketSideIDsLocked,
+	// extended in the same pass that already resolves the match-level
+	// triple) against the two teams' own squads.
+	SideAMemberID  string `json:"sideAMemberId,omitempty" yaml:"side_a_member_id,omitempty"`
+	SideBMemberID  string `json:"sideBMemberId,omitempty" yaml:"side_b_member_id,omitempty"`
+	WinnerMemberID string `json:"winnerMemberId,omitempty" yaml:"winner_member_id,omitempty"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this sub-bout:
@@ -1093,6 +1114,67 @@ type SubMatchResult struct {
 // the mark to the winner's side, at most once.
 func (s *SubMatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(s.IpponsA) || domain.ContainsHantei(s.IpponsB)
+}
+
+// MissingMemberID reports whether s has a side or winner NAMED but not
+// member-id-stamped: SideA/SideB non-empty with SideAMemberID/
+// SideBMemberID empty, or Winner non-empty with WinnerMemberID empty. The
+// sub-bout twin of MatchResult.MissingSideOrWinnerID, used by the
+// legacy-upgrade repair's "does this row still need work" scan (bc-tmid
+// pass 2).
+func (s *SubMatchResult) MissingMemberID() bool {
+	return (s.SideA != "" && s.SideAMemberID == "") ||
+		(s.SideB != "" && s.SideBMemberID == "") ||
+		(s.Winner != "" && s.WinnerMemberID == "")
+}
+
+// ResolveMemberWinnerID derives WinnerMemberID from s's OWN already-resolved
+// side member ids (SideAMemberID/SideBMemberID) and its Winner NAME, routed
+// through domain.AttributeWinnerSide -- the same "which side won" owner the
+// match-level SideAID/SideBID/WinnerID triple already routes through
+// (state/legacy_upgrade.go's pool-matches/bracket.json upgrades). WinnerID
+// is deliberately left empty in the WinnerAttribution literal: nothing here
+// carries a separately-submitted "chosen winner id" to compare against, only
+// the two side ids and the winner's own recorded name, so the call always
+// takes AttributeWinnerSide's NAME-comparison branch; this function's whole
+// contribution is picking the side's member id once that branch names one.
+//
+// No-op (returns false) when WinnerMemberID is already set, Winner is
+// empty, or the two sides can't be told apart by name (SideA == SideB, or a
+// name matching neither) -- the same residue every id-repair in this
+// package accepts rather than guesses at. Reused by the live kachinuki
+// merge (engine.mergeKachinukiSubResults) so the rule has exactly one
+// owner between the legacy-load path and the live-write path.
+func (s *SubMatchResult) ResolveMemberWinnerID() bool {
+	if s.WinnerMemberID != "" || s.Winner == "" {
+		return false
+	}
+	// A row where BOTH sides hold the SAME non-empty name can never be told
+	// apart by name alone (two competitors may legally share a display
+	// name), the same guard upgradePoolMatchSideIDsLocked/
+	// upgradeBracketSideIDsLocked apply before deriving the match-level
+	// WinnerID (legacy_upgrade.go). Skipping derivation here is the only
+	// safe choice: AttributeWinnerSide's own name path would otherwise
+	// default to side A regardless of which one actually won (its
+	// documented aka-first convention -- correct for a genuinely
+	// unattributable winner, wrong here, where the ambiguity is in the
+	// SIDES, not the winner).
+	if s.SideA != "" && s.SideA == s.SideB {
+		return false
+	}
+	switch domain.AttributeWinnerSide(domain.WinnerAttribution{Winner: s.Winner, SideA: s.SideA, SideB: s.SideB}) {
+	case domain.MatchSideA:
+		if s.SideAMemberID != "" {
+			s.WinnerMemberID = s.SideAMemberID
+			return true
+		}
+	case domain.MatchSideB:
+		if s.SideBMemberID != "" {
+			s.WinnerMemberID = s.SideBMemberID
+			return true
+		}
+	}
+	return false
 }
 
 type MatchResult struct {

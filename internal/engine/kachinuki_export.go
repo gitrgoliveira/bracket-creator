@@ -133,12 +133,14 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 // tallyKachinukiEliminations returns the number of retired (eliminated)
 // players per side. It delegates to RetiredPlayersFromBoutLog so the
 // retirement rule (hikiwake retires both sides, otherwise the loser retires)
-// lives in exactly one place: len of the per-side retired-name set equals the
-// elimination count for valid play (each player retires at most once). `a` is
-// SideA eliminations, `b` is SideB.
+// lives in exactly one place: len of the per-side retired-NAME set equals the
+// elimination count for valid play (each player retires at most once, and
+// RetiredMemberSet.retire always records the name when the bout row names
+// one, member id or not, so Names is the count regardless of which rows
+// happen to be id-repaired). `a` is SideA eliminations, `b` is SideB.
 func tallyKachinukiEliminations(m *state.MatchResult) (a, b int) {
 	retiredA, retiredB := RetiredPlayersFromBoutLog(m.SubResults, m.SideA, m.SideB)
-	return len(retiredA), len(retiredB)
+	return len(retiredA.Names), len(retiredB.Names)
 }
 
 // lineupKey is the composite key used to look up a player's lineup

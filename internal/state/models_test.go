@@ -120,6 +120,106 @@ func TestMatchResult_HanteiOmitempty(t *testing.T) {
 	})
 }
 
+// TestSubMatchResult_MemberIDFieldsOmitempty pins the wire contract for the
+// bc-tmid pass 2 id triple: a sub-bout with none of the three set must not
+// emit them (a file/payload written before they existed round-trips
+// byte-identical), while an explicit value on each does emit.
+func TestSubMatchResult_MemberIDFieldsOmitempty(t *testing.T) {
+	t.Run("unset fields are omitted", func(t *testing.T) {
+		sub := SubMatchResult{Position: 1, SideA: "A", SideB: "B"}
+		b, err := json.Marshal(sub)
+		require.NoError(t, err)
+		assert.NotContains(t, string(b), "MemberId", "no id field may appear on the wire when nothing set it")
+	})
+	t.Run("set fields round-trip", func(t *testing.T) {
+		sub := SubMatchResult{
+			Position: 1, SideA: "A", SideB: "B", Winner: "A",
+			SideAMemberID: "id-a", SideBMemberID: "id-b", WinnerMemberID: "id-a",
+		}
+		b, err := json.Marshal(sub)
+		require.NoError(t, err)
+		var got SubMatchResult
+		require.NoError(t, json.Unmarshal(b, &got))
+		assert.Equal(t, "id-a", got.SideAMemberID)
+		assert.Equal(t, "id-b", got.SideBMemberID)
+		assert.Equal(t, "id-a", got.WinnerMemberID)
+	})
+}
+
+// TestSubMatchResult_MissingMemberID pins the sub-bout twin of
+// MatchResult.MissingSideOrWinnerID: a side/winner NAMED but not
+// id-stamped needs repair; an empty side/winner, or one already stamped,
+// does not.
+func TestSubMatchResult_MissingMemberID(t *testing.T) {
+	cases := []struct {
+		name string
+		sub  SubMatchResult
+		want bool
+	}{
+		{"fully repaired", SubMatchResult{SideA: "A", SideAMemberID: "ida", SideB: "B", SideBMemberID: "idb", Winner: "A", WinnerMemberID: "ida"}, false},
+		{"empty row", SubMatchResult{}, false},
+		{"SideA named, no id", SubMatchResult{SideA: "A", SideB: "B", SideBMemberID: "idb"}, true},
+		{"SideB named, no id", SubMatchResult{SideA: "A", SideAMemberID: "ida", SideB: "B"}, true},
+		{"Winner named, no id", SubMatchResult{SideA: "A", SideAMemberID: "ida", SideB: "B", SideBMemberID: "idb", Winner: "A"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.sub.MissingMemberID())
+		})
+	}
+}
+
+// TestSubMatchResult_ResolveMemberWinnerID pins the derivation rule (bc-tmid
+// pass 2): WinnerMemberID comes from the row's own already-resolved side
+// ids via domain.AttributeWinnerSide's name path, and stays EMPTY -- the
+// same rule the match-level SideAID/SideBID/WinnerID triple already
+// follows -- when the two sides cannot be told apart (SideA == SideB, or a
+// winner matching neither).
+func TestSubMatchResult_ResolveMemberWinnerID(t *testing.T) {
+	t.Run("side A wins, ids resolve", func(t *testing.T) {
+		sub := SubMatchResult{SideA: "Sato", SideAMemberID: "id-sato", SideB: "Suzuki", SideBMemberID: "id-suzuki", Winner: "Sato"}
+		require.True(t, sub.ResolveMemberWinnerID())
+		assert.Equal(t, "id-sato", sub.WinnerMemberID)
+	})
+	t.Run("side B wins, ids resolve", func(t *testing.T) {
+		sub := SubMatchResult{SideA: "Sato", SideAMemberID: "id-sato", SideB: "Suzuki", SideBMemberID: "id-suzuki", Winner: "Suzuki"}
+		require.True(t, sub.ResolveMemberWinnerID())
+		assert.Equal(t, "id-suzuki", sub.WinnerMemberID)
+	})
+	t.Run("already set is a no-op", func(t *testing.T) {
+		sub := SubMatchResult{SideA: "Sato", SideAMemberID: "id-sato", SideB: "Suzuki", SideBMemberID: "id-suzuki", Winner: "Sato", WinnerMemberID: "id-existing"}
+		assert.False(t, sub.ResolveMemberWinnerID())
+		assert.Equal(t, "id-existing", sub.WinnerMemberID, "an existing value is never overwritten")
+	})
+	t.Run("empty winner is a no-op", func(t *testing.T) {
+		sub := SubMatchResult{SideA: "Sato", SideAMemberID: "id-sato", SideB: "Suzuki", SideBMemberID: "id-suzuki"}
+		assert.False(t, sub.ResolveMemberWinnerID())
+		assert.Empty(t, sub.WinnerMemberID)
+	})
+	t.Run("winner matches neither side is a no-op", func(t *testing.T) {
+		sub := SubMatchResult{SideA: "Sato", SideAMemberID: "id-sato", SideB: "Suzuki", SideBMemberID: "id-suzuki", Winner: "Someone Else"}
+		assert.False(t, sub.ResolveMemberWinnerID())
+		assert.Empty(t, sub.WinnerMemberID)
+	})
+	t.Run("indistinguishable sides (same name both sides) left empty", func(t *testing.T) {
+		// Two competitors may legally share a display name (different
+		// dojos). A row where BOTH sides hold that shared name can never
+		// be told apart by name alone; deriving anyway would silently
+		// credit side A regardless of who actually won.
+		sub := SubMatchResult{SideA: "Sato", SideAMemberID: "id-sato-1", SideB: "Sato", SideBMemberID: "id-sato-2", Winner: "Sato"}
+		assert.False(t, sub.ResolveMemberWinnerID(),
+			"the two sides cannot be told apart by name, so WinnerMemberID must stay empty, matching the team-level triple's rule")
+		assert.Empty(t, sub.WinnerMemberID)
+	})
+	t.Run("resolves to a side missing its own id stays empty", func(t *testing.T) {
+		// SideA wins by name, but SideAMemberID itself was never resolved
+		// (e.g. the winning side's own name never matched a squad member).
+		sub := SubMatchResult{SideA: "Sato", SideB: "Suzuki", SideBMemberID: "id-suzuki", Winner: "Sato"}
+		assert.False(t, sub.ResolveMemberWinnerID())
+		assert.Empty(t, sub.WinnerMemberID)
+	})
+}
+
 // TestSubMatchResult_HanteiRoundTrip pins the wire/storage contract for the
 // per-bout hantei flag the viewer reads (mp-8sw). The flag is TRI-STATE
 // (*bool): true and explicit false both serialize (a withdrawal must reach

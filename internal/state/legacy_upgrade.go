@@ -147,6 +147,26 @@ import (
 //     recorded at all -- is left alone; every id-aware reader falls back
 //     to the name for exactly that slot.
 //
+//   - pool-matches.csv / bracket.json SUB-BOUT rows (SubMatchResult's
+//     SideAMemberID/SideBMemberID/WinnerMemberID) convert in the SAME pass
+//     as the match-level upgrades above (bc-tmid pass 2), an EXTENSION of
+//     upgradePoolMatchSideIDsLocked / upgradeBracketSideIDsLocked rather
+//     than a third read of either file (mirroring how the seeds.csv dojo
+//     and id repairs share one pass instead of two). A sub-bout's SideA/
+//     SideB are resolved against the TWO TEAMS' OWN squads -- side A
+//     against squads[m.SideAID], side B against squads[m.SideBID] -- using
+//     the match's OWN already-resolved SideAID/SideBID from the step just
+//     above, so this can only repair a row whose parent match id-resolved
+//     first (a match that could not be, e.g. an ambiguous shared name,
+//     leaves its sub-bouts alone too). WinnerMemberID is then derived from
+//     the sub-bout's OWN just-resolved side member ids via
+//     SubMatchResult.ResolveMemberWinnerID, the sub-bout twin of the
+//     match-level WinnerID derivation two bullets above. The daihyosen
+//     sentinel row (Position == DaihyosenSubPosition) is resolved the same
+//     uniform way; it is simply never a RETIREMENT input (kachinuki
+//     retirement already skips it) so an id here has no observable effect
+//     either way.
+//
 // EnsureLegacyUpgraded runs BEFORE loadParticipants/LoadPools/LoadPoolMatches/
 // LoadBracket take their read lock, once per competition per process: the conversion
 // needs the per-comp WRITE lock, and writing from under the reader's RLock
@@ -339,6 +359,36 @@ func squadMemberIDByName(squads map[string][]domain.TeamMember, teamID, name str
 		}
 	}
 	return ""
+}
+
+// resolveSubMemberIDs fills sub's SideAMemberID/SideBMemberID from squads,
+// resolving side A against teamAID's squad and side B against teamBID's
+// squad -- the PARENT match's own already-resolved SideAID/SideBID, so this
+// can only repair a sub-bout whose parent match id-resolved first.
+// WinnerMemberID is then derived via SubMatchResult.ResolveMemberWinnerID
+// (models.go), the sub-bout twin of the match-level WinnerID derivation the
+// callers of this function (upgradePoolMatchSideIDsLocked,
+// upgradeBracketSideIDsLocked) already run for the match itself. Returns
+// whether it changed anything, matching those callers' changed-flag
+// convention.
+func resolveSubMemberIDs(sub *SubMatchResult, squads map[string][]domain.TeamMember, teamAID, teamBID string) bool {
+	changed := false
+	if sub.SideA != "" && sub.SideAMemberID == "" {
+		if id := squadMemberIDByName(squads, teamAID, sub.SideA); id != "" {
+			sub.SideAMemberID = id
+			changed = true
+		}
+	}
+	if sub.SideB != "" && sub.SideBMemberID == "" {
+		if id := squadMemberIDByName(squads, teamBID, sub.SideB); id != "" {
+			sub.SideBMemberID = id
+			changed = true
+		}
+	}
+	if sub.ResolveMemberWinnerID() {
+		changed = true
+	}
+	return changed
 }
 
 // ParticipantsFingerprint stats participants.csv and seeds.csv for compID,
@@ -545,8 +595,10 @@ func (s *Store) upgradePoolParticipantIDsLocked(compID string, roster *legacyUpg
 // upgradePoolMatchSideIDsLocked completes legacy (no-id) pool-matches.csv
 // rows: SideAID/SideBID are stamped when the side's name is unique across
 // the whole roster, and WinnerID is then derived from the row's OWN
-// just-resolved sides. See the header comment above for the full rationale.
-// Caller holds the per-comp lock.
+// just-resolved sides. Since bc-tmid pass 2 it ALSO resolves each row's
+// SUB-BOUT member ids (resolveSubMemberIDs) against the two teams' squads,
+// in the SAME pass rather than a second read/write of this file -- see the
+// header comment above for both rationales. Caller holds the per-comp lock.
 //
 // Parses pool-matches.csv directly (parsePoolMatchesFile) rather than going
 // through LoadPoolMatchesLocked, for the same reason
@@ -570,12 +622,28 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 			needs = true
 			break
 		}
+		// bc-tmid pass 2: also scan sub-bout rows, so a match whose OWN
+		// SideAID/SideBID/WinnerID are already fine (a fresh draw) but
+		// whose bout log still lacks member ids still trips the repair.
+		for j := range matches[i].SubResults {
+			if matches[i].SubResults[j].MissingMemberID() {
+				needs = true
+				break
+			}
+		}
+		if needs {
+			break
+		}
 	}
 	if !needs {
 		return nil
 	}
 	idx, err := roster.get()
 	if err != nil || idx == nil {
+		return err
+	}
+	squads, err := roster.squads()
+	if err != nil {
 		return err
 	}
 	changed := false
@@ -654,6 +722,16 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 				}
 			}
 		}
+		// Sub-bout member ids (bc-tmid pass 2), resolved against the two
+		// TEAMS' OWN squads using the SideAID/SideBID just resolved above --
+		// see resolveSubMemberIDs' own doc for why an ambiguous row (both
+		// SideAID/SideBID still empty via the whole-row skip above) is a
+		// safe no-op here rather than a special case to guard against.
+		for j := range m.SubResults {
+			if resolveSubMemberIDs(&m.SubResults[j], squads, m.SideAID, m.SideBID) {
+				changed = true
+			}
+		}
 	}
 	if !changed {
 		return nil
@@ -670,10 +748,22 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 // placeholder exclusion has no pool-matches.csv equivalent (a pool row's
 // SideA/SideB are always resolved competitors, never a bracket-style
 // forward reference).
+//
+// Also true when any SUB-BOUT row is missing a member id (bc-tmid pass 2),
+// so a bracket match whose OWN SideAID/SideBID/WinnerID are already fine
+// but whose bout log still lacks member ids still trips the repair.
 func bracketSideNeedsIDRepair(m *BracketMatch) bool {
-	return (m.SideA != "" && !helper.IsReservedParticipantName(m.SideA) && m.SideAID == "") ||
+	if (m.SideA != "" && !helper.IsReservedParticipantName(m.SideA) && m.SideAID == "") ||
 		(m.SideB != "" && !helper.IsReservedParticipantName(m.SideB) && m.SideBID == "") ||
-		(m.Winner != "" && m.WinnerID == "")
+		(m.Winner != "" && m.WinnerID == "") {
+		return true
+	}
+	for i := range m.SubResults {
+		if m.SubResults[i].MissingMemberID() {
+			return true
+		}
+	}
+	return false
 }
 
 // bracketNeedsIDRepair reports whether any match in b (every round, plus the
@@ -786,6 +876,31 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	}
 	if bracket.ThirdPlaceMatch != nil {
 		deriveWinner(bracket.ThirdPlaceMatch)
+	}
+
+	// (d) Sub-bout member ids (bc-tmid pass 2), resolved against the two
+	// TEAMS' OWN squads using the SideAID/SideBID (b) and, where applicable,
+	// (a) just resolved -- a match neither reached leaves its sub-bouts
+	// alone too, the same "can only repair what its parent resolved" rule
+	// resolveSubMemberIDs' doc states.
+	squads, err := roster.squads()
+	if err != nil {
+		return err
+	}
+	resolveSubs := func(m *BracketMatch) {
+		for i := range m.SubResults {
+			if resolveSubMemberIDs(&m.SubResults[i], squads, m.SideAID, m.SideBID) {
+				changed = true
+			}
+		}
+	}
+	for i := range bracket.Rounds {
+		for j := range bracket.Rounds[i] {
+			resolveSubs(&bracket.Rounds[i][j])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		resolveSubs(bracket.ThirdPlaceMatch)
 	}
 
 	if !changed {

@@ -77,10 +77,10 @@ func TestMobileAppOptions_LockPasswordRequiresHash(t *testing.T) {
 	t.Setenv("TOURNAMENT_PASSWORD_HASH", "")
 	dir := t.TempDir()
 	o := &mobileAppOptions{
-		folder:       dir,
-		bindAddress:  "127.0.0.1",
-		port:         0,
-		lockPassword: true,
+		folder:      dir,
+		bindAddress: "127.0.0.1",
+		port:        0,
+		lockedMode:  true,
 	}
 	err := o.run(nil, nil)
 	require.Error(t, err)
@@ -94,10 +94,10 @@ func TestMobileAppOptions_LockPasswordRejectsBadHash(t *testing.T) {
 	t.Setenv("TOURNAMENT_PASSWORD_HASH", "not-a-bcrypt-hash")
 	dir := t.TempDir()
 	o := &mobileAppOptions{
-		folder:       dir,
-		bindAddress:  "127.0.0.1",
-		port:         0,
-		lockPassword: true,
+		folder:      dir,
+		bindAddress: "127.0.0.1",
+		port:        0,
+		lockedMode:  true,
 	}
 	err := o.run(nil, nil)
 	require.Error(t, err)

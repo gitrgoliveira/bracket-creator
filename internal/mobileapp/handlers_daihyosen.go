@@ -209,12 +209,15 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 			// (or carry stale overtime) while Status is back to running. WinnerID/
 			// WinnerSide are cleared alongside Winner (a match this handler
 			// reaches is, in the currently reachable case, always bracket-sourced
-			// and so already carries neither -- BracketMatch has no id fields --
-			// but a stored POOL match that has picked up a legacy/hand-edited
-			// Position=-1 sub CAN carry real SideAID/SideBID, and a stale
-			// WinnerID left over from an unrelated prior result would otherwise
-			// fail backfillMatchIdentity's forward-write validation (bc-idfx
-			// finding 10) as an inherited 500, not this handler's own fault).
+			// and so already carries no WinnerID either (AddDaihyosen only
+			// appends onto a TIED, RUNNING encounter, so Winner/WinnerID were
+			// never set to begin with, whatever bm.SideAID/SideBID carry
+			// since bc-brid) -- but a stored POOL match that has picked up a
+			// legacy/hand-edited Position=-1 sub CAN carry a real stale
+			// WinnerID left over from an unrelated prior result, which would
+			// otherwise fail backfillMatchIdentity's forward-write
+			// validation (bc-idfx finding 10) as an inherited 500, not this
+			// handler's own fault).
 			u.Winner = ""
 			u.WinnerID = ""
 			u.WinnerSide = ""
@@ -491,10 +494,18 @@ func findMatchForDaihyosenTx(tx state.StoreTx, compID, matchID string) (*state.M
 // build its own copy before appending.
 func daihyosenBracketResult(bm *state.BracketMatch) *state.MatchResult {
 	return &state.MatchResult{
-		ID:             bm.ID,
-		SideA:          bm.SideA,
-		SideB:          bm.SideB,
-		Winner:         bm.Winner,
+		ID:     bm.ID,
+		SideA:  bm.SideA,
+		SideB:  bm.SideB,
+		Winner: bm.Winner,
+		// SideAID/SideBID/WinnerID (bc-brid): bm may carry none (an
+		// unresolved knockout match -- the only shape reachable here, since
+		// AddDaihyosen requires the encounter tied and running, i.e. no
+		// Winner/WinnerID yet either way) or its stamped pairing; projected
+		// faithfully either way, matching bracketMatchAsResult's rule.
+		SideAID:        bm.SideAID,
+		SideBID:        bm.SideBID,
+		WinnerID:       bm.WinnerID,
 		Status:         bm.Status,
 		Court:          bm.Court,
 		ScheduledAt:    bm.ScheduledAt,

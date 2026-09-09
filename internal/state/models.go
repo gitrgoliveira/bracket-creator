@@ -1271,13 +1271,14 @@ func (m *MatchResult) HanteiDecided() bool {
 }
 
 // CarriesSideIDs reports whether m is a record with a per-side id field
-// stamped (SideAID or SideBID non-empty) -- the POOL class, resolved BY ID
-// ONLY (operator ruling bc-pnum). A record with neither (the BRACKET
-// class -- BracketMatch persists no per-side id at all, so a MatchResult
-// projected from one, e.g. bracketMatchAsResult, leaves both empty) is the
-// one legitimate case a caller may fall back to comparing SideA/SideB by
-// name instead: comparing two empty-string ids would look like a match but
-// proves nothing.
+// stamped (SideAID or SideBID non-empty), resolved BY ID ONLY (operator
+// ruling bc-pnum). Both the pool class and, since bc-brid, a repaired/freshly
+// stamped bracket class carry these; a record with neither (an UNREPAIRED
+// legacy bracket row, or a pool row from a competition drawn before ids were
+// minted, so a MatchResult projected from one, e.g. bracketMatchAsResult,
+// leaves both empty) is the one legitimate case a caller may fall back to
+// comparing SideA/SideB by name instead: comparing two empty-string ids would
+// look like a match but proves nothing.
 func (m *MatchResult) CarriesSideIDs() bool {
 	return m.SideAID != "" || m.SideBID != ""
 }
@@ -1392,6 +1393,31 @@ type BracketMatch struct {
 	Status      MatchStatus `json:"status"`
 	Court       string      `json:"court"`
 	ScheduledAt string      `json:"scheduledAt"`
+	// SideAID/SideBID/WinnerID carry the participant UUID for each side and
+	// the winner when available, MatchResult's SideAID/SideBID/WinnerID twin
+	// (bc-brid). A bracket match used to persist names only, so two
+	// competitors sharing a display name from different dojos (legal:
+	// CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo)
+	// could not be told apart once seated in the same knockout -- the
+	// simultaneity gate, a bracket kiken's ineligibility target, a
+	// participant rename, and MatchSidesByID all degraded to a first-match
+	// name guess. Stamped by every bracket writer (buildBracketFromDraw's
+	// round 0 from Bracket.DrawOrder, ResolveQualifiedPools' pool-finisher
+	// resolver, propagateBracketWinner's advancement + bronze feed, and
+	// applyBracketMatchResult's winner-id resolution) IFF the side is a
+	// resolved competitor: a bye (empty), a "Winner of ..." feeder, and an
+	// unresolved "Pool A-1st" placeholder carry none
+	// (helper.IsReservedParticipantName already stops a real person taking
+	// those strings as a display name). omitempty keeps a bracket.json
+	// written before this field existed, and every reader of one, fully
+	// compatible: state.EnsureLegacyUpgraded repairs a legacy row's ids on
+	// load (DrawOrder positionally for a standalone knockout, else a unique
+	// roster name match), and every identity-critical reader keeps its
+	// pre-existing name path as the fallback for a row repair could not
+	// resolve.
+	SideAID  string `json:"sideAId,omitempty"`
+	SideBID  string `json:"sideBId,omitempty"`
+	WinnerID string `json:"winnerId,omitempty"`
 	// Additional fields from design
 	//
 	// ScoreA/ScoreB are LEGACY READ-ONLY channels (see legacy_hantei.go): a

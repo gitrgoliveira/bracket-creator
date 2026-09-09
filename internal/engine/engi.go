@@ -76,9 +76,11 @@ func (e *Engine) recordEngiMatchResult(h state.StoreTx, compID, matchID string, 
 // only flag counts and status, never a winner, so without this the bracket
 // card / scoreboard would show the match completed but with no winner
 // highlight until the next background refetch. Winner/WinnerSide are set by
-// engiWinnerSide; WinnerID is populated for pool bouts (from SideAID/SideBID)
-// and empty for bracket bouts (BracketMatch has no per-side IDs), matching the
-// authoritative on-disk state either way.
+// engiWinnerSide; WinnerID is populated from SideAID/SideBID for both pool
+// bouts and, since bc-brid, a stamped bracket bout (applyEngiToBracketMatch),
+// matching the authoritative on-disk state either way. An unstamped bracket
+// row (a bye, an unresolved feeder, or an unrepaired legacy row) still
+// carries no WinnerID, exactly as it carries no SideAID/SideBID.
 func backfillEngiResult(result, rec *state.MatchResult) {
 	if result == nil || rec == nil {
 		return
@@ -184,11 +186,24 @@ func applyEngiToMatchResult(r *state.MatchResult, flagsA, flagsB int, winnerSide
 // applyEngiToBracketMatch writes a flag-decided result into a BracketMatch and
 // returns the equivalent MatchResult for the caller to echo / broadcast.
 // correctionReason is persisted on the bracket match when non-empty.
+//
+// bm.WinnerID is stamped from bm.SideAID/SideBID (bc-brid), mirroring
+// applyEngiToMatchResult's pool twin: an engi bracket bout's sides are
+// stamped by the SAME generation/propagation writers a kendo bracket uses
+// (this function is the one place that decides an engi bracket winner, so
+// it is also the one place responsible for the id half), and
+// propagateBracketWinner (called right after this by the caller) advances
+// bm.WinnerID into the next round exactly like it does for a kendo match --
+// without this stamp, that propagation would silently carry an empty id
+// through the rest of the bracket even though the sides themselves are
+// correctly identified.
 func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerSide, correctionReason string) *state.MatchResult {
 	if winnerSide == "A" {
 		bm.Winner = bm.SideA
+		bm.WinnerID = bm.SideAID
 	} else {
 		bm.Winner = bm.SideB
+		bm.WinnerID = bm.SideBID
 	}
 	bm.FlagsA = flagsA
 	bm.FlagsB = flagsB
@@ -200,7 +215,10 @@ func applyEngiToBracketMatch(bm *state.BracketMatch, flagsA, flagsB int, winnerS
 		ID:               bm.ID,
 		SideA:            bm.SideA,
 		SideB:            bm.SideB,
+		SideAID:          bm.SideAID,
+		SideBID:          bm.SideBID,
 		Winner:           bm.Winner,
+		WinnerID:         bm.WinnerID,
 		WinnerSide:       winnerSide,
 		FlagsA:           flagsA,
 		FlagsB:           flagsB,

@@ -1032,6 +1032,54 @@ func TestReplaceParticipantInDraw_CheckedOutNamesakeBlocksRewrite(t *testing.T) 
 	assert.True(t, findNameInBracket(bracketAfter, "Alice"), "both original rows must survive untouched, including the checked-out namesake's own match history")
 }
 
+// TestReplaceParticipantInDraw_IDStampedNamesakeRenameCascades is
+// TestReplaceParticipantInDraw_CheckedOutNamesakeBlocksRewrite's positive
+// twin (bc-brid): the SAME same-name-across-dojos topology, but this time
+// both bracket rows carry the SideAID a real (post-bc-brid) generation
+// stamps. The rename now resolves by id, unambiguously, and cascades into
+// the CORRECT row only -- the namesake's own row, which shares the same
+// display name but a different id, is left untouched. A guard pinned only
+// in the refusing direction (the sibling test above) would silently disable
+// the whole rename feature for every same-name pair; this is the other
+// half.
+func TestReplaceParticipantInDraw_IDStampedNamesakeRenameCascades(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "replace-id-stamped-namesake"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "ID Stamped Namesake", Kind: "individual",
+		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		StartTime: "09:00", Status: state.CompStatusDrawReady,
+	}))
+
+	aliceID := helper.NewUUID4()
+	namesakeID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo0", CheckedIn: true},
+		{ID: namesakeID, Name: "Alice", Dojo: "DojoOther", CheckedIn: true},
+	}))
+	// Both "Alice" rows carry their own stamped id, exactly as generation
+	// (buildBracketFromDraw + Bracket.StampRoundZeroSideIDsFromDrawOrder)
+	// now produces.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "R1-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", Winner: "Alice", WinnerID: aliceID, Status: state.MatchStatusCompleted},
+				{ID: "R1-1", SideA: "Alice", SideAID: namesakeID, SideB: "Charlie", Winner: "Charlie", Status: state.MatchStatusCompleted},
+			},
+		},
+	}))
+
+	warnings, err := eng.ReplaceParticipantInDraw(compID, aliceID, "Alice", "Dojo0", "", "Alicia", "Dojo0", "")
+	require.NoError(t, err)
+	assert.Empty(t, warnings, "the rename resolves unambiguously by id, so no ambiguity warning should fire")
+
+	bracketAfter, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alicia", bracketAfter.Rounds[0][0].SideA, "the renamed participant's OWN row (matched by id) must cascade")
+	assert.Equal(t, "Alicia", bracketAfter.Rounds[0][0].Winner, "the Winner field cascades too, via its own WinnerID")
+	assert.Equal(t, "Alice", bracketAfter.Rounds[0][1].SideA, "the namesake's row (a DIFFERENT id) must be left untouched")
+}
+
 // corruptParticipantsFile forces LoadParticipants to error on compID's
 // participants.csv. Unlike corruptOverridesFile (malformed JSON), malformed
 // CSV content is not reliable here: helper.ReadCSVFile deliberately parses

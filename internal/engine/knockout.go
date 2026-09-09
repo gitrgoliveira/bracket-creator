@@ -51,6 +51,15 @@ func bracketHasPoolPlaceholders(b *state.Bracket) bool {
 	return false
 }
 
+// resolvedFinisher pairs a pool finisher's display name with their
+// participant id, the value ResolveQualifiedPools' label→finisher resolver
+// maps a bracket placeholder ("Pool A-1st") onto (bc-brid). The zero value
+// (both fields empty) represents a degenerate pool's unfillable rank, mapped
+// to a bye exactly as a bare "" name used to be.
+type resolvedFinisher struct {
+	Name, ID string
+}
+
 // completedPoolNames returns poolName → isComplete for every pool in compID. A
 // pool is complete when all of its matches (regular + any tiebreaker/daihyosen)
 // are completed with a winner, no further tiebreaker/DH injection is pending for
@@ -189,18 +198,13 @@ func (e *Engine) completedPoolNames(compID string, comp *state.Competition) (map
 // seeded). No-op (0, false, nil) for non-mixed competitions, standalone playoffs
 // brackets carry no pool placeholders.
 //
-// Boundary, by current design (bc-cse): the resolver above writes a
-// competitor's display NAME into the bracket slot (`resolver[key] =
-// ps[rank-1].Player.Name`), not an id -- BracketMatch persists no side ids
-// at all (state/bracket.go's MatchSidesByID doc), so there is nowhere on a
-// bracket match to put one even if this function resolved one. If two
-// same-name-different-dojo competitors both qualify (legal identity,
-// CLAUDE.md's "Competitor identity" rule), the bracket cannot tell their
-// slots apart from that point on, and downstream eligibility resolution
-// (lookupPlayerID, eligibility.go) degrades to a first-name-match lookup for
-// the same reason. This is the documented seam where bc-cse's identity work
-// stops, not an oversight this function owes a fix for: closing it needs
-// BracketMatch to grow persisted side ids, a separate, larger change.
+// Identity (bc-brid): the resolver below writes both a competitor's display
+// NAME and their participant id into the bracket slot
+// (`resolver[key] = resolvedFinisher{Name: ps[rank-1].Player.Name, ID:
+// ps[rank-1].Player.ID}`), closing the seam bc-cse's identity work left open
+// -- BracketMatch now persists per-side ids (state/models.go's
+// BracketMatch.SideAID doc), so two same-name-different-dojo pool finishers
+// qualifying into the same knockout stay distinguishable from here on.
 func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
@@ -242,9 +246,12 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 	// labels the draw actually seated.
 	ranksNeeded := comp.MatchWinnerRanksNeeded()
 
-	// Build a label→player resolver for COMPLETED pools only. Incomplete pools
-	// contribute nothing, so their placeholders survive untouched.
-	resolver := make(map[string]string)
+	// Build a label→finisher resolver for COMPLETED pools only. Incomplete
+	// pools contribute nothing, so their placeholders survive untouched.
+	// resolvedFinisher carries both the display name and the participant id
+	// (bc-brid), so a bracket slot's identity survives the resolution, not
+	// just its label.
+	resolver := make(map[string]resolvedFinisher)
 	for _, pool := range pools {
 		if !completed[pool.PoolName] {
 			continue
@@ -258,10 +265,11 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				// to "" (bye) so the bracket slot auto-resolves. Draw-time
 				// validation prevents this in supported flows.
 				log.Printf("engine.ResolveQualifiedPools: pool %q has only %d ranked finisher(s) but placeholders may reference %d rank(s); treating rank %d as bye", pool.PoolName, len(ps), ranksNeeded, rank)
-				resolver[key] = ""
+				resolver[key] = resolvedFinisher{}
 				continue
 			}
-			resolver[key] = ps[rank-1].Player.Name
+			p := ps[rank-1].Player
+			resolver[key] = resolvedFinisher{Name: p.Name, ID: p.ID}
 		}
 	}
 
@@ -299,17 +307,23 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 			// "Winner of …"/""), stable across re-scores. Only completed-pool
 			// placeholders are resolver keys; "Winner of" and "" never are, so
 			// already-scored knockout sides and unresolved feeders are untouched.
-			// Compare against the current value so an unchanged re-run is a no-op.
-			if name, ok := resolver[m.PlaceholderA]; ok && m.SideA != name {
-				m.SideA = name
+			// Compare against the current (name, id) pair so an unchanged
+			// re-run is a no-op, and so a bracket resolved once BEFORE bc-brid
+			// (name only, id still "") gets its id backfilled the next time its
+			// pool's placeholder is looked at.
+			if rf, ok := resolver[m.PlaceholderA]; ok && (m.SideA != rf.Name || m.SideAID != rf.ID) {
+				m.SideA = rf.Name
+				m.SideAID = rf.ID
 				n++
 			}
-			if name, ok := resolver[m.PlaceholderB]; ok && m.SideB != name {
-				m.SideB = name
+			if rf, ok := resolver[m.PlaceholderB]; ok && (m.SideB != rf.Name || m.SideBID != rf.ID) {
+				m.SideB = rf.Name
+				m.SideBID = rf.ID
 				n++
 			}
-			if name, ok := resolver[m.PlaceholderWinner]; ok && m.Winner != name {
-				m.Winner = name
+			if rf, ok := resolver[m.PlaceholderWinner]; ok && (m.Winner != rf.Name || m.WinnerID != rf.ID) {
+				m.Winner = rf.Name
+				m.WinnerID = rf.ID
 				n++ // count Winner-only changes so a bye-propagated Winner fix is persisted
 			}
 		}
@@ -344,11 +358,13 @@ func (e *Engine) ResolveQualifiedPools(compID string) (int, bool, error) {
 				bResolved := !bEmpty && !isUnresolvedBracketSide(m.SideB)
 				if aEmpty && bResolved {
 					m.Winner = m.SideB
+					m.WinnerID = m.SideBID
 					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++
 				} else if bEmpty && aResolved {
 					m.Winner = m.SideA
+					m.WinnerID = m.SideAID
 					m.Status = state.MatchStatusCompleted
 					e.propagateBracketWinner(bracket, ri, mi)
 					n++

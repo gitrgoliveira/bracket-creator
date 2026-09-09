@@ -68,17 +68,20 @@ func (e *Engine) generatePlayoffs(comp *state.Competition, players []domain.Play
 	// so the seeded tree is cut into one region per shiaijo exactly as the Excel
 	// pagination cuts it (helper.NewPlayoffDraw).
 	draw := helper.NewPlayoffDraw(tree, len(comp.Courts))
-	bracket, err := e.buildBracketFromDraw(comp, draw)
+	// drawOrder is StandardSeeding's own placement, participant ids in
+	// bracket-position order top to bottom (bc-pnum ruling 2): "a number
+	// belongs to a position in the draw". Passed straight into
+	// buildBracketFromDraw, which stamps it onto bracket.DrawOrder AND uses
+	// it to stamp round-0 SideAID/SideBID (bc-brid) before its own
+	// bye-propagation pass runs, so a walkover's WinnerID cascades too. This
+	// is the ONE place that produces it -- a mixed (Pools + Knockout)
+	// bracket never carries it, its competitors are numbered pool by pool
+	// instead, and generatePoolPreviewBracket passes nil for exactly that
+	// reason.
+	bracket, err := e.buildBracketFromDraw(comp, draw, drawOrder)
 	if err != nil {
 		return err
 	}
-
-	// DrawOrder is StandardSeeding's own placement, participant ids in
-	// bracket-position order top to bottom (bc-pnum ruling 2): "a number
-	// belongs to a position in the draw". This is the ONE place that
-	// stamps it -- a mixed (Pools + Knockout) bracket never carries it,
-	// its competitors are numbered pool by pool instead.
-	bracket.DrawOrder = drawOrder
 
 	return e.store.SaveBracket(comp.ID, bracket)
 }
@@ -162,7 +165,11 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 		return nil
 	}
 
-	bracket, err := e.buildBracketFromDraw(comp, draw)
+	// nil drawOrder: a pool-fed bracket's leaves are pool-origin placeholders,
+	// never resolved competitors at draw time, so there is nothing to stamp
+	// (see buildBracketFromDraw's own doc comment). ResolveQualifiedPools
+	// stamps ids as each placeholder resolves to a real pool finisher.
+	bracket, err := e.buildBracketFromDraw(comp, draw, nil)
 	if err != nil {
 		return err
 	}
@@ -191,7 +198,14 @@ func (e *Engine) generatePoolPreviewBracket(comp *state.Competition) error {
 // round-1 slot count by the court count, which is only right when every court
 // holds the same number of pools, and which silently clamped every overflow
 // slot onto the last court. A draw with no regions falls back to court 0.
-func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw) (*state.Bracket, error) {
+//
+// drawOrder is the participant-id twin of the leaves this draw was built
+// from, in the SAME order (bc-brid): generatePlayoffs passes StandardSeeding's
+// own id ordering so round-0 SideAID/SideBID (and a walkover's WinnerID) can
+// be stamped from it (see state.Bracket.StampRoundZeroSideIDsFromDrawOrder);
+// generatePoolPreviewBracket passes nil, since a pool-fed bracket's leaves are
+// unresolved pool placeholders, not competitors, at draw time.
+func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.KnockoutDraw, drawOrder []string) (*state.Bracket, error) {
 	if draw == nil || draw.Root == nil {
 		return nil, fmt.Errorf("buildBracketFromDraw: no draw to build from")
 	}
@@ -292,8 +306,14 @@ func (e *Engine) buildBracketFromDraw(comp *state.Competition, draw *helper.Knoc
 	}
 
 	bracket := &state.Bracket{
-		Rounds: rounds,
+		Rounds:    rounds,
+		DrawOrder: drawOrder,
 	}
+	// Stamp round-0 SideAID/SideBID (and a resolved bye's WinnerID) from
+	// DrawOrder BEFORE the propagation pass below runs, so a walkover's
+	// winner id cascades into later rounds along with its name (bc-brid).
+	// No-op when drawOrder is nil (the pool-fed preview bracket).
+	bracket.StampRoundZeroSideIDsFromDrawOrder()
 
 	// Post-process: Propagate auto-resolved winners across all rounds
 	for rIdx := 0; rIdx < len(bracket.Rounds)-1; rIdx++ {

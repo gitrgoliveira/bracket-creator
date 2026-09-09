@@ -580,6 +580,10 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
 // shared row writers consume (they read only the result fields).
+// Deliberately omits SideAID/SideBID/WinnerID (bc-brid added them to
+// BracketMatch, but this export path was not converted; see the id-fallback
+// comment at this function's call site) -- the row writers below stay on
+// the pre-existing name-based attribution.
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 	return state.MatchResult{
 		SideA:      bm.SideA,
@@ -978,10 +982,14 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
-				// BracketMatch carries no WinnerID/SideAID/SideBID (see
-				// bracketMatchResultView above), so this is always the
-				// name-fallback branch, matching the SideMarksLR call in
-				// writeScoreRowCells below.
+				// bracketMatchResultView above deliberately does not carry
+				// SideAID/SideBID/WinnerID into mrView (bm may carry them
+				// since bc-brid, but the export path was not converted), so
+				// this is always the name-fallback branch, matching the
+				// SideMarksLR call in writeScoreRowCells below. Out of
+				// scope for bc-brid: the byte-pinned example workbooks make
+				// this a separate, deliberately deferred change (see that
+				// bead's final report).
 				scoreA, scoreB = DefaultWinMaruAB(
 					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
 					bm.Decision, bm.Encho, domain.WinnerAttribution{

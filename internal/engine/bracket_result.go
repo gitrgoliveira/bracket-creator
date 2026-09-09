@@ -42,10 +42,20 @@ func bracketMatchAsResult(bm *state.BracketMatch) *state.MatchResult {
 	// "a match is a match" argument applyMatchWrite already makes for refusing
 	// to let the pool and the bracket arbitrate differently.
 	return &state.MatchResult{
-		ID:             bm.ID,
-		SideA:          bm.SideA,
-		SideB:          bm.SideB,
-		Winner:         bm.Winner,
+		ID:     bm.ID,
+		SideA:  bm.SideA,
+		SideB:  bm.SideB,
+		Winner: bm.Winner,
+		// SideAID/SideBID/WinnerID (bc-brid): projected the same faithful way
+		// as every other field on this struct -- "" when bm's own row is
+		// unstamped (a bye, an unresolved feeder, or an unrepaired legacy
+		// row), never guessed. losingSide (eligibility.go) reads these
+		// through this projection to attribute a bracket kiken/fusenpai to
+		// the correct competitor even when both sides of the match share a
+		// display name.
+		SideAID:        bm.SideAID,
+		SideBID:        bm.SideBID,
+		WinnerID:       bm.WinnerID,
 		Status:         bm.Status,
 		Decision:       bm.Decision,
 		DecisionBy:     bm.DecisionBy,

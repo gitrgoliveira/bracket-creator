@@ -478,6 +478,100 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	assert.NotContains(t, body, `"scoreB"`, "body=%q", body)
 }
 
+// TestCourtCurrentBracketMatch_ResolvesSideByIDNotNameAcrossDojos is
+// TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos's bracket
+// twin (bc-brid): before BracketMatch carried per-side ids, the OBS/vMix
+// overlay resolved a running knockout bout's dojo/number by NAME
+// (buildSideByIDOrName's predecessor, then unconditionally name-only), so
+// two "Sam"s from different dojos meeting in the same match always showed
+// whichever Sam the roster happened to list first, on BOTH sides. A
+// stamped bracket row now resolves by id via buildSideByIDOrName, exactly
+// like a pool match.
+func TestCourtCurrentBracketMatch_ResolvesSideByIDNotNameAcrossDojos(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "same-name-bracket-current", Name: "Same Name Bracket Current",
+		Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+
+	northID := helper.NewUUID4()
+	southID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("same-name-bracket-current", []domain.Player{
+		{ID: southID, Name: "Sam", Dojo: "South"},
+		{ID: northID, Name: "Sam", Dojo: "North"},
+	}))
+	require.NoError(t, store.SaveBracket("same-name-bracket-current", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Sam", SideAID: northID, SideB: "Sam", SideBID: southID,
+				Status: state.MatchStatusRunning, Court: "A"},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "North", resp.SideA.Dojo, "SideAID must resolve to the North Sam, not whichever Sam the roster lists first")
+	assert.Equal(t, "South", resp.SideB.Dojo, "SideBID must resolve to the South Sam")
+	assert.Equal(t, northID, resp.SideA.PlayerID)
+	assert.Equal(t, southID, resp.SideB.PlayerID)
+}
+
+// TestCourtCurrentBracketMatch_EmptySideIDStillResolvesByName is the
+// falling-back direction paired with the test above: an
+// UNREPAIRED bracket row (both SideAID/SideBID empty, the pre-bc-brid or
+// hand-edited shape) must still resolve by name -- bc-brid's own
+// instruction is that adding ids must never remove the pre-existing name
+// handling for a row a repair could not stamp. Unlike the pool branch's
+// TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing (a DELIBERATE,
+// stricter ruling for pool matches), the bracket keeps its weaker,
+// pre-existing name tolerance.
+func TestCourtCurrentBracketMatch_EmptySideIDStillResolvesByName(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "unstamped-bracket-current", Name: "Unstamped Bracket Current",
+		Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+	aoiID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("unstamped-bracket-current", []domain.Player{
+		{ID: aoiID, Name: "Aoi Mori", Dojo: "North"},
+	}))
+	// SideAID left empty on purpose (the unrepaired/legacy shape).
+	require.NoError(t, store.SaveBracket("unstamped-bracket-current", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Aoi Mori", SideB: "Ken Sato",
+				Status: state.MatchStatusRunning, Court: "A"},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	assert.Equal(t, "Aoi Mori", resp.SideA.Name)
+	assert.Equal(t, "North", resp.SideA.Dojo, "an unstamped row still resolves its unique-name side")
+	assert.Equal(t, aoiID, resp.SideA.PlayerID)
+}
+
 // TestCourtCurrentEmptyIpponsAreArraysNotNull, Copilot review. An unscored
 // match (here a bracket bout with only a hansoku and no ippons) must encode
 // ipponsA/ipponsB as [] on the wire, not null, the contract models them as

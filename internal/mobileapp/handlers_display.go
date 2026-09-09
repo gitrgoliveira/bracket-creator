@@ -101,7 +101,7 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				//
 				// A pool MatchResult always carries a SideAID/SideBID field
 				// (even a legacy row where it is empty), so this is the id
-				// class: buildSideByID, never buildSideByName -- a name
+				// class: buildSideByID, never buildSideByIDOrName -- a name
 				// fallback here could silently resolve to the wrong same-name
 				// competitor across dojos.
 				c.JSON(http.StatusOK, currentMatchPayload(court, comp,
@@ -133,12 +133,13 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					// read bracket.json a second time.
 					players := currentMatchPlayers(store, comp, bracket)
 					zek := comp.EffectiveWithZekkenName()
-					// BracketMatch carries no per-side id at all (out of scope
-					// for bc-pnum, see CLAUDE.md), so this call is the ONLY
-					// class allowed to reach buildSideByName.
+					// bc-brid: BracketMatch carries a per-side id when its own
+					// row is stamped; buildSideByIDOrName prefers it and falls
+					// back to the pre-bc-brid name match for a bye, an
+					// unresolved feeder, or an unrepaired legacy row.
 					c.JSON(http.StatusOK, currentMatchPayload(court, comp,
-						buildSideByName(bm.SideA, players, zek),
-						buildSideByName(bm.SideB, players, zek),
+						buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
+						buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
 						bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
 						phaseFromMatchID(bm.ID), "", ""))
 					return
@@ -162,11 +163,12 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// stable literal label instead of deriving one from the ID
 				// (matches the "3rd Place Match" label kachinuki_export.go
 				// uses for the same match).
-				// ThirdPlaceMatch is a BracketMatch too: no per-side id at
-				// all, so this is buildSideByName like the round branch above.
+				// ThirdPlaceMatch is a BracketMatch too, so the same
+				// id-preferring, name-falling-back resolution applies
+				// (buildSideByIDOrName, matching the round branch above).
 				c.JSON(http.StatusOK, currentMatchPayload(court, comp,
-					buildSideByName(bm.SideA, players, zek),
-					buildSideByName(bm.SideB, players, zek),
+					buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
+					buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
 					ipponsA, ipponsB, hansokuA, hansokuB,
 					"3rd Place Match", "", ""))
 				return
@@ -366,10 +368,11 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition, bracket *s
 // shared by the pool and bracket branches. repA/repB are the
 // representative-bout fighters for a pool daihyosen (empty for regular and
 // bracket matches). sideA/sideB are pre-built by the caller via
-// buildSideByID (pool: the record carries a SideAID/SideBID field, even
-// when empty) or buildSideByName (bracket/ThirdPlaceMatch: no per-side id
-// field exists at all) -- the CALLER picks the resolver, because only it
-// knows which record class it read the match from; this function must not
+// buildSideByID (pool: id-only, no name fallback -- operator ruling
+// bc-pnum) or buildSideByIDOrName (bracket/ThirdPlaceMatch: prefers the id
+// but falls back to name for a bye, an unresolved feeder, or an unrepaired
+// legacy row) -- the CALLER picks the resolver, because only it knows
+// which record class it read the match from; this function must not
 // re-derive that choice from whether an id string happens to be empty.
 func currentMatchPayload(court string, comp *state.Competition, sideA, sideB gin.H,
 	ipponsA, ipponsB []string, hansokuA, hansokuB int,
@@ -474,24 +477,39 @@ func sidePayload(name string, p *domain.Player, withZekkenName bool) gin.H {
 // same display name across dojos (bc-pnum review finding 2; the old single
 // buildSide fell back to a name scan whenever id == "", which a legacy
 // id-less POOL row could reach just as easily as a genuinely id-less
-// record). Only buildSideByName may fall back to a name match -- see its
-// own doc comment for which record class that is.
+// record). Only buildSideByIDOrName may fall back to a name match -- see
+// its own doc comment for which record class (the bracket) that is, and why.
 func buildSideByID(name, id string, players []domain.Player, withZekkenName bool) gin.H {
 	return sidePayload(name, findPlayerByID(players, id), withZekkenName)
 }
 
-// buildSideByName is buildSideByID's counterpart for the one record class
-// that carries no per-side id field at all: a BracketMatch (out of scope
-// for bc-pnum, see CLAUDE.md) or its ThirdPlaceMatch sibling. name is the
-// only information those records carry (MatchResult.SideA/SideB and
-// BracketMatch.SideA/SideB both persist names only, see state/models.go),
-// so this resolves by matching Player.Name == name -- the same fallback
-// buildSideByID used to run for id == "", now reachable ONLY from a
-// record class that genuinely has no id to try first. When the roster
-// cannot resolve the name either, this still returns a name-only side so
-// the overlay can render "Player vs Player" rather than blanking out.
-func buildSideByName(name string, players []domain.Player, withZekkenName bool) gin.H {
-	return sidePayload(name, findPlayerByName(players, name), withZekkenName)
+// buildSideByIDOrName is buildSideByID's bracket counterpart (bc-brid).
+// BracketMatch now carries a per-side id when its own row is stamped (see
+// BracketMatch.SideAID's own doc comment for the writers that stamp it and
+// the three shapes that carry none: a bye, an unresolved "Winner of ..."
+// feeder, or an unrepaired legacy row), so this prefers the id exactly like
+// buildSideByID, but falls back to the pre-bc-brid name match
+// (findPlayerByName) when the id is empty or does not resolve to a roster
+// player -- "this ADDS ids, it does not remove name handling" (bc-brid's own
+// instruction for every identity-critical reader). When the roster cannot
+// resolve either, this still returns a name-only side so the overlay can
+// render "Player vs Player" rather than blanking out.
+//
+// Deliberately NOT folded into buildSideByID itself: a pool MatchResult's
+// id-less residue (a row an earlier repair could not resolve) has ALWAYS
+// rendered unresolved via buildSideByID, with NO name fallback -- pool
+// sides are resolved BY ID ONLY (operator ruling bc-pnum), precisely to
+// avoid the same same-name misattribution this function's own fallback
+// re-admits for the bracket's residue. Widening buildSideByID itself would
+// regress that deliberate pool ruling; keeping this a separate function is
+// what lets the bracket keep its (necessarily weaker, but pre-existing)
+// name tolerance without touching the pool's stricter one.
+func buildSideByIDOrName(name, id string, players []domain.Player, withZekkenName bool) gin.H {
+	p := findPlayerByID(players, id)
+	if p == nil {
+		p = findPlayerByName(players, name)
+	}
+	return sidePayload(name, p, withZekkenName)
 }
 
 // phaseFromMatchID derives a human-readable phase label from a match ID.

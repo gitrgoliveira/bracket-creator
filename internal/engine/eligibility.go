@@ -127,8 +127,9 @@ func participantIDByName(h state.StoreTx, compID, name string) (string, error) {
 // else (repro: roster Tanaka@DojoB registered before Tanaka@DojoA; Tanaka@A
 // withdraws, but a name-only resolution here would check Tanaka@B's status
 // instead). loserName is used ONLY when loserID is empty (a match row with no
-// stamped side ids at all, e.g. a bracket kiken -- BracketMatch carries no
-// per-side id).
+// stamped side ids at all -- e.g. a bracket kiken whose row is a bye, an
+// unresolved feeder, or an unrepaired legacy row; a STAMPED bracket row
+// resolves loserID the same way a pool row does, via losingSide).
 //
 // Takes h state.StoreTx so both the transactional (RecordDecisionTx) and
 // non-transactional (test) callers share one body (bc-twin follow-up):
@@ -294,9 +295,9 @@ func (e *Engine) lookupMatchCourt(compID, matchID string) (string, error) {
 }
 
 // findPoolMatch returns matchID's own row within an already-loaded
-// pool-matches slice. ok is false when matchID is not among them (a bracket
-// match, out of scope for bc-pnum -- BracketMatch carries no per-side id at
-// all).
+// pool-matches slice. ok is false when matchID is not among them (e.g. a
+// bracket match, which lives in bracket.json's own slice entirely, never
+// pool-matches.csv).
 //
 // checkSimultaneousMatchTx uses this to resolve the CURRENT match's identity
 // from its own stored SideAID/SideBID instead of re-deriving it from the

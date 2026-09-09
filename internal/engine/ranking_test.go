@@ -72,6 +72,73 @@ func TestGetBracketRanking(t *testing.T) {
 	}
 }
 
+// TestGetBracketRanking_SameNameSemifinalLoserResolvesByID pins the bc-brid
+// fix to GetBracketRanking's loser derivation: the old
+// `loser := m.SideA; if loser == m.Winner { loser = m.SideB }` comparison
+// operates on bare NAME strings, so a match between two "Sam"s (different
+// dojos, legal per CheckDuplicateEntriesByNameDojo) with Sam-North winning
+// resolved "loser" to the bare name "Sam" either way -- indistinguishable
+// from Sam-North's own name -- and the final roster scan then picked
+// whichever "Sam" the roster happened to list FIRST, not the competitor who
+// actually lost. bracketLoserIdentity resolves the SAME semifinal by id
+// instead (domain.AttributeWinnerSide), so it returns Sam-SOUTH (the real
+// loser) regardless of roster order.
+func TestGetBracketRanking_SameNameSemifinalLoserResolvesByID(t *testing.T) {
+	dir, err := os.MkdirTemp("", "engine-ranking-sameid-test-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	compID := "same-name-ranking"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Same Name Ranking"}))
+
+	samNorthID := helper.NewUUID4()
+	samSouthID := helper.NewUUID4()
+	charlieID := helper.NewUUID4()
+	daveID := helper.NewUUID4()
+	// Roster order matters for the OLD (buggy) behaviour: Sam-North is
+	// listed FIRST, so a name-only scan for "Sam" always finds him,
+	// whichever Sam actually lost.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: samNorthID, Name: "Sam", Dojo: "North"},
+		{ID: samSouthID, Name: "Sam", Dojo: "South"},
+		{ID: charlieID, Name: "Charlie", Dojo: "DojoC"},
+		{ID: daveID, Name: "Dave", Dojo: "DojoD"},
+	}))
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				// Sam-South (SideA) vs Sam-North (SideB); North wins.
+				{ID: "M1", SideA: "Sam", SideAID: samSouthID, SideB: "Sam", SideBID: samNorthID,
+					Winner: "Sam", WinnerID: samNorthID, Status: state.MatchStatusCompleted},
+				{ID: "M2", SideA: "Charlie", SideAID: charlieID, SideB: "Dave", SideBID: daveID,
+					Winner: "Charlie", WinnerID: charlieID, Status: state.MatchStatusCompleted},
+			},
+			{
+				{ID: "M3", SideA: "Sam", SideAID: samNorthID, SideB: "Charlie", SideBID: charlieID,
+					Winner: "Charlie", WinnerID: charlieID, Status: state.MatchStatusCompleted},
+			},
+		},
+	}))
+
+	// rank 3 = M1's loser = Sam-SOUTH, never Sam-North (the winner).
+	player, err := eng.GetBracketRanking(compID, 3)
+	require.NoError(t, err)
+	assert.Equal(t, samSouthID, player.ID, "the actual semifinal loser, not whichever Sam the roster lists first")
+	assert.Equal(t, "South", player.Dojo)
+
+	// rank 4 = M2's loser = Dave (no same-name collision in this match, a
+	// plain regression check that the OTHER semifinal slot is unaffected).
+	player, err = eng.GetBracketRanking(compID, 4)
+	require.NoError(t, err)
+	assert.Equal(t, daveID, player.ID)
+	assert.Equal(t, "Dave", player.Name)
+}
+
 func TestGetBracketRanking_Errors(t *testing.T) {
 	dir, err := os.MkdirTemp("", "engine-ranking-err-test-*")
 	require.NoError(t, err)

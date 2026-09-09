@@ -66,9 +66,11 @@ import (
 // display name from different dojos are explicitly legal,
 // CheckDuplicateEntriesByNameDojo, so a bare-name set would not notice a
 // re-score swapping WHICH namesake holds a qualifying rank), while
-// hasStartedKnockoutMatchTx's bracket lookup only has names to match against
-// (BracketMatch carries no per-side id, out of scope for bc-pnum), so the
-// reported Finisher must still be a name.
+// hasStartedKnockoutMatchTx's bracket lookup still matches by name only (a
+// bracket match can carry a per-side id since bc-brid, but this mp-e2k1
+// guard was not converted -- a separate, lower-priority gap that bead
+// recorded rather than closed), so the reported Finisher must still be a
+// name.
 type topNFinisher struct {
 	key  string
 	name string
@@ -212,12 +214,14 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 			newSet[p.ID] = struct{}{}
 		}
 		// displaced carries bare NAMES (not keys): hasStartedKnockoutMatchTx
-		// below matches bracket sides by name only (BracketMatch carries no
-		// per-side id), so a namesake swap deliberately produces an
-		// over-broad name-based lookup that can match EITHER dojo's
-		// occupant of that bracket slot. That is intentional: the guard
-		// fails CLOSED on a namesake collision rather than silently letting
-		// an identity swap through.
+		// below still matches bracket sides by name only (a bracket match CAN
+		// carry a per-side id since bc-brid, but this mp-e2k1 guard was not
+		// converted -- see topNFinisher's doc comment above, a separate,
+		// lower-priority gap that bead recorded rather than closed), so a
+		// namesake swap deliberately produces an over-broad name-based lookup
+		// that can match EITHER dojo's occupant of that bracket slot. That is
+		// intentional: the guard fails CLOSED on a namesake collision rather
+		// than silently letting an identity swap through.
 		var displaced []string
 		for _, f := range oldTopN {
 			if _, stillIn := newSet[f.key]; !stillIn {
@@ -347,18 +351,27 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 // checkSimultaneousMatch (eligibility.go) is the non-tx entry point, calling
 // this with e.store as h (bc-twin: one body, two doors).
 //
-// matchID's own identity is resolved from the pool-matches slice FIRST,
-// via findPoolMatch: a pool row already carries its
-// own SideAID/SideBID, so reading them directly is strictly better than a
-// roster name scan, which two different competitors can share (operator
-// ruling bc-pnum). The roster scan (resolvePlayerIDs) therefore only runs
-// for a match that is NOT itself a pool row, i.e. the bracket half, where
-// no id field exists to prefer instead.
+// matchID's own identity is resolved from the pool-matches slice FIRST, via
+// findPoolMatch: a pool row already carries its own SideAID/SideBID, so
+// reading them directly is strictly better than a roster name scan, which
+// two different competitors can share (operator ruling bc-pnum). When
+// matchID is instead a bracket row, its own SideAID/SideBID are now read the
+// same direct way (bc-brid, findBracketMatchInBracket); the roster scan
+// (resolvePlayerIDs) only fills a side the row itself did not stamp -- a
+// bye, an unresolved "Winner of ..." feeder, or an unrepaired legacy bracket
+// row (a tx read bypasses EnsureLegacyUpgraded by design, see
+// legacy_upgrade.go's header, so a bracket mid-repair can still reach here
+// unstamped).
 //
-// The pool-vs-pool comparison below is id-only: a side with no resolvable
-// roster id (rawIDA/rawIDB == "") never matches any other pool match, there
-// is no name fallback for it. The bracket half stays name-based
-// (BracketMatch carries no per-side id).
+// The pool-vs-pool comparison below stays id-only: a side with no resolvable
+// id (rawIDA/rawIDB == "") never matches any other pool match, there is no
+// name fallback for it (every pool match is repaired at load). The
+// bracket-vs-bracket comparison (matchesBracketSide) prefers id but keeps a
+// name fallback for a CANDIDATE match whose own row is still unrepaired --
+// it never falls back to name once this side's id AND both of the
+// candidate's ids are known and none of them match, which is exactly the
+// false "already fighting" block two same-named, different-dojo competitors
+// used to trip on (the live defect bc-brid fixes).
 //
 // Phase 2c simultaneity gate.
 func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID string) error {
@@ -372,13 +385,39 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 			rawIDA, rawIDB = m.SideAID, m.SideBID
 		}
 	}
+
+	// Loaded once, reused below both for this match's OWN identity (bracket
+	// half only) and for the bracket-vs-bracket comparison loop.
+	bracket, berr := h.LoadBracket(compID)
+
 	if !isPoolMatch {
-		var err error
-		sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
-		if err != nil {
-			return nil
+		if berr == nil {
+			if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
+				sideA, sideB = bm.SideA, bm.SideB
+				rawIDA, rawIDB = bm.SideAID, bm.SideBID
+			}
 		}
-		rawIDA, rawIDB = resolvePlayerIDs(h, compID, sideA, sideB)
+		if sideA == "" && sideB == "" {
+			// Not found in the bracket read above (a berr load failure, or a
+			// genuinely unknown matchID): fall back to the general resolver,
+			// matching the previous behaviour.
+			var err error
+			sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
+			if err != nil {
+				return nil
+			}
+		}
+		// The row's OWN ids are preferred (above); the roster name scan only
+		// fills a side this match's own row did not stamp.
+		if rawIDA == "" || rawIDB == "" {
+			fallbackA, fallbackB := resolvePlayerIDs(h, compID, sideA, sideB)
+			if rawIDA == "" {
+				rawIDA = fallbackA
+			}
+			if rawIDB == "" {
+				rawIDB = fallbackB
+			}
+		}
 	}
 	if sideA == "" && sideB == "" {
 		return nil
@@ -414,44 +453,88 @@ func (e *Engine) checkSimultaneousMatchTx(h state.StoreTx, compID, matchID strin
 		}
 	}
 
-	bracket, berr := h.LoadBracket(compID)
 	if berr == nil && bracket != nil {
-		for _, round := range bracket.Rounds {
-			for _, bm := range round {
-				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
-					continue
-				}
-				if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
-					return &IneligibleCompetitorError{
-						PlayerID: playerIDFor(rawIDA, sideA),
-						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
-					}
-				}
-				if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
-					return &IneligibleCompetitorError{
-						PlayerID: playerIDFor(rawIDB, sideB),
-						Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
-					}
-				}
-			}
-		}
-		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
-			if sideA != "" && (bm.SideA == sideA || bm.SideB == sideA) {
+		checkBracketMatch := func(bm *state.BracketMatch) error {
+			if sideA != "" && matchesBracketSide(rawIDA, sideA, bm) {
 				return &IneligibleCompetitorError{
 					PlayerID: playerIDFor(rawIDA, sideA),
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 				}
 			}
-			if sideB != "" && (bm.SideA == sideB || bm.SideB == sideB) {
+			if sideB != "" && matchesBracketSide(rawIDB, sideB, bm) {
 				return &IneligibleCompetitorError{
 					PlayerID: playerIDFor(rawIDB, sideB),
 					Reason:   fmt.Sprintf("already fighting in match %s on court %s", bm.ID, bm.Court),
 				}
 			}
+			return nil
+		}
+		for ri := range bracket.Rounds {
+			for mi := range bracket.Rounds[ri] {
+				bm := &bracket.Rounds[ri][mi]
+				if bm.ID == matchID || bm.Status != state.MatchStatusRunning {
+					continue
+				}
+				if err := checkBracketMatch(bm); err != nil {
+					return err
+				}
+			}
+		}
+		if bm := bracket.ThirdPlaceMatch; bm != nil && bm.ID != matchID && bm.Status == state.MatchStatusRunning {
+			if err := checkBracketMatch(bm); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
+}
+
+// findBracketMatchInBracket returns a pointer to the bracket match with the
+// given ID -- rounds first, then the ThirdPlaceMatch sibling -- or nil. The
+// engine package's own copy of the same walk state.findBracketMatchByID does
+// internally (unexported there, so this package cannot reach it).
+func findBracketMatchInBracket(bracket *state.Bracket, matchID string) *state.BracketMatch {
+	if bracket == nil {
+		return nil
+	}
+	for ri := range bracket.Rounds {
+		for mi := range bracket.Rounds[ri] {
+			if bracket.Rounds[ri][mi].ID == matchID {
+				return &bracket.Rounds[ri][mi]
+			}
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil && bracket.ThirdPlaceMatch.ID == matchID {
+		return bracket.ThirdPlaceMatch
+	}
+	return nil
+}
+
+// matchesBracketSide reports whether a running bracket match candidate bm
+// includes the competitor identified by (rawID, name) on either of its own
+// sides -- checkSimultaneousMatchTx's bracket-vs-bracket comparison
+// (bc-brid).
+//
+// Prefers an id match when rawID and at least one of bm's own side ids are
+// known. When rawID is known AND BOTH of bm's side ids are known but neither
+// equals it, the two are PROVABLY different competitors and this returns
+// false outright -- it never falls through to a name comparison in that
+// case, which is exactly the false "already fighting" block two same-named,
+// different-dojo competitors used to trip (the defect bc-brid fixes). Only
+// when there is not enough id information to be sure (this side's id is
+// unknown, or bm's row is not fully stamped -- an unrepaired legacy row, or
+// a side that is a bye/unresolved feeder) does it fall back to comparing
+// names, the same tolerance every other identity-critical bracket reader
+// keeps for an unrepaired row.
+func matchesBracketSide(rawID, name string, bm *state.BracketMatch) bool {
+	if rawID != "" && (bm.SideAID == rawID || bm.SideBID == rawID) {
+		return true
+	}
+	if rawID != "" && bm.SideAID != "" && bm.SideBID != "" {
+		return false
+	}
+	return bm.SideA == name || bm.SideB == name
 }
 
 // checkCourtExclusivityTx is the court-exclusivity entry point for callers that
@@ -706,9 +789,13 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 	// present even before the match is ever scored, mirrors pools.go), which
 	// is the identity data every id-based resolution below needs -- the
 	// concurrent-kiken check, the eligibility write, and the undo-path
-	// restore. A bracket match carries none (BracketMatch persists no
-	// per-side id), so every id below is simply "" there and each
-	// consumer's documented name-only fallback applies unchanged.
+	// restore. Since bc-brid a bracket match's own row carries the SAME ids
+	// once stamped (lookupExistingResult's bracket branch projects them via
+	// bracketMatchAsResult), so this id-based resolution now applies to a
+	// stamped bracket match too; only an UNSTAMPED row (a bye, an unresolved
+	// feeder, or an unrepaired legacy row) still has every id below come
+	// back "", falling through to each consumer's documented name-only
+	// fallback.
 	prior, err := e.lookupExistingResult(tx, compID, matchID)
 	if err != nil {
 		return nil, nil, err

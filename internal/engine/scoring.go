@@ -1034,6 +1034,25 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 	// closed) must still be caught there. domain.WinnerIDAcceptable is the
 	// ONE owner of the both-unknown exemption (bc-pnum review): do not
 	// re-derive a local `bothSideIDsUnknown` here.
+	return resolveWinnerIDFromSides(result, policy)
+}
+
+// resolveWinnerIDFromSides derives result.WinnerID from result.SideAID/
+// SideBID (already populated by the caller from the match's fixed,
+// generation-time pairing) and reports a *ValidationError when a
+// client-supplied WinnerID (FORWARD policy only) names neither side once at
+// least one side id is known (domain.WinnerIDAcceptable). Extracted from
+// backfillMatchIdentity (bc-brid) so applyBracketMatchResult can share the
+// IDENTICAL derivation rather than growing its own copy: both callers
+// persist a match's generation-time SideAID/SideBID and need the same
+// winner-id resolution over them (an explicit WinnerSide hint, else a name
+// match against SideA/SideB, else -- a same-name head-to-head with no hint
+// -- the scoreline).
+//
+// A no-op when result.WinnerID already carries a value (the common case: a
+// restore replays a snapshot that already projected it, and a forward write
+// backed by the id-aware validator on the wire already supplies it).
+func resolveWinnerIDFromSides(result *state.MatchResult, policy matchWritePolicy) error {
 	if policy == matchWriteForward &&
 		!domain.WinnerIDAcceptable(result.WinnerID, result.SideAID, result.SideBID) {
 		return validationErrorf("match %s: winnerId %q does not match sideAId %q or sideBId %q",
@@ -1080,11 +1099,13 @@ func backfillMatchIdentity(result, stored *state.MatchResult, policy matchWriteP
 // stand and continue to count in IV/PW standings via accrueTeamSubResults).
 //
 // prior is the match state before the decision. When either record carries
-// a side id (CarriesSideIDs, the POOL class), both records' ids must be
-// present and equal or nothing is preserved -- a drifted or re-oriented
-// prior must not mis-attribute points, so a mismatch is a non-match, not a
-// guess. Otherwise (the BRACKET class: BracketMatch persists no per-side id
-// at all) SideA/SideB are compared by name instead.
+// a side id (CarriesSideIDs -- a pool match, or, since bc-brid, a stamped
+// bracket row), both records' ids must be present and equal or nothing is
+// preserved -- a drifted or re-oriented prior must not mis-attribute
+// points, so a mismatch is a non-match, not a guess. Otherwise (an
+// id-less record: a legacy pool row, or an unstamped bracket row -- a bye,
+// an unresolved feeder, or an unrepaired legacy row) SideA/SideB are
+// compared by name instead.
 //
 // decisionBy names the WITHDRAWING side ("shiro" = SideB/Shiro, "aka" =
 // SideA/Aka). Shared by the two RecordDecision twins.
@@ -2036,10 +2057,12 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 	// reconcileSides BACKFILLS as a side effect and only reports the mismatch,
 	// so folding it into a short-circuit would let a later tidy (cheap
 	// comparison first) silently drop the backfill.
-	// No ids: a BracketMatch persists names only, so the id half of the guard
-	// has nothing to compare against here and correctly stays silent (an
-	// empty stored id means "unknown", never "mismatch").
-	sidesDisagree := reconcileSides(result, storedSides{A: bm.SideA, B: bm.SideB})
+	// AID/BID (bc-brid): a bracket match's own pairing ids, when stamped
+	// (generation, pool resolution, or propagation -- see
+	// BracketMatch.SideAID's own doc comment); "" for an unrepaired legacy
+	// row, which correctly stays silent here exactly as before (an empty
+	// stored id means "unknown", never "mismatch").
+	sidesDisagree := reconcileSides(result, storedSides{A: bm.SideA, B: bm.SideB, AID: bm.SideAID, BID: bm.SideBID})
 	// FORWARD only, matching the pool twin and the contract stated on
 	// writeToPoolOrBracket: the restore replays sides captured from this same
 	// match, so a disagreement there is not a client error to reject. This used
@@ -2073,6 +2096,24 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 		preserveDaihyosenOutcome(bm.SubResults, result)
 	}
 	deriveDaihyosenWinner(result)
+	// Preserve the match's fixed pairing ids (stamped at generation/pool
+	// resolution/propagation, never rewritten by a score write -- see the
+	// reconcileSides comment above) and resolve the winner id from them, the
+	// bracket twin of backfillMatchIdentity's id half (bc-brid).
+	// RepPlayerA/RepPlayerB don't apply here: BracketMatch carries no
+	// rep-player fields, a bracket daihyosen is a numbered sub-bout, not a
+	// team rep-player nomination. Runs before validateBracketCompletion,
+	// matching that check's own "validated before the first mutation of bm"
+	// ordering: a rejected winnerId must not leave bm partially written.
+	if result.SideAID == "" {
+		result.SideAID = bm.SideAID
+	}
+	if result.SideBID == "" {
+		result.SideBID = bm.SideBID
+	}
+	if err := resolveWinnerIDFromSides(result, policy); err != nil {
+		return false, err
+	}
 	// Preserve incoming Status. Pre-fix this was unconditionally Completed, so
 	// the scoring modal's "Start" tap (which sends `{status: "running"}`)
 	// immediately persisted the bracket match as completed with no winner.
@@ -2089,6 +2130,7 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 		return false, err
 	}
 	bm.Winner = result.Winner
+	bm.WinnerID = result.WinnerID
 	bm.Status = status
 	// Stamp the applied write's server-relative time so the next write is
 	// compared against it (mp-y3nk). On the FORWARD path, preserve a prior stamp
@@ -2230,23 +2272,31 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 
 	if mIdx%2 == 0 {
 		nextM.SideA = m.Winner
+		nextM.SideAID = m.WinnerID
 	} else {
 		nextM.SideB = m.Winner
+		nextM.SideBID = m.WinnerID
 	}
 
 	// Feed the loser of a SEMIFINAL into the bronze (3rd-place) playoff match.
 	// The semifinal round index is len(Rounds)-2 (the round that feeds the
-	// final). This is a pure advancement step: it moves a name only, never
-	// computes a score, so it keeps propagateBracketWinner a pure helper.
-	// Guarded on ThirdPlaceMatch being present (naginata brackets only).
+	// final). This is a pure advancement step: it moves a name (and, since
+	// bc-brid, an id) only, never computes a score, so it keeps
+	// propagateBracketWinner a pure helper. Guarded on ThirdPlaceMatch being
+	// present, which bracket.go stamps whenever comp.RequiresSingleThirdPlace()
+	// is true -- naginata by default, but generalised through that method, not
+	// naginata-only.
 	if bracket.ThirdPlaceMatch != nil && rIdx == len(bracket.Rounds)-2 {
-		loser := ""
-		switch m.Winner {
-		case m.SideA:
-			loser = m.SideB
-		case m.SideB:
-			loser = m.SideA
-		}
+		// bracketLoserIdentity (ranking.go), not a bare `switch m.Winner`
+		// (bc-brid): a same-name semifinal (two competitors
+		// sharing a display name from different dojos, legal per
+		// CheckDuplicateEntriesByNameDojo) makes m.Winner equal BOTH m.SideA
+		// and m.SideB, and a plain switch's first-case-wins semantics always
+		// fed the WINNER's own id into the bronze match under that shape.
+		// bracketLoserIdentity resolves the winner by id first
+		// (domain.AttributeWinnerSide), so it names the actual loser even
+		// when both sides share a name.
+		loser, loserID := bracketLoserIdentity(m)
 		// Skip empty/placeholder losers (bye matches resolve with one side blank).
 		if loser != "" && !strings.HasPrefix(loser, "Winner of") {
 			bronze := bracket.ThirdPlaceMatch
@@ -2259,8 +2309,10 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 			// both slots are populated and a semifinal is later re-scored.
 			if mIdx%2 == 0 {
 				bronze.SideA = loser
+				bronze.SideAID = loserID
 			} else {
 				bronze.SideB = loser
+				bronze.SideBID = loserID
 			}
 		}
 	}
@@ -2273,6 +2325,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 			srcM := bracket.Rounds[r][m]
 			if srcM.Status == state.MatchStatusCompleted {
 				nextM.SideA = srcM.Winner
+				nextM.SideAID = srcM.WinnerID
 			}
 		}
 	}
@@ -2282,6 +2335,7 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 			srcM := bracket.Rounds[r][m]
 			if srcM.Status == state.MatchStatusCompleted {
 				nextM.SideB = srcM.Winner
+				nextM.SideBID = srcM.WinnerID
 			}
 		}
 	}
@@ -2289,10 +2343,12 @@ func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) 
 	// Recursive resolution
 	if nextM.SideA != "" && nextM.SideB == "" && !strings.HasPrefix(nextM.SideA, "Winner of") {
 		nextM.Winner = nextM.SideA
+		nextM.WinnerID = nextM.SideAID
 		nextM.Status = state.MatchStatusCompleted
 		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
 	} else if nextM.SideA == "" && nextM.SideB != "" && !strings.HasPrefix(nextM.SideB, "Winner of") {
 		nextM.Winner = nextM.SideB
+		nextM.WinnerID = nextM.SideBID
 		nextM.Status = state.MatchStatusCompleted
 		e.propagateBracketWinner(bracket, rIdx+1, nextMatchIdx)
 	} else if nextM.SideA == "" && nextM.SideB == "" {
@@ -2333,6 +2389,37 @@ func (e *Engine) UpdateMatchCourt(compId string, matchId string, newCourt string
 	})
 }
 
+// setBracketOverrideWinner sets m's Winner name AND (bc-pnum review finding
+// F1) its matching WinnerID together, for OverrideBracketWinner's two
+// branches (a round match and the bronze/3rd-place match). The override API
+// only ever supplies a NAME, so the id half has to be derived from m's OWN
+// SideA/SideB -- leaving it untouched (the pre-fix behaviour) let a stale id
+// from whatever the row held before survive the rename and propagate to a
+// competitor who did not win.
+//
+// Neither of this package's existing "which side" helpers fits directly:
+// bracketLoserIdentity answers a different question (the LOSER, given an
+// already-attributed winner), and domain.AttributeWinnerSide's ambiguous-name
+// tie-break (sideA wins ties, the same convention every other name-only
+// attribution in this codebase follows) is a deliberate GUESS -- exactly what
+// this call site must not make. A winnerName matching BOTH sides identically
+// (a same-name pairing, legal per CheckDuplicateEntriesByNameDojo) cannot be
+// told apart by name alone, so it resolves to an empty id, never a guessed
+// side.
+func setBracketOverrideWinner(m *state.BracketMatch, winnerName string) {
+	m.Winner = winnerName
+	aMatches := winnerName != "" && winnerName == m.SideA
+	bMatches := winnerName != "" && winnerName == m.SideB
+	switch {
+	case aMatches && !bMatches:
+		m.WinnerID = m.SideAID
+	case bMatches && !aMatches:
+		m.WinnerID = m.SideBID
+	default:
+		m.WinnerID = ""
+	}
+}
+
 // OverrideBracketWinner atomically loads the bracket, locates the
 // target match, sets the winner + IsOverridden + Status, propagates
 // the winner to subsequent rounds, and saves. Same UpdateBracket
@@ -2368,7 +2455,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					if !domain.ApplyByTimestamp(modifiedAt, m.ModifiedAt) {
 						return errLWWDropped
 					}
-					m.Winner = winnerName
+					setBracketOverrideWinner(m, winnerName)
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
 					// An override is itself the operator's audited, final decision,
@@ -2397,7 +2484,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 			if !domain.ApplyByTimestamp(modifiedAt, bm.ModifiedAt) {
 				return errLWWDropped
 			}
-			bm.Winner = winnerName
+			setBracketOverrideWinner(bm, winnerName)
 			bm.IsOverridden = true
 			bm.Status = state.MatchStatusCompleted
 			// Mirror of the round branch: an override discharges the reopen debt.
@@ -2530,6 +2617,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		// even if it was already scheduled.
 		m.Status = state.MatchStatusScheduled
 		m.Winner = ""
+		m.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 		m.IpponsA = nil
 		m.IpponsB = nil
 		m.HansokuA = 0

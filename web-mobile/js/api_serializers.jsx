@@ -221,7 +221,7 @@ function normalizeMatch(m, playerMap) {
     // (e.g. two "Tanaka Kenji" from different dojos: the duplicate check
     // only rejects same-name AND same-dojo) onto a single id. When the
     // server provides an explicit per-side id (m.sideAId / m.sideBId /
-    // m.winnerId: populated from pool-matches.csv), it is the authoritative
+    // m.winnerId: populated from pool-matches.csv or bracket.json), it is the authoritative
     // identity and overrides the name-collapsed lookup. We clone the
     // playerMap entry before stamping the id so the shared map object isn't
     // mutated across matches.

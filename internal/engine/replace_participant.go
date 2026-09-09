@@ -17,16 +17,16 @@ import (
 // route param), used to disambiguate two participants who currently share
 // oldName -- e.g. two "Tanaka Kenji" from different dojos, legal per
 // CheckDuplicateEntriesByNameDojo. A pools.csv row (helper.Player.ID, column
-// 8) and a pool-matches.csv side (MatchResult.SideAID/SideBID/WinnerID) are
-// records that carry an id field, so both are resolved BY ID ONLY (operator
-// ruling bc-pnum): a row whose id differs from pid names a DIFFERENT
-// competitor and must be left untouched even when its display name still
-// matches oldName, and a row with NO id at all is simply never matched --
-// there is no (name, dojo) fallback. bracket.json carries no per-side id or
-// dojo at all (BracketMatch has neither field, out of scope for bc-pnum), so
-// a plain-name match there is unavoidably ambiguous whenever oldName is
-// shared by more than one CURRENT participant; see the ambiguity guard
-// below, which stays for that bracket branch only.
+// 8), a pool-matches.csv side (MatchResult.SideAID/SideBID/WinnerID), and,
+// since bc-brid, a bracket.json side (BracketMatch.SideAID/SideBID/WinnerID)
+// are all records that carry an id field, so each is resolved BY ID ONLY
+// (operator ruling bc-pnum): a row whose id differs from pid names a
+// DIFFERENT competitor and must be left untouched even when its display name
+// still matches oldName. bracket.json still carries no per-side DOJO field,
+// so a row a repair could not stamp with an id (an unrepaired legacy row)
+// falls back to the SAME ambiguity-guarded plain-name match this function
+// has always applied there; see oldNameAmbiguous and the rename pass below,
+// now scoped to id-less rows only.
 //
 // Returns warnings (e.g. dojo conflicts, an ambiguous bracket rename skipped)
 // and an error on failure.
@@ -156,39 +156,60 @@ func (e *Engine) ReplaceParticipantInDraw(
 		if err != nil {
 			return fmt.Errorf("loading bracket: %w", err)
 		}
-		// bracket.json carries no per-side id AND no per-side dojo (BracketMatch
-		// has neither field), so a plain-name match is ambiguous whenever
-		// oldName is still held by another CURRENT participant (oldNameAmbiguous
-		// above). In the normal flow UpdateParticipant has already renamed the
-		// target participant's OWN row to newName before this function runs, so
-		// any OTHER participant still named oldName at this point is a
-		// DIFFERENT competitor -- rewriting every bracket row named oldName
-		// would silently reattribute their match history too (e.g. two "Tanaka
-		// Kenji" from different dojos). When ambiguous, presence is still
-		// tracked (bracketFound, so the "not found in draw artifacts" fallback
-		// warning below doesn't misfire), but nothing is rewritten and the
-		// operator is warned instead of a guess being made.
+		// ID-first (bc-brid), name as the fallback ONLY for a row a repair
+		// could not stamp. Pass 1: rename every (name, id) side whose id is
+		// pid -- unambiguous, whatever the display name currently reads, so
+		// it renames even a side whose text has already drifted from
+		// oldName. This is the SAME rule pools.csv/pool-matches.csv already
+		// apply (matchesParticipant), now extended to bracket.json now that
+		// it carries ids too.
+		bracketChanged := false
+		forEachBracketSideWithID(bracket, func(name, id *string) {
+			if !matchesParticipant(*id, pid) {
+				return
+			}
+			bracketFound = true
+			if *name != newName {
+				*name = newName
+				bracketChanged = true
+			}
+		})
+
+		// Pass 2: the pre-bc-brid fallback, now scoped to ID-LESS sides only
+		// -- a side that DOES carry an id, and it is not pid's (checked
+		// above), belongs to a DIFFERENT competitor and must never be
+		// touched by a name guess, whatever it happens to read. A plain-name
+		// match is ambiguous whenever oldName is still held by another
+		// CURRENT participant (oldNameAmbiguous below). In the normal flow
+		// UpdateParticipant has already renamed the target participant's OWN
+		// row to newName before this function runs, so any OTHER participant
+		// still named oldName at this point is a DIFFERENT competitor --
+		// rewriting every id-less bracket row named oldName would silently
+		// reattribute their match history too (e.g. two "Tanaka Kenji" from
+		// different dojos, one of whose bracket rows predates ids). When
+		// ambiguous, presence is still tracked (bracketFound, so the "not
+		// found in draw artifacts" fallback warning below doesn't misfire),
+		// but nothing is rewritten and the operator is warned instead of a
+		// guess being made.
 		//
-		// Pass 1 below (via forEachBracketSide, the bc-pnum review) collects
-		// every name actually appearing in a bracket row (SideA/SideB/Winner,
-		// Rounds + ThirdPlaceMatch), purely so the ambiguity check below is
-		// only invoked when oldName is a name this bracket could possibly need
-		// rewritten -- the empty-bracket case folds into this naturally, since
-		// an empty bracket contributes no names. A namesake who exists in the
-		// full roster but was never placed in ANY bracket row still triggers
-		// the ambiguity guard once oldName itself does appear in the bracket
-		// (the pass-1 check does not, and cannot, verify that the SPECIFIC
-		// bracket occurrence naming oldName belongs to oldName's own
-		// participant rather than the namesake's -- that is exactly the
-		// ambiguity bracket.json's lack of ids makes unresolvable).
-		// Over-warning in that shape -- refusing a safe rename because an
-		// uninvolved namesake merely exists -- is the accepted safe direction:
-		// a stale warning costs the operator a manual check, while the
-		// silent-corruption direction costs someone else's match history.
+		// bracketNames below collects every id-less name actually appearing
+		// in a bracket row, purely so the ambiguity check is only invoked
+		// when oldName is a name an UNREPAIRED row could still need
+		// rewritten -- an id-less namesake who exists in the full roster but
+		// was never placed in any id-less bracket row still triggers the
+		// ambiguity guard once oldName itself appears there (the collection
+		// pass does not, and cannot, verify that the SPECIFIC occurrence
+		// naming oldName belongs to oldName's own participant rather than
+		// the namesake's -- that is exactly the ambiguity an id-less row
+		// makes unresolvable). Over-warning in that shape -- refusing a safe
+		// rename because an uninvolved namesake merely exists -- is the
+		// accepted safe direction: a stale warning costs the operator a
+		// manual check, while the silent-corruption direction costs someone
+		// else's match history.
 		bracketNames := make(map[string]bool)
-		forEachBracketSide(bracket, func(s *string) {
-			if *s != "" {
-				bracketNames[*s] = true
+		forEachBracketSideWithID(bracket, func(name, id *string) {
+			if *id == "" && *name != "" {
+				bracketNames[*name] = true
 			}
 		})
 		bracketNameAmbiguous := false
@@ -199,18 +220,33 @@ func (e *Engine) ReplaceParticipantInDraw(
 			}
 			bracketNameAmbiguous = amb
 		}
-		bracketChanged := false
-		forEachBracketSide(bracket, func(s *string) {
-			if *s == oldName {
-				bracketFound = true
-				if !bracketNameAmbiguous {
-					*s = newName
-					bracketChanged = true
-				}
+		forEachBracketSideWithID(bracket, func(name, id *string) {
+			if *id != "" {
+				// Carries an id that is NOT pid's (pass 1 already renamed
+				// every pid match): a different competitor, full stop --
+				// never fall back to a name guess for a row already known
+				// to belong to someone else.
+				return
+			}
+			if *name != oldName {
+				return
+			}
+			bracketFound = true
+			if !bracketNameAmbiguous {
+				*name = newName
+				bracketChanged = true
 			}
 		})
 		if bracketNameAmbiguous && bracketFound {
-			warnings = append(warnings, fmt.Sprintf("bracket entries named %q are ambiguous across dojos and were left unchanged; correct them manually if needed", oldName))
+			// Scoped to what pass 2 actually left alone: any bracket row
+			// already carrying this participant's OWN id was renamed by pass
+			// 1, above, before this check ever runs. Only the ID-LESS rows
+			// merely named oldName -- which cannot be told apart from a
+			// same-name namesake's -- are the ones left unchanged here
+			// (bc-pnum review: the old wording claimed the whole bracket was
+			// untouched, which is wrong whenever pid's own rows carried an
+			// id).
+			warnings = append(warnings, fmt.Sprintf("id-less bracket entries named %q are ambiguous across dojos and were left unchanged; any bracket row already carrying this participant's id was renamed. Correct the id-less ones manually if needed", oldName))
 		}
 		if bracketChanged {
 			if err := tx.SaveBracket(compID, bracket); err != nil {
@@ -281,25 +317,28 @@ func matchesParticipant(rowID, pid string) bool {
 	return rowID != "" && pid != "" && rowID == pid
 }
 
-// forEachBracketSide calls fn once for each of a bracket's per-side name
-// fields: every round's SideA/SideB/Winner, plus the ThirdPlaceMatch
-// sibling's when present (the bc-pnum review). fn receives a pointer that
-// ALIASES the stored match (indexed slice access, never a range-copy), so a
-// caller mutating through it edits the bracket in place. Shared by
-// ReplaceParticipantInDraw's name-collection pass and its rename pass, which
-// used to hand-copy the same 4-line SideA/SideB/Winner/ThirdPlaceMatch
-// enumeration twice.
-func forEachBracketSide(b *state.Bracket, fn func(*string)) {
+// forEachBracketSideWithID calls fn once for each of a bracket's three
+// (name, id) side pairs -- SideA/SideAID, SideB/SideBID, Winner/WinnerID --
+// across every round, plus the ThirdPlaceMatch sibling's when present. Both
+// pointers ALIAS the stored match (indexed slice access, never a
+// range-copy), so a caller mutating through them edits the bracket in
+// place. Shared by ReplaceParticipantInDraw's id-based rename pass, its
+// id-less name-collection pass, and its name-based fallback rename pass,
+// which would otherwise hand-copy the same enumeration three times
+// (bc-brid; this replaced the pre-bc-brid, name-only forEachBracketSide,
+// whose two callers both needed the id half once bracket.json grew one).
+func forEachBracketSideWithID(b *state.Bracket, fn func(name, id *string)) {
 	for i := range b.Rounds {
 		for j := range b.Rounds[i] {
-			fn(&b.Rounds[i][j].SideA)
-			fn(&b.Rounds[i][j].SideB)
-			fn(&b.Rounds[i][j].Winner)
+			m := &b.Rounds[i][j]
+			fn(&m.SideA, &m.SideAID)
+			fn(&m.SideB, &m.SideBID)
+			fn(&m.Winner, &m.WinnerID)
 		}
 	}
 	if bm := b.ThirdPlaceMatch; bm != nil {
-		fn(&bm.SideA)
-		fn(&bm.SideB)
-		fn(&bm.Winner)
+		fn(&bm.SideA, &bm.SideAID)
+		fn(&bm.SideB, &bm.SideBID)
+		fn(&bm.Winner, &bm.WinnerID)
 	}
 }

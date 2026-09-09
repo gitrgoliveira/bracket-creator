@@ -4,17 +4,110 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 )
 
 func (s *Store) LoadBracket(compID string) (*Bracket, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
+
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	// Must NOT run from loadBracketLocked or any caller that already holds
+	// the per-comp lock (e.g. storeTx.LoadBracket, WithTransaction bodies) --
+	// same rule as LoadPools/LoadPoolMatches, whose own EnsureLegacyUpgraded
+	// calls carry the full explanation.
+	s.EnsureLegacyUpgraded(compID)
+
 	bracket, err := s.cachedBracket(compID)
 	if err != nil {
 		return nil, err
 	}
 	return s.copyBracket(bracket), nil
+}
+
+// StampRoundZeroSideIDsFromDrawOrder assigns SideAID/SideBID (and, for an
+// already-resolved bye, WinnerID) on every round-0 match from b.DrawOrder,
+// which is positional: DrawOrder[k] is the k-th non-empty round-0 leaf,
+// walking Rounds[0] in array order and SideA before SideB within each match
+// (helper.CreateBalancedTree/SlotArray are order-preserving, so a bare
+// left-to-right count reconstructs the mapping exactly -- see DrawOrder's own
+// field comment). Exact even when two leaves share a display name, because it
+// never compares names.
+//
+// Shared by the two producers that can reconstruct round-0 identity this way:
+// engine.buildBracketFromDraw calls it once at generation time (before the
+// bye-propagation pass runs, so a walkover's WinnerID propagates too), and
+// EnsureLegacyUpgraded's bracket-repair step (legacy_upgrade.go) calls it on
+// a legacy bracket.json that already carries DrawOrder but predates these
+// fields. One implementation, two callers, so the positional rule cannot
+// drift between "stamp on generation" and "repair on load".
+//
+// No-op when DrawOrder or Rounds is empty: a pool-fed (mixed) bracket never
+// carries DrawOrder (its competitors are numbered pool by pool instead, see
+// DrawOrder's own comment), and a not-yet-drawn bracket has no rounds to
+// stamp.
+//
+// Idempotent: a side that already carries an id is skipped for assignment
+// but still advances the positional counter, so calling this twice, or over
+// a bracket some of whose round-0 sides are already stamped, changes nothing
+// further and never double-consumes a DrawOrder entry.
+//
+// Reports whether anything changed, so a caller with a "no-op means don't
+// save" contract (the legacy repair) can skip the rewrite.
+func (b *Bracket) StampRoundZeroSideIDsFromDrawOrder() bool {
+	if b == nil || len(b.DrawOrder) == 0 || len(b.Rounds) == 0 {
+		return false
+	}
+	changed := false
+	k := 0
+	consume := func(sideEmpty bool, id *string) {
+		if sideEmpty {
+			return
+		}
+		if *id == "" {
+			if k < len(b.DrawOrder) {
+				*id = b.DrawOrder[k]
+				changed = true
+			}
+		}
+		k++
+	}
+	for i := range b.Rounds[0] {
+		m := &b.Rounds[0][i]
+		consume(m.SideA == "", &m.SideAID)
+		consume(m.SideB == "", &m.SideBID)
+		// A round-0 bye is auto-resolved (Winner set) before this runs, so its
+		// winner id is derivable from the sides just stamped above. Uses the
+		// row's OWN resolved sides, never a fresh lookup, and only when they
+		// are distinguishable (domain.AttributeWinnerSide's name branch, the
+		// same rule the pool-matches legacy repair applies) -- gated on
+		// SideA != SideB exactly like deriveWinner's sibling guard in
+		// legacy_upgrade.go (bc-brid: this call used to skip
+		// that guard, so a completed round-0 match between two same-name
+		// competitors -- legal per CheckDuplicateEntriesByNameDojo -- had
+		// AttributeWinnerSide's name path fall back to crediting SideA
+		// unconditionally, inventing a coin-flip WinnerID for whichever
+		// competitor happened to be seated there rather than leaving it empty
+		// like every other unresolvable same-name row in this file).
+		if m.Winner != "" && m.WinnerID == "" && (m.SideA == "" || m.SideA != m.SideB) {
+			switch domain.AttributeWinnerSide(domain.WinnerAttribution{Winner: m.Winner, SideA: m.SideA, SideB: m.SideB}) {
+			case domain.MatchSideA:
+				if m.SideAID != "" {
+					m.WinnerID = m.SideAID
+					changed = true
+				}
+			case domain.MatchSideB:
+				if m.SideBID != "" {
+					m.WinnerID = m.SideBID
+					changed = true
+				}
+			}
+		}
+	}
+	return changed
 }
 
 func parseBracketFile(path string) (any, error) {
@@ -379,11 +472,11 @@ func (s *Store) MatchStatusByID(compID, matchID string) (MatchStatus, bool, erro
 // disagree with. Handlers backfill the omitted ids from here the same way
 // they already backfill the omitted names, so the validator and the engine
 // attribute by the SAME triple. Pool matches carry ids (SideAID/SideBID);
-// BracketMatch persists no ids at all, so sideAID/sideBID are always "" for
-// a bracket result and that path stays on the name fallback unchanged - this
-// widened return does not alter the existing sideA/sideB behaviour for the
-// legacy-hantei name backfill caller, which keeps ignoring the two new
-// values.
+// since bc-brid a bracket match does too (stamped by every bracket writer,
+// see BracketMatch.SideAID's own comment), so sideAID/sideBID are only ""
+// for a bracket result when the match's own row was never stamped -- a bye,
+// an unresolved feeder, or a legacy row a repair could not resolve -- in
+// which case the caller's existing name fallback still applies unchanged.
 func (s *Store) MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, sideBID string, found bool, err error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return "", "", "", "", false, err
@@ -403,10 +496,7 @@ func (s *Store) MatchSidesByID(compID, matchID string) (sideA, sideB, sideAID, s
 	}
 	if b != nil {
 		if bm := findBracketMatchByID(b, matchID); bm != nil {
-			// BracketMatch has no SideAID/SideBID fields: a bracket result
-			// always returns empty ids here, matching AttributeWinnerSide's
-			// existing name-only fallback for bracket matches.
-			return bm.SideA, bm.SideB, "", "", true, nil
+			return bm.SideA, bm.SideB, bm.SideAID, bm.SideBID, true, nil
 		}
 	}
 	return "", "", "", "", false, nil

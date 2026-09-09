@@ -4863,6 +4863,26 @@ components:
         winner:
           type: string
           maxLength: 100
+        sideAId:
+          type: string
+          description: >
+            Participant UUID for side A, when known. Same rule as
+            `MatchResult.sideAId`: sides are otherwise stored by name, but a
+            name is not unique within a competition, so this id disambiguates
+            side A precisely. Stamped by the bracket writers (the draw, pool
+            resolution, and winner propagation) when the side is a resolved
+            competitor; omitted for a bye, a "Winner of ..." feeder, an
+            unresolved pool placeholder, or a legacy bracket a repair could
+            not resolve.
+        sideBId:
+          type: string
+          description: The side B counterpart of `sideAId`.
+        winnerId:
+          type: string
+          description: >
+            Participant UUID of the winner, when known. Same attribution rule
+            as `MatchResult.winnerId`. Falls back to comparing names when any
+            of the three ids is absent.
         status:
           type: string
           enum: [scheduled, running, completed]

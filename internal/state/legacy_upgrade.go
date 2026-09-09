@@ -68,6 +68,33 @@ import (
 //     resolver. A winner naming neither side, or a row whose sides are not
 //     distinguishable, stays empty.
 //
+//   - bracket.json rows with an empty SideAID/SideBID/WinnerID convert ON
+//     READ, below (bc-brid). Two resolution paths, tried in order, mirroring
+//     the two ways a bracket side is written: (a) for a STANDALONE knockout
+//     (Bracket.DrawOrder non-empty -- a mixed pool-fed bracket never carries
+//     it), Bracket.StampRoundZeroSideIDsFromDrawOrder resolves round-0
+//     POSITIONALLY: DrawOrder[k] is the k-th non-empty round-0 leaf
+//     (helper.CreateBalancedTree/SlotArray are order-preserving), so this is
+//     exact even for a name shared by two round-0 competitors -- it never
+//     compares names at all. (b) every side (any round, plus the bronze
+//     sibling) that path did not reach -- every round of a mixed bracket, and
+//     any round-0 side a corrupted/short DrawOrder missed -- falls back to
+//     the SAME unique-bare-name match every other legacy upgrade in this file
+//     uses, gated on domain.RosterIndex.NameCount rather than
+//     RosterIndex.Lookup's own dojo=="" branch, for the identical reason the
+//     pools.csv/pool-matches.csv upgrades above give: a roster entry whose
+//     OWN dojo genuinely IS blank would otherwise score an exact hit on
+//     Lookup's first branch and resolve before the uniqueness fallback ever
+//     runs. A placeholder ("Winner of r1-m3", "Pool A-1st",
+//     helper.IsReservedParticipantName) is never a resolution target -- it is
+//     not a competitor's name at all. WinnerID is then derived from the
+//     row's OWN just-resolved SideA/SideB NAMES via domain.AttributeWinnerSide
+//     (the pool-matches upgrade's identical rule; a row is left alone when
+//     SideA == SideB and non-empty, the same legally-shared-name guard). A
+//     row neither path resolves (two or more current competitors share that
+//     exact name) is left alone; the fields stay empty and the identity-
+//     critical readers keep their name-based fallback for it.
+//
 //   - participants.csv rows without the leading id column convert ON WRITE
 //     (marshalParticipantsCSV mints ids for id-less rows on every save), and
 //     DELIBERATELY NOT on read. A legacy no-id roster and a roster carrying
@@ -81,8 +108,8 @@ import (
 //     caught it; do not reintroduce a read-side roster rewrite without an
 //     unambiguous discriminator.
 //
-// EnsureLegacyUpgraded runs BEFORE loadParticipants/LoadPools/LoadPoolMatches
-// take their read lock, once per competition per process: the conversion
+// EnsureLegacyUpgraded runs BEFORE loadParticipants/LoadPools/LoadPoolMatches/
+// LoadBracket take their read lock, once per competition per process: the conversion
 // needs the per-comp WRITE lock, and writing from under the reader's RLock
 // would race the other readers doing the same. Callers that FINGERPRINT
 // files before their first load (StartCompetition's drift guard, via
@@ -98,15 +125,15 @@ import (
 // NEXT read after that save retries the repair with a roster that can now
 // resolve it, without requiring a restart.
 //
-// ONLY the four PUBLIC, caller-does-not-already-hold-the-lock entry points
-// (loadParticipants, Store.LoadPools, Store.LoadPoolMatches, and
-// ParticipantsFingerprint below, which calls it directly rather than
-// through one of the other three) call this. The *Locked siblings
-// (loadPoolsLocked, LoadPoolMatchesLocked) and every storeTx method are
-// called by something that ALREADY holds the per-comp lock (typically
-// WithTransaction), so calling this from any of them would try to
-// re-acquire a non-reentrant mutex and deadlock. Do not add a call here
-// from inside that set.
+// ONLY the five PUBLIC, caller-does-not-already-hold-the-lock entry points
+// (loadParticipants, Store.LoadPools, Store.LoadPoolMatches, Store.LoadBracket,
+// and ParticipantsFingerprint below, which calls it directly rather than
+// through one of the other four) call this. The *Locked siblings
+// (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
+// storeTx method (including storeTx.LoadBracket) are called by something
+// that ALREADY holds the per-comp lock (typically WithTransaction), so
+// calling this from any of them would try to re-acquire a non-reentrant
+// mutex and deadlock. Do not add a call here from inside that set.
 //
 // Failure policy: a failed conversion is logged and NOT retried until the
 // next process start OR the next participants.csv write, whichever comes
@@ -124,7 +151,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if _, done := s.legacyUpgraded.Load(compID); done {
 		return // lost the race to a concurrent reader's upgrade
 	}
-	// One roster load shared by all three steps below (bc-pnum review): built
+	// One roster load shared by all four steps below (bc-pnum review): built
 	// LAZILY on first actual use, so a competition needing no repair at all
 	// never parses participants.csv, and loaded/indexed at most ONCE rather
 	// than once per step. Safe to share across steps despite the seeds step's
@@ -132,7 +159,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// file cache (so the NEXT independent Store.LoadParticipants call
 	// re-parses), but a seed-dojo backfill never touches participants.csv
 	// itself, so the roster this instance already loaded stays accurate for
-	// the pools/pool-matches steps that follow it in the same call.
+	// the pools/pool-matches/bracket steps that follow it in the same call.
 	roster := &legacyUpgradeRoster{store: s, compID: compID}
 	if err := s.upgradeSeedDojosLocked(compID, roster); err != nil {
 		log.Printf("state: legacy seed-dojo upgrade for %s: %v", compID, err)
@@ -143,11 +170,14 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradePoolMatchSideIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy pool-match-side-id upgrade for %s: %v", compID, err)
 	}
+	if err := s.upgradeBracketSideIDsLocked(compID, roster); err != nil {
+		log.Printf("state: legacy bracket-side-id upgrade for %s: %v", compID, err)
+	}
 	s.legacyUpgraded.Store(compID, struct{}{})
 }
 
 // legacyUpgradeRoster lazily loads and indexes compID's participants.csv for
-// EnsureLegacyUpgraded's three steps. Caller MUST already hold the per-comp
+// EnsureLegacyUpgraded's four steps. Caller MUST already hold the per-comp
 // write lock (the same requirement every method below carries); this type
 // adds no locking of its own because it is never shared beyond a single
 // EnsureLegacyUpgraded call.
@@ -475,4 +505,137 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 		return nil
 	}
 	return s.savePoolMatchesLocked(compID, matches, s.directWrite)
+}
+
+// bracketSideNeedsIDRepair reports whether m still needs a side or winner id:
+// a resolved competitor's SideA/SideB (helper.IsReservedParticipantName
+// excludes a bye, a "Winner of ..." feeder, and an unseeded pool placeholder,
+// none of which are ever id-stamped by design) with no id, or a named Winner
+// with no WinnerID. The bracket twin of MatchResult.MissingSideOrWinnerID
+// (models.go); BracketMatch has no such method of its own because the
+// placeholder exclusion has no pool-matches.csv equivalent (a pool row's
+// SideA/SideB are always resolved competitors, never a bracket-style
+// forward reference).
+func bracketSideNeedsIDRepair(m *BracketMatch) bool {
+	return (m.SideA != "" && !helper.IsReservedParticipantName(m.SideA) && m.SideAID == "") ||
+		(m.SideB != "" && !helper.IsReservedParticipantName(m.SideB) && m.SideBID == "") ||
+		(m.Winner != "" && m.WinnerID == "")
+}
+
+// bracketNeedsIDRepair reports whether any match in b (every round, plus the
+// bronze sibling) still needs a side or winner id.
+func bracketNeedsIDRepair(b *Bracket) bool {
+	for i := range b.Rounds {
+		for j := range b.Rounds[i] {
+			if bracketSideNeedsIDRepair(&b.Rounds[i][j]) {
+				return true
+			}
+		}
+	}
+	return b.ThirdPlaceMatch != nil && bracketSideNeedsIDRepair(b.ThirdPlaceMatch)
+}
+
+// upgradeBracketSideIDsLocked completes a legacy (no-id) bracket.json's
+// SideAID/SideBID/WinnerID. See the header comment above for the full
+// resolution order (DrawOrder positionally for round 0, then the
+// unique-bare-name fallback everywhere else, then WinnerID derived from each
+// row's own resolved sides). Caller holds the per-comp lock.
+//
+// Parses bracket.json directly (parseBracketFile) rather than going through
+// loadBracketLocked, for the same reason the pools/pool-matches upgrades
+// above parse directly: that wrapper is parse-then-deep-copy
+// (state.copyBracket), and the copy is pure overhead when this repair owns
+// the parsed value exclusively and either discards it or hands it straight
+// to saveBracketLocked.
+func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgradeRoster) error {
+	path := s.compPath(compID, "bracket.json")
+	parsed, err := parseBracketFile(path)
+	if err != nil {
+		return nil // missing/unreadable bracket is the consumers' error to report
+	}
+	bracket, _ := parsed.(*Bracket)
+	if bracket == nil || len(bracket.Rounds) == 0 {
+		return nil
+	}
+	if !bracketNeedsIDRepair(bracket) {
+		return nil
+	}
+
+	// (a) Round 0, positionally, from DrawOrder -- exact even for a
+	// duplicated name, and the ONLY resolver here that never compares names.
+	// No-op (returns false) for a mixed bracket, which carries no DrawOrder.
+	changed := bracket.StampRoundZeroSideIDsFromDrawOrder()
+
+	// (b) Everywhere DrawOrder didn't reach: the unique-bare-name fallback,
+	// gated on idx.NameCount EXPLICITLY before Lookup for the same reason
+	// documented on the pools.csv/pool-matches.csv upgrades above.
+	idx, err := roster.get()
+	if err != nil {
+		return err
+	}
+	if idx != nil {
+		resolveSide := func(m *BracketMatch) {
+			if m.SideA != "" && m.SideAID == "" && !helper.IsReservedParticipantName(m.SideA) && idx.NameCount(m.SideA) == 1 {
+				if p, ok := idx.Lookup(m.SideA, ""); ok && p.ID != "" {
+					m.SideAID = p.ID
+					changed = true
+				}
+			}
+			if m.SideB != "" && m.SideBID == "" && !helper.IsReservedParticipantName(m.SideB) && idx.NameCount(m.SideB) == 1 {
+				if p, ok := idx.Lookup(m.SideB, ""); ok && p.ID != "" {
+					m.SideBID = p.ID
+					changed = true
+				}
+			}
+		}
+		for i := range bracket.Rounds {
+			for j := range bracket.Rounds[i] {
+				resolveSide(&bracket.Rounds[i][j])
+			}
+		}
+		if bracket.ThirdPlaceMatch != nil {
+			resolveSide(bracket.ThirdPlaceMatch)
+		}
+	}
+
+	// (c) WinnerID from the row's OWN just-resolved side NAMES
+	// (domain.AttributeWinnerSide's name path -- the row carries no
+	// WinnerID/SideAID/SideBID triple to compare by id at this point, only
+	// the two names), gated on SideA != SideB exactly like the
+	// pool-matches.csv upgrade: two competitors can legally share a display
+	// name, and a row where both sides hold it can never be told apart by
+	// name alone.
+	deriveWinner := func(m *BracketMatch) {
+		if m.Winner == "" || m.WinnerID != "" {
+			return
+		}
+		if m.SideA != "" && m.SideA == m.SideB {
+			return
+		}
+		switch domain.AttributeWinnerSide(domain.WinnerAttribution{Winner: m.Winner, SideA: m.SideA, SideB: m.SideB}) {
+		case domain.MatchSideA:
+			if m.SideAID != "" {
+				m.WinnerID = m.SideAID
+				changed = true
+			}
+		case domain.MatchSideB:
+			if m.SideBID != "" {
+				m.WinnerID = m.SideBID
+				changed = true
+			}
+		}
+	}
+	for i := range bracket.Rounds {
+		for j := range bracket.Rounds[i] {
+			deriveWinner(&bracket.Rounds[i][j])
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil {
+		deriveWinner(bracket.ThirdPlaceMatch)
+	}
+
+	if !changed {
+		return nil
+	}
+	return s.saveBracketLocked(compID, bracket, s.directWrite)
 }

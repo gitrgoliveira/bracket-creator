@@ -334,6 +334,7 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 	bm.SubResults = append(bm.SubResults, next)
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
+	bm.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 	bm.Decision = ""
 }
 
@@ -488,6 +489,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		parent.SubResults = append(parent.SubResults, *out.Next)
 		parent.Status = state.MatchStatusRunning
 		parent.Winner = ""
+		parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 		parent.Decision = ""
 		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
 		return nil
@@ -1151,11 +1153,13 @@ func (e *Engine) checkPoolReopenDownstreamTx(tx state.StoreTx, compID string, co
 
 // reopenPoolMatch is reopenBracketMatch's twin for a pool/league match. Same
 // rule, same field set: MatchResult and BracketMatch both carry the
-// scoreline as IpponsA/IpponsB (+ HansokuA/B), the shape they share. This
-// twin adds WinnerID and the rep-bout nominations. The hantei verdict needs
-// no clear of its own: it is the domain.HanteiMark entry inside the
-// scoreline being cleared. See reopenBracketMatch for why each of these is
-// verdict rather than bout record.
+// scoreline as IpponsA/IpponsB (+ HansokuA/B) and, since bc-brid, the winner
+// id as WinnerID. This twin adds the rep-bout nominations, which have no
+// BracketMatch counterpart (a bracket daihyosen is a numbered sub-bout, not
+// a team rep-player nomination). The hantei verdict needs no clear of its
+// own: it is the domain.HanteiMark entry inside the scoreline being cleared.
+// See reopenBracketMatch for why each of these is verdict rather than bout
+// record.
 //
 // RepPlayerA/B name who fought a pool daihyosen. That bout's own record lives
 // in SubResults like any other; these two fields are the discarded verdict's
@@ -1218,6 +1222,7 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
+	bm.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 	bm.IpponsA = nil
 	bm.IpponsB = nil
 	bm.HansokuA = 0
@@ -1294,11 +1299,17 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
 	if bronze != nil {
 		// Mirror propagateBracketWinner's positional assignment: semifinal
-		// mIdx 0 feeds the bronze SideA, mIdx 1 feeds SideB.
+		// mIdx 0 feeds the bronze SideA, mIdx 1 feeds SideB. The id clears
+		// alongside the name (bc-brid): propagateBracketWinner set both
+		// together, so undoing it must clear both together too, or the
+		// bronze slot would keep a stale id pointing at a name it no longer
+		// carries.
 		if mIdx%2 == 0 {
 			bronze.SideA = ""
+			bronze.SideAID = ""
 		} else {
 			bronze.SideB = ""
+			bronze.SideBID = ""
 		}
 	}
 	if next != nil {
@@ -1306,10 +1317,15 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 		// with generation and parseWinnerOf: depth is 1-based from the final,
 		// so the source match at round rIdx is depth len(Rounds)-rIdx.
 		placeholder := winnerOfPlaceholder(len(bracket.Rounds)-rIdx, mIdx)
+		// Same id-follows-name rule as the bronze clear above: a "Winner of
+		// ..." placeholder is not a resolved competitor, so its slot must
+		// carry no id (bc-brid).
 		if mIdx%2 == 0 {
 			next.SideA = placeholder
+			next.SideAID = ""
 		} else {
 			next.SideB = placeholder
+			next.SideBID = ""
 		}
 	}
 	return nil

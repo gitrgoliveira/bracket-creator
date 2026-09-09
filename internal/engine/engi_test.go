@@ -152,20 +152,24 @@ func TestRecordEngiMatchResult_BracketAdvances(t *testing.T) {
 	sfIdx := len(bracket.Rounds) - 2
 	sf := bracket.Rounds[sfIdx]
 	require.Len(t, sf, 2)
+	require.NotEmpty(t, sf[0].SideAID, "precondition: generation stamps round-0 ids for an engi bracket exactly like a kendo one")
 
 	// SF0: 3-2 → SideA advances.
 	res, err := eng.recordEngiMatchResult(eng.store, compID, sf[0].ID, 3, 2, "")
 	require.NoError(t, err)
 	assert.Equal(t, sf[0].SideA, res.Winner)
+	assert.Equal(t, sf[0].SideAID, res.WinnerID, "bc-brid: an engi flag-decided winner's id is stamped, not left empty")
 
 	bracket, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	// Final's SideA should now be SF0's winner.
 	final := bracket.Rounds[len(bracket.Rounds)-1][0]
 	assert.Equal(t, sf[0].SideA, final.SideA, "flag-decided winner propagated to final")
+	assert.Equal(t, sf[0].SideAID, final.SideAID, "the winner's id propagates into the final too, not merely their name")
 	// Flag counts persisted in bracket.json.
 	assert.Equal(t, 3, bracket.Rounds[sfIdx][0].FlagsA)
 	assert.Equal(t, 2, bracket.Rounds[sfIdx][0].FlagsB)
+	assert.Equal(t, sf[0].SideAID, bracket.Rounds[sfIdx][0].WinnerID, "the decided semifinal's own WinnerID is stamped on disk")
 }
 
 // --- Standings -------------------------------------------------------------

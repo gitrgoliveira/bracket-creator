@@ -522,10 +522,13 @@ func TestDaihyosenHandler_PoolMatchReturnsError(t *testing.T) {
 
 // TestRemoveDaihyosen_PoolMatchWithStaleWinnerIDSucceeds is the round-2 Opus
 // review's finding 3: DELETE /daihyosen's `u := *match` inherits the stored
-// match's WinnerID/WinnerSide verbatim. POST can never reach a match with
-// real side ids (AddDaihyosen rejects any "Pool "-prefixed id with
-// ErrPoolMatch before its own `u := *match`, and a bracket-sourced match
-// carries no id fields at all -- BracketMatch has none), but DELETE has no
+// match's WinnerID/WinnerSide verbatim. POST can never reach a match with a
+// STALE WinnerID (AddDaihyosen rejects any "Pool "-prefixed id with
+// ErrPoolMatch before its own `u := *match`, and AddDaihyosen only succeeds
+// against a TIED, RUNNING encounter -- i.e. no Winner/WinnerID recorded yet
+// either way -- so the bracket projection's WinnerID is always empty here,
+// even though daihyosenBracketResult now projects a stamped BracketMatch's
+// real SideAID/SideBID/WinnerID faithfully, bc-brid), but DELETE has no
 // such gate: findMatchForDaihyosenTx dispatches purely on ID shape, so a
 // legacy/hand-edited POOL match row that has picked up an unscored
 // Position=-1 placeholder sub (this handler's normal removal target) CAN

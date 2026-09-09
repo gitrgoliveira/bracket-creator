@@ -37,7 +37,7 @@ func saveMixedScaffold(t *testing.T, store *state.Store, compID string, pools []
 	draw := helper.BuildKnockoutDraw(pools, poolWinners, 1)
 	eng := New(store)
 	comp, _ := store.LoadCompetition(compID)
-	bracket, err := eng.buildBracketFromDraw(comp, draw)
+	bracket, err := eng.buildBracketFromDraw(comp, draw, nil)
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))

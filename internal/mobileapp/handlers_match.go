@@ -341,9 +341,11 @@ func hanteiAttributionNeedsBackfill(req *state.MatchResult) bool {
 // genuine sideA/sideB or sideAID/sideBID mismatch is still caught downstream
 // (by reconcileSides, or by stripInvalidHantei) exactly as before; this
 // cannot weaken those guards, only let attribution see what they were always
-// going to fill in anyway. A bracket match's stored ids are always ""
-// (BracketMatch persists no ids at all), so the id half is a no-op there and
-// the name-fallback path for bracket hantei is unchanged.
+// going to fill in anyway. A bracket match's stored ids are "" only when its
+// own row is unstamped (a bye, an unresolved feeder, or an unrepaired legacy
+// row); since bc-brid a stamped row's real ids backfill here too, exactly
+// like a pool match, and only the unstamped residue still falls back to the
+// name path for bracket hantei.
 //
 // Store-read failure and the one deliberate behaviour change from the merge:
 // the two twins had DIFFERENT store-error policies before this merge — the

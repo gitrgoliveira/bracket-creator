@@ -141,6 +141,66 @@ func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
 	assert.Equal(t, wantA, got.WinnerID, "WinnerSide=A must resolve WinnerID to SideAID even when both sides share a name")
 }
 
+// TestStartCompetition_PlayoffsBracketCarriesSideIDsAndPropagates is
+// TestStartCompetition_LeagueMatchesCarrySideIDs's bracket twin (bc-brid): a
+// standalone knockout's round-0 SideAID/SideBID are stamped from
+// Bracket.DrawOrder at generation, and a same-name pair (two "Tanaka Kenji"
+// from different dojos) is still told apart correctly. Scoring round 0 by
+// WinnerSide hint (the only way to disambiguate a same-name winner) then
+// confirms the winner's ID -- not merely their shared display name --
+// propagates into the next round.
+func TestStartCompetition_PlayoffsBracketCarriesSideIDsAndPropagates(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "playoffs-ids"
+
+	createTestCompetition(t, store, compID, "playoffs", 4)
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+		idC = "33333333-3333-4333-8333-333333333333"
+		idD = "44444444-4444-4444-8444-444444444444"
+	)
+	players := []domain.Player{
+		{ID: idA, Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{ID: idB, Name: "Tanaka Kenji", Dojo: "Osaka"}, // same name, different dojo
+		{ID: idC, Name: "Suzuki Hiro", Dojo: "Nagoya"},
+		{ID: idD, Name: "Watanabe Ryo", Dojo: "Kyoto"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.Rounds, 2, "4 players -> round 0 + final")
+	require.Len(t, bracket.Rounds[0], 2, "4 players -> 2 round-0 matches")
+
+	validIDs := map[string]bool{idA: true, idB: true, idC: true, idD: true}
+	for _, m := range bracket.Rounds[0] {
+		assert.NotEmptyf(t, m.SideAID, "match %s SideAID should be stamped from DrawOrder", m.ID)
+		assert.NotEmptyf(t, m.SideBID, "match %s SideBID should be stamped from DrawOrder", m.ID)
+		assert.Truef(t, validIDs[m.SideAID], "match %s SideAID %q is not a roster id", m.ID, m.SideAID)
+		assert.Truef(t, validIDs[m.SideBID], "match %s SideBID %q is not a roster id", m.ID, m.SideBID)
+		assert.NotEqual(t, m.SideAID, m.SideBID, "a match must be between two distinct participants")
+	}
+
+	// Score round-0 match 0 by WinnerSide hint (mirrors the same-name
+	// Tanaka-vs-Tanaka case the league test exercises above), then confirm
+	// the winner's ID propagates into the final -- not merely their name,
+	// which the OTHER Tanaka in the bracket also carries.
+	m0 := bracket.Rounds[0][0]
+	require.NoError(t, eng.RecordMatchResult(compID, m0.ID, &state.MatchResult{
+		ID: m0.ID, SideA: m0.SideA, SideB: m0.SideB,
+		Winner: m0.SideA, WinnerSide: "A", Status: state.MatchStatusCompleted,
+	}))
+
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, reloaded.Rounds, 2)
+	final := reloaded.Rounds[1][0]
+	assert.Equal(t, m0.SideAID, final.SideAID, "the round-0 winner's id propagates into the final, not merely their name")
+}
+
 // --- Pool Generation Tests ---
 
 func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {

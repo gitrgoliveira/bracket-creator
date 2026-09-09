@@ -682,6 +682,79 @@ func TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock(t *testing.T) 
 	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere must not block")
 }
 
+// TestCheckSimultaneousMatchTx_Bracket_SameNameDifferentIDDoesNotBlock is the
+// bracket twin of TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock
+// above (bc-brid): before BracketMatch carried per-side ids, the
+// bracket-vs-bracket comparison was name-only, so two "Sam"s from different
+// dojos falsely blocked each other from starting concurrent knockout bouts.
+// Both round-0 matches carry their own stamped SideAID, exactly as
+// generation now produces, so matchesBracketSide can tell them apart.
+func TestCheckSimultaneousMatchTx_Bracket_SameNameDifferentIDDoesNotBlock(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "csmtx-bracket-same-name-diff-id"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	samSouthID := helper.NewUUID4()
+	samNorthID := helper.NewUUID4()
+	runningOpponentID := helper.NewUUID4()
+	waitingOpponentID := helper.NewUUID4()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Sam", SideAID: samSouthID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+					Status: state.MatchStatusRunning, Court: "A"},
+				{ID: "m-r1-1", SideA: "Sam", SideAID: samNorthID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+					Status: state.MatchStatusScheduled, Court: "B"},
+			},
+			{{ID: "m-r2-0"}},
+		},
+	}))
+
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "m-r1-1")
+		return nil
+	})
+	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere in the bracket must not block")
+}
+
+// TestCheckSimultaneousMatchTx_Bracket_SameIDBlocks pins the positive
+// direction of the same guard: the SAME competitor (by id), not merely the
+// same display name, already running in another bracket match on a
+// different court, must still block -- confirming the id-preferring
+// comparison in matchesBracketSide has not traded away genuine simultaneity
+// detection while fixing the same-name false positive above.
+func TestCheckSimultaneousMatchTx_Bracket_SameIDBlocks(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "csmtx-bracket-same-id-blocks"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	samID := helper.NewUUID4()
+	runningOpponentID := helper.NewUUID4()
+	waitingOpponentID := helper.NewUUID4()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Sam", SideAID: samID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+					Status: state.MatchStatusRunning, Court: "A"},
+				{ID: "m-r1-1", SideA: "Sam", SideAID: samID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+					Status: state.MatchStatusScheduled, Court: "B"},
+			},
+			{{ID: "m-r2-0"}},
+		},
+	}))
+
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "m-r1-1")
+		return nil
+	})
+	require.Error(t, txErr)
+	var ineligErr *IneligibleCompetitorError
+	require.ErrorAs(t, txErr, &ineligErr)
+	assert.Equal(t, samID, ineligErr.PlayerID)
+}
+
 // TestRecordDecisionTx_ValidationError confirms RecordDecisionTx returns
 // a validation error when decisionBy is not "shiro" or "aka".
 func TestRecordDecisionTx_ValidationError(t *testing.T) {

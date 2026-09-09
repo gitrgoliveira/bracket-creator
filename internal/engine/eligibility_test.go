@@ -575,12 +575,15 @@ func TestLosingSide(t *testing.T) {
 			wantID: "", wantName: "", wantOK: false,
 		},
 		{
-			// The bracket-class twin of the two cases above: NO id field at
-			// all (BracketMatch carries none, out of scope for bc-pnum), so
-			// tiers 3/4 remain the correct, and only, resolution path here.
-			// Same-name pair, ambiguous Winner name, so the scoreline (side A
-			// struck ippons, side B did not) is the only side-specific signal
-			// left, and it points at side B as the loser.
+			// The bracket-class twin of the two cases above: an UNREPAIRED
+			// bracket row -- a bye, an unresolved "Winner of ..." feeder, or
+			// a legacy row a repair has not yet reached (a STAMPED
+			// BracketMatch now carries SideAID/SideBID/WinnerID too, since
+			// bc-brid) -- so tiers 3/4 remain the correct, and only,
+			// resolution path here. Same-name pair, ambiguous Winner name,
+			// so the scoreline (side A struck ippons, side B did not) is the
+			// only side-specific signal left, and it points at side B as the
+			// loser.
 			name: "no ids at all: ambiguous Winner name falls back to the scoreline (bracket class)",
 			result: state.MatchResult{
 				SideA: "Tanaka", SideB: "Tanaka",
@@ -1705,15 +1708,17 @@ func TestRecordDecision_TeamWithdrawalKeepsSubResults(t *testing.T) {
 }
 
 // TestRecordDecision_BracketLoserKeepsStruckPoints is the bracket-shaped
-// twin of TestRecordDecision_LoserKeepsStruckPoints. A BracketMatch persists
-// no per-side id at all (bracketMatchAsResult never projects one), so both
-// prior and result carry SideAID=="" / SideBID=="" here -- this is the
-// "record with no id field at all" class CLAUDE.md carves out, not a name
-// fallback beside an id lookup. Before this pin, preserveLoserScore's id
-// guard read two empty strings as "no proof of a match" and refused to
-// preserve anything, so a kiken on a bracket match erased the withdrawer's
-// already-struck ippons outright -- a regression against FIK Art. 32 that a
-// pool-only pin could not catch.
+// twin of TestRecordDecision_LoserKeepsStruckPoints. This fixture's
+// BracketMatch is an UNSTAMPED legacy row (no SideAID/SideBID set), so both
+// prior and result carry SideAID=="" / SideBID=="" here, even though a
+// stamped BracketMatch now carries real ids that bracketMatchAsResult
+// projects faithfully (bc-brid) -- this exercises the id-less fallback
+// CLAUDE.md carves out for exactly that unstamped shape, not a name
+// fallback beside an id lookup on a resolved side. Before this pin,
+// preserveLoserScore's id guard read two empty strings as "no proof of a
+// match" and refused to preserve anything, so a kiken on a bracket match
+// erased the withdrawer's already-struck ippons outright -- a regression
+// against FIK Art. 32 that a pool-only pin could not catch.
 func TestRecordDecision_BracketLoserKeepsStruckPoints(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-loser-keeps-points"

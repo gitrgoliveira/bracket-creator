@@ -153,8 +153,8 @@ const (
 //     matches neither -> MatchSideNone. Ids WIN over names when they
 //     disagree; that is the point of this function.
 //   - Otherwise (any of the three ids empty: legacy data, id-less payloads,
-//     bracket rows, or a sub-bout, which carries no ids at all), fall back
-//     to the name comparison: winner==sideA -> MatchSideA; else
+//     an unrepaired bracket row, or a sub-bout, which carries no ids at all
+//     by design), fall back to the name comparison: winner==sideA -> MatchSideA; else
 //     winner==sideB -> MatchSideB; matches neither -> MatchSideNone. sideA
 //     is checked first, so a winner name that matches BOTH sides (invalid
 //     data - see the same convention documented for team aggregation)
@@ -178,9 +178,13 @@ const (
 // two functions implementing this one rule had already drifted into two
 // different string orders (winner fourth in one, winner last in the other).
 //
-// The zero value means "this record has no ids", which SubMatchResult and
-// BracketMatch both are (they persist names only); a partially-filled id set
-// takes the name path too, per the rule below.
+// The zero value means "no ids to attribute by here": unconditionally true
+// for SubMatchResult (lineup names only, no id fields exist at all), and
+// for BracketMatch only on a bye, an unresolved "Winner of ..." feeder, or
+// an unrepaired legacy row (bc-brid: BracketMatch now carries
+// SideAID/SideBID/WinnerID and this struct carries them whenever the side
+// resolves); a partially-filled id set takes the name path too, per the
+// rule below.
 //
 // Mirrored in JS as attributeWinnerSide's options object in
 // web-mobile/js/result_slot.jsx, which took an object from the start.
@@ -261,20 +265,20 @@ func WinnerIDNamesASide(winnerID, sideAID, sideBID string) bool {
 // unconditional form directly and would be silently weakened by this
 // exemption.
 //
-// The exemption covers two shapes of data, one bounded and one permanent.
-// The bounded one is a legacy pool row drawn before ids were minted (ids
-// were backfilled going forward only, never onto existing rows). The
-// permanent one is every bracket match write at the HTTP boundary:
-// state.BracketMatch persists no side ids at all, so
-// state.Store.MatchSidesByID returns two empty strings for EVERY bracket
-// match, not just a legacy one (see that function's own doc comment) -- so
-// this exemption is permanently "on" for the whole bracket branch, not a
-// transitional carve-out. That is harmless: applyBracketMatchResult
-// (internal/engine/scoring.go) derives the persisted winner from
-// result.Winner (the name) and never reads result.WinnerID at all --
-// state.BracketMatch has no WinnerID field to receive it -- so an
-// unattributable winnerId on a bracket write is silently discarded, not
-// misapplied to the stored result.
+// The exemption covers two bounded shapes of data (bc-brid narrowed this
+// from "permanent" to "residual"): a legacy pool row drawn before ids were
+// minted (ids were backfilled going forward only, never onto existing rows,
+// state.upgradePoolMatchSideIDsLocked's own residue), and an UNREPAIRED
+// bracket row -- a bye, an unresolved "Winner of ..." feeder, or a legacy
+// bracket.json a load-time repair could not resolve (ambiguous name; see
+// state.Bracket.StampRoundZeroSideIDsFromDrawOrder and
+// state.upgradeBracketSideIDsLocked). A STAMPED bracket row is no different
+// from a stamped pool row here: state.Store.MatchSidesByID returns its real
+// SideAID/SideBID (that function's own doc comment), applyBracketMatchResult
+// (internal/engine/scoring.go) resolves and persists bm.WinnerID from them
+// via resolveWinnerIDFromSides, and an unattributable winnerId on a bracket
+// write with both sides known is rejected exactly like the pool branch's,
+// not silently discarded.
 func WinnerIDAcceptable(winnerID, sideAID, sideBID string) bool {
 	return (sideAID == "" && sideBID == "") || WinnerIDNamesASide(winnerID, sideAID, sideBID)
 }

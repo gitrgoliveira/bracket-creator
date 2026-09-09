@@ -218,25 +218,21 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 	assert.True(t, statuses[aliceID].Eligible)
 }
 
-// TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer
-// is PR #416 finding 1's repro. A bracket match carries no per-side ids
-// (BracketMatch persists names only), so the FIRST kiken resolves the loser
-// by a name-based roster scan -- correctly, at the time. If the roster is
-// then edited so the withdrawn player's display name no longer matches the
-// bracket row's stored SideA/SideB (a rename that never touches an
-// already-generated bracket), re-recording the SAME decision (same
-// decisionBy, hence the same intended loser) can no longer resolve a NEW
-// ineligibility by name: recordIneligibilityFromDecision returns (nil, nil),
-// exactly the "did not resolve/write a loser" case, not "this decision no
-// longer makes anyone ineligible".
-//
-// Before the fix, RecordDecisionTx's restore loop treated status==nil as
-// proof every MatchID==matchID/Eligible==false entry was stale and restored
-// it -- flipping the STILL-withdrawn player back to Eligible:true even
-// though the operator never rescinded anything. The fix gates the restore on
-// the new decision actually having settled a loser when it is itself a
-// withdrawal.
-func TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer(t *testing.T) {
+// TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID replaces the
+// pre-bc-brid TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer
+// (PR #416 finding 1's repro), whose premise -- "a bracket match carries no
+// per-side ids, so a rename breaks re-attribution" -- bc-brid makes false for
+// a freshly generated bracket. A standalone knockout's round-0 SideBID is
+// stamped from Bracket.DrawOrder at generation and never changes: renaming
+// the withdrawn player afterwards edits only their display name, so
+// re-recording the SAME decision (same decisionBy, hence the same intended
+// loser) still resolves and re-confirms the SAME competitor by id, unlike
+// the old name-only bracket, which lost the attribution entirely the moment
+// the roster name changed. See
+// TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore
+// below for the residual case this bead's own instruction preserves: an
+// UNREPAIRED row still falls back to the old (and still fragile) name path.
+func TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "renamed-loser-bracket"
 	createTestCompetition(t, store, compID, "playoffs", 3)
@@ -253,9 +249,9 @@ func TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer
 	require.NoError(t, err)
 	require.NotEmpty(t, bracket.Rounds)
 	matchID := bracket.Rounds[0][0].ID
+	require.Equal(t, bobID, bracket.Rounds[0][0].SideBID, "precondition: generation stamps Bob's id onto the round-0 row")
 
-	// First kiken: decisionBy=shiro -> Bob (SideB) withdraws, resolved by
-	// name (bracket matches carry no ids at all).
+	// First kiken: decisionBy=shiro -> Bob (SideB) withdraws.
 	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
 	require.NoError(t, err)
 	require.NotNil(t, status)
@@ -263,7 +259,84 @@ func TestRecordDecisionTx_RenamedLoser_RescoreDoesNotRestoreStillWithdrawnPlayer
 	assert.False(t, status.Eligible, "precondition: Bob must be ineligible after the first kiken")
 
 	// Roster edit: Bob is renamed. The bracket row's own SideB still reads
-	// "Bob" (a rename never rewrites an already-generated bracket).
+	// "Bob" (a rename never rewrites an already-generated bracket's display
+	// text), but SideBID still names Bob's participant id -- an id never
+	// changes, only the roster's display text for it does.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob-Renamed", Dojo: "B"},
+	}))
+
+	// Re-record the SAME decision (same decisionBy, same intended loser).
+	// The stored id survives the rename, so this still resolves to Bob.
+	_, status2, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, status2, "the id survives the rename, so the write still resolves the SAME loser")
+	assert.Equal(t, bobID, status2.PlayerID)
+	assert.False(t, status2.Eligible)
+
+	statuses, err := store.LoadCompetitorStatus(compID)
+	require.NoError(t, err)
+	require.Contains(t, statuses, bobID)
+	assert.False(t, statuses[bobID].Eligible, "Bob is STILL withdrawn")
+}
+
+// TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore
+// preserves PR #416 finding 1's original safety net for the row bc-brid's
+// fix does not reach: an UNREPAIRED bracket row (simulated here by clearing
+// the ids generation just stamped, standing in for a legacy bracket.json
+// written before bc-brid, or a hand-edited file). Every identity-critical
+// bracket reader keeps its pre-existing name path as the fallback for
+// exactly this row (bc-brid's own instruction: "this ADDS ids, it does not
+// remove name handling"), so the ORIGINAL defect this test used to name is
+// still reachable there, and the safety net it pins -- a re-score the engine
+// could not attribute must never silently restore a still-withdrawn
+// player -- still matters.
+//
+// Before the ORIGINAL fix (PR #416 finding 1), RecordDecisionTx's restore
+// loop treated status==nil as proof every MatchID==matchID/Eligible==false
+// entry was stale and restored it -- flipping the STILL-withdrawn player
+// back to Eligible:true even though the operator never rescinded anything.
+// The fix gates the restore on the new decision actually having settled a
+// loser when it is itself a withdrawal.
+func TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "renamed-loser-unstamped-bracket"
+	createTestCompetition(t, store, compID, "playoffs", 3)
+
+	aliceID := helper.NewUUID4()
+	bobID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "A"},
+		{ID: bobID, Name: "Bob", Dojo: "B"},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, bracket.Rounds)
+	matchID := bracket.Rounds[0][0].ID
+
+	// Simulate an UNREPAIRED legacy row: clear the ids generation just
+	// stamped, so this match's own row carries none, exactly like a
+	// bracket.json written before bc-brid.
+	found, err := store.UpdateBracketMatchByID(compID, matchID, func(m *state.BracketMatch) {
+		m.SideAID = ""
+		m.SideBID = ""
+	})
+	require.NoError(t, err)
+	require.True(t, found)
+
+	// First kiken: decisionBy=shiro -> Bob (SideB) withdraws, resolved by
+	// name (this row carries no ids at all).
+	_, status, err := eng.RecordDecision(compID, matchID, "kiken-voluntary", "shiro", "injury", nil, false)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	assert.Equal(t, bobID, status.PlayerID)
+	assert.False(t, status.Eligible, "precondition: Bob must be ineligible after the first kiken")
+
+	// Roster edit: Bob is renamed. The unrepaired bracket row's own SideB
+	// still reads "Bob".
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
 		{ID: aliceID, Name: "Alice", Dojo: "A"},
 		{ID: bobID, Name: "Bob-Renamed", Dojo: "B"},
@@ -631,7 +704,7 @@ func saveMixedCompForGuardTest(t *testing.T, teamSize int) (*Engine, *state.Stor
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromDraw(comp, draw)
+	bracket, err := eng.buildBracketFromDraw(comp, draw, nil)
 	require.NoError(t, err)
 	bracket.Preview = true
 	require.NoError(t, store.SaveBracket(compID, bracket))
@@ -1111,7 +1184,7 @@ func TestPoolRescore_CorruptBracket_FailsClosed(t *testing.T) {
 	draw := helper.BuildKnockoutDraw(pools, 1, 1)
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
-	bracket, err := eng.buildBracketFromDraw(comp, draw)
+	bracket, err := eng.buildBracketFromDraw(comp, draw, nil)
 	require.NoError(t, err)
 	require.NoError(t, store.SaveBracket(compID, bracket))
 	bracketPath := filepath.Join(dir, "competitions", compID, "bracket.json")

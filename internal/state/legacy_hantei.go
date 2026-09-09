@@ -66,8 +66,11 @@ import "github.com/gitrgoliveira/bracket-creator/internal/domain"
 //
 // att carries the participant ids for an attribution, so this signature does
 // not grow three more bare strings that are easy to transpose at a call
-// site — the zero domain.WinnerAttribution{} means "this record has no ids"
-// (SubMatchResult and BracketMatch both persist names only).
+// site — the zero domain.WinnerAttribution{} means "no ids to attribute by
+// here": unconditionally for SubMatchResult (lineup names only, no id
+// fields exist at all), and for BracketMatch only on a bye, an unresolved
+// feeder, or an unrepaired legacy row (bc-brid: BracketMatch now carries
+// SideAID/SideBID/WinnerID and passes them whenever the side resolves).
 func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ipponsB []string) ([]string, []string) {
 	if !flagged {
 		return domain.StripHantei(ipponsA), domain.StripHantei(ipponsB)
@@ -76,8 +79,9 @@ func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ippon
 	// legacy flag lands on the same side every other surface would choose:
 	// by participant id when the caller has all three (a same-name pair is
 	// only separable that way), else by name with the sideA-first fallback.
-	// Callers without ids (sub-bouts, bracket matches) pass the zero value and
-	// take the name path, which is byte-identical to the pre-id behaviour.
+	// SubMatchResult always passes the zero value and takes the name path
+	// (byte-identical to the pre-id behaviour); BracketMatch does too, but
+	// only when its own row carries no id for that side.
 	switch domain.AttributeWinnerSide(att) {
 	case domain.MatchSideA:
 		return domain.AppendHantei(ipponsA), ipponsB
@@ -144,7 +148,10 @@ func (b *BracketMatch) NormalizeLegacy() {
 	// duplicate that rule at a second enforcement point.
 	if b.DecidedByHantei {
 		b.DecidedByHantei = false
-		att := domain.WinnerAttribution{Winner: b.Winner, SideA: b.SideA, SideB: b.SideB}
+		att := domain.WinnerAttribution{
+			WinnerID: b.WinnerID, SideAID: b.SideAID, SideBID: b.SideBID,
+			Winner: b.Winner, SideA: b.SideA, SideB: b.SideB,
+		}
 		b.IpponsA, b.IpponsB = foldLegacyHantei(true, att, b.IpponsA, b.IpponsB)
 	}
 	for i := range b.SubResults {

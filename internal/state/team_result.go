@@ -55,6 +55,27 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 		}
 		hasBout = true
 		switch {
+		case sub.WinnerMemberID != "":
+			// The row knows exactly who won, so the ids decide and the name
+			// comparison below never runs. Two members of OPPOSING teams may
+			// legally share a name (only two members of ONE team may not), and
+			// a bout between two such fighters matches the side A arm first
+			// whichever of them actually won, crediting the wrong team an
+			// individual victory. That is the same misattribution this branch's
+			// neighbours already fixed for pool and bracket sides, one level
+			// further down.
+			//
+			// A winner id matching NEITHER side is contradictory data and
+			// credits nobody, rather than falling through to the comparison the
+			// id was recorded to replace. It is not reachable from the load-time
+			// repair, which derives the winner id from the sides it has just
+			// resolved, but guessing would be the wrong answer if it ever were.
+			switch sub.WinnerMemberID {
+			case sub.SideAMemberID:
+				line.AkaIV++
+			case sub.SideBMemberID:
+				line.ShiroIV++
+			}
 		case sub.Winner == sideAName || (sub.SideA != "" && sub.Winner == sub.SideA):
 			line.AkaIV++
 		case sub.Winner == sideBName || (sub.SideB != "" && sub.Winner == sub.SideB):

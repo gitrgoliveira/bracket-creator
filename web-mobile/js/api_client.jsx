@@ -2826,9 +2826,14 @@ const API = {
         }
         return res.json();
     },
-    async putTeamLineup(compID, teamId, round, positions, password) {
+    // memberIds (bc-tmid pass 3) is optional and keyed by the same position
+    // as positions: the squad member id half of a lineup, sent alongside
+    // the name so the server can persist both together. Omitted entirely
+    // when the caller passes nothing, so a caller that never adopted squad
+    // members (or an older bundle) round-trips exactly as before.
+    async putTeamLineup(compID, teamId, round, positions, password, memberIds) {
         const lineupUrl = `/api/competitions/${compID}/teams/${teamId}/lineups/${round}`;
-        const lineupBody = { teamId, competitionId: compID, round, positions };
+        const lineupBody = { teamId, competitionId: compID, round, positions, ...(memberIds ? { memberIds } : {}) };
         // F5: lineup queue key is distinct from score/decision keys so a lineup
         // write doesn't collide with a concurrent score write for the same match.
         const lineupKey = `lineup:${compID}:${teamId}:${round}`;
@@ -2874,6 +2879,58 @@ const API = {
         if (!res.ok && res.status !== 404) {
             const err = await res.json().catch(() => ({}));
             throw new Error(err.error || "Failed to delete lineup");
+        }
+        return true;
+    },
+    // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
+    // own per-competition store (squads.yaml), keyed by the team's
+    // participant id -- see internal/state/squad.go. Returns the whole
+    // map ({ teamId: [{id, index, name}, …] }) since the lineup editor
+    // needs its own team's list, not one member at a time.
+    async fetchSquads(compID, password) {
+        const res = await fetch(`/api/competitions/${compID}/squads`, {
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load squads");
+        }
+        const data = await res.json();
+        return data.squads || {};
+    },
+    // Mints the new member's id and display index server-side in one step
+    // (operator ruling: assigned automatically as members are added) and
+    // returns the created {id, index, name}. There is no removal
+    // counterpart: indices are never freed once minted.
+    async addTeamMember(compID, teamId, name, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ name })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to add team member");
+        }
+        return res.json();
+    },
+    // Keeps memberId's id and index; only the display name changes.
+    // 204 No Content on success.
+    async renameTeamMember(compID, teamId, memberId, name, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ name })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to rename team member");
         }
         return true;
     },

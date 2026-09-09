@@ -348,6 +348,93 @@ func TestBuildPoolPhaseTreeAwareWithMode_RefusesWhitespaceOnlyDojo(t *testing.T)
 	assert.Contains(t, err.Error(), "WhitespaceDojo", "the error must name the offending player")
 }
 
+// TestValidateNoDuplicateTeamMembers exercises the bc-tmdup draw pre-flight
+// (ValidateNoDuplicateTeamMembers, called from engine.runDrawPipeline beside
+// ValidateNoBlankDojo) directly, in its own package -- mirroring the
+// TestBuildPoolPhaseTreeAwareWithMode_RefusesBlankDojo* tests above for its
+// sibling. Before this test existed, the function's only exercise was two
+// internal/engine integration tests
+// (TestGenerateDraw_RefusesDuplicateTeamMemberRoster /
+// TestGenerateDraw_CleanTeamRosterUnaffected), which left three mutants
+// standing in the helper itself: an early return on the first offending
+// team instead of accumulating every one, dropping the blank/whitespace
+// filter, and forcing the isTeam gate permanently true.
+func TestValidateNoDuplicateTeamMembers(t *testing.T) {
+	t.Run("a non-team roster is skipped, even with a repeated metadata entry", func(t *testing.T) {
+		// Kills the "isTeam gate forced true" mutant: an individual's
+		// Metadata carries dan-grade data (see
+		// state.ErrDuplicateTeamMember's doc comment for the shape), and a
+		// coincidental repeat there is never this rule's business. isTeam
+		// is passed false explicitly -- not inferred from the data -- so a
+		// mutation that ignores the parameter and always treats the roster
+		// as a team turns this red.
+		players := []Player{
+			{Name: "Akira Tanaka", Dojo: "Gyokusen", Metadata: []string{"3", "3"}},
+		}
+		require.NoError(t, ValidateNoDuplicateTeamMembers(players, false))
+	})
+
+	t.Run("blank and whitespace-only slots are not a collision", func(t *testing.T) {
+		// Kills the "drop the blank/whitespace filter" mutant: "" and "  "
+		// both normalize to the same empty key (NormalizeParticipantName
+		// trims), so without the filter this partially-filled, perfectly
+		// ordinary roster would misreport two open lineup slots as a
+		// same-team collision. This is the property the persistence floor
+		// (state.checkTeamMemberNameCollisions, via nonBlankMetadata) and
+		// this pre-flight must agree on: a regression here alone makes a
+		// savable roster undrawable with nothing else going red.
+		players := []Player{
+			{Name: "Tora A", Dojo: "Tora Dojo", Metadata: []string{"Alice", "", "  ", "Bob"}},
+		}
+		require.NoError(t, ValidateNoDuplicateTeamMembers(players, true))
+	})
+
+	t.Run("a team with fewer than two names is skipped", func(t *testing.T) {
+		players := []Player{
+			{Name: "Tora A", Dojo: "Tora Dojo", Metadata: []string{"Alice"}},
+			{Name: "Tora B", Dojo: "Tora Dojo", Metadata: []string{}},
+		}
+		require.NoError(t, ValidateNoDuplicateTeamMembers(players, true))
+	})
+
+	t.Run("a same-team collision is refused, naming the team and the repeated member", func(t *testing.T) {
+		players := []Player{
+			{Name: "Tora A", Dojo: "Tora Dojo", Metadata: []string{"Alice", "Bob", "Alice"}},
+		}
+		err := ValidateNoDuplicateTeamMembers(players, true)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDuplicateTeamMemberInDraw)
+		assert.Contains(t, err.Error(), "Tora A", "the error must name the offending team")
+		assert.Contains(t, err.Error(), "Alice", "the error must name the repeated member")
+	})
+
+	t.Run("TWO offending teams are both named, not just the first", func(t *testing.T) {
+		// Kills the "early return on the first offending team" mutant: an
+		// implementation that stops accumulating and returns as soon as it
+		// finds one bad team would never mention Tora C or Frank.
+		players := []Player{
+			{Name: "Tora A", Dojo: "Tora Dojo", Metadata: []string{"Alice", "Bob", "Alice"}},
+			{Name: "Tora B", Dojo: "Tora Dojo", Metadata: []string{"Carol", "Dan", "Eve"}},
+			{Name: "Tora C", Dojo: "Tora Dojo", Metadata: []string{"Frank", "Grace", "Frank"}},
+		}
+		err := ValidateNoDuplicateTeamMembers(players, true)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDuplicateTeamMemberInDraw)
+		assert.Contains(t, err.Error(), "Tora A", "the first offending team must be named")
+		assert.Contains(t, err.Error(), "Alice", "the first repeated member must be named")
+		assert.Contains(t, err.Error(), "Tora C", "a SECOND offending team must also be named, not just the first")
+		assert.Contains(t, err.Error(), "Frank", "the second repeated member must also be named")
+		assert.NotContains(t, err.Error(), "Tora B", "a clean team must not be reported")
+	})
+
+	t.Run("a clean team roster is unaffected", func(t *testing.T) {
+		players := []Player{
+			{Name: "Tora A", Dojo: "Tora Dojo", Metadata: []string{"Alice", "Bob", "Carol"}},
+		}
+		require.NoError(t, ValidateNoDuplicateTeamMembers(players, true))
+	})
+}
+
 // referenceEarliestDojoMeeting is the pre-P3 nested-scan algorithm, kept
 // here ONLY as an independent oracle for TestEarliestDojoMeeting_MatchesReference:
 // it rediscovers pool membership inside the pair loop itself (O(P^2*poolSize))

@@ -59,6 +59,104 @@ func (e *duplicateTeamNameError) Error() string {
 
 func (e *duplicateTeamNameError) Is(target error) bool { return target == ErrDuplicateName }
 
+// ErrDuplicateTeamMember is returned by every participant write path
+// (saveParticipantsNoLock) when a single TEAM's own member list names the
+// same member twice. A team's members live in that team's Player.Metadata --
+// the ordered trailing columns on its roster row, appended verbatim by
+// marshalParticipantsCSV/CreatePlayersFromRecords (see CLAUDE.md's
+// Participant CSV Schema section) -- and are read back the same way by the
+// SPA's rosterFor (web-mobile/js/admin_lineup.jsx). For an INDIVIDUAL
+// competitor the SAME array instead carries the dan grade at index 0
+// (buildPlayerMetadata, web-mobile/js/api_serializers.jsx), so this rule
+// only ever runs for a team competition (Kind=="team" or TeamSize>0, the same
+// discriminator checkNewTeamNameCollisions already uses); scanning an
+// individual's Metadata as a member list would misfire on unrelated trailing
+// columns. Engi pairs are excluded structurally, not by a special case:
+// Engi is mutually exclusive with a team competition (handlers_competition.go
+// refuses the combination outright), so an engi pair's combined
+// "Name 1 - Name 2" lives in Player.Name and never reaches here as a team's
+// Metadata.
+//
+// Operator ruling 2026-09-09 (bc-tmdup): two members of ONE team sharing a
+// name must be impossible. It is not cosmetic: kachinuki retirement
+// (engine.RetiredPlayersFromBoutLog) tracks who has already fought as a NAME
+// set keyed on SideA/SideB, so two identically-named teammates would both
+// retire the instant either one lost, and every other member-name consumer
+// (bout logs, IV/PW standings, the scoreboard, the export) would likewise be
+// unable to tell them apart. The rule is deliberately broader than that one
+// harm, though: the scan runs through helper.DuplicateNamesWithKeys, which
+// normalises case, whitespace and Latin combining marks, so "Sato"/"sato",
+// "Sato"/" Sato ", "Ken Sato"/"Ken  Sato" and "Satō"/"Sato" are ALL refused,
+// while the kachinuki harm above keys on the exact string. That breadth is
+// the right call regardless: two teammates who differ only in case or
+// accenting are indistinguishable on a score sheet, so the ruling here is
+// "impossible", not merely "improbable" -- own it, rather than "fixing" the
+// normaliser to match the narrower harm.
+//
+// Members of DIFFERENT teams may still share a name: only a collision WITHIN
+// one team's own Metadata is refused. Distinct from ErrDuplicateName (two
+// PARTICIPANTS -- two teams, or two individuals -- sharing (name, dojo)) and
+// from duplicateTeamNameError (two TEAM participants sharing a NAME):
+// errors.Is against the wrong one silently never matches.
+//
+// GRANDFATHERED against what a roster already holds, exactly like
+// checkNewTeamNameCollisions and for the identical reason: this rule is NEW,
+// and the app has no UI that authors a member list at all, so every member
+// list on disk arrived by hand-authored CSV or archive import -- data that
+// can predate this rule. Every rewrite funnels through this same floor
+// including check-in, deliberately ungated so it keeps working after a
+// competition starts; refusing an already-stored pair would brick the next
+// check-in on a live event with no in-app repair (the roster paste box that
+// IS enabled post-start discards every team's member list, since its parser
+// reads a fixed column set -- a worse outcome than the gap this rule
+// closes). See checkTeamMemberNameCollisions for the stored-vs-incoming
+// comparison this runs, scoped per team.
+//
+// UNLIKE checkNewTeamNameCollisions, though, this has no teamNameRule.skip
+// escape hatch at all -- it is unconditional with respect to that flag, so
+// SaveParticipantsRestored (the one caller that sets skip for the sibling
+// rule) does not exempt this one. That is not a gap: a restore always writes
+// into a freshly created competition with nothing stored yet to grandfather
+// against, so it is refused exactly as fresh operator input would be --
+// only a write against an already-populated, already-violating stored
+// roster is grandfathered. `engine.StartCompetition`'s roster pre-flight
+// (helper.ValidateNoDuplicateTeamMembers) closes the other side: no NEW
+// competition can start holding a duplicate in the first place, so
+// grandfathering here never needs to reach further back than "this store's
+// entire history", the same scope ErrBlankDojo's own unconditional floor
+// has.
+var ErrDuplicateTeamMember = errors.New("a team cannot list the same member name twice")
+
+// teamMemberViolation is one team's contribution to duplicateTeamMemberError:
+// the team name and the FRESH (non-grandfathered) repeated member name(s)
+// this write introduces for it.
+type teamMemberViolation struct {
+	team  string
+	dupes []string
+}
+
+// duplicateTeamMemberError reports every team whose OWN member list holds a
+// name more than once (ErrDuplicateTeamMember's concrete shape). It names
+// each offending team and its repeated member(s) so an operator can act on
+// every offending row directly, mirroring duplicateTeamNameError's shape for
+// the sibling (team-name) rule -- and, matching that sibling's own
+// accumulate-don't-stop-at-the-first behaviour, ALL offending teams from one
+// write are reported together rather than only the first, so a bulk import
+// touching several bad rows needs one fix-and-retry pass, not one per row.
+type duplicateTeamMemberError struct {
+	violations []teamMemberViolation
+}
+
+func (e *duplicateTeamMemberError) Error() string {
+	parts := make([]string, 0, len(e.violations))
+	for _, v := range e.violations {
+		parts = append(parts, fmt.Sprintf("team %q lists the same member name more than once: %s", v.team, strings.Join(v.dupes, "; ")))
+	}
+	return strings.Join(parts, " | ")
+}
+
+func (e *duplicateTeamMemberError) Is(target error) bool { return target == ErrDuplicateTeamMember }
+
 // ErrCompetitionNotInSetup is returned by the setup-gated write paths
 // (Store.AddParticipant and Store.ReplaceParticipant; both call
 // requireSetupLocked) when the competition has already advanced past the
@@ -424,18 +522,33 @@ func (s *Store) saveParticipantsTakingLock(compID string, players []domain.Playe
 // fails. Fresh operator input still goes through SaveParticipants and is still
 // refused; only a restore of already-owned data is exempt.
 //
-// The blank-dojo floor (ErrBlankDojo, saveParticipantsNoLock) is deliberately
-// NOT exempted the same way: it runs unconditionally regardless of rule.skip,
-// so an archive containing a blank-dojo row is refused here exactly as a
-// fresh save would refuse it, and the error names the offending row. This
-// is a chosen asymmetry, not an oversight -- the team-name rule postdates
-// existing archives (a backup can be older than the rule and still be
-// legitimate data), but a blank dojo has never been valid competitor
-// identity at any point this store has existed, restored or not. The
-// operator's remedy is also different in kind: a team-name collision has no
-// fix the operator can apply (the archive just predates the rule), whereas a
-// blank dojo is a repairable data error -- fix the row in the CSV inside the
-// archive bundle and re-import.
+// Two OTHER floors are deliberately NOT exempted the same way: the blank-dojo
+// floor (ErrBlankDojo) and the duplicate-team-member floor
+// (ErrDuplicateTeamMember, checkTeamMemberNameCollisions) both run
+// unconditionally regardless of rule.skip, so an archive containing a
+// blank-dojo row or a team with a repeated member name is refused here
+// exactly as a fresh save would refuse it, and each error names the
+// offending row. This is a chosen asymmetry, not an oversight, but the two
+// floors reach it for DIFFERENT reasons. A blank dojo has never been valid
+// competitor identity at any point this store has existed, restored or not,
+// so refusing it here is the same "never valid" refusal a fresh save gives.
+// A duplicate member name is not that: it WAS valid competitor data before
+// this rule existed, and this rule's own grandfathering
+// (checkTeamMemberNameCollisions, see ErrDuplicateTeamMember's doc comment)
+// keeps it valid for a write against an ALREADY-POPULATED, already-violating
+// store -- which is exactly what a restore is not. Every import row lands
+// via importCompetition (internal/mobileapp/handlers_import.go), which
+// always creates the competition fresh with Status: CompStatusSetup, and
+// engine.StartCompetition's own pre-flight (helper.ValidateNoDuplicateTeamMembers)
+// would refuse to draw that same competition regardless of what
+// SaveParticipantsRestored allowed through. Accepting the duplicate here
+// would therefore only hand the operator a competition that can be created
+// but never started -- refusing it now, with the offending row named, is the
+// more useful failure. The operator's remedy is also different in kind: a
+// team-name collision has no fix the operator can apply (the archive just
+// predates the rule), whereas a blank dojo or a duplicate member is a
+// repairable data error -- fix the row in the CSV inside the archive bundle
+// and re-import.
 func (s *Store) SaveParticipantsRestored(compID string, players []domain.Player) error {
 	return s.saveParticipantsTakingLock(compID, players, false)
 }
@@ -1018,6 +1131,192 @@ func (s *Store) checkNewTeamNameCollisions(compID string, players []domain.Playe
 	return nil
 }
 
+// nonBlankMetadata returns metadata, with blank/whitespace-only entries
+// dropped. An unfilled lineup slot is stored as "", and two open slots are
+// not two members named "" -- counting them as a collision would refuse a
+// perfectly normal partially-filled roster, so both the incoming and stored
+// scans in checkTeamMemberNameCollisions filter through this before looking
+// for duplicates.
+func nonBlankMetadata(metadata []string) []string {
+	names := make([]string, 0, len(metadata))
+	for _, m := range metadata {
+		if strings.TrimSpace(m) != "" {
+			names = append(names, m)
+		}
+	}
+	return names
+}
+
+// checkTeamMemberNameCollisions enforces ErrDuplicateTeamMember: no single
+// team's own Metadata (its ordered member-name list, see that sentinel's doc
+// comment for where member names live and how they are told apart from an
+// individual's dan-grade metadata) may name the same member twice. Reuses
+// helper.DuplicateNamesWithKeys per team, the same scan checkNewTeamNameCollisions
+// uses across team names, rather than writing a new one.
+//
+// GRANDFATHERED against the STORED roster, mirroring checkNewTeamNameCollisions
+// exactly (see ErrDuplicateTeamMember's own doc comment for why): it rejects
+// only what THIS WRITE introduces for a given team, not a collision the
+// stored roster already held for that same team. The per-team comparison
+// matches a team between the incoming and stored rosters by
+// helper.PlayerKey (participant id when present, else a normalized
+// (name, dojo) composite -- CLAUDE.md's "key by id, else CompetitorKey"
+// rule), NOT by the raw team name. checkNewTeamNameCollisions' own
+// storedCounts is a flat map with no outer key at all (it counts NAMES
+// globally, not per team), so it gives no cover for keying THIS map by
+// bare name: a bare-name key here would miss a pre-start team RENAME (the
+// renamed team's stored bucket goes unconsulted, so an existing duplicate
+// is re-reported as fresh and an unrelated rename is refused), would miss
+// a case/whitespace drift between the persisted and freshly-parsed name
+// (the bulk save persists the raw request name while the CSV parse
+// Title-cases on every read), and -- worst -- would silently MERGE two
+// teams that legitimately share a name (the sibling rule grandfathers
+// exactly that case) into one bucket, combining their member counts and
+// failing OPEN. Keying on the bare participant id instead would be worse,
+// not better: a fresh row's id is minted at marshal time, AFTER this check
+// runs (saveParticipantsNoLock's ID-fill branch runs later), so every new
+// row has no id yet, and a legacy pre-id roster has none at all -- both
+// would collapse onto one empty-id bucket, merging every such team's
+// counts. helper.PlayerKey's (name, dojo) fallback is what keeps those
+// id-less teams apart from each other; that fallback is what makes keying
+// by identity actually safe here, not just different.
+//
+// Residual miss, accepted: an id-LESS stored row compared against an
+// id-CARRYING incoming row for what is otherwise the same team keys
+// differently (CompetitorKey takes the id branch the moment either side
+// has one), so the grandfather lookup misses and an already-stored
+// duplicate is re-reported as fresh. That is the pre-start id-minting
+// transition -- the same write that mints the id is also the first write
+// under the new key -- and it is no worse than today (bare-name keying
+// hits that same transition, plus the rename and case/whitespace misses
+// above that this fixes), and it fails CLOSED: the operator sees a
+// refusal for something already on disk, never a silent bypass.
+//
+// A team the stored roster has no entry for under that key (added by THIS
+// write, a pre-start rename, or the id-minting transition just above) has
+// a zero stored count for every member name, so any internal duplicate it
+// carries is unconditionally fresh -- correct, since there was nothing on
+// disk yet to have grandfathered it under that identity. Like the
+// sibling, the test is whether THIS WRITE increases how many times a name
+// appears within that one team's own list: equal or fewer is a rewrite of
+// what is already stored (check-in, a re-save, removing one of the pair);
+// more is a new collision and is refused.
+//
+// The pure in-memory scan of the INCOMING roster runs FIRST, over every
+// player regardless of competition kind, and the competition -- plus the
+// stored roster needed for the grandfather comparison -- are only consulted
+// (and possibly loaded) when that scan actually finds a same-team collision:
+// mirroring checkNewTeamNameCollisions' own cost-avoidance, since the common
+// case (no team carries duplicate metadata) must not pay a config.md read
+// plus a second participants.csv read on every write.
+//
+// Every offending team is accumulated and reported together, not just the
+// first (matching checkNewTeamNameCollisions' own accumulate-all shape): a
+// bulk write touching several bad rows needs one fix-and-retry pass, not one
+// per row.
+//
+// comp is the caller's already-loaded competition, or nil to load on demand.
+// Caller MUST hold the per-comp lock. Unlike checkNewTeamNameCollisions this
+// check is NOT gated by teamNameRule.skip: it runs unconditionally for every
+// caller, including SaveParticipantsRestored, per ErrDuplicateTeamMember's
+// own doc comment -- a restore writes into a freshly created competition
+// with nothing stored to grandfather against, so it is refused there
+// exactly as fresh operator input would be.
+func (s *Store) checkTeamMemberNameCollisions(compID string, players []domain.Player, withZekkenName bool, comp *Competition) error {
+	type incomingTeamDupes struct {
+		team   string // raw team name, for the operator-facing message only
+		key    string // helper.PlayerKey(players[i]) -- the identity used for the grandfather lookup, never the raw name
+		dupes  []string
+		counts map[string]int // normalized member name -> count within this team's incoming Metadata
+	}
+	var incoming []incomingTeamDupes
+	for i := range players {
+		names := nonBlankMetadata(players[i].Metadata)
+		if len(names) < 2 {
+			continue
+		}
+		dupes, nameKeys := helper.DuplicateNamesWithKeys(names)
+		if len(dupes) == 0 {
+			continue
+		}
+		counts := make(map[string]int, len(nameKeys))
+		for _, k := range nameKeys {
+			counts[k]++
+		}
+		incoming = append(incoming, incomingTeamDupes{team: players[i].Name, key: helper.PlayerKey(players[i]), dupes: dupes, counts: counts})
+	}
+	if len(incoming) == 0 {
+		return nil
+	}
+	if comp == nil {
+		loaded, err := s.loadCompetitionLocked(compID)
+		if err != nil {
+			// Logged, not propagated: mirrors checkNewTeamNameCollisions'
+			// fail-open choice -- a transient config read failure must not
+			// block a participant write (check-in funnels through here too),
+			// but it must not pass silently either.
+			log.Printf("state: saveParticipants %s: competition config unreadable, team-member uniqueness not enforced for this write: %v", compID, err)
+			return nil
+		}
+		comp = loaded
+	}
+	if comp == nil || (comp.Kind != "team" && comp.TeamSize == 0) {
+		// Not a team competition: the candidate array is dan-grade metadata
+		// (or other unrelated trailing columns) on an individual, not a
+		// member list, so a coincidental repeat there is not this rule's
+		// business.
+		return nil
+	}
+
+	// storedCounts[helper.PlayerKey(team)][normalized member name]
+	// grandfathers a pre-existing same-team duplicate, keyed by identity
+	// rather than the raw team name -- see the doc comment above for why a
+	// bare-name key would miss a rename, miss a case/whitespace drift, and
+	// merge two legitimately same-named teams. Same cache key
+	// checkNewTeamNameCollisions reads (WithSeeds:false), so this pays no
+	// second _with_seeds_ read. A load failure fails OPEN (nil map, every
+	// stored count reads 0) rather than blocking the write -- same
+	// rationale as the comp-load failure above; an unenforced write here is
+	// still safer than a bricked one.
+	storedCounts := make(map[string]map[string]int)
+	if stored, lerr := s.loadParticipantsNoLock(compID, withZekkenName, LoadParticipantsOpts{WithSeeds: false}); lerr == nil {
+		for _, p := range stored {
+			names := nonBlankMetadata(p.Metadata)
+			if len(names) == 0 {
+				continue
+			}
+			key := helper.PlayerKey(p)
+			counts := storedCounts[key]
+			if counts == nil {
+				counts = make(map[string]int, len(names))
+				storedCounts[key] = counts
+			}
+			for _, m := range names {
+				counts[helper.NormalizeParticipantName(m)]++
+			}
+		}
+	}
+
+	var violations []teamMemberViolation
+	for _, v := range incoming {
+		teamStored := storedCounts[v.key] // nil is fine: every lookup below then reads 0
+		var fresh []string
+		for _, d := range v.dupes {
+			k := helper.NormalizeParticipantName(d)
+			if v.counts[k] > teamStored[k] {
+				fresh = append(fresh, d)
+			}
+		}
+		if len(fresh) > 0 {
+			violations = append(violations, teamMemberViolation{team: v.team, dupes: fresh})
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	return &duplicateTeamMemberError{violations: violations}
+}
+
 func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, withZekkenName bool, rule teamNameRule) error {
 	// Tier-1 (perfect-duplicate) guard at the lowest write layer so EVERY
 	// persistence path; the bulk PUT /competitions/:id roster import (the
@@ -1042,6 +1341,13 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	}
 	if dupes := helper.CheckDuplicateEntriesByNameDojo(entries); len(dupes) > 0 {
 		return fmt.Errorf("%w: %s", ErrDuplicateName, strings.Join(dupes, "; "))
+	}
+
+	// Unconditional (not gated by rule.skip): see ErrDuplicateTeamMember's
+	// own doc comment for why this floor is never exempted, unlike the
+	// team-NAME rule just below.
+	if err := s.checkTeamMemberNameCollisions(compID, players, withZekkenName, rule.comp); err != nil {
+		return err
 	}
 
 	if !rule.skip {

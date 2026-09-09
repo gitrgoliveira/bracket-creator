@@ -113,6 +113,14 @@ knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for 
 competitions. A competition in the `team` kind treats each `Player` entry as a team, with
 member names held in the entry's metadata.
 
+Two rules govern those member names. Within one team the names must be unique, because a
+bout records the fighter by name and the winner-stays-on format tracks who is already out
+by name, so two members of one team sharing a name cannot be told apart. Members of
+different teams may share a name freely. The list is a squad rather than a starting
+line-up, so it may hold more members than the competition's team size: the extra entries
+are the replacements an organiser can field, and the team size only fixes how many
+positions a round has.
+
 ## 3. The match and result model
 
 This is the detailed part of the model, because the rules it encodes are detailed. A match

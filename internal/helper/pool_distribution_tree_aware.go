@@ -374,6 +374,62 @@ func ValidateNoBlankDojo(players []Player) error {
 	return fmt.Errorf("%w: %s", ErrBlankDojoInDraw, strings.Join(names, ", "))
 }
 
+// ErrDuplicateTeamMemberInDraw is the sentinel identifying a draw refused
+// because a team's own member list (Player.Metadata) names the same member
+// twice (bc-tmdup). DISTINCT from state.ErrDuplicateTeamMember
+// (internal/state/participants.go), the participant-WRITE floor: different
+// packages, different sentinel values, on purpose -- mirrors
+// ErrBlankDojoInDraw's own distinction from state.ErrBlankDojo for the same
+// reason, so errors.Is against the wrong one silently never matches.
+var ErrDuplicateTeamMemberInDraw = errors.New("cannot draw: a team lists the same member name twice")
+
+// ValidateNoDuplicateTeamMembers is the roster pre-flight covering every
+// competition format runDrawPipeline can generate (playoffs, Swiss, pools) --
+// engine.StartCompetition calls it beside ValidateNoBlankDojo, ahead of the
+// format switch, so no format-specific path has to carry its own copy of
+// this check.
+//
+// Unlike state.checkTeamMemberNameCollisions (the participant-WRITE floor,
+// which grandfathers a pre-existing on-disk duplicate so a live event's
+// check-ins keep working against data that predates the rule), this
+// pre-flight is NOT grandfathered and never needs to be: the roster it
+// scans is still fully editable (the competition has not started), so a
+// refusal here is always actionable -- the operator fixes the row and
+// starts. Together the pair is the coherent fix: a live event already
+// holding a duplicate keeps working, and no NEW competition can start
+// holding one.
+//
+// isTeam is the caller's own Kind/TeamSize discriminator (mirrors
+// state.checkTeamMemberNameCollisions' own gate, and the isTeam idiom
+// already used elsewhere in engine, e.g. chusen.go): an individual
+// competitor's Metadata carries dan-grade data, not a member list, and must
+// never be scanned as one -- a coincidental repeat there is not this rule's
+// business.
+func ValidateNoDuplicateTeamMembers(players []Player, isTeam bool) error {
+	if !isTeam {
+		return nil
+	}
+	var violations []string
+	for _, p := range players {
+		names := make([]string, 0, len(p.Metadata))
+		for _, m := range p.Metadata {
+			if strings.TrimSpace(m) != "" {
+				names = append(names, m)
+			}
+		}
+		if len(names) < 2 {
+			continue
+		}
+		if dupes, _ := DuplicateNamesWithKeys(names); len(dupes) > 0 {
+			violations = append(violations, fmt.Sprintf("team %q: %s", p.Name, strings.Join(dupes, ", ")))
+		}
+	}
+	if len(violations) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", ErrDuplicateTeamMemberInDraw, strings.Join(violations, "; "))
+}
+
 // buildPoolPhaseTreeAwareCore is BuildPoolPhaseTreeAware's and
 // BuildPoolPhaseFillBracketTreeAware's shared body (bc-dojo Phase 4): given
 // the pool COUNT and BASE target sizes already resolved by the caller's own

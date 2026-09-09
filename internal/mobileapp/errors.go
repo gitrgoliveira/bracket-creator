@@ -175,7 +175,7 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // leaving the caller free to check its own site-specific sentinels (e.g.
 // state.ErrCompetitionNotInSetup) before falling back to internalError.
 //
-// This is the ONE place these four map to a status; every participant-write
+// This is the ONE place these five map to a status; every participant-write
 // call site should classify through here (directly, or via
 // respondRosterWriteError) rather than hand-copying its own
 // errors.Is(...)-then-c.JSON chain. Before this existed, ErrBlankDojo's own
@@ -189,6 +189,8 @@ func classifyRosterWriteError(err error) (status int, ok bool) {
 	case errors.Is(err, state.ErrParticipantNotFound):
 		return http.StatusNotFound, true
 	case errors.Is(err, state.ErrDuplicateName):
+		return http.StatusConflict, true
+	case errors.Is(err, state.ErrDuplicateTeamMember):
 		return http.StatusConflict, true
 	case errors.Is(err, state.ErrReservedName):
 		return http.StatusBadRequest, true

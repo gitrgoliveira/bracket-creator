@@ -987,6 +987,22 @@ func (e *Engine) runDrawPipeline(id string) error {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
 
+	// Duplicate-team-member pre-flight (bc-tmdup). state.checkTeamMemberNameCollisions
+	// (the participant-WRITE floor) grandfathers a pre-existing on-disk
+	// duplicate so a live event's check-ins keep working against data that
+	// predates the rule -- but that means a duplicate roster could otherwise
+	// start cleanly and only surface later, on the first check-in after the
+	// competition goes live. This pre-flight is the other half of that pair:
+	// the roster reaching here is still fully editable (the competition has
+	// not started), so refusing it is always actionable, and no NEW
+	// competition can start holding a duplicate in the first place. isTeam
+	// mirrors the same Kind/TeamSize discriminator the write-floor check
+	// uses (comp.TeamSize is already defaulted above when Kind=="team").
+	isTeam := comp.Kind == "team" || comp.TeamSize > 0
+	if err := helper.ValidateNoDuplicateTeamMembers(players, isTeam); err != nil {
+		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
+	}
+
 	// Missing-id pre-flight (bc-pnum ruling 1c). Ids are the roster's stable
 	// identity for the draw's own output (pools.csv's ID column,
 	// SideAID/SideBID on every match, sub-bout winner attribution); the draw

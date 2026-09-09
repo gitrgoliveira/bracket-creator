@@ -573,8 +573,17 @@ func importCompetition(store *state.Store, eng *engine.Engine, entry ImportManif
 		log.Printf("mobileapp: import %s: competitors not numbered: %v (retried on the next settings save, G4)", entry.ID, err)
 	}
 
-	// Save participants, already parsed pre-save, so this is a pure
-	// disk write that can only fail on I/O.
+	// Save participants, already parsed pre-save. That does NOT make this a
+	// pure disk write that can only fail on I/O: SaveParticipantsRestored
+	// still runs its own roster sentinels unconditionally (ErrBlankDojo,
+	// ErrDuplicateTeamMember -- see checkTeamMemberNameCollisions' own doc
+	// comment in internal/state/participants.go for why those two are never
+	// exempted the way the team-NAME rule is), so a manifest whose
+	// participants.csv predates one of those floors can still fail this
+	// call on a data error, not just a disk fault. The code below is
+	// correct either way -- it already treats any error from this call as a
+	// row failure and rolls back -- this note is only correcting what kind
+	// of error to expect here.
 	//
 	// Atomicity: SaveCompetition above has already written config.md
 	// (the visible "this competition exists" marker, enforced by the

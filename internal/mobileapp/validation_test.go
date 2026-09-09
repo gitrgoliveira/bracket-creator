@@ -1967,3 +1967,19 @@ func TestBulkScore_WithdrawalMustNameTheWinner(t *testing.T) {
 			"only a withdrawal carries the eligibility side effect this rule protects")
 	})
 }
+
+// TestSeedsOffRoster_IDFirstResolutionSurvivesStaleName pins seedsOffRoster's
+// side of the id-first-then-(name, dojo) resolution order (domain.RosterIndex.
+// LookupSeed): a row carrying an id must resolve by that id alone, even when
+// its own Name/Dojo have drifted stale, rather than being reported as a ghost.
+func TestSeedsOffRoster_IDFirstResolutionSurvivesStaleName(t *testing.T) {
+	players := []domain.Player{
+		{ID: "alice-id", Name: "Alice Renamed", Dojo: "New Dojo"},
+	}
+	assignments := []domain.SeedAssignment{
+		{ID: "alice-id", Name: "Alice Old Name", Dojo: "Old Dojo", SeedRank: 1},
+	}
+
+	err := seedsOffRoster(players, assignments, "REMEDY")
+	assert.NoError(t, err, "the id must resolve the row even though its stored Name/Dojo are stale")
+}

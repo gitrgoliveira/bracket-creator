@@ -648,6 +648,16 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {
+			// A non-empty seeding against a roster with no participants at
+			// all is the client's error (the operator has to enter
+			// participants first), not the server's; rejectSeedsOffRoster
+			// above already answers 400 for this exact shape (every name
+			// reads as a ghost against an empty roster), so this arm is
+			// belt-and-suspenders for whatever reaches SaveSeeds directly.
+			if errors.Is(err, state.ErrSeedsWithoutRoster) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			internalError(c, err)
 			return
 		}

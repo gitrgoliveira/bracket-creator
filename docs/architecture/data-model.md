@@ -279,7 +279,7 @@ classDiagram
     }
     class seeds_csv["seeds.csv"] {
         <<CSV>>
-        Rank, Name, Dojo
+        Rank, Name, Dojo, ID
     }
     class pools_csv["pools.csv"] {
         <<CSV>>
@@ -340,11 +340,18 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
 
-The seed list stores the dojo alongside the name, and a seed is matched to its participant
-by name and dojo together, because two competitors may share a name across dojos; a file
-that stored only the name could not say which of them the rank belonged to. A row without a
-dojo still matches by name alone when that name is unique in the roster, and a file without
-the dojo column is completed from the roster on first load.
+A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
+with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that
+is how an operator removes one, and there is nothing to attach either way.
+
+The seed list stores the participant's own id alongside the name and dojo, and once a row
+carries that id it is the one thing a seed is matched to its participant by. The name and dojo
+are kept for two other jobs: they are what an older reader that has never heard of the id
+column still matches by, and they are the fallback for a row the id column has not reached
+yet, matched by name and dojo together because two competitors may share a name across
+dojos and a file that stored only the name could not say which of them the rank belonged to.
+A row without a dojo still matches by name alone when that name is unique in the roster, and
+a file without the dojo or the id column is completed from the roster on first load.
 
 ## 5. Write guarantees
 

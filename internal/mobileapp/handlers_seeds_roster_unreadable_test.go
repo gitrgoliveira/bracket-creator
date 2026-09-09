@@ -88,18 +88,35 @@ func TestPutSeeds_UnreadableRosterFailsClosed(t *testing.T) {
 	assert.Empty(t, seeds, "nothing may be persisted when the check could not run")
 }
 
-// The other half of the retired condition still behaves as documented: an empty
-// roster is a legitimate state, not a failure, and the seeding is accepted.
-func TestPutSeeds_EmptyRosterStillAccepts(t *testing.T) {
+// The other half of the retired condition no longer behaves as it used to:
+// a competitor list must exist to define seeds (operator ruling, bc-sdid), so
+// a non-empty seeding against an empty roster is refused, not accepted.
+func TestPutSeeds_NonEmptyRosterRequired(t *testing.T) {
 	store, _, do := seedsRosterFixture(t)
 
 	w := do("PUT", "/api/competitions/c1/seeds", completeSeeding(t))
-	assert.Equal(t, http.StatusOK, w.Code,
-		"seeds saved before the roster must still work: the draw's own validation is the backstop")
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"a seeding needs a roster to seed; nothing has been entered yet")
+	assert.Contains(t, w.Body.String(), "roster",
+		"the operator must be told to enter participants first")
 
 	seeds, err := store.LoadSeeds("c1")
 	require.NoError(t, err)
-	assert.Len(t, seeds, 2)
+	assert.Empty(t, seeds, "a refused seeding must not reach seeds.csv")
+}
+
+// Clearing a seeding must never require a roster: an EMPTY seed list is
+// still accepted against an empty roster, since there is nothing to attach
+// and nothing the operator could usefully be refused.
+func TestPutSeeds_EmptySeedingStillAcceptedWithNoRoster(t *testing.T) {
+	store, _, do := seedsRosterFixture(t)
+
+	w := do("PUT", "/api/competitions/c1/seeds", []byte(`[]`))
+	assert.Equal(t, http.StatusOK, w.Code, "clearing a seeding must not require a roster")
+
+	seeds, err := store.LoadSeeds("c1")
+	require.NoError(t, err)
+	assert.Empty(t, seeds)
 }
 
 // And a readable roster still refuses a name nobody carries, so failing closed

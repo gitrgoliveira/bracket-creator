@@ -199,39 +199,40 @@ func rejectSeedsOffRoster(store *state.Store, compID string, assignments []domai
 // held a valid 1..N and drew, while every reader that merges seeds onto players
 // by name saw only the survivors and read the ghost's rank as an unclosable gap.
 //
-// Checked via domain.RosterIndex.Lookup, the SAME (name, dojo)-with-
-// unique-bare-name-fallback resolver the merge (state.loadParticipants) and
-// every other matcher use, so this gate and the merge can never disagree.
-// It used to check Name alone, deliberately coarser than the pair, on the
-// reasoning that "anything the merge attaches, this finds by name too" -- but
-// that reasoning broke once seeds carry a dojo (bc-389): a row naming a
-// roster name with the WRONG dojo passes a name-only check yet the merge can
-// never attach it (exact key misses, and the bare-name fallback is disabled
-// whenever the row carries a non-empty dojo), so seeds.csv saved cleanly with
-// an unattached rank and only generate-draw failed, minutes or hours later,
-// with "seeded participant not found in main list" -- exactly the split-views
-// failure this gate exists to catch at write time instead.
+// Checked via domain.RosterIndex.LookupSeed, the SAME id-first-then-
+// (name, dojo)-with-unique-bare-name-fallback resolver the merge
+// (state.loadParticipants) and every other matcher use, so this gate and the
+// merge can never disagree. It used to check Name alone, deliberately
+// coarser than the pair, on the reasoning that "anything the merge attaches,
+// this finds by name too" -- but that reasoning broke once seeds carry a
+// dojo (bc-389): a row naming a roster name with the WRONG dojo passes a
+// name-only check yet the merge can never attach it (exact key misses, and
+// the bare-name fallback is disabled whenever the row carries a non-empty
+// dojo), so seeds.csv saved cleanly with an unattached rank and only
+// generate-draw failed, minutes or hours later, with "seeded participant not
+// found in main list" -- exactly the split-views failure this gate exists to
+// catch at write time instead.
 //
-// An empty roster is NOT treated as "everything is a ghost": seeds for a
-// competition whose participants have not been written yet are refused only when
-// there is a roster to contradict them, so a client that saves seeds before the
-// roster still works and the draw's own validation remains the backstop. For
-// the store-backed caller, a missing participants.csv IS that state and reads
-// as an empty roster, not as an error (state.loadParticipants maps
-// os.IsNotExist to an empty slice); a genuine read/parse failure there is
-// instead turned into errSeedRosterUnreadable before this function is ever
-// called, so `players` here is never "empty because the read failed".
+// An empty roster IS "everything is a ghost" (operator ruling, bc-sdid): a
+// competitor list must exist to define seeds, so a non-empty seeding with no
+// roster to check it against is refused, same as state.SaveSeeds refuses it
+// at the write door. This function used to special-case an empty roster as
+// "nothing to contradict a seeding with" while that tolerance stood; it no
+// longer needs to, and every name in `assignments` correctly reports as
+// unknown against an empty roster with no special-casing here at all. For
+// the store-backed caller, a missing participants.csv reads as an empty
+// roster, not as an error (state.loadParticipants maps os.IsNotExist to an
+// empty slice); a genuine read/parse failure there is instead turned into
+// errSeedRosterUnreadable before this function is ever called, so `players`
+// here is never "empty because the read failed".
 func seedsOffRoster(players []domain.Player, assignments []domain.SeedAssignment, remedy string) error {
 	if len(assignments) == 0 {
-		return nil
-	}
-	if len(players) == 0 {
 		return nil
 	}
 	roster := domain.NewRosterIndex(players)
 	var unknown []string
 	for _, a := range assignments {
-		if _, ok := roster.Lookup(a.Name, a.Dojo); !ok {
+		if _, ok := roster.LookupSeed(a); !ok {
 			unknown = append(unknown, fmt.Sprintf("%q (rank %d)", a.Name, a.SeedRank))
 		}
 	}

@@ -78,6 +78,45 @@ func TestUpdateParticipant_DojoOnlyEditUpdatesSeedRow(t *testing.T) {
 		"generate-draw's own resolver must still find the seeded participant")
 }
 
+// TestUpdateParticipant_RenamePreservesStampedSeedID pins the bc-sdid rule
+// for this rewrite: it is rewriting a row it already loaded off disk, so it
+// must carry forward whatever id that row already carried, never re-derive
+// or blank it. The rewrite touches only Name/Dojo (see its own doc comment
+// in participants.go), so this is a property of Go struct assignment rather
+// than code this function runs -- but a future "simplify this by rebuilding
+// the row" edit could easily drop it, and nothing else in this file checks
+// the id survives a rename at all.
+func TestUpdateParticipant_RenamePreservesStampedSeedID(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+	compID := "rename-preserves-id"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Rename Preserves ID"}))
+
+	added, err := store.AddParticipant(compID, domain.Player{Name: "Alice Cooper", Dojo: "Wakaba"}, false)
+	require.NoError(t, err)
+	// SaveSeeds stamps the id from the roster it resolves the row against.
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Alice Cooper", Dojo: "Wakaba", SeedRank: 1},
+	}))
+	seededBefore, err := store.LoadSeedsRaw(compID)
+	require.NoError(t, err)
+	require.Len(t, seededBefore, 1)
+	require.Equal(t, added.ID, seededBefore[0].ID, "fixture must start with a stamped id to prove preservation")
+
+	_, err = store.UpdateParticipant(compID, added.ID, false, func(p *domain.Player) error {
+		p.Name = "Alice C."
+		return nil
+	})
+	require.NoError(t, err)
+
+	seededAfter, err := store.LoadSeedsRaw(compID)
+	require.NoError(t, err)
+	require.Len(t, seededAfter, 1)
+	assert.Equal(t, "Alice C.", seededAfter[0].Name, "the rename must still reach the row")
+	assert.Equal(t, added.ID, seededAfter[0].ID, "the id the row already carried must survive the rewrite untouched")
+}
+
 // TestUpdateParticipant_RenameOnlyTouchesEditedParticipantsSeedRow pins bug
 // (b): the rewrite used to match seed rows on bare oldName alone, with no
 // dojo filter, so renaming ONE of two same-named players rewrote BOTH

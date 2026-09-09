@@ -1209,6 +1209,28 @@ func TestStandardSeeding_DisplacedSeeds(t *testing.T) {
 	})
 }
 
+// TestApplySeeds_IDFirstResolutionSurvivesStaleName pins ApplySeeds' side of
+// the id-first-then-(name, dojo) resolution order (see domain.SeedAssignment's
+// doc comment): a row carrying an id is matched by that id alone, even when
+// its own Name/Dojo have drifted stale and now happen to name a DIFFERENT
+// player on the roster.
+func TestApplySeeds_IDFirstResolutionSurvivesStaleName(t *testing.T) {
+	players := []Player{
+		{ID: "alice-id", Name: "Alice Renamed", Dojo: "New Dojo"},
+		// A second, unrelated player who now happens to hold the exact
+		// (name, dojo) pair the seed row still carries. A name/dojo
+		// fallback would misattribute the seed to THIS player instead.
+		{ID: "impersonator-id", Name: "Alice Old Name", Dojo: "Old Dojo"},
+	}
+	assignments := []domain.SeedAssignment{
+		{ID: "alice-id", Name: "Alice Old Name", Dojo: "Old Dojo", SeedRank: 1},
+	}
+
+	require.NoError(t, ApplySeeds(players, assignments))
+	assert.Equal(t, 1, players[0].Seed, "the id must win, not whoever currently holds the stale name/dojo")
+	assert.Equal(t, 0, players[1].Seed, "the impersonator must not inherit the seed")
+}
+
 func TestApplySeeds_CornerCases(t *testing.T) {
 	tests := []struct {
 		name        string

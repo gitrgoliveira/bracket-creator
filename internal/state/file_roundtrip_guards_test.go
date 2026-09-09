@@ -170,12 +170,21 @@ func TestSeedAssignmentRoundTripIsComplete(t *testing.T) {
 	s, err := NewStore(dir)
 	require.NoError(t, err)
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C"}))
+	// A seeding needs a roster to attach to (SaveSeeds refuses a non-empty
+	// one otherwise); the id below must match this participant's, since
+	// SaveSeeds stamps it from whoever the row resolves to regardless of
+	// what the caller supplied.
+	require.NoError(t, s.SaveParticipants("c", []domain.Player{
+		{ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301", Name: "Tanaka Ichiro", Dojo: "Kyoto"},
+	}))
 
 	// Dojo matters: a seed assignment is matched to its participant by
 	// (name, dojo) because names are not unique within a competition. It was
 	// silently dropped by the writer until this guard existed, which made a
 	// seed for either of two same-named players unresolvable after a restart.
-	in := domain.SeedAssignment{Name: "Tanaka Ichiro", Dojo: "Kyoto", SeedRank: 1}
+	in := domain.SeedAssignment{
+		ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301", Name: "Tanaka Ichiro", Dojo: "Kyoto", SeedRank: 1,
+	}
 	require.NoError(t, s.SaveSeeds("c", []domain.SeedAssignment{in}))
 
 	fresh, err := NewStore(dir)

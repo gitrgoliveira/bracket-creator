@@ -464,15 +464,16 @@ func (s *Store) loadParticipantsNoLock(compID string, withZekkenName bool, opts 
 		seeds, _ := helper.ReadSeedsFileRaw(s.compPath(compID, "seeds.csv"))
 		if len(seeds) > 0 {
 			// Merge via the ONE shared resolver every seed matcher in the
-			// codebase now uses (domain.RosterIndex): exact (name, dojo)
-			// match, else -- only for a legacy row with no dojo -- a
-			// bare-name match when that name is unique in the roster.
-			// Keying on the name alone attached a seed to EVERY same-named
-			// player, so the console displayed a seeding that
-			// domain.AssignSeeds would refuse to draw.
+			// codebase now uses (domain.RosterIndex.LookupSeed): a row's
+			// own id first when it carries one, else -- exact (name, dojo)
+			// match, or for a legacy no-dojo row, a bare-name match when
+			// that name is unique in the roster. Keying on the name alone
+			// attached a seed to EVERY same-named player, so the console
+			// displayed a seeding that domain.AssignSeeds would refuse to
+			// draw.
 			roster := domain.NewRosterIndex(players)
 			for _, sd := range seeds {
-				if p, ok := roster.Lookup(sd.Name, sd.Dojo); ok {
+				if p, ok := roster.LookupSeed(sd); ok {
 					p.Seed = sd.SeedRank
 				}
 			}
@@ -809,6 +810,19 @@ func (s *Store) updateParticipantNoLock(compID string, pid string, withZekkenNam
 		// this same participant. Matching on bare oldName alone, with no
 		// dojo filter, rewrote EVERY same-named row on a rename; this keys
 		// the match so two same-named players' seeds don't cross.
+		//
+		// A rename no longer needs this rewrite to keep a row RESOLVABLE --
+		// once a row carries an id (SaveSeeds stamps one for every row that
+		// resolves), the id survives the rename untouched and every
+		// id-first matcher still finds this participant under the new
+		// identity without any help from this function. It stays anyway
+		// because seeds.csv is still read RAW for display (LoadSeedsRaw) and
+		// by builds that predate the id column entirely, both of which show
+		// the stored Name/Dojo verbatim; skipping the rewrite would leave
+		// those two surfaces naming a competitor who no longer exists under
+		// that name. Whatever id a matched row already carries (stamped, or
+		// still empty on a legacy row) is left exactly as read: only
+		// Name/Dojo are written below.
 		changed := false
 		for i := range seeds {
 			p, ok := preEditRoster.Lookup(seeds[i].Name, seeds[i].Dojo)

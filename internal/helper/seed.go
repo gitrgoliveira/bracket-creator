@@ -980,7 +980,11 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 	// ApplySeeds title-cases the assignment's name before querying it so a
 	// hand-typed "alice cooper" still matches the roster's canonical
 	// "Alice Cooper", but the index itself is queried the same way every
-	// other matcher in the codebase does.
+	// other matcher in the codebase does. An id, when the row carries one,
+	// is tried first via LookupByID (the same id-first-then-pair order
+	// domain.RosterIndex.LookupSeed implements; spelled out by hand below,
+	// rather than calling it, so the title-casing ceremony can be skipped
+	// entirely on the id path instead of computed and then ignored).
 	roster := domain.NewRosterIndex(players)
 
 	// Build a seed→player reverse index for O(1) collision detection.
@@ -1001,8 +1005,17 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 			seenSeeds[a.SeedRank] = a.Name
 		}
 
-		titleName := c.String(a.Name)
-		p, ok := roster.Lookup(titleName, a.Dojo)
+		// The title-casing ceremony is skipped entirely once the row carries
+		// an id: an id does not care how the name was typed, so there is
+		// nothing for it to correct. It stays for the (name, dojo) fallback
+		// below, which still needs it.
+		var p *Player
+		var ok bool
+		if a.ID != "" {
+			p, ok = roster.LookupByID(a.ID)
+		} else {
+			p, ok = roster.Lookup(c.String(a.Name), a.Dojo)
+		}
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

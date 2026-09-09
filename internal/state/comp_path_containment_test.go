@@ -47,6 +47,7 @@ func TestCompPath_Containment(t *testing.T) {
 		{name: "hidden dotfile id", id: ".hidden"},
 		{name: "65-char id", id: strings.Repeat("a", 65)},
 		{name: "valid id, escaping parts", id: "comp1", parts: []string{"..", "..", "etc", "passwd"}},
+		{name: "parts walk back to the competitions root", id: "comp1", parts: []string{".."}},
 	}
 
 	for _, tc := range tests {
@@ -55,19 +56,23 @@ func TestCompPath_Containment(t *testing.T) {
 
 			oldSegments := append([]string{store.folder, "competitions", tc.id}, tc.parts...)
 			oldVulnerable := filepath.Clean(filepath.Join(oldSegments...))
-			oldContained := oldVulnerable == base || strings.HasPrefix(oldVulnerable, base+sep)
+			oldContained := strings.HasPrefix(oldVulnerable, base+sep)
 
 			got := store.compPath(tc.id, tc.parts...)
 
-			// The core guarantee, unconditional: every result stays under base.
-			gotContained := got == base || strings.HasPrefix(got, base+sep)
-			assert.Truef(t, gotContained, "compPath(%q, %v) = %q, want a path under %q", tc.id, tc.parts, got, base)
+			// The core guarantee, unconditional: every result is STRICTLY
+			// below base. The competitions directory itself is not an
+			// acceptable answer -- it holds every competition, and a caller
+			// that asked for one file inside one of them must not be handed
+			// it -- so this is a strict prefix, not a prefix-or-equal.
+			gotContained := strings.HasPrefix(got, base+sep)
+			assert.Truef(t, gotContained, "compPath(%q, %v) = %q, want a path strictly below %q", tc.id, tc.parts, got, base)
 
 			switch {
 			case !oldContained:
-				// The pre-fix implementation would have escaped the competitions
-				// dir for this input. The new result must not land on that
-				// outside path.
+				// The pre-fix implementation would have left the competitions
+				// dir for this input, either escaping it entirely or landing
+				// on the directory itself. The new result must not land there.
 				assert.NotEqual(t, oldVulnerable, got,
 					"compPath(%q, %v) must not resolve to the outside path %q the pre-fix implementation produced", tc.id, tc.parts, oldVulnerable)
 			case isValid:

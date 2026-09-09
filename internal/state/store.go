@@ -331,13 +331,21 @@ const invalidCompDir = ".invalid"
 // A rejected id or an escaping join resolves to invalidCompDir instead: that
 // directory does not exist, so a read returns ENOENT and a write fails,
 // rather than either touching a path outside the tournament folder.
+//
+// The competitions directory ITSELF is not a valid answer either, which is
+// why the check demands a path strictly below it rather than merely one that
+// has not escaped. No legitimate call can land there: every caller names a
+// competition, and the file parts are literal filenames. Only parts walking
+// back up ("..") reach it, and returning the directory that holds every
+// competition to a caller that asked for one file inside one of them is a
+// bug worth failing on, not a location worth handing out.
 func (s *Store) compPath(compID string, parts ...string) string {
 	base := filepath.Clean(filepath.Join(s.folder, "competitions"))
 	if ValidateCompetitionID(compID) != nil {
 		return filepath.Join(base, invalidCompDir)
 	}
 	p := filepath.Clean(filepath.Join(append([]string{base, compID}, parts...)...))
-	if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
+	if !strings.HasPrefix(p, base+string(filepath.Separator)) {
 		return filepath.Join(base, invalidCompDir)
 	}
 	return p

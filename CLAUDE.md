@@ -91,7 +91,8 @@ tournament-data/
     ├── pool-matches.csv           Pool phase match results
     ├── bracket.json               Elimination bracket structure + results
     ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
-    ├── lineups.yaml               Team lineups, keyed by round
+    ├── lineups.yaml               Team lineups, keyed by round; a position holds a name AND a member id
+    ├── squads.yaml                A team's members, keyed by the team's participant id; each has a stable id and a display index, and there is no removal
     └── overrides.json             Manual ranking overrides
 ```
 

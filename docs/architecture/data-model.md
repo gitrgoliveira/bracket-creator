@@ -110,16 +110,24 @@ classDiagram
 
 `Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
-competitions. A competition in the `team` kind treats each `Player` entry as a team, with
-member names held in the entry's metadata.
+competitions. A competition in the `team` kind treats each `Player` entry as a team, and
+the people on that team are its squad, stored in `squads.yaml` under the team's participant
+id.
 
-Two rules govern those member names. Within one team the names must be unique, because a
-bout records the fighter by name and the winner-stays-on format tracks who is already out
-by name, so two members of one team sharing a name cannot be told apart. Members of
-different teams may share a name freely. The list is a squad rather than a starting
-line-up, so it may hold more members than the competition's team size: the extra entries
-are the replacements an organiser can field, and the team size only fixes how many
-positions a round has.
+Each squad member carries a stable id, minted once when the member is added and never
+reused, and a display index. The id is what a lineup position and a bout row record, so a
+member can be renamed without any record losing track of who fought. There is no way to
+remove a member, which is why an index is never freed and no renumbering question arises.
+The label an organiser reads is the team's competitor number followed by the member index,
+for example `T10.1`. That label is composed when it is shown and never stored, because a
+competitor number can change and the identity underneath it cannot.
+
+Two rules govern member names. Within one team the names must be unique: a name is how an
+organiser picks a member, and the winner-stays-on format has to tell two teammates apart.
+Members of different teams may share a name freely. The squad is not a starting line-up, so
+it may hold more members than the competition's team size: the extra entries are the
+replacements an organiser can field, and the team size only fixes how many positions a
+round has.
 
 ## 3. The match and result model
 
@@ -300,6 +308,11 @@ classDiagram
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
         TeamLineup by round
+        position to name and member id
+    }
+    class squads_yaml["squads.yaml"] {
+        <<YAML>>
+        TeamMember list by team
     }
     class overrides_json["overrides.json"] {
         <<JSON>>
@@ -329,7 +342,9 @@ classDiagram
     config_md --> bracket_json
     config_md --> status_yaml
     config_md --> lineups_yaml
+    config_md --> squads_yaml
     config_md --> overrides_json
+    squads_yaml --> lineups_yaml : positions reference members
 ```
 
 Markdown, CSV, and JSON or YAML each earn their place:

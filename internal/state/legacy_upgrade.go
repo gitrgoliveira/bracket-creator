@@ -116,6 +116,23 @@ import (
 //     caught it; do not reintroduce a read-side roster rewrite without an
 //     unambiguous discriminator.
 //
+//   - a team's Player.Metadata (its ordered member-name list, sharing that
+//     array ambiguously with an individual's dan grade) converts to
+//     squads.yaml ON READ *and* ON WRITE (bc-tmid), below
+//     (upgradeSquadsFromMetadataLocked). Unlike every upgrade above, this
+//     one is not resolving a foreign id against the roster; a team's own
+//     Metadata needs no lookup, only its OWN already-resolved participant
+//     id, so it migrates on the FIRST write too (from inside
+//     saveParticipantsNoLock, before the incoming payload is marshaled),
+//     not only on the next load -- see that call site's own comment for why
+//     a load-only trigger would still lose data. A team with no squad
+//     entry at all gets one from its current Metadata, in array order; a
+//     team that already has a squad entry is left untouched (never
+//     re-folded); an individual competitor's Metadata (Kind != "team" and
+//     TeamSize == 0) is never read as a member list. A row with no
+//     participant id yet is left alone, the same residual miss every
+//     upgrade above accepts, resolved once the roster itself gains one.
+//
 // EnsureLegacyUpgraded runs BEFORE loadParticipants/LoadPools/LoadPoolMatches/
 // LoadBracket take their read lock, once per competition per process: the conversion
 // needs the per-comp WRITE lock, and writing from under the reader's RLock
@@ -181,20 +198,26 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if err := s.upgradeBracketSideIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy bracket-side-id upgrade for %s: %v", compID, err)
 	}
+	if err := s.upgradeSquadsFromMetadataLocked(compID, roster); err != nil {
+		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
+	}
 	s.legacyUpgraded.Store(compID, struct{}{})
 }
 
 // legacyUpgradeRoster lazily loads and indexes compID's participants.csv for
-// EnsureLegacyUpgraded's four steps. Caller MUST already hold the per-comp
+// EnsureLegacyUpgraded's steps. Caller MUST already hold the per-comp
 // write lock (the same requirement every method below carries); this type
 // adds no locking of its own because it is never shared beyond a single
 // EnsureLegacyUpgraded call.
 type legacyUpgradeRoster struct {
-	store   *Store
-	compID  string
-	loaded  bool
-	index   *domain.RosterIndex
-	loadErr error
+	store      *Store
+	compID     string
+	loaded     bool
+	index      *domain.RosterIndex
+	players    []domain.Player
+	comp       *Competition
+	withZekken bool
+	loadErr    error
 }
 
 // get returns the roster index, loading it on the first call and caching
@@ -213,15 +236,41 @@ func (r *legacyUpgradeRoster) get() (*domain.RosterIndex, error) {
 		r.loadErr = err
 		return nil, r.loadErr
 	}
+	r.withZekken = withZekken
+	r.comp = comp
 	players, err := r.store.loadParticipantsNoLock(r.compID, withZekken, LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
 	if err != nil {
 		r.loadErr = err
 		return nil, r.loadErr
 	}
+	r.players = players
 	if len(players) > 0 {
 		r.index = domain.NewRosterIndex(players)
 	}
 	return r.index, nil
+}
+
+// competition triggers get()'s lazy load (if it has not already run for
+// this EnsureLegacyUpgraded call) and returns the competition record it
+// fetched -- nil, nil when there is none. Lets a step that needs
+// Kind/TeamSize rather than the RosterIndex (upgradeSquadsFromMetadataLocked)
+// share the one load the other steps already pay for, instead of
+// re-reading config.md itself.
+func (r *legacyUpgradeRoster) competition() (*Competition, error) {
+	if _, err := r.get(); err != nil {
+		return nil, err
+	}
+	return r.comp, nil
+}
+
+// rosterPlayers is competition's twin: it returns the raw, as-loaded player
+// list get() populated (nil when there is no roster), for a step that needs
+// each row's OWN fields (Metadata) rather than a name-keyed index.
+func (r *legacyUpgradeRoster) rosterPlayers() ([]domain.Player, error) {
+	if _, err := r.get(); err != nil {
+		return nil, err
+	}
+	return r.players, nil
 }
 
 // ParticipantsFingerprint stats participants.csv and seeds.csv for compID,
@@ -675,4 +724,92 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 		return nil
 	}
 	return s.saveBracketLocked(compID, bracket, s.directWrite)
+}
+
+// upgradeSquadsFromMetadataLocked migrates a team's squad OUT of
+// Player.Metadata into squads.yaml, the first time a team competition's
+// roster is seen with no squad entry at all for that team (bc-tmid).
+// Metadata is the untyped trailing-columns array participants.csv shares
+// between two unrelated uses -- a team's ordered member-name list
+// (CreatePlayersFromRecords/marshalParticipantsCSV) and an individual's
+// dan grade at index 0 (buildPlayerMetadata, the SPA) -- so this only ever
+// runs for a team competition (comp.Kind=="team" || comp.TeamSize>0, the
+// same discriminator checkTeamMemberNameCollisions already uses);
+// scanning an individual's Metadata as a member list would invent members
+// out of a dan-grade string.
+//
+// Migrates a team ONLY when squads has NO entry at all for that team's id:
+// a team that already has one is finished migrating, and re-running the
+// fold over every later roster write would duplicate members on top of
+// whatever the operator has since added or renamed through
+// AddTeamMember/RenameTeamMember.
+//
+// Deliberately does NOT clear or rewrite Player.Metadata (operator ruling:
+// "nothing is deleted" -- migrate on load, don't build a separate repair):
+// squads.yaml becomes the source of truth going forward and the old array
+// is simply left where it is.
+//
+// Requires the row's OWN participant id: squads.yaml is keyed by the
+// team's participant id, and a genuinely legacy (pre-id-column) row has
+// none yet -- the same residual miss the four legacy-upgrade steps above
+// accept for the identical reason. Such a team is left alone here; the
+// very next roster write mints its id (marshalParticipantsCSV), and the
+// write after that can migrate it, exactly like the pools.csv/
+// pool-matches.csv/bracket.json repairs above wait for the roster itself
+// to gain ids before they can resolve against it.
+//
+// Caller holds the per-comp lock. Called from TWO sites: EnsureLegacyUpgraded
+// (below, sharing the roster this function's siblings already loaded) and
+// saveParticipantsNoLock (participants.go, given a FRESH roster instance),
+// which calls this directly -- never EnsureLegacyUpgraded itself, which
+// would re-acquire the same per-comp lock its caller already holds and
+// deadlock a non-reentrant mutex -- BEFORE marshaling the incoming write,
+// so a save that blanks a team's Metadata (the Apply flow's shape) cannot
+// destroy members that were never migrated: see that call site's own
+// comment for why a load-only trigger is not enough.
+func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpgradeRoster) error {
+	comp, err := roster.competition()
+	if err != nil || comp == nil {
+		return err
+	}
+	if comp.Kind != "team" && comp.TeamSize == 0 {
+		return nil
+	}
+	players, err := roster.rosterPlayers()
+	if err != nil || len(players) == 0 {
+		return err
+	}
+
+	squads, err := s.loadSquadsLocked(compID)
+	if err != nil {
+		return err
+	}
+
+	changed := false
+	for _, p := range players {
+		if p.ID == "" {
+			continue // no stable key to migrate under yet; see doc comment above
+		}
+		if _, exists := squads[p.ID]; exists {
+			continue // already migrated (or operator-managed); never re-fold
+		}
+		names := nonBlankMetadata(p.Metadata)
+		if len(names) == 0 {
+			continue
+		}
+		members := make([]domain.TeamMember, 0, len(names))
+		for i, name := range names {
+			members = append(members, domain.TeamMember{
+				ID:    newParticipantID(),
+				Index: i + 1,
+				Name:  name,
+			})
+		}
+		squads[p.ID] = members
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveSquadsLocked(compID, squads, s.directWrite)
 }

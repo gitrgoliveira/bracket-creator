@@ -199,6 +199,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
 	RegisterLineupHandlers(adminSmallBody, store, store, store, hub)
+	RegisterSquadHandlers(adminSmallBody, store, store)
 	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)

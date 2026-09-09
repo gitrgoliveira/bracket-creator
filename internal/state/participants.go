@@ -1381,6 +1381,25 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 		}
 	}
 
+	// bc-tmid: migrate a team's squad OUT of Metadata BEFORE this write can
+	// blank it, reading whatever is CURRENTLY stored (not the incoming
+	// `players`, which may be about to overwrite it). This roster PUT does
+	// NOT read participants before writing (only after, to build the
+	// response), so a migration triggered solely by EnsureLegacyUpgraded's
+	// load-side hook would miss a save that lands before anything ever
+	// reads this competition, a scripted PUT, or the first request after a
+	// process restart, wiping members that had never been migrated. Calling
+	// the locked step directly on a FRESH roster instance here -- never
+	// EnsureLegacyUpgraded itself, which takes the same per-comp lock this
+	// function's every caller already holds, and would deadlock a
+	// non-reentrant mutex -- closes that gap. A failure here is logged, not
+	// propagated: it must not block a roster write that would otherwise
+	// succeed, the same fail-open policy the checks above already apply to
+	// an unreadable competition config.
+	if err := s.upgradeSquadsFromMetadataLocked(compID, &legacyUpgradeRoster{store: s, compID: compID}); err != nil {
+		log.Printf("state: saveParticipants %s: pre-write squad migration: %v", compID, err)
+	}
+
 	path := s.compPath(compID, "participants.csv")
 
 	data, err := marshalParticipantsCSV(players, withZekkenName)

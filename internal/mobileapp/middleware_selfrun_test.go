@@ -257,6 +257,11 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		// play, so they stay main-password gated even in self-run mode (mp-i96p).
 		{http.MethodGet, "/api/competitions/some-id/export"},
 		{http.MethodGet, "/api/competitions/some-id/export-results"},
+		// Squad management (bc-tmid): organiser setup, same class as team
+		// lineup PUT/DELETE just above.
+		{http.MethodGet, "/api/competitions/some-id/squads"},
+		{http.MethodPost, "/api/competitions/some-id/teams/some-team/members"},
+		{http.MethodPut, "/api/competitions/some-id/teams/some-team/members/some-member"},
 	}
 
 	for _, tc := range configRoutes {

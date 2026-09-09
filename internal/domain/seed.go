@@ -49,8 +49,8 @@ func SeedKey(name, dojo string) string {
 //
 // This was previously reimplemented independently in four places (this
 // package's AssignSeeds, helper.ApplySeeds, the seeds.csv-onto-roster merge
-// in state.loadParticipants, and the legacy dojo-backfill in
-// state.upgradeSeedDojosLocked), which is exactly the kind of drift SeedKey's
+// in state.loadParticipants, and the legacy seed-row backfill in
+// state.upgradeSeedRowsLocked), which is exactly the kind of drift SeedKey's
 // doc comment warned about without anything actually shared. All four now
 // build one RosterIndex over their roster and call Lookup. A fifth case is a
 // failed Lookup itself: a caller that needs to tell a GHOST name (absent from

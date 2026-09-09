@@ -130,7 +130,7 @@ func TestLegacyPoolMatchSideIDUpgradeOnRead(t *testing.T) {
 // TestLegacyPoolMatchSideIDUpgrade_AmbiguousNameLeftAlone is the residue
 // case: two roster entries share the exact name "Yuki Tanaka" (different
 // dojos), so the unique-bare-name resolution the repair relies on (the same
-// fallback upgradeSeedDojosLocked already uses for seeds.csv) cannot pick
+// fallback upgradeSeedRowsLocked already uses for seeds.csv) cannot pick
 // one. That side's id is left alone rather than guessed, the row still
 // carries the operator-facing notice, and the OTHER side (a unique name)
 // still resolves normally.

@@ -189,10 +189,16 @@ func squadDuplicateNameCheck(teamID, candidateName string, otherNames []string) 
 // squad size: real teams carry reserves and replacements, so a squad may
 // exceed the competition's TeamSize.
 //
-// teamID is treated as opaque, like handlers_lineup.go's own teamID: no
-// existence check against participants.csv is made here, so the caller
-// (the HTTP handler) is responsible for confirming the team is a real
-// participant if that matters to it.
+// teamID is treated as opaque, exactly like handlers_lineup.go's own
+// teamID, and NOTHING validates it against participants.csv -- not this
+// function and not the handler above it. A member added under an id no
+// team holds is therefore reachable, and because there is no removal
+// operation it stays. It is inert (no surface renders a squad for an id
+// that is not a participant) and the SPA only ever sends ids it read off
+// the roster, so this is a known limit of the opaque-key convention rather
+// than an oversight. Validating it is an operator-visible behaviour change
+// -- a request that succeeds today would 404 -- so it is a decision, not a
+// tidy-up.
 func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return domain.TeamMember{}, err

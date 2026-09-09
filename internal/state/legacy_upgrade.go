@@ -176,15 +176,15 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	if _, done := s.legacyUpgraded.Load(compID); done {
 		return // lost the race to a concurrent reader's upgrade
 	}
-	// One roster load shared by all four steps below (bc-pnum review): built
+	// One roster load shared by every step below: built
 	// LAZILY on first actual use, so a competition needing no repair at all
 	// never parses participants.csv, and loaded/indexed at most ONCE rather
 	// than once per step. Safe to share across steps despite the seeds step's
 	// own invalidateParticipantCaches call: that invalidates the STORE's
 	// file cache (so the NEXT independent Store.LoadParticipants call
-	// re-parses), but a seed-dojo backfill never touches participants.csv
+	// re-parses), but the seed-row backfill never touches participants.csv
 	// itself, so the roster this instance already loaded stays accurate for
-	// the pools/pool-matches/bracket steps that follow it in the same call.
+	// every step that follows it in the same call.
 	roster := &legacyUpgradeRoster{store: s, compID: compID}
 	if err := s.upgradeSeedRowsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy seed-row upgrade for %s: %v", compID, err)

@@ -903,8 +903,8 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// the fresh roster. FileMtime returns 0 if the file does not exist,
 	// which is a valid "no participants yet" state, we snapshot the
 	// same 0 and the comparison still works.
-	// ParticipantsFingerprint runs all three legacy upgrades (state/
-	// legacy_upgrade.go: seed-dojo, pool-participant-id, pool-match-side-id)
+	// ParticipantsFingerprint runs the legacy upgrades (state/
+	// legacy_upgrade.go, which owns the list and adds to it over time)
 	// BEFORE stat'ing, so these mtimes are the post-upgrade files rather
 	// than a snapshot the load below could still convert between here and
 	// the re-check, which would then read our own one-time rewrite as a

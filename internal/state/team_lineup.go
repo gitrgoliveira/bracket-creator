@@ -71,7 +71,7 @@ func lineupStorageKey(l domain.TeamLineup) string {
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
 // file is "no lineups yet" and returns an empty map.
 func parseTeamLineupsFile(path string) (map[string]domain.TeamLineup, error) {
-	data, err := os.ReadFile(path) // #nosec G304, compPath cleans the path.
+	data, err := os.ReadFile(path) // #nosec G304, compPath enforces containment under the competitions dir.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]domain.TeamLineup{}, nil

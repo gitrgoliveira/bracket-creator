@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -316,10 +317,30 @@ func (s *Store) cachedBracket(compID string) (*Bracket, error) {
 	return bracket, nil
 }
 
-// compPath builds and cleans the path to a file inside a competition directory.
+// invalidCompDir is where a rejected competition id resolves. No legal id can
+// collide with it: validIDPattern requires a leading alphanumeric.
+const invalidCompDir = ".invalid"
+
+// compPath builds and cleans the path to a file inside a competition
+// directory, and is the ONE place that enforces containment under
+// "<folder>/competitions" rather than trusting a caller to have validated
+// compID first. filepath.Clean alone collapses "..", but a joined path can
+// still resolve outside that base (e.g. compID = "../.."), so every result
+// is re-checked against the base after cleaning, covering both compID and
+// the variadic parts (a caller-supplied filename can also carry "..").
+// A rejected id or an escaping join resolves to invalidCompDir instead: that
+// directory does not exist, so a read returns ENOENT and a write fails,
+// rather than either touching a path outside the tournament folder.
 func (s *Store) compPath(compID string, parts ...string) string {
-	segments := append([]string{s.folder, "competitions", compID}, parts...)
-	return filepath.Clean(filepath.Join(segments...))
+	base := filepath.Clean(filepath.Join(s.folder, "competitions"))
+	if ValidateCompetitionID(compID) != nil {
+		return filepath.Join(base, invalidCompDir)
+	}
+	p := filepath.Clean(filepath.Join(append([]string{base, compID}, parts...)...))
+	if p != base && !strings.HasPrefix(p, base+string(filepath.Separator)) {
+		return filepath.Join(base, invalidCompDir)
+	}
+	return p
 }
 
 // FileMtime returns the UnixNano mtime of a file inside a competition directory.

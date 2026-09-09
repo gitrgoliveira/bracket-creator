@@ -127,9 +127,13 @@ func adminGroup(r *gin.Engine, capBytes int64, verifier PasswordVerifier, store 
 // caller should `return` immediately.
 //
 // Every handler that reads `c.Param("id")` and passes it to
-// store.compPath(id, ...) must use this helper. compPath does
-// filepath.Clean(filepath.Join(folder, "competitions", id, ...)), an
-// id like "../../../etc/passwd" would cleanly escape the data dir.
+// store.compPath(id, ...) should still use this helper: compPath itself
+// now enforces containment under the competitions dir (an id like
+// "../../../etc/passwd" resolves to a fixed, nonexistent sentinel
+// directory rather than escaping it), but doing the check here turns a
+// bad id into a clear 400 instead of a confusing not-found. This is no
+// longer the only thing standing between a route parameter and the
+// filesystem, just the earlier and more legible one.
 //
 // Called from BOTH authenticated routes (handlers_competition.go gated
 // by AuthMiddleware via X-Tournament-Password) AND the public viewer

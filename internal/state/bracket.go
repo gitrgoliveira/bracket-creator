@@ -111,7 +111,7 @@ func (b *Bracket) StampRoundZeroSideIDsFromDrawOrder() bool {
 }
 
 func parseBracketFile(path string) (any, error) {
-	raw, err := os.ReadFile(path) // #nosec G304, path built by compPath which calls filepath.Clean
+	raw, err := os.ReadFile(path) // #nosec G304, path built by compPath, which enforces containment under the competitions dir
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Bracket{Rounds: [][]BracketMatch{}}, nil

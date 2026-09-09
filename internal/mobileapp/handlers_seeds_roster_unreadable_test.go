@@ -97,8 +97,17 @@ func TestPutSeeds_NonEmptyRosterRequired(t *testing.T) {
 	w := do("PUT", "/api/competitions/c1/seeds", completeSeeding(t))
 	assert.Equal(t, http.StatusBadRequest, w.Code,
 		"a seeding needs a roster to seed; nothing has been entered yet")
-	assert.Contains(t, w.Body.String(), "roster",
+	assert.Contains(t, w.Body.String(), "competitor list must exist",
 		"the operator must be told to enter participants first")
+
+	// The refusal must name the ACTUAL problem. Against an empty roster
+	// every row also fails the per-row roster scan, so the coarser answer
+	// is a list of the operator's own competitors reported as unknown --
+	// which sends them looking for competitors who were never missing.
+	assert.NotContains(t, w.Body.String(), "Alice",
+		"an empty roster must not be reported as the seeded competitors being unknown")
+	assert.NotContains(t, w.Body.String(), "Bob",
+		"an empty roster must not be reported as the seeded competitors being unknown")
 
 	seeds, err := store.LoadSeeds("c1")
 	require.NoError(t, err)

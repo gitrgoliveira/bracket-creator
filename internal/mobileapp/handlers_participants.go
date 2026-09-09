@@ -650,10 +650,12 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		if err := store.SaveSeeds(id, assignments); err != nil {
 			// A non-empty seeding against a roster with no participants at
 			// all is the client's error (the operator has to enter
-			// participants first), not the server's; rejectSeedsOffRoster
-			// above already answers 400 for this exact shape (every name
-			// reads as a ghost against an empty roster), so this arm is
-			// belt-and-suspenders for whatever reaches SaveSeeds directly.
+			// participants first), not the server's. rejectSeedsOffRoster
+			// above already answers 400 with this same sentinel on this
+			// route, so the arm exists for the store's own floor: SaveSeeds
+			// is the rule's last line and reports it whatever the caller,
+			// and a 500 here would blame the server for the operator's
+			// order of work.
 			if errors.Is(err, state.ErrSeedsWithoutRoster) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return

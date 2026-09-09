@@ -229,6 +229,17 @@ func seedsOffRoster(players []domain.Player, assignments []domain.SeedAssignment
 	if len(assignments) == 0 {
 		return nil
 	}
+	// No roster at all is its own answer, and it must come BEFORE the
+	// per-row scan: against an empty roster every seed reads as a ghost, so
+	// the scan below would hand the operator a list of their own competitors
+	// reported as unknown when the real problem is that the competitor list
+	// does not exist yet. Same sentinel state.SaveSeeds refuses with, so the
+	// rule has one message wherever it is enforced (operator ruling: a
+	// competitor list must exist to define seeds).
+	if len(players) == 0 {
+		return fmt.Errorf("%w. %s", state.ErrSeedsWithoutRoster, remedy)
+	}
+
 	roster := domain.NewRosterIndex(players)
 	var unknown []string
 	for _, a := range assignments {

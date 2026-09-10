@@ -1104,6 +1104,30 @@ type SubMatchResult struct {
 	// (state.upgradePoolMatchSideIDsLocked / upgradeBracketSideIDsLocked,
 	// extended in the same pass that already resolves the match-level
 	// triple) against the two teams' own squads.
+	//
+	// WinnerMemberID IS DIFFERENT FROM ITS TWO NEIGHBOURS AND YOU SHOULD
+	// READ THIS BEFORE WIRING IT INTO ANYTHING. SideAMemberID and
+	// SideBMemberID have real consumers: retirement builds its id set from
+	// them. WinnerMemberID has none. It is written by the repair and by the
+	// kachinuki merge, and read only by MissingMemberID and
+	// ResolveMemberWinnerID, both of which exist to maintain it. Nothing
+	// decides anything with it.
+	//
+	// It cannot usefully acquire a consumer yet, and the reason is not
+	// obvious: ResolveMemberWinnerID derives it from the row's NAMES and
+	// deliberately refuses when both sides hold the same name, which is
+	// precisely the case an id would disambiguate. So for every row where
+	// it is set, the names already agree and using it changes nothing, and
+	// for every row where it would help, it is empty. A change that reads
+	// it "to fix same-name attribution" is inert; one was written, gated
+	// green, and reverted for exactly that.
+	//
+	// What would make it useful is the channel MatchResult already has and
+	// this struct does not: a winner SIDE, stamped by the editor, which
+	// knows unambiguously which side the operator scored. Until then, a
+	// bout between two opposing fighters who share a display name cannot be
+	// attributed from anything stored, and the name comparison's aka-first
+	// order decides it.
 	SideAMemberID  string `json:"sideAMemberId,omitempty" yaml:"side_a_member_id,omitempty"`
 	SideBMemberID  string `json:"sideBMemberId,omitempty" yaml:"side_b_member_id,omitempty"`
 	WinnerMemberID string `json:"winnerMemberId,omitempty" yaml:"winner_member_id,omitempty"`

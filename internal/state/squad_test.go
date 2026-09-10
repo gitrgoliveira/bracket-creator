@@ -361,3 +361,36 @@ func TestSquadMigration_InvalidatesTheSharedLazyCache(t *testing.T) {
 	assert.Equal(t, []string{"Alice", "Bob", "Carol"}, names,
 		"a repair reading squads after the migration must see what the migration wrote")
 }
+
+// TestLegacyUpgradeRoster_CompetitionDoesNotLoadTheRoster pins the split
+// between loadComp and get. The squad migration gates on Kind/TeamSize
+// before it needs a participant, and saveParticipantsNoLock runs that
+// migration on EVERY roster write, so an individual competition must not be
+// charged a participants.csv parse and a RosterIndex build to answer a
+// question config.md already answers.
+//
+// Asserting on the holder's own laziness rather than on timings: r.loaded
+// stays false and r.players stays nil until something actually asks for the
+// roster.
+func TestLegacyUpgradeRoster_CompetitionDoesNotLoadTheRoster(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "", 0, false)
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{Name: "Alice", Dojo: "D"}, {Name: "Bob", Dojo: "D"},
+	}))
+
+	roster := &legacyUpgradeRoster{store: s, compID: id}
+
+	comp, err := roster.competition()
+	require.NoError(t, err)
+	require.NotNil(t, comp, "the competition record must still be returned")
+
+	assert.False(t, roster.loaded, "asking for the competition must not trigger the roster load")
+	assert.Nil(t, roster.players, "no participant should have been parsed yet")
+	assert.Nil(t, roster.index, "no roster index should have been built yet")
+
+	// And the roster still loads correctly when something does ask.
+	players, err := roster.rosterPlayers()
+	require.NoError(t, err)
+	assert.Len(t, players, 2)
+	assert.True(t, roster.loaded)
+}

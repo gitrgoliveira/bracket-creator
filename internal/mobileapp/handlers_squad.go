@@ -12,6 +12,16 @@
 // self-run mode (isSelfRunMainGatedConfigRoute, middleware.go): squad
 // management is organiser setup, not operational play, the same class as
 // team lineup PUT/DELETE.
+//
+// Deliberately NO SSE broadcast, unlike the lineup handlers next door which
+// fire EventLineupUpdated on every mutation. The consequence is real and
+// accepted: a member added or renamed on one device is invisible to a second
+// admin session already sitting in the lineup editor until it remounts.
+// Squad edits are setup done by one organiser, not the concurrent
+// multi-device traffic the lineup broadcast exists for, and adding an event
+// means a new wire event plus a subscriber on every squad reader. Stated
+// here because the omission otherwise reads as an oversight next to a
+// sibling that does broadcast.
 package mobileapp
 
 import (
@@ -128,7 +138,10 @@ func requireExistingCompetitionForSquad(c *gin.Context, comps CompetitionStore, 
 }
 
 // requireValidCompIDAndTeam extracts (compID, teamID) from the URL, 400ing
-// on an empty team id. The URL param is named :tid, matching
+// on an empty team id. Shared by all three readers of this path prefix: the
+// squad handlers below and parseLineupParams/parseMatchLineupParams
+// (handlers_lineup.go), which spelled the same check out by hand until this
+// helper existed. The URL param is named :tid, matching
 // parseLineupParams' own wildcard at this same path prefix
 // ("/competitions/:id/teams/:tid/...") -- gin's router tree refuses two
 // different wildcard names at one path position, so this MUST stay :tid,

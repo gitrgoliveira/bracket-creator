@@ -260,6 +260,8 @@ type legacyUpgradeRoster struct {
 	index      *domain.RosterIndex
 	players    []domain.Player
 	comp       *Competition
+	compLoaded bool
+	compErr    error
 	withZekken bool
 	loadErr    error
 
@@ -284,14 +286,14 @@ func (r *legacyUpgradeRoster) get() (*domain.RosterIndex, error) {
 		return r.index, r.loadErr
 	}
 	r.loaded = true
-	withZekken, comp, err := r.store.withZekkenNameLocked(r.compID)
-	if err != nil || comp == nil {
+	if err := r.loadComp(); err != nil {
 		r.loadErr = err
 		return nil, r.loadErr
 	}
-	r.withZekken = withZekken
-	r.comp = comp
-	players, err := r.store.loadParticipantsNoLock(r.compID, withZekken, LoadParticipantsOpts{HasIDs: comp.ParticipantIDsHint()})
+	if r.comp == nil {
+		return nil, nil
+	}
+	players, err := r.store.loadParticipantsNoLock(r.compID, r.withZekken, LoadParticipantsOpts{HasIDs: r.comp.ParticipantIDsHint()})
 	if err != nil {
 		r.loadErr = err
 		return nil, r.loadErr
@@ -309,11 +311,40 @@ func (r *legacyUpgradeRoster) get() (*domain.RosterIndex, error) {
 // Kind/TeamSize rather than the RosterIndex (upgradeSquadsFromMetadataLocked)
 // share the one load the other steps already pay for, instead of
 // re-reading config.md itself.
+// competition returns the competition record WITHOUT paying for the roster
+// load get() performs. The split matters because upgradeSquadsFromMetadataLocked
+// gates on Kind/TeamSize before it needs a single participant, and
+// saveParticipantsNoLock calls that step on EVERY roster write: charging an
+// individual competition a participants.csv parse and a RosterIndex build to
+// answer a question its config.md already answers is work thrown away on a
+// path the seeding panel hits repeatedly.
 func (r *legacyUpgradeRoster) competition() (*Competition, error) {
-	if _, err := r.get(); err != nil {
+	if err := r.loadComp(); err != nil {
 		return nil, err
 	}
 	return r.comp, nil
+}
+
+// loadComp lazily loads the competition record and the zekken layout flag the
+// roster parse below depends on. Separate from get() so a caller that only
+// needs the record does not trigger the roster read; get() calls it first.
+func (r *legacyUpgradeRoster) loadComp() error {
+	if r.compLoaded {
+		return r.compErr
+	}
+	r.compLoaded = true
+	withZekken, comp, err := r.store.withZekkenNameLocked(r.compID)
+	if err != nil {
+		r.compErr = err
+		return r.compErr
+	}
+	if comp == nil {
+		r.compErr = nil
+		return nil
+	}
+	r.withZekken = withZekken
+	r.comp = comp
+	return nil
 }
 
 // rosterPlayers is competition's twin: it returns the raw, as-loaded player

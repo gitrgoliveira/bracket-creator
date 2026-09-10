@@ -162,12 +162,14 @@ func (t TeamLineup) OrderedRoster(teamSize int) []string {
 // allowedPositionSet returns the valid position keys for a team size: the five
 // FIK names for 5-person teams, else numbered positions 1..teamSize.
 func allowedPositionSet(teamSize int) map[Position]struct{} {
-	if teamSize == 5 {
-		return map[Position]struct{}{PosSenpo: {}, PosJiho: {}, PosChuken: {}, PosFukusho: {}, PosTaisho: {}}
-	}
-	allowed := make(map[Position]struct{}, teamSize)
-	for i := 1; i <= teamSize; i++ {
-		allowed[PositionNumbered(i)] = struct{}{}
+	// Derived from canonicalPositionOrder rather than enumerating the
+	// five-versus-numbered rule a second time: which positions a team size
+	// has is one fact, and a second spelling of it is a second place to
+	// forget when a new team format arrives.
+	order := canonicalPositionOrder(teamSize)
+	allowed := make(map[Position]struct{}, len(order))
+	for _, pos := range order {
+		allowed[pos] = struct{}{}
 	}
 	return allowed
 }

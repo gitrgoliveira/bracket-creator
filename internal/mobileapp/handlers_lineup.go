@@ -407,13 +407,8 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 // composite string and never used as a filesystem path). When team
 // management lands a real validator can be added here.
 func parseLineupParams(c *gin.Context) (compID, teamID string, round int, ok bool) {
-	compID, ok = requireValidCompID(c)
+	compID, teamID, ok = requireValidCompIDAndTeam(c)
 	if !ok {
-		return "", "", 0, false
-	}
-	teamID = c.Param("tid")
-	if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team ID is required"})
 		return "", "", 0, false
 	}
 	roundStr := c.Param("round")
@@ -435,13 +430,8 @@ func parseLineupParams(c *gin.Context) (compID, teamID string, round int, ok boo
 // key and a lookup against persisted match IDs, so no regex is imposed
 // beyond non-empty.
 func parseMatchLineupParams(c *gin.Context) (compID, teamID, matchID string, ok bool) {
-	compID, ok = requireValidCompID(c)
+	compID, teamID, ok = requireValidCompIDAndTeam(c)
 	if !ok {
-		return "", "", "", false
-	}
-	teamID = c.Param("tid")
-	if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team ID is required"})
 		return "", "", "", false
 	}
 	matchID = c.Param("matchId")

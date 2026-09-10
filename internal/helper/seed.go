@@ -1005,17 +1005,20 @@ func ApplySeeds(players []Player, assignments []domain.SeedAssignment) error {
 			seenSeeds[a.SeedRank] = a.Name
 		}
 
-		// The title-casing ceremony is skipped entirely once the row carries
-		// an id: an id does not care how the name was typed, so there is
-		// nothing for it to correct. It stays for the (name, dojo) fallback
-		// below, which still needs it.
-		var p *Player
-		var ok bool
-		if a.ID != "" {
-			p, ok = roster.LookupByID(a.ID)
-		} else {
-			p, ok = roster.Lookup(c.String(a.Name), a.Dojo)
+		// Resolution goes through LookupSeed, the ONE owner of the
+		// id-first-then-(name, dojo) order, rather than restating that order
+		// here -- restating it is what LookupSeed's own doc comment names
+		// this call site as no longer doing.
+		//
+		// The title-casing ceremony is still skipped once the row carries an
+		// id: an id does not care how the name was typed, so there is nothing
+		// for it to correct, and LookupSeed's id branch never reads Name. It
+		// stays for the (name, dojo) fallback, which still needs it.
+		lookup := a
+		if a.ID == "" {
+			lookup.Name = c.String(a.Name)
 		}
+		p, ok := roster.LookupSeed(lookup)
 		if !ok {
 			return fmt.Errorf("seeded participant not found in main list: %s", a.Name)
 		}

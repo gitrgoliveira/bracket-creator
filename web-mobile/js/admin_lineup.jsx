@@ -636,5 +636,5 @@ if (typeof window !== "undefined") {
 
 export {
   AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
-  squadMemberOptions, resolveMemberIdForName, resolveMemberIdsForPositions,
+  resolveMemberIdForName, resolveMemberIdsForPositions,
 };

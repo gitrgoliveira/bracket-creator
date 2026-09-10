@@ -339,7 +339,9 @@ func (r *legacyUpgradeRoster) loadComp() error {
 		return r.compErr
 	}
 	if comp == nil {
-		r.compErr = nil
+		// No competition on disk. Leave r.comp nil rather than stamping the
+		// layout flag off a record that does not exist; both callers branch
+		// on r.comp == nil.
 		return nil
 	}
 	r.withZekken = withZekken

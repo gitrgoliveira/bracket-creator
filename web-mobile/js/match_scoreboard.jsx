@@ -332,6 +332,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   );
 }
 
+// A squad the caller did not supply. Hoisted out of the default prop because a
+// literal there is a NEW array on every render, so every consumer keyed on the
+// prop's identity re-runs for a value that never changed.
+const NO_SQUAD = [];
+
 // BoutSubRow: one FIK bout row: Shiro name | ippon slots · vs · ippon slots | Aka name.
 // TV sizing is driven by the parent `.msb--tv` CSS selector, not a prop.
 // state: "now" | "queued" | "done" (TV highlight only). Names come from the
@@ -352,7 +357,7 @@ function centreMarks(sub, matchSideA, matchSideB) {
 // (empty array / empty string) so a caller that never adopted squads (an
 // individual competition, or a host that has not been updated yet) renders
 // exactly as before.
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki, squadA = [], squadB = [], numberA = "", numberB = "" }) {
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki, squadA = NO_SQUAD, squadB = NO_SQUAD, numberA = "", numberB = "" }) {
   const subSideName = (v) => {
     const n = nameOf(v);
     if (!n) return "";

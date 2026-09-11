@@ -75,8 +75,9 @@ describe('buildInlineLineupWrite', () => {
     // This is the one that matters most: the operator is never blocked by
     // a resolve/mint failure (offline venue wifi).
     const resolveMemberIdsForPositions = vi.fn().mockResolvedValue({
-      memberIds: {}, // the resolver's own mint failed and swallowed the error
+      memberIds: {}, // the resolver's own mint failed and reported it instead
       squad: [],
+      failures: [{ position: 'taisho', name: 'Yamada', reason: 'offline' }],
     });
     global.window.AdminLineupHelpers = { resolveMemberIdsForPositions };
 
@@ -85,6 +86,21 @@ describe('buildInlineLineupWrite', () => {
     expect(out.positions).toEqual({ senpo: 'Sato', taisho: 'Yamada' }); // name written regardless
     expect(out.memberIds).toEqual({ senpo: 'mem-sato' }); // taisho absent, senpo's prior id untouched
     expect('taisho' in out.memberIds).toBe(false);
+    // bc-cse: the failure is carried through, not discarded, so the caller
+    // (submitInlineLineup) can warn without ever blocking this write.
+    expect(out.failures).toEqual([{ position: 'taisho', name: 'Yamada', reason: 'offline' }]);
+  });
+
+  it('propagates NO failures when the resolver reports none', async () => {
+    const resolveMemberIdsForPositions = vi.fn().mockResolvedValue({
+      memberIds: { taisho: 'mem-new' },
+      squad: [{ id: 'mem-new', name: 'Yamada' }],
+      failures: [],
+    });
+    global.window.AdminLineupHelpers = { resolveMemberIdsForPositions };
+
+    const out = await buildInlineLineupWrite('comp1', 'team1', lineup, [], 'taisho', 'Yamada', 'pw');
+    expect(out.failures).toEqual([]);
   });
 
   it('clearing a position (falsy value) removes it from positions AND clears its member id, without calling the resolver', async () => {
@@ -103,6 +119,7 @@ describe('buildInlineLineupWrite', () => {
     const out = await buildInlineLineupWrite('comp1', 'team1', lineup, [], 'taisho', 'Yamada', 'pw');
     expect(out.positions.taisho).toBe('Yamada');
     expect('taisho' in out.memberIds).toBe(false);
+    expect(out.failures).toEqual([]);
   });
 
   it('defense in depth: the write still lands even when the resolver itself REJECTS outright (not just a per-position mint miss)', async () => {
@@ -117,5 +134,9 @@ describe('buildInlineLineupWrite', () => {
     expect(out.positions).toEqual({ senpo: 'Sato', taisho: 'Yamada' });
     expect(out.memberIds).toEqual({ senpo: 'mem-sato' });
     expect('taisho' in out.memberIds).toBe(false);
+    // The resolver rejected outright (never even returned a failures list):
+    // buildInlineLineupWrite's own defense-in-depth catch has nothing to
+    // report, so failures is simply empty, not a fabricated entry.
+    expect(out.failures).toEqual([]);
   });
 });

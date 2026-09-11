@@ -6,7 +6,7 @@
 // mounting anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMemberIdForName, resolveMemberIdsForPositions } from '../admin_lineup.jsx';
+import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning } from '../admin_lineup.jsx';
 
 const SQUAD = [
   { id: 'mem-sato', index: 0, name: 'Sato' },
@@ -78,6 +78,45 @@ describe('resolveMemberIdsForPositions', () => {
     expect(squad).toBe(SQUAD); // the failed mint never touched the squad copy
   });
 
+  it('bc-cse: a FAILING mint is reported in `failures`, carrying the position, the name, and the server\'s own message', async () => {
+    // The resolver used to discard this entirely (see resolveMemberIdsForPositions's
+    // doc comment history). It must now report it WITHOUT throwing and WITHOUT
+    // changing the write-proceeds-anyway behaviour pinned by the test above.
+    const addTeamMember = vi.fn().mockRejectedValue(new Error('sato normalises onto an existing member'));
+    global.window.API = { addTeamMember };
+    const { memberIds, failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { taisho: 'Yamada' }, SQUAD, 'pw'
+    );
+    expect(memberIds.taisho).toBeUndefined();
+    expect(failures).toEqual([
+      { position: 'taisho', name: 'Yamada', reason: 'sato normalises onto an existing member' },
+    ]);
+  });
+
+  it('bc-cse: a resolvable position reports no failure at all, and `failures` is empty when nothing fails', async () => {
+    const addTeamMember = vi.fn();
+    global.window.API = { addTeamMember };
+    const { failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, SQUAD, 'pw'
+    );
+    expect(failures).toEqual([]);
+  });
+
+  it('bc-cse: reports one failures entry PER failed position, alongside the successful ones, never throwing', async () => {
+    const addTeamMember = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('team not found'));
+    global.window.API = { addTeamMember };
+    const { memberIds, failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato', taisho: 'Yamada', jiho: 'Ito' }, SQUAD, 'pw'
+    );
+    expect(memberIds).toEqual({ senpo: 'mem-sato' });
+    expect(failures).toEqual([
+      { position: 'taisho', name: 'Yamada', reason: 'offline' },
+      { position: 'jiho', name: 'Ito', reason: 'team not found' },
+    ]);
+  });
+
   it('mints a repeated new name only ONCE (sequential, not racing a duplicate add)', async () => {
     const minted = { id: 'mem-new', index: 2, name: 'Yamada' };
     const addTeamMember = vi.fn().mockResolvedValue(minted);
@@ -97,5 +136,102 @@ describe('resolveMemberIdsForPositions', () => {
     );
     expect(memberIds).toEqual({});
     expect(addTeamMember).not.toHaveBeenCalled();
+  });
+});
+
+// bc-cse gap closure: memberIdentityWarning is the ONE composer all three
+// lineup-writing surfaces (admin_lineup.jsx, admin_schedule_lineup.jsx,
+// admin_scoring_team.jsx) call to tell the operator a save's squad-member
+// attachment fell short, without ever blocking the save that already
+// succeeded.
+describe('memberIdentityWarning', () => {
+  it('returns "" when nothing failed and the squad loaded fine', () => {
+    expect(memberIdentityWarning([], false)).toBe('');
+  });
+
+  it('names the affected position and fighter, and states the lineup was saved and scores are unaffected', () => {
+    const msg = memberIdentityWarning(
+      [{ position: 'senpo', name: 'Sato', reason: 'sato normalises onto an existing member' }],
+      false,
+    );
+    expect(msg).toContain('Lineup saved');
+    expect(msg).toContain('Senpo');
+    expect(msg).toContain('Sato');
+    expect(msg).toContain('sato normalises onto an existing member');
+    expect(msg).toContain('Scores will still record normally');
+  });
+
+  it('names EVERY affected position and fighter when more than one position failed, not just a count', () => {
+    const msg = memberIdentityWarning(
+      [
+        { position: 'senpo', name: 'Sato', reason: 'request timed out' },
+        { position: 'taisho', name: 'Tanaka', reason: 'team not found' },
+      ],
+      false,
+    );
+    expect(msg).toContain('Senpo');
+    expect(msg).toContain('Sato');
+    expect(msg).toContain('Taisho');
+    expect(msg).toContain('Tanaka');
+    // Never a bare count in place of naming who/what was affected.
+    expect(msg).not.toMatch(/\b2 positions\b/i);
+  });
+
+  it('labels a numeric (non-FIK) position key plainly', () => {
+    const msg = memberIdentityWarning([{ position: '3', name: 'Ito', reason: 'offline' }], false);
+    expect(msg).toContain('Ito');
+    expect(msg).toContain('3');
+  });
+
+  it('produces the ONE root-cause sentence, not a per-position list, when the squad itself could not be loaded', () => {
+    // squadUnavailable wins even when failures also carries entries: those
+    // per-position reasons would all be misleading duplicates of the one
+    // real cause (every name looked "new" because the squad never loaded).
+    const msg = memberIdentityWarning(
+      [
+        { position: 'senpo', name: 'Sato', reason: 'duplicate name' },
+        { position: 'taisho', name: 'Tanaka', reason: 'duplicate name' },
+      ],
+      true,
+    );
+    expect(msg).toContain('Lineup saved');
+    expect(msg).toContain('squad list could not be loaded');
+    expect(msg).toContain('Scores will still record normally');
+    expect(msg).not.toContain('Sato');
+    expect(msg).not.toContain('Tanaka');
+    expect(msg).not.toContain('Senpo');
+  });
+
+  it('the squad-unavailable sentence alone is exactly ONE sentence naming the cause, not a list', () => {
+    const msg = memberIdentityWarning([], true);
+    // "not a per-position list": no position/name placeholders appear, and
+    // the message reads as a single flowing warning rather than enumerated
+    // items (no semicolons/bullets joining multiple clauses).
+    expect(msg).not.toMatch(/;/);
+  });
+
+  it('never uses the word "live" or an em-dash (repo copy rules)', () => {
+    const withFailure = memberIdentityWarning(
+      [{ position: 'senpo', name: 'Sato', reason: 'offline' }], false,
+    );
+    const withSquadDown = memberIdentityWarning([], true);
+    for (const msg of [withFailure, withSquadDown]) {
+      expect(msg.toLowerCase()).not.toContain('live');
+      expect(msg).not.toContain('—'); // em-dash
+    }
+  });
+
+  it('uses operator vocabulary ("squad member"), never internal jargon ("member id")', () => {
+    const msg = memberIdentityWarning(
+      [{ position: 'senpo', name: 'Sato', reason: 'offline' }], false,
+    );
+    expect(msg).toContain('squad member');
+    expect(msg.toLowerCase()).not.toContain('member id');
+  });
+
+  it('ignores entries with no position key defensively (never throws on malformed input)', () => {
+    expect(() => memberIdentityWarning([null, {}, { name: 'Sato' }], false)).not.toThrow();
+    expect(memberIdentityWarning([null, {}, { name: 'Sato' }], false)).toBe('');
+    expect(memberIdentityWarning(undefined, false)).toBe('');
   });
 });

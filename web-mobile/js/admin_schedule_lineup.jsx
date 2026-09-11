@@ -118,6 +118,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
+  // bc-cse gap closure: the composed operator-facing warning shown after a
+  // SUCCESSFUL save whose squad-member attachment fell short (see doSave
+  // below). Deliberately a separate channel from `error`: the save did not
+  // fail, so it must never look like the red error banner above it.
+  const [lineupWarning, setLineupWarning] = useStateA("");
 
   // bc-pnum gap closure: this team's squad, loaded once so save() can
   // resolve a typed/picked name to its member id (see doSave below) --
@@ -127,8 +132,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // fetch failure must not block loading OR saving the lineup itself, so
   // it is swallowed and the resolver (window.AdminLineupHelpers.
   // resolveMemberIdsForPositions) simply mints for every name it cannot
-  // find against an empty list.
+  // find against an empty list. bc-cse: `squadUnavailable` records that this
+  // happened, so doSave's warning names the real root cause instead of
+  // reporting every position the resolver then "failed" to match.
   const [squad, setSquad] = useStateA([]);
+  const [squadUnavailable, setSquadUnavailable] = useStateA(false);
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) return;
@@ -136,7 +144,9 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       try {
         const squads = await window.API.fetchSquads(compId, password);
         if (!cancelled) setSquad((squads && squads[teamId]) || []);
-      } catch (_e) { /* best-effort: resolver mints when nothing is loaded */ }
+      } catch (_e) {
+        if (!cancelled) setSquadUnavailable(true);
+      }
     })();
     return () => { cancelled = true; };
   }, [compId, teamId]);
@@ -187,6 +197,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
   const doSave = async (positionsOut, successMsg = "Match lineup saved") => {
     setError("");
+    setLineupWarning("");
     setSaving(true);
     try {
       // bc-pnum gap closure: resolve each occupied position's name to a
@@ -199,13 +210,17 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // (offline venue wifi -- this panel's whole reason for existing) must
       // never block the save: the helper simply omits that position's id
       // and the write proceeds with the names alone, exactly as it
-      // behaves today.
+      // behaves today. bc-cse: the failure is no longer discarded either --
+      // `memberFailures` carries it through to the warning shown below on
+      // a successful save.
       let memberIdsOut = {};
+      let memberFailures = [];
       try {
         const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
         if (typeof resolver === "function") {
           const resolved = await resolver(compId, teamId, positionsOut, squad, password);
           memberIdsOut = resolved.memberIds || {};
+          memberFailures = resolved.failures || [];
           setSquad(resolved.squad);
         }
       } catch (_e) {
@@ -231,6 +246,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setValues(next);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast(successMsg);
+      const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+      if (typeof composer === "function") {
+        setLineupWarning(composer(memberFailures, squadUnavailable));
+      }
     } catch (e) {
       setError(e?.message || "Failed to save lineup");
     } finally {
@@ -316,6 +335,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       {error && (
         <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 8, padding: "6px 8px", border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
           {error}
+        </div>
+      )}
+
+      {/* Non-blocking: the save above already succeeded. Amber .alert--warn
+          so it can never be mistaken for the red error banner above. */}
+      {lineupWarning && (
+        <div className="alert alert--warn" role="status" data-testid={`match-lineup-warning-${teamId}`} style={{ marginBottom: 8 }}>
+          {lineupWarning}
         </div>
       )}
 

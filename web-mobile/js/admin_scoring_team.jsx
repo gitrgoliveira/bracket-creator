@@ -98,6 +98,10 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
 // -- is pinned directly, without mounting TeamScoreEditorModal, which
 // vitest's hook stubs cannot drive through a full interaction (see
 // tie_button_no_term.test.jsx).
+//
+// bc-cse gap closure: also returns `failures` (the resolver's own, or []
+// when the resolver is unavailable/threw) so submitInlineLineup below can
+// warn the operator on a successful save without ever blocking this one.
 export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password) {
   const existing = lineup?.positions || {};
   const positions = { ...existing };
@@ -106,6 +110,7 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
 
   let resolvedId = null;
   let nextSquad = Array.isArray(squad) ? squad : [];
+  let failures = [];
   if (value) {
     try {
       const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
@@ -113,6 +118,7 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
         const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password);
         nextSquad = resolved.squad;
         resolvedId = resolved.memberIds[posKey] || null;
+        failures = resolved.failures || [];
       }
     } catch (_e) {
       // On top of the helper's own per-position mint catch, because this
@@ -126,7 +132,7 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
     }
   }
   const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
-  return { positions, memberIds, squad: nextSquad };
+  return { positions, memberIds, squad: nextSquad, failures };
 }
 
 function renderTeamBoutMiddle(s, t, isDaihyoRow) {
@@ -886,6 +892,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // made here, mid-encounter, is exactly when a slot's occupant changes.
   const [squadA, setSquadA] = useStateA([]);
   const [squadB, setSquadB] = useStateA([]);
+  // bc-cse gap closure: did the shared fetchSquads call below (both sides,
+  // one request) fail this session? Fed into memberIdentityWarning so an
+  // inline lineup save reports the real root cause instead of a list of
+  // positions the resolver could only ever "fail" to match against an
+  // empty local squad.
+  const [squadUnavailable, setSquadUnavailable] = useStateA(false);
   // T136 / T141: competition lookup so we can branch on teamMatchType
   // ("kachinuki" vs "fixed") and gate the daihyosen affordance on the
   // knockout-format precondition. Falls back to compKind/teamSize when
@@ -895,6 +907,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // 400 not_tied / 400 pool_match / 409 insufficient_eligibility: see
   // handlers_daihyosen.go for the canonical strings.
   const [editorErr, setEditorErr] = useStateA(""); // inline error surface: daihyosen + lineup saves
+  // bc-cse gap closure: the composed operator-facing warning shown after a
+  // SUCCESSFUL inline lineup save whose squad-member attachment fell short
+  // (see submitInlineLineup below). Deliberately separate from editorErr:
+  // the save did not fail, so it must never read like that channel.
+  const [editorWarning, setEditorWarning] = useStateA("");
   const [daihyosenBusy, setDaihyosenBusy] = useStateA(false);
   // mp-4pc: the daihyosen is the only team sub-bout that may be decided
   // by hantei (judges' decision on a tied bout, FIK 7-5 / 29-6: encho
@@ -1216,8 +1233,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // below can resolve a name typed or picked in this modal to its squad
   // member id. Keyed on compMeta rather than the raw sideA/sideB keys so
   // this re-runs once the real team ids are known; a squad fetch failure
-  // must not block scoring, so it is swallowed (the resolver then simply
-  // mints for every name it cannot find against an empty list).
+  // must not block scoring, so it never blocks here either (the resolver
+  // then simply mints for every name it cannot find against an empty
+  // list). bc-cse: `squadUnavailable` records that this happened, so
+  // submitInlineLineup's warning names the real root cause.
   useEffectA(() => {
     let cancelled = false;
     const teamAId = teamIdForSide(m.sideA);
@@ -1229,7 +1248,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         if (cancelled) return;
         if (teamAId) setSquadA((squads && squads[teamAId]) || []);
         if (teamBId) setSquadB((squads && squads[teamBId]) || []);
-      } catch (_e) { /* best-effort: resolver mints when nothing is loaded */ }
+      } catch (_e) {
+        if (!cancelled) setSquadUnavailable(true);
+      }
     })();
     return () => { cancelled = true; };
   }, [m.compId, compMeta]);
@@ -1240,8 +1261,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // always editable; no force/reason needed.
   const submitInlineLineup = async (teamId, lineup, squad, setSquad, posKey, value) => {
     setInlineLineupSaving(true);
+    setEditorWarning("");
     try {
-      const { positions: updated, memberIds: updatedIds, squad: nextSquad } =
+      const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } =
         await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password);
       if (typeof setSquad === "function") setSquad(nextSquad);
       const hasMemberIds = Object.keys(updatedIds).length > 0;
@@ -1254,6 +1276,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         setLineupA(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
       } else {
         setLineupB(prev => ({ ...prev, positions: updated, memberIds: updatedIds }));
+      }
+      // bc-cse gap closure: the write above succeeded (putMatchLineup did
+      // not throw), so this is the non-blocking warning channel, never the
+      // error one -- the save is done, only its squad-member identity
+      // attachment fell short.
+      const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+      if (typeof composer === "function") {
+        setEditorWarning(composer(failures || [], squadUnavailable));
       }
     } catch (e) {
       // Surface error briefly: can't use a toast from inside the modal so
@@ -3137,6 +3167,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               of decisionErr, it shows wherever it is set. */}
           {editorErr && (
             <div data-testid="team-editor-error" className="daihyosen-controls__err" style={{ marginTop: 6 }}>{editorErr}</div>
+          )}
+
+          {/* Non-blocking: the inline lineup save above already succeeded.
+              Amber .alert--warn, a separate channel from editorErr, so it
+              can never be mistaken for that failed-save message. */}
+          {editorWarning && (
+            <div className="alert alert--warn" role="status" data-testid="team-editor-lineup-warning" style={{ marginTop: 6 }}>
+              {editorWarning}
+            </div>
           )}
 
           {/* Ippon-type letter legend: same affordance as the individual

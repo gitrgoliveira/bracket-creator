@@ -71,6 +71,17 @@ function positionsForSize(teamSize) {
   }));
 }
 
+// lineupPositionLabel: the operator-facing name for a position KEY, reusing
+// POS_LABELS_5's own labels (Senpo, Jiho, ...) rather than a second copy of
+// them, so the two can never drift. A numeric-size key (positionsForSize's
+// "1".."N") has no FIK name, so it reads as "Position N": unambiguous on
+// its own outside the table context memberIdentityWarning's callers render
+// it in.
+const POS_LABEL_BY_KEY = POS_LABELS_5.reduce((acc, p) => { acc[p.key] = p.label; return acc; }, {});
+function lineupPositionLabel(posKey) {
+  return POS_LABEL_BY_KEY[posKey] || `Position ${posKey}`;
+}
+
 // Pull the member roster off the team Player object. Retained for the
 // OTHER lineup surface (admin_schedule_lineup.jsx's match-scoped panel,
 // reached via window.AdminLineupHelpers) which has not moved off
@@ -162,22 +173,28 @@ function resolveMemberIdForName(squad, name) {
 // member in the growing local squad copy instead of racing a duplicate add
 // the server would refuse anyway.
 //
-// A mint failure (offline venue wifi, exactly the condition these panels
-// are used under) is swallowed, NOT surfaced. That part is an engineering
-// call, not something the operator ruled on, so it is open to revisiting:
-// the reasoning is that a lineup slot's NAME is the load-bearing half and
-// the id is an enhancement over it, so losing an operator's edit to a
-// failed identity lookup trades the important half away for the lesser one.
-// That position's id is simply omitted from the result -- the lineup write
-// still proceeds with whatever ids resolved, and
-// the load-time legacy-upgrade repair (EnsureLegacyUpgraded) fills the rest
-// in once a participants.csv write re-arms it.
+// A mint failure (offline venue wifi, a typed name that normalises onto an
+// existing member, a team no longer on the roster, a stale password) NEVER
+// blocks the write: the operator ruling for THIS bead is the write half of
+// the question, and it stays exactly as it was -- that position's id is
+// simply omitted from the result, the lineup write still proceeds with
+// whatever ids resolved, and the load-time legacy-upgrade repair
+// (EnsureLegacyUpgraded) fills the rest in once a participants.csv write
+// re-arms it. What changed (bc-cse gap closure) is the WARN half: a failure
+// is no longer discarded, it is reported in `failures` so a caller can tell
+// the operator -- via memberIdentityWarning below -- without ever refusing
+// or retrying the save on its own account.
 //
-// Returns { memberIds, squad }: `squad` is handed back (possibly extended
-// by a mint) so the caller can cache it without a second fetch.
+// Returns { memberIds, squad, failures }: `squad` is handed back (possibly
+// extended by a mint) so the caller can cache it without a second fetch.
+// `failures` is `[{ position, name, reason }]`, one entry per position whose
+// mint failed; `reason` is the server's own message (API.addTeamMember
+// throws with err.error from the response body) -- never a raw Error object
+// or a stack. This function never throws.
 async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password) {
   let currentSquad = Array.isArray(squad) ? squad : [];
   const memberIds = {};
+  const failures = [];
   for (const [posKey, rawName] of Object.entries(positions || {})) {
     const name = (rawName || "").trim();
     if (!name) continue;
@@ -190,11 +207,47 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
       const member = await window.API.addTeamMember(compId, teamId, name, password);
       currentSquad = [...currentSquad, member];
       memberIds[posKey] = member.id;
-    } catch (_e) {
-      // Minting failed: leave this position's id unresolved (see doc above).
+    } catch (e) {
+      // Minting failed: leave this position's id unresolved (see doc above)
+      // and record why.
+      failures.push({ position: posKey, name, reason: (e && e.message) || "" });
     }
   }
-  return { memberIds, squad: currentSquad };
+  return { memberIds, squad: currentSquad, failures };
+}
+
+// memberIdentityWarning composes the ONE operator-facing sentence every
+// lineup-writing surface shows after a save whose squad-member attachment
+// partially or wholly failed (see resolveMemberIdsForPositions above), so
+// admin_lineup.jsx, admin_schedule_lineup.jsx and admin_scoring_team.jsx
+// never grow three different wordings for the same event. Order is fixed by
+// the operator's ruling: the lineup WAS saved, which positions lack an
+// identity and why, then that scores are unaffected. Copy rules this repo
+// enforces: never "live", no em-dashes, "squad member" not "member id"
+// (operator vocabulary, not internal jargon).
+//
+// squadUnavailable takes priority over `failures` and is checked first: when
+// the squad itself could not be loaded this session, EVERY name in the
+// lineup looked new to the resolver, so a per-position list would just be
+// the same root cause repeated once per slot -- misleading, since it reads
+// as N unrelated problems instead of the one real one. One sentence naming
+// the actual cause replaces the whole list in that case.
+//
+// Returns "" when there is nothing to say.
+function memberIdentityWarning(failures, squadUnavailable) {
+  if (squadUnavailable) {
+    return "Lineup saved, but the squad list could not be loaded, so no position could be linked to a squad member this time. Scores will still record normally.";
+  }
+  const list = (Array.isArray(failures) ? failures : []).filter(f => f && f.position);
+  if (list.length === 0) return "";
+  const parts = list.map(f => {
+    const label = lineupPositionLabel(f.position);
+    const who = f.name ? `${label} (${f.name})` : label;
+    return f.reason
+      ? `${who} could not be linked to a squad member (${f.reason})`
+      : `${who} could not be linked to a squad member`;
+  });
+  return `Lineup saved, but ${parts.join(". ")}. Scores will still record normally.`;
 }
 
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
@@ -224,6 +277,16 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [error, setError] = useStateA("");
+  // bc-cse gap closure: did the team's squad fail to load this session? Fed
+  // into memberIdentityWarning below, alongside a save's own per-position
+  // `failures`, so a squad fetch failure -- which otherwise silently leaves
+  // every existing member looking "new" -- is disclosed rather than
+  // discarded. A save is never blocked on it.
+  const [squadUnavailable, setSquadUnavailable] = useStateA(false);
+  // The composed warning shown after a SUCCESSFUL save (see save() below).
+  // Deliberately a separate channel from `error`: the save did not fail,
+  // so it must never read like the red error banner above.
+  const [saveWarning, setSaveWarning] = useStateA("");
 
   // Operation 2 (ADD): which position is mid-add, and the name typed so
   // far. Only one position can be mid-add at a time, an operator works one
@@ -237,11 +300,8 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const [renamingName, setRenamingName] = useStateA("");
   const [renameBusy, setRenameBusy] = useStateA(false);
 
-  // Load the existing lineup AND the team's squad together: the lineup
-  // supplies the current positions/memberIds, the squad supplies the
-  // pickable member list operation 1 (SELECT) needs. 404 on the lineup ->
-  // fresh form (server contract, unchanged); the squad fetch has no such
-  // fallback, an empty/missing squad is simply [].
+  // Load the existing lineup: positions/memberIds. 404 -> fresh form
+  // (server contract, unchanged).
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) {
@@ -250,10 +310,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     }
     (async () => {
       try {
-        const [lineup, squads] = await Promise.all([
-          window.API.fetchTeamLineup(compId, teamId, round),
-          window.API.fetchSquads(compId, password),
-        ]);
+        const lineup = await window.API.fetchTeamLineup(compId, teamId, round);
         if (cancelled) return;
         if (lineup) {
           const nextValues = {};
@@ -265,7 +322,6 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           setValues(nextValues);
           setMemberIds(nextIds);
         }
-        setSquad((squads && squads[teamId]) || []);
       } catch (e) {
         if (!cancelled) setError(e?.message || "Failed to load lineup");
       } finally {
@@ -274,6 +330,27 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     })();
     return () => { cancelled = true; };
   }, [compId, teamId, round]);
+
+  // Load the team's squad: the pickable member list operation 1 (SELECT)
+  // needs. Independent of the lineup load above -- a squad fetch failure
+  // must never block the lineup from loading or the form from being usable
+  // (bc-pnum gap closure); an empty/missing squad is simply []. It DOES mean
+  // the picker shows no existing members this session, so anything typed
+  // through "+ Add new member..." looks new to the resolver even when it
+  // is not; squadUnavailable carries that fact to memberIdentityWarning.
+  useEffectA(() => {
+    let cancelled = false;
+    if (!compId || !teamId) return;
+    (async () => {
+      try {
+        const squads = await window.API.fetchSquads(compId, password);
+        if (!cancelled) setSquad((squads && squads[teamId]) || []);
+      } catch (_e) {
+        if (!cancelled) setSquadUnavailable(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [compId, teamId]);
 
   const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
 
@@ -367,6 +444,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   const save = async () => {
     setError("");
+    setSaveWarning("");
     setSaving(true);
     try {
       // Strip empty positions before sending: an omitted key reads as
@@ -397,6 +475,13 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         return;
       }
       if (typeof showToast === "function") showToast("Lineup saved");
+      // bc-cse gap closure: this surface's own SELECT/ADD/RENAME operations
+      // already surface a mint/rename failure immediately (see commitAdd's
+      // and commitRename's own `error` handling above); what a save here
+      // cannot see is a squad that failed to load THIS session, which is
+      // why memberIdentityWarning is fed `failures: []` unconditionally and
+      // `squadUnavailable` is the one signal that varies.
+      setSaveWarning(memberIdentityWarning([], squadUnavailable));
     } catch (e) {
       setError(e?.message || "Failed to save lineup");
     } finally {
@@ -433,6 +518,16 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       {error && (
         <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
           {error}
+        </div>
+      )}
+
+      {/* Non-blocking: the save above already succeeded. This rides the
+          shared amber .alert--warn treatment so it can never be mistaken
+          for the red error banner above -- the lineup saved fine, only its
+          squad-member identity attachment fell short. */}
+      {saveWarning && (
+        <div className="alert alert--warn" role="status" data-testid="lineup-member-warning" style={{ marginBottom: 12 }}>
+          {saveWarning}
         </div>
       )}
 
@@ -630,11 +725,11 @@ if (typeof window !== "undefined") {
   // at runtime in the browser and in the esbuild bundle).
   window.AdminLineupHelpers = {
     positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
-    resolveMemberIdForName, resolveMemberIdsForPositions,
+    resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning,
   };
 }
 
 export {
   AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
-  resolveMemberIdForName, resolveMemberIdsForPositions,
+  resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning,
 };

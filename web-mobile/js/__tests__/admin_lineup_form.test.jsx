@@ -241,4 +241,38 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
     expect(call[5]).toBeUndefined();
   });
+
+  // bc-cse gap closure: make a silent failure visible, without ever blocking.
+  const memberWarning = (tree) =>
+    findHosts(tree, 'div').find(d => d.props?.['data-testid'] === 'lineup-member-warning');
+
+  it('shows the squad-unavailable warning after a save that still succeeded, when the squad failed to load', async () => {
+    global.window.API.fetchSquads.mockRejectedValue(new Error('network error'));
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' });
+
+    mainSaveButton(tree).props.onClick();
+    await flush();
+
+    const tree2 = runtime.currentTree();
+    // The save itself still succeeded (never blocked by the squad failure).
+    expect(global.window.API.putTeamLineup).toHaveBeenCalled();
+    const warning = memberWarning(tree2);
+    expect(warning).toBeTruthy();
+    const text = collectText(warning);
+    expect(text).toContain('Lineup saved');
+    expect(text).toContain('squad list could not be loaded');
+    expect(text).toContain('Scores will still record normally');
+  });
+
+  it('shows no member-identity warning after an ordinary successful save (squad loaded fine)', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+    const tree2 = runtime.currentTree();
+    mainSaveButton(tree2).props.onClick();
+    await flush();
+    const tree3 = runtime.currentTree();
+    expect(memberWarning(tree3)).toBeFalsy();
+  });
 });

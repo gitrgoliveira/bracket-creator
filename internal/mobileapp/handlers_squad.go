@@ -1,14 +1,14 @@
 // Package mobileapp, handlers_squad.go owns the
 // `/api/competitions/:id/squads` and
 // `/api/competitions/:id/teams/:tid/members[/:memberId]` endpoints
-// (bc-tmid pass 1): a team's squad, the people on it, kept in its own
-// per-competition store (internal/state/squad.go) rather than in
-// Player.Metadata, the untyped array a team's roster row shares with an
-// individual's dan grade -- see state.ErrDuplicateTeamMember's doc comment
-// in participants.go for the data-loss history that store move exists to
-// close.
+// (bc-tmid pass 1; DELETE added bc-pnum): a team's squad, the people on it,
+// kept in its own per-competition store (internal/state/squad.go) rather
+// than in Player.Metadata, the untyped array a team's roster row shares
+// with an individual's dan grade -- see state.ErrDuplicateTeamMember's doc
+// comment in participants.go for the data-loss history that store move
+// exists to close.
 //
-// All three routes are admin-only, and stay main-password-gated even in
+// All four routes are admin-only, and stay main-password-gated even in
 // self-run mode (isSelfRunMainGatedConfigRoute, middleware.go): squad
 // management is organiser setup, not operational play, the same class as
 // team lineup PUT/DELETE.
@@ -41,9 +41,9 @@ type SquadMemberRequest struct {
 	Name string `json:"name"`
 }
 
-// RegisterSquadHandlers wires the GET/POST/PUT squad endpoints under the
-// admin group. comps is used only to turn an unknown competition id into a
-// 404 instead of a confusing 500 from a write that can never land (the
+// RegisterSquadHandlers wires the GET/POST/PUT/DELETE squad endpoints under
+// the admin group. comps is used only to turn an unknown competition id into
+// a 404 instead of a confusing 500 from a write that can never land (the
 // per-competition directory does not exist to write into); mirrors
 // handlers_lineup.go's own comp == nil check.
 func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore) {
@@ -116,6 +116,33 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 		}
 		c.Status(http.StatusNoContent)
 	})
+
+	// DELETE is the operator's "removal": it clears the member's Name back
+	// to "" and leaves ID and Index untouched (bc-pnum), so a bout already
+	// fought that names this position keeps its meaning. Refused with 409
+	// once the competition has started (state.ErrTeamMemberClearAfterStart):
+	// the request itself is well-formed, it is the competition's state that
+	// forbids it, the same reasoning classifyRosterWriteError's other 409s
+	// already use.
+	r.DELETE("/competitions/:id/teams/:tid/members/:memberId", func(c *gin.Context) {
+		compID, teamID, ok := requireValidCompIDAndTeam(c)
+		if !ok {
+			return
+		}
+		if !requireExistingCompetitionForSquad(c, comps, compID) {
+			return
+		}
+		memberID := c.Param("memberId")
+		if memberID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "member ID is required"})
+			return
+		}
+		if err := store.ClearTeamMemberName(compID, teamID, memberID); err != nil {
+			respondSquadWriteError(c, err)
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
 }
 
 // requireExistingCompetitionForSquad 404s when compID names no competition,
@@ -166,10 +193,11 @@ func requireValidCompIDAndTeam(c *gin.Context) (compID, teamID string, ok bool) 
 	return compID, teamID, true
 }
 
-// respondSquadWriteError maps an AddTeamMember/RenameTeamMember error to its
-// HTTP status. ErrTeamNotFound (the team id names no participant) and
-// ErrTeamMemberNotFound are squad-specific (404 each); everything
-// else reuses classifyRosterWriteError's existing sentinel table via
+// respondSquadWriteError maps an AddTeamMember/RenameTeamMember/
+// ClearTeamMemberName error to its HTTP status. ErrTeamNotFound (the team id
+// names no participant), ErrTeamMemberNotFound, and
+// ErrTeamMemberClearAfterStart are squad-specific; everything else reuses
+// classifyRosterWriteError's existing sentinel table via
 // respondRosterWriteError (errors.go) rather than a second hand-copied
 // mapping -- state.ErrDuplicateTeamMember is already classified there as a
 // 409, the same status every OTHER caller of that sentinel gets.
@@ -180,6 +208,12 @@ func respondSquadWriteError(c *gin.Context, err error) {
 	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if errors.Is(err, state.ErrTeamMemberClearAfterStart) {
+		// 409, not 400: the request is well-formed, it is the competition's
+		// current state (already started) that forbids it.
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 	if respondRosterWriteError(c, err) {

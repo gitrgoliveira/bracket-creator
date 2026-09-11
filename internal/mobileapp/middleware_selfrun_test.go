@@ -262,6 +262,9 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		{http.MethodGet, "/api/competitions/some-id/squads"},
 		{http.MethodPost, "/api/competitions/some-id/teams/some-team/members"},
 		{http.MethodPut, "/api/competitions/some-id/teams/some-team/members/some-member"},
+		// bc-pnum: clearing a member's name is the operator's "removal",
+		// same class as the PUT just above.
+		{http.MethodDelete, "/api/competitions/some-id/teams/some-team/members/some-member"},
 	}
 
 	for _, tc := range configRoutes {

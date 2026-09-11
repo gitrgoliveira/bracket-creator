@@ -16,12 +16,25 @@
 // Squad size is unconstrained and independent of the competition's
 // TeamSize (operator ruling 2026-09-09): real teams carry reserves and
 // replacements, so a squad may be larger than however many fight at once.
+// A squad's FLOOR, however, IS the competition's TeamSize (bc-pnum ruling:
+// "by default teams have x team members, as defined in the competition
+// config, and those positions have their numbers"): upgradeSquadsFromMetadataLocked
+// (legacy_upgrade.go) seeds every team up to TeamSize on load, minting an
+// id and a 1-based index for each slot with Name left blank unless already
+// known, and pads (never trims) the squad again if TeamSize is later
+// raised.
 //
-// A member is added, or renamed; there is NO removal operation (operator
-// ruling), so an index once minted is never freed and never reused --
-// AddTeamMember mints max(existing index)+1, never a stored counter (see
-// domain.TeamMember's own doc comment for why a stored "next index" would
-// be derivable state that can disagree with the list it describes).
+// A member is added, renamed, or CLEARED; there is no ENTRY-removal
+// operation (an id/index pair, once minted, is never deleted or reused).
+// "Removal" in the operator's own words is ClearTeamMemberName blanking
+// Name back to "" -- a bout already fought refers to a position by its
+// index, and the label (e.g. "T10.4") must keep meaning what it always
+// meant. AddTeamMember mints max(existing index)+1, never a stored counter
+// (see domain.TeamMember's own doc comment for why a stored "next index"
+// would be derivable state that can disagree with the list it describes).
+// ClearTeamMemberName is refused once the competition has started
+// (state.CanStart(comp.Status) false), the same precondition
+// engine.StartCompetition itself gates on.
 //
 // squads.yaml is deliberately NOT in allowedDrawFiles (competition.go): a
 // team's squad and its draw are independent lifecycles, so discarding the
@@ -41,16 +54,27 @@ import (
 
 const squadsFilename = "squads.yaml"
 
-// ErrTeamMemberNotFound is returned by RenameTeamMember when (teamID,
-// memberID) does not resolve to a stored entry -- either teamID has no
-// squad recorded at all, or it does but no member inside it carries
-// memberID. Both cases collapse to this one sentinel: from the caller's
-// perspective there is nothing to rename either way.
+// ErrTeamMemberNotFound is returned by RenameTeamMember and
+// ClearTeamMemberName when (teamID, memberID) does not resolve to a stored
+// entry -- either teamID has no squad recorded at all, or it does but no
+// member inside it carries memberID. Both cases collapse to this one
+// sentinel: from the caller's perspective there is nothing to rename (or
+// clear) either way.
 var ErrTeamMemberNotFound = errors.New("team member not found")
 
 // ErrTeamNotFound is returned when a squad write names a team id that no
 // participant in this competition carries.
 var ErrTeamNotFound = errors.New("no team with that id in this competition")
+
+// ErrTeamMemberClearAfterStart is returned by ClearTeamMemberName when the
+// competition has already started (state.CanStart(comp.Status) is false --
+// past setup and past a generated-but-not-yet-started draw). Distinct from
+// ErrCompetitionNotInSetup (participants.go), which gates the roster floor
+// on the narrower "still in setup" precondition: a squad clear is allowed
+// through draw-ready too, the same window engine.StartCompetition itself
+// still accepts a one-click start from, so gating this on CanStart rather
+// than requireSetupLocked's stricter check is deliberate, not an oversight.
+var ErrTeamMemberClearAfterStart = errors.New("cannot clear a team member's name once the competition has started")
 
 // squadsFile is the on-disk YAML shape: a single top-level key so the file
 // is self-describing and can grow a sibling key later without a format
@@ -209,9 +233,29 @@ func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
 // participant-roster floor (participants.go), rather than a second
 // hand-rolled scan, so "Sato"/"sato"/" Sato "/"Satō" are refused here
 // exactly as they are there.
+//
+// Blank names are excluded from BOTH sides of the comparison (bc-pnum): a
+// team's squad is seeded with TeamSize members whose Name is blank until
+// filled in or after a clear, so a real team routinely holds several blank
+// names at once. helper.NormalizeParticipantName("") returns "", so without
+// this exclusion every blank slot beyond the first would register as a
+// "duplicate" of the one before it -- refusing the team's own default state,
+// and any later add/rename alongside it, on every team the moment it has
+// TWO blank slots (which is every seeded team, since TeamSize is always
+// >= 2 for a team competition). A blank candidateName is itself never a
+// collision (there is nothing to name yet), so it short-circuits before
+// even excluding blanks from otherNames.
 func squadDuplicateNameCheck(teamID, candidateName string, otherNames []string) error {
+	if strings.TrimSpace(candidateName) == "" {
+		return nil
+	}
 	names := make([]string, 0, len(otherNames)+1)
-	names = append(names, otherNames...)
+	for _, n := range otherNames {
+		if strings.TrimSpace(n) == "" {
+			continue
+		}
+		names = append(names, n)
+	}
 	names = append(names, candidateName)
 	if dupes, _ := helper.DuplicateNamesWithKeys(names); len(dupes) > 0 {
 		// Deliberately does NOT name the team. Both callers act on ONE team
@@ -318,6 +362,73 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 	}
 
 	existing[target].Name = newName
+	squads[teamID] = existing
+	return s.saveSquadsLocked(compID, squads, s.directWrite)
+}
+
+// ClearTeamMemberName is the operator's "removal": it blanks memberID's
+// Name back to "" and leaves ID and Index untouched, so a bout already
+// fought that refers to this position (e.g. "T10.4") keeps meaning what it
+// always meant. It never deletes the entry -- there is no ENTRY-removal
+// operation, see this file's own package doc comment.
+//
+// Returns ErrTeamMemberNotFound when (teamID, memberID) does not resolve
+// (no squad for teamID at all, or no member with that id inside it),
+// matching RenameTeamMember's contract exactly.
+//
+// Refuses with ErrTeamMemberClearAfterStart once the competition has
+// started (state.CanStart(comp.Status) false, checked under this same
+// lock so a concurrent POST .../start landing between an operator's outer
+// check and this call cannot let a clear slip in after all). A missing
+// competition record is treated as "not yet started" (mirrors
+// requireSetupLocked's identical treatment a few lines above in this
+// package), so a fresh test fixture or an in-flight creation still allows
+// a clear rather than refusing on a technicality.
+//
+// Loads the competition through loadCompetitionLocked (competition.go), the
+// no-lock reader, for the same reason requireTeamParticipantLocked above
+// reads the roster through loadParticipantsNoLock: this function already
+// holds the per-comp lock, and LoadCompetition would re-acquire it and
+// deadlock the non-reentrant mutex.
+//
+// Does NOT run squadDuplicateNameCheck: blanking a name can never collide
+// with anything (squadDuplicateNameCheck already treats a blank candidate
+// as never a collision), so the check would be a costly no-op here.
+func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
+	if err := ValidateCompetitionID(compID); err != nil {
+		return err
+	}
+
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil {
+		return err
+	}
+	if comp != nil && !CanStart(comp.Status) {
+		return ErrTeamMemberClearAfterStart
+	}
+
+	squads, err := s.loadSquadsLocked(compID)
+	if err != nil {
+		return err
+	}
+	existing := squads[teamID]
+
+	target := -1
+	for i, m := range existing {
+		if m.ID == memberID {
+			target = i
+			break
+		}
+	}
+	if target == -1 {
+		return ErrTeamMemberNotFound
+	}
+
+	existing[target].Name = ""
 	squads[teamID] = existing
 	return s.saveSquadsLocked(compID, squads, s.directWrite)
 }

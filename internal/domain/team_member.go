@@ -19,8 +19,12 @@ type TeamMember struct {
 	ID string `json:"id" yaml:"id"`
 
 	// Index is the 1-based DISPLAY index, minted once when the member is
-	// added and never reused (there is no member-removal operation,
-	// operator ruling 2026-09-09, so no index is ever freed).
+	// added (or seeded, see below) and never reused: the ENTRY itself is
+	// never removed, so no index is ever freed. "Removal" in the operator's
+	// own words (bc-pnum ruling) is CLEARING Name back to "" -- a bout
+	// already fought refers to a position by this index, and the label
+	// (e.g. "T10.4") must keep meaning what it always meant, which a freed
+	// or reused index would break.
 	//
 	// It is stored rather than derived from the member's position in the
 	// squad slice because the label an operator reads is the team's
@@ -31,20 +35,27 @@ type TeamMember struct {
 	// every other competitor number, while the member's own identity (this
 	// Index, paired with ID) stays fixed underneath it. Deriving Index from
 	// slice position instead would silently renumber every later member
-	// the moment an earlier one was removed -- moot today (there is no
-	// removal), but the reason this field is persisted data rather than a
-	// computed len()-based value is that "no removal" is an operator
-	// RULING, not a language guarantee: the stored index does not need
-	// that ruling to hold forever in order to stay correct.
+	// the moment an earlier one was removed -- moot today (an entry is
+	// never removed), but the reason this field is persisted data rather
+	// than a computed len()-based value is that "no entry removal" is an
+	// operator RULING, not a language guarantee: the stored index does not
+	// need that ruling to hold forever in order to stay correct.
 	//
-	// Do NOT add a "next index" counter alongside this. With no removal,
-	// the next index is always max(existing Index)+1: a stored counter
-	// would be a second, DERIVABLE representation of the same fact, and a
-	// derivable value kept in two places is a value that can disagree with
-	// itself the moment one of the two writes is missed.
+	// Do NOT add a "next index" counter alongside this. With no entry
+	// removal, the next index is always max(existing Index)+1: a stored
+	// counter would be a second, DERIVABLE representation of the same fact,
+	// and a derivable value kept in two places is a value that can disagree
+	// with itself the moment one of the two writes is missed.
 	Index int `json:"index" yaml:"index"`
 
 	// Name is the member's display name. It may be changed by
-	// RenameTeamMember without affecting ID or Index.
+	// RenameTeamMember without affecting ID or Index, and CLEARED back to ""
+	// by ClearTeamMemberName -- the operator's "removal" -- which is
+	// likewise refused from touching ID or Index and, per the same ruling,
+	// refused outright once the competition has started (state.CanStart).
+	// A blank Name is a normal, expected state, not an absence: a team's
+	// squad is SEEDED with the competition's TeamSize members on load
+	// (state.upgradeSquadsFromMetadataLocked), each already carrying its ID
+	// and Index, with Name blank until filled in.
 	Name string `json:"name" yaml:"name"`
 }

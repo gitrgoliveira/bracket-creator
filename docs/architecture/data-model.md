@@ -122,6 +122,10 @@ classDiagram
     TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
+The competition box lists the settings that shape the model, not every field it holds: the
+scheduling, display and format-specific settings are left out because nothing else on this
+page depends on them.
+
 `Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
 competitions. A competition in the `team` kind treats each `Player` entry as a team, and
@@ -293,6 +297,21 @@ member ids beside their names, and the winner's id beside the winner's name. Wit
 a bout between two people who happen to share a display name could not be attributed at
 all, because the name identifies neither of them, and competitors are allowed to share
 one.
+
+Those are two different namespaces, and the field names keep them apart on purpose. A
+match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side
+carries a SQUAD MEMBER id, which names one person inside a team. They sit one level apart
+and are never interchangeable.
+
+The cost of the pattern is worth stating, because it is this model's sharpest edge. A name
+and its id are stored as two fields, or in a lineup's case as two maps keyed by the same
+position, so nothing in the storage forces a writer to set both. A record with a name and
+no id is therefore representable, and does occur: rows written before the id existed, and
+rows whose name could not be resolved to exactly one person. The app treats such a row as
+unrepaired rather than as a fault, repairs what it can when it loads the file, and falls
+back to the name for that row alone. Making the pair a single value instead of two fields
+would remove the state entirely, at the cost of rewriting every stored file, which is why
+it has not been done.
 
 ### Match status and decision
 

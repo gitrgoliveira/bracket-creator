@@ -402,10 +402,15 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 // goes through requireValidCompID to enforce the
 // ValidateCompetitionID character whitelist.
 //
-// teamID is treated as opaque; there's no team-management surface
-// yet, so we don't impose a regex (the on-disk file is keyed by the
-// composite string and never used as a filesystem path). When team
-// management lands a real validator can be added here.
+// teamID is treated as opaque here, and that is now a CHOICE rather than
+// the absence of an alternative: the squad endpoints are a team-management
+// surface and do validate the id against participants.csv
+// (state.AddTeamMember). Lineups deliberately do not follow them. A lineup
+// keyed on an id no team holds is overwritten by the next save for that
+// team and renders nowhere meanwhile, whereas a squad member minted under
+// one can never be removed, so only the irreversible side earns the check.
+// The on-disk file is keyed by the composite string and the id is never
+// used as a filesystem path.
 func parseLineupParams(c *gin.Context) (compID, teamID string, round int, ok bool) {
 	compID, teamID, ok = requireValidCompIDAndTeam(c)
 	if !ok {

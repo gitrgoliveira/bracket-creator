@@ -145,9 +145,14 @@ func requireExistingCompetitionForSquad(c *gin.Context, comps CompetitionStore, 
 // parseLineupParams' own wildcard at this same path prefix
 // ("/competitions/:id/teams/:tid/...") -- gin's router tree refuses two
 // different wildcard names at one path position, so this MUST stay :tid,
-// not :teamId, or route registration panics. teamID is opaque (no
-// team-management surface validates it against participants.csv) and is
-// never used as a filesystem path.
+// not :teamId, or route registration panics.
+//
+// This helper checks the SHAPE of teamID only (non-empty) and never that it
+// names a real team; it is shared by callers that differ on that point. The
+// squad path validates existence downstream, at state.AddTeamMember, because
+// a member minted under a bogus id can never be removed. The lineup paths
+// deliberately do not, because a lineup keyed on a bogus id is overwritable.
+// teamID is never used as a filesystem path on either.
 func requireValidCompIDAndTeam(c *gin.Context) (compID, teamID string, ok bool) {
 	compID, ok = requireValidCompID(c)
 	if !ok {

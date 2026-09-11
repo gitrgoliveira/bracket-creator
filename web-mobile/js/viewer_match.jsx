@@ -102,8 +102,10 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   const isDone = match.status === "completed";
 
   // mp-13y: fetch per-match lineups for team matches so bout rows show
-  // competitor names instead of bout numbers.
-  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
+  // competitor names instead of bout numbers. bc-pnum: squadA/squadB ride
+  // along the same fetch (this card passes no `competition`, so
+  // useTeamLineups resolves squads off its own fetchCompetitionDetails call).
+  const { lineupA, lineupB, squadA, squadB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
   // Show the Daihyosen row when a rep-bout subResult exists (position DAIHYOSEN_POSITION);
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
@@ -155,6 +157,8 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
             teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
+            squadA={squadA} squadB={squadB}
+            numberA={match.sideA?.number || ""} numberB={match.sideB?.number || ""}
             kachinuki={match.teamMatchType === "kachinuki"} />
         : <IndividualScore match={match} variant="card" showNames showDojo
             shiroName={bName} akaName={aName} />}

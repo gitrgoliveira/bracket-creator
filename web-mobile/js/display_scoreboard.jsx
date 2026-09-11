@@ -60,7 +60,7 @@ function LinkDot({ linkState }) {
     );
 }
 
-function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, teamSize, showDH, queueMatches, zekken }) {
+function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, squadA, squadB, teamSize, showDH, queueMatches, zekken }) {
     const shiroTeam = sideLabel(promoted.match.sideB, zekken);
     const akaTeam = sideLabel(promoted.match.sideA, zekken);
     // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
@@ -143,6 +143,8 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         shiroName={shiroTeam} akaName={akaTeam}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
                         matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
+                        squadA={squadA} squadB={squadB}
+                        numberA={promoted.match.sideA?.number || ""} numberB={promoted.match.sideB?.number || ""}
                         kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
                 </div>
             ) : (
@@ -578,9 +580,12 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
     const teamSize = (promoted && promoted.competition && promoted.competition.teamSize) || 0;
 
     // mp-13y: fetch lineups for the running team match. useTeamLineups
-    // degrades gracefully (returns null/null) when the promoted slot is
-    // not a team match or when window.API is unavailable.
-    const { lineupA, lineupB } = useTeamLineups(
+    // degrades gracefully (returns null/null/[]/[]) when the promoted slot is
+    // not a team match or when window.API is unavailable. bc-pnum: squadA/
+    // squadB ride the same fetch, resolved off promoted.competition.squads
+    // (the aggregate item this surface consumes, per api_client.jsx's
+    // normalizeViewerCompItem).
+    const { lineupA, lineupB, squadA, squadB } = useTeamLineups(
         isTeamMatch && promoted && promoted.match ? promoted.match : null,
         isTeamMatch && promoted ? promoted.competition : null,
         promoted ? promoted.roundIndex : undefined
@@ -639,7 +644,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
             return <TvWhiteBoard
                 tournament={tournament} court={court} linkState={linkState}
                 promoted={promoted} isTeamMatch={isTeamMatch}
-                subResults={subResults} lineupA={lineupA} lineupB={lineupB} teamSize={teamSize}
+                subResults={subResults} lineupA={lineupA} lineupB={lineupB} squadA={squadA} squadB={squadB} teamSize={teamSize}
                 showDH={showDH} queueMatches={queueMatches} zekken={zekken}
             />;
         }

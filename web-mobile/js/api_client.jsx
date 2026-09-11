@@ -98,6 +98,17 @@ function normalizeViewerCompItem(item) {
         // inside one of them. Hoisted like poolMatches so the console can
         // render the notice off the flattened competition it already has.
         dataIssues: item.dataIssues,
+        // bc-pnum: squads is ALSO a sibling of config on the wire (present
+        // only for a team competition, keyed by the team's participant id --
+        // handlers_viewer.go's buildViewerCompetitionPayload), so it must be
+        // hoisted exactly like poolMatches/bracket/dataIssues above or it is
+        // silently dropped here: `c` (item.config) never carries it, and
+        // normalizeCompetitionDetail's `{...data}` spread only preserves
+        // whatever this function hands it. Without this, TvDisplay and
+        // StreamingOverlay (which consume this normalized shape via
+        // tournament.competitions, app.jsx's `t.competitions = comps`) could
+        // never see the squads the aggregate/court-feed payload now carries.
+        squads: item.squads,
         players: (c.players || []).map(normalizePlayer),
     });
 }

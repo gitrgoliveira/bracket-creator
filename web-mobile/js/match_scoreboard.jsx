@@ -17,10 +17,20 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+
+// bc-pnum: inline style for the squad member label riding beside a bout
+// row's fighter name (BoutSubRow below), the public twin of
+// admin_scoring_team.jsx's identical SQUAD_MEMBER_LABEL_STYLE badge. Kept
+// local (not imported) since importing from an admin_*.jsx module into this
+// PUBLIC-surface shared component is exactly the layering lineup_resolver.jsx's
+// own header warns against for admin_lineup.jsx specifically -- the same
+// reasoning applies to any admin panel. `em` sizing (rather than a fixed px)
+// scales with the name it rides beside across variant="card"/"tv".
+const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75, marginRight: "0.35em" };
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -34,9 +44,20 @@ export function boutHansokuMark(foulCount) {
 // useTeamLineups: fetch per-match lineups for both sides of a team match.
 // Unifies the former viewer useTeamLineups + display useTvTeamLineups: pass the
 // competition explicitly when available (TV/SSE), else it falls back to
-// match.compId (viewer). Returns { lineupA, lineupB }; degrades to null/null
-// when window.API is unavailable (public surfaces) → callers fall back to bout
-// numbers.
+// match.compId (viewer). Returns { lineupA, lineupB, squadA, squadB };
+// degrades to null/null/[]/[] when window.API is unavailable (public
+// surfaces) → callers fall back to bout numbers and no squad labels.
+//
+// squadA/squadB (bc-pnum: extend the squad member label to the public
+// surfaces) are resolved from the SAME source the players list already
+// comes from: the passed `competition.squads` when present (TvDisplay /
+// StreamingOverlay carry the aggregate item, which now carries it), else
+// the `fetchCompetitionDetails` fallback fetch's own top-level `squads`
+// (the viewer card, which never gets a `competition` prop at all). Both are
+// the identical {teamParticipantId: [{id,index,name}]} shape the public
+// viewer payload carries only for a team competition, so an individual
+// competition (or a payload predating this field) simply yields {} and
+// every lookup below degrades to [].
 //
 // `roundIndex` (optional, 0-based) is the authoritative round for the
 // round-scoped lineup fallback. Callers that know the bracket round (the TV
@@ -46,6 +67,8 @@ export function boutHansokuMark(foulCount) {
 export function useTeamLineups(match, competition, roundIndex) {
   const [lineupA, setLineupA] = useSB(null);
   const [lineupB, setLineupB] = useSB(null);
+  const [squadA, setSquadA] = useSB([]);
+  const [squadB, setSquadB] = useSB([]);
   const [lineupVersion, setLineupVersion] = useSB(0);
 
   const compId = (competition && competition.id) || match?.compId;
@@ -83,6 +106,8 @@ export function useTeamLineups(match, competition, roundIndex) {
     // into the next render (Copilot review: stale lineup state).
     setLineupA(null);
     setLineupB(null);
+    setSquadA([]);
+    setSquadB([]);
     if (!compId || !matchId || !window.API) return undefined;
     let cancelled = false;
     (async () => {
@@ -92,6 +117,11 @@ export function useTeamLineups(match, competition, roundIndex) {
       let players = (competition && competition.players && competition.players.length)
         ? competition.players
         : [];
+      // squads (bc-pnum): prefer the passed competition's own squads map
+      // (present only for a team competition); only fall through to the
+      // detail fetch's squads when the caller passed no competition at all
+      // (the viewer card) or it carried no squads of its own.
+      let squadsMap = (competition && competition.squads) || null;
       if (!players.length) {
         try {
           const detail = await window.API.fetchCompetitionDetails(compId);
@@ -100,6 +130,7 @@ export function useTeamLineups(match, competition, roundIndex) {
             (detail && detail.players && detail.players.length ? detail.players : null)
             || (detail && detail.config && detail.config.players)
             || [];
+          if (!squadsMap) squadsMap = (detail && detail.squads) || null;
         } catch (_e) {
           console.warn("useTeamLineups: competition fetch failed", _e);
         }
@@ -129,13 +160,16 @@ export function useTeamLineups(match, competition, roundIndex) {
       if (cancelled) return;
       if (teamAId) setLineupA(la);
       if (teamBId) setLineupB(lb);
+      const squads = squadsMap || {};
+      if (teamAId) setSquadA(squads[teamAId] || []);
+      if (teamBId) setSquadB(squads[teamBId] || []);
     })();
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round
     // change on a reused match id must re-run the effect.
   }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion]);
 
-  return { lineupA, lineupB };
+  return { lineupA, lineupB, squadA, squadB };
 }
 
 // Real ippon letters for a side (realIppons, the shared leaf filter), capped
@@ -309,7 +343,16 @@ function centreMarks(sub, matchSideA, matchSideB) {
 // Lineup fallback is used ONLY for the index-0 bootstrap (the initial
 // senpo-vs-senpo pairing); later rows must never show position-N lineup
 // names because kachinuki bouts are winner-stays, not position-keyed.
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki }) {
+//
+// squadA/squadB (bc-pnum: extend the squad member label to the public
+// surfaces, operator ruling "visible everywhere, together with the name")
+// are the team's squad member lists ({id,index,name}[], from useTeamLineups);
+// numberA/numberB are the team's own competitor numbers (side.number, the
+// SAME field withNumber already reads). All four default to "no label"
+// (empty array / empty string) so a caller that never adopted squads (an
+// individual competition, or a host that has not been updated yet) renders
+// exactly as before.
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki, squadA = [], squadB = [], numberA = "", numberB = "" }) {
   const subSideName = (v) => {
     const n = nameOf(v);
     if (!n) return "";
@@ -327,12 +370,31 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // server-driven kachinuki bout, so never blank its lineup pick (the DH row is
   // rendered without the kachinuki prop today, but !isDH keeps this correct if
   // a caller ever passes it).
-  const lineupNameFor = (lu) =>
-    kachinukiHidesLineupPosition(kachinuki, isDH, index) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
+  const lineupHidden = kachinukiHidesLineupPosition(kachinuki, isDH, index);
+  const lineupNameFor = (lu) => lineupHidden ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
   const resolveSide = (subSide, lu) =>
     resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);
   const akaName = resolveSide(sub && sub.sideA, lineupA);
+  // The squad member label rides beside the SAME name resolved above, via the
+  // ONE shared composer (resolveBoutSideSquadLabel, lineup_resolver.jsx): the
+  // member id comes from the SAME kachinuki/fixed-format tier the name used
+  // (sub.sideBMemberId/sub.sideAMemberId are the server-recorded ids,
+  // pickMemberIdFromLineup the lineup-pinned ones, gated on the SAME
+  // lineupHidden flag as the name), falling back to matching the resolved
+  // NAME against the squad when no id resolved at all.
+  const shiroLabel = resolveBoutSideSquadLabel({
+    isKachinuki: kachinuki, isDaihyosen: isDH,
+    existingMemberId: (sub && sub.sideBMemberId) || "",
+    lineupMemberId: lineupHidden ? "" : pickMemberIdFromLineup(lineupB, index, teamSize),
+    squad: squadB, name: shiroName, teamNumber: numberB,
+  });
+  const akaLabel = resolveBoutSideSquadLabel({
+    isKachinuki: kachinuki, isDaihyosen: isDH,
+    existingMemberId: (sub && sub.sideAMemberId) || "",
+    lineupMemberId: lineupHidden ? "" : pickMemberIdFromLineup(lineupA, index, teamSize),
+    squad: squadA, name: akaName, teamNumber: numberA,
+  });
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"
@@ -341,9 +403,15 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     + (isDH ? " msb-row--dh" : "");
   return (
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
-      <span className="msb-name" data-testid="sub-shiro-name">{shiroName}</span>
+      <span className="msb-name">
+        {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
+        <span data-testid="sub-shiro-name">{shiroName}</span>
+      </span>
       {centreMarks(sub, matchSideA, matchSideB)}
-      <span className="msb-name msb-name--aka" data-testid="sub-aka-name">{akaName}</span>
+      <span className="msb-name msb-name--aka">
+        {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-a">{akaLabel}</span>}
+        <span data-testid="sub-aka-name">{akaName}</span>
+      </span>
     </div>
   );
 }
@@ -487,7 +555,11 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
 // kachinuki (boolean, default false): when true the match uses winner-stays
 // ordering. Row count is driven by recorded bouts (never padded to teamSize)
 // and name resolution is server-bout-first (see BoutSubRow).
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
+//
+// squadA/squadB/numberA/numberB (bc-pnum): threaded straight through to every
+// BoutSubRow, which is where the label is actually composed and rendered;
+// see that component's header for the props' shape and defaults.
+export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
@@ -565,7 +637,8 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           lineup name when present, else the bout number (mp-13y #4/#6). */}
       {Array.from({ length: rowCount }, (_, i) => (
         <BoutSubRow key={i} sub={regular[i] || {}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki} />
+          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki}
+          squadA={squadA} squadB={squadB} numberA={numberA} numberB={numberB} />
       ))}
 
       {/* Rep bout (knockout tie only). No separate "DAIHYOSEN" text banner:
@@ -578,7 +651,8 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       {renderDH && (dhSub
         ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
             index={regular.length} lineupA={lineupA} lineupB={lineupB}
-            teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
+            teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB}
+            squadA={squadA} squadB={squadB} numberA={numberA} numberB={numberB} />
         : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>)}
     </div>
   );

@@ -3,7 +3,7 @@
 
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
-import { pickFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
+import { pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { realIppons, nameOf } from './result_slot.jsx';
 
@@ -93,8 +93,11 @@ function StreamingOverlay({ court, position, competitions }) {
     const isTeamMatch = !!(comp && (comp.kind === "team" || comp.teamSize > 0));
     const teamSizeOvl = (comp && comp.teamSize) || 0;
 
-    // mp-13y: per-match lineups for team overlay.
-    const { lineupA: ovlLineupA, lineupB: ovlLineupB } = useTeamLineups(
+    // mp-13y: per-match lineups for team overlay. bc-pnum: squadA/squadB ride
+    // the same fetch, resolved off comp.squads (findRunningOnCourt's own
+    // `competition`, i.e. the SAME aggregate item normalizeViewerCompItem
+    // now hoists squads onto).
+    const { lineupA: ovlLineupA, lineupB: ovlLineupB, squadA: ovlSquadA, squadB: ovlSquadB } = useTeamLineups(
         isTeamMatch && hasRunning ? running.match : null,
         isTeamMatch && hasRunning ? comp : null,
         hasRunning ? running.roundIndex : undefined
@@ -150,6 +153,13 @@ function StreamingOverlay({ court, position, competitions }) {
     const subSideName = nameOf;
     const boutPosLabel = currentSub ? overlayPositionLabel(teamSizeOvl, currentBoutIdx, currentSub) : (dhPending ? 'Daihyosen' : '');
     let boutShiroName, boutAkaName;
+    // bc-pnum: the squad member label riding beside the current bout's
+    // fighter name (operator ruling: "visible everywhere, together with the
+    // name"). "" for anything other than a real in-progress team bout: the
+    // fallback labels (bout number / FIK position / "Daihyosen") name no
+    // squad member, so resolveBoutSideSquadLabel's own no-match path already
+    // returns "" for them, but there is no member id to resolve there either.
+    let boutShiroLabel = "", boutAkaLabel = "";
     if (isTeamMatch && currentSub) {
         // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki
         // numbered bouts are server-bout-first with the lineup only seeding the
@@ -165,6 +175,22 @@ function StreamingOverlay({ court, position, competitions }) {
         const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;
         boutShiroName = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) }) || ovlFallback;
         boutAkaName   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) }) || ovlFallback;
+        // The member id mirrors the SAME kachinuki/fixed-format tier the name
+        // above used (existingMemberId from the sub's own recorded id,
+        // lineupMemberId gated on the SAME ovlHidesLineup flag), so the label
+        // can never name a different fighter than boutShiroName/boutAkaName.
+        boutShiroLabel = resolveBoutSideSquadLabel({
+            isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout,
+            existingMemberId: currentSub.sideBMemberId || "",
+            lineupMemberId: ovlHidesLineup ? "" : pickMemberIdFromLineup(ovlLineupB, currentBoutIdx, teamSizeOvl),
+            squad: ovlSquadB, name: boutShiroName, teamNumber: running.match.sideB?.number || "",
+        });
+        boutAkaLabel = resolveBoutSideSquadLabel({
+            isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout,
+            existingMemberId: currentSub.sideAMemberId || "",
+            lineupMemberId: ovlHidesLineup ? "" : pickMemberIdFromLineup(ovlLineupA, currentBoutIdx, teamSizeOvl),
+            squad: ovlSquadA, name: boutAkaName, teamNumber: running.match.sideA?.number || "",
+        });
     } else {
         boutShiroName = dhPending ? boutPosLabel : '';
         boutAkaName   = dhPending ? boutPosLabel : '';
@@ -250,7 +276,10 @@ function StreamingOverlay({ court, position, competitions }) {
                             <span data-testid="overlay-shiro-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
-                            <span style={{ fontSize: '1.9vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutShiroName}</span>
+                            <span style={{ fontSize: '1.9vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {boutShiroLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginRight: '0.35em' }} data-testid="overlay-shiro-member-label">{boutShiroLabel}</span>}
+                                {boutShiroName}
+                            </span>
                             <span data-testid="overlay-shiro-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsB}</span>
                         </div>
                     </div>
@@ -268,7 +297,10 @@ function StreamingOverlay({ court, position, competitions }) {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
                             <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsA}</span>
-                            <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{boutAkaName}</span>
+                            <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {boutAkaLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginRight: '0.35em' }} data-testid="overlay-aka-member-label">{boutAkaLabel}</span>}
+                                {boutAkaName}
+                            </span>
                         </div>
                     </div>
                 </>

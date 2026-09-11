@@ -10,9 +10,13 @@
 //   API.fetchTeamLineup(compId, teamId, round)    → lineup | null
 //
 // Lineup shape:
-//   { teamId, positions: { [posKey]: playerName } }
+//   { teamId, positions: { [posKey]: playerName }, memberIds: { [posKey]: memberId } }
 // where posKey is a named FIK position ("senpo", "jiho", ...) for 5-person
-// teams, or a numeric string "1".."N" for other sizes.
+// teams, or a numeric string "1".."N" for other sizes. `memberIds` is the
+// squad member id half of a lineup pick (bc-tmid pass 3), keyed by the SAME
+// posKey as `positions`; a lineup saved before squads existed simply omits it.
+
+import { squadMemberLabel } from './squad_member_label.jsx';
 
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
@@ -110,6 +114,23 @@ export function pickFromLineup(lineup, index, teamSize) {
   return "";
 }
 
+// pickMemberIdFromLineup: the memberIds twin of pickFromLineup, resolving the
+// squad MEMBER ID pinned at a lineup position rather than the name. Mirrors
+// the SAME posKey5/numeric priority so the id can only ever pair with the
+// name pickFromLineup resolves from the SAME position for the SAME row.
+// Returns "" when the lineup carries no memberIds map (a lineup saved before
+// squads existed) or no entry at that position.
+export function pickMemberIdFromLineup(lineup, index, teamSize) {
+  if (!lineup || !lineup.memberIds) return "";
+  if (teamSize === 5 && index >= 0 && index < 5) {
+    const named = lineup.memberIds[POS_KEYS_5[index]];
+    if (named) return named;
+  }
+  const numeric = lineup.memberIds[String(index + 1)];
+  if (numeric) return numeric;
+  return "";
+}
+
 // resolveBoutSideMemberId: which squad MEMBER ID identifies one side of a
 // sub-bout row (bc-pnum: extend the squad member label -- squadMemberLabel,
 // squad_member_label.jsx -- to the team scoring surfaces). MIRRORS
@@ -146,4 +167,22 @@ export function resolveSquadMember(squad, memberId, name) {
   }
   if (!name) return null;
   return list.find(mem => mem && mem.name === name) || null;
+}
+
+// resolveBoutSideSquadLabel: the squad member label riding beside a bout
+// row's fighter name on the PUBLIC surfaces (operator ruling: "the label
+// must be visible everywhere, together with the name"). Composes the same
+// chain every consumer must use, so the composition is stated once: first
+// resolveBoutSideMemberId (the member id, through the SAME kachinuki/
+// fixed-format tier resolveBoutSideName used for the name -- an id must
+// never label a different fighter than the name shown beside it), then
+// resolveSquadMember (id first, an exact name fallback -- squad member
+// names are unique within one team, so the fallback needs no second key),
+// then squadMemberLabel (the one "number.index" composer). Returns "" when
+// the fighter matches no squad member or the team carries no competitor
+// number yet -- never a stray separator.
+export function resolveBoutSideSquadLabel({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId, squad, name, teamNumber }) {
+  const memberId = resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId });
+  const member = resolveSquadMember(squad, memberId, name);
+  return member ? squadMemberLabel(teamNumber, member.index) : "";
 }

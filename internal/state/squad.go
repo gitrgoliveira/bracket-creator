@@ -214,7 +214,14 @@ func squadDuplicateNameCheck(teamID, candidateName string, otherNames []string) 
 	names = append(names, otherNames...)
 	names = append(names, candidateName)
 	if dupes, _ := helper.DuplicateNamesWithKeys(names); len(dupes) > 0 {
-		return fmt.Errorf("%w: team %q already has a member named %q", ErrDuplicateTeamMember, teamID, candidateName)
+		// Deliberately does NOT name the team. Both callers act on ONE team
+		// the caller already identified, and this message is shown to the
+		// operator verbatim inside the lineup warning, where the only id
+		// available here is the team's UUID: a raw identifier dropped into
+		// the middle of a sentence about a fighter is noise the operator
+		// cannot act on. The surrounding warning already names the position
+		// and the person.
+		return fmt.Errorf("%w: %q is already on this team", ErrDuplicateTeamMember, candidateName)
 	}
 	return nil
 }

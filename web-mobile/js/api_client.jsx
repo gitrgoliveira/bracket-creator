@@ -2911,8 +2911,9 @@ const API = {
     },
     // Mints the new member's id and display index server-side in one step
     // (operator ruling: assigned automatically as members are added) and
-    // returns the created {id, index, name}. There is no removal
-    // counterpart: indices are never freed once minted.
+    // returns the created {id, index, name}. clearTeamMember below is the
+    // nearest counterpart and only blanks a name: an index, once minted, is
+    // never freed.
     async addTeamMember(compID, teamId, name, password) {
         const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members`, {
             method: 'POST',

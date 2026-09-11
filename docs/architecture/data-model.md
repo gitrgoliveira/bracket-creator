@@ -116,11 +116,20 @@ id.
 
 Each squad member carries a stable id, minted once when the member is added and never
 reused, and a display index. The id is what a lineup position and a bout row record, so a
-member can be renamed without any record losing track of who fought. There is no way to
-remove a member, which is why an index is never freed and no renumbering question arises.
+member can be renamed without any record losing track of who fought. A squad is seeded with
+one member per position the competition's team size defines, so a team has its shape before
+anyone is named. No member is ever removed, which is why an index is never freed and no
+renumbering question arises; what an organiser can do instead is clear a name, which empties
+that position and keeps its id and index, and only until the competition starts. After that
+the names are fixed, so a bout already fought always names the same person. Adding a member
+stays available at any time, including after the start, because a team fields replacements
+mid tournament.
+
 The label an organiser reads is the team's competitor number followed by the member index,
 for example `T10.1`. That label is composed when it is shown and never stored, because a
-competitor number can change and the identity underneath it cannot.
+competitor number can change and the identity underneath it cannot. It is derived the same
+way on both sides: the public surfaces receive a team's squad on the viewer payload and
+compose the label themselves, rather than reading a stored string.
 
 Two rules govern member names. Within one team the names must be unique: a name is how an
 organiser picks a member, and the winner-stays-on format has to tell two teammates apart.

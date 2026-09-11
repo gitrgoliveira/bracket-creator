@@ -92,7 +92,7 @@ tournament-data/
     ├── bracket.json               Elimination bracket structure + results
     ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
     ├── lineups.yaml               Team lineups, keyed by round; a position holds a name AND a member id
-    ├── squads.yaml                A team's members, keyed by the team's participant id; each has a stable id and a display index, and there is no removal
+    ├── squads.yaml                A team's members, keyed by the team's participant id; each has a stable id and a display index. Positions are seeded from the competition's team size and the squad may grow past it; a member is never deleted, and a name may be cleared (position and index survive) only before the competition starts
     └── overrides.json             Manual ranking overrides
 ```
 

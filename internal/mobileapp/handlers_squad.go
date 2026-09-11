@@ -22,6 +22,14 @@
 // means a new wire event plus a subscriber on every squad reader. Stated
 // here because the omission otherwise reads as an oversight next to a
 // sibling that does broadcast.
+//
+// The public surfaces do not call these routes at all: the viewer, the
+// court display and the streaming overlay read a team's squad from the
+// viewer payload (handlers_viewer.go). They inherit the same consequence.
+// Nothing here fires an event and the SPA has no data poll, so a squad
+// edit reaches them only on their next payload fetch, which some OTHER
+// broadcast triggers. Same trade, same reason: this is setup, and the
+// label it feeds is enrichment beside a name that is already correct.
 package mobileapp
 
 import (

@@ -193,10 +193,11 @@ func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamM
 // competition carries. Caller MUST hold the per-competition lock.
 //
 // The check belongs HERE rather than in the handler above it because
-// AddTeamMember is the one door that MINTS a member, and there is no removal
-// operation: a member created under an id no team holds could never be
-// cleaned up through the app, so a mistyped id would write permanent,
-// unreachable data. RenameTeamMember needs no equivalent, since a team with
+// AddTeamMember is the one door that MINTS a member, and nothing ever
+// deletes one (ClearTeamMemberName blanks a name and keeps the slot): a
+// member created under an id no team holds could never be cleaned up
+// through the app, so a mistyped id would write permanent, unreachable
+// data. RenameTeamMember needs no equivalent, since a team with
 // no squad already fails its member lookup.
 //
 // Reads the roster through the no-lock loader for the reason SaveSeeds does

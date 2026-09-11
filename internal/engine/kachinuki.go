@@ -307,6 +307,16 @@ func (r RetiredMemberSet) retire(name, memberID string) {
 // retired, so IsMemberRetired refuses to act on it. Members of one team may
 // legally share a display name -- the uniqueness rule is grandfathered, so
 // rosters written before it exist and still load.
+//
+// Deliberately not helper.DuplicateNamesWithKeys, which answers a nearby
+// question differently: it folds names through NormalizeParticipantName and
+// reports the FIRST-SEEN label of each duplicate group. Both differences
+// break this use. The set it gates (RetiredMemberSet.Names) holds the raw
+// names bout rows store, and the lookup compares a fighter's own raw name
+// against it, so a normalised set would be keyed differently from the thing
+// it guards; and a first-seen label misses the other spellings, which is the
+// silent-miss direction. Reusing it would mean normalising the retirement
+// comparison too, a change to what that set means rather than a tidy-up.
 func ambiguousFighterNames(roster []kachinukiFighter) map[string]struct{} {
 	count := make(map[string]int, len(roster))
 	for _, f := range roster {

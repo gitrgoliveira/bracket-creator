@@ -12,26 +12,37 @@ Each team encounter has its own lineup. To carry over the same order from the pr
 
 ### The squad
 
-A team's people are its squad. You build it as you go: pick an existing member
+A team's people are its squad. A team starts with one position per fighter the
+competition's team size defines, each numbered and waiting for a name. Fill those
+names in from the **Squad members** section of the competition's **Settings**
+page, or build the squad as you go from the lineup panel: pick an existing member
 for a position, or type a new name into a position and the app adds that person
-to the squad in the same step.
+to the squad in the same step. Adding someone new is confirmed first, so a
+mistyped name cannot quietly create a person nobody expected.
 
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person
 after the change, so you can correct a spelling or switch to a full name mid
-tournament without disturbing results already recorded.
+tournament without disturbing results already recorded. Rename from either
+place, at any time.
+
+Nobody is removed from a squad. What you can do instead is clear a name, which
+empties that position and keeps its number, and you can only do that before the
+competition starts. Once it has started every name stays, so a bout already
+fought always names the same person. An unused member is harmless: they simply
+never appear in a lineup.
 
 The squad can be larger than the number of positions a round has. Add the
 replacements a team brings and field whichever of them you need in each
-encounter.
+encounter. You can add a member after the competition has started, which is how
+a team fields a replacement mid tournament.
 
 Each member shows as the team's competitor number followed by their position in
 the squad, for example T10.1 and T10.2. These labels follow the team's number,
-so if you change a competition's number prefix the labels change with it.
-
-There is no way to remove someone from a squad. A name typed by mistake stays,
-so check a new name before you add it. An unused member is harmless: they simply
-never appear in a lineup.
+so if you change a competition's number prefix the labels change with it. A
+label appears wherever the member's name does: the lineup panel, the score
+sheet, the viewer, the court display, the streaming overlay, and the bout detail
+sheet a winner-stays-on competition adds to its export.
 
 ### Incomplete and uneven teams
 

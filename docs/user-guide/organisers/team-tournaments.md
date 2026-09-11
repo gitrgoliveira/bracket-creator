@@ -10,6 +10,29 @@ Before each team encounter, set the fighting order for each team across the five
 
 Each team encounter has its own lineup. To carry over the same order from the previous encounter, use **Copy from previous match** at the top of the lineup panel.
 
+### The squad
+
+A team's people are its squad. You build it as you go: pick an existing member
+for a position, or type a new name into a position and the app adds that person
+to the squad in the same step.
+
+Renaming a member keeps them attached to everything they have already done. A
+bout they fought, and the winner-stays-on order, still refer to the same person
+after the change, so you can correct a spelling or switch to a full name mid
+tournament without disturbing results already recorded.
+
+The squad can be larger than the number of positions a round has. Add the
+replacements a team brings and field whichever of them you need in each
+encounter.
+
+Each member shows as the team's competitor number followed by their position in
+the squad, for example T10.1 and T10.2. These labels follow the team's number,
+so if you change a competition's number prefix the labels change with it.
+
+There is no way to remove someone from a squad. A name typed by mistake stays,
+so check a new name before you add it. An unused member is harmless: they simply
+never appear in a lineup.
+
 ### Incomplete and uneven teams
 
 Team sizes are not fixed. A lineup can leave any position empty, teams in the same competition can field different numbers of fighters, and the app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started, so you can complete or adjust the order as a round is running.

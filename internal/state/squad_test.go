@@ -394,3 +394,57 @@ func TestLegacyUpgradeRoster_CompetitionDoesNotLoadTheRoster(t *testing.T) {
 	assert.Len(t, players, 2)
 	assert.True(t, roster.loaded)
 }
+
+// TestSquadMigration_ZekkenRosterMigratesTheRightColumns covers the one
+// layout variant every other squad test omits. With a zekken column the
+// participant row gains DisplayName between Name and Dojo
+// ([id, Name, DisplayName, Dojo, ...Metadata] rather than
+// [id, Name, Dojo, ...Metadata]), so the members the migration folds are at a
+// different offset. This package already carries a documented disaster from
+// exactly that class: a row parsed one column out turned a member name into a
+// dojo and destroyed the id every record pointed at. A migration that reads
+// trailing columns must be pinned against both layouts, not just the one the
+// fixtures happen to use.
+//
+// Written through the real writer so the bytes on disk are whatever
+// marshalParticipantsCSV actually produces for a zekken competition, rather
+// than a hand-built row asserting my own reading of the layout.
+func TestSquadMigration_ZekkenRosterMigratesTheRightColumns(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	comp := &Competition{ID: "z1", Name: "Z1", Kind: "team", TeamSize: 3, WithZekkenName: true}
+	require.NoError(t, s.SaveCompetition(comp))
+
+	teamID := "33333333-3333-4333-8333-333333333333"
+	require.NoError(t, s.SaveParticipants(comp.ID, []domain.Player{{
+		ID:          teamID,
+		Name:        "Tora",
+		DisplayName: "TORA",
+		Dojo:        "Tora Dojo",
+		Metadata:    []string{"Sato", "Tanaka", "Yamada"},
+	}}))
+
+	// Trigger EnsureLegacyUpgraded through a public load, with the zekken
+	// flag this competition actually carries, so the roster the migration
+	// reads is parsed under the same layout it was written with.
+	stored, err := s.LoadParticipants(comp.ID, true)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	require.Equal(t, "Tora", stored[0].Name, "precondition: the row parsed under the zekken layout")
+	require.Equal(t, "Tora Dojo", stored[0].Dojo, "precondition: the dojo did not shift")
+
+	squads, err := s.LoadSquads(comp.ID)
+	require.NoError(t, err)
+
+	members := squads[teamID]
+	require.Len(t, members, 3, "the zekken layout must yield the same three members as the plain one")
+
+	names := make([]string, len(members))
+	for i, m := range members {
+		names[i] = m.Name
+	}
+	assert.Equal(t, []string{"Sato", "Tanaka", "Yamada"}, names,
+		"a column-shifted read would fold the dojo or the zekken in as a member")
+	assert.NotContains(t, names, "TORA", "the zekken must never be read as a squad member")
+	assert.NotContains(t, names, "Tora Dojo", "the dojo must never be read as a squad member")
+}

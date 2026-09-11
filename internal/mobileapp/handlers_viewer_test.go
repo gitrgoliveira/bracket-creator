@@ -700,3 +700,122 @@ func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
 	}
 	assert.True(t, found, "the competition must still be listed")
 }
+
+// --- Squads on the public viewer detail payload (bc-pnum: "make a team
+// member's label available to the public surfaces") ---
+
+// TestViewerCompetitionDetail_TeamCompetitionCarriesSquads pins the wire
+// contract: a team competition's GET /api/viewer/competitions/:id payload
+// carries a "squads" key, keyed by the team's participant id (matching
+// the admin endpoint's shape, GET /api/competitions/:id/squads), so a
+// client can resolve a bout row's sideAMemberId/sideBMemberId without a
+// second, admin-gated call. A blank-named member (an unfilled seeded
+// position) is still present with its index: the index, not the name, is
+// what makes the "T10.2" numbering read correctly.
+func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-squads-team"
+	const redID = "11111111-1111-4111-8111-111111111111"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+	}))
+
+	member, err := store.AddTeamMember(cid, redID, "Alice")
+	require.NoError(t, err)
+	_, err = store.AddTeamMember(cid, redID, "") // unfilled seeded slot: blank name
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Contains(t, body.Squads, redID)
+	require.Len(t, body.Squads[redID], 2)
+	assert.Equal(t, member.ID, body.Squads[redID][0].ID)
+	assert.Equal(t, 1, body.Squads[redID][0].Index)
+	assert.Equal(t, "Alice", body.Squads[redID][0].Name)
+	assert.Equal(t, 2, body.Squads[redID][1].Index)
+	assert.Equal(t, "", body.Squads[redID][1].Name,
+		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+}
+
+// TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead
+// verifies both halves of "an individual competition's payload carries
+// none, and no squad read is attempted": the response carries no
+// "squads" key at all, and garbage bytes planted directly at
+// squads.yaml's path produce no log line, proving state.LoadSquads was
+// never called (mirrors TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead's
+// same proof-by-corruption technique for pools.csv above).
+func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-squads-individual"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Individual Comp", Kind: "individual", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "squads.yaml"), []byte("not: [valid yaml"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	_, hasSquads := body["squads"]
+	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	assert.NotContains(t, logBuf.String(), "load squads",
+		"an individual competition must never attempt the squads.yaml read, so garbage bytes there produce no log line")
+}
+
+// TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError verifies that
+// a team competition with no squads.yaml written yet (an individual
+// competition, or a team competition not yet loaded/never given a squad
+// member) still returns 200 with an empty "squads" object, never an
+// error: state.LoadSquads treats a missing file as "no squads recorded",
+// not a fault.
+func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-squads-missing-file"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp No Squads Yet", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
+	}))
+	// No AddTeamMember call: squads.yaml is never written to disk.
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	squadsField, ok := body["squads"]
+	require.True(t, ok, "a team competition must always carry the squads key, even before any squad is recorded")
+	assert.Equal(t, map[string]any{}, squadsField, "a missing squads.yaml is normal: empty object, not an error")
+}

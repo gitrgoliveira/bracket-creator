@@ -1714,9 +1714,23 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 // its own in-place-append call site).
 func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 	return &state.MatchResult{
-		ID:          bm.ID,
-		SideA:       bm.SideA,
-		SideB:       bm.SideB,
+		ID:    bm.ID,
+		SideA: bm.SideA,
+		SideB: bm.SideB,
+		// SideAID/SideBID carry the bracket match's own id-only side
+		// resolution (bc-brid) through this read-only projection, so a
+		// caller that needs to resolve a bracket-origin bout's fighter to a
+		// squad member (kachinuki_export.go's team-number/label lookup) can
+		// do so without a second, parallel read of the raw BracketMatch.
+		// This function is a read-only projection used by callers that only
+		// ever inspect the result (findTeamMatch, MaybeAdvanceKachinuki's
+		// advancement math, the kachinuki detail export); it is never fed
+		// into a match-write policy (matchWriteForward/matchWriteRestore),
+		// so adding fields here carries none of the "omitted field means
+		// clear" risk that governs bracketMatchAsResult's own projection in
+		// bracket_result.go.
+		SideAID:     bm.SideAID,
+		SideBID:     bm.SideBID,
 		Winner:      bm.Winner,
 		Status:      bm.Status,
 		Court:       bm.Court,

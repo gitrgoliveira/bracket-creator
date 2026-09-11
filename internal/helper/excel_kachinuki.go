@@ -35,13 +35,23 @@ import (
 type KachinukiBout struct {
 	Position  int    // 1-based bout index within the team match
 	SideAName string // player name for Side A
-	SideAPos  string // lineup position (Senpo, Jiho, Chuken, Fukusho, Taisho), may be empty
-	ScoreA    string // accumulated ippon string (e.g. "MK", "MMK") or empty
-	SideBName string
-	SideBPos  string
-	ScoreB    string
-	Winner    string // player name of the winner; empty for hikiwake
-	Decision  string // canonical decision wire value (fought / hikiwake / kiken / fusenpai / fusensho / daihyosen / kachinuki-exhaustion)
+	// SideALabel is the squad member's "T10.1"-style label (bc-pnum: "make
+	// a team member's label available to the public surfaces"), composed
+	// by domain.SquadMemberLabel from the team's competitor number and the
+	// member's stable display index. Empty when the side's team has no
+	// assigned number yet, or the fighter cannot be resolved to a squad
+	// member (no recorded member id on the bout row, or no squad on
+	// file) -- the printed sheet then falls back to the name alone,
+	// exactly as it did before squad labels existed.
+	SideALabel string
+	SideAPos   string // lineup position (Senpo, Jiho, Chuken, Fukusho, Taisho), may be empty
+	ScoreA     string // accumulated ippon string (e.g. "MK", "MMK") or empty
+	SideBName  string
+	SideBLabel string // Side B's twin of SideALabel, same rules.
+	SideBPos   string
+	ScoreB     string
+	Winner     string // player name of the winner; empty for hikiwake
+	Decision   string // canonical decision wire value (fought / hikiwake / kiken / fusenpai / fusensho / daihyosen / kachinuki-exhaustion)
 }
 
 // KachinukiMatchDetail is a single team match's bout log with team-level
@@ -210,9 +220,10 @@ func writeKachinukiBoutRow(f *excelize.File, sheet string, bout KachinukiBout, r
 	// Column A: bout number
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColBout+rowStr, strconv.Itoa(bout.Position)))
 
-	// Column B: Side A name + position (formatted "Name (Position)" when
-	// position is set, else just the name).
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColSideA+rowStr, formatKachinukiPlayer(bout.SideAName, bout.SideAPos)))
+	// Column B: Side A label + name + position (formatted "T10.1 Name
+	// (Position)" when both the label and position are set; either or
+	// both may be blank).
+	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColSideA+rowStr, formatKachinukiPlayer(bout.SideALabel, bout.SideAName, bout.SideAPos)))
 
 	// Column C: Score A
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColScoreA+rowStr, bout.ScoreA))
@@ -223,8 +234,8 @@ func writeKachinukiBoutRow(f *excelize.File, sheet string, bout KachinukiBout, r
 	// Column E: Score B
 	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColScoreB+rowStr, bout.ScoreB))
 
-	// Column F: Side B name + position
-	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColSideB+rowStr, formatKachinukiPlayer(bout.SideBName, bout.SideBPos)))
+	// Column F: Side B label + name + position
+	handleExcelError("SetCellValue", f.SetCellValue(sheet, kachinukiColSideB+rowStr, formatKachinukiPlayer(bout.SideBLabel, bout.SideBName, bout.SideBPos)))
 
 	// Column G: Winner (left blank on hikiwake, decision column carries the
 	// outcome label).
@@ -264,16 +275,25 @@ func writeKachinukiSummaryRow(f *excelize.File, sheet string, match KachinukiMat
 	handleExcelError("SetCellStyle", f.SetCellStyle(sheet, kachinukiColBout+rowStr, kachinukiColDecision+rowStr, style))
 }
 
-// formatKachinukiPlayer is a pure helper that combines a player's name and
-// lineup position for display on the detail sheet. Empty position → just
-// the name; empty name → empty string (defensive, the renderer should
-// never receive an empty player name for a played bout).
-func formatKachinukiPlayer(name, position string) string {
+// formatKachinukiPlayer is a pure helper that combines a squad member's
+// label (e.g. "T10.1", from domain.SquadMemberLabel; may be blank), a
+// player's name, and their lineup position for display on the detail
+// sheet: "T10.1 Name (Position)". label leads name (matching the JS
+// display order the label's one owner, squad_member_label.jsx, composes
+// everywhere else), separated by a space; either the label or the
+// position may be blank independently. Empty name → empty string
+// (defensive, the renderer should never receive an empty player name for
+// a played bout).
+func formatKachinukiPlayer(label, name, position string) string {
 	if name == "" {
 		return ""
 	}
-	if position == "" {
-		return name
+	display := name
+	if label != "" {
+		display = label + " " + name
 	}
-	return fmt.Sprintf("%s (%s)", name, position)
+	if position == "" {
+		return display
+	}
+	return fmt.Sprintf("%s (%s)", display, position)
 }

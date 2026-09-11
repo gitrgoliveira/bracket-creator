@@ -548,14 +548,26 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				return nil, errNotFound
 			}
 
+			// bc-pnum: "make a team member's label available to the public
+			// surfaces". Gated on the same team-competition discriminator the
+			// rest of the codebase uses (Kind == "team" || TeamSize > 0, e.g.
+			// Competition.IsKachinuki's own condition and the JS twin in
+			// admin_schedule_lineup.jsx) so an individual competition never
+			// attempts a squads.yaml read at all: this is a hot path (every
+			// viewer/TV/streaming-overlay poll), and a file that can only
+			// ever be empty for this shape of competition is not worth a
+			// stat, let alone a read+parse.
+			isTeamComp := comp.Kind == "team" || comp.TeamSize > 0
+
 			// Run all independent I/O concurrently.
 			var (
 				pools       []helper.Pool
 				poolMatches []state.MatchResult
 				standings   any
 				bracket     *state.Bracket
+				squads      map[string][]domain.TeamMember
 
-				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr error
+				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, squadsErr error
 			)
 
 			var wg sync.WaitGroup
@@ -580,10 +592,37 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			safeGo(&wg, &panicRef, func() {
 				bracket, bracketErr = store.LoadBracket(id)
 			})
+			if isTeamComp {
+				safeGo(&wg, &panicRef, func() {
+					squads, squadsErr = store.LoadSquads(id)
+				})
+			}
 			wg.Wait()
 
 			if p := panicRef.Load(); p != nil {
 				return nil, p
+			}
+
+			// squadsErr is NOT folded into the strict degradedReads loop below
+			// (state.AsCorruptFile-gated, everything else aborts the request):
+			// unlike pools/poolMatches/bracket/standings, a squad label is
+			// pure ENRICHMENT of an already-complete match row (it decorates a
+			// fighter's name with "T10.1"; it drives no scoring, standings, or
+			// bracket advancement), so a broken squads.yaml must never be able
+			// to take the whole competition page down with it -- the same
+			// "one bad cell cannot stop a tournament" principle this file's
+			// own read-fault handling already applies elsewhere degrades
+			// unconditionally here rather than escalating on an unwrapped
+			// YAML parse error (state/squad.go does not wrap its yaml.Unmarshal
+			// failures as *state.CorruptFileError the way the JSON/CSV readers
+			// do, so treating it like the strict loop below would 500 the
+			// whole page over a typo in one YAML file). A MISSING squads.yaml
+			// is not an error at all (state.LoadSquads' own contract, mirroring
+			// LoadTeamLineups): squadsErr is only ever non-nil for a genuine
+			// read/parse fault, which is logged and then ignored.
+			if squadsErr != nil {
+				log.Printf("mobileapp: viewer payload %s: load squads: %v", id, squadsErr)
+				squads = nil
 			}
 
 			// bc-pnum ruling 1e follow-up: a corrupt-file error (pools.csv,
@@ -694,6 +733,19 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"poolMatches": poolMatches,
 				"standings":   standings,
 				"bracket":     bracket,
+			}
+			// "squads" is present only for a team competition (isTeamComp,
+			// above) and omitted entirely for an individual one, rather than
+			// carrying an always-empty {} -- a client can treat the key's
+			// absence as "this competition has no squads to resolve" without
+			// inspecting comp.kind/comp.teamSize itself. Keyed by the TEAM's
+			// participant id, matching the admin endpoint's shape
+			// (GET /api/competitions/:id/squads, handlers_squad.go) exactly,
+			// so a client resolves a bout row's sideAMemberId/sideBMemberId
+			// (state.SubMatchResult) to {id, index, name} without a second,
+			// admin-gated call this public surface could never make anyway.
+			if isTeamComp {
+				payload["squads"] = squads
 			}
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues

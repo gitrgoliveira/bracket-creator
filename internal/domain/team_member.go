@@ -1,5 +1,7 @@
 package domain
 
+import "fmt"
+
 // TeamMember is one person on a team's squad (bc-tmid): the actual kendoka
 // who steps onto the court, as distinct from the team itself, which is the
 // PARTICIPANT (it carries the stable id and competitor number every other
@@ -58,4 +60,27 @@ type TeamMember struct {
 	// (state.upgradeSquadsFromMetadataLocked), each already carrying its ID
 	// and Index, with Name blank until filled in.
 	Name string `json:"name" yaml:"name"`
+}
+
+// SquadMemberLabel composes a squad member's visible label (bc-pnum, "make
+// a team member's label available to the public surfaces") from the team's
+// competitor NUMBER and the member's stable display INDEX, e.g. "T10.1".
+// This is the Go twin of web-mobile/js/squad_member_label.jsx's
+// squadMemberLabel, the JS side's own single owner of the identical
+// composition; the two must never drift apart on the "number, dot, index"
+// format. internal/engine/kachinuki_export.go (the Kachinuki Detail Excel
+// sheet) is this function's one caller on the Go side, so the printed
+// record and the live app compose the same label rather than two
+// hand-rolled copies of the same format string.
+//
+// Returns "" when teamNumber is empty (pre-draw, or a competitor excluded
+// from the draw -- there is no meaningful label for a member of a team
+// that itself has no number) or when memberIndex is not a real 1-based
+// index (<= 0; every real member is minted with one starting at 1, so this
+// branch is defensive only, mirroring the JS side's own defensive check).
+func SquadMemberLabel(teamNumber string, memberIndex int) string {
+	if teamNumber == "" || memberIndex <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s.%d", teamNumber, memberIndex)
 }

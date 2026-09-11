@@ -1597,6 +1597,39 @@ func deriveKachinukiWinner(result *state.MatchResult) error {
 	if last.Winner == "" {
 		return validationErrorf("a kachinuki match ending on a tied bout is not a decisive win: record the last bout's winner, take it to overtime, or end the encounter as a draw (hikiwake)")
 	}
+	// MEMBER IDS FIRST (operator ruling bc-pnum). The deciding bout names its
+	// winner by the FIGHTER's name, and two opposing fighters may legally
+	// share one, so the name comparison below cannot tell them apart and its
+	// case order silently handed the ENCOUNTER to side A. That is the same
+	// coin flip as the individual victory, one level up and far more
+	// expensive: it decides who advances. The score editor stamps all three
+	// member ids on the row it writes, so this settles every bout scored
+	// through it.
+	switch domain.AttributeWinnerSide(domain.WinnerAttribution{
+		WinnerID: last.WinnerMemberID, SideAID: last.SideAMemberID, SideBID: last.SideBMemberID,
+	}) {
+	case domain.MatchSideA:
+		result.Winner = result.SideA
+		return nil
+	case domain.MatchSideB:
+		result.Winner = result.SideB
+		return nil
+	}
+	// No ids, and the two fighters share a name. The name comparison below
+	// MUST NOT run: both of its cases match, and the first one wins, which
+	// is how the encounter used to be handed to side A. The only evidence
+	// left is the operator's own verdict, already on result.Winner from the
+	// payload, so keep it -- rather than overturning it by case order, and
+	// rather than rejecting the write, which would leave a legitimate
+	// encounter on legacy data impossible to finish at all. A verdict naming
+	// neither team is still refused: the relaxation trusts the operator's
+	// CHOICE OF SIDE, not any string they send.
+	if last.SideA != "" && last.SideA == last.SideB {
+		if result.Winner == result.SideA || result.Winner == result.SideB {
+			return nil
+		}
+		return validationErrorf("a kachinuki match's deciding bout was fought between two competitors with the same name (%q) and carries no member ids, so the winner cannot be derived: record the encounter winner from the score editor, which knows which side scored", last.SideA)
+	}
 	switch {
 	case isWinForSide(last.Winner, result.SideA, last.SideA):
 		result.Winner = result.SideA

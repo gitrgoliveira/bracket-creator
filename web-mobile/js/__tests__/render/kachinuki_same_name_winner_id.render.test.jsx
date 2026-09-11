@@ -153,10 +153,20 @@ describe('bc-pnum: a same-name kachinuki bout records the winner by member id', 
     expect(bout.ipponsA).toEqual([]);
     expect(bout.winner).toBe('Yamada');
     expect(bout.winnerMemberId).toBe(SHIRO_MEMBER);
+    // The winner id settles nothing on its own: every consumer compares it
+    // against the two SIDE ids, so all three must travel together. A browser
+    // run found this, because the first bout of an encounter is built by this
+    // editor rather than appended by the server, and the side ids were absent
+    // on exactly the row that needed them.
+    expect(bout.sideAMemberId).toBe(AKA_MEMBER);
+    expect(bout.sideBMemberId).toBe(SHIRO_MEMBER);
     // And it survives the real serializer, which is where the previous
     // attempt at this defect died.
     const wire = toBackendMatchResult(patch);
-    expect(wire.subResults.find((s) => s.position === 1).winnerMemberId).toBe(SHIRO_MEMBER);
+    const wireBout = wire.subResults.find((s) => s.position === 1);
+    expect(wireBout.winnerMemberId).toBe(SHIRO_MEMBER);
+    expect(wireBout.sideAMemberId).toBe(AKA_MEMBER);
+    expect(wireBout.sideBMemberId).toBe(SHIRO_MEMBER);
   });
 
   it('stamps the AKA member id when aka scores', async () => {

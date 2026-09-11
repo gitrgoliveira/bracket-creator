@@ -2140,10 +2140,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // has not paired yet), which leaves the server's name derivation to
       // answer exactly as before. Kachinuki only: a fixed-format bout row
       // names the TEAMS, which are unique by rule.
-      let winnerMemberId = "";
+      let winnerMemberId = "", sideAMemberId = "", sideBMemberId = "";
       if (isKachinuki && !isDaihyo) {
         const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(idx);
         ({ sideA, sideB, winner } = resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }));
+        // The two SIDE ids travel with the winner's, because the winner id
+        // alone settles nothing: every consumer compares it against these two,
+        // so a row carrying one and not the others is read exactly like a row
+        // carrying none. The server stamps them when IT appends a pairing,
+        // but the first bout of an encounter is built here, and a browser run
+        // on a real same-name pairing is what showed that gap -- the unit
+        // fixtures had hand-written all three.
+        sideAMemberId = aMemberId || "";
+        sideBMemberId = bMemberId || "";
         if (winner) winnerMemberId = (wKey === "a" ? aMemberId : wKey === "b" ? bMemberId : "") || "";
       } else {
         sideA = sideAName;
@@ -2163,7 +2172,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       };
       // Omitted, not stated empty: an absent key leaves the stored id and the
       // server's own derivation untouched, which is what "this writer knows
-      // no id" has to mean.
+      // no id" has to mean. A typed-name override resolves to no id at all
+      // (playerNamesForBout short-circuits it), so a substitution never sends
+      // the replaced fighter's id under the new name.
+      if (sideAMemberId) entry.sideAMemberId = sideAMemberId;
+      if (sideBMemberId) entry.sideBMemberId = sideBMemberId;
       if (winnerMemberId) entry.winnerMemberId = winnerMemberId;
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two

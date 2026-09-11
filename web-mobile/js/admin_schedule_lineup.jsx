@@ -81,7 +81,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const positions = (typeof lineupPositionsForSize === "function")
     ? lineupPositionsForSize(teamSize)
     : [];
-  const roster = (typeof lineupRosterFor === "function")
+  // The team's members as the PRE-SQUAD model stored them, in the roster
+  // row's untyped metadata array. Kept only as a fallback: see effectiveRoster
+  // below, which prefers the squad.
+  const legacyRoster = (typeof lineupRosterFor === "function")
     ? lineupRosterFor(team)
     : [];
   const teamId = (typeof lineupTeamIdOf === "function")
@@ -108,9 +111,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     positions.forEach(p => { init[p.key] = ""; });
     return init;
   });
-  const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
-    ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
-    : roster;
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
@@ -137,6 +137,25 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // reporting every position the resolver then "failed" to match.
   const [squad, setSquad] = useStateA([]);
   const [squadUnavailable, setSquadUnavailable] = useStateA(false);
+
+  // bc-pnum: the suggestion list reads the SQUAD, because that is where a
+  // team's members now live. rosterFor reads the roster row's metadata array,
+  // which was their home before this PR moved them out, so a team whose
+  // members were entered through the squad UI arrived here looking empty --
+  // the operator was told "this team has no registered members" under a full
+  // squad, and had to retype every name the app already knew. Blank entries
+  // are skipped: a squad is seeded with one unnamed position per team size,
+  // and an unnamed position is not a person to suggest.
+  //
+  // The metadata array stays as the fallback for the two windows where the
+  // squad is not available: before the load-time migration has folded a
+  // legacy team's members into one, and when the squad fetch above failed
+  // (squadUnavailable), where falling back beats suggesting nothing.
+  const squadNames = squad.map(m => ((m && m.name) || "").trim()).filter(Boolean);
+  const roster = squadNames.length > 0 ? squadNames : legacyRoster;
+  const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
+    : roster;
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) return;

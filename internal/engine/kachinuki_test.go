@@ -3547,3 +3547,81 @@ func TestRetiredPlayersFromBoutLog_SameNameBoutUsesMemberIDs(t *testing.T) {
 		assert.Empty(t, rA.Names)
 	})
 }
+
+// TestDeriveKachinukiWinner_SameNameDecidingBout is the most expensive form
+// of the same-name defect: the deciding bout's winner is a FIGHTER name, and
+// when both fighters carry the same one the name comparison's case order
+// handed the ENCOUNTER to side A. That decides who advances, and it
+// overturned the operator's own verdict on the way.
+func TestDeriveKachinukiWinner_SameNameDecidingBout(t *testing.T) {
+	newResult := func(sub state.SubMatchResult, clientWinner string) *state.MatchResult {
+		return &state.MatchResult{
+			SideA: "Tora", SideB: "Kaze", Winner: clientWinner,
+			Decision:   string(domain.DecisionKachinukiExhaustion),
+			SubResults: []state.SubMatchResult{sub},
+		}
+	}
+
+	t.Run("the member ids decide the encounter", func(t *testing.T) {
+		r := newResult(state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-shiro",
+			IpponsB: []string{"M"},
+		}, "Kaze")
+		require.NoError(t, deriveKachinukiWinner(r))
+		assert.Equal(t, "Kaze", r.Winner, "shiro's member id won the deciding bout")
+	})
+
+	t.Run("and for aka", func(t *testing.T) {
+		r := newResult(state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-aka",
+			IpponsA: []string{"M"},
+		}, "Tora")
+		require.NoError(t, deriveKachinukiWinner(r))
+		assert.Equal(t, "Tora", r.Winner)
+	})
+
+	t.Run("the ids overrule a payload that names the other side", func(t *testing.T) {
+		// This is what pins the ID TIER apart from the same-name relaxation
+		// below: with the two agreeing, removing the ids changes nothing and
+		// the tier is untested. Here the row's identity and the payload
+		// disagree, and the row wins -- the ids are evidence about who
+		// fought, the winner field is a name that cannot discriminate.
+		r := newResult(state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-shiro",
+			IpponsB: []string{"M"},
+		}, "Tora")
+		require.NoError(t, deriveKachinukiWinner(r))
+		assert.Equal(t, "Kaze", r.Winner)
+	})
+
+	t.Run("no ids: the operator's verdict stands rather than name order", func(t *testing.T) {
+		// Legacy data. Nothing stored can attribute the bout, so overturning
+		// the operator is the one thing that must not happen.
+		r := newResult(state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			IpponsB: []string{"M"},
+		}, "Kaze")
+		require.NoError(t, deriveKachinukiWinner(r))
+		assert.Equal(t, "Kaze", r.Winner, "the editor said shiro; nothing here knows better")
+	})
+
+	t.Run("no ids and a winner naming neither team is still rejected", func(t *testing.T) {
+		r := newResult(state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			IpponsB: []string{"M"},
+		}, "Someone Else")
+		assert.Error(t, deriveKachinukiWinner(r), "the relaxation must not accept an unattributable winner")
+	})
+
+	t.Run("distinct fighter names still derive from the names", func(t *testing.T) {
+		r := newResult(state.SubMatchResult{
+			Position: 1, SideA: "Sato", SideB: "Ito", Winner: "Ito",
+			IpponsB: []string{"M"},
+		}, "")
+		require.NoError(t, deriveKachinukiWinner(r))
+		assert.Equal(t, "Kaze", r.Winner)
+	})
+}

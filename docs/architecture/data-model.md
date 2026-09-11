@@ -62,6 +62,7 @@ classDiagram
     }
 
     class Player {
+        <<one row per entrant: a competitor, or a TEAM when Kind is team>>
         +string ID
         +string Name
         +string DisplayName
@@ -89,6 +90,7 @@ classDiagram
     }
 
     class TeamLineup {
+        <<team competitions only>>
         +string TeamID
         +string CompetitionID
         +int Round
@@ -98,6 +100,7 @@ classDiagram
     }
 
     class TeamMember {
+        <<team competitions only>>
         +string ID
         +int Index
         +string Name
@@ -115,7 +118,7 @@ classDiagram
     Competition "1" o-- "0..*" TeamLineup
     Competition "1" o-- "0..1" Overrides
     Pool "1" o-- "1..*" Player : draws from
-    Player "1" o-- "0..*" TeamMember : a team's squad
+    Player "1" o-- "0..*" TeamMember : squad, only when the row is a team
     TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
@@ -124,6 +127,13 @@ knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for 
 competitions. A competition in the `team` kind treats each `Player` entry as a team, and
 the people on that team are its squad, stored in `squads.yaml` under the team's participant
 id.
+
+That one setting decides which records exist at all. An individual competition has no
+`squads.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
+directly. A team competition has both, and its entrants are teams, so the person who fights
+a given bout is named one level further down. Everything else on the diagram above, the
+pools, the eligibility records and the ranking overrides, is the same for either kind, and
+reads a `Player` row without caring which of the two it is.
 
 Each squad member carries a stable id, minted once when the member is added and never
 reused, and a display index. The id is what a lineup position and a bout row record, so a

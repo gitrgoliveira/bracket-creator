@@ -19,7 +19,7 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide } from './result_slot.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
@@ -205,11 +205,9 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
   // declared JS twin of domain.AttributeWinnerSide, rather than re-spelling
   // its id branch here: a winner id matching neither side returns null and
   // falls through to the names, exactly as the Go owner does.
-  const idSide = attributeWinnerSide({
-    winnerId: sub.winnerMemberId, sideAId: sub.sideAMemberId, sideBId: sub.sideBMemberId,
-  });
-  if (idSide === "a") return { shiro: false, aka: true };
-  if (idSide === "b") return { shiro: true, aka: false };
+  const side = attributeWinnerSide(subBoutAttribution(sub));
+  if (side === "a") return { shiro: false, aka: true };
+  if (side === "b") return { shiro: true, aka: false };
   const w = sub.winner;
   // Two opposing fighters may legally share a display name. When they do and
   // no id decided above, NOTHING here can say who won, so the row names
@@ -218,8 +216,10 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
   // this apart from an ordinary winner-less row, whose IV it still infers
   // from the scoreline.
   if (sub.sideA && sub.sideA === sub.sideB) return { shiro: false, aka: false, ambiguous: true };
-  const aka = !!(w && (w === sub.sideA || w === sub.teamA || (matchSideA && w === matchSideA)));
-  const shiro = !aka && !!(w && (w === sub.sideB || w === sub.teamB || (matchSideB && w === matchSideB)));
+  // Only the TEAM aliases are left to test: the fighter-name arms live in the
+  // shared owner above, which is also where the shared-name case is dropped.
+  const aka = !!(w && (w === sub.teamA || (matchSideA && w === matchSideA)));
+  const shiro = !aka && !!(w && (w === sub.teamB || (matchSideB && w === matchSideB)));
   return { shiro, aka };
 }
 

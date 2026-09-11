@@ -1177,6 +1177,27 @@ describe('fusenshoSideFromSub (recovers a per-bout fusensho on reseed)', () => {
     expect(fusenshoSideFromSub({ decision: 'hikiwake', winner: 'A-Senpo', sideA: 'A-Senpo' })).toBe('');
     expect(fusenshoSideFromSub(null)).toBe('');
   });
+
+  // bc-pnum: two opposing fighters may legally share a display name, so the
+  // winner NAME cannot say which of them was awarded the walkover. Reseeding
+  // the wrong side re-marks the wrong competitor on the operator's screen.
+  it('uses the member ids when both fighters share a name', () => {
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      sideAMemberId: 'm-aka', sideBMemberId: 'm-shiro', winnerMemberId: 'm-shiro',
+      ipponsA: [], ipponsB: ['○', '○'],
+    })).toBe('b');
+  });
+
+  it('falls through to the maru evidence when a shared name has no id to settle it', () => {
+    // The maru cells record who was actually awarded the bout. The old name
+    // arms answered "a" before this test could be reached, which is a guess
+    // standing in front of real evidence.
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      ipponsA: [], ipponsB: ['○', '○'],
+    })).toBe('b');
+  });
 });
 
 describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {

@@ -43,7 +43,7 @@ import { notLandedBanner } from './write_result.jsx';
 // the editor derives its per-bout middle from it rather than restating the
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -450,9 +450,12 @@ export function deriveKachinukiEndOutcome({ subResults, isKnockoutPhase }) {
     // Layered ON TOP of the side rule, not a second copy of it: a
     // server-recorded bout may name its winner by STRING with nothing a
     // side rule can key off (a fusensho persisted without maru cells and
-    // without a marked side). Map that name back to a side when possible.
-    if (last.sideA && last.winner === last.sideA) side = "a";
-    else if (last.sideB && last.winner === last.sideB) side = "b";
+    // without a marked side). Map that winner back to a side through the
+    // shared owner (bc-pnum), so the row's member ids answer where they can
+    // and two fighters sharing a display name name NO side -- the verdict
+    // then stays blocked or drawn, which tells the operator to settle it,
+    // instead of silently crediting whichever fighter is written first.
+    side = attributeWinnerSide(subBoutAttribution(last));
   }
   if (side) return { kind: "win", winnerSide: side };
   if (isKnockoutPhase) return { kind: "blocked", reason: "knockout-tie" };
@@ -641,8 +644,13 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
 export function fusenshoSideFromSub(sub) {
   if (!sub || sub.decision !== "fusensho") return "";
   const allMaru = (arr) => Array.isArray(arr) && arr.length > 0 && arr.every(x => x === "○");
-  if (sub.winner && sub.winner === sub.sideA) return "a";
-  if (sub.winner && sub.winner === sub.sideB) return "b";
+  // bc-pnum: through the shared owner, so the row's member ids decide and two
+  // fighters sharing a display name fall through to the maru test below
+  // rather than being resolved by name order. That fall-through is the point:
+  // the maru cells are real evidence of who was awarded the bout, and the old
+  // name arms short-circuited them with a guess.
+  const side = attributeWinnerSide(subBoutAttribution(sub));
+  if (side) return side;
   if (allMaru(sub.ipponsA) && !allMaru(sub.ipponsB)) return "a";
   if (allMaru(sub.ipponsB) && !allMaru(sub.ipponsA)) return "b";
   return "";

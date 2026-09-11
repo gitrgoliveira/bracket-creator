@@ -26,7 +26,8 @@ import (
 // all) is left alone rather than guessed at.
 func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)
-	const teamID = "team-1"
+	teams := legacyUpgradeTeams(t, s, "Tora", "Kaze")
+	teamID, noSquadTeamID := teams[0], teams[1]
 
 	sato, err := s.AddTeamMember("c1", teamID, "Sato")
 	require.NoError(t, err)
@@ -44,7 +45,7 @@ func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	// A second team with a lineup but NO squad recorded at all: also left
 	// alone, not just an unmatched name within a squad that exists.
 	require.NoError(t, s.SetTeamLineup("c1", domain.TeamLineup{
-		TeamID: "team-no-squad", Round: 0,
+		TeamID: noSquadTeamID, Round: 0,
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(1): "Whoever",
 		},
@@ -68,7 +69,7 @@ func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	assert.Equal(t, "Ghost", repaired.Positions[domain.PositionNumbered(2)],
 		"the name itself is untouched; only the id half is ever filled")
 
-	noSquad, ok := state.FindBestLineup(lineups, "team-no-squad", "", 0)
+	noSquad, ok := state.FindBestLineup(lineups, noSquadTeamID, "", 0)
 	require.True(t, ok)
 	assert.Empty(t, noSquad.MemberIDs, "a team with no squad recorded at all is left alone entirely")
 

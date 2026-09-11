@@ -48,6 +48,10 @@ const squadsFilename = "squads.yaml"
 // perspective there is nothing to rename either way.
 var ErrTeamMemberNotFound = errors.New("team member not found")
 
+// ErrTeamNotFound is returned when a squad write names a team id that no
+// participant in this competition carries.
+var ErrTeamNotFound = errors.New("no team with that id in this competition")
+
 // squadsFile is the on-disk YAML shape: a single top-level key so the file
 // is self-describing and can grow a sibling key later without a format
 // break (mirrors teamLineupFile's own reasoning). Marshaling a
@@ -161,6 +165,38 @@ func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamM
 	return nil
 }
 
+// requireTeamParticipantLocked refuses a teamID no participant in this
+// competition carries. Caller MUST hold the per-competition lock.
+//
+// The check belongs HERE rather than in the handler above it because
+// AddTeamMember is the one door that MINTS a member, and there is no removal
+// operation: a member created under an id no team holds could never be
+// cleaned up through the app, so a mistyped id would write permanent,
+// unreachable data. RenameTeamMember needs no equivalent, since a team with
+// no squad already fails its member lookup.
+//
+// Reads the roster through the no-lock loader for the reason SaveSeeds does
+// (seeds.go): LoadParticipants would re-acquire the lock this function's
+// caller already holds and deadlock a non-reentrant mutex. WithSeeds is off
+// because the seed merge is irrelevant to an id comparison and would read a
+// second file.
+func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
+	withZekken, _, err := s.withZekkenNameLocked(compID)
+	if err != nil {
+		return err
+	}
+	players, err := s.loadParticipantsNoLock(compID, withZekken, LoadParticipantsOpts{WithSeeds: false})
+	if err != nil {
+		return err
+	}
+	for i := range players {
+		if players[i].ID == teamID {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %q", ErrTeamNotFound, teamID)
+}
+
 // squadDuplicateNameCheck runs helper.DuplicateNamesWithKeys over
 // candidateName plus otherNames (every OTHER member already on the team --
 // the member being added has no "other" self to compare against, and a
@@ -208,6 +244,10 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 	mu := s.getCompLock(compID)
 	mu.Lock()
 	defer mu.Unlock()
+
+	if err := s.requireTeamParticipantLocked(compID, teamID); err != nil {
+		return domain.TeamMember{}, err
+	}
 
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {

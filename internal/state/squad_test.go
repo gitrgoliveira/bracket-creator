@@ -11,30 +11,49 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newSquadTestStore returns a store, a competition id, and the participant
+// ids of two REAL teams in it. AddTeamMember refuses a team id no
+// participant carries, so a squad test needs genuine teams rather than a
+// placeholder string.
+func newSquadTestStore(t *testing.T) (store *Store, compID, teamA, teamB string) {
+	t.Helper()
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{Name: "Tora", Dojo: "Tora Dojo"},
+		{Name: "Kaze", Dojo: "Kaze Dojo"},
+	}))
+	stored, err := s.LoadParticipants(id, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	require.NotEmpty(t, stored[0].ID)
+	require.NotEmpty(t, stored[1].ID)
+	return s, id, stored[0].ID, stored[1].ID
+}
+
 // --- AddTeamMember / RenameTeamMember ---------------------------------------
 
 // A first member gets index 1, a second gets index 2, and both keep their
 // id and index across a rename.
 func TestSquad_AddMintsIDAndIndex_RenameKeepsBoth(t *testing.T) {
-	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	s, id, teamA, _ := newSquadTestStore(t)
 
-	m1, err := s.AddTeamMember(id, "team-1", "Alice")
+	m1, err := s.AddTeamMember(id, teamA, "Alice")
 	require.NoError(t, err)
 	assert.NotEmpty(t, m1.ID)
 	assert.Equal(t, 1, m1.Index)
 	assert.Equal(t, "Alice", m1.Name)
 
-	m2, err := s.AddTeamMember(id, "team-1", "Bob")
+	m2, err := s.AddTeamMember(id, teamA, "Bob")
 	require.NoError(t, err)
 	assert.NotEmpty(t, m2.ID)
 	assert.NotEqual(t, m1.ID, m2.ID)
 	assert.Equal(t, 2, m2.Index, "a second member must get the next index, not a fresh 1")
 
-	require.NoError(t, s.RenameTeamMember(id, "team-1", m1.ID, "Alicia"))
+	require.NoError(t, s.RenameTeamMember(id, teamA, m1.ID, "Alicia"))
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	members := squads["team-1"]
+	members := squads[teamA]
 	require.Len(t, members, 2)
 	byID := map[string]domain.TeamMember{}
 	for _, m := range members {
@@ -52,48 +71,48 @@ func TestSquad_AddMintsIDAndIndex_RenameKeepsBoth(t *testing.T) {
 // normalized forms (case, whitespace, Latin combining marks); the same
 // name on a DIFFERENT team is allowed.
 func TestSquad_AddRefusesDuplicateWithinOneTeam(t *testing.T) {
-	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	s, id, teamA, teamB := newSquadTestStore(t)
 
-	_, err := s.AddTeamMember(id, "team-1", "Sato")
+	_, err := s.AddTeamMember(id, teamA, "Sato")
 	require.NoError(t, err)
 
 	for _, variant := range []string{"Sato", "sato", " Sato ", "Satō"} {
 		t.Run(variant, func(t *testing.T) {
-			_, err := s.AddTeamMember(id, "team-1", variant)
+			_, err := s.AddTeamMember(id, teamA, variant)
 			require.Error(t, err)
 			assert.True(t, errors.Is(err, ErrDuplicateTeamMember))
 		})
 	}
 
 	// The same name on a DIFFERENT team is fine.
-	_, err = s.AddTeamMember(id, "team-2", "Sato")
+	_, err = s.AddTeamMember(id, teamB, "Sato")
 	require.NoError(t, err, "members of different teams may share a name")
 }
 
 // Duplicate names within ONE team are refused on rename too, and renaming
 // a member to their OWN current name is not a self-collision.
 func TestSquad_RenameRefusesDuplicateWithinOneTeam_ButNotSelf(t *testing.T) {
-	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	s, id, teamA, _ := newSquadTestStore(t)
 
-	alice, err := s.AddTeamMember(id, "team-1", "Alice")
+	alice, err := s.AddTeamMember(id, teamA, "Alice")
 	require.NoError(t, err)
-	_, err = s.AddTeamMember(id, "team-1", "Bob")
+	_, err = s.AddTeamMember(id, teamA, "Bob")
 	require.NoError(t, err)
 
 	t.Run("renaming to another member's name is refused", func(t *testing.T) {
-		err := s.RenameTeamMember(id, "team-1", alice.ID, "Bob")
+		err := s.RenameTeamMember(id, teamA, alice.ID, "Bob")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrDuplicateTeamMember))
 	})
 
 	t.Run("renaming to another member's name in a normalized form is refused", func(t *testing.T) {
-		err := s.RenameTeamMember(id, "team-1", alice.ID, " bob ")
+		err := s.RenameTeamMember(id, teamA, alice.ID, " bob ")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrDuplicateTeamMember))
 	})
 
 	t.Run("renaming a member to their OWN current name is not a self-collision", func(t *testing.T) {
-		err := s.RenameTeamMember(id, "team-1", alice.ID, "Alice")
+		err := s.RenameTeamMember(id, teamA, alice.ID, "Alice")
 		require.NoError(t, err, "a rename to the member's own current name must not be refused as a collision with itself")
 	})
 }
@@ -101,7 +120,7 @@ func TestSquad_RenameRefusesDuplicateWithinOneTeam_ButNotSelf(t *testing.T) {
 // RenameTeamMember on an unknown (team, member) pair -- including a team
 // with no squad at all -- returns ErrTeamMemberNotFound.
 func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
-	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	s, id, teamA, _ := newSquadTestStore(t)
 
 	t.Run("no squad for the team at all", func(t *testing.T) {
 		err := s.RenameTeamMember(id, "no-such-team", "no-such-member", "X")
@@ -110,9 +129,9 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 	})
 
 	t.Run("team exists but member id does not", func(t *testing.T) {
-		_, err := s.AddTeamMember(id, "team-1", "Alice")
+		_, err := s.AddTeamMember(id, teamA, "Alice")
 		require.NoError(t, err)
-		err = s.RenameTeamMember(id, "team-1", "no-such-member", "X")
+		err = s.RenameTeamMember(id, teamA, "no-such-member", "X")
 		require.Error(t, err)
 		assert.True(t, errors.Is(err, ErrTeamMemberNotFound))
 	})
@@ -121,17 +140,17 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 // A squad may exceed the competition's TeamSize: reserves and replacements
 // are unconstrained (operator ruling 2026-09-09).
 func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {
-	s, id := newTeamMemberTestStore(t, "team", 3, false) // TeamSize: 3
+	s, id, teamA, _ := newSquadTestStore(t) // TeamSize: 3
 
 	names := []string{"Alice", "Bob", "Carol", "Dan", "Eve"} // 5 > TeamSize 3
 	for _, n := range names {
-		_, err := s.AddTeamMember(id, "team-1", n)
+		_, err := s.AddTeamMember(id, teamA, n)
 		require.NoError(t, err, "squad size must not be capped by TeamSize")
 	}
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	assert.Len(t, squads["team-1"], 5, "all 5 reserves/starters must be persisted despite a TeamSize of 3")
+	assert.Len(t, squads[teamA], 5, "all 5 reserves/starters must be persisted despite a TeamSize of 3")
 }
 
 // --- saveSquadsLocked / directory creation ----------------------------------
@@ -140,10 +159,18 @@ func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {
 // resurrecting the competition directory: only saveCompetitionChangedLocked
 // may create it.
 func TestSquad_WriteAfterDeleteDoesNotResurrectDirectory(t *testing.T) {
-	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	s, id, teamA, _ := newSquadTestStore(t)
 	require.NoError(t, s.DeleteCompetition(id))
 
-	_, err := s.AddTeamMember(id, "team-1", "Alice")
+	// Drives saveSquadsLocked DIRECTLY rather than going through
+	// AddTeamMember. The public door now refuses a team id no participant
+	// carries, and a deleted competition has no participants, so it would
+	// fail before ever reaching the writer -- leaving the property this test
+	// exists for (the saver never creates the competition directory)
+	// unexercised while the test still passed.
+	err := s.saveSquadsLocked(id, map[string][]domain.TeamMember{
+		teamA: {{ID: "m1", Index: 1, Name: "Alice"}},
+	}, s.directWrite)
 	require.Error(t, err, "a squad write to a deleted competition must fail")
 
 	_, statErr := os.Stat(filepath.Join(s.GetFolder(), "competitions", id))
@@ -447,4 +474,27 @@ func TestSquadMigration_ZekkenRosterMigratesTheRightColumns(t *testing.T) {
 		"a column-shifted read would fold the dojo or the zekken in as a member")
 	assert.NotContains(t, names, "TORA", "the zekken must never be read as a squad member")
 	assert.NotContains(t, names, "Tora Dojo", "the dojo must never be read as a squad member")
+}
+
+// A team id no participant carries is refused, and nothing is written for
+// it. Without a removal operation a member minted under such an id could
+// never be cleaned up through the app, so a typo would leave permanent,
+// unreachable data behind.
+func TestSquad_AddRefusesATeamIDNoParticipantCarries(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t)
+
+	_, err := s.AddTeamMember(id, "not-a-real-team", "Alice")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrTeamNotFound), "the refusal must carry its own sentinel")
+	assert.Contains(t, err.Error(), "not-a-real-team", "the message must name the offending id")
+
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Empty(t, squads["not-a-real-team"], "a refused add must not persist a squad for the bogus id")
+	assert.Empty(t, squads, "nothing at all should have been written")
+
+	// And a real team still works, so the guard refuses only what it should.
+	m, err := s.AddTeamMember(id, teamA, "Alice")
+	require.NoError(t, err, "a genuine team must still accept a member")
+	assert.Equal(t, 1, m.Index)
 }

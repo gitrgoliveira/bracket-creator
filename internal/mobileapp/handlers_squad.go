@@ -162,12 +162,17 @@ func requireValidCompIDAndTeam(c *gin.Context) (compID, teamID string, ok bool) 
 }
 
 // respondSquadWriteError maps an AddTeamMember/RenameTeamMember error to its
-// HTTP status. ErrTeamMemberNotFound is squad-specific (404); everything
+// HTTP status. ErrTeamNotFound (the team id names no participant) and
+// ErrTeamMemberNotFound are squad-specific (404 each); everything
 // else reuses classifyRosterWriteError's existing sentinel table via
 // respondRosterWriteError (errors.go) rather than a second hand-copied
 // mapping -- state.ErrDuplicateTeamMember is already classified there as a
 // 409, the same status every OTHER caller of that sentinel gets.
 func respondSquadWriteError(c *gin.Context, err error) {
+	if errors.Is(err, state.ErrTeamNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, state.ErrTeamMemberNotFound) {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return

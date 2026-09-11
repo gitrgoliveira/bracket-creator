@@ -26,8 +26,8 @@ import (
 func TestLegacyPoolMatchSubBoutMemberIDUpgradeOnRead(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)
 
-	redID := "red-team-id"
-	whiteID := "white-team-id"
+	teams := legacyUpgradeTeams(t, s, "RedTeam", "WhiteTeam")
+	redID, whiteID := teams[0], teams[1]
 	require.NoError(t, s.SaveParticipants("c1", []domain.Player{
 		{ID: redID, Name: "RedTeam", Dojo: "D"},
 		{ID: whiteID, Name: "WhiteTeam", Dojo: "D"},
@@ -71,8 +71,8 @@ func TestLegacyPoolMatchSubBoutMemberIDUpgradeOnRead(t *testing.T) {
 func TestLegacyBracketSubBoutMemberIDUpgradeOnRead(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)
 
-	redID := "red-team-id"
-	whiteID := "white-team-id"
+	teams := legacyUpgradeTeams(t, s, "RedTeam", "WhiteTeam")
+	redID, whiteID := teams[0], teams[1]
 	require.NoError(t, s.SaveParticipants("c1", []domain.Player{
 		{ID: redID, Name: "RedTeam", Dojo: "D"},
 		{ID: whiteID, Name: "WhiteTeam", Dojo: "D"},

@@ -34,6 +34,30 @@ func newLegacyUpgradeFixture(t *testing.T) (dir string, s *state.Store) {
 	return dir, s
 }
 
+// legacyUpgradeTeams saves the named teams as real participants and returns
+// their minted ids, in order. state.Store.AddTeamMember refuses a team id no
+// participant carries (a member minted under a bogus id could never be
+// removed), so a squad seeded for these repair tests needs genuine teams
+// rather than the placeholder strings these fixtures used when nothing
+// checked them.
+func legacyUpgradeTeams(t *testing.T, s *state.Store, names ...string) []string {
+	t.Helper()
+	players := make([]domain.Player, 0, len(names))
+	for _, n := range names {
+		players = append(players, domain.Player{Name: n, Dojo: n + " Dojo"})
+	}
+	require.NoError(t, s.SaveParticipants("c1", players))
+	stored, err := s.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.Len(t, stored, len(names))
+	ids := make([]string, 0, len(names))
+	for i := range stored {
+		require.NotEmpty(t, stored[i].ID)
+		ids = append(ids, stored[i].ID)
+	}
+	return ids
+}
+
 // freshLegacyUpgradeStore opens a NEW Store instance rooted at dir. Most
 // tests below need one after using `s` (or another Store) to seed the
 // fixture: EnsureLegacyUpgraded's once-map is per-process (here, per Store),

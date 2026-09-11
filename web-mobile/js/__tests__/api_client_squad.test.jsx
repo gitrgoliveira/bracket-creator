@@ -93,6 +93,32 @@ describe('API.renameTeamMember', () => {
   });
 });
 
+describe('API.clearTeamMember', () => {
+  let originalFetch;
+  beforeEach(() => { originalFetch = global.fetch; });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it('DELETEs the member endpoint and resolves true on 204', async () => {
+    global.fetch = vi.fn(() => Promise.resolve({ ok: true, status: 204 }));
+    const result = await API.clearTeamMember('c1', 'team-1', 'm1', 'pw');
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c1/teams/team-1/members/m1');
+    expect(opts.method).toBe('DELETE');
+    expect(opts.headers['X-Tournament-Password']).toBe('pw');
+    expect(result).toBe(true);
+  });
+
+  it('throws with the server message on a 409 once the competition has started', async () => {
+    global.fetch = mockFetch(409, { error: 'cannot clear a team member\'s name once the competition has started' });
+    await expect(API.clearTeamMember('c1', 'team-1', 'm1', 'pw')).rejects.toThrow(/once the competition has started/);
+  });
+
+  it('throws on a 404 (member id does not resolve)', async () => {
+    global.fetch = mockFetch(404, { error: 'team member not found' });
+    await expect(API.clearTeamMember('c1', 'team-1', 'no-such-id', 'pw')).rejects.toThrow('team member not found');
+  });
+});
+
 describe('API.putTeamLineup memberIds', () => {
   let originalFetch;
   beforeEach(() => { originalFetch = global.fetch; });

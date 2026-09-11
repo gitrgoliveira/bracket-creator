@@ -2934,6 +2934,24 @@ const API = {
         }
         return true;
     },
+    // The operator's "removal": blanks memberId's Name back to "" and
+    // leaves the id and display index untouched, so a bout already fought
+    // that names this position keeps meaning the same person (bc-pnum).
+    // 204 No Content on success. Refused with a 409 once the competition
+    // has started (state.ErrTeamMemberClearAfterStart); the server's own
+    // message is operator-facing, so it is surfaced verbatim rather than
+    // remapped here.
+    async clearTeamMember(compID, teamId, memberId, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to clear team member");
+        }
+        return true;
+    },
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
     // two teams each carry an independent lineup entry.

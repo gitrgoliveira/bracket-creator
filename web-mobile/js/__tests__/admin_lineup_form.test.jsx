@@ -69,12 +69,14 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
   let AdminLineup;
   let origAPI;
   let origCompMatches;
+  let origConfirmDialog;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
 
   beforeEach(async () => {
     origAPI = global.window.API;
     origCompMatches = global.window.compMatches;
+    origConfirmDialog = global.window.confirmDialog;
     global.window.compMatches = () => [];
     global.window.API = {
       fetchTeamLineup: vi.fn().mockResolvedValue(null), // 404 → fresh form
@@ -83,6 +85,11 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       renameTeamMember: vi.fn().mockResolvedValue(true),
       putTeamLineup: vi.fn().mockResolvedValue({}),
     };
+    // bc-pnum: commitAdd (operation 2) now confirms before minting. Default
+    // to "confirmed" here so the pre-existing ADD/RENAME/SELECT tests below
+    // keep exercising the real mint path; the dedicated confirmation tests
+    // further down override this per-case.
+    global.window.confirmDialog = vi.fn().mockResolvedValue(true);
 
     runtime = makeReactive();
     global.React = runtime.React;
@@ -95,6 +102,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     global.React = realReact;
     global.window.API = origAPI;
     global.window.compMatches = origCompMatches;
+    global.window.confirmDialog = origConfirmDialog;
     vi.resetModules();
   });
 
@@ -183,6 +191,51 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const call = global.window.API.putTeamLineup.mock.calls.at(-1);
     expect(call[3]['1']).toBe('Ito');
     expect(call[5]['1']).toBe('sq-new');
+  });
+
+  it('operation 2 (ADD): confirms before minting, naming the team and the typed name', async () => {
+    global.window.API.addTeamMember.mockResolvedValue({ id: 'sq-new', index: 1, name: 'Ito' });
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Ito' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).toHaveBeenCalledTimes(1);
+    const [opts] = global.window.confirmDialog.mock.calls[0];
+    expect(opts.message).toContain('Ito');
+    expect(opts.message).toContain('Tora A');
+    // Called BEFORE the mint, not after: declining must prevent the write
+    // (pinned by the next test), which only holds if confirmation gates it.
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+  });
+
+  it('operation 2 (ADD): declining the confirmation never mints a member', async () => {
+    global.window.confirmDialog.mockResolvedValue(false);
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Ito' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+    // The add-row stays open with the typed name, rather than resetting, so
+    // the operator can correct a typo instead of starting the picker over.
+    const tree3 = runtime.currentTree();
+    const nameFieldAfter = findHosts(tree3, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    expect(nameFieldAfter, 'expected the add-name field to still be open after declining').toBeTruthy();
+    expect(nameFieldAfter.props.value).toBe('Ito');
   });
 
   it('operation 3 (RENAME): renaming a squad member keeps its id in the position that references it', async () => {

@@ -53,6 +53,10 @@ import {
 } from './competition_shape.jsx';
 import { PillGroup, CheckboxField, NumberField, TextField } from './competition_fields.jsx';
 import { seededRanks } from './admin_helpers.jsx';
+// squadMemberLabel is the ONE place a squad member's visible label
+// ("T10.1") is composed (see that module's header); this screen's Squad
+// members section imports it directly rather than restating the format.
+import { squadMemberLabel } from './squad_member_label.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
@@ -90,6 +94,298 @@ function formatClearedValue(key, value) {
   }
   if (key === "extraQualifiers") return extraQualifiersLabel(value);
   return String(value);
+}
+
+// Resolve a team Player's stable id the same way admin_lineup.jsx's
+// teamIdOf does (id, ID, name, Name -- pre-persist teams may carry no id
+// yet). A local copy rather than an ES import of admin_lineup.jsx: that
+// file deliberately stays reachable only via window.AdminLineupHelpers for
+// its OTHER consumers (see its own module header), and this is a two-line
+// fallback chain, not a rule worth a cross-module dependency for.
+function squadTeamIdOf(team) {
+  return (team && (team.id || team.ID || team.name || team.Name)) || "";
+}
+
+// bc-pnum: the operator surface for managing a team's squad (its actual
+// members), on the Settings screen. Read internal/state/squad.go's own
+// header for the model: a squad is seeded with `teamSize` members the
+// moment a team competition exists, each `{id, index, name}` with a BLANK
+// name being a normal "unfilled position" state, never an absence. Adding
+// appends reserves beyond that. "Removing" a member means CLEARING the
+// name; the id and index survive forever because a bout already fought
+// names that position, and REFUSED once the competition has started
+// (state.ErrTeamMemberClearAfterStart, 409) so a bout in progress can never
+// lose the identity of the person it names. Filling and renaming (the SAME
+// wire operation, PUT .../members/:id -- the row just labels it
+// differently depending on whether the slot already carries a name) stay
+// allowed at any time, matching the operator's own ruling.
+//
+// TeamSquadMemberRow: one member's fill/rename/clear controls, in the
+// index order TeamSquadSection sorts by. Clearing is NEVER labelled
+// "Delete": the operator ruling is explicit that it clears a name and
+// keeps the position, it does not remove anybody.
+function TeamSquadMemberRow({ compId, teamId, member, teamNumber, clearDisabled, password, onChanged, onError }) {
+  const [editing, setEditing] = useStateA(false);
+  const [draftName, setDraftName] = useStateA(member.name || "");
+  const [busy, setBusy] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  const startEdit = () => { setDraftName(member.name || ""); setEditing(true); onError(""); };
+  const cancelEdit = () => { setEditing(false); setDraftName(member.name || ""); };
+
+  // Fill (empty -> named) and Rename (named -> named) are the SAME
+  // operation on the wire: renameTeamMember keeps the id and index, only
+  // the display name changes. The row's own label (below) is what tells
+  // the operator which one they are doing.
+  const commit = async () => {
+    const name = draftName.trim();
+    if (!name || name === (member.name || "")) { setEditing(false); setDraftName(member.name || ""); return; }
+    setBusy(true);
+    onError("");
+    try {
+      await window.API.renameTeamMember(compId, teamId, member.id, name, password);
+      if (!mountedRef.current) return;
+      onChanged(member.id, name);
+      setEditing(false);
+    } catch (e) {
+      if (mountedRef.current) onError((e && e.message) || "Failed to save the name");
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  // Clearing: the operator's own "removal". The Clear button is already
+  // disabled once the competition has started (clearDisabled, driven by the
+  // same isStarted the rest of this screen locks output-affecting fields
+  // on), but a 409 can still arrive if another device started the
+  // competition after this page loaded its squads -- surfaced via onError,
+  // never swallowed.
+  const clear = async () => {
+    setBusy(true);
+    onError("");
+    try {
+      await window.API.clearTeamMember(compId, teamId, member.id, password);
+      if (!mountedRef.current) return;
+      onChanged(member.id, "");
+    } catch (e) {
+      if (mountedRef.current) onError((e && e.message) || "Failed to clear the name");
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  const label = squadMemberLabel(teamNumber, member.index);
+  const hasName = !!(member.name || "").trim();
+
+  return (
+    <div data-testid={`settings-squad-member-${member.id}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontSize: 13, color: "var(--ink-3)", minWidth: 48 }}>{label}</span>
+      {editing ? (
+        <>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            aria-label={`Name for ${label}`}
+            value={draftName}
+            disabled={busy}
+            onChange={(e) => setDraftName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commit(); }
+              else if (e.key === "Escape") { e.preventDefault(); cancelEdit(); }
+            }}
+          />
+          <button type="button" className="btn btn--sm" onClick={commit} disabled={busy || !draftName.trim()}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={cancelEdit} disabled={busy}>Cancel</button>
+        </>
+      ) : (
+        <>
+          <span style={{ flex: 1, fontStyle: hasName ? "normal" : "italic", color: hasName ? "inherit" : "var(--ink-3)" }}>
+            {hasName ? member.name : "(unfilled)"}
+          </span>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={startEdit} disabled={busy}>
+            {hasName ? "Rename" : "Fill"}
+          </button>
+          {/* Nothing to clear on an already-blank slot: the row shows no
+              Clear button at all rather than one that would refuse itself
+              (a blank candidate never collides and clearing it would be a
+              no-op the operator has no reason to ask for). */}
+          {hasName && (
+            <button type="button" className="btn btn--ghost btn--sm" onClick={clear} disabled={busy || clearDisabled}>
+              {busy ? "Clearing…" : "Clear name"}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// TeamSquadSection: one team's member list plus its Add-reserve control.
+// `onSquadChange(teamId, nextMembers)` lets the parent SquadManager hold the
+// single source of truth for the whole competition's squads map, so a
+// rename/fill/clear/add on one team never disturbs another's already-loaded
+// list.
+function TeamSquadSection({ compId, team, squad, clearDisabled, password, onSquadChange }) {
+  const teamId = squadTeamIdOf(team);
+  const teamNumber = team.number || team.Number || "";
+  const teamLabel = team.name || team.Name || teamId;
+  const members = (Array.isArray(squad) ? squad : []).slice().sort((a, b) => (a.index || 0) - (b.index || 0));
+
+  const [error, setError] = useStateA("");
+  const [addingName, setAddingName] = useStateA("");
+  const [adding, setAdding] = useStateA(false);
+  const mountedRef = useRefA(true);
+  useEffectA(() => () => { mountedRef.current = false; }, []);
+
+  const handleMemberChanged = (memberId, name) => {
+    onSquadChange(teamId, members.map((m) => (m.id === memberId ? { ...m, name } : m)));
+  };
+
+  // ADD mints a brand-new squad member (a reserve beyond the seeded roster)
+  // -- the one operation on this screen that creates something. Per the
+  // operator's ruling, creating is rare and deliberate (filling an already-
+  // seeded slot via "Fill" above creates nothing and is NOT gated here), so
+  // this is confirmed first: the last guard against a typo becoming a
+  // permanent squad position.
+  const addMember = async () => {
+    const name = addingName.trim();
+    if (!name) return;
+    const ok = await window.confirmDialog({
+      message: `Add "${name}" as a new squad member of ${teamLabel}? This adds a new position to the squad. Once added, it can be cleared but never removed.`,
+      confirmLabel: "Add member",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) return;
+    setAdding(true);
+    setError("");
+    try {
+      const member = await window.API.addTeamMember(compId, teamId, name, password);
+      if (!mountedRef.current) return;
+      onSquadChange(teamId, [...members, member]);
+      setAddingName("");
+    } catch (e) {
+      if (mountedRef.current) setError((e && e.message) || "Failed to add the new squad member");
+    } finally {
+      if (mountedRef.current) setAdding(false);
+    }
+  };
+
+  return (
+    <div data-testid={`settings-squad-team-${teamId}`} style={{ marginBottom: 16 }}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{teamLabel}</div>
+      {error && <div className="field__hint field__hint--warn">{error}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {members.map((m) => (
+          <TeamSquadMemberRow
+            key={m.id}
+            compId={compId}
+            teamId={teamId}
+            member={m}
+            teamNumber={teamNumber}
+            clearDisabled={clearDisabled}
+            password={password}
+            onChanged={handleMemberChanged}
+            onError={setError}
+          />
+        ))}
+        {members.length === 0 && (
+          <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>No squad members yet.</div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <input
+          className="input"
+          style={{ flex: 1 }}
+          placeholder="New member name"
+          aria-label={`New squad member for ${teamLabel}`}
+          value={addingName}
+          disabled={adding}
+          onChange={(e) => setAddingName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addMember(); } }}
+        />
+        <button type="button" className="btn btn--sm" onClick={addMember} disabled={adding || !addingName.trim()}>
+          {adding ? "Adding…" : "Add member"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// SquadManager: mounted only for a team competition (teamFieldsVisible(c.kind)
+// at the call site below) -- an individual competition has no squads and
+// renders nothing. Fetches the whole competition's squads map once (the
+// same GET every other squad-reading surface uses) and hands each team's
+// slice to its own TeamSquadSection, so a write on one team's list never
+// re-fetches or disturbs another's.
+function SquadManager({ compId, teams, isStarted, password }) {
+  const [squads, setSquads] = useStateA({});
+  const [loading, setLoading] = useStateA(true);
+  const [loadErr, setLoadErr] = useStateA("");
+
+  useEffectA(() => {
+    let cancelled = false;
+    if (!compId) { setLoading(false); return undefined; }
+    setLoading(true);
+    setLoadErr("");
+    (async () => {
+      try {
+        const result = await window.API.fetchSquads(compId, password);
+        if (!cancelled) setSquads(result || {});
+      } catch (e) {
+        if (!cancelled) setLoadErr((e && e.message) || "Failed to load squad members");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [compId]);
+
+  const setTeamSquad = (teamId, members) => {
+    setSquads((prev) => ({ ...prev, [teamId]: members }));
+  };
+
+  if (loading) {
+    return (
+      <div data-testid="settings-squad-section">
+        <div className="overline" style={{ marginBottom: 4 }}>Squad members</div>
+        <div className="field__hint">Loading squad members…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-testid="settings-squad-section">
+      <div className="overline" style={{ marginBottom: 4 }}>Squad members</div>
+      {/* Same disabled-status pattern this whole screen already uses
+          (isDrawReady/lockedAfterDraw): the control is disabled AND the
+          reason is stated where the operator is looking, once for the
+          section rather than repeated per row. */}
+      <div className="field__hint" style={{ marginBottom: isStarted ? 4 : 10 }}>
+        Fill or rename a member's name at any time. Clearing a name empties that position: it keeps the position and number, it does not delete anybody.
+      </div>
+      {isStarted && (
+        <div className="field__hint field__hint--warn" style={{ marginBottom: 10 }}>
+          Clearing is locked once the competition has started.
+        </div>
+      )}
+      {loadErr && <div className="field__hint field__hint--warn">Could not load squad members: {loadErr}</div>}
+      {teams.length === 0 && <div className="field__hint">No teams registered yet.</div>}
+      {teams.map((t) => (
+        <TeamSquadSection
+          key={squadTeamIdOf(t)}
+          compId={compId}
+          team={t}
+          squad={squads[squadTeamIdOf(t)] || []}
+          clearDisabled={isStarted}
+          password={password}
+          onSquadChange={setTeamSquad}
+        />
+      ))}
+    </div>
+  );
 }
 
 function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, onStatusChange }) {
@@ -1191,6 +1487,16 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             onChange={(v) => update("teamMatchType", v)} disabled={lockedAfterDraw}
             hint={`${teamMatchTypeHint(local.teamMatchType === "kachinuki")}${lockedNote}`} />
         </>
+      )}
+      {/* bc-pnum: gated on c.kind (the server-CONFIRMED kind), not
+          local.kind (the pending edit) like the two team fields above.
+          Squads belong to the real Player rows in c.players; a pending,
+          unsaved flip of the Kind pill has not changed what those rows
+          are, so this must not appear (or vanish) a beat ahead of Save. */}
+      {teamFieldsVisible(c.kind) && (
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line, #ddd)" }}>
+          <SquadManager compId={c.id} teams={c.players || []} isStarted={isStarted} password={password} />
+        </div>
       )}
       {poolFormatVisible(local.format) && (
         <>

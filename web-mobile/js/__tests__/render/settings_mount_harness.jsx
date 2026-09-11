@@ -59,6 +59,14 @@ function defaultStubbedGlobals() {
       fetchDrawWarnings: vi.fn().mockResolvedValue([]),
       // saveNow runs a post-save clash check before navigating away.
       getScheduleClashes: vi.fn().mockResolvedValue([]),
+      // bc-pnum: the Squad members section mounts for any team-kind fixture
+      // and fetches on its own effect regardless of what a given test is
+      // about, the same reason estimateCompetitionSchedule is a shared
+      // default above rather than a per-file override.
+      fetchSquads: vi.fn().mockResolvedValue({}),
+      addTeamMember: vi.fn(),
+      renameTeamMember: vi.fn(),
+      clearTeamMember: vi.fn(),
     },
   };
 }

@@ -384,10 +384,24 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // Operation 2 (ADD): mint the member server-side, then place it, in one
   // round trip's worth of user action. commitAdd is the only place that
   // calls addTeamMember: a new name is never stored as a bare string.
+  //
+  // bc-pnum: confirm before MINTING. Creating a squad member is rare and
+  // deliberate -- picking an existing member from the dropdown above
+  // creates nothing, and only this explicit "+ Add new member…" choice
+  // does -- so a confirmation here is cheap and is the last guard against
+  // a typo becoming a permanent squad position. Declining leaves the
+  // add-row open with the typed name intact so the operator can correct it
+  // rather than restarting the picker.
   const commitAdd = async () => {
     const posKey = addingPos;
     const name = addingName.trim();
     if (!posKey || !name) { setAddingPos(null); setAddingName(""); return; }
+    const ok = await window.confirmDialog({
+      message: `Add "${name}" as a new squad member of ${team?.name || team?.Name || "this team"}? This adds a new position to the squad. Once added, it can be cleared but never removed.`,
+      confirmLabel: "Add member",
+      cancelLabel: "Cancel",
+    });
+    if (!ok) return;
     setAddBusy(true);
     setError("");
     try {

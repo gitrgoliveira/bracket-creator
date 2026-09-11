@@ -182,12 +182,23 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
 import { matchDataUnreadable, UnreadableEditorNote } from './data_integrity.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+// bc-pnum: the ONE primitive that composes a squad member's visible label
+// ("T10.1"); see its header for why this is never restated inline.
+import { squadMemberLabel } from './squad_member_label.jsx';
+
+// Shared inline style for the squad member label riding beside a bout row's
+// fighter name (squadLabelFor, TeamScoreEditorModal below). A muted, small
+// badge, matching the sizing convention admin_lineup.jsx's own squad panel
+// uses for the same label -- there is no existing CSS class for this (the
+// label is new), and one bare constant beats three duplicated style object
+// literals at the three render sites.
+const SQUAD_MEMBER_LABEL_STYLE = { fontSize: 11, color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 };
 
 // Position keys are generated inline in TeamScoreEditorModal (numbered "1".."N")
 // from teamSize and any persisted kachinuki bouts; the upper bound everywhere is
@@ -1892,15 +1903,51 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       if (lineup.positions[posKeyN]) return lineup.positions[posKeyN];
       return "";
     };
+    // bc-pnum: mirrors `pick` above, but for the squad MEMBER ID riding a
+    // lineup position, so the id can be paired with the name resolved from
+    // the same tier (see resolveBoutSideMemberId below).
+    const pickMemberId = (lineup) => {
+      if (!lineup?.memberIds) return "";
+      if (posKey5 && lineup.memberIds[posKey5]) return lineup.memberIds[posKey5];
+      if (lineup.memberIds[posKeyN]) return lineup.memberIds[posKeyN];
+      return "";
+    };
     // mp-gmcg: a manually-added bout (no server entry, no lineup key) carries
     // the operator's player picks on the local sub state (aName/bName). They
     // take the existing-name slot: for that bout they ARE the authoritative
     // per-bout identity, exactly like a server bout-log entry.
     const override = subs[idx] || {};
-    return {
-      aName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.aName || existing?.sideA, lineupName: pick(lineupA) }),
-      bName: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.bName || existing?.sideB, lineupName: pick(lineupB) }),
-    };
+    const aName = resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.aName || existing?.sideA, lineupName: pick(lineupA) });
+    const bName = resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.bName || existing?.sideB, lineupName: pick(lineupB) });
+    // bc-pnum: the squad member id feeding the row's member label
+    // (squadMemberLabel, via resolveSquadMember at the render sites).
+    // resolveBoutSideMemberId mirrors resolveBoutSideName's own priority so
+    // the id can never label a different fighter than the name shown above.
+    // A manually-typed override has no valid lineup key to resolve an id
+    // from at all (it is not a server bout-log entry either, until the
+    // operator's pick is saved), so it short-circuits to "no id" ahead of
+    // the mirrored priority; the render sites then fall back to matching
+    // the resolved NAME against the squad instead.
+    const aMemberId = override.aName ? "" : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideAMemberId, lineupMemberId: pickMemberId(lineupA) });
+    const bMemberId = override.bName ? "" : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideBMemberId, lineupMemberId: pickMemberId(lineupB) });
+    return { aName, bName, aMemberId, bMemberId };
+  };
+
+  // bc-pnum: the squad member label beside a bout row's fighter name (the
+  // SAME "T10.1" identifier the round-scoped Lineups page shows --
+  // squadMemberLabel, squad_member_label.jsx), shared by the editable row
+  // and the read-only (past-bout) row so both resolve identically: squad
+  // member id first (resolveSquadMember, lineup_resolver.jsx), falling back
+  // to an exact name match only when no id resolved. "a" is AKA/squadA/
+  // m.sideA, "b" is SHIRO/squadB/m.sideB, matching this file's side
+  // convention throughout (teamIdForSide et al). Returns "" (never a stray
+  // label) when the fighter matches no squad member, or the team carries no
+  // competitor number yet.
+  const squadLabelFor = (side, memberId, name) => {
+    const squad = side === "a" ? squadA : squadB;
+    const teamNumber = (side === "a" ? m.sideA : m.sideB)?.number || "";
+    const member = resolveSquadMember(squad, memberId, name);
+    return member ? squadMemberLabel(teamNumber, member.index) : "";
   };
 
   // mp-gmcg: open a past (already-fought) bout for inline correction. Snapshot
@@ -1940,7 +1987,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const renderReadOnlyBout = (idx) => {
     const s = subs[idx];
     const t = subTotals[idx];
-    const { aName, bName } = playerNamesForBout(idx);
+    const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(idx);
+    const aLabel = squadLabelFor("a", aMemberId, aName);
+    const bLabel = squadLabelFor("b", bMemberId, bName);
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
     return (
       <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
@@ -1952,7 +2001,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         <div className="team-sub-match__pos"><span className="tsm-caret" aria-hidden="true">▶</span><span className="team-sub-match__pos-num">{idx + 1}</span></div>
         <div className="team-sub-match__row">
           <div className="team-sub-match__side team-sub-match__side--shiro">
-            <div className="tsm-name"><span className={nameCls("b")}>{bName || "-"}</span></div>
+            <div className="tsm-name">
+              {bLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`kachinuki-done-bout-${idx}-member-label-b`}>{bLabel}</span>}
+              <span className={nameCls("b")}>{bName || "-"}</span>
+            </div>
           </div>
           <div className="team-sub-match__center">
             <div className="tsm-center-marks">
@@ -1968,7 +2020,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             </div>
           </div>
           <div className="team-sub-match__side team-sub-match__side--aka team-sub-match__side--right">
-            <div className="tsm-name"><span className={nameCls("a")}>{aName || "-"}</span></div>
+            <div className="tsm-name">
+              {aLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`kachinuki-done-bout-${idx}-member-label-a`}>{aLabel}</span>}
+              <span className={nameCls("a")}>{aName || "-"}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -2528,7 +2583,11 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const posKey5 = (teamSize === 5 && idx < 5) ? POS_KEYS_5[idx] : null;
             const posKeyN = String(positions[idx]);
             // Same lineup→competitor resolution buildPatch uses (DRY).
-            const { aName: playerAName, bName: playerBName } = playerNamesForBout(idx);
+            const { aName: playerAName, bName: playerBName, aMemberId: playerAMemberId, bMemberId: playerBMemberId } = playerNamesForBout(idx);
+            // bc-pnum: the squad member label riding beside each side's name
+            // (squadLabelFor, defined above playerNamesForBout).
+            const playerALabel = squadLabelFor("a", playerAMemberId, playerAName);
+            const playerBLabel = squadLabelFor("b", playerBMemberId, playerBName);
 
             // Feature 2 / layout: each player's name select lives WITH that
             // side's score controls (grouped, and aligned down the sheet),
@@ -2593,7 +2652,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // accepts only senpo/… or "1".."N"), so a name pick there would
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
-                playerName: playerBName, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow || freeNameB,
+                playerName: playerBName, memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow || freeNameB,
                 onSelectName: (isManualRow || freeNameB) ? pickManual("bName") : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
               {
@@ -2606,7 +2665,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
-                playerName: playerAName, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow || freeNameA,
+                playerName: playerAName, memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow || freeNameA,
                 onSelectName: (isManualRow || freeNameA) ? pickManual("aName") : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
               },
             ];
@@ -2687,6 +2746,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             no roster metadata. Lineups are always editable. */}
                         <div className="tsm-name">
                           <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
+                          {rs.memberLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`team-sub-match-member-label-${rs.color}`}>{rs.memberLabel}</span>}
                           {(rs.roster && rs.roster.length > 0) || rs.forceInput ? (
                             <LineupNameInput
                               value={rs.playerName || ""}

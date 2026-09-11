@@ -109,3 +109,41 @@ export function pickFromLineup(lineup, index, teamSize) {
   if (numeric) return numeric;
   return "";
 }
+
+// resolveBoutSideMemberId: which squad MEMBER ID identifies one side of a
+// sub-bout row (bc-pnum: extend the squad member label -- squadMemberLabel,
+// squad_member_label.jsx -- to the team scoring surfaces). MIRRORS
+// resolveBoutSideName's kachinuki-vs-fixed priority exactly: the id must
+// come from the SAME source tier the name was resolved from (a kachinuki
+// numbered bout's pairing is server-bout-log first, the SubMatchResult's own
+// sideAMemberId/sideBMemberId -- backfilled from squads.yaml by the
+// legacy-upgrade repair -- so the lineup position's id must never outrank
+// it; fixed-format and the daihyosen row stay lineup-first). Callers pass
+// existingMemberId/lineupMemberId from the SAME existing/lineup objects
+// resolveBoutSideName was given for the SAME row, and must independently
+// block an operator's free-typed override (which has no valid lineup key to
+// resolve an id from at all) before ever reaching this function -- see
+// admin_scoring_team.jsx's playerNamesForBout for that guard.
+export function resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId }) {
+  if (isKachinuki && !isDaihyosen) return existingMemberId || lineupMemberId || "";
+  return lineupMemberId || existingMemberId || "";
+}
+
+// resolveSquadMember: the squad member a bout side's (memberId, name) pair
+// identifies -- id first, an exact NAME match only when no id resolved (a
+// manually-typed/free bout, or a row the legacy-upgrade repair has not
+// reached yet). Squad member names are unique WITHIN one team
+// (server-enforced, bc-tmdup), so the name fallback cannot be ambiguous and
+// needs no second key the way a cross-team lookup would.
+//
+// Returns null when nothing in `squad` matches: an empty/not-yet-loaded
+// squad, or a name that names no squad member at all.
+export function resolveSquadMember(squad, memberId, name) {
+  const list = Array.isArray(squad) ? squad : [];
+  if (memberId) {
+    const byId = list.find(mem => mem && mem.id === memberId);
+    if (byId) return byId;
+  }
+  if (!name) return null;
+  return list.find(mem => mem && mem.name === name) || null;
+}

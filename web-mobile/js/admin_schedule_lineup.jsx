@@ -147,10 +147,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // are skipped: a squad is seeded with one unnamed position per team size,
   // and an unnamed position is not a person to suggest.
   //
-  // The metadata array stays as the fallback for the two windows where the
-  // squad is not available: before the load-time migration has folded a
-  // legacy team's members into one, and when the squad fetch above failed
-  // (squadUnavailable), where falling back beats suggesting nothing.
+  // The metadata array stays as the fallback for the two cases where no
+  // squad comes back, both of them reachable. The load-time migration folds
+  // a team's metadata into a squad keyed by its PARTICIPANT ID, and skips a
+  // roster row that has no id -- the legacy state this PR's own data-issue
+  // notices describe -- so such a team has members in metadata and nothing
+  // under its key. And the fetch above can simply fail, where falling back
+  // beats suggesting nothing. Migration does not clear metadata, so the
+  // fallback still has names to offer in both.
   const squadNames = squad.map(m => ((m && m.name) || "").trim()).filter(Boolean);
   const roster = squadNames.length > 0 ? squadNames : legacyRoster;
   const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")

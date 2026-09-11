@@ -54,6 +54,7 @@ classDiagram
         +int PoolSize
         +int PoolWinners
         +TeamMatchType TeamMatchType
+        +string NumberPrefix
         +string[] Courts
         +bool Naginata
         +bool Engi
@@ -89,9 +90,17 @@ classDiagram
 
     class TeamLineup {
         +string TeamID
+        +string CompetitionID
         +int Round
         +string MatchID
         +Map~Position, string~ Positions
+        +Map~Position, string~ MemberIDs
+    }
+
+    class TeamMember {
+        +string ID
+        +int Index
+        +string Name
     }
 
     class Overrides {
@@ -106,6 +115,8 @@ classDiagram
     Competition "1" o-- "0..*" TeamLineup
     Competition "1" o-- "0..1" Overrides
     Pool "1" o-- "1..*" Player : draws from
+    Player "1" o-- "0..*" TeamMember : a team's squad
+    TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
 `Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
@@ -185,11 +196,14 @@ classDiagram
         +int Position
         +string SideA
         +string SideB
+        +string SideAMemberID
+        +string SideBMemberID
         +string[] IpponsA
         +string[] IpponsB
         +int HansokuA
         +int HansokuB
         +string Winner
+        +string WinnerMemberID
         +string Decision
         +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
     }
@@ -209,7 +223,10 @@ classDiagram
         +MatchStatus Status
         +string SideA
         +string SideB
+        +string SideAID
+        +string SideBID
         +string Winner
+        +string WinnerID
         +string[] IpponsA
         +string[] IpponsB
         +int HansokuA
@@ -250,11 +267,22 @@ are one concept with two instances, not twelve independent attributes.
 **A team match is an aggregate.** `SubMatchResult` is a full bout in its own right: its own
 pairing, score, decision, overtime and judges' decision. A five person team encounter holds
 five of them, plus an optional representative bout at position `-1`. Ranking figures such as
-individual victories and points won are derived from these, never stored separately.
+individual victories and points won are DERIVED from these by one function, never entered by
+hand and never a second source of truth: every read serves them alongside the bouts, every
+save of an elimination match recomputes them, and every surface that shows them takes what
+the server computed rather than re-deriving its own.
 
-**Sides carry both a name and an id.** Results are written against the name, and the
-participant id travels alongside it. Both are kept because a rename must not orphan a
-recorded result.
+**Sides carry both a name and an id, and the id is the one that identifies.** Both are
+kept because a rename must not orphan a recorded result: the name is what a person reads
+on the sheet, the id is what the app resolves by. Where a record has an id field, it is
+read by id alone; a name is consulted only for a row old enough to predate the field,
+which the app repairs when it loads it.
+
+That applies one level further down as well. A team bout carries its two fighters' SQUAD
+member ids beside their names, and the winner's id beside the winner's name. Without them
+a bout between two people who happen to share a display name could not be attributed at
+all, because the name identifies neither of them, and competitors are allowed to share
+one.
 
 ### Match status and decision
 

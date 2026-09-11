@@ -62,6 +62,8 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 2. If wins are equal, the team with the highest points scored wins.
 3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
 
+Two fighters from opposing teams may share a name, so the app records who won each bout by identity rather than by the name on the sheet. You do not have to do anything for this, and bouts you score now are unaffected. The one case you may see is an encounter scored by a much older version: a bout between two same-named fighters there can show no individual win for either team, because the name it stored cannot say which of the two it meant. The points scored in that bout still count.
+
 ## Kachinuki (winner stays on)
 
 In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. Kachinuki is run under one of two rule sets, described below. Because only the shiai-jo operator knows which rule set governs a match, and because team sizes are flexible, the app never decides on its own when a kachinuki encounter is over: the court operator does, using the buttons in the score editor.

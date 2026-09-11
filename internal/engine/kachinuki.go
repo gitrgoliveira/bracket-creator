@@ -302,19 +302,68 @@ func (r RetiredMemberSet) retire(name, memberID string) {
 	}
 }
 
+// ambiguousFighterNames returns the names carried by MORE THAN ONE entry of
+// roster. A retirement recorded under such a name cannot say WHICH of them
+// retired, so IsMemberRetired refuses to act on it. Members of one team may
+// legally share a display name -- the uniqueness rule is grandfathered, so
+// rosters written before it exist and still load.
+func ambiguousFighterNames(roster []kachinukiFighter) map[string]struct{} {
+	count := make(map[string]int, len(roster))
+	for _, f := range roster {
+		if f.Name != "" {
+			count[f.Name]++
+		}
+	}
+	out := make(map[string]struct{})
+	for name, n := range count {
+		if n > 1 {
+			out[name] = struct{}{}
+		}
+	}
+	return out
+}
+
 // IsMemberRetired reports whether fighter f -- named, and possibly
 // id-stamped, exactly like a bout-log side or a lineup slot -- has retired
-// per `retired`. The member id wins whenever f carries one (operator
-// ruling bc-pnum, "a record that carries an id field is resolved by id
-// only"): a renamed member's slot keeps ITS id, so a retirement recorded
-// under the member's OLD name is still found -- this is the mechanism that
-// closes the rename defect this pass exists for. A fighter with no id (an
-// unrepaired legacy slot, or the bout-log-only heuristic, which has no
-// lineup to draw one from at all) is NOT such a record, so it is compared
-// by name -- exactly the pre-bc-tmid rule, unchanged for exactly that case.
-func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet) bool {
+// per `retired`. ambiguousNames is the set of names more than one member of
+// f's OWN roster carries (ambiguousFighterNames); pass nil when there is no
+// roster to compute it from.
+//
+// The member id wins whenever f carries one (operator ruling bc-pnum, "a
+// record that carries an id field is resolved by id only"): a renamed
+// member's slot keeps ITS id, so a retirement recorded under the member's
+// OLD name is still found -- this is the mechanism that closes the rename
+// defect this pass exists for.
+//
+// An id MISS then falls through to the name, and that tier is not a
+// weakening of the id rule but the only way to read a row that has no id to
+// be resolved by. The two keys live on opposite ends of one comparison:
+// f's id comes from a LINEUP SLOT, which the load-time repair fills, while
+// the retirement was recorded by a BOUT ROW, which the same repair can only
+// fill when that row's name resolves to exactly one squad member. A row it
+// could not resolve -- or one written after it ran, by a client too old to
+// send ids -- contributes a name and nothing else, so an id-only check
+// finds nothing and puts a fighter who has already lost back in the queue,
+// ahead of the reserve who has not. That is the defect this tier exists for,
+// and it is the same defect the id rule was introduced to fix, arriving
+// through the other door.
+//
+// The gate is what keeps it honest: the fallback applies only when f's name
+// belongs to f alone on this roster, because a shared name cannot say which
+// teammate the row meant. One case stays wrong and cannot be fixed from
+// stored data: a member renamed AFTER losing, whose old name a teammate now
+// carries, retires that teammate instead. Nothing links the old name to the
+// id, so every rule guesses there; this one guesses in the direction that
+// keeps a beaten fighter out of the queue.
+func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet, ambiguousNames map[string]struct{}) bool {
 	if f.MemberID != "" {
-		_, ok := retired.IDs[f.MemberID]
+		if _, ok := retired.IDs[f.MemberID]; ok {
+			return true
+		}
+		if _, ambiguous := ambiguousNames[f.Name]; ambiguous {
+			return false
+		}
+		_, ok := retired.Names[f.Name]
 		return ok
 	}
 	_, ok := retired.Names[f.Name]
@@ -348,10 +397,32 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 			retiredB.retire(b.SideB, b.SideBMemberID)
 			continue
 		}
-		// Map per-bout winner to the team side. A team-name match on
-		// the parent (b.Winner == teamAName) is the legacy synth path
-		// from quick-score; the per-player path keys on the bout's
-		// SideA/SideB names.
+		// Map per-bout winner to the team side. MEMBER IDS FIRST (operator
+		// ruling bc-pnum): who won decides who stays on, so the same
+		// same-name hazard that used to hand an individual victory to the
+		// wrong team also used to retire the wrong fighter here, which is
+		// worse -- it changes who fights next. The ids settle it whenever
+		// the row carries them, which every bout scored since the editor
+		// began stamping the winner's member id does.
+		//
+		// The name switch below still answers for a row they cannot settle,
+		// aka-first on a same-name pair exactly as before. That residue is
+		// deliberately NOT converted into "nobody retires": a kachinuki
+		// queue whose head never clears would re-offer the same pairing,
+		// turning a wrong-but-recoverable answer into a stuck encounter. A
+		// team-name match on the parent (b.Winner == teamAName) is the
+		// legacy synth path from quick-score; the per-player path keys on
+		// the bout's own side names.
+		switch domain.AttributeWinnerSide(domain.WinnerAttribution{
+			WinnerID: b.WinnerMemberID, SideAID: b.SideAMemberID, SideBID: b.SideBMemberID,
+		}) {
+		case domain.MatchSideA:
+			retiredB.retire(b.SideB, b.SideBMemberID)
+			continue
+		case domain.MatchSideB:
+			retiredA.retire(b.SideA, b.SideAMemberID)
+			continue
+		}
 		switch b.Winner {
 		case b.SideA, teamAName:
 			// SideA player stays; SideB player retires.
@@ -370,9 +441,13 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 // lineup to draw ids from and keeps using plain FilterRemaining over
 // retired.Names.
 func filterRemainingFighters(roster []kachinukiFighter, retired RetiredMemberSet) []kachinukiFighter {
+	// The roster IS the context IsMemberRetired's name tier needs: whether a
+	// name belongs to one member of this team or to several is a fact about
+	// this slice, computed once here rather than re-derived per fighter.
+	ambiguous := ambiguousFighterNames(roster)
 	out := make([]kachinukiFighter, 0, len(roster))
 	for _, f := range roster {
-		if IsMemberRetired(f, retired) {
+		if IsMemberRetired(f, retired, ambiguous) {
 			continue
 		}
 		out = append(out, f)
@@ -1755,7 +1830,10 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 // filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
 // produce the remaining queue, so a lineup-resolved fighter's member id
 // (when the slot has one) rather than their possibly-stale name decides
-// whether they have retired.
+// whether they have retired -- falling back to the name only where the
+// retiring bout row carried no id to match against and the name belongs to
+// one member of this roster alone. See IsMemberRetired for why both tiers
+// are needed and what the gate protects.
 func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Competition, parent *state.MatchResult, roundIdx int) ([]kachinukiFighter, []kachinukiFighter, bool) {
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
 

@@ -649,9 +649,15 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 			leftScore, rightScore = scoreB, scoreA
 			lFoul, rFoul = rFoul, lFoul
 		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.WinnerAttribution{
-			Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
-		}, mirror)
+		// bc-pnum: the bout row's MEMBER IDS decide which fighter the mark
+		// rides beside, through the same owner that decides the individual
+		// victory (domain.SubBoutAttribution). A same-name pair no id can
+		// settle gets NO mark rather than one beside whichever fighter is
+		// written first: CLAUDE.md's accepted no-mark class (i).
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.SubBoutAttribution(
+			sub.Winner, sub.SideA, sub.SideB,
+			sub.WinnerMemberID, sub.SideAMemberID, sub.SideBMemberID,
+		), mirror)
 		// Outstanding-hansoku ▲ on the cell's outer edge, as in
 		// writeScoreRowCells (FIK Table 2; scoreboard parity).
 		if lScore := joinSp(lFoul, joinSp(leftScore, lMark)); lScore != "" {

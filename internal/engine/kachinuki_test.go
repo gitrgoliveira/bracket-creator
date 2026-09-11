@@ -256,20 +256,80 @@ func TestIsMemberRetired(t *testing.T) {
 		IDs:   map[string]struct{}{"id-sato": {}},
 		Names: map[string]struct{}{"Suzuki": {}},
 	}
+	// The roster carries exactly one of each name unless a subtest says
+	// otherwise: that is what lets the name tier speak at all.
+	unique := map[string]struct{}{}
 	t.Run("id present and retired", func(t *testing.T) {
-		assert.True(t, IsMemberRetired(kachinukiFighter{Name: "Renamed Sato", MemberID: "id-sato"}, retired),
+		assert.True(t, IsMemberRetired(kachinukiFighter{Name: "Renamed Sato", MemberID: "id-sato"}, retired, unique),
 			"the id matches regardless of what name currently rides with it")
 	})
-	t.Run("id present but not retired must not fall back to a coincidental name match", func(t *testing.T) {
-		// This fighter's OWN name happens to collide with an unrelated
-		// retiree's name, but they carry a DIFFERENT id: id resolution
-		// must never consult Names once MemberID is non-empty.
-		assert.False(t, IsMemberRetired(kachinukiFighter{Name: "Suzuki", MemberID: "id-different"}, retired),
-			"a fighter with an id is resolved BY ID ONLY, never by a same-name coincidence")
+	t.Run("id present but not retired must not fall back to a SHARED name", func(t *testing.T) {
+		// Two members of this team are called Suzuki, so a retirement
+		// recorded under that name cannot say which of them it meant. The
+		// fighter carries a different id, and the name cannot break the tie,
+		// so nothing here may retire them.
+		shared := map[string]struct{}{"Suzuki": {}}
+		assert.False(t, IsMemberRetired(kachinukiFighter{Name: "Suzuki", MemberID: "id-different"}, retired, shared),
+			"a name two teammates share can never identify which one retired")
+	})
+	t.Run("id present, id misses, and the name is the fighter's alone: retired", func(t *testing.T) {
+		// The bout row that retired them carried no member id -- a row the
+		// load-time repair could not resolve, or one written by a client too
+		// old to send ids -- so it recorded only the name. The id lookup
+		// therefore finds nothing, and refusing here would put a fighter who
+		// has already lost back in the queue ahead of the reserve.
+		assert.True(t, IsMemberRetired(kachinukiFighter{Name: "Suzuki", MemberID: "id-different"}, retired, unique),
+			"an id miss over a name nobody else on this roster carries still retires them")
 	})
 	t.Run("no id falls back to name", func(t *testing.T) {
-		assert.True(t, IsMemberRetired(kachinukiFighter{Name: "Suzuki"}, retired))
-		assert.False(t, IsMemberRetired(kachinukiFighter{Name: "Someone Else"}, retired))
+		assert.True(t, IsMemberRetired(kachinukiFighter{Name: "Suzuki"}, retired, unique))
+		assert.False(t, IsMemberRetired(kachinukiFighter{Name: "Someone Else"}, retired, unique))
+	})
+	t.Run("a nil ambiguity set means no name is shared", func(t *testing.T) {
+		assert.True(t, IsMemberRetired(kachinukiFighter{Name: "Suzuki", MemberID: "id-different"}, retired, nil))
+	})
+}
+
+// TestAmbiguousFighterNames pins the gate itself: only a name MORE THAN ONE
+// roster entry carries is ambiguous, and a blank name is never a key (an
+// unfilled lineup slot is not a person two slots could be confused for).
+func TestAmbiguousFighterNames(t *testing.T) {
+	got := ambiguousFighterNames([]kachinukiFighter{
+		{Name: "Suzuki", MemberID: "m1"},
+		{Name: "Suzuki", MemberID: "m2"},
+		{Name: "Sato", MemberID: "m3"},
+		{Name: "", MemberID: "m4"},
+		{Name: "", MemberID: "m5"},
+	})
+	assert.Equal(t, map[string]struct{}{"Suzuki": {}}, got)
+}
+
+// TestFilterRemainingFighters_UnrepairedRowRetiresByName is the defect in its
+// own shape: a fighter whose LINEUP SLOT carries a member id, retired by a
+// BOUT ROW that carries none. The two keys never meet, so before this gate
+// the loser came back up the queue ahead of the reserve.
+func TestFilterRemainingFighters_UnrepairedRowRetiresByName(t *testing.T) {
+	// Bout row with no member id: only the name survives it.
+	boutLog := []state.SubMatchResult{
+		{Position: 1, SideA: "Sato", SideB: "Ito", Winner: "Ito"},
+	}
+	retiredA, _ := RetiredPlayersFromBoutLog(boutLog, "Team A", "Team B")
+
+	roster := []kachinukiFighter{
+		{Name: "Sato", MemberID: "m-sato"}, // lost above; the row named no id
+		{Name: "Kato", MemberID: "m-kato"}, // the reserve, never fought
+	}
+	remaining := filterRemainingFighters(roster, retiredA)
+	require.Len(t, remaining, 1, "the beaten fighter must not be queued again")
+	assert.Equal(t, "Kato", remaining[0].Name)
+
+	t.Run("but not when a teammate shares the name", func(t *testing.T) {
+		shared := []kachinukiFighter{
+			{Name: "Sato", MemberID: "m-sato-1"},
+			{Name: "Sato", MemberID: "m-sato-2"},
+		}
+		assert.Len(t, filterRemainingFighters(shared, retiredA), 2,
+			"the row cannot say WHICH Sato lost, so it may not remove either")
 	})
 }
 
@@ -3443,5 +3503,47 @@ func TestRemoveTrailingKachinukiBout(t *testing.T) {
 
 		stored := loadPoolMatchByID(t, store, "rm-single", "P1-0")
 		require.Len(t, stored.SubResults, 2)
+	})
+}
+
+// TestRetiredPlayersFromBoutLog_SameNameBoutUsesMemberIDs pins the operator
+// ruling where it matters most: who won a bout decides who STAYS ON. Two
+// opposing fighters may legally share a display name, and the name switch
+// resolves such a row to side A, so before this the winner of a same-name
+// bout was retired and the loser kept fighting.
+func TestRetiredPlayersFromBoutLog_SameNameBoutUsesMemberIDs(t *testing.T) {
+	// Both fighters are called "Yamada". SHIRO (side B) won, and only the
+	// member ids say so.
+	boutLog := []state.SubMatchResult{{
+		Position: 1,
+		SideA:    "Yamada", SideB: "Yamada", Winner: "Yamada",
+		SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-shiro",
+	}}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(boutLog, "Team A", "Team B")
+
+	assert.Contains(t, retiredA.IDs, "m-aka", "the aka fighter lost and must retire")
+	assert.NotContains(t, retiredB.IDs, "m-shiro", "the shiro fighter won and stays on")
+
+	t.Run("and aka winning still retires shiro", func(t *testing.T) {
+		log := []state.SubMatchResult{{
+			Position: 1,
+			SideA:    "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-aka",
+		}}
+		rA, rB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
+		assert.Contains(t, rB.IDs, "m-shiro")
+		assert.NotContains(t, rA.IDs, "m-aka")
+	})
+
+	t.Run("a row with no ids keeps the old name answer rather than stalling", func(t *testing.T) {
+		// Nothing can say who won. Retiring side B is the pre-existing
+		// answer and is kept deliberately: a queue whose head never clears
+		// would re-offer the same pairing for ever.
+		log := []state.SubMatchResult{{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+		}}
+		rA, rB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
+		assert.Contains(t, rB.Names, "Yamada")
+		assert.Empty(t, rA.Names)
 	})
 }

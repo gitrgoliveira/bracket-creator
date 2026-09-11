@@ -182,18 +182,40 @@ function ipponLetters(arr) {
 // subWinnerSides: does sub.winner name the shiro or aka side? The ONE
 // cross-level chain (sub side → daihyosen team alias → match-level side),
 // shared by centreMarks' marks and teamIVPW's IV attribution so the bout rows
-// and the summary row can never disagree about who a winner names. A winner
-// matching BOTH sides is INVALID data (team names are unique by rule; only
-// drifted or hand-edited files can produce it) and resolves defensively to
-// AKA — the side-A-first order Go uses everywhere for the identical case
-// (isWinForSide in engine/scoring.go, TeamResultFrom in state/team_result.go,
-// SideMarksLR in export/suffix.go) — so the on-screen rows, the IV summary,
-// the server standings and the Excel export all agree on the SAME arbitrary
-// side. Never both: asserting two winners was the bug; disagreeing with the
-// server's numbers was the fix's bug. The truth is not in the data
-// (arbitrary-but-consistent, see api_serializers.jsx).
+// and the summary row can never disagree about who a winner names. Never
+// both: asserting two winners was the bug; disagreeing with the server's
+// numbers was the fix's bug.
+//
+// A winner matching BOTH sides splits into two cases that used to be one.
+// At MATCH level a team name is unique by rule, so a winner matching both is
+// drifted or hand-edited data and still resolves defensively to AKA, the
+// side-A-first order Go uses for the identical case (isWinForSide in
+// engine/scoring.go, SideMarksLR in export/suffix.go). At SUB-BOUT level two
+// opposing fighters may legally share a display name, so that same order was
+// a coin flip on ordinary valid data: such a row now resolves to NEITHER
+// side unless the member ids settle it (operator ruling bc-pnum, mirroring
+// state.subBoutWinnerSide). Either way the on-screen rows, the IV summary,
+// the server standings and the Excel export agree with each other.
 function subWinnerSides(sub, matchSideA, matchSideB) {
+  // MEMBER IDS FIRST (operator ruling bc-pnum, "this should only use the
+  // IDs"), mirroring state.subBoutWinnerSide: the score editor stamps the
+  // winner's member id from the SIDE it was told won, so three ids present
+  // and the winner's matching one of them settles the row without consulting
+  // a single name. A winner id matching neither side is drifted data and
+  // falls through, exactly as the Go owner does.
+  const wid = sub.winnerMemberId || "", aid = sub.sideAMemberId || "", bid = sub.sideBMemberId || "";
+  if (wid && aid && bid) {
+    if (wid === aid) return { shiro: false, aka: true };
+    if (wid === bid) return { shiro: true, aka: false };
+  }
   const w = sub.winner;
+  // Two opposing fighters may legally share a display name. When they do and
+  // no id decided above, NOTHING here can say who won, so the row names
+  // neither side rather than taking the aka-first order below -- which would
+  // be a coin flip, and used to be one. `ambiguous` is how teamIVPW tells
+  // this apart from an ordinary winner-less row, whose IV it still infers
+  // from the scoreline.
+  if (sub.sideA && sub.sideA === sub.sideB) return { shiro: false, aka: false, ambiguous: true };
   const aka = !!(w && (w === sub.sideA || w === sub.teamA || (matchSideA && w === matchSideA)));
   const shiro = !aka && !!(w && (w === sub.sideB || w === sub.teamB || (matchSideB && w === matchSideB)));
   return { shiro, aka };
@@ -444,6 +466,10 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     const isShiroWin = wsides.shiro;
     if (isAkaWin) ivAka++;
     else if (isShiroWin) ivShiro++;
+    // An unattributable same-name bout counts for NEITHER side, matching the
+    // server (state.subBoutWinnerSide). The scoreline fallback below must not
+    // step in here: it would hand the summary an IV the standings do not have.
+    else if (wsides.ambiguous) { /* no IV either side */ }
     else if (b > a) ivShiro++;
     else if (a > b) ivAka++;
   }

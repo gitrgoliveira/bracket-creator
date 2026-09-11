@@ -58,6 +58,31 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 1, pwShiro: 0, pwAka: 0 });
   });
 
+  // bc-pnum: two opposing fighters may legally share a display name, so the
+  // name comparison cannot say who won such a bout. The member ids can, and
+  // are the only thing allowed to. Mirrors state.TeamResultFrom /
+  // subBoutWinnerSide; if these two ever disagree the summary row and the
+  // server standings show different numbers for the same encounter.
+  it('attributes a same-name bout by member id, against the aka-first name order', () => {
+    const subs = [{
+      position: 1, sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      sideAMemberId: 'm-aka', sideBMemberId: 'm-shiro', winnerMemberId: 'm-shiro',
+      ipponsA: [], ipponsB: ['M', 'K'],
+    }];
+    expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 2, pwAka: 0 });
+  });
+
+  it('credits a same-name bout to NEITHER side when no member id can settle it', () => {
+    // The scoreline fallback must not step in here either: the server counts
+    // no IV for this row, so a summary that inferred one from the points
+    // would contradict the standings beside it.
+    const subs = [{
+      position: 1, sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      ipponsA: ['M'], ipponsB: ['M', 'K'],
+    }];
+    expect(teamIVPW(subs)).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 2, pwAka: 1 });
+  });
+
   it('counts IV via match-level side names when sub-bout sides are empty (quick-score)', () => {
     const subs = [
       { position: 1, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },

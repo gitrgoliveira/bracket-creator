@@ -1130,29 +1130,26 @@ type SubMatchResult struct {
 	// extended in the same pass that already resolves the match-level
 	// triple) against the two teams' own squads.
 	//
-	// WinnerMemberID IS DIFFERENT FROM ITS TWO NEIGHBOURS AND YOU SHOULD
-	// READ THIS BEFORE WIRING IT INTO ANYTHING. SideAMemberID and
-	// SideBMemberID have real consumers: retirement builds its id set from
-	// them. WinnerMemberID has none. It is written by the repair and by the
-	// kachinuki merge, and read only by MissingMemberID and
-	// ResolveMemberWinnerID, both of which exist to maintain it. Nothing
-	// decides anything with it.
+	// WinnerMemberID HAS TWO PRODUCERS AND YOU SHOULD KNOW WHICH ONE FILLED
+	// A GIVEN ROW. The score editor stamps it from the SIDE the operator
+	// picked, so it is a record of who they said won. ResolveMemberWinnerID
+	// derives it from the row's NAMES for a row that arrived without one,
+	// and deliberately refuses when both sides hold the same name.
 	//
-	// It cannot usefully acquire a consumer yet, and the reason is not
-	// obvious: ResolveMemberWinnerID derives it from the row's NAMES and
-	// deliberately refuses when both sides hold the same name, which is
-	// precisely the case an id would disambiguate. So for every row where
-	// it is set, the names already agree and using it changes nothing, and
-	// for every row where it would help, it is empty. A change that reads
-	// it "to fix same-name attribution" is inert; one was written, gated
-	// green, and reverted for exactly that.
+	// That refusal is why the editor has to be the producer. A derived
+	// value is present exactly where the names already agree, and absent
+	// exactly where an id would have settled the question, so a consumer
+	// reading a derived-only value can never change an outcome. A change
+	// that read it "to fix same-name attribution" was written, gated green,
+	// and reverted for precisely that reason (bc-pnum) before the editor
+	// began stamping it.
 	//
-	// What would make it useful is the channel MatchResult already has and
-	// this struct does not: a winner SIDE, stamped by the editor, which
-	// knows unambiguously which side the operator scored. Until then, a
-	// bout between two opposing fighters who share a display name cannot be
-	// attributed from anything stored, and the name comparison's aka-first
-	// order decides it.
+	// Its one consumer is state.subBoutWinnerSide, the team summary's
+	// "which side won this bout" owner, which reads the three ids together
+	// and falls through to the names when they cannot decide. A row where
+	// two opposing fighters share a display name and no id was ever
+	// recorded counts for NEITHER side: see that function for why refusing
+	// beats the aka-first coin flip it replaced.
 	SideAMemberID  string `json:"sideAMemberId,omitempty" yaml:"side_a_member_id,omitempty"`
 	SideBMemberID  string `json:"sideBMemberId,omitempty" yaml:"side_b_member_id,omitempty"`
 	WinnerMemberID string `json:"winnerMemberId,omitempty" yaml:"winner_member_id,omitempty"`

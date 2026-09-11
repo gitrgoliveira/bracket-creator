@@ -193,6 +193,35 @@ type WinnerAttribution struct {
 	Winner, SideA, SideB       string
 }
 
+// SubBoutAttribution builds the WinnerAttribution for one bout of a TEAM
+// encounter, and owns the single rule that makes a sub-bout different from
+// the match above it: its two sides are FIGHTERS, and two fighters on
+// opposing teams may legally share a display name, where two teams may not.
+//
+// AttributeWinnerSide's name branch resolves a winner matching both sides to
+// side A. At match level that is a deliberate convention for data that
+// should not exist, keeping every surface on the same arbitrary answer. At
+// sub-bout level the same order is a coin flip on ordinary valid data, and
+// it decided individual victories, which decide the encounter. So when the
+// two fighters share a name this drops the names from the attribution: the
+// ids are then the only thing left that can answer, and where they cannot,
+// AttributeWinnerSide reports no side at all rather than guessing.
+//
+// Every consumer of "which side won this bout" must build its attribution
+// here: state.subBoutWinnerSide for individual victories, export's bout rows
+// for the mark beside a fighter's name. The JS mirror is subWinnerSides
+// (match_scoreboard.jsx).
+func SubBoutAttribution(winner, sideA, sideB, winnerID, sideAID, sideBID string) WinnerAttribution {
+	att := WinnerAttribution{
+		Winner: winner, SideA: sideA, SideB: sideB,
+		WinnerID: winnerID, SideAID: sideAID, SideBID: sideBID,
+	}
+	if att.SideA != "" && att.SideA == att.SideB {
+		att.SideA, att.SideB = "", ""
+	}
+	return att
+}
+
 func AttributeWinnerSide(a WinnerAttribution) MatchSide {
 	if a.WinnerID != "" && a.SideAID != "" && a.SideBID != "" {
 		switch a.WinnerID {

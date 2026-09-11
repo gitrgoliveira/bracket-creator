@@ -2129,9 +2129,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // level, so it keeps the team-name behaviour (standings match the
       // match-level side first via isWinForSide).
       let sideA, sideB, winner;
+      // bc-pnum: the winner's squad MEMBER ID, stamped from wKey -- the SIDE
+      // the operator picked -- and never from the winner's name. It is the
+      // only channel that survives two opposing fighters sharing a display
+      // name: the server's fallback derivation (ResolveMemberWinnerID) reads
+      // the row's names and rightly refuses that case, so without this the
+      // bout is attributed by a name comparison that cannot tell the two
+      // apart. Consumed by state.subBoutWinnerSide for IV. Empty when the
+      // row's own id is unknown (a typed-name override, or a bout the server
+      // has not paired yet), which leaves the server's name derivation to
+      // answer exactly as before. Kachinuki only: a fixed-format bout row
+      // names the TEAMS, which are unique by rule.
+      let winnerMemberId = "";
       if (isKachinuki && !isDaihyo) {
-        const { aName, bName } = playerNamesForBout(idx);
+        const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(idx);
         ({ sideA, sideB, winner } = resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }));
+        if (winner) winnerMemberId = (wKey === "a" ? aMemberId : wKey === "b" ? bMemberId : "") || "";
       } else {
         sideA = sideAName;
         sideB = sideBName;
@@ -2148,6 +2161,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         winner,
         decision,
       };
+      // Omitted, not stated empty: an absent key leaves the stored id and the
+      // server's own derivation untouched, which is what "this writer knows
+      // no id" has to mean.
+      if (winnerMemberId) entry.winnerMemberId = winnerMemberId;
       // mp-4pc: encho + hantei are valid ONLY on the daihyosen
       // (validation.go validateSubBout). daihyosenEnchoFields emits the two
       // independently: encho is optional for a hantei decision.

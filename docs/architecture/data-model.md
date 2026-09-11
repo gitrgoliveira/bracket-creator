@@ -26,7 +26,13 @@ The trade this makes is described honestly in [section 6](#6-how-the-model-maps-
 ## 2. Tournament and competition structure
 
 A tournament owns competitions; a competition owns everything else. The competition is the
-consistency boundary: every write is serialised per competition, and nothing spans two.
+consistency boundary: every write is serialised per competition, and no write spans two.
+
+One rule does span them, and it comes from the venue rather than from the data. Competitions
+run at the same time on a shared set of courts, so a court may hold only one running match in
+the whole tournament. Starting a match therefore checks every other competition first, and that
+check and the write it guards are taken under one tournament wide lock, so two operators in
+different competitions cannot both claim the same court.
 
 ```mermaid
 classDiagram
@@ -135,9 +141,11 @@ id.
 That one setting decides which records exist at all. An individual competition has no
 `squads.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
 directly. A team competition has both, and its entrants are teams, so the person who fights
-a given bout is named one level further down. Everything else on the diagram above, the
-pools, the eligibility records and the ranking overrides, is the same for either kind, and
-reads a `Player` row without caring which of the two it is.
+a given bout is named one level further down. The positions a round has are the five FIK
+names, senpo, jiho, chuken, fukusho and taisho, when the team size is five, and numbers for
+any other size. Everything else on the diagram above, the pools, the eligibility records and
+the ranking overrides, is the same for either kind, and reads a `Player` row without caring
+which of the two it is.
 
 Each squad member carries a stable id, minted once when the member is added and never
 reused, and a display index. The id is what a lineup position and a bout row record, so a
@@ -167,7 +175,9 @@ round has.
 
 This is the detailed part of the model, because the rules it encodes are detailed. A match
 carries its pairing, its score, how it was decided, when and where it is played, and an
-audit trail for corrections.
+audit trail for corrections. Every match belongs to exactly one competition: pool, league and
+Swiss matches are rows in that competition's results file, and knockout matches are nodes in
+its bracket, so nothing in this section exists outside a competition.
 
 ```mermaid
 classDiagram
@@ -259,7 +269,7 @@ classDiagram
         +long ModifiedAt
     }
 
-    MatchResult "1" *-- "2" CompetitorSide : shiro and aka
+    MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
     MatchResult "1" *-- "1" Outcome
     MatchResult "1" *-- "0..*" SubMatchResult : team bouts
     MatchResult "1" *-- "0..1" EnchoMetadata
@@ -276,7 +286,9 @@ own, chosen for clarity: no such type exists in the code. Everything a competito
 to a match (name, participant id, struck points, outstanding fouls, flags, and the
 representative player for a team tie breaker) exists twice, once per side. In the object
 model those are `SideA`/`SideB`, `IpponsA`/`IpponsB`, `HansokuA`/`HansokuB` and so on. They
-are one concept with two instances, not twelve independent attributes.
+are one concept with two instances, not twelve independent attributes. Side A is aka and
+side B is shiro. The draw fixes that pairing, and it is not a display order: every surface
+draws shiro on the left.
 
 **A team match is an aggregate.** `SubMatchResult` is a full bout in its own right: its own
 pairing, score, decision, overtime and judges' decision. A five person team encounter holds

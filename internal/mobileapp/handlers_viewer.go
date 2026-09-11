@@ -249,6 +249,20 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		return nil
 	}
 
+	// bc-pnum: "make a team member's label available to the public
+	// surfaces". Same gate as the detail endpoint above (isTeamComp,
+	// buildViewerCompetitionPayload's caller for GET /competitions/:id):
+	// Kind == "team" || TeamSize > 0, so an individual competition never
+	// attempts a squads.yaml read at all. This matters MORE here than on
+	// the detail endpoint: this function runs once per competition in the
+	// tournament (buildViewerCompetitionPayloads' safeGo fan-out) on the
+	// aggregate GET /competitions and the court feed GET /court/:court/matches,
+	// both of which app.jsx polls on every score broadcast for the TV
+	// display and the streaming overlay -- an ungated read would multiply
+	// an unnecessary stat+parse across every individual competition in the
+	// tournament on every such poll, not just cost one extra read.
+	isTeamComp := comp.Kind == "team" || comp.TeamSize > 0
+
 	// Global views like Scoring/Schedule need matches and brackets.
 	poolMatches, pmErr := store.LoadPoolMatches(compID)
 	if pmErr != nil {
@@ -318,6 +332,33 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// file, never re-reports) bracket.json.
 	applyDrawNumbers(comp, players, pools, bracket)
 
+	// Squads (bc-pnum, continued from the isTeamComp gate above): a
+	// SEQUENTIAL read, matching every other load in this function --
+	// buildViewerCompetitionPayloads already parallelises at the
+	// per-competition level (one safeGo goroutine per comp), so this
+	// function has never needed its own internal concurrency. LoadSquads
+	// is cache-backed exactly like LoadPools/LoadPoolMatches/LoadBracket
+	// above (state.Store.loadCached: an mtime-keyed cache that stats the
+	// file on every call but only re-parses when it actually changed), so
+	// gating this on isTeamComp keeps the added cost, for a team
+	// competition, at one extra stat (a cache hit on every poll where
+	// squads.yaml hasn't changed) -- the same class of cost the three
+	// sibling reads already pay here, not a new per-broadcast full read.
+	// Tolerant like the detail endpoint's own squad read: a squad label is
+	// enrichment (drives no scoring/standings/bracket advancement), so a
+	// broken squads.yaml degrades to no labels rather than dropping the
+	// competition from the board, and a missing file is not an error at
+	// all (state.LoadSquads' own contract).
+	var squads map[string][]domain.TeamMember
+	if isTeamComp {
+		var squadsErr error
+		squads, squadsErr = store.LoadSquads(compID)
+		if squadsErr != nil {
+			log.Printf("mobileapp: viewer payload %s: load squads: %v", compID, squadsErr)
+			squads = nil
+		}
+	}
+
 	// mp-9dz: a preview bracket carries pool-origin placeholders ("Pool A-1st")
 	// with assigned times. It MUST NOT leak into the public match-list payloads
 	// (Find-My-Matches / Watchlist / global schedule / TV / operator console),
@@ -338,6 +379,19 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		"config":      comp,
 		"poolMatches": poolMatches,
 		"bracket":     bracket,
+	}
+	// SAME shape and SAME gate as the detail endpoint's own "squads" key
+	// (GET /api/viewer/competitions/:id, above): present only for a team
+	// competition, keyed by the team's participant id, matching the admin
+	// endpoint's shape. Deliberately identical rather than a leaner variant
+	// for this payload -- two endpoints carrying the same concept in
+	// different shapes is how a client grows a branch per endpoint, and
+	// app.jsx's display route and StreamingOverlay both consume THIS
+	// aggregate (via competitions={displayTournament.competitions}), not
+	// the detail endpoint, so this is the shape those two surfaces
+	// actually see.
+	if isTeamComp {
+		payload["squads"] = squads
 	}
 	// Both loads above already SWALLOW their error into a log and carry on with
 	// whatever they got, which is right -- one unreadable file must not blank a
@@ -565,9 +619,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				poolMatches []state.MatchResult
 				standings   any
 				bracket     *state.Bracket
-				squads      map[string][]domain.TeamMember
 
-				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr, squadsErr error
+				playersErr, poolsErr, poolMatchesErr, standingsErr, bracketErr error
 			)
 
 			var wg sync.WaitGroup
@@ -592,37 +645,52 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			safeGo(&wg, &panicRef, func() {
 				bracket, bracketErr = store.LoadBracket(id)
 			})
-			if isTeamComp {
-				safeGo(&wg, &panicRef, func() {
-					squads, squadsErr = store.LoadSquads(id)
-				})
-			}
 			wg.Wait()
 
 			if p := panicRef.Load(); p != nil {
 				return nil, p
 			}
 
-			// squadsErr is NOT folded into the strict degradedReads loop below
-			// (state.AsCorruptFile-gated, everything else aborts the request):
-			// unlike pools/poolMatches/bracket/standings, a squad label is
-			// pure ENRICHMENT of an already-complete match row (it decorates a
-			// fighter's name with "T10.1"; it drives no scoring, standings, or
-			// bracket advancement), so a broken squads.yaml must never be able
-			// to take the whole competition page down with it -- the same
-			// "one bad cell cannot stop a tournament" principle this file's
-			// own read-fault handling already applies elsewhere degrades
-			// unconditionally here rather than escalating on an unwrapped
-			// YAML parse error (state/squad.go does not wrap its yaml.Unmarshal
-			// failures as *state.CorruptFileError the way the JSON/CSV readers
-			// do, so treating it like the strict loop below would 500 the
-			// whole page over a typo in one YAML file). A MISSING squads.yaml
-			// is not an error at all (state.LoadSquads' own contract, mirroring
-			// LoadTeamLineups): squadsErr is only ever non-nil for a genuine
-			// read/parse fault, which is logged and then ignored.
-			if squadsErr != nil {
-				log.Printf("mobileapp: viewer payload %s: load squads: %v", id, squadsErr)
-				squads = nil
+			// Squads: deliberately SEQUENTIAL, run only now that every
+			// concurrent read above has finished, not as one more safeGo
+			// goroutine alongside them. LoadParticipantsOpt, LoadPools and
+			// LoadBracket each call state.EnsureLegacyUpgraded, which can
+			// SEED squads.yaml as a side effect the very first time a team's
+			// squad is touched (state.upgradeSquadsFromMetadataLocked pads
+			// it to TeamSize). Reading squads.yaml concurrently with those
+			// three would race that side effect: whichever goroutine's
+			// per-comp lock acquisition the Go runtime happened to schedule
+			// first would decide whether THIS request saw the pre-seed or
+			// post-seed file, for otherwise-identical on-disk state -- a
+			// real flake this file caught under -count=20 during review.
+			// Waiting for wg.Wait() first makes the read deterministic: any
+			// seeding those three reads could trigger has already landed
+			// (under the same per-comp lock) by the time this runs.
+			//
+			// Not folded into the strict degradedReads loop below
+			// (state.AsCorruptFile-gated, everything else aborts the
+			// request): unlike pools/poolMatches/bracket/standings, a squad
+			// label is pure ENRICHMENT of an already-complete match row (it
+			// decorates a fighter's name with "T10.1"; it drives no scoring,
+			// standings, or bracket advancement), so a broken squads.yaml
+			// must never be able to take the whole competition page down
+			// with it -- the same "one bad cell cannot stop a tournament"
+			// principle this file's own read-fault handling already applies
+			// elsewhere degrades unconditionally here rather than escalating
+			// on an unwrapped YAML parse error (state/squad.go does not wrap
+			// its yaml.Unmarshal failures as *state.CorruptFileError the way
+			// the JSON/CSV readers do, so treating it like the strict loop
+			// below would 500 the whole page over a typo in one YAML file).
+			// A MISSING squads.yaml is not an error at all (state.LoadSquads'
+			// own contract, mirroring LoadTeamLineups).
+			var squads map[string][]domain.TeamMember
+			if isTeamComp {
+				var squadsErr error
+				squads, squadsErr = store.LoadSquads(id)
+				if squadsErr != nil {
+					log.Printf("mobileapp: viewer payload %s: load squads: %v", id, squadsErr)
+					squads = nil
+				}
 			}
 
 			// bc-pnum ruling 1e follow-up: a corrupt-file error (pools.csv,

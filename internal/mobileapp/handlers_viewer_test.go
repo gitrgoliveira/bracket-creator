@@ -806,16 +806,204 @@ func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
 	}))
-	// No AddTeamMember call: squads.yaml is never written to disk.
+	// No AddTeamMember call, and confirm the premise directly: squads.yaml
+	// is not on disk yet.
+	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "squads.yaml"))
+	require.True(t, os.IsNotExist(statErr), "squads.yaml must not exist yet for this test to mean anything")
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
 	r.ServeHTTP(w, req)
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
-	var body map[string]any
+	var body struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	squadsField, ok := body["squads"]
-	require.True(t, ok, "a team competition must always carry the squads key, even before any squad is recorded")
-	assert.Equal(t, map[string]any{}, squadsField, "a missing squads.yaml is normal: empty object, not an error")
+	// The exact CONTENT is deliberately not pinned here: this same request's
+	// own participants read (state.EnsureLegacyUpgraded, triggered inside
+	// LoadParticipantsOpt) may seed squads.yaml up to TeamSize as a side
+	// effect the very first time this team's squad is touched
+	// (state.upgradeSquadsFromMetadataLocked) -- so "a missing file loads
+	// fine" can legitimately observe either an empty map or the auto-seeded
+	// pad, depending on load order, and BOTH are "not an error". What this
+	// test pins is the one thing that must hold either way: no error, and a
+	// present, well-typed squads map (never a 500, never a bare null/string).
+	assert.NotNil(t, body.Squads, "a missing squads.yaml must decode to a present (possibly empty) map, never null")
+}
+
+// --- Squads on the aggregate/court-feed payload (bc-pnum, continued):
+// app.jsx's display route and StreamingOverlay both consume the aggregate
+// GET /api/viewer/competitions (competitions={displayTournament.competitions}),
+// never the detail endpoint, so the TV display and the streaming overlay
+// only ever see squads if buildViewerCompetitionPayload carries them too.
+// Same shape, same gate as the detail endpoint's own three tests above. ---
+
+// TestViewerAggregate_TeamCompetitionCarriesSquads mirrors
+// TestViewerCompetitionDetail_TeamCompetitionCarriesSquads for the
+// aggregate GET /api/viewer/competitions endpoint (buildViewerCompetitionPayload,
+// shared by the court feed).
+func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-agg-squads-team"
+	const redID = "11111111-1111-4111-8111-111111111111"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+	}))
+
+	member, err := store.AddTeamMember(cid, redID, "Alice")
+	require.NoError(t, err)
+	_, err = store.AddTeamMember(cid, redID, "") // unfilled seeded slot: blank name
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var comps []struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	require.Len(t, comps, 1)
+	require.Contains(t, comps[0].Squads, redID)
+	require.Len(t, comps[0].Squads[redID], 2)
+	assert.Equal(t, member.ID, comps[0].Squads[redID][0].ID)
+	assert.Equal(t, 1, comps[0].Squads[redID][0].Index)
+	assert.Equal(t, "Alice", comps[0].Squads[redID][0].Name)
+	assert.Equal(t, 2, comps[0].Squads[redID][1].Index)
+	assert.Equal(t, "", comps[0].Squads[redID][1].Name,
+		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+}
+
+// TestViewerAggregate_IndividualCompetitionSkipsSquadsRead mirrors
+// TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead for the
+// aggregate endpoint: no "squads" key, and garbage bytes at squads.yaml's
+// path produce no log line, proving state.LoadSquads was never called for
+// an individual competition even though buildViewerCompetitionPayload runs
+// once per competition in the whole tournament.
+func TestViewerAggregate_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-agg-squads-individual"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Individual Comp", Kind: "individual", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "squads.yaml"), []byte("not: [valid yaml"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var comps []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	require.Len(t, comps, 1)
+	_, hasSquads := comps[0]["squads"]
+	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	assert.NotContains(t, logBuf.String(), "load squads",
+		"an individual competition must never attempt the squads.yaml read, so garbage bytes there produce no log line")
+}
+
+// TestViewerAggregate_MissingSquadsFileIsNotAnError mirrors
+// TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError for the
+// aggregate endpoint.
+func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-agg-squads-missing-file"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp No Squads Yet", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
+	}))
+	// No AddTeamMember call, and confirm the premise directly: squads.yaml
+	// is not on disk yet.
+	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "squads.yaml"))
+	require.True(t, os.IsNotExist(statErr), "squads.yaml must not exist yet for this test to mean anything")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var comps []struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	require.Len(t, comps, 1)
+	// Same non-pinned-content reasoning as the detail endpoint's twin test:
+	// this function loads participants/pools/bracket sequentially BEFORE
+	// the squads read (never concurrently -- see the squads read's own
+	// comment in buildViewerCompetitionPayload), so by the time it runs,
+	// the seed-on-touch side effect has deterministically already run for
+	// THIS builder specifically. What matters is that a missing file is
+	// never an error: a present, well-typed map either way.
+	assert.NotNil(t, comps[0].Squads, "a missing squads.yaml must decode to a present (possibly empty) map, never null")
+}
+
+// TestViewerCourtFeed_TeamCompetitionCarriesSquads verifies the court feed
+// (GET /api/viewer/court/:court/matches), the OTHER consumer of
+// buildViewerCompetitionPayload, also carries squads: app.jsx's own
+// comment (fetchCourtMatches, api_client.jsx) treats this as the cheap
+// per-court alternative to the full aggregate, so it must not silently
+// diverge on payload shape from the aggregate this test suite otherwise
+// covers.
+func TestViewerCourtFeed_TeamCompetitionCarriesSquads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-court-squads-team"
+	const redID = "11111111-1111-4111-8111-111111111111"
+	const whiteID = "22222222-2222-4222-8222-222222222222"
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "DojoW"},
+	}))
+	member, err := store.AddTeamMember(cid, redID, "Alice")
+	require.NoError(t, err)
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "RedTeam", SideAID: redID, SideB: "WhiteTeam", SideBID: whiteID,
+			Court: "A", Status: state.MatchStatusScheduled,
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/matches", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body struct {
+		Competitions []struct {
+			Squads map[string][]domain.TeamMember `json:"squads"`
+		} `json:"competitions"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Competitions, 1)
+	require.Contains(t, body.Competitions[0].Squads, redID)
+	require.Equal(t, member.ID, body.Competitions[0].Squads[redID][0].ID)
 }

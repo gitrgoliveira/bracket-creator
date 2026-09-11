@@ -2341,7 +2341,7 @@ func TestEnsureNumberPrefix_ConcurrentFlipSurvivesAtomicReadModifyWrite(t *testi
 	var ensureErr, flipErr error
 	go func() {
 		defer wg.Done()
-		assigned, ensureErr = ensureNumberPrefix(eng, cid, engine.CanStart)
+		assigned, ensureErr = ensureNumberPrefix(eng, cid, state.CanStart)
 	}()
 	go func() {
 		defer wg.Done()

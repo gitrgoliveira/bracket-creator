@@ -20,7 +20,7 @@ import (
 type DrawSource int
 
 const (
-	// DrawNone: no draw has been generated yet (engine.CanGenerateDraw(comp.Status)),
+	// DrawNone: no draw has been generated yet (state.CanGenerateDraw(comp.Status)),
 	// or the competition is Swiss, which never writes a draw to pools.csv or
 	// bracket.json's DrawOrder -- Swiss rounds live in pool-matches.csv only.
 	DrawNone DrawSource = iota
@@ -37,7 +37,7 @@ const (
 // format (comp.EffectiveFormat(), never comp.Format directly: an unset
 // Format ("") is standalone playoffs too).
 func DrawSourceFor(comp *state.Competition) DrawSource {
-	if comp == nil || CanGenerateDraw(comp.Status) {
+	if comp == nil || state.CanGenerateDraw(comp.Status) {
 		return DrawNone
 	}
 	switch comp.EffectiveFormat() {
@@ -471,10 +471,10 @@ func (e *Engine) CheckUniqueCompFields(name, prefix, excludeID string, tolerateU
 // single function, so the two cannot drift (PR #416 finding 1).
 //
 // allowed gates the action exactly the way the caller's own subsequent
-// engine call will (CanStart/CanGenerateDraw): a competition in any other
-// status is left completely untouched -- no assignment, no renumber -- and
-// (false, nil) is returned so the caller's own action reports the refusal on
-// its own terms.
+// engine call will (state.CanStart/state.CanGenerateDraw): a competition in
+// any other status is left completely untouched -- no assignment, no
+// renumber -- and (false, nil) is returned so the caller's own action
+// reports the refusal on its own terms.
 //
 // A stored, non-blank prefix skips the assignment step; the renumber below
 // still always runs (RenumberCompetitors is a cheap read-compare-discard

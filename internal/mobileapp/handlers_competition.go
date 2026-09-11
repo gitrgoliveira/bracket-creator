@@ -423,8 +423,8 @@ func assignDefaultNumberPrefix(eng *engine.Engine, comp *state.Competition, excl
 // predates this rule and still carries an empty NumberPrefix on disk (G7),
 // and G2 requires the app never draw one without a prefix.
 //
-// allowed is the engine's OWN precondition for the action (engine.CanStart or
-// engine.CanGenerateDraw), so the gate cannot drift from the switch it
+// allowed is the engine's OWN precondition for the action (state.CanStart or
+// state.CanGenerateDraw), so the gate cannot drift from the switch it
 // guards: a competition in any other status is left completely untouched
 // (no assignment, no renumber) and the caller's engine call, immediately
 // after, rejects it on the engine's own terms.
@@ -2366,7 +2366,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		// bc-pnum A5(b): the shared pre-flight -> engine call ->
 		// error-classification sequence, see runWithNumberPrefixPreflight's
 		// doc comment. A false return means the response is already written.
-		if !runWithNumberPrefixPreflight(c, eng, hub, id, engine.CanStart, eng.StartCompetition) {
+		if !runWithNumberPrefixPreflight(c, eng, hub, id, state.CanStart, eng.StartCompetition) {
 			return
 		}
 
@@ -2402,7 +2402,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			return
 		}
 		// Same shared handling as POST .../start (see runWithNumberPrefixPreflight).
-		if !runWithNumberPrefixPreflight(c, eng, hub, id, engine.CanGenerateDraw, eng.GenerateDraw) {
+		if !runWithNumberPrefixPreflight(c, eng, hub, id, state.CanGenerateDraw, eng.GenerateDraw) {
 			return
 		}
 		comp, err := store.LoadCompetition(id)

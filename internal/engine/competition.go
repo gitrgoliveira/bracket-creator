@@ -428,23 +428,6 @@ func dhCycleExists(standings map[string][]state.PlayerStanding, allMatches []sta
 	return false
 }
 
-// CanStart reports whether StartCompetition accepts a competition in status:
-// setup (and the legacy empty status) take the one-click draw-then-run path,
-// draw-ready only flips status over an already-generated draw. It is the ONE
-// statement of that precondition: StartCompetition gates on it, and so does
-// the mobileapp start handler's pre-flight (ensureNumberPrefix), which must
-// act on exactly the statuses the engine will then accept and on no other.
-func CanStart(status state.CompetitionStatus) bool {
-	return status == state.CompStatusDrawReady || CanGenerateDraw(status)
-}
-
-// CanGenerateDraw reports whether GenerateDraw accepts a competition in
-// status: only setup (and the legacy empty status). Shared with the mobileapp
-// generate-draw pre-flight for the same reason as CanStart.
-func CanGenerateDraw(status state.CompetitionStatus) bool {
-	return status == state.CompStatusSetup || status == ""
-}
-
 // StartCompetition starts a competition. When called on a draw-ready
 // competition it transitions directly to running (no regeneration).
 // When called on a setup competition it generates the draw first then
@@ -459,7 +442,7 @@ func (e *Engine) StartCompetition(id string) error {
 	if comp == nil {
 		return notFoundErrorf("competition %s not found", id)
 	}
-	if !CanStart(comp.Status) {
+	if !state.CanStart(comp.Status) {
 		return validationErrorf("competition %s already started", id)
 	}
 	if comp.Status == state.CompStatusDrawReady {
@@ -486,7 +469,7 @@ func (e *Engine) GenerateDraw(id string) error {
 		return notFoundErrorf("competition %s not found", id)
 	}
 	switch {
-	case CanGenerateDraw(comp.Status):
+	case state.CanGenerateDraw(comp.Status):
 		return e.runDrawPipeline(id)
 	case comp.Status == state.CompStatusDrawReady:
 		return validationErrorf("competition %s draw already generated; discard it first to regenerate", id)
@@ -836,10 +819,11 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// WithCompetitionRenameLock acquire here cannot deadlock against
 	// anything this function already holds.
 	//
-	// allowed is CanGenerateDraw: by the time execution reaches this point,
-	// both StartCompetition's one-click path and GenerateDraw have already
-	// confirmed CanGenerateDraw(comp.Status) against their own outer load, so
-	// this restates the same precondition rather than introducing a new one.
+	// allowed is state.CanGenerateDraw: by the time execution reaches this
+	// point, both StartCompetition's one-click path and GenerateDraw have
+	// already confirmed state.CanGenerateDraw(comp.Status) against their own
+	// outer load, so this restates the same precondition rather than
+	// introducing a new one.
 	//
 	// comp.NumberPrefix is re-read after the call rather than assumed,
 	// because EnsureNumberPrefix operates on its OWN freshly loaded copy: a
@@ -848,7 +832,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// derived, and comp (and the loadedNumberPrefix snapshot captured just
 	// below) must reflect whichever prefix is actually now on disk.
 	if strings.TrimSpace(comp.NumberPrefix) == "" {
-		if _, err := e.EnsureNumberPrefix(id, CanGenerateDraw, true); err != nil {
+		if _, err := e.EnsureNumberPrefix(id, state.CanGenerateDraw, true); err != nil {
 			return fmt.Errorf("assign default number prefix for %s: %w", id, err)
 		}
 		current, err := e.store.LoadCompetition(id)

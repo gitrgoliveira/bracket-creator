@@ -947,6 +947,31 @@ const (
 	CompStatusInvalid   CompetitionStatus = "invalid"
 )
 
+// CanStart reports whether StartCompetition accepts a competition in status:
+// setup (and the legacy empty status) take the one-click draw-then-run path,
+// draw-ready only flips status over an already-generated draw. It is the ONE
+// statement of that precondition: engine.StartCompetition gates on it, and so
+// does the mobileapp start handler's pre-flight (ensureNumberPrefix), which
+// must act on exactly the statuses the engine will then accept and on no
+// other.
+//
+// Lives here rather than in internal/engine because internal/state sits
+// BELOW internal/engine in the layering (state persists, engine drives), and
+// a squad write (Store.ClearTeamMemberName) needs this same precondition to
+// refuse clearing a member's name once the competition has started -- a
+// state-package function cannot import engine without an upward/circular
+// dependency.
+func CanStart(status CompetitionStatus) bool {
+	return status == CompStatusDrawReady || CanGenerateDraw(status)
+}
+
+// CanGenerateDraw reports whether GenerateDraw accepts a competition in
+// status: only setup (and the legacy empty status). Shared with the mobileapp
+// generate-draw pre-flight for the same reason as CanStart.
+func CanGenerateDraw(status CompetitionStatus) bool {
+	return status == CompStatusSetup || status == ""
+}
+
 type MatchStatus string
 
 const (

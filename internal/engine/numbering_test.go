@@ -285,7 +285,7 @@ func TestEnsureNumberPrefix_SaveFailure_ReportsNotAssigned(t *testing.T) {
 	require.NoError(t, os.Chmod(compDir, 0o500))
 	defer func() { _ = os.Chmod(compDir, 0o700) }() // let t.TempDir()/os.RemoveAll cleanup remove it
 
-	assigned, err := eng.EnsureNumberPrefix(compID, CanGenerateDraw, true)
+	assigned, err := eng.EnsureNumberPrefix(compID, state.CanGenerateDraw, true)
 	require.Error(t, err, "a config.md write failure must surface as an error")
 	assert.False(t, assigned, "assigned must be false when the prefix was never actually saved")
 

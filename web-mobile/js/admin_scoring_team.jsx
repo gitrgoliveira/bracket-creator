@@ -188,7 +188,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -1961,13 +1961,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // (squadMemberLabel, via resolveSquadMember at the render sites).
     // resolveBoutSideMemberId mirrors resolveBoutSideName's own priority so
     // the id can never label a different fighter than the name shown above.
-    // A manually-typed override has no valid lineup key to resolve an id
-    // from at all (it is not a server bout-log entry either, until the
-    // operator's pick is saved), so it short-circuits to "no id" ahead of
-    // the mirrored priority; the render sites then fall back to matching
-    // the resolved NAME against the squad instead.
-    const aMemberId = override.aName ? "" : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideAMemberId, lineupMemberId: pickMemberId(lineupA) });
-    const bMemberId = override.bName ? "" : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideBMemberId, lineupMemberId: pickMemberId(lineupB) });
+    // A manually-typed override has no lineup key to resolve an id from, so
+    // the mirrored priority cannot answer for it. It is still resolved, just
+    // by the only evidence available: the typed name against that team's own
+    // squad, and only when exactly one member carries it
+    // (squadMemberIdForUniqueName). A name two teammates share resolves to
+    // nothing rather than to the first of them.
+    //
+    // This matters beyond the label. The id written here becomes the bout
+    // row's record of who fought, and a row that carries one is immune to a
+    // later rename; a row that carries none has to be matched by a name that
+    // may by then belong to somebody else. Leaving the typed-name path
+    // id-less was the last routine way to create such a row.
+    const overrideId = (side) => squadMemberIdForUniqueName(side === "a" ? squadA : squadB,
+      side === "a" ? override.aName : override.bName);
+    const aMemberId = override.aName
+      ? overrideId("a")
+      : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideAMemberId, lineupMemberId: pickMemberId(lineupA) });
+    const bMemberId = override.bName
+      ? overrideId("b")
+      : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideBMemberId, lineupMemberId: pickMemberId(lineupB) });
     return { aName, bName, aMemberId, bMemberId };
   };
 

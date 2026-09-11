@@ -122,7 +122,17 @@ function StreamingOverlay({ court, position, competitions }) {
     // numbered bouts (position > DAIHYOSEN_POSITION). sideB = shiro, sideA = aka.
     const ovlSideA = hasRunning ? (running.match.sideA?.name || (typeof running.match.sideA === "string" ? running.match.sideA : "")) : "";
     const ovlSideB = hasRunning ? (running.match.sideB?.name || (typeof running.match.sideB === "string" ? running.match.sideB : "")) : "";
-    const ovlIV = isTeamMatch ? teamIVPW(ovlSubResults, ovlSideA, ovlSideB) : { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 };
+    // The server's figure wins where the payload carries it (operator ruling:
+    // one source of truth, the data on the server), same rule as
+    // TeamScoreboard. teamIVPW remains the fallback for a payload that
+    // predates the field. It is not only a caption here: dhPending below
+    // reads these totals to decide whether to announce the rep bout.
+    const ovlTR = hasRunning ? running.match.teamResult : null;
+    const ovlIV = !isTeamMatch
+        ? { ivShiro: 0, ivAka: 0, pwShiro: 0, pwAka: 0 }
+        : (ovlTR && typeof ovlTR === "object"
+            ? { ivShiro: ovlTR.shiroIV || 0, ivAka: ovlTR.akaIV || 0, pwShiro: ovlTR.shiroPW || 0, pwAka: ovlTR.akaPW || 0 }
+            : teamIVPW(ovlSubResults, ovlSideA, ovlSideB));
 
     // DH-pending: all regular bouts are scored, the match is tied (equal IV
     // and PW), but no DH sub-result has been created yet. In that case

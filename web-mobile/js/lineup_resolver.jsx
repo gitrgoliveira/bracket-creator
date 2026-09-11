@@ -159,6 +159,22 @@ export function resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemb
 //
 // Returns null when nothing in `squad` matches: an empty/not-yet-loaded
 // squad, or a name that names no squad member at all.
+// squadMemberIdForUniqueName: the id of the ONE squad member carrying `name`,
+// or "" when nobody does or more than one does.
+//
+// Deliberately stricter than resolveSquadMember below, which takes the first
+// name match. That looseness is right for a LABEL -- showing "T10.1" beside
+// the wrong twin is a cosmetic slip on a row the operator can read -- and
+// wrong for anything WRITTEN, where the id becomes the record of who fought.
+// Members of one team may share a display name in rosters that predate the
+// uniqueness rule, so the gate is not theoretical.
+export function squadMemberIdForUniqueName(squad, name) {
+  const wanted = (name || "").trim();
+  if (!wanted) return "";
+  const hits = (Array.isArray(squad) ? squad : []).filter(mem => mem && mem.name === wanted);
+  return hits.length === 1 ? (hits[0].id || "") : "";
+}
+
 export function resolveSquadMember(squad, memberId, name) {
   const list = Array.isArray(squad) ? squad : [];
   if (memberId) {

@@ -595,11 +595,24 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
 // squadA/squadB/numberA/numberB (bc-pnum): threaded straight through to every
 // BoutSubRow, which is where the label is actually composed and rendered;
 // see that component's header for the props' shape and defaults.
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB }) {
+export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
-  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
+  // THE SERVER'S FIGURE WINS (operator ruling: there can be only one source of
+  // truth, and it is the data on the server). Go attaches teamResult to every
+  // team match on both marshal paths, computed by the same state.TeamResultFrom
+  // that feeds the standings, so taking it here makes this row, the bracket
+  // card (teamIVPWScore, bracket.jsx, which already did), the pool table and
+  // the Excel export one number rather than four agreeing ones.
+  //
+  // teamIVPW stays as the fallback for a payload that predates the field, and
+  // is the mirror the summary used to derive from unconditionally. Note what
+  // rides on these four values below: `tied` gates whether the daihyosen row
+  // renders at all, so this is the structural answer, not just a label.
+  const { ivShiro, ivAka, pwShiro, pwAka } = teamResult && typeof teamResult === "object"
+    ? { ivShiro: teamResult.shiroIV || 0, ivAka: teamResult.akaIV || 0, pwShiro: teamResult.shiroPW || 0, pwAka: teamResult.akaPW || 0 }
+    : teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts: equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a

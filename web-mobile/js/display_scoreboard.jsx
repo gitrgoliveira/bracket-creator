@@ -137,7 +137,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         win-mark lands on the winning side when the backend
                         persists the winner as the team name (mirrors viewer
                         MatchDetailCard). */}
-                    <TeamScoreboard subResults={subResults} lineupA={lineupA} lineupB={lineupB}
+                    <TeamScoreboard subResults={subResults} teamResult={promoted.match?.teamResult} lineupA={lineupA} lineupB={lineupB}
                         teamSize={teamSize} showDH={showDH} variant="tv"
                         isRunning={promoted.match?.status === "running"}
                         shiroName={shiroTeam} akaName={akaTeam}

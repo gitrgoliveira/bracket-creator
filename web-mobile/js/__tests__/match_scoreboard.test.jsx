@@ -83,6 +83,33 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs)).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 2, pwAka: 1 });
   });
 
+  // Operator ruling: there can be only one source of truth, and it is the data
+  // on the server. TeamScoreboard takes teamResult when the payload carries it
+  // and only derives when it does not. teamIVPW is that fallback, so it keeps
+  // its own coverage above; these two pin which one wins.
+  it('is the fallback: TeamScoreboard prefers the server figure', async () => {
+    const { TeamScoreboard } = await import('../match_scoreboard.jsx');
+    // The bout log says shiro won one bout; the server says two. The server
+    // wins, because it is the same computation the standings ranked by.
+    const el = TeamScoreboard({
+      subResults: [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }],
+      teamResult: { shiroIV: 2, akaIV: 0, shiroPW: 5, akaPW: 1 },
+      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3,
+    });
+    const text = collectText(el);
+    expect(text).toContain('2');
+    expect(text).toContain('5');
+  });
+
+  it('derives locally when the payload carries no server figure', async () => {
+    const { TeamScoreboard } = await import('../match_scoreboard.jsx');
+    const el = TeamScoreboard({
+      subResults: [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }],
+      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3,
+    });
+    expect(collectText(el)).toContain('1');
+  });
+
   it('counts IV via match-level side names when sub-bout sides are empty (quick-score)', () => {
     const subs = [
       { position: 1, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },

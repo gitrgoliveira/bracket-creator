@@ -115,3 +115,46 @@ describe('labelForBoutSide (the composed render-site logic: resolveSquadMember +
     expect(labelForBoutSide(SQUAD_A, undefined, 'mem-1', 'Sato')).toBe('');
   });
 });
+
+// bc-pnum: the id a TYPED fighter name resolves to. This is the one that gets
+// WRITTEN onto the bout row, so it is gated harder than the label above: a row
+// carrying an id is immune to a later rename, and a row carrying none has to
+// be matched by a name that may by then belong to a different member.
+describe('squadMemberIdForUniqueName (the id a typed name may be written under)', () => {
+  let squadMemberIdForUniqueName;
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ squadMemberIdForUniqueName } = await import('../lineup_resolver.jsx'));
+  });
+
+  const SQUAD = [
+    { id: 'm1', index: 1, name: 'Sato' },
+    { id: 'm2', index: 2, name: 'Ito' },
+    { id: 'm3', index: 3, name: '' },
+  ];
+
+  it('resolves a name exactly one member carries', () => {
+    expect(squadMemberIdForUniqueName(SQUAD, 'Ito')).toBe('m2');
+    expect(squadMemberIdForUniqueName(SQUAD, '  Ito  ')).toBe('m2');
+  });
+
+  it('resolves nothing for a name two teammates share', () => {
+    // Grandfathered rosters hold these, and the first match is a guess that
+    // would be written into the record of who fought.
+    const twins = [{ id: 'm1', index: 1, name: 'Sato' }, { id: 'm2', index: 2, name: 'Sato' }];
+    expect(squadMemberIdForUniqueName(twins, 'Sato')).toBe('');
+  });
+
+  it('resolves nothing for an unknown, blank or missing name, or no squad', () => {
+    expect(squadMemberIdForUniqueName(SQUAD, 'Nobody')).toBe('');
+    expect(squadMemberIdForUniqueName(SQUAD, '')).toBe('');
+    expect(squadMemberIdForUniqueName(SQUAD, '   ')).toBe('');
+    expect(squadMemberIdForUniqueName(SQUAD, undefined)).toBe('');
+    expect(squadMemberIdForUniqueName(null, 'Ito')).toBe('');
+    expect(squadMemberIdForUniqueName(undefined, 'Ito')).toBe('');
+  });
+
+  it('never matches the blank name of an unfilled position', () => {
+    expect(squadMemberIdForUniqueName(SQUAD, '')).toBe('');
+  });
+});

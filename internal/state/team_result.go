@@ -30,7 +30,7 @@ func countScoringIppons(ippons []string) int {
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single
 // source of truth for the team-match summary: the daihyosen placeholder
 // (Position <= DaihyosenSubPosition, the -1 daihyosen or any negative) is skipped so a re-validated tie does
-// not double-count, IV counts sub-bout winners through subBoutWinnerSide (member
+// not double-count, IV counts sub-bout winners through SubBoutWinnerSide (member
 // ids first, then names, and neither side when two fighters share a name and the
 // ids cannot decide), and PW counts every scored ippon regardless of bout outcome (a drawn bout where
 // both sides scored still contributes), skipping unfilled "•" placeholder slots
@@ -54,7 +54,7 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 			continue
 		}
 		hasBout = true
-		switch subBoutWinnerSide(sub, sideAName, sideBName) {
+		switch SubBoutWinnerSide(sub, sideAName, sideBName) {
 		case domain.MatchSideA:
 			line.AkaIV++
 		case domain.MatchSideB:
@@ -69,8 +69,11 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 	return line
 }
 
-// subBoutWinnerSide answers "which side won this sub-bout", and is the one
-// owner of that question for the team summary. Two tiers, in this order.
+// SubBoutWinnerSide answers "which side won this sub-bout", and is the one
+// owner of that question: the wire summary (TeamResultFrom, just above) and
+// the standings accrual (engine.accrueTeamSubResults) both route through it,
+// so the IV a spectator reads and the IV the tie-break ranks by cannot
+// disagree. Two tiers, in this order.
 //
 // MEMBER IDS FIRST (operator ruling bc-pnum, "this should only use the
 // IDs"). A kachinuki bout row carries SideAMemberID/SideBMemberID, stamped
@@ -96,11 +99,8 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 // editor since bc-pnum carries the winner's member id and is unaffected;
 // what loses an IV here is drifted or legacy data that never recorded who
 // won in a form that survives two fighters sharing a name.
-func subBoutWinnerSide(sub SubMatchResult, sideAName, sideBName string) domain.MatchSide {
-	if side := domain.AttributeWinnerSide(domain.SubBoutAttribution(
-		sub.Winner, sub.SideA, sub.SideB,
-		sub.WinnerMemberID, sub.SideAMemberID, sub.SideBMemberID,
-	)); side != domain.MatchSideNone {
+func SubBoutWinnerSide(sub SubMatchResult, sideAName, sideBName string) domain.MatchSide {
+	if side := domain.AttributeWinnerSide(domain.SubBoutAttribution(sub.Attribution())); side != domain.MatchSideNone {
 		return side
 	}
 	if sub.Winner == "" || (sub.SideA != "" && sub.SideA == sub.SideB) {

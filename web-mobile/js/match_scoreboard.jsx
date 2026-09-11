@@ -19,7 +19,7 @@
 
 import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
@@ -198,16 +198,18 @@ function ipponLetters(arr) {
 // the server standings and the Excel export agree with each other.
 function subWinnerSides(sub, matchSideA, matchSideB) {
   // MEMBER IDS FIRST (operator ruling bc-pnum, "this should only use the
-  // IDs"), mirroring state.subBoutWinnerSide: the score editor stamps the
+  // IDs"), mirroring state.SubBoutWinnerSide: the score editor stamps the
   // winner's member id from the SIDE it was told won, so three ids present
   // and the winner's matching one of them settles the row without consulting
-  // a single name. A winner id matching neither side is drifted data and
-  // falls through, exactly as the Go owner does.
-  const wid = sub.winnerMemberId || "", aid = sub.sideAMemberId || "", bid = sub.sideBMemberId || "";
-  if (wid && aid && bid) {
-    if (wid === aid) return { shiro: false, aka: true };
-    if (wid === bid) return { shiro: true, aka: false };
-  }
+  // a single name. Asked through attributeWinnerSide (result_slot.jsx), the
+  // declared JS twin of domain.AttributeWinnerSide, rather than re-spelling
+  // its id branch here: a winner id matching neither side returns null and
+  // falls through to the names, exactly as the Go owner does.
+  const idSide = attributeWinnerSide({
+    winnerId: sub.winnerMemberId, sideAId: sub.sideAMemberId, sideBId: sub.sideBMemberId,
+  });
+  if (idSide === "a") return { shiro: false, aka: true };
+  if (idSide === "b") return { shiro: true, aka: false };
   const w = sub.winner;
   // Two opposing fighters may legally share a display name. When they do and
   // no id decided above, NOTHING here can say who won, so the row names
@@ -313,9 +315,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const markable = (sub.decidedByHantei && hanteiTied(sub.ipponsA, sub.ipponsB)) || noIppons;
   // Which side the result mark belongs to (sideB = shiro/left, sideA = aka/right),
   // via subWinnerSides: the one cross-level chain, shared with teamIVPW, that
-  // falls back sub-level side → daihyosen team alias → match-level side for the
-  // quick-score bouts with empty sub.sideA/sideB, and resolves a both-sides
-  // match aka-first to align every JS surface with the Go standings/export.
+  // reads the row's member ids first and otherwise falls back sub-level side →
+  // daihyosen team alias → match-level side for the quick-score bouts with
+  // empty sub.sideA/sideB. Two fighters sharing a display name get NO mark
+  // unless an id settles them (bc-pnum), which is what keeps every JS surface
+  // aligned with the Go standings and the export.
   const { shiro: winShiro, aka: winAka } = markable
     ? subWinnerSides(sub, matchSideA, matchSideB)
     : { shiro: false, aka: false };
@@ -454,13 +458,14 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
-    // Mirror Go backend pattern (scoring.go): check match-level side name
-    // first, then sub-level side name (guarded against "" == "" false
-    // positive). Quick-scored bouts have empty sub-level sides.
-    // IV attribution runs through subWinnerSides — the SAME resolver the bout
-    // rows use, aka-first on a both-sides match like Go's isWinForSide — so
-    // rows, summary, server standings and the Excel export all agree. The
-    // ippon comparison below still decides where the winner names nobody.
+    // IV attribution runs through subWinnerSides, the SAME resolver the bout
+    // rows use and the mirror of state.SubBoutWinnerSide: member ids first,
+    // then the match-level side name, then the sub-level one (guarded against
+    // an "" == "" false positive, since quick-scored bouts have empty
+    // sub-level sides). Rows, summary, server standings and the Excel export
+    // therefore all agree. The ippon comparison below still decides where the
+    // winner names nobody -- but NOT where the two fighters share a name, see
+    // the ambiguous branch.
     const wsides = subWinnerSides(s, matchSideA, matchSideB);
     const isAkaWin = wsides.aka;
     const isShiroWin = wsides.shiro;

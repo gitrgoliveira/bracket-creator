@@ -187,7 +187,10 @@ func TestAttributeWinnerSide(t *testing.T) {
 // so a same-name pair must arrive with nothing for that branch to match on.
 func TestSubBoutAttribution(t *testing.T) {
 	t.Run("same-named fighters drop their names, leaving only the ids", func(t *testing.T) {
-		att := domain.SubBoutAttribution("Yamada", "Yamada", "Yamada", "m-shiro", "m-aka", "m-shiro")
+		att := domain.SubBoutAttribution(domain.WinnerAttribution{
+			Winner: "Yamada", SideA: "Yamada", SideB: "Yamada",
+			WinnerID: "m-shiro", SideAID: "m-aka", SideBID: "m-shiro",
+		})
 		assert.Empty(t, att.SideA, "a name both sides carry cannot identify either")
 		assert.Empty(t, att.SideB)
 		assert.Equal(t, domain.MatchSideB, domain.AttributeWinnerSide(att),
@@ -195,13 +198,13 @@ func TestSubBoutAttribution(t *testing.T) {
 	})
 
 	t.Run("same-named fighters with no ids attribute to no side at all", func(t *testing.T) {
-		att := domain.SubBoutAttribution("Yamada", "Yamada", "Yamada", "", "", "")
+		att := domain.SubBoutAttribution(domain.WinnerAttribution{Winner: "Yamada", SideA: "Yamada", SideB: "Yamada"})
 		assert.Equal(t, domain.MatchSideNone, domain.AttributeWinnerSide(att),
 			"nothing stored can say who won, so nothing may be claimed")
 	})
 
 	t.Run("distinct names are passed through untouched", func(t *testing.T) {
-		att := domain.SubBoutAttribution("Ito", "Sato", "Ito", "", "", "")
+		att := domain.SubBoutAttribution(domain.WinnerAttribution{Winner: "Ito", SideA: "Sato", SideB: "Ito"})
 		assert.Equal(t, "Sato", att.SideA)
 		assert.Equal(t, "Ito", att.SideB)
 		assert.Equal(t, domain.MatchSideB, domain.AttributeWinnerSide(att))
@@ -210,7 +213,7 @@ func TestSubBoutAttribution(t *testing.T) {
 	t.Run("two empty sides are not a shared name", func(t *testing.T) {
 		// A quick-scored row names neither fighter. That is an absence, not
 		// an ambiguity, and blanking what is already blank changes nothing.
-		att := domain.SubBoutAttribution("Team A", "", "", "", "", "")
+		att := domain.SubBoutAttribution(domain.WinnerAttribution{Winner: "Team A"})
 		assert.Equal(t, "Team A", att.Winner)
 		assert.Empty(t, att.SideA)
 	})

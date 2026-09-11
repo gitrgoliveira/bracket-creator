@@ -630,34 +630,28 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
-		// SubMatchResult persists no ids, so names are all there is and both
-		// calls below are always the name-fallback branch, resolved by the
-		// documented sideA-first convention. Note the limit of that: a
-		// numbered team bout names individual PLAYERS, whose names are not
-		// unique by rule (only name+dojo is), so a same-named pair on opposing
-		// lineups is separated by convention rather than by identity.
-		// Unchanged from before ids existed, and not fixable here without
-		// persisting ids per sub row.
+		// ONE attribution per bout row, shared by both marks below, because
+		// they name the SAME winner: the maru fallback and the Kiken/Fus.
+		// mark landing in different cells is the incoherence DefaultWinMaruAB's
+		// own doc warns about. bc-pnum: a numbered team bout names individual
+		// PLAYERS, whose names are not unique by rule, so the row's member ids
+		// decide (domain.SubBoutAttribution, the same owner the individual
+		// victory uses) and a same-name pair no id can settle gets NO mark
+		// rather than one beside whichever fighter is written first --
+		// CLAUDE.md's accepted no-mark class (i). Before ids reached these
+		// rows this was the sideA-first convention, and the paragraph here
+		// said so; that is no longer true.
+		att := domain.SubBoutAttribution(sub.Attribution())
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
-			sub.Decision, sub.Encho, domain.WinnerAttribution{
-				Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
-			})
+			sub.Decision, sub.Encho, att)
 		leftScore, rightScore := scoreA, scoreB
 		lFoul, rFoul := HansokuMark(sub.HansokuA), HansokuMark(sub.HansokuB)
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 			lFoul, rFoul = rFoul, lFoul
 		}
-		// bc-pnum: the bout row's MEMBER IDS decide which fighter the mark
-		// rides beside, through the same owner that decides the individual
-		// victory (domain.SubBoutAttribution). A same-name pair no id can
-		// settle gets NO mark rather than one beside whichever fighter is
-		// written first: CLAUDE.md's accepted no-mark class (i).
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.SubBoutAttribution(
-			sub.Winner, sub.SideA, sub.SideB,
-			sub.WinnerMemberID, sub.SideAMemberID, sub.SideBMemberID,
-		), mirror)
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), att, mirror)
 		// Outstanding-hansoku ▲ on the cell's outer edge, as in
 		// writeScoreRowCells (FIK Table 2; scoreboard parity).
 		if lScore := joinSp(lFoul, joinSp(leftScore, lMark)); lScore != "" {

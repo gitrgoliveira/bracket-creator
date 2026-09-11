@@ -2605,3 +2605,65 @@ func TestHansokuAwardFollowsTheSlotRule(t *testing.T) {
 			"an H the operator struck is theirs; the fold must never remove it")
 	})
 }
+
+// TestAccrueTeamSubResults_SameNameBout pins that the STANDINGS attribute a
+// sub-bout the same way the wire summary does. They are one rule with two
+// readers: the IV a spectator sees on the bracket row and the IV the team
+// tie-break ranks by. Before bc-pnum this function compared names, so a bout
+// between two fighters sharing a display name was credited to side A by case
+// order while state.TeamResultFrom credited the member id, and the pool table
+// ranked the opposite team from the one the board showed.
+func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
+	accrue := func(sub state.SubMatchResult) (state.PlayerStanding, state.PlayerStanding) {
+		var sA, sB state.PlayerStanding
+		accrueTeamSubResults(&sA, &sB, state.MatchResult{
+			SideA: "Tora", SideB: "Kaze", SubResults: []state.SubMatchResult{sub},
+		})
+		return sA, sB
+	}
+
+	t.Run("the member ids decide, and the summary agrees", func(t *testing.T) {
+		sub := state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-shiro",
+			IpponsB: []string{"M"},
+		}
+		sA, sB := accrue(sub)
+		assert.Equal(t, 1, sB.IndividualWins, "shiro's member id won the bout")
+		assert.Equal(t, 0, sA.IndividualWins)
+		assert.Equal(t, 1, sA.IndividualLosses)
+
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		require.NotNil(t, line)
+		assert.Equal(t, sB.IndividualWins, line.ShiroIV, "standings and summary must not disagree")
+		assert.Equal(t, sA.IndividualWins, line.AkaIV)
+	})
+
+	t.Run("no ids: neither side is credited, and the summary agrees", func(t *testing.T) {
+		sub := state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			IpponsB: []string{"M"},
+		}
+		sA, sB := accrue(sub)
+		assert.Equal(t, 0, sA.IndividualWins, "aka-first on a same-name bout is the coin flip this removes")
+		assert.Equal(t, 0, sB.IndividualWins)
+		assert.Equal(t, 0, sA.IndividualDraws, "a bout with a winner is not a draw just because nobody could be credited")
+
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		require.NotNil(t, line)
+		assert.Equal(t, 0, line.ShiroIV)
+		assert.Equal(t, 0, line.AkaIV)
+	})
+
+	t.Run("distinct names are unchanged, and a winnerless bout is still a draw", func(t *testing.T) {
+		sA, sB := accrue(state.SubMatchResult{
+			Position: 1, SideA: "Sato", SideB: "Ito", Winner: "Ito", IpponsB: []string{"M"},
+		})
+		assert.Equal(t, 1, sB.IndividualWins)
+		assert.Equal(t, 1, sA.IndividualLosses)
+
+		dA, dB := accrue(state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Ito"})
+		assert.Equal(t, 1, dA.IndividualDraws)
+		assert.Equal(t, 1, dB.IndividualDraws)
+	})
+}

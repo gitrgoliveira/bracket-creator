@@ -82,7 +82,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     ? lineupPositionsForSize(teamSize)
     : [];
   // The team's members as the PRE-SQUAD model stored them, in the roster
-  // row's untyped metadata array. Kept only as a fallback: see effectiveRoster
+  // row's untyped metadata array. Kept only as a fallback: see `roster`
   // below, which prefers the squad.
   const legacyRoster = (typeof lineupRosterFor === "function")
     ? lineupRosterFor(team)

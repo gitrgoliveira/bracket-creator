@@ -886,18 +886,25 @@ func isWinForSide(subWinner, matchSide, subSide string) bool {
 // between formats.
 func accrueTeamSubResults(sA, sB *state.PlayerStanding, m state.MatchResult) {
 	for _, sub := range m.SubResults {
-		sideAWin := isWinForSide(sub.Winner, m.SideA, sub.SideA)
-		sideBWin := isWinForSide(sub.Winner, m.SideB, sub.SideB)
-		switch {
-		case sideAWin:
+		// bc-pnum: the SAME owner the wire summary uses (state.TeamResultFrom
+		// -> SubBoutWinnerSide), so the IV a spectator reads and the IV this
+		// tie-break ranks by cannot disagree. That is the pact the PW comment
+		// below already describes, extended to victories, and it was broken
+		// for exactly one shape: a bout between two fighters sharing a display
+		// name, which the name comparison here credited to side A by case
+		// order while the summary credited the member id -- or neither.
+		switch state.SubBoutWinnerSide(sub, m.SideA, m.SideB) {
+		case domain.MatchSideA:
 			sA.IndividualWins++
 			sB.IndividualLosses++
-		case sideBWin:
+		case domain.MatchSideB:
 			sB.IndividualWins++
 			sA.IndividualLosses++
-		case sub.Winner == "":
-			sA.IndividualDraws++
-			sB.IndividualDraws++
+		default:
+			if sub.Winner == "" {
+				sA.IndividualDraws++
+				sB.IndividualDraws++
+			}
 		}
 		// countScoringIppons (not len): a completed bout can retain
 		// "•" unfilled-slot placeholders or empty entries, which are

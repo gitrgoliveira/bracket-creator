@@ -373,8 +373,6 @@ func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet, ambiguousName
 		if _, ambiguous := ambiguousNames[f.Name]; ambiguous {
 			return false
 		}
-		_, ok := retired.Names[f.Name]
-		return ok
 	}
 	_, ok := retired.Names[f.Name]
 	return ok
@@ -423,9 +421,7 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 		// team-name match on the parent (b.Winner == teamAName) is the
 		// legacy synth path from quick-score; the per-player path keys on
 		// the bout's own side names.
-		switch domain.AttributeWinnerSide(domain.WinnerAttribution{
-			WinnerID: b.WinnerMemberID, SideAID: b.SideAMemberID, SideBID: b.SideBMemberID,
-		}) {
+		switch domain.AttributeWinnerSide(domain.SubBoutAttribution(b.Attribution())) {
 		case domain.MatchSideA:
 			retiredB.retire(b.SideB, b.SideBMemberID)
 			continue
@@ -1605,9 +1601,7 @@ func deriveKachinukiWinner(result *state.MatchResult) error {
 	// expensive: it decides who advances. The score editor stamps all three
 	// member ids on the row it writes, so this settles every bout scored
 	// through it.
-	switch domain.AttributeWinnerSide(domain.WinnerAttribution{
-		WinnerID: last.WinnerMemberID, SideAID: last.SideAMemberID, SideBID: last.SideBMemberID,
-	}) {
+	switch domain.AttributeWinnerSide(domain.SubBoutAttribution(last.Attribution())) {
 	case domain.MatchSideA:
 		result.Winner = result.SideA
 		return nil

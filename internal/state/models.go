@@ -1144,12 +1144,12 @@ type SubMatchResult struct {
 	// and reverted for precisely that reason (bc-pnum) before the editor
 	// began stamping it.
 	//
-	// Its one consumer is state.subBoutWinnerSide, the team summary's
-	// "which side won this bout" owner, which reads the three ids together
-	// and falls through to the names when they cannot decide. A row where
-	// two opposing fighters share a display name and no id was ever
-	// recorded counts for NEITHER side: see that function for why refusing
-	// beats the aka-first coin flip it replaced.
+	// Consumers read it through domain.SubBoutAttribution /
+	// AttributeWinnerSide rather than by hand; grep WinnerMemberID for the
+	// current set, because naming them here is what makes a comment rot.
+	// A row where two opposing fighters share a display name and no id was
+	// ever recorded counts for NEITHER side: see state.SubBoutWinnerSide
+	// for why refusing beats the aka-first coin flip it replaced.
 	SideAMemberID  string `json:"sideAMemberId,omitempty" yaml:"side_a_member_id,omitempty"`
 	SideBMemberID  string `json:"sideBMemberId,omitempty" yaml:"side_b_member_id,omitempty"`
 	WinnerMemberID string `json:"winnerMemberId,omitempty" yaml:"winner_member_id,omitempty"`
@@ -1160,6 +1160,19 @@ type SubMatchResult struct {
 // the mark to the winner's side, at most once.
 func (s *SubMatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(s.IpponsA) || domain.ContainsHantei(s.IpponsB)
+}
+
+// Attribution reads this row's six identity fields into the shape every
+// "which side won" owner takes (domain.AttributeWinnerSide, and
+// domain.SubBoutAttribution for the sub-bout rule). It exists so that no
+// caller hand-builds the literal: all six fields are the same type, and the
+// struct is what stops a transposed pair from silently marking the wrong
+// competitor.
+func (s *SubMatchResult) Attribution() domain.WinnerAttribution {
+	return domain.WinnerAttribution{
+		Winner: s.Winner, SideA: s.SideA, SideB: s.SideB,
+		WinnerID: s.WinnerMemberID, SideAID: s.SideAMemberID, SideBID: s.SideBMemberID,
+	}
 }
 
 // MissingMemberID reports whether s has a side or winner NAMED but not

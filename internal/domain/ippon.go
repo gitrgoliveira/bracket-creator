@@ -211,11 +211,10 @@ type WinnerAttribution struct {
 // here: state.subBoutWinnerSide for individual victories, export's bout rows
 // for the mark beside a fighter's name. The JS mirror is subWinnerSides
 // (match_scoreboard.jsx).
-func SubBoutAttribution(winner, sideA, sideB, winnerID, sideAID, sideBID string) WinnerAttribution {
-	att := WinnerAttribution{
-		Winner: winner, SideA: sideA, SideB: sideB,
-		WinnerID: winnerID, SideAID: sideAID, SideBID: sideBID,
-	}
+// Takes the struct rather than six strings for the reason WinnerAttribution
+// itself gives: all six are the same type and mutually assignable, so a
+// transposed pair would compile clean and silently mark the wrong competitor.
+func SubBoutAttribution(att WinnerAttribution) WinnerAttribution {
 	if att.SideA != "" && att.SideA == att.SideB {
 		att.SideA, att.SideB = "", ""
 	}

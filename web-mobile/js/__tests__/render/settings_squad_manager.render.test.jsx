@@ -233,4 +233,45 @@ describe('bc-pnum: Settings "Squad members" section', () => {
     await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-1', 'Ito', ''));
     await waitFor(() => expect(memberRow(container, 'm-new')).not.toBeNull());
   });
+
+  it('adding stays available after the competition has started, on the same render that locks clearing', async () => {
+    // Operator ruling: "Adding member can be enabled after the competition
+    // started, but you cannot remove them, only modify the name." The started
+    // gate belongs to CLEARING alone, so this asserts both halves on one
+    // render -- a future symmetry argument ("clear is locked, so lock add
+    // too") has to redden something.
+    //
+    // It also pins WHY the add control is disabled at rest: an empty input,
+    // never the competition's status. Reading a status lock into that
+    // emptiness is a mistake that has already been made once, against a real
+    // started competition.
+    const comp = makeTeamCompetition({ status: 'playoffs' });
+    window.API.fetchSquads.mockResolvedValue({
+      'team-1': [{ id: 'm1', index: 1, name: 'Sato' }],
+    });
+    window.API.addTeamMember.mockResolvedValue({ id: 'm-res', index: 2, name: 'Reserve' });
+    window.confirmDialog.mockResolvedValue(true);
+    const { container } = await mountSettings(comp, () => {});
+    await waitFor(() => expect(teamBlock(container, 'team-1')).not.toBeNull());
+
+    expect(
+      buttonNamed(memberRow(container, 'm1'), 'Clear name').disabled,
+      'the started gate must still hold for clearing'
+    ).toBe(true);
+
+    const block = teamBlock(container, 'team-1');
+    const addBtn = buttonNamed(block, 'Add member');
+    expect(addBtn.disabled, 'nothing typed yet').toBe(true);
+    // No row is in edit mode, so the only input in the block is the add box.
+    const input = block.querySelector('input');
+    await act(async () => { fireEvent.change(input, { target: { value: 'Reserve' } }); });
+    expect(
+      buttonNamed(teamBlock(container, 'team-1'), 'Add member').disabled,
+      'a started competition must still accept a reserve'
+    ).toBe(false);
+
+    await act(async () => { fireEvent.click(buttonNamed(teamBlock(container, 'team-1'), 'Add member')); });
+    await waitFor(() => expect(window.API.addTeamMember).toHaveBeenCalledWith('c1', 'team-1', 'Reserve', ''));
+    await waitFor(() => expect(memberRow(container, 'm-res')).not.toBeNull());
+  });
 });

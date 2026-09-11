@@ -153,10 +153,11 @@ member can be renamed without any record losing track of who fought. A squad is 
 one member per position the competition's team size defines, so a team has its shape before
 anyone is named. No member is ever removed, which is why an index is never freed and no
 renumbering question arises; what an organiser can do instead is clear a name, which empties
-that position and keeps its id and index, and only until the competition starts. After that
-the names are fixed, so a bout already fought always names the same person. Adding a member
-stays available at any time, including after the start, because a team fields replacements
-mid tournament.
+that position and keeps its id and index, and only until the competition starts. After that a
+name can still be corrected, which is what renaming one is for: a bout row holds the member's
+id, so a bout already fought names the same person whatever the name is changed to. Adding a
+member stays available at any time, including after the start, because a team fields
+replacements mid tournament.
 
 The label an organiser reads is the team's competitor number followed by the member index,
 for example `T10.1`. That label is composed when it is shown and never stored, because a
@@ -240,11 +241,14 @@ classDiagram
         +bool Preview
         +BracketMatch[][] Rounds
         +BracketMatch ThirdPlaceMatch
+        +string[] DrawOrder
     }
 
     class BracketMatch {
         +string ID
         +MatchStatus Status
+        +string Court
+        +string ScheduledAt
         +string SideA
         +string SideB
         +string SideAID
@@ -255,16 +259,24 @@ classDiagram
         +string[] IpponsB
         +int HansokuA
         +int HansokuB
+        +int FlagsA
+        +int FlagsB
         +string ScoreA (legacy, read-only)
         +string ScoreB (legacy, read-only)
         +int MatchNumber
         +int DisplayRound
         +string[] Feeders
+        +string PlaceholderA
+        +string PlaceholderB
+        +string PlaceholderWinner
         +bool IsOverridden
         +bool Hidden
         +string Decision
         +string DecisionBy
         +string DecisionReason
+        +string ResultSource
+        +string CorrectionReason
+        +bool ReopenPending
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
     }
@@ -324,6 +336,15 @@ unrepaired rather than as a fault, repairs what it can when it loads the file, a
 back to the name for that row alone. Making the pair a single value instead of two fields
 would remove the state entirely, at the cost of rewriting every stored file, which is why
 it has not been done.
+
+**A knockout slot remembers the draw.** A bracket match repeats the scheduling and audit
+fields a pool match carries, so a knockout match is scheduled, corrected and reopened the same
+way. Two things are its own. For a knockout fed by pools it keeps what the draw wrote in each
+slot before any pool finished, which is how a qualifier reaches the slot the draw gave it
+without the draw being recomputed. For a knockout drawn without pools the bracket keeps the
+order the competitors were drawn in, which is what their competitor numbers count; a
+competition with pools numbers its entrants at the pool draw instead, so it stores no second
+order.
 
 ### Match status and decision
 

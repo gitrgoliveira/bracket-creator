@@ -703,6 +703,42 @@ func TestSquad_ClearRefusedOnceStarted(t *testing.T) {
 	assert.Equal(t, versionBefore, s.FileVersion(id, squadsFilename), "a refused clear must write nothing")
 }
 
+// Renaming a member and adding one stay available once the competition has
+// started. The operator ruling is that a member can never be removed but its
+// name can be corrected, and that a team may field a replacement mid
+// tournament, so only CLEARING a name is gated on the start
+// (TestSquad_ClearRefusedOnceStarted above). The three operations therefore do
+// NOT share one rule, and the regression this pins is the symmetry argument
+// that would give them one: every other squad test passes with a start gate
+// added to Rename and Add.
+func TestSquad_RenameAndAddRemainAvailableOnceStarted(t *testing.T) {
+	s, id, teamA, _ := newSquadTestStore(t)
+	m, err := s.AddTeamMember(id, teamA, "Alice")
+	require.NoError(t, err)
+
+	comp, err := s.LoadCompetition(id)
+	require.NoError(t, err)
+	comp.Status = CompStatusPools
+	require.NoError(t, s.SaveCompetition(comp))
+
+	require.NoError(t, s.RenameTeamMember(id, teamA, m.ID, "Alicia"),
+		"a started competition must still allow a member's name to be corrected")
+
+	reserve, err := s.AddTeamMember(id, teamA, "Bob")
+	require.NoError(t, err, "a started competition must still allow a replacement to be added")
+	assert.Equal(t, m.Index+1, reserve.Index, "a replacement added after the start continues the index sequence")
+
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	byID := make(map[string]domain.TeamMember, len(squads[teamA]))
+	for _, mm := range squads[teamA] {
+		byID[mm.ID] = mm
+	}
+	assert.Equal(t, "Alicia", byID[m.ID].Name, "the corrected name must be the stored one")
+	assert.Equal(t, m.Index, byID[m.ID].Index, "a rename must keep the index whatever the status")
+	assert.Equal(t, "Bob", byID[reserve.ID].Name)
+}
+
 // Clearing an unknown (team, member) pair -- including a team with no squad
 // at all -- returns ErrTeamMemberNotFound, matching RenameTeamMember's
 // contract exactly.

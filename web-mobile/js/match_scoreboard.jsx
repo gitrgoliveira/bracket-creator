@@ -194,7 +194,7 @@ function ipponLetters(arr) {
 // opposing fighters may legally share a display name, so that same order was
 // a coin flip on ordinary valid data: such a row now resolves to NEITHER
 // side unless the member ids settle it (operator ruling bc-pnum, mirroring
-// state.subBoutWinnerSide). Either way the on-screen rows, the IV summary,
+// state.SubBoutWinnerSide). Either way the on-screen rows, the IV summary,
 // the server standings and the Excel export agree with each other.
 function subWinnerSides(sub, matchSideA, matchSideB) {
   // MEMBER IDS FIRST (operator ruling bc-pnum, "this should only use the
@@ -472,7 +472,7 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     if (isAkaWin) ivAka++;
     else if (isShiroWin) ivShiro++;
     // An unattributable same-name bout counts for NEITHER side, matching the
-    // server (state.subBoutWinnerSide). The scoreline fallback below must not
+    // server (state.SubBoutWinnerSide). The scoreline fallback below must not
     // step in here: it would hand the summary an IV the standings do not have.
     else if (wsides.ambiguous) { /* no IV either side */ }
     else if (b > a) ivShiro++;

@@ -2156,7 +2156,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // name: the server's fallback derivation (ResolveMemberWinnerID) reads
       // the row's names and rightly refuses that case, so without this the
       // bout is attributed by a name comparison that cannot tell the two
-      // apart. Consumed by state.subBoutWinnerSide for IV. Empty when the
+      // apart. Consumed by state.SubBoutWinnerSide for IV. Empty when the
       // row's own id is unknown (a typed-name override, or a bout the server
       // has not paired yet), which leaves the server's name derivation to
       // answer exactly as before. Kachinuki only: a fixed-format bout row

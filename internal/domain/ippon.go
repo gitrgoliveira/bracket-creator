@@ -208,7 +208,7 @@ type WinnerAttribution struct {
 // AttributeWinnerSide reports no side at all rather than guessing.
 //
 // Every consumer of "which side won this bout" must build its attribution
-// here: state.subBoutWinnerSide for individual victories, export's bout rows
+// here: state.SubBoutWinnerSide for individual victories, export's bout rows
 // for the mark beside a fighter's name. The JS mirror is subWinnerSides
 // (match_scoreboard.jsx).
 // Takes the struct rather than six strings for the reason WinnerAttribution

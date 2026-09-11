@@ -61,7 +61,7 @@ describe('match_scoreboard: teamIVPW', () => {
   // bc-pnum: two opposing fighters may legally share a display name, so the
   // name comparison cannot say who won such a bout. The member ids can, and
   // are the only thing allowed to. Mirrors state.TeamResultFrom /
-  // subBoutWinnerSide; if these two ever disagree the summary row and the
+  // SubBoutWinnerSide; if these two ever disagree the summary row and the
   // server standings show different numbers for the same encounter.
   it('attributes a same-name bout by member id, against the aka-first name order', () => {
     const subs = [{

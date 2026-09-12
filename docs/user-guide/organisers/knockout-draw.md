@@ -143,6 +143,16 @@ This matters most for a **Knockout only** competition, where there is no pool ph
 
 Two things it never does. It does not move a **seeded** competitor: seed places are worked out from the ranks you set, and a shared dojo is not a reason to override them. It does not force an exchange that would create the same problem somewhere else, so where the draw is too tight to fix a pairing, the pairing stands. In a **Pools + Knockout** competition the pools have already spread each dojo, so there is usually nothing left to correct by the time the bracket is drawn. See [The pool draw](pool-draw.md) for how that spreading works.
 
+## Competitor numbers
+
+A **Knockout only** competition numbers its competitors the same way a pooled one does, down the bracket instead of pool by pool. See [Competitor numbers](pool-draw.md#competitor-numbers) for the pooled-format rule (mixed and league).
+
+Numbers are assigned when the draw is generated, not before: nothing is shown while the competition is still in setup, whatever prefix you have set. Once the draw runs, each competitor's number follows their position in the bracket, read from the top of the tree to the bottom, one shiai-jo's block at a time starting with the first. A bye takes no number, so numbering stays sequential rather than skipping a slot for it. A competitor excluded from the draw (for example, not checked in) carries no number either.
+
+Discarding the draw removes the numbers along with it, exactly as it does for a pooled competition; generating a fresh draw assigns them again from the new bracket. Changing the number prefix relabels every competitor immediately, with no need to regenerate the draw.
+
+Everything else about the prefix works the same as the pooled-format rule: you can set your own or leave it blank to derive one, change it at any time, and the printed tags carry these numbers the same way, with a reprint needed after a prefix change. When the prefix is more than one character, the printed tags and the Names to Print cards show the prefix above the rest of the number, for example KO above 20; a one-character prefix stays on one line, for example K20.
+
 ## Byes
 
 Byes are decided **inside each block**, never across the draw as a whole.

@@ -206,6 +206,35 @@ func TestKachinukiDetailBoutRows(t *testing.T) {
 	assert.NotEqual(t, "7", postBouts, "expected exactly 6 bout rows, found a 7th")
 }
 
+// TestKachinukiDetailBoutRows_WithSquadLabel verifies the squad member
+// label (bc-pnum: "make a team member's label available to the public
+// surfaces") is written beside the fighter's name on the detail sheet, and
+// that a blank label (the SideB fighter here has none) falls back to just
+// the name -- unaffected, matching every other row in this file's fixture.
+func TestKachinukiDetailBoutRows_WithSquadLabel(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+
+	match := KachinukiMatchDetail{
+		Label:     "Pool A - Match 1",
+		SideATeam: "Team Alpha",
+		SideBTeam: "Team Bravo",
+		Bouts: []KachinukiBout{
+			{Position: 1, SideAName: "Alice", SideALabel: "T10.1", SideAPos: "Senpo", ScoreA: "MM", SideBName: "Bob", SideBPos: "Senpo", ScoreB: "", Winner: "Alice", Decision: "fought"},
+		},
+	}
+	require.NoError(t, WriteKachinukiDetailSheet(f, []KachinukiMatchDetail{match}))
+
+	firstBoutRow := 4
+	sideACell, err := f.GetCellValue(SheetKachinukiDetail, "B"+intToString(firstBoutRow))
+	require.NoError(t, err)
+	assert.Equal(t, "T10.1 Alice (Senpo)", sideACell, "label leads the name, ahead of the position suffix")
+
+	sideBCell, err := f.GetCellValue(SheetKachinukiDetail, "F"+intToString(firstBoutRow))
+	require.NoError(t, err)
+	assert.Equal(t, "Bob (Senpo)", sideBCell, "no label recorded for Side B: falls back to name + position, unchanged")
+}
+
 // TestKachinukiDetailSummaryRow is T197: the summary row shows total
 // eliminations per team and the match outcome.
 func TestKachinukiDetailSummaryRow(t *testing.T) {

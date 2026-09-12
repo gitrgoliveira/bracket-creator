@@ -19,6 +19,12 @@ func (s *Store) LoadPools(compID string) ([]helper.Pool, error) {
 		return nil, err
 	}
 
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	// Must NOT run from loadPoolsLocked or any caller that already holds the
+	// per-comp lock (e.g. storeTx.LoadPools, WithTransaction bodies).
+	s.EnsureLegacyUpgraded(compID)
+
 	data, err := s.loadCached(compID, "pools.csv", parsePoolsFile)
 	if err != nil {
 		return nil, err
@@ -95,8 +101,13 @@ func parsePoolsFile(path string) (any, error) {
 			player.Number = rec[6]
 		}
 		// Participant UUID (appended after the legacy 7-column layout).
-		// Absent in pre-change files → empty id; the league matrix then
-		// falls back to name-based cell matching.
+		// Absent in pre-change files → empty id. A helper.Player is a record
+		// that carries an id field, so it is resolved BY ID ONLY (operator
+		// ruling bc-pnum): an empty id here resolves to nothing downstream
+		// (no player number, no standings/scoring attribution), it does not
+		// fall back to name-based cell matching -- see
+		// helper.PoolsMissingParticipantIDsMessage, the operator-facing
+		// notice for exactly this gap.
 		if len(rec) > 7 {
 			player.ID = rec[7]
 		}
@@ -228,6 +239,13 @@ func (s *Store) savePoolsLocked(compID string, pools []helper.Pool) error {
 	cache.mtime = s.FileMtime(compID, "pools.csv")
 	cache.mu.Unlock()
 
+	// Bumped AFTER the bytes land and the cache is refreshed (bumpFileVersion's
+	// contract): anything keying a cache on pools.csv, notably engine's
+	// standingsTokens (RenumberCompetitors is the first pools.csv writer that
+	// runs after the pool phase has standings, so a stale-cache read here would
+	// otherwise serve pre-renumber numbers for the process lifetime, see bc-pnum).
+	s.bumpFileVersion(compID, "pools.csv")
+
 	return nil
 }
 
@@ -235,6 +253,13 @@ func (s *Store) LoadPoolMatches(compID string) ([]MatchResult, error) {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return nil, err
 	}
+
+	// Before the read lock: legacy shapes convert on first read, under the
+	// WRITE lock (legacy_upgrade.go). No-op after the first call per comp.
+	// Must NOT run from LoadPoolMatchesLocked or any caller that already
+	// holds the per-comp lock (e.g. storeTx.LoadPoolMatches, WithTransaction
+	// bodies).
+	s.EnsureLegacyUpgraded(compID)
 
 	matches, err := s.cachedPoolMatches(compID)
 	if err != nil {
@@ -540,7 +565,11 @@ var poolMatchColumns = []poolMatchColumn{
 	// column with an absent-default.
 	intCol("Round", func(m *MatchResult) *int { return &m.Round }),
 	// Participant-id columns. Absent in files written before they existed;
-	// ids stay empty and consumers fall back to name matching.
+	// a MatchResult is a record that carries an id field, so it is resolved
+	// BY ID ONLY (operator ruling bc-pnum) -- ids staying empty here means
+	// the row resolves to nothing downstream, not a name-matching fallback.
+	// See engine.PoolMatchesMissingSideIDsMessage, the operator-facing
+	// notice for exactly this gap.
 	strCol("SideAID", func(m *MatchResult) *string { return &m.SideAID }),
 	strCol("SideBID", func(m *MatchResult) *string { return &m.SideBID }),
 	strCol("WinnerID", func(m *MatchResult) *string { return &m.WinnerID }),

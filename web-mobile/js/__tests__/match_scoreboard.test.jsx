@@ -58,6 +58,58 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 1, pwShiro: 0, pwAka: 0 });
   });
 
+  // bc-pnum: two opposing fighters may legally share a display name, so the
+  // name comparison cannot say who won such a bout. The member ids can, and
+  // are the only thing allowed to. Mirrors state.TeamResultFrom /
+  // SubBoutWinnerSide; if these two ever disagree the summary row and the
+  // server standings show different numbers for the same encounter.
+  it('attributes a same-name bout by member id, against the aka-first name order', () => {
+    const subs = [{
+      position: 1, sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      sideAMemberId: 'm-aka', sideBMemberId: 'm-shiro', winnerMemberId: 'm-shiro',
+      ipponsA: [], ipponsB: ['M', 'K'],
+    }];
+    expect(teamIVPW(subs)).toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 2, pwAka: 0 });
+  });
+
+  it('credits a same-name bout to NEITHER side when no member id can settle it', () => {
+    // The scoreline fallback must not step in here either: the server counts
+    // no IV for this row, so a summary that inferred one from the points
+    // would contradict the standings beside it.
+    const subs = [{
+      position: 1, sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      ipponsA: ['M'], ipponsB: ['M', 'K'],
+    }];
+    expect(teamIVPW(subs)).toEqual({ ivShiro: 0, ivAka: 0, pwShiro: 2, pwAka: 1 });
+  });
+
+  // Operator ruling: there can be only one source of truth, and it is the data
+  // on the server. TeamScoreboard takes teamResult when the payload carries it
+  // and only derives when it does not. teamIVPW is that fallback, so it keeps
+  // its own coverage above; these two pin which one wins.
+  it('is the fallback: TeamScoreboard prefers the server figure', async () => {
+    const { TeamScoreboard } = await import('../match_scoreboard.jsx');
+    // The bout log says shiro won one bout; the server says two. The server
+    // wins, because it is the same computation the standings ranked by.
+    const el = TeamScoreboard({
+      subResults: [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }],
+      teamResult: { shiroIV: 2, akaIV: 0, shiroPW: 5, akaPW: 1 },
+      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3,
+    });
+    const text = collectText(el);
+    expect(text).toContain('2');
+    expect(text).toContain('5');
+  });
+
+  it('derives locally when the payload carries no server figure', async () => {
+    const { TeamScoreboard } = await import('../match_scoreboard.jsx');
+    const el = TeamScoreboard({
+      subResults: [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }],
+      matchSideA: 'Team A', matchSideB: 'Team B', teamSize: 3,
+    });
+    expect(collectText(el)).toContain('1');
+  });
+
   it('counts IV via match-level side names when sub-bout sides are empty (quick-score)', () => {
     const subs = [
       { position: 1, sideA: '', sideB: '', winner: 'Team Alpha', ipponsA: [], ipponsB: [] },
@@ -66,6 +118,24 @@ describe('match_scoreboard: teamIVPW', () => {
     ];
     // matchSideA=aka(right)=Team Alpha, matchSideB=shiro(left)=Team Beta
     expect(teamIVPW(subs, 'Team Alpha', 'Team Beta')).toEqual({ ivShiro: 1, ivAka: 2, pwShiro: 0, pwAka: 0 });
+  });
+
+  it('falls back to the fighter names when the winner id matches neither side', () => {
+    // The id branch of attributeWinnerSide SHORT-CIRCUITS: three ids present
+    // and a winner id matching neither returns no side WITHOUT reaching its
+    // own name tier. state.SubBoutWinnerSide repeats the fighter-name
+    // comparison for exactly that row, so the mirror here must too, or the
+    // server's IV summary and the client's bout rows contradict each other on
+    // the same screen. The 1-1 scoreline is load-bearing: it leaves the
+    // ippon-count fallback tied, so only the name arm can credit this bout.
+    const subs = [
+      {
+        position: 1, sideA: 'Tanaka', sideB: 'Suzuki', winner: 'Tanaka',
+        sideAMemberId: 'member-a', sideBMemberId: 'member-b', winnerMemberId: 'member-gone',
+        ipponsA: ['M'], ipponsB: ['K'],
+      },
+    ];
+    expect(teamIVPW(subs, 'Team Alpha', 'Team Beta')).toEqual({ ivShiro: 0, ivAka: 1, pwShiro: 1, pwAka: 1 });
   });
 
   it('does not false-positive on empty winner with empty sub-sides (draw)', () => {

@@ -199,6 +199,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterEligibilityHandlers(adminSmallBody, store, hub)
 	RegisterReinstateHandler(adminSmallBody, eng, hub)
 	RegisterLineupHandlers(adminSmallBody, store, store, store, hub)
+	RegisterSquadHandlers(adminSmallBody, store, store)
 	RegisterDaihyosenHandlers(adminSmallBody, eng, store, hub)
 	RegisterLeagueTiebreakHandlers(adminSmallBody, eng, store, hub)
 	RegisterSwissHandlers(adminSmallBody, store, eng, hub)
@@ -209,7 +210,7 @@ func NewRouterWithHub(store *state.Store, eng *engine.Engine, res *resources.Res
 	RegisterExportResultsHandlers(adminSmallBody, store, eng)
 
 	adminLargeBody := adminGroup(r, MaxImportBodyBytes, verifier, store)
-	RegisterImportHandlers(adminLargeBody, store, hub, elevated)
+	RegisterImportHandlers(adminLargeBody, store, eng, hub, elevated)
 
 	// Sponsor uploads (mp-c38), multipart logo upload needs envelope
 	// headroom for the file plus boundary/form-field overhead; so it gets

@@ -2,10 +2,13 @@ package engine
 
 import (
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,6 +25,18 @@ func setupTestEngine(t *testing.T) (*Engine, *state.Store, string) {
 
 	eng := New(store)
 	return eng, store, dir
+}
+
+// writeRawParticipantsCSV writes csv verbatim as compID's participants.csv,
+// creating the competition's directory first. The one place a test writes a
+// hand-spelled roster straight to disk, bypassing SaveParticipants, to
+// exercise a legacy/hand-edited shape (no ids, a blank dojo, ...) the normal
+// write path would never produce on its own.
+func writeRawParticipantsCSV(t *testing.T, dir, compID, csv string) {
+	t.Helper()
+	csvPath := filepath.Join(dir, "competitions", compID, "participants.csv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(csvPath), 0700))
+	require.NoError(t, os.WriteFile(csvPath, []byte(csv), 0600))
 }
 
 // createTestCompetition saves a canonical individual competition. opts mutate
@@ -126,6 +141,66 @@ func TestStartCompetition_LeagueMatchesCarrySideIDs(t *testing.T) {
 	assert.Equal(t, wantA, got.WinnerID, "WinnerSide=A must resolve WinnerID to SideAID even when both sides share a name")
 }
 
+// TestStartCompetition_PlayoffsBracketCarriesSideIDsAndPropagates is
+// TestStartCompetition_LeagueMatchesCarrySideIDs's bracket twin (bc-brid): a
+// standalone knockout's round-0 SideAID/SideBID are stamped from
+// Bracket.DrawOrder at generation, and a same-name pair (two "Tanaka Kenji"
+// from different dojos) is still told apart correctly. Scoring round 0 by
+// WinnerSide hint (the only way to disambiguate a same-name winner) then
+// confirms the winner's ID -- not merely their shared display name --
+// propagates into the next round.
+func TestStartCompetition_PlayoffsBracketCarriesSideIDsAndPropagates(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "playoffs-ids"
+
+	createTestCompetition(t, store, compID, "playoffs", 4)
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+		idC = "33333333-3333-4333-8333-333333333333"
+		idD = "44444444-4444-4444-8444-444444444444"
+	)
+	players := []domain.Player{
+		{ID: idA, Name: "Tanaka Kenji", Dojo: "Tokyo"},
+		{ID: idB, Name: "Tanaka Kenji", Dojo: "Osaka"}, // same name, different dojo
+		{ID: idC, Name: "Suzuki Hiro", Dojo: "Nagoya"},
+		{ID: idD, Name: "Watanabe Ryo", Dojo: "Kyoto"},
+	}
+	require.NoError(t, store.SaveParticipants(compID, players))
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, bracket.Rounds, 2, "4 players -> round 0 + final")
+	require.Len(t, bracket.Rounds[0], 2, "4 players -> 2 round-0 matches")
+
+	validIDs := map[string]bool{idA: true, idB: true, idC: true, idD: true}
+	for _, m := range bracket.Rounds[0] {
+		assert.NotEmptyf(t, m.SideAID, "match %s SideAID should be stamped from DrawOrder", m.ID)
+		assert.NotEmptyf(t, m.SideBID, "match %s SideBID should be stamped from DrawOrder", m.ID)
+		assert.Truef(t, validIDs[m.SideAID], "match %s SideAID %q is not a roster id", m.ID, m.SideAID)
+		assert.Truef(t, validIDs[m.SideBID], "match %s SideBID %q is not a roster id", m.ID, m.SideBID)
+		assert.NotEqual(t, m.SideAID, m.SideBID, "a match must be between two distinct participants")
+	}
+
+	// Score round-0 match 0 by WinnerSide hint (mirrors the same-name
+	// Tanaka-vs-Tanaka case the league test exercises above), then confirm
+	// the winner's ID propagates into the final -- not merely their name,
+	// which the OTHER Tanaka in the bracket also carries.
+	m0 := bracket.Rounds[0][0]
+	require.NoError(t, eng.RecordMatchResult(compID, m0.ID, &state.MatchResult{
+		ID: m0.ID, SideA: m0.SideA, SideB: m0.SideB,
+		Winner: m0.SideA, WinnerSide: "A", Status: state.MatchStatusCompleted,
+	}))
+
+	reloaded, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.Len(t, reloaded.Rounds, 2)
+	final := reloaded.Rounds[1][0]
+	assert.Equal(t, m0.SideAID, final.SideAID, "the round-0 winner's id propagates into the final, not merely their name")
+}
+
 // --- Pool Generation Tests ---
 
 func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {
@@ -173,6 +248,42 @@ func TestStartCompetition_MixedFormat_BasicGeneration(t *testing.T) {
 		assert.Equal(t, state.MatchStatusScheduled, m.Status)
 		assert.NotEmpty(t, m.SideA)
 		assert.NotEmpty(t, m.SideB)
+	}
+}
+
+// TestStartCompetition_BlankNumberPrefix_AssignsDefaultInsteadOfBareDigits is
+// the bc-pnum review: the never-empty-prefix invariant was enforced only by
+// the HTTP handler's ensureNumberPrefix, so a NON-HTTP caller of
+// StartCompetition/GenerateDraw (createTestCompetition here mirrors any
+// caller that saves a Competition directly, bypassing that handler) numbers
+// pools with whatever prefix is stored -- an empty one composes bare
+// "1","2",... with no letters at all, which RenumberCompetitors' OWN blank-
+// prefix guard would refuse outright as a rewrite target. The fix assigns a
+// default (never refuses) the same way the HTTP handler would have,
+// directly inside runDrawPipeline, so every caller gets a usable draw.
+func TestStartCompetition_BlankNumberPrefix_AssignsDefaultInsteadOfBareDigits(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "blank-prefix-comp"
+
+	createTestCompetition(t, store, compID, "mixed", 3) // NumberPrefix left "" (zero value)
+	saveTestParticipants(t, store, compID, []string{
+		"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank",
+	})
+
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.NotEmpty(t, comp.NumberPrefix, "a default prefix must be assigned and persisted, never left blank")
+
+	pools, err := store.LoadPools(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, pools)
+	numberRe := regexp.MustCompile(`^\D`)
+	for _, p := range pools {
+		for _, player := range p.Players {
+			assert.Regexp(t, numberRe, player.Number, "every competitor number must start with a non-digit prefix character, never bare digits")
+		}
 	}
 }
 
@@ -376,9 +487,13 @@ func TestStartCompetition_LeagueFormat(t *testing.T) {
 	assert.Len(t, matches, 10, "5-player round-robin must produce 10 matches")
 
 	// Mark all matches completed; MaybeAutoCompletePools should transition to complete.
+	// WinnerID is stamped from the already-populated SideAID (standings
+	// resolution is id-only, operator ruling bc-pnum), or every player's win
+	// tally stays zero and the league reads as one big unresolved tie.
 	for i := range matches {
 		matches[i].Status = state.MatchStatusCompleted
 		matches[i].Winner = matches[i].SideA
+		matches[i].WinnerID = matches[i].SideAID
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
@@ -980,6 +1095,16 @@ func TestCalculatePoolStandings_Basic(t *testing.T) {
 			winner = m.SideA
 		}
 		matches[i].Winner = winner
+		// Standings resolution is id-only (operator ruling bc-pnum): stamp
+		// WinnerID from the roster-derived SideAID/SideBID (already present
+		// on every loaded match, since SaveParticipants mints ids on write),
+		// or Alice's wins below would never tally.
+		switch winner {
+		case matches[i].SideA:
+			matches[i].WinnerID = matches[i].SideAID
+		case matches[i].SideB:
+			matches[i].WinnerID = matches[i].SideBID
+		}
 		matches[i].Status = state.MatchStatusCompleted
 		matches[i].IpponsA = []string{"M"}
 		matches[i].IpponsB = []string{}
@@ -1157,6 +1282,16 @@ func TestCalculatePoolStandings_WeightedScore(t *testing.T) {
 				matches[i].IpponsB = []string{"M"}
 			}
 		}
+		// Standings resolution is id-only (operator ruling bc-pnum): stamp
+		// WinnerID from the roster-derived SideAID/SideBID (already present
+		// on every loaded match, since SaveParticipants mints ids on write),
+		// or every Wins/Losses tally below stays zero.
+		switch matches[i].Winner {
+		case matches[i].SideA:
+			matches[i].WinnerID = matches[i].SideAID
+		case matches[i].SideB:
+			matches[i].WinnerID = matches[i].SideBID
+		}
 		matches[i].Status = state.MatchStatusCompleted
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -1249,6 +1384,16 @@ func TestCalculatePoolStandings_TeamScoring(t *testing.T) {
 				{Position: 2, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"K"}, Winner: "TeamC"},
 				{Position: 3, SideA: b, SideB: c, IpponsA: []string{"M"}, IpponsB: []string{"D"}, Winner: "TeamB"},
 			}
+		}
+		// Standings resolution is id-only (operator ruling bc-pnum): stamp
+		// WinnerID from the roster-derived SideAID/SideBID (already present
+		// on every loaded match, since SaveParticipants mints ids on write),
+		// or every team's Wins/Losses tally below stays zero.
+		switch matches[i].Winner {
+		case matches[i].SideA:
+			matches[i].WinnerID = matches[i].SideAID
+		case matches[i].SideB:
+			matches[i].WinnerID = matches[i].SideBID
 		}
 	}
 	require.NoError(t, store.SavePoolMatches(compID, matches))
@@ -1683,14 +1828,23 @@ func TestCalculatePoolStandings_WithManualOverrides(t *testing.T) {
 
 	pools, _ := store.LoadPools(compID)
 	poolName := pools[0].PoolName
+	byName := make(map[string]domain.Player, len(pools[0].Players))
+	for _, p := range pools[0].Players {
+		byName[p.Name] = p
+	}
 
-	// Manually override Bob to rank 1, Alice to rank 2, Charlie to rank 3
+	// Manually override Bob to rank 1, Alice to rank 2, Charlie to rank 3.
+	// Overrides are keyed by helper.PlayerKey (== helper.CompetitorKey(id,
+	// name, dojo)), id-only once an id exists: lookupPoolRankOverride
+	// dropped the pre-bc-cse bare-name fallback (operator ruling bc-pnum), so
+	// a plain "Bob" key here would never resolve now that SaveParticipants
+	// has minted every roster entry a real id.
 	overrides := &state.Overrides{
 		PoolRanks: map[string]map[string]int{
 			poolName: {
-				"Bob":     1,
-				"Alice":   2,
-				"Charlie": 3,
+				helper.PlayerKey(byName["Bob"]):     1,
+				helper.PlayerKey(byName["Alice"]):   2,
+				helper.PlayerKey(byName["Charlie"]): 3,
 			},
 		},
 	}

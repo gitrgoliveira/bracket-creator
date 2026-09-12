@@ -425,6 +425,10 @@ func TestStore_SeedsCSV_CommaInName(t *testing.T) {
 
 	compID := "seed-comma"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Smith, John", Dojo: "Dojo A"},
+		{Name: "Yamada Taro", Dojo: "Dojo B"},
+	}))
 
 	seeds := []domain.SeedAssignment{
 		{Name: "Smith, John", SeedRank: 1},
@@ -861,6 +865,9 @@ func TestStore_Seeds_RoundTrip(t *testing.T) {
 
 	compID := "seeded"
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo A"}, {Name: "Bob", Dojo: "Dojo B"}, {Name: "Charlie", Dojo: "Dojo C"},
+	}))
 
 	seeds := []domain.SeedAssignment{
 		{Name: "Alice", SeedRank: 1},
@@ -917,9 +924,13 @@ func TestStore_Seeds_PerCompLocking(t *testing.T) {
 	err = store.SaveSeeds("../escape", []domain.SeedAssignment{{Name: "A", SeedRank: 1}})
 	assert.Error(t, err, "SaveSeeds must validate the comp ID")
 
-	// (2) Concurrent SaveSeeds on different comps must both land.
+	// (2) Concurrent SaveSeeds on different comps must both land. Each needs
+	// a roster to attach to now that SaveSeeds refuses a non-empty seeding
+	// with none.
 	require.NoError(t, store.SaveCompetition(&Competition{ID: "alpha"}))
 	require.NoError(t, store.SaveCompetition(&Competition{ID: "beta"}))
+	require.NoError(t, store.SaveParticipants("alpha", []domain.Player{{Name: "A", Dojo: "D"}}))
+	require.NoError(t, store.SaveParticipants("beta", []domain.Player{{Name: "B", Dojo: "D"}}))
 
 	var wg sync.WaitGroup
 	wg.Add(2)

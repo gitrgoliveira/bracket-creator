@@ -1569,6 +1569,16 @@ func writeLegacyRosterCSV(t *testing.T, tempDir, compID, csv string) {
 // an otherwise-fine participant into a 400 naming the offending row, not an
 // opaque 500. Covers all three check-in paths: PUT checkin, DELETE checkin,
 // and POST checkin-bulk.
+//
+// Converted for the operator ruling bc-pnum: a participant is addressed by
+// id ONLY now (state/participants.go's resolveParticipantIndex/BulkCheckIn
+// dropped the legacy composite "name|dojo" pid fallback entirely), so this
+// fixture stamps a real UUID for every row (including the blank-dojo one)
+// and addresses Alice/Bob by their real id in the request, rather than by
+// the no-longer-resolvable "Alice|DojoA" composite the pre-bc-pnum version
+// used. The scenario under test -- a blank-dojo row ELSEWHERE in the roster
+// still blocks an otherwise-valid check-in with a 400 naming the offender,
+// never a 404 or a silent 500 -- is unchanged.
 func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 	t.Run("PUT checkin", func(t *testing.T) {
 		r, store, _, _, tempDir := setupTestRouter(t)
@@ -1579,11 +1589,13 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		// Alice is a perfectly fine row; Charlie carries a blank dojo. Both
 		// on the SAME roster, so checking Alice in still has to rewrite the
 		// whole file -- and the floor guard fires on Charlie's row, not
-		// Alice's.
-		writeLegacyRosterCSV(t, tempDir, compID, "Alice,DojoA\nCharlie,\n")
+		// Alice's. Both carry a real id so Alice remains addressable at all
+		// under id-only resolution.
+		aliceID, charlieID := helper.NewUUID4(), helper.NewUUID4()
+		writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA\n"+charlieID+",Charlie,\n")
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/Alice|DojoA/checkin", nil)
+		req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", nil)
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -1608,10 +1620,11 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Checkin Blank Dojo DELETE", Status: state.CompStatusSetup,
 		}))
-		writeLegacyRosterCSV(t, tempDir, compID, "Alice,DojoA,checked_in\nCharlie,\n")
+		aliceID, charlieID := helper.NewUUID4(), helper.NewUUID4()
+		writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA,checked_in\n"+charlieID+",Charlie,\n")
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/api/competitions/"+compID+"/participants/Alice|DojoA/checkin", nil)
+		req, _ := http.NewRequest("DELETE", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", nil)
 		r.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code,
@@ -1625,9 +1638,10 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: compID, Name: "Checkin Blank Dojo Bulk", Status: state.CompStatusSetup,
 		}))
-		writeLegacyRosterCSV(t, tempDir, compID, "Alice,DojoA\nBob,DojoB\nCharlie,\n")
+		aliceID, bobID, charlieID := helper.NewUUID4(), helper.NewUUID4(), helper.NewUUID4()
+		writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA\n"+bobID+",Bob,DojoB\n"+charlieID+",Charlie,\n")
 
-		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{"Alice|DojoA", "Bob|DojoB"}})
+		body, _ := json.Marshal(map[string]interface{}{"participantIds": []string{aliceID, bobID}})
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/participants/checkin-bulk", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")

@@ -61,10 +61,10 @@ const (
 )
 
 type mobileAppOptions struct {
-	folder       string
-	bindAddress  string
-	port         int
-	lockPassword bool
+	folder      string
+	bindAddress string
+	port        int
+	lockedMode  bool
 }
 
 func newMobileAppCmd() *cobra.Command {
@@ -107,7 +107,7 @@ func newMobileAppCmd() *cobra.Command {
 	// The flag is recommended for any internet-exposed deployment; for
 	// local/private use the default (unlocked) behavior keeps the
 	// recovery-via-/reset path available.
-	cmd.Flags().BoolVar(&o.lockPassword, "lock-password", false,
+	cmd.Flags().BoolVar(&o.lockedMode, "lock-password", false,
 		"disable POST /api/tournament/reset (SPA /reset page still shows a disabled message) and authenticate via bcrypt hash from TOURNAMENT_PASSWORD_HASH")
 
 	return cmd
@@ -126,7 +126,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return fmt.Errorf("LOCK_PASSWORD=%q: unrecognised boolean value (accepted: 1/t/T/TRUE/true/True or 0/f/F/FALSE/false/False)", raw)
 			}
-			o.lockPassword = v
+			o.lockedMode = v
 		}
 	}
 
@@ -134,7 +134,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 		"tournamentDataDir", o.folder,
 		"bind", o.bindAddress,
 		"port", o.port,
-		"lockPassword", o.lockPassword,
+		"lockedMode", o.lockedMode,
 	)
 	store, err := state.NewStore(o.folder)
 	if err != nil {
@@ -150,7 +150,7 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 	// expose the admin endpoints to whatever's in tournament.md, or to
 	// the new-tournament bootstrap path on an empty install).
 	var verifier mobileapp.PasswordVerifier
-	if o.lockPassword {
+	if o.lockedMode {
 		hash := os.Getenv("TOURNAMENT_PASSWORD_HASH")
 		v, err := mobileapp.NewBcryptVerifier(hash)
 		if err != nil {
@@ -164,6 +164,18 @@ func (o *mobileAppOptions) run(cmd *cobra.Command, args []string) error {
 
 	slog.Info("mobile-app: starting", "bind", o.bindAddress, "port", o.port, "tournamentDataDir", o.folder)
 	eng := engine.New(store)
+
+	// Data written by a version that predates the never-empty number prefix
+	// rule is migrated as it is LOADED, here, before a single request is
+	// served: every competition with an empty prefix gets the derived default
+	// and its pools.csv is numbered under it (engine.MigrateNumberPrefixes).
+	migrated, err := eng.MigrateNumberPrefixes()
+	if err != nil {
+		return fmt.Errorf("migrate competitor number prefixes in %q: %w", o.folder, err)
+	}
+	if len(migrated) > 0 {
+		slog.Info("mobile-app: assigned number prefixes to competitions saved by an earlier version", "competitions", migrated)
+	}
 
 	// SSE subscriber cap is configurable via SSE_MAX_CLIENTS to handle
 	// deployments with unusually high viewer counts; non-numeric values

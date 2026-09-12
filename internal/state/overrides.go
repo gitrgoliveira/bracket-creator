@@ -3,21 +3,34 @@ package state
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
 
+// ErrCorruptOverrides is the sentinel wrapped (via %w) around a JSON parse
+// failure reading overrides.json. Standings computation deliberately fails
+// closed on a corrupt overrides file (a silently-dropped override could
+// resurrect a broken chusen or a stale manual rank), but every override
+// writer -- SaveRankOverrideChanged, SaveWinnerOverride, ResetOverrides --
+// goes through modifyOverridesChanged, which LOADS the file first, so a
+// corrupt file has no writer that can repair it: even "reset" fails
+// identically. errors.Is(err, ErrCorruptOverrides) lets a caller (the HTTP
+// layer) recognise this specific, operator-recoverable failure and map it to
+// a terminal 4xx naming overrides.json, and route the operator to
+// ResetOverridesForceChanged, the one write that does NOT parse first.
+var ErrCorruptOverrides = errors.New("overrides.json is corrupt")
+
 // Overrides.PoolRanks is keyed PoolID -> overrideKey -> Rank. overrideKey is
-// helper.CompetitorKey(id, name, dojo) for every override written since
-// bc-cse (id-preferred, normalized name+dojo composite fallback -- see that
-// function's doc comment for the operator identity rule: (name, dojo), not
-// name, so two same-name competitors from different dojos never share one
-// override entry). A file written BEFORE bc-cse instead holds bare player
-// names as keys: those legacy entries are never rewritten (read-only
-// compatibility, see lookupPoolRankOverride in internal/engine for the
-// read-side fallback and the tradeoff it documents) -- SaveRankOverride*
-// below always writes the new identity-keyed form.
+// helper.CompetitorKey(id, "", "") for every override written since bc-cse,
+// which resolves to "id:"+id (playerID is REQUIRED, bc-pnum): two same-name
+// competitors from different dojos never share one override entry, since
+// each carries a distinct id. A file written BEFORE bc-cse instead holds
+// bare player names as keys: those legacy entries are never rewritten and,
+// per the bc-pnum operator ruling, are no longer read back either (see
+// lookupPoolRankOverride in internal/engine) -- SaveRankOverride* below
+// always writes the current identity-keyed form.
 type Overrides struct {
 	PoolRanks map[string]map[string]int `json:"poolRanks"`
 	Winners   map[string]string         `json:"winners"` // MatchID -> WinnerName
@@ -50,7 +63,13 @@ func (s *Store) loadOverridesLocked(compID string) (*Overrides, error) {
 	}
 	var o Overrides
 	if err := json.Unmarshal(data, &o); err != nil {
-		return nil, err
+		// corruptJSONWithSentinel gives the failure ONE representation that
+		// answers both questions the codebase asks about it: AsCorruptFile
+		// (so readers that degrade on an operator-repairable file, e.g. the
+		// public viewer detail endpoint, recognise it) and
+		// errors.Is(err, ErrCorruptOverrides) (so respondIfCorruptOverrides
+		// and the other sentinel checks below keep matching).
+		return nil, corruptJSONWithSentinel(ErrCorruptOverrides, "overrides.json", data, err)
 	}
 	if o.PoolRanks == nil {
 		o.PoolRanks = make(map[string]map[string]int)
@@ -132,22 +151,17 @@ func (s *Store) modifyOverrides(compID string, fn func(*Overrides)) error {
 }
 
 // SaveRankOverrideChanged saves a manual pool-rank override for one
-// competitor and reports whether the overrides file actually changed. Use
-// this to gate broadcasts.
+// competitor, identified by playerID ONLY, and reports whether the
+// overrides file actually changed. Use this to gate broadcasts.
 //
-// The override is keyed by helper.CompetitorKey(playerID, playerName,
-// playerDojo) (bc-cse), never by bare playerName: two competitors sharing a
-// display name from different dojos are legal (operator identity rule,
-// CLAUDE.md) and must not collide on one override entry. playerID and
-// playerDojo may be empty (an older API client sending only playerName), in
-// which case CompetitorKey degrades to its normalized-name(+empty dojo)
-// composite -- callers that can resolve the competitor's real id/dojo from
-// the roster before calling this (as the mobileapp handler does) should
-// always do so, since that is what actually disambiguates a same-name pair.
-// This function never touches a pre-existing legacy bare-name key; see
-// Overrides.PoolRanks' doc comment for the read-side compatibility story.
-func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID, playerName, playerDojo string, rank int) (bool, error) {
-	key := helper.CompetitorKey(playerID, playerName, playerDojo)
+// The override is keyed by helper.CompetitorKey(playerID, "", "") (bc-cse),
+// which resolves to "id:"+playerID: playerID is REQUIRED (bc-pnum) by every
+// caller (the mobileapp override-rank handler rejects a request with no
+// playerId before this is ever reached), so the name/dojo composite branch
+// CompetitorKey falls back to for an empty id is dead code from this
+// caller's side and is not exposed here.
+func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID string, rank int) (bool, error) {
+	key := helper.CompetitorKey(playerID, "", "")
 	return s.modifyOverridesChanged(compID, func(o *Overrides) {
 		if o.PoolRanks[poolID] == nil {
 			o.PoolRanks[poolID] = make(map[string]int)
@@ -156,8 +170,8 @@ func (s *Store) SaveRankOverrideChanged(compID, poolID, playerID, playerName, pl
 	})
 }
 
-func (s *Store) SaveRankOverride(compID, poolID, playerID, playerName, playerDojo string, rank int) error {
-	_, err := s.SaveRankOverrideChanged(compID, poolID, playerID, playerName, playerDojo, rank)
+func (s *Store) SaveRankOverride(compID, poolID, playerID string, rank int) error {
+	_, err := s.SaveRankOverrideChanged(compID, poolID, playerID, rank)
 	return err
 }
 
@@ -179,4 +193,24 @@ func (s *Store) ResetOverridesChanged(compID string) (bool, error) {
 func (s *Store) ResetOverrides(compID string) error {
 	_, err := s.ResetOverridesChanged(compID)
 	return err
+}
+
+// ResetOverridesForce clears all overrides WITHOUT first loading/parsing the
+// existing file. This is the repair door for a corrupt overrides.json
+// (ErrCorruptOverrides): every OTHER override writer, ResetOverridesChanged
+// included, goes through modifyOverridesChanged, which loads first and so
+// fails identically against the very file it would need to repair -- there
+// is otherwise no way to clear a corrupt overrides.json short of an operator
+// deleting the file by hand.
+//
+// Calls SaveOverrides directly with a fresh empty value -- the same
+// save-side primitive every other writer already uses -- so the file
+// version still bumps (saveOverridesLocked's bumpFileVersion) and the
+// standings cache correctly invalidates, exactly as any other overrides
+// write does.
+func (s *Store) ResetOverridesForce(compID string) error {
+	return s.SaveOverrides(compID, &Overrides{
+		PoolRanks: make(map[string]map[string]int),
+		Winners:   make(map[string]string),
+	})
 }

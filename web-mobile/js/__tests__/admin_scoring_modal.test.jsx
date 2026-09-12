@@ -23,6 +23,7 @@ import {
   isKoTieBlocked,
 } from '../admin_scoring_modal.jsx';
 import { makeSubmitDecision } from '../admin_scoring_shared.jsx';
+import { sameCompetitor } from '../competitor_identity.jsx';
 import { preserveStoredDaihyosenVerdict } from '../admin_scoring_team.jsx';
 import { hanteiWinnerKey, hanteiSlot } from '../result_slot.jsx';
 import { defaultWinMaru } from '../bracket.jsx';
@@ -1176,6 +1177,27 @@ describe('fusenshoSideFromSub (recovers a per-bout fusensho on reseed)', () => {
     expect(fusenshoSideFromSub({ decision: 'hikiwake', winner: 'A-Senpo', sideA: 'A-Senpo' })).toBe('');
     expect(fusenshoSideFromSub(null)).toBe('');
   });
+
+  // bc-pnum: two opposing fighters may legally share a display name, so the
+  // winner NAME cannot say which of them was awarded the walkover. Reseeding
+  // the wrong side re-marks the wrong competitor on the operator's screen.
+  it('uses the member ids when both fighters share a name', () => {
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      sideAMemberId: 'm-aka', sideBMemberId: 'm-shiro', winnerMemberId: 'm-shiro',
+      ipponsA: [], ipponsB: ['○', '○'],
+    })).toBe('b');
+  });
+
+  it('falls through to the maru evidence when a shared name has no id to settle it', () => {
+    // The maru cells record who was actually awarded the bout. The old name
+    // arms answered "a" before this test could be reached, which is a guess
+    // standing in front of real evidence.
+    expect(fusenshoSideFromSub({
+      decision: 'fusensho', sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada',
+      ipponsA: [], ipponsB: ['○', '○'],
+    })).toBe('b');
+  });
 });
 
 describe('subBoutHasBeenPlayed (drops untouched kachinuki bouts)', () => {
@@ -1331,6 +1353,94 @@ describe('item 7: non-points decisions advance to next match', () => {
       expect(onClose).not.toHaveBeenCalled();
       expect(setWithdrawnPlayer).toHaveBeenCalled();
     });
+
+    // bc-pnum: the loser used to be re-derived from the /decision response's
+    // plain winner/sideA/sideB NAME strings. Two participants sharing a
+    // display name from different dojos make those strings identical on
+    // both sides, so a name compare always resolves to the SAME side
+    // regardless of who actually withdrew. decisionBy ("aka"/"shiro")
+    // already names the withdrawn side unambiguously and matches the
+    // server's own attribution (scoring_tx.go: aka=sideA, shiro=sideB).
+    it('resolves the withdrawn player by decisionBy, not by name, when both sides share a display name', async () => {
+      window.API.recordDecision = vi.fn().mockResolvedValue({
+        winner: 'Sato', sideA: 'Sato', sideB: 'Sato',
+      });
+      const match = {
+        compId: 'c1', id: 'm5',
+        sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+        sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+      };
+      const setWithdrawnPlayer = vi.fn();
+      const submit = makeSubmitDecision({
+        match, enchoPeriodCount: 0, password: 'pw',
+        ...makeSetters(), setWithdrawnPlayer, onClose: vi.fn(), isComplete: false,
+        entityLabel: 'competitors',
+      });
+      // Shiro withdrew: the loser is sideB (Osaka), never sideA (Tokyo).
+      await submit('kiken-voluntary', { decisionBy: 'shiro', decisionReason: '' });
+      expect(setWithdrawnPlayer).toHaveBeenCalledWith(match.sideB);
+    });
+  });
+});
+
+// bc-pnum: RemainingMatchesPanel's match filter, award() side resolution,
+// and its opponent-render lookup all call sameCompetitor (competitor_
+// identity.jsx) directly to decide whether a match side is the withdrawn
+// player -- never an OR that could count a name hit even when both sides
+// carry ids and differ. These fixtures pin that call-site usage, on top of
+// sameCompetitor's own coverage in competitor_identity.test.jsx.
+describe('sameCompetitor (RemainingMatchesPanel identity, bc-pnum)', () => {
+  it('decides by id when both the withdrawn player and the side carry one', () => {
+    const side = { id: 'S2', name: 'Sato' };
+    // Same name, different id: an id compare must say "no", never fall
+    // through to the name hit.
+    expect(sameCompetitor(side, { id: 'S1', name: 'Sato' })).toBe(false);
+    expect(sameCompetitor(side, { id: 'S2', name: 'Sato' })).toBe(true);
+  });
+
+  // Canonical bc-pnum case: two "Sato" entries from different dojos. The
+  // withdrawn player is S1 (Tokyo); this side is the UNRELATED S2 (Osaka)
+  // who merely shares a display name. The old OR-shaped compare would say
+  // "yes" here purely off the name hit.
+  it('never lights an unrelated same-name/different-dojo participant', () => {
+    const withdrawn = { id: 'S1', name: 'Sato', dojo: 'Tokyo' };
+    const otherSideSameName = { id: 'S2', name: 'Sato', dojo: 'Osaka' };
+    expect(sameCompetitor(otherSideSameName, withdrawn)).toBe(false);
+  });
+
+  it('falls back to name only when NEITHER side carries an id', () => {
+    expect(sameCompetitor({ name: 'Sato' }, { id: '', name: 'Sato' })).toBe(true);
+    expect(sameCompetitor({ name: 'Tanaka' }, { id: '', name: 'Sato' })).toBe(false);
+  });
+
+  it('resolves to false (never guesses by name) when only one side carries an id', () => {
+    // Withdrawn player has a real id, but this match side has none (e.g. a
+    // bracket row): no id to decide with, and a name guess is not safe.
+    expect(sameCompetitor({ name: 'Sato' }, { id: 'S1', name: 'Sato' })).toBe(false);
+    // Reverse: this side has an id but the withdrawn player record doesn't.
+    expect(sameCompetitor({ id: 'S2', name: 'Sato' }, { id: '', name: 'Sato' })).toBe(false);
+  });
+
+  // Item 7 (UI-reachable fixture): the same mixed-case refusal, exercised
+  // through the SAME shape RemainingMatchesPanel actually builds --
+  // withdrawnPlayer as resolved by makeSubmitDecision's kiken branch
+  // (match.sideA/sideB, an {id,name} object with a real UUID) against a
+  // remaining match's side that resolveSide left id-less (a bracket row
+  // api_serializers.jsx could not resolve at all).
+  it('UI-reachable: a kiken-resolved withdrawn player never lights an id-less remaining-match side sharing its name', () => {
+    // Shape makeSubmitDecision's kiken branch actually produces (see that
+    // test file's own withdrawn-player assertions): match.sideA/sideB.
+    const originatingMatch = {
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: 'S9', name: 'Someone Else', dojo: 'Nagoya' },
+    };
+    const withdrawnPlayer = originatingMatch.sideA; // aka withdrew.
+    // A different, later bracket round match whose side never got a real id
+    // (resolveSide's own residual "not found" fallback would invent one from
+    // the name in production; here we model the ALREADY id-less shape a
+    // caller must not misattribute).
+    const remainingMatchSide = { id: '', name: 'Sato' };
+    expect(sameCompetitor(remainingMatchSide, withdrawnPlayer)).toBe(false);
   });
 });
 

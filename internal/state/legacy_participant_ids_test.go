@@ -151,3 +151,59 @@ func TestLegacyRosterProvedByTheBracket(t *testing.T) {
 	assert.Equal(t, byName["Rin Sato"], bracket.Rounds[0][0].SideAID, "and the bracket row is stamped in the same pass")
 	assert.Equal(t, byName["Yuki Tanaka"], bracket.Rounds[0][0].SideBID)
 }
+
+// TestLegacyRosterLeftAloneWhenTheRowShapeIsNotCorroborated pins the second
+// legacy ambiguity, which column 0 says nothing about.
+//
+// The ORIGINAL writer emitted "Name, DisplayName, Dojo" whenever the display
+// name differed from the name, which SanitizeName makes true for nearly
+// every competitor, and "Name, Dojo" otherwise -- both shapes in one file. A
+// NON-zekken parser reads three fields as [Name, Dojo, Metadata], so such a
+// row loads with the DISPLAY NAME as the dojo. Reading it wrong is
+// survivable; rewriting it from that parse is not, because the file then
+// encodes the wrong dojo and the truth is gone.
+func TestLegacyRosterLeftAloneWhenTheRowShapeIsNotCorroborated(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	require.NoError(t, s.SaveCompetition(&state.Competition{ID: "c1", Name: "C1"}))
+
+	rosterPath := filepath.Join(dir, "competitions", "c1", "participants.csv")
+	legacy := "Rin Sato, R. SATO, Seibukan\nYuki Tanaka, Tobukan\n"
+	require.NoError(t, os.WriteFile(rosterPath, []byte(legacy), 0o600))
+	// The draw names both competitors, so column 0 IS provably a name -- the
+	// mint path is reached. The draw also records Rin Sato's dojo as
+	// Seibukan, which contradicts the parse's "R. SATO" and is what stops it.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "pools.csv"),
+		[]byte("Pool A,Rin Sato,0,,Seibukan,,\nPool A,Yuki Tanaka,1,,Tobukan,,\n"), 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	_, err := fresh.LoadParticipants("c1", false)
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(rosterPath)
+	require.NoError(t, err)
+	assert.Equal(t, legacy, string(raw),
+		"rewriting this row would persist the display name as the dojo, so the file is left alone")
+}
+
+// TestLegacyRosterMintedWhenTheDrawCorroboratesTheDojo is the same shape
+// reaching the opposite verdict: a two-field roster has no shape to mistake,
+// and the draw agrees with the dojo it parsed, so the ids are assigned.
+func TestLegacyRosterMintedWhenTheDrawCorroboratesTheDojo(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	require.NoError(t, s.SaveCompetition(&state.Competition{ID: "c1", Name: "C1"}))
+
+	rosterPath := filepath.Join(dir, "competitions", "c1", "participants.csv")
+	require.NoError(t, os.WriteFile(rosterPath, []byte("Rin Sato, Seibukan\nYuki Tanaka, Tobukan\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "pools.csv"),
+		[]byte("Pool A,Rin Sato,0,,Seibukan,,\nPool A,Yuki Tanaka,1,,Tobukan,,\n"), 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	players, err := fresh.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.Len(t, players, 2)
+	for _, p := range players {
+		assert.NotEmpty(t, p.ID)
+		assert.NotEqual(t, p.DisplayName, p.Dojo, "%s: the dojo is a dojo, not a display name", p.Name)
+	}
+	assert.Equal(t, "Seibukan", players[0].Dojo)
+}

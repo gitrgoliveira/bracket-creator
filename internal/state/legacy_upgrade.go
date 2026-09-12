@@ -1179,6 +1179,74 @@ func intersects(a, b map[string]bool) bool {
 	return false
 }
 
+// evidenceDojoByName is the dojo the DRAW records for each competitor name.
+// Only pools.csv carries a dojo; match rows and bracket sides name a side and
+// nothing else.
+func (s *Store) evidenceDojoByName(compID string) map[string]string {
+	out := map[string]string{}
+	pools, err := s.loadPoolsLocked(compID)
+	if err != nil {
+		return out
+	}
+	for _, pool := range pools {
+		for _, p := range pool.Players {
+			if n := strings.TrimSpace(p.Name); n != "" && strings.TrimSpace(p.Dojo) != "" {
+				out[helper.NormalizeParticipantName(n)] = p.Dojo
+			}
+		}
+	}
+	return out
+}
+
+// rosterParseCorroborated guards the MINT path against a second legacy
+// ambiguity, one that column 0 says nothing about: the ROW SHAPE.
+//
+// The original writer emitted "Name, DisplayName, Dojo" whenever the display
+// name differed from the name -- which SanitizeName makes true for almost
+// every competitor ("Rin Sato" -> "R. SATO") -- and "Name, Dojo" otherwise.
+// Both shapes in one file. A NON-zekken competition's parser reads three
+// fields as [Name, Dojo, Metadata...], so such a row loads TODAY with the
+// display name as the dojo and the real dojo pushed into metadata.
+//
+// Reading it wrong is survivable: the bytes still hold the truth. REWRITING
+// it from that parse is not -- the file then encodes Dojo="R. SATO" and the
+// mistake stops being recoverable. Measured on exactly this fixture before
+// the check existed.
+//
+// So a wide non-zekken row is minted only when the draw corroborates the
+// dojo the parse produced. No corroboration, no rewrite; the roster keeps
+// its operator notice instead, which is the same answer the column-0
+// question gives when nothing can prove it.
+func (s *Store) rosterParseCorroborated(compID string, withZekken bool, rows [][]string, players []domain.Player) bool {
+	if withZekken {
+		return true // this parser reads both legacy shapes correctly
+	}
+	wide := false
+	for _, rec := range rows {
+		if len(rec) >= 3 {
+			wide = true
+			break
+		}
+	}
+	if !wide {
+		return true // [Name, Dojo] only: no shape to mistake
+	}
+	dojoByName := s.evidenceDojoByName(compID)
+	if len(dojoByName) == 0 {
+		return false
+	}
+	for _, p := range players {
+		want, ok := dojoByName[helper.NormalizeParticipantName(p.Name)]
+		if !ok {
+			return false // a row the draw cannot vouch for
+		}
+		if helper.NormalizeParticipantName(want) != helper.NormalizeParticipantName(p.Dojo) {
+			return false // the parse disagrees with the draw: wrong shape
+		}
+	}
+	return true
+}
+
 // upgradeParticipantIDsLocked is the participants.csv storage-format repair,
 // and it runs FIRST in EnsureLegacyUpgraded because every step after it
 // resolves against the roster's ids: pools.csv, the pool-match and bracket
@@ -1222,7 +1290,7 @@ func (s *Store) upgradeParticipantIDsLocked(compID string, roster *legacyUpgrade
 	case rosterFirstColumnID:
 		return s.repairParticipantIDFlagLocked(compID, comp, roster)
 	case rosterFirstColumnName:
-		return s.mintRosterParticipantIDsLocked(compID, comp, roster)
+		return s.mintRosterParticipantIDsLocked(compID, comp, roster, rows)
 	default:
 		log.Printf("state: %s: participants.csv carries no id column and nothing on disk can say whether column 0 is an id or a name; left untouched", compID)
 		return nil
@@ -1255,10 +1323,14 @@ func (s *Store) repairParticipantIDFlagLocked(compID string, comp *Competition, 
 // refuse this for exactly the rosters that need it, and take the load with it.
 //
 // The column layout comes from the roster's own withZekken, never guessed.
-func (s *Store) mintRosterParticipantIDsLocked(compID string, comp *Competition, roster *legacyUpgradeRoster) error {
+func (s *Store) mintRosterParticipantIDsLocked(compID string, comp *Competition, roster *legacyUpgradeRoster, rows [][]string) error {
 	players, err := roster.rosterPlayers()
 	if err != nil || len(players) == 0 {
 		return err
+	}
+	if !s.rosterParseCorroborated(compID, roster.withZekken, rows, players) {
+		log.Printf("state: %s: participants.csv has rows whose shape the draw does not corroborate (the original writer's \"Name, DisplayName, Dojo\" form); left untouched rather than rewritten from a parse that may put the display name in the dojo", compID)
+		return nil
 	}
 	stamped := make([]domain.Player, len(players))
 	copy(stamped, players)

@@ -216,10 +216,16 @@ function subWinnerSides(sub, matchSideA, matchSideB) {
   // this apart from an ordinary winner-less row, whose IV it still infers
   // from the scoreline.
   if (sub.sideA && sub.sideA === sub.sideB) return { shiro: false, aka: false, ambiguous: true };
-  // Only the TEAM aliases are left to test: the fighter-name arms live in the
-  // shared owner above, which is also where the shared-name case is dropped.
-  const aka = !!(w && (w === sub.teamA || (matchSideA && w === matchSideA)));
-  const shiro = !aka && !!(w && (w === sub.teamB || (matchSideB && w === matchSideB)));
+  // The fighter-name arms are repeated here rather than left to the shared
+  // owner above, because attributeWinnerSide's id branch SHORT-CIRCUITS: a row
+  // carrying all three ids whose winner id matches neither side returns null
+  // and never reaches its own name tier. That row is drifted data whose NAMES
+  // still tell the two fighters apart, so it is attributed rather than
+  // dropped -- exactly what state.SubBoutWinnerSide does for the identical
+  // case, and the reason this mirror cannot stop at the team aliases. The
+  // shared-name row is already gone above, so no coin flip can reach here.
+  const aka = !!(w && (w === sub.teamA || (matchSideA && w === matchSideA) || (sub.sideA && w === sub.sideA)));
+  const shiro = !aka && !!(w && (w === sub.teamB || (matchSideB && w === matchSideB) || (sub.sideB && w === sub.sideB)));
   return { shiro, aka };
 }
 

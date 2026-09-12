@@ -120,6 +120,24 @@ describe('match_scoreboard: teamIVPW', () => {
     expect(teamIVPW(subs, 'Team Alpha', 'Team Beta')).toEqual({ ivShiro: 1, ivAka: 2, pwShiro: 0, pwAka: 0 });
   });
 
+  it('falls back to the fighter names when the winner id matches neither side', () => {
+    // The id branch of attributeWinnerSide SHORT-CIRCUITS: three ids present
+    // and a winner id matching neither returns no side WITHOUT reaching its
+    // own name tier. state.SubBoutWinnerSide repeats the fighter-name
+    // comparison for exactly that row, so the mirror here must too, or the
+    // server's IV summary and the client's bout rows contradict each other on
+    // the same screen. The 1-1 scoreline is load-bearing: it leaves the
+    // ippon-count fallback tied, so only the name arm can credit this bout.
+    const subs = [
+      {
+        position: 1, sideA: 'Tanaka', sideB: 'Suzuki', winner: 'Tanaka',
+        sideAMemberId: 'member-a', sideBMemberId: 'member-b', winnerMemberId: 'member-gone',
+        ipponsA: ['M'], ipponsB: ['K'],
+      },
+    ];
+    expect(teamIVPW(subs, 'Team Alpha', 'Team Beta')).toEqual({ ivShiro: 0, ivAka: 1, pwShiro: 1, pwAka: 1 });
+  });
+
   it('does not false-positive on empty winner with empty sub-sides (draw)', () => {
     const subs = [
       { position: 1, sideA: '', sideB: '', winner: '', ipponsA: [], ipponsB: [] },

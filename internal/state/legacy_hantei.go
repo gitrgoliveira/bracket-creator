@@ -93,13 +93,23 @@ func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ippon
 }
 
 // normalizeLegacyHantei folds a legacy sub-bout flag into the mark.
+//
+// The attribution comes from the SUB-BOUT owner, not from a hand-built literal:
+// a bout's two sides are FIGHTERS, and two fighters on opposing teams may
+// legally share a display name, where two teams may not. domain.SubBoutAttribution
+// drops a shared name for that reason, so this fold now places the mark by the
+// row's member ids where it has them and places NO mark where the name is the
+// only thing left and it names both sides. That is the same rule every live
+// surface applies to a sub-bout, and it replaces the aka-first tie the bare
+// name attribution took here -- a deliberate convention at match level, a coin
+// flip on a bout.
 func (s *SubMatchResult) normalizeLegacyHantei() {
 	if s.DecidedByHantei == nil {
 		return
 	}
 	flagged := *s.DecidedByHantei
 	s.DecidedByHantei = nil
-	s.IpponsA, s.IpponsB = foldLegacyHantei(flagged, domain.WinnerAttribution{Winner: s.Winner, SideA: s.SideA, SideB: s.SideB}, s.IpponsA, s.IpponsB)
+	s.IpponsA, s.IpponsB = foldLegacyHantei(flagged, domain.SubBoutAttribution(s.Attribution()), s.IpponsA, s.IpponsB)
 }
 
 // NormalizeLegacyHantei folds legacy flags into the mark, match-level and

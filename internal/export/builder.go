@@ -586,9 +586,20 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 // the pre-existing name-based attribution.
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 	return state.MatchResult{
-		SideA:      bm.SideA,
-		SideB:      bm.SideB,
-		Winner:     bm.Winner,
+		SideA:  bm.SideA,
+		SideB:  bm.SideB,
+		Winner: bm.Winner,
+		// The side and winner ids travel with the names they belong to
+		// (bc-brid). Every mark this view feeds is attributed through
+		// domain.AttributeWinnerSide, which prefers them, so dropping them
+		// here would have made the export the one surface that still decided
+		// a same-name bracket pairing by the aka-first name convention while
+		// the app decided it by id. A row that carries no id (a bye, an
+		// unresolved feeder, an unrepaired legacy row) passes "" and takes
+		// the name path exactly as before.
+		SideAID:    bm.SideAID,
+		SideBID:    bm.SideBID,
+		WinnerID:   bm.WinnerID,
 		Decision:   bm.Decision,
 		Encho:      bm.Encho,
 		SubResults: bm.SubResults,
@@ -982,17 +993,15 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
-				// bracketMatchResultView above deliberately does not carry
-				// SideAID/SideBID/WinnerID into mrView (bm may carry them
-				// since bc-brid, but the export path was not converted), so
-				// this is always the name-fallback branch, matching the
-				// SideMarksLR call in writeScoreRowCells below. Out of
-				// scope for bc-brid: the byte-pinned example workbooks make
-				// this a separate, deliberately deferred change (see that
-				// bead's final report).
+				// Attributed by the row's own ids, the same triple
+				// writeScoreRowCells passes to SideMarksLR below: the maru
+				// fallback and the result mark compose one cell, so a
+				// same-name pairing must not be able to send them to
+				// different sides.
 				scoreA, scoreB = DefaultWinMaruAB(
 					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
 					bm.Decision, bm.Encho, domain.WinnerAttribution{
+						WinnerID: bm.WinnerID, SideAID: bm.SideAID, SideBID: bm.SideBID,
 						Winner: bm.Winner, SideA: bm.SideA, SideB: bm.SideB,
 					})
 			}

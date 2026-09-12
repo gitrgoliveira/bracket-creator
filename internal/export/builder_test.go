@@ -4110,3 +4110,61 @@ func TestBuildResultsWorkbook_ClampedShiaijoBands(t *testing.T) {
 	assert.Falsef(t, columnContains(rows, scoreCol(2), "T"),
 		"Pool C's ippon must NOT land in a shiaijo C band (column %d): the draw has only two shiaijo", scoreCol(2)+1)
 }
+
+// A bracket row's marks are attributed by the row's own side ids, not by the
+// aka-first name convention. The subject is a pairing both of whose sides show
+// the SAME display name, which is legal (two competitors from different dojos),
+// and which no name comparison can separate: "winner == SideA" and
+// "winner == SideB" are both true, so the name tier answers side A every time.
+//
+// The control is the same encounter with distinct names and the winner on the
+// same side. Asserting the two land in the SAME physical cells is what makes
+// this a property rather than a transcription of today's output: the sheet's
+// left/right mapping is whatever it is, and the same-name row must follow it
+// exactly as its distinguishable twin does.
+func TestBuildResultsWorkbook_BracketMarksFollowTheSideIDs(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setCompFormat(t, store, compID, state.CompFormatMixed)
+	require.NoError(t, store.SavePools(compID, makePools()))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	// Side B wins by the opponent's withdrawal in both matches.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{
+				ID: "B1", MatchNumber: 1, Status: state.MatchStatusCompleted,
+				SideA: "Alice", SideAID: "id-alice",
+				SideB: "Charlie", SideBID: "id-charlie",
+				Winner: "Charlie", WinnerID: "id-charlie",
+				Decision: string(domain.DecisionKikenVoluntary),
+			},
+			{
+				ID: "B2", MatchNumber: 2, Status: state.MatchStatusCompleted,
+				SideA: "Yamada", SideAID: "id-yamada-tokyo",
+				SideB: "Yamada", SideBID: "id-yamada-osaka",
+				Winner: "Yamada", WinnerID: "id-yamada-osaka",
+				Decision: string(domain.DecisionKikenVoluntary),
+			},
+		}},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	ctlLeft, ctlRight := bracketVictoryCells(t, rows, "Round 1 - Match 1")
+	subLeft, subRight := bracketVictoryCells(t, rows, "Round 1 - Match 2")
+
+	require.NotEqual(t, ctlLeft, ctlRight, "the control must distinguish the two sides at all")
+	assert.Equal(t, ctlLeft, subLeft,
+		"the same-name pairing's LOSING cell must sit where its distinguishable twin's does")
+	assert.Equal(t, ctlRight, subRight,
+		"the same-name pairing's WINNING cell must sit where its distinguishable twin's does")
+}

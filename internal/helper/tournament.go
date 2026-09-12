@@ -559,9 +559,8 @@ func realTargetSizes(base []int, numPlayers int) []int {
 		// fresh storage, so returning the caller's own slice here made the
 		// result's aliasing depend on whether the roster happened to divide
 		// evenly -- the shape of bug that reproduces on every awkward roster
-		// and hides on every tidy one. Nothing mutates the result today;
-		// this is so nothing has to check first, and one call site in the
-		// doc-fixture test already copies defensively before calling.
+		// and hides on every tidy one. Nothing mutates the result today; this
+		// is so nothing has to check first.
 		return append([]int(nil), base...)
 	}
 

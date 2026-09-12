@@ -675,9 +675,18 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 	if err != nil || idx == nil {
 		return err
 	}
+	// A squads.yaml this pass cannot read must not cost the MATCH-level
+	// repair below, which needs no squad at all -- only the sub-bout branch
+	// resolves against it. Aborting here left every legacy row's
+	// SideAID/SideBID/WinnerID empty forever, and standings resolve BY ID
+	// ONLY since bc-pnum, so each of those matches would contribute nothing
+	// to anyone's record. Log and carry on with no squad: resolveSubMemberIDs
+	// then finds no member to stamp, which is exactly the answer a team that
+	// has no squad yet already gets.
 	squads, err := roster.squads()
 	if err != nil {
-		return err
+		log.Printf("state: legacy pool-match-side-id upgrade for %s: squads unreadable, sub-bout member ids not repaired: %v", compID, err)
+		squads = nil
 	}
 	changed := false
 	for i := range matches {
@@ -916,9 +925,18 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	// (a) just resolved -- a match neither reached leaves its sub-bouts
 	// alone too, the same "can only repair what its parent resolved" rule
 	// resolveSubMemberIDs' doc states.
+	// A squads.yaml this pass cannot read must not cost the MATCH-level
+	// repair below, which needs no squad at all -- only the sub-bout branch
+	// resolves against it. Aborting here left every legacy row's
+	// SideAID/SideBID/WinnerID empty forever, and standings resolve BY ID
+	// ONLY since bc-pnum, so each of those matches would contribute nothing
+	// to anyone's record. Log and carry on with no squad: resolveSubMemberIDs
+	// then finds no member to stamp, which is exactly the answer a team that
+	// has no squad yet already gets.
 	squads, err := roster.squads()
 	if err != nil {
-		return err
+		log.Printf("state: legacy bracket-side-id upgrade for %s: squads unreadable, sub-bout member ids not repaired: %v", compID, err)
+		squads = nil
 	}
 	resolveSubs := func(m *BracketMatch) {
 		for i := range m.SubResults {
@@ -1105,7 +1123,17 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 // its siblings above. Caller holds the per-comp lock.
 func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgradeRoster) error {
 	lineups, err := s.loadTeamLineupsLocked(compID)
-	if err != nil || len(lineups) == 0 {
+	if err != nil {
+		// Propagate rather than swallow, like every sibling step: a missing
+		// lineups.yaml already reads as an empty map (parseTeamLineupsFile),
+		// so an error here means the file exists and could not be parsed --
+		// the one condition EnsureLegacyUpgraded's log-and-continue policy
+		// exists to report. Swallowing it left a corrupt lineup file as the
+		// only repair failure in this pass with nothing logged anywhere,
+		// while every position silently fell back to name matching.
+		return err
+	}
+	if len(lineups) == 0 {
 		return nil
 	}
 	needs := false

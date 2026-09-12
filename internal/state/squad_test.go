@@ -540,13 +540,13 @@ func TestSquad_AddRefusesATeamIDNoParticipantCarries(t *testing.T) {
 // it has two blank slots, which is every seeded team (TeamSize is always
 // >= 2 for a team competition).
 func TestSquadDuplicateNameCheck_BlanksNeverCollideWithEachOther(t *testing.T) {
-	err := squadDuplicateNameCheck("team-1", "", []string{"", "", ""})
+	err := squadDuplicateNameCheck("", []string{"", "", ""})
 	assert.NoError(t, err, "a blank candidate against blank slots must never be a collision")
 
-	err = squadDuplicateNameCheck("team-1", "Dan", []string{"", "", ""})
+	err = squadDuplicateNameCheck("Dan", []string{"", "", ""})
 	assert.NoError(t, err, "a real candidate name must not collide with blank slots")
 
-	err = squadDuplicateNameCheck("team-1", "Dan", []string{"", "Dan", ""})
+	err = squadDuplicateNameCheck("Dan", []string{"", "Dan", ""})
 	require.Error(t, err, "a real duplicate must still be refused even alongside blanks")
 	assert.True(t, errors.Is(err, ErrDuplicateTeamMember))
 }

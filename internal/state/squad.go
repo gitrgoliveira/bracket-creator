@@ -246,7 +246,7 @@ func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
 // >= 2 for a team competition). A blank candidateName is itself never a
 // collision (there is nothing to name yet), so it short-circuits before
 // even excluding blanks from otherNames.
-func squadDuplicateNameCheck(teamID, candidateName string, otherNames []string) error {
+func squadDuplicateNameCheck(candidateName string, otherNames []string) error {
 	if strings.TrimSpace(candidateName) == "" {
 		return nil
 	}
@@ -259,13 +259,13 @@ func squadDuplicateNameCheck(teamID, candidateName string, otherNames []string) 
 	}
 	names = append(names, candidateName)
 	if dupes, _ := helper.DuplicateNamesWithKeys(names); len(dupes) > 0 {
-		// Deliberately does NOT name the team. Both callers act on ONE team
-		// the caller already identified, and this message is shown to the
-		// operator verbatim inside the lineup warning, where the only id
-		// available here is the team's UUID: a raw identifier dropped into
-		// the middle of a sentence about a fighter is noise the operator
-		// cannot act on. The surrounding warning already names the position
-		// and the person.
+		// Deliberately does NOT name the team, which is why this takes no
+		// team argument at all: both callers act on ONE team they already
+		// identified, and the only id they could pass is the team's UUID --
+		// a raw identifier dropped into the middle of a sentence about a
+		// fighter is noise the operator cannot act on. This message is shown
+		// verbatim inside the lineup warning, which already names the
+		// position and the person.
 		return fmt.Errorf("%w: %q is already on this team", ErrDuplicateTeamMember, candidateName)
 	}
 	return nil
@@ -308,7 +308,7 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 	for _, m := range existing {
 		otherNames = append(otherNames, m.Name)
 	}
-	if err := squadDuplicateNameCheck(teamID, name, otherNames); err != nil {
+	if err := squadDuplicateNameCheck(name, otherNames); err != nil {
 		return domain.TeamMember{}, err
 	}
 
@@ -358,7 +358,7 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 	if target == -1 {
 		return ErrTeamMemberNotFound
 	}
-	if err := squadDuplicateNameCheck(teamID, newName, otherNames); err != nil {
+	if err := squadDuplicateNameCheck(newName, otherNames); err != nil {
 		return err
 	}
 

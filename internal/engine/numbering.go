@@ -622,7 +622,17 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 		}
 		for _, comp := range pending {
 			prefix := helper.DefaultNumberPrefix(comp.Name, taken)
-			taken = append(taken, prefix)
+			// `settled` is the prefix this competition actually ends up
+			// holding: the derived one when the write lands, or the one a
+			// concurrent writer got there first with. Reserving the DERIVED
+			// prefix up front (as this loop used to) got BOTH halves wrong
+			// whenever the guard below declined -- it held "KO" against a
+			// competition that does not carry it, pushing the next
+			// derivation onto "KO2", while the prefix that competition DOES
+			// carry went unreserved (so a later derivation could collide
+			// with it) and unrenumbered (it never reached `prefixed`).
+			settled := prefix
+			missing := false
 			// the bc-pnum review: LoadCompetition (in the scan loop above) +
 			// a later whole-struct SaveCompetition left a load/save race
 			// window a concurrent writer could land a DIFFERENT field change
@@ -633,7 +643,12 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 			// already prefixed) mirrors the "pending" gate the caller already
 			// applied, in case that raced too.
 			changed, err := e.store.UpdateCompetitionChanged(comp.ID, func(current *state.Competition) (*state.Competition, error) {
-				if current == nil || strings.TrimSpace(current.NumberPrefix) != "" {
+				if current == nil {
+					missing = true
+					return nil, nil
+				}
+				if stored := strings.TrimSpace(current.NumberPrefix); stored != "" {
+					settled = stored
 					return nil, nil
 				}
 				current.NumberPrefix = prefix
@@ -643,11 +658,14 @@ func (e *Engine) MigrateNumberPrefixes() ([]string, error) {
 				log.Printf("engine: number-prefix migration: %s: prefix %q not saved: %v (retried on the next start)", comp.ID, prefix, err)
 				continue
 			}
-			if !changed {
-				continue
+			if missing {
+				continue // competition disappeared between the scan and here
 			}
-			migrated = append(migrated, comp.ID)
-			prefixed = append(prefixed, prefixedCompetition{id: comp.ID, prefix: prefix})
+			taken = append(taken, settled)
+			if changed {
+				migrated = append(migrated, comp.ID)
+			}
+			prefixed = append(prefixed, prefixedCompetition{id: comp.ID, prefix: settled})
 		}
 		for _, pc := range prefixed {
 			renumbered, err := e.RenumberCompetitors(pc.id)

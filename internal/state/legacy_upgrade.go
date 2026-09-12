@@ -233,7 +233,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// downstream tries to resolve against it, or the very team this pass
 	// just gave a squad to would still see "no squad" and skip repair for
 	// a full extra load.
-	if err := s.upgradeSquadsFromMetadataLocked(compID, roster); err != nil {
+	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
 		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradePoolMatchSideIDsLocked(compID, roster); err != nil {
@@ -1019,7 +1019,15 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 // so a save that blanks a team's Metadata (the Apply flow's shape) cannot
 // destroy members that were never migrated: see that call site's own
 // comment for why a load-only trigger is not enough.
-func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpgradeRoster) error {
+// mintedByCompetitor lets the PRE-WRITE call site (saveParticipantsNoLock)
+// migrate a stored row that has no id of its own, under the id that same
+// save is about to give it. It is keyed by helper.CompetitorKey's id-less
+// form, the (name, dojo) pair that IS a competitor's identity wherever no
+// id exists yet -- the documented carve-out, not a weakening of the id
+// ruling, since the row being resolved carries no id field to resolve by.
+// EnsureLegacyUpgraded passes nil: on a plain load there is no pending
+// write to borrow an id from, so an id-less row still migrates to nothing.
+func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpgradeRoster, mintedByCompetitor map[string]string) error {
 	comp, err := roster.competition()
 	if err != nil || comp == nil {
 		return err
@@ -1039,10 +1047,14 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 
 	changed := false
 	for _, p := range players {
-		if p.ID == "" {
+		id := p.ID
+		if id == "" {
+			id = mintedByCompetitor[helper.CompetitorKey("", p.Name, p.Dojo)]
+		}
+		if id == "" {
 			continue // no stable key to migrate under yet; see doc comment above
 		}
-		existing, alreadyMigrated := squads[p.ID]
+		existing, alreadyMigrated := squads[id]
 		if !alreadyMigrated {
 			names := nonBlankMetadata(p.Metadata)
 			members := make([]domain.TeamMember, 0, max(len(names), comp.TeamSize))
@@ -1059,7 +1071,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 			if len(members) == 0 {
 				continue // nothing to migrate and nothing to seed (e.g. TeamSize 0)
 			}
-			squads[p.ID] = members
+			squads[id] = members
 			changed = true
 			continue
 		}
@@ -1071,7 +1083,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 			for i := len(existing); i < comp.TeamSize; i++ {
 				existing = append(existing, domain.TeamMember{ID: newParticipantID(), Index: i + 1, Name: ""})
 			}
-			squads[p.ID] = existing
+			squads[id] = existing
 			changed = true
 		}
 	}

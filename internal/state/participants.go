@@ -1396,13 +1396,41 @@ func (s *Store) saveParticipantsNoLock(compID string, players []domain.Player, w
 	// propagated: it must not block a roster write that would otherwise
 	// succeed, the same fail-open policy the checks above already apply to
 	// an unreadable competition config.
-	if err := s.upgradeSquadsFromMetadataLocked(compID, &legacyUpgradeRoster{store: s, compID: compID}); err != nil {
+	// Stamp the ids HERE rather than leaving them to marshalParticipantsCSV,
+	// so the migration below can key a stored row that has none under the id
+	// this very save is about to persist. A pre-UUID roster has no ids at
+	// all, and the remedy this PR advertises for exactly that state -- "no id
+	// on file. Save the roster once and the ids are assigned"
+	// (helper.MissingParticipantIDsMessage, shown in the console banner and
+	// in the draw refusal) -- IS this save. Without the stamp the migration
+	// skipped every row for want of a key, the write then landed with blank
+	// Metadata, and the next load migrated a team of empty slots and marked
+	// it done: the advertised repair permanently destroyed the members it
+	// exists to rescue. marshalParticipantsCSV keeps its own mint for its
+	// other caller; for this path it is now a no-op.
+	//
+	// A copy, because the caller's slice is the caller's.
+	stamped := make([]domain.Player, len(players))
+	copy(stamped, players)
+	mintedByCompetitor := make(map[string]string)
+	for i := range stamped {
+		if !helper.ParticipantIDMissing(stamped[i].ID) {
+			continue
+		}
+		stamped[i].ID = newParticipantID()
+		// The id-less form of the SAME key the duplicate guard above just
+		// proved unique across this roster, so the join below cannot be
+		// ambiguous.
+		mintedByCompetitor[helper.CompetitorKey("", stamped[i].Name, stamped[i].Dojo)] = stamped[i].ID
+	}
+
+	if err := s.upgradeSquadsFromMetadataLocked(compID, &legacyUpgradeRoster{store: s, compID: compID}, mintedByCompetitor); err != nil {
 		log.Printf("state: saveParticipants %s: pre-write squad migration: %v", compID, err)
 	}
 
 	path := s.compPath(compID, "participants.csv")
 
-	data, err := marshalParticipantsCSV(players, withZekkenName)
+	data, err := marshalParticipantsCSV(stamped, withZekkenName)
 	if err != nil {
 		return err
 	}

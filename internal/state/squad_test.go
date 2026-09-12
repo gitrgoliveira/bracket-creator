@@ -410,7 +410,7 @@ func TestSquadMigration_InvalidatesTheSharedLazyCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, before[teamID], "precondition: the team has no squad before the migration")
 
-	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster))
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster, nil))
 
 	after, err := roster.squads()
 	require.NoError(t, err)
@@ -597,7 +597,7 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 	require.NoError(t, s.SaveCompetition(comp))
 
 	roster := &legacyUpgradeRoster{store: s, compID: id}
-	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster))
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster, nil))
 
 	squadsAfterRaise, err := s.LoadSquads(id)
 	require.NoError(t, err)
@@ -616,7 +616,7 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 	require.NoError(t, s.SaveCompetition(comp))
 
 	roster2 := &legacyUpgradeRoster{store: s, compID: id}
-	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster2))
+	require.NoError(t, s.upgradeSquadsFromMetadataLocked(id, roster2, nil))
 
 	squadsAfterLower, err := s.LoadSquads(id)
 	require.NoError(t, err)

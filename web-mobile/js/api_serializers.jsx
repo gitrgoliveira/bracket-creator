@@ -22,6 +22,7 @@
 // unified `score` object the bracket card renderer can consume.
 
 import { realIppons, hanteiDecided, placeHtForWinner, stripHt } from './result_slot.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 const STATUS_MAP = { "complete": "completed", "in_progress": "running" };
 
 function toBackendStatus(s) { return STATUS_MAP[s] || s; }
@@ -105,36 +106,32 @@ function toBackendMatchResult(patch, match) {
         if (winnerName === sideAName && winnerName !== sideBName) winnerId = sideAId || "";
         else if (winnerName === sideBName && winnerName !== sideAName) winnerId = sideBId || "";
     }
-    if (winnerId) result.winnerId = winnerId;
+    // Only put winnerId on the wire when it equals the flat sideAId/
+    // sideBId the SERVER associated with THIS match (match.sideAId /
+    // match.sideBId -- not sideAId/sideBId above, which are read off the
+    // resolved side OBJECTS and can come from a playerMap lookup BY NAME: a
+    // real id belonging to some OTHER row that merely shares this side's
+    // display name, which the server never filed against this match.
+    // Forwarding that would misattribute the mark to a different,
+    // same-named participant. A genuine same-name pair where the server DID
+    // supply both flat ids still passes this gate (winnerId equals one of
+    // them) -- the one channel that disambiguates the pair.
+    const winnerIdIsServerSupplied = !!winnerId && (
+        (!!match?.sideAId && winnerId === match.sideAId) ||
+        (!!match?.sideBId && winnerId === match.sideBId)
+    );
+    if (winnerIdIsServerSupplied) result.winnerId = winnerId;
     // Belt and braces (bc-dmsr review): emit the side ids alongside
     // winnerId so the server's validateHanteiMarkPlacement sees the SAME
     // triple this function just used to place the mark above, rather than
     // relying solely on the server backfilling them from the stored match.
-    // Without this the server never learned the ids on the wire at all -
-    // sideAId/sideBId are computed above purely for this function's own
-    // placement and were otherwise discarded - so a same-name pair's
-    // correctly id-attributed mark could be rejected by the server's
-    // name-only fallback. Omitted (not sent as "") when a side carries no
-    // id at all, matching every other optional field in this payload.
-    //
-    // Send back ONLY an id the server itself supplied. The locals above are
-    // not always participant UUIDs: normalizeMatch's resolveSide falls back to
-    // `{ id: flatId || name }`, so a match the server sends WITHOUT flat side
-    // ids - a bracket match, which persists none, or a legacy pool row written
-    // before the id columns existed - yields sides whose id IS the display
-    // name. That is fine for this function's own placement (the fallback
-    // applies to all three values at once, so domain.AttributeWinnerSide's id
-    // branch compares name against name and answers exactly as its name branch
-    // would), but it must not go on the wire: a pool write persists the ids
-    // verbatim, so an invented one would be stored as though it were a real
-    // participant UUID, and buildPlayerMap collapses a same-name pair onto one
-    // entry, so BOTH sides would be stored under the SAME invented id.
-    //
-    // Gating on the flat id the server sent, rather than on the resolved side
-    // object, keeps the case this was added for (a real same-name pair, whose
-    // mark can only be attributed by id) and drops exactly the invented case.
-    // With nothing sent, the server backfills from the stored match and falls
-    // back to name attribution, which is what it did before these were added.
+    // Same gate and same reason as winnerIdIsServerSupplied above -- only
+    // forward a side id that equals the match's own flat id, since
+    // sideAId/sideBId can otherwise be a name-keyed playerMap lookup the
+    // server never filed against this match. Omitted (not sent as "") when
+    // a side carries no id at all, matching every other optional field
+    // here; with nothing sent, the server backfills from the stored match
+    // and falls back to name attribution.
     if (match?.sideAId && sideAId) result.sideAId = sideAId;
     if (match?.sideBId && sideBId) result.sideBId = sideBId;
     // Engi (kata) matches score by referee flag count, not ippons: carry
@@ -224,7 +221,7 @@ function normalizeMatch(m, playerMap) {
     // (e.g. two "Tanaka Kenji" from different dojos: the duplicate check
     // only rejects same-name AND same-dojo) onto a single id. When the
     // server provides an explicit per-side id (m.sideAId / m.sideBId /
-    // m.winnerId: populated from pool-matches.csv), it is the authoritative
+    // m.winnerId: populated from pool-matches.csv or bracket.json), it is the authoritative
     // identity and overrides the name-collapsed lookup. We clone the
     // playerMap entry before stamping the id so the shared map object isn't
     // mutated across matches.
@@ -238,7 +235,13 @@ function normalizeMatch(m, playerMap) {
             const byName = playerMap?.[name];
             if (byName && (!flatId || byName.id === flatId)) p = byName;
         }
-        const base = p ? { ...p } : { id: flatId || name, name };
+        // bc-pnum: never invent an id from the name. A
+        // side absent from the player map entirely (not found by flat id or
+        // by name) keeps id "" -- exactly like buildPlayerMap now does for
+        // an id-less participant -- so every downstream "does this side
+        // carry an id" check reads it truthfully instead of matching itself
+        // to any other side that happens to share the display name.
+        const base = p ? { ...p } : { id: flatId || "", name };
         if (flatId) base.id = flatId;
         return base;
     };
@@ -268,20 +271,12 @@ function normalizeMatch(m, playerMap) {
         // surface agreeing on one side beats surfaces disagreeing.
         norm.winner = resolveSide(norm.winner, m.winnerId);
     }
-    // Did sideA win? Prefer matching by stable id (sideA/winner are resolved to
-    // {id,name} above with the server's authoritative flat ids), so same-name /
-    // different-dojo finalists don't collide onto the wrong side and swap the
-    // displayed winner/loser tallies. Fall back to name only when an id isn't
-    // present on both.
-    const sideAWon = (w, a) => {
-        if (!w || !a) return false;
-        const wId = typeof w === "object" ? w.id || "" : "";
-        const aId = typeof a === "object" ? a.id || "" : "";
-        if (wId && aId) return wId === aId;
-        const wn = typeof w === "object" ? w.name : w;
-        const an = typeof a === "object" ? a.name : a;
-        return wn === an;
-    };
+    // Did sideA win? sameCompetitor (competitor_identity.jsx, the one owner
+    // of the attribution rule): id decides whenever BOTH sideA and winner
+    // carry one (same-name/different-dojo finalists never collide onto the
+    // wrong side), name only when NEITHER does, and a mixed pair is never
+    // guessed at.
+    const sideAWon = (w, a) => !!w && !!a && sameCompetitor(w, a);
     // Build score from ipponsA/ipponsB. Pool and bracket matches converge on
     // this one shape (both carry ipponsA/ipponsB arrays; scoreA/scoreB
     // strings never appear on the wire), so one branch covers both.
@@ -334,7 +329,14 @@ function buildPlayerMap(comp) {
         // as the pool/schedule cards. Previously only {id,name,dojo,seed} were
         // carried, so a qualifier lost their number and zekken in the bracket.
         const entry = {
-            id: norm.id || norm.name,
+            // bc-pnum: never invent an id from the display name. Name and
+            // dojo are operator-editable after the draw (they are not a
+            // stable identity), so a participant with no real UUID must
+            // read as id-less ("") downstream, not as if "id" happened to
+            // equal its own name. Every "does this side carry an id"
+            // check (LeagueMatrix, enrichPoolMatchWithComp, lineup
+            // resolution, etc.) depends on this being truthful.
+            id: norm.id || "",
             name: norm.name,
             dojo: norm.dojo || "",
             seed: norm.seed ?? 0,
@@ -443,6 +445,16 @@ function normalizeCompetitionDetail(data) {
                 return { ...norm, id: p.id || norm.id, seed: p.Seed || p.seed || null };
             });
         }
+        // bc-pnum ruling 1e follow-up: dataIssues is a SIBLING of config on
+        // the detail response (handlers_viewer.go's viewerDataIssues, the
+        // same builder + same key the aggregate uses), because it is about
+        // the FILES, not about the record inside one of them -- exactly the
+        // reasoning normalizeViewerCompItem's own `dataIssues: item.dataIssues`
+        // already applies to the aggregate's per-item shape. admin.jsx renders
+        // the competition Overview off `detail?.config || c`, so it is
+        // `config.dataIssues` (not the response's own top-level key) that the
+        // banner actually reads; map it here so the two loading paths agree.
+        config.dataIssues = result.dataIssues;
         result.config = config;
     }
 

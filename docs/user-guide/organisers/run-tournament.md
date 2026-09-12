@@ -166,6 +166,15 @@ The **Participant list** panel (labelled **Team list** for team competitions) co
 
 Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list.
 
+Applying the list gives every competitor a participant id, shown beside the row in the working roster (hover it for the full value). Competitor numbers come later: every competition numbers its competitors when the draw is generated, pool by pool for a pooled competition or down the bracket for a knockout-only one, and nothing is shown before that; see [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app whose list has no ids shows a notice on its **Overview** naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
+
+Two more notices can appear on the **Overview** for the same reason, once a competition has drawn. The app tries to repair these automatically, behind the scenes, the next time it reads the competition's data. Saving the participant list again lets it try once more. It matches a pool member to a participant by name and dojo together, or by name alone when the row records no dojo and only one competitor has that name. It matches a match side by name alone, because a match row only records a name. A notice remains only for a row it could not match this way:
+
+- A notice naming pool members with no id. The app could not match that member to a participant on the current roster (for example, the roster changed after the draw was made). That competitor shows no competitor number. Regenerate the draw, while it is still draw-ready, to fix it.
+- A notice naming pool matches with no id on a side or a winner. The app could not match that side automatically, most often because two competitors share the same name. That match is not counted in the standings. Re-entering the result assigns a missing winner id. Regenerating the draw, while it is still draw-ready, restores a missing side id.
+
+Both notices are advisory, not blocking: the competition keeps running, and nothing you have already recorded is lost.
+
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
 The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:

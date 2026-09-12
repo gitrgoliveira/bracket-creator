@@ -149,8 +149,20 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// steps and order to Engine.ExportCompetitionXlsx. poolsByCourt is the one
 	// artifact the overlays below need (PrintPoolMatches's pool-index grouping
 	// per shiaijo band); everything else PrintPoolMatches/AddPoolDataToSheet
-	// return is consumed entirely inside the shared pipeline.
-	poolsByCourt, err := engine.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
+	// return is consumed entirely inside the shared pipeline. The pipeline
+	// derives its own numbered-roster (namesToPrintPlayers) internally for a
+	// playoffs-only competition (bc-pnum A8, PlayoffsNamesToPrint in
+	// numbering.go): its Names-to-Print/Data writers use it for the sheets
+	// that read straight off a numbered roster, but the elimination entrant
+	// NAMES in the bracket sheets are a SEPARATE concern -- they still need
+	// literal overlaying from the stored bracket further down (see the
+	// len(pools) == 0 branch below), because this workbook is a results
+	// snapshot and the pool-oriented renderer's formula references have
+	// nowhere valid to point without a pool data sheet.
+	// The second return value (the playoffs-only numbered roster) is the
+	// blank-template export's own extra (its Tags sheet); this results
+	// export has no such extra and discards it.
+	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
 	if err != nil {
 		return nil, fmt.Errorf("export: %w", err)
 	}
@@ -229,10 +241,10 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 // (non-numeric suffix, e.g. "Pool A-DH-0") are skipped.
 //
 // Each side is resolved to its pool Player by the authoritative SideAID/SideBID
-// UUID first, which disambiguates same-name-different-dojo participants. Legacy
-// results written before side UUIDs existed fall back to name matching (last
-// write wins in the name map), so exact-duplicate names in such old data can
-// still be conflated; current data always carries the UUIDs.
+// UUID ONLY (operator ruling bc-pnum): a pool-matches.csv row and a pools.csv
+// Player both carry an id field, so there is no name fallback. A row with no
+// id for a side, or an id this pool's own roster does not carry, resolves to
+// no Player at all and the match is skipped below.
 func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) map[string][]int {
 	poolOrdinals := make(map[string][]int, len(pools))
 	for pi := range pools {
@@ -257,32 +269,29 @@ func attachPoolMatches(pools []helper.Pool, matchResults []state.MatchResult) ma
 		sort.Slice(mine, func(i, j int) bool { return mine[i].idx < mine[j].idx })
 
 		byID := make(map[string]*helper.Player, len(p.Players))
-		byName := make(map[string]*helper.Player, len(p.Players))
 		for i := range p.Players {
 			pl := &p.Players[i]
 			if pl.ID != "" {
 				byID[pl.ID] = pl
 			}
-			byName[pl.Name] = pl
 		}
-		// Prefer the authoritative side UUID (SideAID/SideBID from pool-matches.csv)
-		// and fall back to the display name. Names are not unique within a
-		// competition (same name, different dojo is allowed), so a name-only lookup
-		// could attach the wrong Player and mislabel the grid; the UUID disambiguates.
-		resolve := func(id, name string) *helper.Player {
-			if id != "" {
-				if pl, ok := byID[id]; ok {
-					return pl
-				}
+		// ID-only (operator ruling bc-pnum): the side UUID (SideAID/SideBID
+		// from pool-matches.csv) is the only resolution path. Names are not
+		// unique within a competition (same name, different dojo is
+		// allowed), so a name-only lookup could attach the wrong Player and
+		// mislabel the grid; an empty or foreign id simply resolves to nil.
+		resolve := func(id string) *helper.Player {
+			if id == "" {
+				return nil
 			}
-			return byName[name]
+			return byID[id]
 		}
 
 		p.Matches = make([]helper.Match, 0, len(mine))
 		ords := make([]int, 0, len(mine))
 		for _, ir := range mine {
-			sideA := resolve(ir.mr.SideAID, ir.mr.SideA)
-			sideB := resolve(ir.mr.SideBID, ir.mr.SideB)
+			sideA := resolve(ir.mr.SideAID)
+			sideB := resolve(ir.mr.SideBID)
 			// A side that resolves to no pool member (e.g. a participant removed
 			// after the match was recorded, or partially-written state) would be a
 			// nil *Player, which PrintPoolMatches dereferences unconditionally and
@@ -571,11 +580,26 @@ func writeMiddleMarkCell(f *excelize.File, sheetName string, courtStartCol, exce
 
 // bracketMatchResultView adapts a BracketMatch to the MatchResult shape the
 // shared row writers consume (they read only the result fields).
+// Deliberately omits SideAID/SideBID/WinnerID (bc-brid added them to
+// BracketMatch, but this export path was not converted; see the id-fallback
+// comment at this function's call site) -- the row writers below stay on
+// the pre-existing name-based attribution.
 func bracketMatchResultView(bm *state.BracketMatch) state.MatchResult {
 	return state.MatchResult{
-		SideA:      bm.SideA,
-		SideB:      bm.SideB,
-		Winner:     bm.Winner,
+		SideA:  bm.SideA,
+		SideB:  bm.SideB,
+		Winner: bm.Winner,
+		// The side and winner ids travel with the names they belong to
+		// (bc-brid). Every mark this view feeds is attributed through
+		// domain.AttributeWinnerSide, which prefers them, so dropping them
+		// here would have made the export the one surface that still decided
+		// a same-name bracket pairing by the aka-first name convention while
+		// the app decided it by id. A row that carries no id (a bye, an
+		// unresolved feeder, an unrepaired legacy row) passes "" and takes
+		// the name path exactly as before.
+		SideAID:    bm.SideAID,
+		SideBID:    bm.SideBID,
+		WinnerID:   bm.WinnerID,
 		Decision:   bm.Decision,
 		Encho:      bm.Encho,
 		SubResults: bm.SubResults,
@@ -617,28 +641,28 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// Sub-match row for Position P is the P-th sub row (1-based Position).
 		excelRow := subStartExcelRow + (sub.Position - 1)
 
-		// SubMatchResult persists no ids, so names are all there is and both
-		// calls below are always the name-fallback branch, resolved by the
-		// documented sideA-first convention. Note the limit of that: a
-		// numbered team bout names individual PLAYERS, whose names are not
-		// unique by rule (only name+dojo is), so a same-named pair on opposing
-		// lineups is separated by convention rather than by identity.
-		// Unchanged from before ids existed, and not fixable here without
-		// persisting ids per sub row.
+		// ONE attribution per bout row, shared by both marks below, because
+		// they name the SAME winner: the maru fallback and the Kiken/Fus.
+		// mark landing in different cells is the incoherence DefaultWinMaruAB's
+		// own doc warns about. bc-pnum: a numbered team bout names individual
+		// PLAYERS, whose names are not unique by rule, so the row's member ids
+		// decide (domain.SubBoutAttribution, the same owner the individual
+		// victory uses) and a same-name pair no id can settle gets NO mark
+		// rather than one beside whichever fighter is written first --
+		// CLAUDE.md's accepted no-mark class (i). Before ids reached these
+		// rows this was the sideA-first convention, and the paragraph here
+		// said so; that is no longer true.
+		att := domain.SubBoutAttribution(sub.Attribution())
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
-			sub.Decision, sub.Encho, domain.WinnerAttribution{
-				Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
-			})
+			sub.Decision, sub.Encho, att)
 		leftScore, rightScore := scoreA, scoreB
 		lFoul, rFoul := HansokuMark(sub.HansokuA), HansokuMark(sub.HansokuB)
 		if mirror {
 			leftScore, rightScore = scoreB, scoreA
 			lFoul, rFoul = rFoul, lFoul
 		}
-		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), domain.WinnerAttribution{
-			Winner: sub.Winner, SideA: sub.SideA, SideB: sub.SideB,
-		}, mirror)
+		lMark, rMark := SideMarksLR(sub.Decision, sub.HanteiDecided(), att, mirror)
 		// Outstanding-hansoku ▲ on the cell's outer edge, as in
 		// writeScoreRowCells (FIK Table 2; scoreboard parity).
 		if lScore := joinSp(lFoul, joinSp(leftScore, lMark)); lScore != "" {
@@ -707,7 +731,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 			if !ok {
 				continue
 			}
-			byName := standingMap(poolStandings)
+			byID := standingMap(poolStandings)
 			// Scope the header map to THIS court's 8-column band. Pool Matches
 			// repeats the W/L/T/PW/PL/Rank headers once per court, and a whole-row
 			// map keeps only the first occurrence, so on a multi-court sheet every
@@ -721,7 +745,7 @@ func overlayPoolStandings(f *excelize.File, pools []helper.Pool, standings map[s
 				if dataRowIdx >= len(rows) {
 					break
 				}
-				ps, ok := byName[standingKey(player)]
+				ps, ok := byID[player.ID]
 				if !ok {
 					continue
 				}
@@ -850,7 +874,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 			if !ok {
 				continue
 			}
-			byName := standingMap(poolStandings)
+			byID := standingMap(poolStandings)
 
 			courtStartCol := 1 + c*helper.CourtsColumnsPerCourt // 1-based
 			wCol := colNum(courtStartCol + 1)
@@ -865,7 +889,7 @@ func overlayTeamPoolStandings(f *excelize.File, pools []helper.Pool, standings m
 
 			nPlayers := len(pool.Players)
 			for i, player := range pool.Players {
-				ps, ok := byName[standingKey(player)]
+				ps, ok := byID[player.ID]
 				if !ok {
 					continue
 				}
@@ -969,13 +993,15 @@ func overlayBracketScores(f *excelize.File, bracketByNum map[int]state.BracketMa
 				// as the pool path (overlayPoolScores) already does — the
 				// mark then rides ONLY through the appended SideMarksLR
 				// suffix, matching the pool cell's "M Ht".
-				// BracketMatch carries no WinnerID/SideAID/SideBID (see
-				// bracketMatchResultView above), so this is always the
-				// name-fallback branch, matching the SideMarksLR call in
-				// writeScoreRowCells below.
+				// Attributed by the row's own ids, the same triple
+				// writeScoreRowCells passes to SideMarksLR below: the maru
+				// fallback and the result mark compose one cell, so a
+				// same-name pairing must not be able to send them to
+				// different sides.
 				scoreA, scoreB = DefaultWinMaruAB(
 					IpponsScore(mrView.IpponsA), IpponsScore(mrView.IpponsB),
 					bm.Decision, bm.Encho, domain.WinnerAttribution{
+						WinnerID: bm.WinnerID, SideAID: bm.SideAID, SideBID: bm.SideBID,
 						Winner: bm.Winner, SideA: bm.SideA, SideB: bm.SideB,
 					})
 			}
@@ -1203,25 +1229,21 @@ func buildCourtColumnMap(row []string, startColIdx int) map[string]int {
 	return m
 }
 
-// standingMap keys standings by participant ID (falling back to name for legacy
-// state without UUIDs) so two same-name competitors in one pool don't collapse
-// onto a single entry. Look up with standingKey(player).
+// standingMap keys standings by participant ID ONLY (operator ruling
+// bc-pnum: a state.PlayerStanding carries an id field, so it is resolved by
+// id only) so two same-name competitors in one pool don't collapse onto a
+// single entry. A row is keyed by its participant id; a row without one
+// resolves to nothing, so an id-less standing is never inserted, matching
+// attachPoolMatches' own id-only resolution. Look up with player.ID.
 func standingMap(standings []state.PlayerStanding) map[string]state.PlayerStanding {
 	m := make(map[string]state.PlayerStanding, len(standings))
 	for _, ps := range standings {
-		m[standingKey(ps.Player)] = ps
+		if ps.Player.ID == "" {
+			continue
+		}
+		m[ps.Player.ID] = ps
 	}
 	return m
-}
-
-// standingKey returns the lookup key for standingMap: the player's UUID when
-// present, else the display name (legacy data). Mirrors the ID-first, name-
-// fallback resolution used by attachPoolMatches.
-func standingKey(p helper.Player) string {
-	if p.ID != "" {
-		return p.ID
-	}
-	return p.Name
 }
 
 // buildBracketMatchIndex maps MatchNumber -> match for O(1) lookup by the printed

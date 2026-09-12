@@ -366,7 +366,7 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   };
 
   const startCompetition = async (cid) => {
-    const c = t.competitions.find(cc => cc.id === cid);
+    const c = (t.competitions || []).find(cc => cc.id === cid);
     if (!c) return;
     showToast(`Starting ${c.name}…`);
     try {
@@ -763,7 +763,11 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
   }
 
   if (view.kind === "competition") {
-    const c = t.competitions.find((cc) => cc.id === view.id);
+    // t.competitions is absent on a tournament that has never had one (the
+    // record the setup wizard just created), and this view can be reached
+    // on such a tournament by a stale deep link: guard, and let the
+    // "not available" branch below handle it rather than throwing.
+    const c = (t.competitions || []).find((cc) => cc.id === view.id);
     if (!c) return (
       <div className="page">
         <div className="comp-shell-actions">

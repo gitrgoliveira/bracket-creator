@@ -600,68 +600,15 @@ func indexOfLeaf(leaves []string, label string) int {
 	return -1
 }
 
-// TestCreatePoolsForCount covers the pool-cutting half of fill-bracket
-// formation: explicit pool count, min-size targets, remainder spread.
-//
-// Fault injection (manually verified, reverted after): changing the upper
-// bound check from `len(players) > (poolSize+1)*totalPools` to `>=` turns
-// "exact upper bound (every pool at minSize+1) is accepted" red (a
-// legitimate all-oversized shape would be rejected).
-func TestCreatePoolsForCount(t *testing.T) {
-	t.Run("poolSize <= 0 is a clean error", func(t *testing.T) {
-		_, err := CreatePoolsForCount(nil, 0, 3)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "pool size")
-	})
-
-	t.Run("totalPools <= 0 is a clean error", func(t *testing.T) {
-		_, err := CreatePoolsForCount(nil, 3, 0)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "pool count")
-	})
-
-	t.Run("too few players for the minimum is a clean error", func(t *testing.T) {
-		players := make([]Player, 5)
-		_, err := CreatePoolsForCount(players, 3, 2) // needs >= 6
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "only 5")
-	})
-
-	t.Run("too many players to fit within +1 per pool is a clean error", func(t *testing.T) {
-		players := make([]Player, 9) // 9 > (3+1)*2=8
-		_, err := CreatePoolsForCount(players, 3, 2)
-		require.Error(t, err)
-	})
-
-	t.Run("exact upper bound (every pool at minSize+1) is accepted", func(t *testing.T) {
-		players := makeUniquePlayers(8)
-		pools, err := CreatePoolsForCount(players, 3, 2) // exactly (3+1)*2
-		require.NoError(t, err)
-		require.Len(t, pools, 2)
-		for _, p := range pools {
-			assert.Len(t, p.Players, 4)
-		}
-	})
-
-	t.Run("remainder spreads outer-to-inner, exactly like CreatePools' min-mode branch", func(t *testing.T) {
-		players := makeUniquePlayers(11) // totalPools=3, minSize=3: remainder 2
-		pools, err := CreatePoolsForCount(players, 3, 3)
-		require.NoError(t, err)
-		require.Len(t, pools, 3)
-		oversized := 0
-		total := 0
-		for _, p := range pools {
-			total += len(p.Players)
-			if len(p.Players) == 4 {
-				oversized++
-			} else {
-				assert.Len(t, p.Players, 3)
-			}
-		}
-		assert.Equal(t, 11, total)
-		assert.Equal(t, 2, oversized)
-	})
-}
+// CreatePoolsForCount (the pool-cutting half of fill-bracket formation:
+// explicit pool count, min-size targets, remainder spread) was removed as
+// dead code (bc-drwx item 11: no production caller, only this file's own
+// dedicated TestCreatePoolsForCount). Its remainder-spread mechanism --
+// assignPlayersToPools' forcePoolSize fallback, the same one CreatePools'
+// min-mode branch and realTargetSizes (bc-drwx item 5) share -- is a live
+// piece with its own coverage elsewhere: TestRealTargetSizes_
+// SpreadsRemainderPastFirstRound, TestForcePoolSizeFromCounts_MultipleRounds
+// and TestRealTargetSizes_SumMatchesNumPlayers (real_target_sizes_remainder_test.go).
 
 func makeUniquePlayers(n int) []Player {
 	players := make([]Player, n)

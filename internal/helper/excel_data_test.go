@@ -196,6 +196,107 @@ func TestAddPoolDataToSheet(t *testing.T) {
 	}
 }
 
+// TestAddPoolDataToSheet_HasNumberChecksEveryPlayer pins bc-pnum review:
+// hasNumber used to be decided from the FIRST player only, so a
+// hand-edited/legacy pools.csv whose leading row is unnumbered dropped the
+// whole Player Number column (and so the Names to Print number cell that
+// links to it) for EVERY player on the sheet, even ones that do carry a
+// Number. hasNumber must be true when ANY player anywhere in pools has one.
+func TestAddPoolDataToSheet_HasNumberChecksEveryPlayer(t *testing.T) {
+	f := excelize.NewFile()
+	defer f.Close()
+	_, err := f.NewSheet(SheetData)
+	require.NoError(t, err)
+
+	pools := []Pool{{PoolName: "Pool A", Players: []Player{
+		{Name: "Alice", Dojo: "Dojo A", Number: ""},
+		{Name: "Bob", Dojo: "Dojo B", Number: "K2"},
+	}}}
+
+	_, playerCoords := AddPoolDataToSheet(f, pools, false, "")
+
+	numberHeader, err := f.GetCellValue(SheetData, "D2")
+	require.NoError(t, err)
+	assert.Equal(t, "Player Number", numberHeader, "the Player Number column must exist when ANY player has a Number")
+
+	bobCoord, ok := playerCoords[playerCoordKey(pools[0].Players[1])]
+	require.True(t, ok)
+	assert.NotEmpty(t, bobCoord.numberCell, "Bob's Number must still be written to a coordinate")
+
+	bobNumber, err := f.GetCellValue(SheetData, "D4")
+	require.NoError(t, err)
+	assert.Equal(t, "K2", bobNumber)
+}
+
+// TestAddPlayerDataToSheet_EntryOrderMatchesRealZeroBasedRoster pins bc-pnum
+// A11 against the shape CreatePlayers (tournament.go) actually produces: the
+// FIRST entrant carries PoolPosition 0 (len(players) BEFORE the append), a
+// value pool distribution overwrites 1-based for every pooled competition
+// but nothing ever touches for a playoffs-only one. Before the fix, row 3
+// (the first entrant) read "0" in the renamed "Entry order" column (bc-pnum
+// review: relabelled from "Draw order", which implied bracket slot order
+// this column has never held -- this function runs before StandardSeeding)
+// beside a "Player Number" column reading "K1" -- two different counting
+// conventions on the same row. The fix must show "1" for the first entrant.
+func TestAddPlayerDataToSheet_EntryOrderMatchesRealZeroBasedRoster(t *testing.T) {
+	players := []Player{
+		{Name: "Alice", Dojo: "Dojo A", PoolPosition: 0, Number: "K1"},
+		{Name: "Bob", Dojo: "Dojo B", PoolPosition: 1, Number: "K2"},
+		{Name: "Carol", Dojo: "Dojo C", PoolPosition: 2, Number: "K3"},
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+	_, err := f.NewSheet(SheetData)
+	require.NoError(t, err)
+
+	AddPlayerDataToSheet(f, players, false, "")
+
+	for i, want := range []string{"1", "2", "3"} {
+		row := i + 3
+		got, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
+		require.NoError(t, err)
+		assert.Equalf(t, want, got, "row %d (entrant %q, tag %q) must show 1-based draw order", row, players[i].Name, players[i].Number)
+	}
+}
+
+// TestAddDataToSheetForExport_ColumnAHeader pins bc-pnum review's
+// relabel through the export wrapper's own branch selection: the
+// namesToPrintPlayers branch (a playoffs-only export with no pools.csv,
+// routed to AddPlayerDataToSheet) must show "Entry order", never the
+// "Draw order" name that implied a bracket slot order this column has
+// never held; the pools branch (routed to AddPoolDataToSheet) keeps its
+// own truthful "Pool" header, unaffected by this rename.
+func TestAddDataToSheetForExport_ColumnAHeader(t *testing.T) {
+	t.Run("namesToPrintPlayers branch: Entry order", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		_, err := f.NewSheet(SheetData)
+		require.NoError(t, err)
+
+		players := []Player{{Name: "Alice", Dojo: "Dojo A", Number: "K1"}}
+		AddDataToSheetForExport(f, nil, players, false, "")
+
+		header, err := f.GetCellValue(SheetData, "A2")
+		require.NoError(t, err)
+		assert.Equal(t, "Entry order", header)
+	})
+
+	t.Run("pools branch: Pool", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		_, err := f.NewSheet(SheetData)
+		require.NoError(t, err)
+
+		pools := []Pool{{PoolName: "Pool A", Players: []Player{{Name: "Alice", Dojo: "Dojo A", Number: "K1"}}}}
+		AddDataToSheetForExport(f, pools, nil, false, "")
+
+		header, err := f.GetCellValue(SheetData, "A2")
+		require.NoError(t, err)
+		assert.Equal(t, "Pool", header)
+	})
+}
+
 func TestAddPlayerDataToSheet(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -266,10 +367,17 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "Title prefix:", prefixLabel)
 
-			// Verify headers (row 2)
+			// Verify headers (row 2). bc-pnum A11: renamed from "Number" -- this
+			// column is the roster's entry order, not the "Player Number" tag
+			// column (E/D below), and the two used to read as the same concept
+			// under one label while counting from different bases. Relabelled
+			// "Entry order" (bc-pnum review): this sheet is written BEFORE
+			// StandardSeeding reorders players into bracket slot order, so the
+			// column is the entry order the roster arrived in, never a "draw"
+			// (bracket slot) order the old name implied.
 			numberHeader, err := f.GetCellValue(SheetData, "A2")
 			require.NoError(t, err)
-			assert.Equal(t, "Number", numberHeader)
+			assert.Equal(t, "Entry order", numberHeader)
 
 			playerNameHeader, err := f.GetCellValue(SheetData, "B2")
 			require.NoError(t, err)
@@ -293,10 +401,12 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 			for i, player := range tt.players {
 				row := i + 3
 
-				// Verify position number
+				// Verify position number. bc-pnum A11: written 1-based
+				// (PoolPosition+1) now, since PoolPosition itself is 0-based
+				// for a playoffs-only roster (CreatePlayers, tournament.go).
 				position, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
 				require.NoError(t, err)
-				assert.Equal(t, fmt.Sprint(player.PoolPosition), position)
+				assert.Equal(t, fmt.Sprint(player.PoolPosition+1), position)
 
 				// Verify name
 				name, err := f.GetCellValue(SheetData, fmt.Sprintf("B%d", row))

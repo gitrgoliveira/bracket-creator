@@ -8,6 +8,29 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// bracketLoserIdentity returns m's LOSING side's name and id (bc-brid),
+// resolved via domain.AttributeWinnerSide (the id-first rule, so a same-name
+// pair -- two competitors from different dojos, legal per
+// CheckDuplicateEntriesByNameDojo -- is not mis-attributed the way a bare
+// `loser := m.SideA; if loser == m.Winner { loser = m.SideB }` comparison
+// always would: that comparison credits SideA whenever the winner's name
+// matches BOTH sides identically, exactly the "always side A" bug this
+// codebase's other winner/loser derivations were fixed against). Returns
+// ("", "") when the match carries no attributable winner.
+func bracketLoserIdentity(m state.BracketMatch) (name, id string) {
+	switch domain.AttributeWinnerSide(domain.WinnerAttribution{
+		Winner: m.Winner, SideA: m.SideA, SideB: m.SideB,
+		WinnerID: m.WinnerID, SideAID: m.SideAID, SideBID: m.SideBID,
+	}) {
+	case domain.MatchSideA:
+		return m.SideB, m.SideBID
+	case domain.MatchSideB:
+		return m.SideA, m.SideAID
+	default:
+		return "", ""
+	}
+}
+
 // GetBracketRanking returns the player who achieved rank in the bracket of compID.
 // Supported ranks: 1 (winner), 2 (finalist), 3-4 (semi-final losers).
 // Full player data (dojo, displayName) is resolved from the source competition's participants.
@@ -21,40 +44,34 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*domain.Player, err
 	}
 
 	finalRound := bracket.Rounds[len(bracket.Rounds)-1]
-	var winnerName string
+	var winnerName, winnerID string
 	switch rank {
 	case 1:
 		for _, m := range finalRound {
 			if m.Status == state.MatchStatusCompleted && m.Winner != "" {
-				winnerName = m.Winner
+				winnerName, winnerID = m.Winner, m.WinnerID
 			}
 		}
 	case 2:
 		for _, m := range finalRound {
 			if m.Status == state.MatchStatusCompleted && m.Winner != "" {
-				loser := m.SideA
-				if loser == m.Winner {
-					loser = m.SideB
-				}
-				winnerName = loser
+				winnerName, winnerID = bracketLoserIdentity(m)
 			}
 		}
 	default:
 		if rank <= 4 && len(bracket.Rounds) >= 2 {
 			semiRound := bracket.Rounds[len(bracket.Rounds)-2]
 			idx := rank - 3
-			var semis []string
+			var semis, semiIDs []string
 			for _, m := range semiRound {
 				if m.Status == state.MatchStatusCompleted && m.Winner != "" {
-					loser := m.SideA
-					if loser == m.Winner {
-						loser = m.SideB
-					}
+					loser, loserID := bracketLoserIdentity(m)
 					semis = append(semis, loser)
+					semiIDs = append(semiIDs, loserID)
 				}
 			}
 			if idx < len(semis) {
-				winnerName = semis[idx]
+				winnerName, winnerID = semis[idx], semiIDs[idx]
 			}
 		}
 	}
@@ -63,10 +80,23 @@ func (e *Engine) GetBracketRanking(compID string, rank int) (*domain.Player, err
 		return nil, notFoundErrorf("rank %d not found in completed bracket for competition %q", rank, compID)
 	}
 
-	// Resolve full player record from source participants.
+	// Resolve full player record from source participants. Prefers the id
+	// when the bracket row stamped one (bc-brid): two participants can
+	// legally share a display name from different dojos, and a name-only
+	// scan would silently pick the FIRST such match rather than the
+	// competitor actually holding this rank. Falls back to name when
+	// winnerID is empty (an unstamped bracket row -- a bye, an unresolved
+	// feeder, or an unrepaired legacy row).
 	srcComp, _ := e.store.LoadCompetition(compID)
 	withZekken := srcComp != nil && srcComp.EffectiveWithZekkenName()
 	srcPlayers, _ := e.store.LoadParticipants(compID, withZekken)
+	if winnerID != "" {
+		for i := range srcPlayers {
+			if srcPlayers[i].ID == winnerID {
+				return &srcPlayers[i], nil
+			}
+		}
+	}
 	for i := range srcPlayers {
 		if srcPlayers[i].Name == winnerName {
 			return &srcPlayers[i], nil

@@ -206,13 +206,13 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 		// Key by (normalizedName, normalizedDojo), NOT name alone. Tier-1
 		// dedup allows two same-named competitors from different dojos, so a
-		// name-only key would transfer check-in state between distinct people.
-		checkInKey := func(name, dojo string) string {
-			return helper.NormalizeParticipantName(name) + "|" + helper.NormalizeParticipantName(dojo)
-		}
+		// name-only key would transfer check-in state between distinct
+		// people. helper.CompetitorKey("", name, dojo) is exactly that
+		// composite (with an "nd:" prefix, harmless here: the key never
+		// leaves this local map).
 		checkedInByKey := make(map[string]bool, len(existing))
 		for _, ep := range existing {
-			checkedInByKey[checkInKey(ep.Name, ep.Dojo)] = ep.CheckedIn
+			checkedInByKey[helper.CompetitorKey("", ep.Name, ep.Dojo)] = ep.CheckedIn
 		}
 
 		players := make([]domain.Player, 0, len(req.Players))
@@ -233,7 +233,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 				Metadata:     p.Metadata,
 				Source:       helper.CanonicalRegistrationSource(p.Source),
 				PoolPosition: int64(i),
-				CheckedIn:    checkedInByKey[checkInKey(p.Name, p.Dojo)],
+				CheckedIn:    checkedInByKey[helper.CompetitorKey("", p.Name, p.Dojo)],
 			})
 		}
 
@@ -518,7 +518,7 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			if cascadeDisplayName == "" {
 				cascadeDisplayName = helper.SanitizeName(updatedPlayer.Name)
 			}
-			w, cascadeErr := eng.ReplaceParticipantInDraw(id, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
+			w, cascadeErr := eng.ReplaceParticipantInDraw(id, pid, oldName, oldDojo, oldDisplayName, updatedPlayer.Name, updatedPlayer.Dojo, cascadeDisplayName)
 			if cascadeErr != nil {
 				// participants.csv (and seeds.csv) were already updated, broadcast and
 				// return 200 with the updated player so the client keeps its local state.
@@ -648,6 +648,23 @@ func RegisterParticipantHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 		}
 
 		if err := store.SaveSeeds(id, assignments); err != nil {
+			// A non-empty seeding against a roster with no participants at
+			// all is the client's error (the operator has to enter
+			// participants first), not the server's, so a 500 here would
+			// blame the server for the operator's order of work.
+			//
+			// This arm is NOT dead just because rejectSeedsOffRoster above
+			// answers the same sentinel first. The two read the roster
+			// separately and SaveSeeds takes the per-competition lock only
+			// for its own read, so a roster wiped in between -- another
+			// device applying an empty roster, an import replacing one --
+			// passes the gate above and is refused down here. Deleting this
+			// on the grounds that the check above covers it turns that race
+			// into a 500.
+			if errors.Is(err, state.ErrSeedsWithoutRoster) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
 			internalError(c, err)
 			return
 		}

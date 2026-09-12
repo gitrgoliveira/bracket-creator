@@ -236,8 +236,12 @@ func TestSwissStandings_AfterRound1(t *testing.T) {
 	matches, err := store.LoadPoolMatches(compID)
 	require.NoError(t, err)
 	for i := range matches {
-		// SideA in fold pairing is the higher seed (P1/P2 here).
+		// SideA in fold pairing is the higher seed (P1/P2 here). WinnerID
+		// (operator ruling bc-pnum: SwissStandings' resolveWinnerSide is
+		// id-only) must be stamped alongside Winner, or the win below never
+		// attributes to anyone.
 		matches[i].Winner = matches[i].SideA
+		matches[i].WinnerID = matches[i].SideAID
 		matches[i].Status = state.MatchStatusCompleted
 		matches[i].IpponsA = []string{"M", "M"}
 	}

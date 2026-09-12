@@ -22,11 +22,23 @@ import (
 // when a new field misses it. That is how DecisionBy, DecisionReason, Encho
 // and ModifiedAt were lost from pool-matches.csv, and how SeedAssignment.Dojo
 // was lost from seeds.csv while the (name, dojo) matching in ApplySeeds
-// depended on it. The struct-marshalled files (bracket.json, config.md,
-// competitor-status.yaml, lineups.yaml, overrides.json, tournament.md) are
+// depended on it. The struct-marshalled files (config.md,
+// competitor-status.yaml, lineups.yaml, overrides.json, tournament.md) ARE
 // immune by construction and need no per-field guard here;
 // TestMarshalledStructsStayFullyMarshalled below pins the property that makes
 // them immune, checking each type against the tag its file marshals under.
+//
+// bracket.json (Bracket/BracketMatch) is NOT one of them, despite persisting
+// by the same whole-struct json.Marshal: LoadBracket/SaveBracket route every
+// read and the save-time cache refresh through copyBracket (bracket.go),
+// which reconstructs the returned value FIELD BY FIELD rather than via
+// marshal/unmarshal or a generic copy, so it can (and once did: DrawOrder,
+// bc-pnum ruling 2) silently drop a field that the on-disk JSON carries
+// correctly. TestCopyBracketRoundTripIsComplete below is bracket.json's own
+// guard, structured like this file's sweepFields helper but reflectively
+// FILLING every field first (via fillNonZero) rather than requiring a
+// hand-written fixture, so a newly declared field is covered the moment it
+// is declared, with no separate step to remember.
 
 // sweepFields compares in against got field-by-field, consulting allowlist for
 // fields that are legitimately not persisted in this file.
@@ -158,12 +170,21 @@ func TestSeedAssignmentRoundTripIsComplete(t *testing.T) {
 	s, err := NewStore(dir)
 	require.NoError(t, err)
 	require.NoError(t, s.SaveCompetition(&Competition{ID: "c", Name: "C"}))
+	// A seeding needs a roster to attach to (SaveSeeds refuses a non-empty
+	// one otherwise); the id below must match this participant's, since
+	// SaveSeeds stamps it from whoever the row resolves to regardless of
+	// what the caller supplied.
+	require.NoError(t, s.SaveParticipants("c", []domain.Player{
+		{ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301", Name: "Tanaka Ichiro", Dojo: "Kyoto"},
+	}))
 
 	// Dojo matters: a seed assignment is matched to its participant by
 	// (name, dojo) because names are not unique within a competition. It was
 	// silently dropped by the writer until this guard existed, which made a
 	// seed for either of two same-named players unresolvable after a restart.
-	in := domain.SeedAssignment{Name: "Tanaka Ichiro", Dojo: "Kyoto", SeedRank: 1}
+	in := domain.SeedAssignment{
+		ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301", Name: "Tanaka Ichiro", Dojo: "Kyoto", SeedRank: 1,
+	}
 	require.NoError(t, s.SaveSeeds("c", []domain.SeedAssignment{in}))
 
 	fresh, err := NewStore(dir)
@@ -235,6 +256,109 @@ func TestMarshalledStructsStayFullyMarshalled(t *testing.T) {
 					"is intended, add it to the notMarshalled allow-list with the "+
 					"reason; if not, it must carry a real %s tag.",
 				typ.Name(), f.Name, tagKey, tagKey)
+		}
+	}
+}
+
+// fillNonZero sets v (which must be addressable) and every exported field it
+// contains, recursively through nested structs/pointers/slices, to a
+// distinctive non-zero value. Used to build a bracket.json fixture where
+// EVERY field -- including one added after this test was written -- carries
+// a value a dropped-field bug would visibly lose, without hand-maintaining a
+// struct literal that enumerates them.
+//
+// A pointer field is allocated and filled through; a slice field gets
+// exactly one element, itself filled the same way, so a nested
+// slice-of-struct (Bracket.Rounds, BracketMatch.SubResults) is covered too.
+// Map and interface fields are not needed by (and so not handled by)
+// anything this guards today; add a case here if one is ever declared on a
+// bracket.json type.
+func fillNonZero(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.String:
+		v.SetString("x")
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(7)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(7)
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(7)
+	case reflect.Slice:
+		elem := reflect.New(v.Type().Elem()).Elem()
+		fillNonZero(elem)
+		v.Set(reflect.Append(v, elem))
+	case reflect.Pointer:
+		v.Set(reflect.New(v.Type().Elem()))
+		fillNonZero(v.Elem())
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if !v.Type().Field(i).IsExported() {
+				continue
+			}
+			fillNonZero(v.Field(i))
+		}
+	}
+}
+
+// TestCopyBracketRoundTripIsComplete is bracket.json's own round-trip guard
+// (see this file's doc comment for why bracket.json needs one despite being
+// struct-marshalled): it fills every exported field of Bracket and
+// BracketMatch (including through Bracket.ThirdPlaceMatch and
+// BracketMatch.SubResults/Encho, which fillNonZero reaches recursively),
+// runs the result through copyBracket -- the function every LoadBracket
+// call and the save-time cache refresh return through -- and requires the
+// copy to equal the original field for field. A field copyBracket forgets
+// to copy is left at its Go zero value on the copy, which reflect.DeepEqual
+// (or, for a targeted failure message, the same field-by-field walk
+// sweepFields uses elsewhere in this file) catches immediately.
+func TestCopyBracketRoundTripIsComplete(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	var original Bracket
+	fillNonZero(reflect.ValueOf(&original).Elem())
+
+	got := s.copyBracket(&original)
+	require.NotNil(t, got)
+
+	typ := reflect.TypeOf(original)
+	inV, gotV := reflect.ValueOf(original), reflect.ValueOf(*got)
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		// A field left at its zero value by fillNonZero would "survive" a
+		// drop undetected, exactly the failure mode sweepFields' own doc
+		// comment (above) warns about: prove the FIXTURE is non-zero before
+		// trusting the comparison below.
+		assert.Falsef(t, inV.Field(i).IsZero(), "Bracket.%s is zero after fillNonZero; add a case to fillNonZero for its type", f.Name)
+		assert.Equalf(t, inV.Field(i).Interface(), gotV.Field(i).Interface(),
+			"Bracket.%s did not survive copyBracket. Either copy it explicitly or explain why it must not be.",
+			f.Name)
+	}
+
+	// BracketMatch is the type most likely to grow a field (it carries the
+	// bulk of match state) and copyBracket rebuilds it independently for
+	// Rounds entries and for ThirdPlaceMatch; both must agree, and both must
+	// carry every field. Sweep it directly rather than only through the
+	// Bracket-level comparison above, so a failure names the BracketMatch
+	// field rather than requiring a diff of the whole nested struct.
+	require.Len(t, got.Rounds, 1)
+	require.Len(t, got.Rounds[0], 1)
+	require.NotNil(t, got.ThirdPlaceMatch)
+	bmTyp := reflect.TypeOf(BracketMatch{})
+	wantBM := original.Rounds[0][0]
+	for i := range bmTyp.NumField() {
+		f := bmTyp.Field(i)
+		assert.Falsef(t, reflect.ValueOf(wantBM).Field(i).IsZero(),
+			"BracketMatch.%s is zero after fillNonZero; add a case to fillNonZero for its type", f.Name)
+	}
+	for _, gotBM := range []BracketMatch{got.Rounds[0][0], *got.ThirdPlaceMatch} {
+		inV, gotV := reflect.ValueOf(wantBM), reflect.ValueOf(gotBM)
+		for i := range bmTyp.NumField() {
+			f := bmTyp.Field(i)
+			assert.Equalf(t, inV.Field(i).Interface(), gotV.Field(i).Interface(),
+				"BracketMatch.%s did not survive copyBracket.", f.Name)
 		}
 	}
 }

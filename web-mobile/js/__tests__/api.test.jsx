@@ -167,28 +167,80 @@ describe('API Utils', () => {
     // the backend unable to pick a side and the league matrix marks BOTH rows
     // as winners. The scoring modal sets patch.winner to the winning SIDE object.
     it('forwards winnerId from the winning side object', () => {
-      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      // Flat sideAId/sideBId alongside the resolved objects: what a real
+      // normalizeMatch output looks like when the server supplied real ids
+      // for both sides (: winnerId is only forwarded when it matches
+      // one of these flat, server-supplied fields).
+      const match = { sideAId: 'id-a', sideBId: 'id-b', sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
       const result = toBackendMatchResult({ winner: { id: 'id-a', name: 'Player A' }, status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
       expect(result.winnerId).toBe('id-a');
     });
 
     it('forwards the correct winnerId for a same-name head-to-head (object winner)', () => {
-      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      // Flat sideAId/sideBId present: this is what a real same-name pool
+      // match looks like on the wire (: the flat fields are the
+      // server-supplied signal that gates winnerId).
+      const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
       // Mumeishi won; even on a tied scoreline the id disambiguates the side.
       const result = toBackendMatchResult({ winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' }, status: 'complete', ipponsA: ['M'], ipponsB: ['M'], score: { type: 'ippon' }, decidedByHantei: true }, match);
       expect(result.winnerId).toBe('id-mumeishi');
     });
 
     it('omits winnerId when same-name and the winner is a bare name (ambiguous)', () => {
-      const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+      const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
       const result = toBackendMatchResult({ winner: 'Tanaka Kenji', status: 'complete', ipponsA: ['M'], ipponsB: ['M'] }, match);
       expect('winnerId' in result).toBe(false); // backend infers from scoreline / name fallback
     });
 
     it('derives winnerId from the match sides for a distinct-name bare-name winner', () => {
-      const match = { sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
+      const match = { sideAId: 'id-a', sideBId: 'id-b', sideA: { id: 'id-a', name: 'Player A' }, sideB: { id: 'id-b', name: 'Player B' } };
       const result = toBackendMatchResult({ winner: 'Player B', status: 'complete', ipponsA: [], ipponsB: ['K'] }, match);
       expect(result.winnerId).toBe('id-b');
+    });
+
+    // buildPlayerMap invents `id: norm.id || norm.name` for a
+    // participant with no real id, and resolveSide (normalizeMatch) carries
+    // that invented id onto the resolved side object. For a
+    // partially-stamped legacy roster -- one side has a real server id, the
+    // other has NONE at all (no flat sideAId on the wire) -- the id-less
+    // side's resolved object ends up with its OWN NAME as `.id`. Sending
+    // that name as winnerId tells the engine's forward-write gate a name
+    // string is a participant UUID, and the write is rejected, so the match
+    // could never be scored.
+    describe('does not send an invented (name-as-id) winnerId', () => {
+      it('omits winnerId when the winning side carries no server-supplied flat id', () => {
+        // sideB has a real flat id; sideA has none at all -- match.sideAId is
+        // absent, exactly like a wire payload that never had that column.
+        // sideA's resolved object nonetheless carries an id: resolveSide's
+        // `{ id: flatId || name }` fallback, buildPlayerMap's `id: norm.id
+        // || norm.name` copied through unchanged.
+        const match = {
+          sideBId: 'id-b',
+          sideA: { id: 'Player A', name: 'Player A' }, // invented: id === name
+          sideB: { id: 'id-b', name: 'Player B' },
+        };
+        const result = toBackendMatchResult({
+          winner: { id: 'Player A', name: 'Player A' }, // sideA (id-less) won
+          status: 'complete', ipponsA: ['M'], ipponsB: [],
+        }, match);
+        expect('winnerId' in result).toBe(false);
+      });
+
+      it('still sends winnerId when the winning side DOES carry a server-supplied flat id, even though its opponent has none', () => {
+        // Same partially-stamped roster, but this time the side WITH a real
+        // id wins: winnerId must still reach the wire, because it is exactly
+        // what the server itself supplied for that side.
+        const match = {
+          sideBId: 'id-b',
+          sideA: { id: 'Player A', name: 'Player A' },
+          sideB: { id: 'id-b', name: 'Player B' },
+        };
+        const result = toBackendMatchResult({
+          winner: { id: 'id-b', name: 'Player B' }, // sideB (real id) won
+          status: 'complete', ipponsA: [], ipponsB: ['M'],
+        }, match);
+        expect(result.winnerId).toBe('id-b');
+      });
     });
 
     // bc-dmsr follow-up: the Ht mark's side ATTRIBUTION (which array the "Ht"
@@ -200,7 +252,7 @@ describe('API Utils', () => {
     // but was discarded for mark placement - this is the fix and its pin.
     describe('Ht mark placement attributes by id, not name (bc-dmsr follow-up)', () => {
       it('same-name pair: places the mark on sideB when the id says so (the bug, now fixed)', () => {
-        const match = { sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
+        const match = { sideAId: 'id-kenshikan', sideBId: 'id-mumeishi', sideA: { id: 'id-kenshikan', name: 'Tanaka Kenji' }, sideB: { id: 'id-mumeishi', name: 'Tanaka Kenji' } };
         const result = toBackendMatchResult({
           winner: { id: 'id-mumeishi', name: 'Tanaka Kenji' },
           status: 'complete',
@@ -565,7 +617,9 @@ describe('API Utils', () => {
       const norm = normalizeMatch(match, playerMap);
       
       expect(norm.sideA).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A' });
-      expect(norm.sideB).toEqual({ id: 'Bob', name: 'Bob' }); // Fallback if not in map
+      // bc-pnum: 'Bob' has no playerMap entry; resolveSide keeps id ""
+      // rather than inventing one from the name.
+      expect(norm.sideB).toEqual({ id: '', name: 'Bob' });
     });
 
     // mp-jvzy: the playerMap is keyed by NAME, so two same-name participants
@@ -616,8 +670,11 @@ describe('API Utils', () => {
       const map = buildPlayerMap(comp);
       // The map carries the full competitor identity (incl. displayName/number)
       // so bracket sides resolved by name show zekken + number as players qualify.
-      expect(map['Alice']).toEqual({ id: 'Alice', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
-      expect(map['Bob']).toEqual({ id: 'Bob', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
+      // bc-pnum: neither fixture player has a real id, so `id` stays "" --
+      // buildPlayerMap must never invent one from the name (see the
+      // "does not invent an id from the name" test below for why).
+      expect(map['Alice']).toEqual({ id: '', name: 'Alice', dojo: 'Dojo A', seed: 1, displayName: '', number: '', source: '', danGrade: '' });
+      expect(map['Bob']).toEqual({ id: '', name: 'Bob', dojo: 'Dojo B', seed: 0, displayName: '', number: '', source: '', danGrade: '' });
     });
 
     it('carries displayName and number into the map (qualifier identity in bracket)', () => {
@@ -680,10 +737,38 @@ describe('API Utils', () => {
       expect(m.winner).toMatchObject({ id: 'uuid-kenshikan', dojo: 'Kenshikan' });
     });
 
-    it('falls back to name as id when no id field', () => {
+    // bc-pnum: `id: norm.id || norm.name` used to invent an id from the
+    // display name for a participant with no real UUID. That invented value
+    // then rode all the way through resolveSide/normalizeMatch onto the
+    // match side object, so downstream "does this side carry an id" checks
+    // (LeagueMatrix, enrichPoolMatchWithComp, lineup resolution, etc.) wrongly
+    // read an id-less side as id-carrying. An entry without an id now keeps
+    // id "" so every consumer can tell the two cases apart.
+    it('does NOT invent an id from the name when the player has none', () => {
       const comp = { players: [{ name: 'Carol', dojo: 'Dojo C' }] };
       const map = buildPlayerMap(comp);
-      expect(map['Carol'].id).toBe('Carol');
+      expect(map['Carol'].id).toBe('');
+    });
+
+    // Canonical bc-pnum regression case: two participants sharing a display
+    // name from different dojos, NEITHER with a real id. Before the fix,
+    // both entries collapsed onto id === name (the SAME invented string) for
+    // whichever one wins the last-added name-key slot; a name-keyed id-only
+    // consumer could then attribute the wrong dojo. After the fix, neither
+    // entry carries an id at all, so a downstream id-decides check correctly
+    // recognises there is no id to decide with, rather than reading two
+    // distinct-but-invented "ids" as if they meant something.
+    it('two same-name/different-dojo participants with no real id both keep id ""', () => {
+      const comp = {
+        players: [
+          { name: 'Sato', dojo: 'Dojo A' },
+          { name: 'Sato', dojo: 'Dojo B' },
+        ],
+      };
+      const map = buildPlayerMap(comp);
+      // Name key collapses to whichever was added last (existing, unrelated
+      // behavior); the point under test is that its id is empty, not a name.
+      expect(map['Sato'].id).toBe('');
     });
   });
 
@@ -1019,6 +1104,19 @@ describe('API Utils', () => {
             body: JSON.stringify({ playerName: 'Alice', rank: 3 }),
           }),
         );
+      });
+
+      // playerId is REQUIRED server-side (operator ruling bc-pnum:
+      // resolvePoolOverrideTarget resolves a pool member by id only). This
+      // pins that the client forwards it verbatim, and that playerDojo is
+      // NEVER sent -- the server never read it, so there is nothing to gain
+      // from including it, unlike the pre-bc-pnum client which sent it
+      // whenever the caller happened to have one.
+      it('includes playerId when the caller passes one, and never sends playerDojo', async () => {
+        global.fetch = vi.fn().mockResolvedValue({ ok: true });
+        await API.overridePoolRank('comp1', 'pool-A', 'Alice', 3, 'secret', 'id-alice');
+        const [, opts] = global.fetch.mock.calls[0];
+        expect(JSON.parse(opts.body)).toEqual({ playerName: 'Alice', rank: 3, playerId: 'id-alice' });
       });
     });
 

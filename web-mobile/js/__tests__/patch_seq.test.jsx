@@ -12,6 +12,11 @@ import { applyPatchOrdered, checkSeqGap } from '../patch.jsx';
 //
 // These tests pin all three branches plus the first-event behaviour
 // (no false-positive gap on initial connect).
+//
+// bc-pnum: winner assertions expect id "" -- these
+// fixtures carry no player map, so resolveSide (api_serializers.jsx) has
+// nothing to resolve the winner NAME against and no longer invents an id
+// from it.
 
 const makeState = () => ({
   poolMatches: [
@@ -31,7 +36,7 @@ describe('applyPatchOrdered', () => {
       data: { result: { id: "p1", winner: "Alice" } },
     }, state, onGap);
     expect(state.lastSeq).toBe(5);
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
     expect(onGap).not.toHaveBeenCalled();
   });
 
@@ -45,7 +50,7 @@ describe('applyPatchOrdered', () => {
       data: { result: { id: "p1", winner: "Alice" } },
     }, state, onGap);
     expect(state.lastSeq).toBe(6);
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
     expect(onGap).not.toHaveBeenCalled();
   });
 
@@ -60,7 +65,7 @@ describe('applyPatchOrdered', () => {
     }, state, onGap);
     // Still applies the current patch. The latest state is
     // authoritative even when intermediate events were lost.
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
     expect(state.lastSeq).toBe(10);
     expect(onGap).toHaveBeenCalledTimes(1);
     expect(onGap).toHaveBeenCalledWith({ from: 6, to: 9 });
@@ -108,7 +113,7 @@ describe('applyPatchOrdered', () => {
       type: "match_updated",
       data: { result: { id: "p1", winner: "Alice" } },
     }, state, onGap);
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
     expect(state.lastSeq).toBe(10);
     expect(onGap).not.toHaveBeenCalled();
   });
@@ -133,8 +138,8 @@ describe('applyPatchOrdered', () => {
     expect(state.lastSeq).toBe(6);
     expect(onGap).toHaveBeenCalledTimes(1);
     expect(onGap).toHaveBeenCalledWith({ from: 3, to: 4 });
-    expect(cur.poolMatches[0].winner).toEqual({ id: "C", name: "C" });
-    expect(cur.poolMatches[1].winner).toEqual({ id: "D", name: "D" });
+    expect(cur.poolMatches[0].winner).toEqual({ id: "", name: "C" });
+    expect(cur.poolMatches[1].winner).toEqual({ id: "", name: "D" });
   });
 
   it('survives a throwing onGap callback (does not break SSE processing)', () => {
@@ -150,7 +155,7 @@ describe('applyPatchOrdered', () => {
         seq: 10,
         data: { result: { id: "p1", winner: "Alice" } },
       }, state, onGap);
-      expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+      expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
       expect(state.lastSeq).toBe(10);
       expect(onGap).toHaveBeenCalledTimes(1);
     } finally {

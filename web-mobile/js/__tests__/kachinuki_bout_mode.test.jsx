@@ -181,6 +181,29 @@ describe('deriveKachinukiEndOutcome', () => {
     })).toEqual({ kind: 'blocked', reason: 'no-bouts' });
   });
 
+  // bc-pnum: the name arm below the side rule maps a server-recorded winner
+  // STRING back to a side. Two opposing fighters may legally share a display
+  // name, so that string cannot always say which side won -- and this outcome
+  // is what the End-match button offers the operator to confirm.
+  it('maps a same-name winner back to a side by member id', () => {
+    expect(deriveKachinukiEndOutcome({
+      subResults: [bout(1, {
+        sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada', decision: 'fusensho',
+        sideAMemberId: 'm-aka', sideBMemberId: 'm-shiro', winnerMemberId: 'm-shiro',
+      })],
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'win', winnerSide: 'b' });
+  });
+
+  it('offers no winner for a same-name bout no id can settle', () => {
+    // Blocked is the honest answer in a knockout: it tells the operator to
+    // settle the bout rather than confirming a side the data cannot name.
+    expect(deriveKachinukiEndOutcome({
+      subResults: [bout(1, { sideA: 'Yamada', sideB: 'Yamada', winner: 'Yamada', decision: 'fusensho' })],
+      isKnockoutPhase: true,
+    })).toEqual({ kind: 'blocked', reason: 'knockout-tie' });
+  });
+
   it('a trailing untouched auto-appended bout does not mask the decisive bout (composition)', () => {
     const subs = [sub({ aPts: ['M'] }), sub()]; // bout 2 appended, never touched
     expect(deriveKachinukiEndOutcome({

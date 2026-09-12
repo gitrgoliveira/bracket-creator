@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "The bijective base-26 pool-name sequence poolPositionName produces",
+    "(internal/helper/tournament.go), which delegates to mustColumnName --",
+    "the same conversion Excel itself uses for column letters (bc-pnum",
+    "review(d)). Pinned at the boundaries that used to collide under the old",
+    "hand-rolled doubled-letter scheme (bc-drwx item 6) and at the second",
+    "single-to-double-letter rollover.",
+    "",
+    "Shared with the JS mirror, poolLetterName in web-mobile/js/data.jsx",
+    "(bc-drwx item 9), which reads this same file in a later change so the",
+    "two sequences can never independently drift.",
+    "",
+    "index is 0-based (poolPositionName's own argument); name is the full",
+    "\"Pool <letters>\" string.",
+    "",
+    "Go half: TestPoolPositionName_MatchesFixture in pool_position_name_test.go."
+  ],
+  "cases": [
+    { "index": 0, "name": "Pool A" },
+    { "index": 1, "name": "Pool B" },
+    { "index": 25, "name": "Pool Z" },
+    { "index": 26, "name": "Pool AA" },
+    { "index": 27, "name": "Pool AB" },
+    { "index": 51, "name": "Pool AZ" },
+    { "index": 52, "name": "Pool BA" },
+    { "index": 701, "name": "Pool ZZ" },
+    { "index": 702, "name": "Pool AAA" },
+    { "index": 703, "name": "Pool AAB" }
+  ]
+}

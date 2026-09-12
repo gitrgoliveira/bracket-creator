@@ -66,13 +66,15 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     const m = normalizeMatch(raw, {});
 
     // After normalization both sides and winner should be {id, name} objects.
-    // Because neither has a UUID in the playerMap, id falls back to the name.
-    expect(m.sideA).toEqual(expect.objectContaining({ name: 'Ryu' }));
-    expect(m.sideB).toEqual(expect.objectContaining({ name: 'Phoenix' }));
-    expect(m.winner).toEqual(expect.objectContaining({ name: 'Ryu' }));
-    // The critical assertion: winner.id must equal sideA.id so aWin is truthy.
-    expect(m.winner.id).toBe(m.sideA.id);
-    expect(m.winner.id).not.toBe(m.sideB.id);
+    // bc-pnum: resolveSide no longer invents an id from
+    // the name for a side absent from the player map -- id stays "" for all
+    // three (sideA, sideB, winner) here, honestly reflecting that none of
+    // them resolved to a real participant. The winner cue below therefore
+    // resolves through sameCompetitor's name fallback (both are id-less),
+    // not through an id equality that would now be meaningless ("" === "").
+    expect(m.sideA).toEqual({ id: '', name: 'Ryu' });
+    expect(m.sideB).toEqual({ id: '', name: 'Phoenix' });
+    expect(m.winner).toEqual({ id: '', name: 'Ryu' });
 
     // Mount VSchedItem and verify the winner CSS class.
     const { sides, shiroDivs, akaDivs } = mountSides(m);
@@ -98,8 +100,7 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
       winner: 'Phoenix',
     };
     const m = normalizeMatch(raw, {});
-    expect(m.winner.id).toBe(m.sideB.id);
-    expect(m.winner.id).not.toBe(m.sideA.id);
+    expect(m.winner).toEqual({ id: '', name: 'Phoenix' });
 
     const { shiroDivs, akaDivs } = mountSides(m);
     // Shiro (sideB = "Phoenix") wins.
@@ -128,8 +129,10 @@ describe('T5: VSchedItem winner cue - completed team match', () => {
     };
     const m = normalizeMatch(raw, {});
     // IV is 0-0 for all regular sub-bouts (all draws): not our concern here,
-    // but the match-level winner must still resolve correctly.
-    expect(m.winner.id).toBe(m.sideA.id);
+    // but the match-level winner must still resolve correctly (by name: both
+    // sideA and winner are id-less here, so sameCompetitor's name fallback
+    // is what makes this true, not an id equality).
+    expect(m.winner).toEqual({ id: '', name: 'Ryu' });
 
     const { shiroDivs, akaDivs } = mountSides(m);
     // Daihyosen winner is "Ryu" (sideA = Aka): must carry vsched-item__side--w.

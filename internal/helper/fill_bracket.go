@@ -604,8 +604,9 @@ func buildFillBracketSingleCourtDraw(pools []Pool, draftPoolIdx []int) *Knockout
 	// merely the one that happened to measure best on one run: it is the
 	// one deinterleave already proven, by the multi-court cases that route
 	// through the real ReorderPoolsForCourts, to spread the clustering
-	// CreatePoolsForCount's remainder-spread produces -- consistent with the
-	// rest of this package rather than a second, ad hoc rule. This
+	// realTargetSizes' own remainder-spread produces (bc-drwx item 11) --
+	// consistent with the rest of this package rather than a second, ad hoc
+	// rule. This
 	// function's own choice matters LESS now that selection is
 	// capacity-aware (second review rework): computeFillBracketCourtLayout
 	// uses this exact same split for BOTH SelectFillBracketDrafts and this

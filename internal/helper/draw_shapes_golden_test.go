@@ -271,8 +271,9 @@ func drawGoldenDojoRoster(total, dojoSize int, dojoName string) []Player {
 // golden cases.
 func computeDojoOversubscriptionStats(pools []Pool, dojo string) (counts []int, maxCount int, singleDojoPools []string) {
 	counts = make([]int, len(pools))
+	keys := make(dojoKeyCache)
 	for i, p := range pools {
-		n := countDojoInPool(p, dojo)
+		n := countDojoInPool(p, dojo, keys)
 		counts[i] = n
 		if n > maxCount {
 			maxCount = n

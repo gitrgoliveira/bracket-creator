@@ -239,6 +239,29 @@ export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
 // has an id but no name.
 // Exported so a caller that only needs "which side", not "place the mark",
 // can use it directly (e.g. a future consumer that isn't ippon-shaped).
+// subBoutAttribution: the JS twin of domain.SubBoutAttribution, and the one
+// statement of what makes a TEAM SUB-BOUT different from the match above it.
+// Its two sides are FIGHTERS, and two fighters on opposing teams may legally
+// share a display name, where two teams may not. attributeWinnerSide's name
+// branch answers side A for a winner matching both, which is a deliberate
+// convention at match level and a coin flip here, so a shared name is dropped
+// from the attribution: the member ids are then the only thing that can
+// answer, and where they cannot, no side is named at all.
+//
+// Pass a server bout row; every field is optional, so a legacy row missing
+// the ids behaves exactly as it did before they existed.
+export function subBoutAttribution(sub) {
+  const att = {
+    winnerId: sub && sub.winnerMemberId, sideAId: sub && sub.sideAMemberId, sideBId: sub && sub.sideBMemberId,
+    winner: sub && sub.winner, sideA: sub && sub.sideA, sideB: sub && sub.sideB,
+  };
+  if (att.sideA && att.sideA === att.sideB) {
+    att.sideA = "";
+    att.sideB = "";
+  }
+  return att;
+}
+
 export function attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB } = {}) {
   if (winnerId && sideAId && sideBId) {
     if (winnerId === sideAId) return "a";

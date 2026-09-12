@@ -48,8 +48,9 @@ func buildPoolPhaseDojoTree(players []Player, poolSize int, isMax bool, numCourt
 		pools[poolIdx].Players = append(pools[poolIdx].Players, p)
 	}
 
-	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: qualifierModeStandard})
-	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots); err != nil {
+	qualifierSlots := treeAwareQualifierSlots(targetSizes, poolWinners, drawCourts, qualifierMode{ExtraQualifiers: QualifierModeStandard})
+	ids, _ := newDojoIDCacheFor(players)
+	if err := assignUnseededByDojoTree(pools, targetSizes, unseeded, qualifierSlots, ids); err != nil {
 		return nil, 0, err
 	}
 	return ReorderPoolsForCourts(pools, drawCourts), drawCourts, nil
@@ -225,8 +226,9 @@ func TestDojoTreeDescent_RoomPoolsFunnel(t *testing.T) {
 	require.Len(t, pools, 6)
 
 	toraCounts := make([]int, len(pools))
+	keys := make(dojoKeyCache)
 	for i, pool := range pools {
-		toraCounts[i] = countDojoInPool(pool, "Tora Dojo")
+		toraCounts[i] = countDojoInPool(pool, "Tora Dojo", keys)
 	}
 	maxCount := 0
 	for _, c := range toraCounts {

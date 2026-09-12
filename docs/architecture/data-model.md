@@ -26,7 +26,13 @@ The trade this makes is described honestly in [section 6](#6-how-the-model-maps-
 ## 2. Tournament and competition structure
 
 A tournament owns competitions; a competition owns everything else. The competition is the
-consistency boundary: every write is serialised per competition, and nothing spans two.
+consistency boundary: every write is serialised per competition, and no write spans two.
+
+One rule does span them, and it comes from the venue rather than from the data. Competitions
+run at the same time on a shared set of courts, so a court may hold only one running match in
+the whole tournament. Starting a match therefore checks every other competition first, and that
+check and the write it guards are taken under one tournament wide lock, so two operators in
+different competitions cannot both claim the same court.
 
 ```mermaid
 classDiagram
@@ -54,6 +60,7 @@ classDiagram
         +int PoolSize
         +int PoolWinners
         +TeamMatchType TeamMatchType
+        +string NumberPrefix
         +string[] Courts
         +bool Naginata
         +bool Engi
@@ -61,6 +68,7 @@ classDiagram
     }
 
     class Player {
+        <<one row per entrant: a competitor, or a TEAM when Kind is team>>
         +string ID
         +string Name
         +string DisplayName
@@ -88,10 +96,20 @@ classDiagram
     }
 
     class TeamLineup {
+        <<team competitions only>>
         +string TeamID
+        +string CompetitionID
         +int Round
         +string MatchID
         +Map~Position, string~ Positions
+        +Map~Position, string~ MemberIDs
+    }
+
+    class TeamMember {
+        <<team competitions only>>
+        +string ID
+        +int Index
+        +string Name
     }
 
     class Overrides {
@@ -106,18 +124,61 @@ classDiagram
     Competition "1" o-- "0..*" TeamLineup
     Competition "1" o-- "0..1" Overrides
     Pool "1" o-- "1..*" Player : draws from
+    Player "1" o-- "0..*" TeamMember : squad, only when the row is a team
+    TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
+
+The competition box lists the settings that shape the model, not every field it holds: the
+scheduling, display and format-specific settings are left out because nothing else on this
+page depends on them.
 
 `Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
-competitions. A competition in the `team` kind treats each `Player` entry as a team, with
-member names held in the entry's metadata.
+competitions. A competition in the `team` kind treats each `Player` entry as a team, and
+the people on that team are its squad, stored in `squads.yaml` under the team's participant
+id.
+
+That one setting decides which records exist at all. An individual competition has no
+`squads.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
+directly. A team competition has both, and its entrants are teams, so the person who fights
+a given bout is named one level further down. The positions a round has are the five FIK
+names, senpo, jiho, chuken, fukusho and taisho, when the team size is five, and numbers for
+any other size. Everything else on the diagram above, the pools, the eligibility records and
+the ranking overrides, is the same for either kind, and reads a `Player` row without caring
+which of the two it is.
+
+Each squad member carries a stable id, minted once when the member is added and never
+reused, and a display index. The id is what a lineup position and a bout row record, so a
+member can be renamed without any record losing track of who fought. A squad is seeded with
+one member per position the competition's team size defines, so a team has its shape before
+anyone is named. No member is ever removed, which is why an index is never freed and no
+renumbering question arises; what an organiser can do instead is clear a name, which empties
+that position and keeps its id and index, and only until the competition starts. After that a
+name can still be corrected, which is what renaming one is for: a bout row holds the member's
+id, so a bout already fought names the same person whatever the name is changed to. Adding a
+member stays available at any time, including after the start, because a team fields
+replacements mid tournament.
+
+The label an organiser reads is the team's competitor number followed by the member index,
+for example `T10.1`. That label is composed when it is shown and never stored, because a
+competitor number can change and the identity underneath it cannot. It is derived the same
+way on both sides: the public surfaces receive a team's squad on the viewer payload and
+compose the label themselves, rather than reading a stored string.
+
+Two rules govern member names. Within one team the names must be unique: a name is how an
+organiser picks a member, and the winner-stays-on format has to tell two teammates apart.
+Members of different teams may share a name freely. The squad is not a starting line-up, so
+it may hold more members than the competition's team size: the extra entries are the
+replacements an organiser can field, and the team size only fixes how many positions a
+round has.
 
 ## 3. The match and result model
 
 This is the detailed part of the model, because the rules it encodes are detailed. A match
 carries its pairing, its score, how it was decided, when and where it is played, and an
-audit trail for corrections.
+audit trail for corrections. Every match belongs to exactly one competition: pool, league and
+Swiss matches are rows in that competition's results file, and knockout matches are nodes in
+its bracket, so nothing in this section exists outside a competition.
 
 ```mermaid
 classDiagram
@@ -160,11 +221,14 @@ classDiagram
         +int Position
         +string SideA
         +string SideB
+        +string SideAMemberID
+        +string SideBMemberID
         +string[] IpponsA
         +string[] IpponsB
         +int HansokuA
         +int HansokuB
         +string Winner
+        +string WinnerMemberID
         +string Decision
         +bool? DecidedByHantei (legacy, read-only, unset = writer said nothing)
     }
@@ -177,33 +241,47 @@ classDiagram
         +bool Preview
         +BracketMatch[][] Rounds
         +BracketMatch ThirdPlaceMatch
+        +string[] DrawOrder
     }
 
     class BracketMatch {
         +string ID
         +MatchStatus Status
+        +string Court
+        +string ScheduledAt
         +string SideA
         +string SideB
+        +string SideAID
+        +string SideBID
         +string Winner
+        +string WinnerID
         +string[] IpponsA
         +string[] IpponsB
         +int HansokuA
         +int HansokuB
+        +int FlagsA
+        +int FlagsB
         +string ScoreA (legacy, read-only)
         +string ScoreB (legacy, read-only)
         +int MatchNumber
         +int DisplayRound
         +string[] Feeders
+        +string PlaceholderA
+        +string PlaceholderB
+        +string PlaceholderWinner
         +bool IsOverridden
         +bool Hidden
         +string Decision
         +string DecisionBy
         +string DecisionReason
+        +string ResultSource
+        +string CorrectionReason
+        +bool ReopenPending
         +bool DecidedByHantei (legacy, read-only)
         +long ModifiedAt
     }
 
-    MatchResult "1" *-- "2" CompetitorSide : shiro and aka
+    MatchResult "1" *-- "2" CompetitorSide : side A is aka, side B is shiro
     MatchResult "1" *-- "1" Outcome
     MatchResult "1" *-- "0..*" SubMatchResult : team bouts
     MatchResult "1" *-- "0..1" EnchoMetadata
@@ -220,16 +298,53 @@ own, chosen for clarity: no such type exists in the code. Everything a competito
 to a match (name, participant id, struck points, outstanding fouls, flags, and the
 representative player for a team tie breaker) exists twice, once per side. In the object
 model those are `SideA`/`SideB`, `IpponsA`/`IpponsB`, `HansokuA`/`HansokuB` and so on. They
-are one concept with two instances, not twelve independent attributes.
+are one concept with two instances, not twelve independent attributes. Side A is aka and
+side B is shiro. The draw fixes that pairing, and it is not a display order: every surface
+draws shiro on the left.
 
 **A team match is an aggregate.** `SubMatchResult` is a full bout in its own right: its own
 pairing, score, decision, overtime and judges' decision. A five person team encounter holds
 five of them, plus an optional representative bout at position `-1`. Ranking figures such as
-individual victories and points won are derived from these, never stored separately.
+individual victories and points won are DERIVED from these by one function, never entered by
+hand and never a second source of truth: every read serves them alongside the bouts, every
+save of an elimination match recomputes them, and every surface that shows them takes what
+the server computed rather than re-deriving its own.
 
-**Sides carry both a name and an id.** Results are written against the name, and the
-participant id travels alongside it. Both are kept because a rename must not orphan a
-recorded result.
+**Sides carry both a name and an id, and the id is the one that identifies.** Both are
+kept because a rename must not orphan a recorded result: the name is what a person reads
+on the sheet, the id is what the app resolves by. Where a record has an id field, it is
+read by id alone; a name is consulted only for a row old enough to predate the field,
+which the app repairs when it loads it.
+
+That applies one level further down as well. A team bout carries its two fighters' SQUAD
+member ids beside their names, and the winner's id beside the winner's name. Without them
+a bout between two people who happen to share a display name could not be attributed at
+all, because the name identifies neither of them, and competitors are allowed to share
+one.
+
+Those are two different namespaces, and the field names keep them apart on purpose. A
+match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side
+carries a SQUAD MEMBER id, which names one person inside a team. They sit one level apart
+and are never interchangeable.
+
+The cost of the pattern is worth stating, because it is this model's sharpest edge. A name
+and its id are stored as two fields, or in a lineup's case as two maps keyed by the same
+position, so nothing in the storage forces a writer to set both. A record with a name and
+no id is therefore representable, and does occur: rows written before the id existed, and
+rows whose name could not be resolved to exactly one person. The app treats such a row as
+unrepaired rather than as a fault, repairs what it can when it loads the file, and falls
+back to the name for that row alone. Making the pair a single value instead of two fields
+would remove the state entirely, at the cost of rewriting every stored file, which is why
+it has not been done.
+
+**A knockout slot remembers the draw.** A bracket match repeats the scheduling and audit
+fields a pool match carries, so a knockout match is scheduled, corrected and reopened the same
+way. Two things are its own. For a knockout fed by pools it keeps what the draw wrote in each
+slot before any pool finished, which is how a qualifier reaches the slot the draw gave it
+without the draw being recomputed. For a knockout drawn without pools the bracket keeps the
+order the competitors were drawn in, which is what their competitor numbers count; a
+competition with pools numbers its entrants at the pool draw instead, so it stores no second
+order.
 
 ### Match status and decision
 
@@ -271,7 +386,7 @@ classDiagram
     }
     class seeds_csv["seeds.csv"] {
         <<CSV>>
-        Rank, Name, Dojo
+        Rank, Name, Dojo, ID
     }
     class pools_csv["pools.csv"] {
         <<CSV>>
@@ -292,6 +407,11 @@ classDiagram
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
         TeamLineup by round
+        position to name and member id
+    }
+    class squads_yaml["squads.yaml"] {
+        <<YAML>>
+        TeamMember list by team
     }
     class overrides_json["overrides.json"] {
         <<JSON>>
@@ -321,7 +441,9 @@ classDiagram
     config_md --> bracket_json
     config_md --> status_yaml
     config_md --> lineups_yaml
+    config_md --> squads_yaml
     config_md --> overrides_json
+    squads_yaml --> lineups_yaml : positions reference members
 ```
 
 Markdown, CSV, and JSON or YAML each earn their place:
@@ -332,11 +454,18 @@ Markdown, CSV, and JSON or YAML each earn their place:
 | CSV | participants, seeds, pools, pool and league matches | Opens in a spreadsheet; one row per record diffs cleanly |
 | JSON and YAML | bracket, eligibility, lineups, overrides | Tree shaped data that does not fit a row |
 
-The seed list stores the dojo alongside the name, and a seed is matched to its participant
-by name and dojo together, because two competitors may share a name across dojos; a file
-that stored only the name could not say which of them the rank belonged to. A row without a
-dojo still matches by name alone when that name is unique in the roster, and a file without
-the dojo column is completed from the roster on first load.
+A competitor list must exist before a seed can be set: a seed ranks a participant, so a rank
+with nobody to attach it to is refused, not stored. Clearing a seeding is exempt, since that
+is how an operator removes one, and there is nothing to attach either way.
+
+The seed list stores the participant's own id alongside the name and dojo, and once a row
+carries that id it is the one thing a seed is matched to its participant by. The name and dojo
+are kept for two other jobs: they are what an older reader that has never heard of the id
+column still matches by, and they are the fallback for a row the id column has not reached
+yet, matched by name and dojo together because two competitors may share a name across
+dojos and a file that stored only the name could not say which of them the rank belonged to.
+A row without a dojo still matches by name alone when that name is unique in the roster, and
+a file without the dojo or the id column is completed from the roster on first load.
 
 ## 5. Write guarantees
 

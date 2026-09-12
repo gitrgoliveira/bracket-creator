@@ -75,6 +75,15 @@ func TestLeagueStandings_RoundRobinResults(t *testing.T) {
 			winner = m.SideA
 		}
 		matches[i].Winner = winner
+		// WinnerID too: resolveWinnerSide resolves the winner by id only
+		// (operator ruling bc-pnum), so a name-only Winner would never
+		// attribute a win/loss to either side.
+		switch winner {
+		case m.SideA:
+			matches[i].WinnerID = m.SideAID
+		case m.SideB:
+			matches[i].WinnerID = m.SideBID
+		}
 		matches[i].Status = state.MatchStatusCompleted
 		// Score the winner's actual side so points-scored/points-lost data
 		// stays consistent with the recorded winner (a fixed IpponsA would

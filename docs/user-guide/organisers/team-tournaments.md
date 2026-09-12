@@ -10,6 +10,40 @@ Before each team encounter, set the fighting order for each team across the five
 
 Each team encounter has its own lineup. To carry over the same order from the previous encounter, use **Copy from previous match** at the top of the lineup panel.
 
+### The squad
+
+A team's people are its squad. A team starts with one position per fighter the
+competition's team size defines, each numbered and waiting for a name. Fill those
+names in from the **Squad members** section of the competition's **Settings**
+page, or build the squad as you go from the lineup panel: pick an existing member
+for a position, or type a new name into a position and the app adds that person
+to the squad in the same step. Adding someone new is confirmed first, so a
+mistyped name cannot quietly create a person nobody expected.
+
+Renaming a member keeps them attached to everything they have already done. A
+bout they fought, and the winner-stays-on order, still refer to the same person
+after the change, so you can correct a spelling or switch to a full name mid
+tournament without disturbing results already recorded. Rename from either
+place, at any time.
+
+Nobody is removed from a squad. What you can do instead is clear a name, which
+empties that position and keeps its number, and you can only do that before the
+competition starts. Once it has started every name stays, so a bout already
+fought always names the same person. An unused member is harmless: they simply
+never appear in a lineup.
+
+The squad can be larger than the number of positions a round has. Add the
+replacements a team brings and field whichever of them you need in each
+encounter. You can add a member after the competition has started, which is how
+a team fields a replacement mid tournament.
+
+Each member shows as the team's competitor number followed by their position in
+the squad, for example T10.1 and T10.2. These labels follow the team's number,
+so if you change a competition's number prefix the labels change with it. A
+label appears wherever the member's name does: the lineup panel, the score
+sheet, the viewer, the court display, the streaming overlay, and the bout detail
+sheet a winner-stays-on competition adds to its export.
+
 ### Incomplete and uneven teams
 
 Team sizes are not fixed. A lineup can leave any position empty, teams in the same competition can field different numbers of fighters, and the app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started, so you can complete or adjust the order as a round is running.
@@ -27,6 +61,8 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 1. The team with the highest number of individual wins (victories) wins the encounter.
 2. If wins are equal, the team with the highest points scored wins.
 3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). See [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
+
+Two fighters from opposing teams may share a name, so the app records who won each bout by identity rather than by the name on the sheet. You do not have to do anything for this, and bouts you score now are unaffected. The one case you may see is an encounter scored by a much older version: a bout between two same-named fighters there can show no individual win for either team, because the name it stored cannot say which of the two it meant. The points scored in that bout still count.
 
 ## Kachinuki (winner stays on)
 

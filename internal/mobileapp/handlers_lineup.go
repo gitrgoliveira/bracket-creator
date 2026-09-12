@@ -49,10 +49,23 @@ func lineupSetStatus(err error) int {
 }
 
 // LineupRequest is the body for PUT /lineups/:round and the match-scoped
-// PUT /match-lineups/:matchId. We accept only the positions map; teamID,
-// round/matchID, and compID are pinned by the URL path.
+// PUT /match-lineups/:matchId. teamID, round/matchID, and compID are pinned
+// by the URL path.
+//
+// MemberIDs (bc-tmid pass 3) is the id half of a lineup, keyed by the SAME
+// Position as Positions: a client sets both together, the name for display
+// and the id for identity. It is entirely optional on the wire: an older
+// client that only ever sent "positions" leaves MemberIDs nil, which
+// ShouldBindJSON leaves as a nil map, domain.TeamLineup.MemberIDs then
+// stores nil, and json/yaml omitempty both drop it -- so an old client's
+// write behaves exactly as it did before this field existed. Its keys are
+// validated by the same domain.TeamLineup.ValidatePositions call the
+// Positions keys already went through (it walks MemberIDs as its own loop
+// beside Positions), so an invalid position key here is rejected exactly
+// like an invalid Positions key, with no separate check needed here.
 type LineupRequest struct {
 	Positions map[domain.Position]string `json:"positions"`
+	MemberIDs map[domain.Position]string `json:"memberIds,omitempty"`
 }
 
 // RegisterLineupHandlers wires the GET/PUT/DELETE lineup endpoints
@@ -194,6 +207,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			CompetitionID: compID,
 			Round:         round,
 			Positions:     req.Positions,
+			MemberIDs:     req.MemberIDs,
 		}
 
 		// T156: load comp (for teamSize) + Set lineup + reload lineup (for
@@ -308,6 +322,7 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 			CompetitionID: compID,
 			MatchID:       matchID,
 			Positions:     req.Positions,
+			MemberIDs:     req.MemberIDs,
 		}
 
 		type httpErr struct {
@@ -387,18 +402,18 @@ func RegisterLineupHandlers(r *gin.RouterGroup, store TeamLineupStore, comps Com
 // goes through requireValidCompID to enforce the
 // ValidateCompetitionID character whitelist.
 //
-// teamID is treated as opaque; there's no team-management surface
-// yet, so we don't impose a regex (the on-disk file is keyed by the
-// composite string and never used as a filesystem path). When team
-// management lands a real validator can be added here.
+// teamID is treated as opaque here, and that is now a CHOICE rather than
+// the absence of an alternative: the squad endpoints are a team-management
+// surface and do validate the id against participants.csv
+// (state.AddTeamMember). Lineups deliberately do not follow them. A lineup
+// keyed on an id no team holds is overwritten by the next save for that
+// team and renders nowhere meanwhile, whereas a squad member minted under
+// one can never be removed, so only the irreversible side earns the check.
+// The on-disk file is keyed by the composite string and the id is never
+// used as a filesystem path.
 func parseLineupParams(c *gin.Context) (compID, teamID string, round int, ok bool) {
-	compID, ok = requireValidCompID(c)
+	compID, teamID, ok = requireValidCompIDAndTeam(c)
 	if !ok {
-		return "", "", 0, false
-	}
-	teamID = c.Param("tid")
-	if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team ID is required"})
 		return "", "", 0, false
 	}
 	roundStr := c.Param("round")
@@ -420,13 +435,8 @@ func parseLineupParams(c *gin.Context) (compID, teamID string, round int, ok boo
 // key and a lookup against persisted match IDs, so no regex is imposed
 // beyond non-empty.
 func parseMatchLineupParams(c *gin.Context) (compID, teamID, matchID string, ok bool) {
-	compID, ok = requireValidCompID(c)
+	compID, teamID, ok = requireValidCompIDAndTeam(c)
 	if !ok {
-		return "", "", "", false
-	}
-	teamID = c.Param("tid")
-	if teamID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "team ID is required"})
 		return "", "", "", false
 	}
 	matchID = c.Param("matchId")

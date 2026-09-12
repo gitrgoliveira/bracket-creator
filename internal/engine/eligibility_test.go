@@ -1,9 +1,7 @@
 package engine
 
 import (
-	"bytes"
 	"errors"
-	"log"
 	"testing"
 	"time"
 
@@ -483,45 +481,228 @@ func TestAlreadyIneligibleError_Error(t *testing.T) {
 	assert.Contains(t, err.Error(), "match-2")
 }
 
-// TestLoserSideName exercises the loserSideName helper for various
-// result shapes: winner set, winner not set but ippons asymmetric.
-func TestLoserSideName(t *testing.T) {
+// TestLosingSide is PR #416 findings 4/5's table test: losingSide is the ONE
+// owner of "which side lost", preferring WinnerSide, then a complete id set,
+// then the Winner name (guarded against a same-name pairing), then the
+// legacy ippon-emptiness heuristic. loserSideName used to own the last two
+// steps as a name-first helper whose return value was then re-matched
+// against SideA/SideB by the caller; that mapping step is where a same-name
+// pairing went wrong (see the "same-name pair" cases below), so those steps
+// are exercised here directly on losingSide instead.
+func TestLosingSide(t *testing.T) {
 	tests := []struct {
-		name   string
-		result state.MatchResult
-		want   string
+		name     string
+		result   state.MatchResult
+		wantID   string
+		wantName string
+		wantOK   bool
 	}{
 		{
-			"winner is SideA → loser is SideB",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice"},
-			"Bob",
+			name: "WinnerSide authoritative even against a contradicting name",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
+				Winner: "Bob", WinnerSide: "A", // WinnerSide says A won despite Winner naming Bob
+			},
+			wantID: "idB", wantName: "Bob", wantOK: true,
 		},
 		{
-			"winner is SideB → loser is SideA",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Bob"},
-			"Alice",
+			name: "id-only: no WinnerSide, a complete id set disambiguates",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
+				WinnerID: "idB",
+			},
+			wantID: "idA", wantName: "Alice", wantOK: true,
 		},
 		{
-			"no winner but SideA has ippons → SideB is loser",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", IpponsA: []string{"M"}, IpponsB: nil},
-			"Bob",
+			name: "name-only: no ids at all, resolved by Winner name",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", Winner: "Bob",
+			},
+			wantID: "", wantName: "Alice", wantOK: true,
 		},
 		{
-			"no winner but SideB has ippons → SideA is loser",
-			state.MatchResult{SideA: "Alice", SideB: "Bob", IpponsA: nil, IpponsB: []string{"M"}},
-			"Alice",
+			name: "contradictory Winner/WinnerID: ids win over the name",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", SideAID: "idA", SideBID: "idB",
+				Winner: "Alice", WinnerID: "idB", // name says Alice, id says Bob
+			},
+			wantID: "idA", wantName: "Alice", wantOK: true,
 		},
 		{
-			"both empty ippons and no winner → empty",
-			state.MatchResult{SideA: "Alice", SideB: "Bob"},
-			"",
+			name: "ippon-emptiness fallback: no Winner, no WinnerSide, no ids",
+			result: state.MatchResult{
+				SideA: "Alice", SideB: "Bob", IpponsA: []string{"M"},
+			},
+			wantID: "", wantName: "Bob", wantOK: true,
+		},
+		{
+			name:   "wholly unresolved: nothing to go on",
+			result: state.MatchResult{SideA: "Alice", SideB: "Bob"},
+			wantID: "", wantName: "", wantOK: false,
+		},
+		{
+			// bc-pnum review finding 6: this row carries SideAID/SideBID (an
+			// id-carrying pool record), so tiers 3/4 (name and ippon-emptiness)
+			// must NEVER fire for it, no matter how ambiguous or how tempting a
+			// scoreline-based tie-break looks -- a record with an id field is
+			// resolved BY ID ONLY, and this one has no WinnerID to resolve with.
+			// Before finding 6, this same fixture (same-name pair, no WinnerID)
+			// fell through to the ippon-emptiness heuristic and confidently
+			// returned side B as the loser purely from the scoreline; that was
+			// itself the fix for an EARLIER bug (PR #416 findings 4/5, see
+			// TestRecordIneligibilityFromDecision_WinnerSideOverridesAmbiguousNameTieBreak
+			// below) where a cruder name comparison always picked side A. Both
+			// were guesses; the correct answer for an id-carrying row with no
+			// winner id is to resolve NOTHING.
+			name: "same-name pair with ids but no WinnerID resolves nothing, even with a scoreline",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka", SideAID: "idA", SideBID: "idB",
+				Winner:  "Tanaka",
+				IpponsA: []string{"M", "M"}, IpponsB: nil,
+			},
+			wantID: "", wantName: "", wantOK: false,
+		},
+		{
+			// Same fixture, scoreline reversed: still resolves to nothing, for
+			// the same reason -- the scoreline is irrelevant once the row
+			// carries ids, whichever direction it points.
+			name: "same-name pair with ids but no WinnerID resolves nothing, scoreline reversed",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka", SideAID: "idA", SideBID: "idB",
+				Winner:  "Tanaka",
+				IpponsA: nil, IpponsB: []string{"M", "M"},
+			},
+			wantID: "", wantName: "", wantOK: false,
+		},
+		{
+			// The bracket-class twin of the two cases above: an UNREPAIRED
+			// bracket row -- a bye, an unresolved "Winner of ..." feeder, or
+			// a legacy row a repair has not yet reached (a STAMPED
+			// BracketMatch now carries SideAID/SideBID/WinnerID too, since
+			// bc-brid) -- so tiers 3/4 remain the correct, and only,
+			// resolution path here. Same-name pair, ambiguous Winner name,
+			// so the scoreline (side A struck ippons, side B did not) is the
+			// only side-specific signal left, and it points at side B as the
+			// loser.
+			name: "no ids at all: ambiguous Winner name falls back to the scoreline (bracket class)",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka",
+				Winner:  "Tanaka",
+				IpponsA: []string{"M", "M"}, IpponsB: nil,
+			},
+			wantID: "", wantName: "Tanaka", wantOK: true,
+		},
+		{
+			// Same no-id fixture, scoreline reversed: side A struck nothing,
+			// side B struck ippons, so side A lost.
+			name: "no ids at all: ambiguous Winner name falls back to the scoreline, reversed (bracket class)",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka",
+				Winner:  "Tanaka",
+				IpponsA: nil, IpponsB: []string{"M", "M"},
+			},
+			wantID: "", wantName: "Tanaka", wantOK: true,
+		},
+		{
+			// This one carries ids too, so it is unresolved for the SAME
+			// id-gate reason as the two pool-class cases above (finding 6) --
+			// the equal scoreline is not why it fails, the id gate already
+			// stopped it before tier 4 ever ran. Kept as its own case because
+			// an equal-scoreline row is otherwise a plausible fixture an
+			// author might reach for first.
+			name: "same-name pair with ids, equal scorelines: unresolved via the id gate, not the tie",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka", SideAID: "idA", SideBID: "idB",
+				Winner:  "Tanaka",
+				IpponsA: []string{"M"}, IpponsB: []string{"M"},
+			},
+			wantID: "", wantName: "", wantOK: false,
+		},
+		{
+			// The true bracket-class (no id field at all) equal-scoreline
+			// case: nothing distinguishes the two sides even once tier 4 is
+			// reached, so this must report unresolved rather than guess.
+			name: "no ids at all: equal scorelines, no other signal → unresolved (bracket class)",
+			result: state.MatchResult{
+				SideA: "Tanaka", SideB: "Tanaka",
+				Winner:  "Tanaka",
+				IpponsA: []string{"M"}, IpponsB: []string{"M"},
+			},
+			wantID: "", wantName: "", wantOK: false,
+		},
+		{
+			// bc-pnum review round 2, finding 3: an id-carrying row (kiken
+			// decision, SideAID/SideBID both set) with NEITHER WinnerSide
+			// NOR WinnerID resolves to ok=false -- tiers 1/2 have nothing to
+			// go on, and the tier-3/4 id gate (the case above) blocks a
+			// name/ippon guess even though a scoreline signal (IpponsA
+			// struck, IpponsB empty) is sitting right there. This is
+			// DELIBERATE, not a gap to fix: see losingSide's own doc
+			// comment for the known (and, through the app itself,
+			// unreachable) consequence -- RecordDecisionTx's
+			// hadPriorLoser check treats this ok=false as "no prior loser
+			// to protect" and skips the T103 downstream-match lock.
+			name: "id-carrying prior with no WinnerSide/WinnerID resolves nothing, even with a scoreline (deliberate, see losingSide doc comment)",
+			result: state.MatchResult{
+				SideA: "Alice", SideAID: "idA", SideB: "Bob", SideBID: "idB",
+				Decision: "kiken-voluntary",
+				IpponsA:  []string{"M"}, IpponsB: nil,
+			},
+			wantID: "", wantName: "", wantOK: false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, loserSideName(&tc.result))
+			id, name, ok := losingSide(&tc.result)
+			assert.Equal(t, tc.wantID, id, "id")
+			assert.Equal(t, tc.wantName, name, "name")
+			assert.Equal(t, tc.wantOK, ok, "ok")
 		})
 	}
+}
+
+// TestRecordIneligibilityFromDecision_WinnerSideOverridesAmbiguousNameTieBreak
+// is PR #416 finding 4/5's repro on recordIneligibilityFromDecision directly:
+// a same-name pairing (SideA==SideB=="Tanaka") with only SideA's id stamped,
+// WinnerSide="B" (Tanaka@SideB explicitly won) but no WinnerID. Before the
+// fix, the loser was resolved via loserPlayerID -> resolveWinnerSide, which
+// never consulted WinnerSide at all: with no WinnerID, it fell back to a
+// name comparison where Winner matches BOTH sides (same name), and Go's
+// switch matched "case winnerIsA" first -- silently assuming side A won and
+// writing the WINNER (SideB, whichever roster entry the first-namesake scan
+// happened to find) ineligible instead of the actual loser, SideA (whose own
+// id, "a1", was sitting right there on the row).
+func TestRecordIneligibilityFromDecision_WinnerSideOverridesAmbiguousNameTieBreak(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "losing-side-winnerside-override"
+	createTestCompetition(t, store, compID, "league", 3)
+
+	// The SideB namesake is registered FIRST in the roster: the old
+	// first-namesake-by-name fallback would find HER, not SideA -- the
+	// actual loser once WinnerSide is honoured.
+	tanakaSideBRegisteredFirst := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: tanakaSideBRegisteredFirst, Name: "Tanaka", Dojo: "DojoB"},
+	}))
+
+	result := &state.MatchResult{
+		ID:    "Pool A-0",
+		SideA: "Tanaka", SideB: "Tanaka",
+		SideAID: "a1", SideBID: "", // only SideA's id is stamped on this row
+		WinnerSide: "B", // SideB explicitly won -> SideA is the loser
+		Decision:   string(domain.DecisionKikenVoluntary),
+	}
+
+	var status *domain.CompetitorStatus
+	var err error
+	txErr := store.WithTransaction(compID, func(tx state.StoreTx) error {
+		status, err = eng.recordIneligibilityFromDecision(tx, compID, "Pool A-0", result)
+		return nil
+	})
+	require.NoError(t, txErr)
+	require.NoError(t, err)
+	require.NotNil(t, status, "the loser (SideA) has its own id on the row and must resolve without any roster scan")
+	assert.Equal(t, "a1", status.PlayerID, "the ineligibility must land on SideA's own id, not the SideB roster namesake found by a first-match name scan")
 }
 
 // TestLookupPlayerID_EmptyName covers the early-return when name is "".
@@ -530,14 +711,18 @@ func TestLookupPlayerID_EmptyName(t *testing.T) {
 	assert.Equal(t, "", lookupPlayerID(players, ""), "empty name should return empty ID")
 }
 
-// TestCheckConcurrentIneligibility_EmptyLoser covers the loserName==""
-// fast path in checkConcurrentIneligibility.
+// TestCheckConcurrentIneligibility_EmptyLoser covers the fast path in
+// checkConcurrentIneligibility when BOTH loserID and loserName are empty
+// (the guard is `loserID == "" && loserName == ""`, not loserName alone --
+// a non-empty loserID with an empty loserName does not take this path at
+// all, see TestCheckConcurrentIneligibility_PlayerNotInParticipants below
+// for the loserID=="" / loserName-lookup-fails path instead).
 func TestCheckConcurrentIneligibility_EmptyLoser(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "conc-empty-loser"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "")
-	assert.NoError(t, err, "empty loserName should return nil")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "")
+	assert.NoError(t, err, "both loserID and loserName empty should return nil")
 }
 
 // TestCheckConcurrentIneligibility_PlayerNotInParticipants covers the
@@ -547,31 +732,63 @@ func TestCheckConcurrentIneligibility_PlayerNotInParticipants(t *testing.T) {
 	compID := "conc-unknown"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
 	// No participants saved → lookupPlayerID returns ""
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "Ghost Player")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M1", "", "Ghost Player")
 	assert.NoError(t, err, "unknown player should return nil without error")
 }
 
-// TestRestoreCompetitorEligibility_EmptyPriorLoser covers the priorLoser==""
-// fast path in restoreCompetitorEligibility.
-func TestRestoreCompetitorEligibility_EmptyPriorLoser(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "restore-empty"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "", "M1")
-	assert.NoError(t, err)
-	assert.Nil(t, status)
-}
+// TestParticipantIDByName covers the three non-happy branches of PR #416
+// finding 8's extracted helper (participantIDByName), which replaced an
+// inline LoadCompetition -> nil check -> LoadParticipants ->
+// combinedPlayerPool -> lookupPlayerID sequence hand-copied in both
+// checkConcurrentIneligibility and recordIneligibilityFromDecision.
+func TestParticipantIDByName(t *testing.T) {
+	t.Run("nil competition returns empty id, no error", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		id, err := participantIDByName(eng.store, "does-not-exist", "Anyone")
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
 
-// TestRestoreCompetitorEligibility_PlayerNotInParticipants covers the
-// playerID=="" path when the prior loser is not a registered participant.
-func TestRestoreCompetitorEligibility_PlayerNotInParticipants(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "restore-unknown"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	// No participants → lookupPlayerID returns ""
-	status, err := eng.restoreCompetitorEligibility(eng.store, compID, "Ghost Player", "M1")
-	assert.NoError(t, err)
-	assert.Nil(t, status)
+	t.Run("unknown name returns empty id, no error", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "pidbn-unknown"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: helper.NewUUID4(), Name: "Alice", Dojo: "A"},
+		}))
+		id, err := participantIDByName(eng.store, compID, "Ghost Player")
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("empty name returns empty id, no error, no load at all", func(t *testing.T) {
+		eng, _, _ := setupTestEngine(t)
+		id, err := participantIDByName(eng.store, "irrelevant", "")
+		require.NoError(t, err)
+		assert.Empty(t, id)
+	})
+
+	t.Run("a load error propagates", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "pidbn-load-err"
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		corruptCompetitionConfig(t, store, compID)
+		_, err := participantIDByName(eng.store, compID, "Alice")
+		assert.Error(t, err, "a genuine LoadCompetition failure must propagate, not read as \"name not found\"")
+	})
+
+	t.Run("known name resolves its id", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "pidbn-known"
+		aliceID := helper.NewUUID4()
+		require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+		}))
+		id, err := participantIDByName(eng.store, compID, "Alice")
+		require.NoError(t, err)
+		assert.Equal(t, aliceID, id)
+	})
 }
 
 // TestResolveMatchParticipantIDs_UnknownMatch covers the lookupMatchSides
@@ -635,7 +852,7 @@ func TestCheckConcurrentIneligibility_AlreadyIneligible(t *testing.T) {
 		MatchID:  "M-prev",
 	}))
 
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "Alice")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-new", "", "Alice")
 	require.Error(t, err)
 	var alreadyErr *AlreadyIneligibleError
 	require.ErrorAs(t, err, &alreadyErr)
@@ -662,7 +879,7 @@ func TestCheckConcurrentIneligibility_SameMatchNotBlocked(t *testing.T) {
 		MatchID:  "M-current", // same as what we're re-scoring
 	}))
 
-	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "Bob")
+	err := eng.checkConcurrentIneligibility(eng.store, compID, "M-current", "", "Bob")
 	assert.NoError(t, err, "same-match ineligibility should not block re-scoring")
 }
 
@@ -1024,10 +1241,12 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 		}))
 
 		// A-0: Alice vs Bob (Running), A-2: Alice vs Charlie (Scheduled)
+		// bc-pnum: the pool-vs-pool simultaneity check compares by id only, so
+		// every row carries the roster's real SideAID/SideBID.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
-			{ID: "A-1", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusScheduled},
-			{ID: "A-2", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusScheduled},
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "A-1", SideA: "Bob", SideB: "Charlie", SideAID: bobID, SideBID: charlieID, Status: state.MatchStatusScheduled},
+			{ID: "A-2", SideA: "Alice", SideB: "Charlie", SideAID: aliceID, SideBID: charlieID, Status: state.MatchStatusScheduled},
 		}))
 
 		err := eng.StartMatch(compID, "A-2")
@@ -1055,9 +1274,11 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 
 		// A-0: Alice vs Bob (Running). A-1: Charlie vs Bob (Scheduled).
 		// Bob (SideB of A-0) is running, starting A-1 should be blocked.
+		// bc-pnum: the pool-vs-pool simultaneity check compares by id only, so
+		// every row carries the roster's real SideAID/SideBID.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-			{ID: "A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
-			{ID: "A-1", SideA: "Charlie", SideB: "Bob", Status: state.MatchStatusScheduled},
+			{ID: "A-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "A-1", SideA: "Charlie", SideB: "Bob", SideAID: charlieID, SideBID: bobID, Status: state.MatchStatusScheduled},
 		}))
 
 		err := eng.StartMatch(compID, "A-1")
@@ -1154,6 +1375,42 @@ func TestStartMatch_RejectsSimultaneousMatch(t *testing.T) {
 		require.ErrorAs(t, err, &ineligErr)
 		assert.Contains(t, ineligErr.Reason, "already fighting")
 	})
+
+	// bc-pnum review finding 5: the pool-vs-pool half of
+	// checkSimultaneousMatch resolves a side by id only. Two "Sam"s from
+	// different dojos are a legal roster; one running on another court must
+	// NOT block the other from starting just because they share a bare
+	// name -- that would be exactly the pre-bc-pnum name-comparison bug this
+	// check was fixed to avoid.
+	t.Run("running match for a DIFFERENT id sharing the same name does not block", func(t *testing.T) {
+		eng, store, _ := setupTestEngine(t)
+		compID := "simul-same-name-diff-id"
+		createTestCompetition(t, store, compID, "league", 3)
+
+		samSouthID := helper.NewUUID4()
+		samNorthID := helper.NewUUID4()
+		runningOpponentID := helper.NewUUID4()
+		waitingOpponentID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: samSouthID, Name: "Sam", Dojo: "South"},
+			{ID: samNorthID, Name: "Sam", Dojo: "North"},
+			{ID: runningOpponentID, Name: "RunningOpponent", Dojo: "O1"},
+			{ID: waitingOpponentID, Name: "WaitingOpponent", Dojo: "O2"},
+		}))
+
+		// South's Sam is Running on court A. North's Sam (a different id,
+		// same bare name) is Scheduled on court B against a DIFFERENT third
+		// competitor; starting THAT match must not be blocked.
+		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+			{ID: "A-0", SideA: "Sam", SideAID: samSouthID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+				Status: state.MatchStatusRunning, Court: "A"},
+			{ID: "A-1", SideA: "Sam", SideAID: samNorthID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+				Status: state.MatchStatusScheduled, Court: "B"},
+		}))
+
+		err := eng.StartMatch(compID, "A-1")
+		assert.NoError(t, err, "a same-name, different-id competitor running elsewhere must not block")
+	})
 }
 
 // TestStartMatch_CourtExclusivity verifies mp-95mg: StartMatch and
@@ -1210,13 +1467,21 @@ func TestStartMatch_CourtExclusivity(t *testing.T) {
 		eng, store, _ := setupTestEngine(t)
 		compID := "court-free"
 		createTestCompetition(t, store, compID, "league", 3)
-		saveTestParticipants(t, store, compID, []string{"Alice", "Bob"})
+
+		aliceID := helper.NewUUID4()
+		bobID := helper.NewUUID4()
+		require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+			{ID: aliceID, Name: "Alice", Dojo: "A"},
+			{ID: bobID, Name: "Bob", Dojo: "B"},
+		}))
 
 		// Use hyphenated IDs so they survive the CSV round-trip used by the
 		// tx-path simultaneity check (LoadPoolMatchesLocked reads disk).
+		// bc-pnum: the pool-vs-pool simultaneity check compares by id only, so
+		// both rows also carry the roster's real SideAID/SideBID.
 		require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-			{ID: "P-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "B"},
-			{ID: "P-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled, Court: "A"},
+			{ID: "P-0", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusRunning, Court: "B"},
+			{ID: "P-1", SideA: "Alice", SideB: "Bob", SideAID: aliceID, SideBID: bobID, Status: state.MatchStatusScheduled, Court: "A"},
 		}))
 
 		// P-1 is on court A which is free, but Alice is also in P-0 on court B.
@@ -1370,12 +1635,6 @@ func TestEligibilityHelpers_NilCompetitionNoPanic(t *testing.T) {
 	eng, _, _ := setupTestEngine(t)
 	const missing = "no-such-competition"
 
-	t.Run("restoreCompetitorEligibility no-ops on missing config", func(t *testing.T) {
-		status, err := eng.restoreCompetitorEligibility(eng.store, missing, "Bob", "m1")
-		assert.NoError(t, err)
-		assert.Nil(t, status)
-	})
-
 	t.Run("recordIneligibilityFromDecision no-ops on missing config", func(t *testing.T) {
 		result := &state.MatchResult{SideA: "Alice", SideB: "Bob", Winner: "Alice", Decision: string(domain.DecisionKikenVoluntary)}
 		status, err := eng.recordIneligibilityFromDecision(eng.store, missing, "m1", result)
@@ -1398,8 +1657,12 @@ func TestRecordDecision_LoserKeepsStruckPoints(t *testing.T) {
 		{ID: bobID, Name: "Bob", Dojo: "B"},
 	}))
 	// Live bout: Alice (aka/SideA) struck M, Bob (shiro/SideB) struck K.
+	// SideAID/SideBID are stamped (operator ruling bc-pnum): preserveLoserScore's
+	// drift guard now compares sides by id, and a row with no ids never
+	// matches, so this row must carry them for the preservation below to
+	// fire at all.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning,
+		{ID: "Pool A-0", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusRunning,
 			IpponsA: []string{"M"}, IpponsB: []string{"K"}},
 	}))
 	// Bob (shiro) withdraws -> Alice wins by default: Alice gets the maru
@@ -1426,14 +1689,111 @@ func TestRecordDecision_TeamWithdrawalKeepsSubResults(t *testing.T) {
 		{Position: 1, SideA: "Team Red", SideB: "Team White", IpponsA: []string{"M"}, Winner: "Team Red"},
 		{Position: 2, SideA: "Team Red", SideB: "Team White", IpponsB: []string{"K"}, Winner: "Team White"},
 	}
+	redID, whiteID := helper.NewUUID4(), helper.NewUUID4()
+	// SideAID/SideBID are stamped (operator ruling bc-pnum): preserveLoserScore's
+	// drift guard now compares sides by id, and a row with no ids never
+	// matches, so this row must carry them for the sub-bout preservation
+	// below to fire at all.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Team Red", SideB: "Team White", Status: state.MatchStatusRunning, SubResults: subs},
+		{ID: "Pool A-0", SideA: "Team Red", SideAID: redID, SideB: "Team White", SideBID: whiteID,
+			Status: state.MatchStatusRunning, SubResults: subs},
 	}))
 	// aka (SideA = Team Red) withdraws -> shiro (SideB = Team White) wins.
 	result, _, err := eng.RecordDecision(compID, "Pool A-0", "kiken-voluntary", "aka", "withdrew", nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, "Team White", result.Winner)
 	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32)")
+	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
+	assert.Equal(t, "Team White", result.SubResults[1].Winner)
+}
+
+// TestRecordDecision_BracketLoserKeepsStruckPoints is the bracket-shaped
+// twin of TestRecordDecision_LoserKeepsStruckPoints. This fixture's
+// BracketMatch is an UNSTAMPED legacy row (no SideAID/SideBID set), so both
+// prior and result carry SideAID=="" / SideBID=="" here, even though a
+// stamped BracketMatch now carries real ids that bracketMatchAsResult
+// projects faithfully (bc-brid) -- this exercises the id-less fallback
+// CLAUDE.md carves out for exactly that unstamped shape, not a name
+// fallback beside an id lookup on a resolved side. Before this pin,
+// preserveLoserScore's id guard read two empty strings as "no proof of a
+// match" and refused to preserve anything, so a kiken on a bracket match
+// erased the withdrawer's already-struck ippons outright -- a regression
+// against FIK Art. 32 that a pool-only pin could not catch.
+func TestRecordDecision_BracketLoserKeepsStruckPoints(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-loser-keeps-points"
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 2, func(c *state.Competition) {
+		c.Status = state.CompStatusPools
+	})
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
+		}},
+	}))
+	// Live bout: Alice (aka/SideA) struck M, Bob (shiro/SideB) struck K.
+	require.NoError(t, eng.RecordMatchResult(compID, "m-r1-0", &state.MatchResult{
+		SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning,
+		IpponsA: []string{"M"}, IpponsB: []string{"K"},
+	}))
+	// Bob (shiro) withdraws -> Alice wins by default: Alice gets the maru
+	// pair; Bob KEEPS his struck K.
+	result, _, err := eng.RecordDecision(compID, "m-r1-0", "kiken-voluntary", "shiro", "withdrew", nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", result.Winner)
+	assert.Equal(t, []string{"○", "○"}, result.IpponsA, "winner gets the maru default-win fill")
+	assert.Equal(t, []string{"K"}, result.IpponsB, "withdrawing side keeps its struck ippon (FIK Art. 32)")
+}
+
+// TestRecordDecision_BracketTeamWithdrawalKeepsSubResults is the bracket-shaped
+// twin of TestRecordDecision_TeamWithdrawalKeepsSubResults, but the two
+// assertions it carries are NOT pinned by the same mechanism (bc-pnum
+// review round 2, finding 4):
+//
+//   - The match-level IpponsA assertion below IS pinned by preserveLoserScore:
+//     that function is what copies the withdrawing side's already-struck
+//     ippons ("M") from prior onto result, per the id/name-class split
+//     TestRecordDecision_BracketLoserKeepsStruckPoints already pins for the
+//     individual case. Disable preserveLoserScore and THIS assertion goes red.
+//   - The SubResults assertion is NOT pinned by preserveLoserScore for a
+//     BRACKET match: applyBracketMatchResult's own merge rule already
+//     preserves bm.SubResults whenever the incoming write omits it
+//     (nil != explicit-empty-clear), independent of anything
+//     preserveLoserScore does. Disabling preserveLoserScore leaves this
+//     assertion green regardless -- it is exercised here only because the
+//     same withdrawal decision naturally carries both facts at once, not
+//     because this line depends on the function under test.
+func TestRecordDecision_BracketTeamWithdrawalKeepsSubResults(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "bracket-team-withdrawal-subs"
+	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 2, func(c *state.Competition) {
+		c.Kind = "team"
+		c.TeamSize = 3
+		c.Status = state.CompStatusPools
+	})
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Team Red", SideB: "Team White", Status: state.MatchStatusScheduled},
+		}},
+	}))
+	subs := []state.SubMatchResult{
+		{Position: 1, SideA: "Team Red", SideB: "Team White", IpponsA: []string{"M"}, Winner: "Team Red"},
+		{Position: 2, SideA: "Team Red", SideB: "Team White", IpponsB: []string{"K"}, Winner: "Team White"},
+	}
+	// IpponsA: ["M"] is Team Red's own struck match-level point, live in the
+	// encounter before the withdrawal -- the fact preserveLoserScore must
+	// carry across the decision write, exactly as the individual test's
+	// IpponsB does for Bob.
+	require.NoError(t, eng.RecordMatchResult(compID, "m-r1-0", &state.MatchResult{
+		SideA: "Team Red", SideB: "Team White", Status: state.MatchStatusRunning,
+		IpponsA: []string{"M"}, SubResults: subs,
+	}))
+	// aka (SideA = Team Red) withdraws -> shiro (SideB = Team White) wins.
+	result, _, err := eng.RecordDecision(compID, "m-r1-0", "kiken-voluntary", "aka", "withdrew", nil, false)
+	require.NoError(t, err)
+	assert.Equal(t, "Team White", result.Winner)
+	assert.Equal(t, []string{"M"}, result.IpponsA,
+		"withdrawing side (Team Red) keeps its struck ippon (FIK Art. 32) -- this is the assertion preserveLoserScore actually pins")
+	require.Len(t, result.SubResults, 2, "team sub-bouts already fought are preserved (FIK Art. 32) -- via applyBracketMatchResult's own merge rule, not preserveLoserScore")
 	assert.Equal(t, "Team Red", result.SubResults[0].Winner)
 	assert.Equal(t, "Team White", result.SubResults[1].Winner)
 }
@@ -1500,18 +1860,6 @@ func TestK2ChecksItsHandleIsTransactional(t *testing.T) {
 			{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusScheduled},
 		}))
 		return eng, store, compID, aliceID
-	}
-
-	// captureLog swaps the default logger's sink for the duration of fn.
-	captureLog := func(t *testing.T, fn func()) string {
-		t.Helper()
-		var buf bytes.Buffer
-		prevOut, prevFlags := log.Writer(), log.Flags()
-		log.SetOutput(&buf)
-		log.SetFlags(0)
-		t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
-		fn()
-		return buf.String()
 	}
 
 	t.Run("the production path runs K2 on a transactional handle", func(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -316,10 +317,38 @@ func (s *Store) cachedBracket(compID string) (*Bracket, error) {
 	return bracket, nil
 }
 
-// compPath builds and cleans the path to a file inside a competition directory.
+// invalidCompDir is where a rejected competition id resolves. No legal id can
+// collide with it: validIDPattern requires a leading alphanumeric.
+const invalidCompDir = ".invalid"
+
+// compPath builds and cleans the path to a file inside a competition
+// directory, and is the ONE place that enforces containment under
+// "<folder>/competitions" rather than trusting a caller to have validated
+// compID first. filepath.Clean alone collapses "..", but a joined path can
+// still resolve outside that base (e.g. compID = "../.."), so every result
+// is re-checked against the base after cleaning, covering both compID and
+// the variadic parts (a caller-supplied filename can also carry "..").
+// A rejected id or an escaping join resolves to invalidCompDir instead: that
+// directory does not exist, so a read returns ENOENT and a write fails,
+// rather than either touching a path outside the tournament folder.
+//
+// The competitions directory ITSELF is not a valid answer either, which is
+// why the check demands a path strictly below it rather than merely one that
+// has not escaped. No legitimate call can land there: every caller names a
+// competition, and the file parts are literal filenames. Only parts walking
+// back up ("..") reach it, and returning the directory that holds every
+// competition to a caller that asked for one file inside one of them is a
+// bug worth failing on, not a location worth handing out.
 func (s *Store) compPath(compID string, parts ...string) string {
-	segments := append([]string{s.folder, "competitions", compID}, parts...)
-	return filepath.Clean(filepath.Join(segments...))
+	base := filepath.Clean(filepath.Join(s.folder, "competitions"))
+	if ValidateCompetitionID(compID) != nil {
+		return filepath.Join(base, invalidCompDir)
+	}
+	p := filepath.Clean(filepath.Join(append([]string{base, compID}, parts...)...))
+	if !strings.HasPrefix(p, base+string(filepath.Separator)) {
+		return filepath.Join(base, invalidCompDir)
+	}
+	return p
 }
 
 // FileMtime returns the UnixNano mtime of a file inside a competition directory.
@@ -362,6 +391,14 @@ func (s *Store) bumpFileVersion(compID, filename string) {
 // stale entry left by its predecessor. See discardCompCacheBodies.
 func (s *Store) FileVersion(compID, filename string) uint64 {
 	return s.getFileCache(compID, filename).version.Load()
+}
+
+// FileToken returns both cache-validity tokens for a file inside a
+// competition directory in one call -- its FileMtime and FileVersion, always
+// sampled as a pair (see FileVersion's own doc comment) -- so a caller
+// building a multi-file cache key issues one call per file instead of two.
+func (s *Store) FileToken(compID, filename string) (mtime int64, version uint64) {
+	return s.FileMtime(compID, filename), s.FileVersion(compID, filename)
 }
 
 // discardCompCacheBodies drops every cached file body for a competition while

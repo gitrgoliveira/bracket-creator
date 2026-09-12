@@ -6,7 +6,18 @@ import (
 )
 
 // SeedAssignment represents the mapping of a previous winner to a seed position.
+//
+// ID is empty for a row that predates the participant-id column (a legacy
+// seeds.csv, or a hand-written --seeds CSV) and for a row a legacy-upgrade
+// pass has not yet reached; every writer stamps it from the roster once one
+// exists (state.SaveSeeds resolves and stamps it for every writer that funnels
+// through it; the participant-rename rewrite in updateParticipantNoLock only
+// ever preserves an id it already read). A row carrying an id resolves by
+// that id ALONE (RosterIndex.LookupSeed below); the (name, dojo) pair is the
+// fallback for a row that has not been completed yet, never a second check
+// run alongside a present id.
 type SeedAssignment struct {
+	ID       string `json:"id,omitempty"`
 	Name     string `json:"name"`
 	Dojo     string `json:"dojo,omitempty"`
 	SeedRank int    `json:"seedRank"`
@@ -14,10 +25,11 @@ type SeedAssignment struct {
 
 // SeedKey is the composite key that identifies a seeded competitor: names are
 // not unique within a competition (only same name AND same dojo is rejected),
-// so a seed is matched to its participant by the (name, dojo) pair. Exported
-// because every producer, matcher and merger of seed assignments must compose
-// the pair the same way -- AssignSeeds here, helper.ApplySeeds, and the
-// seeds.csv-onto-roster merge in state.loadParticipants all key on it.
+// so a seed with no id is matched to its participant by the (name, dojo)
+// pair. Exported because every producer, matcher and merger of seed
+// assignments must compose the pair the same way -- AssignSeeds here,
+// helper.ApplySeeds, and the seeds.csv-onto-roster merge in
+// state.loadParticipants all key on it.
 //
 // Matchers that consult it also share one fallback for legacy rows: an
 // assignment with NO dojo matches by bare name, but only when that name is
@@ -37,8 +49,8 @@ func SeedKey(name, dojo string) string {
 //
 // This was previously reimplemented independently in four places (this
 // package's AssignSeeds, helper.ApplySeeds, the seeds.csv-onto-roster merge
-// in state.loadParticipants, and the legacy dojo-backfill in
-// state.upgradeSeedDojosLocked), which is exactly the kind of drift SeedKey's
+// in state.loadParticipants, and the legacy seed-row backfill in
+// state.upgradeSeedRowsLocked), which is exactly the kind of drift SeedKey's
 // doc comment warned about without anything actually shared. All four now
 // build one RosterIndex over their roster and call Lookup. A fifth case is a
 // failed Lookup itself: a caller that needs to tell a GHOST name (absent from
@@ -52,6 +64,7 @@ func SeedKey(name, dojo string) string {
 type RosterIndex struct {
 	byKey     map[string]*Player
 	byName    map[string]*Player // only names unique in the roster
+	byID      map[string]*Player // only players carrying a non-empty id
 	nameCount map[string]int
 }
 
@@ -66,12 +79,16 @@ func NewRosterIndex(players []Player) *RosterIndex {
 	idx := &RosterIndex{
 		byKey:     make(map[string]*Player, len(players)),
 		byName:    make(map[string]*Player, len(players)),
+		byID:      make(map[string]*Player, len(players)),
 		nameCount: nameCount,
 	}
 	for i := range players {
 		idx.byKey[SeedKey(players[i].Name, players[i].Dojo)] = &players[i]
 		if nameCount[players[i].Name] == 1 {
 			idx.byName[players[i].Name] = &players[i]
+		}
+		if players[i].ID != "" {
+			idx.byID[players[i].ID] = &players[i]
 		}
 	}
 	return idx
@@ -90,6 +107,34 @@ func (idx *RosterIndex) Lookup(name, dojo string) (*Player, bool) {
 		}
 	}
 	return nil, false
+}
+
+// LookupByID resolves a participant id to a roster player, exact match only.
+// An id, once present on a seed row, is authoritative: there is no
+// id-typo-falls-back-to-name recovery, so an id naming nobody on this roster
+// resolves to nothing rather than guessing from the row's Name/Dojo.
+func (idx *RosterIndex) LookupByID(id string) (*Player, bool) {
+	if id == "" {
+		return nil, false
+	}
+	p, ok := idx.byID[id]
+	return p, ok
+}
+
+// LookupSeed resolves a seed row to its roster participant via the two rules
+// SeedAssignment's doc comment describes, tried in that order: LookupByID
+// when the row carries an id, else the (name, dojo)-with-unique-bare-name
+// fallback Lookup implements. This is the ONE shared implementation every
+// seed-row matcher in the codebase (the seeds.csv-onto-roster merge in
+// state.loadParticipants, helper.ApplySeeds, and
+// mobileapp.seedsOffRoster) calls, rather than each re-deriving the same
+// id-first-then-pair order independently -- exactly the drift Lookup itself
+// was extracted to end for the pair alone.
+func (idx *RosterIndex) LookupSeed(a SeedAssignment) (*Player, bool) {
+	if a.ID != "" {
+		return idx.LookupByID(a.ID)
+	}
+	return idx.Lookup(a.Name, a.Dojo)
 }
 
 // NameCount reports how many roster players carry this exact name. It is the

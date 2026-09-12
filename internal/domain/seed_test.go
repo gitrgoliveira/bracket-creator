@@ -257,3 +257,40 @@ func TestRosterIndex_Lookup(t *testing.T) {
 		assert.False(t, ok)
 	})
 }
+
+// TestRosterIndex_LookupSeed pins the two-rule resolution order every
+// seed-row matcher shares: an id, when the row carries one, is
+// authoritative and is never double-checked against Name/Dojo; the pair
+// fallback runs ONLY for a row whose id is empty.
+func TestRosterIndex_LookupSeed(t *testing.T) {
+	t.Run("an id resolves even when the row's name is stale", func(t *testing.T) {
+		alice := Player{ID: "alice-id", Name: "Alice Renamed", Dojo: "New Dojo"}
+		// A second, unrelated player who now happens to hold the name and
+		// dojo the seed row still carries: a name/dojo fallback would find
+		// THIS player instead, which is exactly the misattribution an
+		// id-first rule exists to prevent.
+		impersonator := Player{ID: "impersonator-id", Name: "Alice Old Name", Dojo: "Old Dojo"}
+		idx := NewRosterIndex([]Player{alice, impersonator})
+
+		p, ok := idx.LookupSeed(SeedAssignment{ID: "alice-id", Name: "Alice Old Name", Dojo: "Old Dojo", SeedRank: 1})
+		require.True(t, ok)
+		assert.Equal(t, "alice-id", p.ID, "the id must win, not whoever currently holds the stale name")
+	})
+
+	t.Run("an id naming nobody resolves to nothing, never to a name guess", func(t *testing.T) {
+		players := []Player{{ID: "real-id", Name: "Alice", Dojo: "D"}}
+		idx := NewRosterIndex(players)
+
+		_, ok := idx.LookupSeed(SeedAssignment{ID: "ghost-id", Name: "Alice", Dojo: "D", SeedRank: 1})
+		assert.False(t, ok, "a bad id must not silently fall back to a name/dojo match it happens to share")
+	})
+
+	t.Run("an empty id falls back to the (name, dojo) pair", func(t *testing.T) {
+		players := []Player{{ID: "real-id", Name: "Alice", Dojo: "D"}}
+		idx := NewRosterIndex(players)
+
+		p, ok := idx.LookupSeed(SeedAssignment{Name: "Alice", Dojo: "D", SeedRank: 1})
+		require.True(t, ok)
+		assert.Equal(t, "real-id", p.ID)
+	})
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -76,7 +77,11 @@ func setupSwissCompetition(t *testing.T, names []string, seeds map[string]int, r
 
 // completeSwissMatch persists a completed match outcome with the
 // winner ippons set to two (kote/men/dou doesn't matter for standings).
-// SideA/SideB are looked up off the supplied match.
+// SideA/SideB are looked up off the supplied match. WinnerID is stamped
+// from the match's own SideAID/SideBID (already present, since
+// buildSwissMatches stamps them at generation): standings resolution is
+// id-only (operator ruling bc-pnum), so a Winner name with no matching
+// WinnerID would silently fail to tally.
 func completeSwissMatch(t *testing.T, store *state.Store, compID, matchID, winner string) {
 	t.Helper()
 	matches, err := store.LoadPoolMatches(compID)
@@ -90,9 +95,11 @@ func completeSwissMatch(t *testing.T, store *state.Store, compID, matchID, winne
 			case matches[i].SideA:
 				matches[i].IpponsA = []string{"M", "M"}
 				matches[i].IpponsB = nil
+				matches[i].WinnerID = matches[i].SideAID
 			case matches[i].SideB:
 				matches[i].IpponsB = []string{"M", "M"}
 				matches[i].IpponsA = nil
+				matches[i].WinnerID = matches[i].SideBID
 			}
 			found = true
 			break
@@ -844,9 +851,10 @@ func TestSwissStandings_Team(t *testing.T) {
 	// TeamA beats TeamB 3-2; TeamC beats TeamD 5-0. Both winners have exactly
 	// one team win, so they tie on the first team-chain criterion and the
 	// ranking must fall to individual victories (IV 5 for C beats IV 3 for A).
-	// Side/Winner IDs are deliberately left empty, mirroring real Swiss matches
-	// (buildSwissMatches persists no per-side UUIDs), so the standings must key
-	// on name alone.
+	// Standings resolution is id-only (operator ruling bc-pnum): a real Swiss
+	// match always carries SideAID/SideBID/WinnerID (buildSwissMatches stamps
+	// them at generation), so this fixture stamps them too via bctest.StampIDs
+	// rather than relying on the name-fallback this ruling removed.
 	matches := []state.MatchResult{
 		{
 			ID: "Swiss-R1-0", SideA: "TeamA", SideB: "TeamB",
@@ -861,6 +869,7 @@ func TestSwissStandings_Team(t *testing.T) {
 			SubResults: teamSubs("TeamC", "TeamD", 5),
 		},
 	}
+	bctest.StampIDs(teams, matches)
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.SwissStandings(compID)
@@ -915,9 +924,11 @@ func TestSwissStandings_Engi(t *testing.T) {
 
 	// E1 beats E2 3-2 flags; E3 beats E4 5-0 flags. Both winners have one win,
 	// so the tie must break on accumulated own-side flags (E3's 5 beats E1's 3).
-	// Side/Winner IDs are deliberately left empty, mirroring real Swiss engi
-	// matches (pool-matches.csv persists no per-side UUIDs); the standings must
-	// therefore key on name alone, or every competitor tallies zero.
+	// Standings resolution is id-only (operator ruling bc-pnum): a real Swiss
+	// match always carries SideAID/SideBID/WinnerID (buildSwissMatches stamps
+	// them at generation, engi Swiss included), so this fixture stamps them
+	// too via bctest.StampIDs rather than relying on the name-fallback this
+	// ruling removed.
 	matches := []state.MatchResult{
 		{
 			ID: "Swiss-R1-0", SideA: "E1", SideB: "E2",
@@ -932,6 +943,7 @@ func TestSwissStandings_Engi(t *testing.T) {
 			FlagsA: 5, FlagsB: 0,
 		},
 	}
+	bctest.StampIDs(pairs, matches)
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.SwissStandings(compID)
@@ -1166,79 +1178,123 @@ func TestSwissPairing_SameNameDifferentDojo_ByeIndependence(t *testing.T) {
 			"not be skipped because Osaka Tanaka (same display name, different dojo) already had one")
 }
 
-// TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth pins the frozen-
-// field side of the fix: round-1 rows written with NO per-side ids at all
-// (the pre-bc-cse wire shape) still name BOTH "Tanaka Kenji" namesakes, one
-// per match. swissFieldKeysFromMatches must admit every roster key sharing
-// an id-less side's name, not just resolveSwissRosterKey's single
-// last-registered pick -- picking only one would silently evict the other
-// namesake from every round after the first, since a frozen-out participant
-// never gets a fresh row of their own to reclaim a field slot.
-func TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "swiss-field-namesake"
+// TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth and
+// TestResolveSwissRosterKey_MatchesStandingsLastWritePolicy_IDlessNamesake
+// used to live here, pinning the pre-bc-pnum name-fallback behaviour of
+// swissFieldKeysFromMatches / resolveSwissRosterKey / lookupStandingsPlayer:
+// an id-less match row named a namesake by bare name, and each resolver had
+// its own policy for picking (or, for the frozen field, admitting BOTH)
+// among same-name roster entries.
+//
+// The operator ruling bc-pnum removed that whole resolution path: every one
+// of those functions is id-only now, so an id-less match row resolves to
+// NOTHING everywhere, not to a picked-or-admitted namesake. Under the
+// FIRST test's exact fixture (round-1 rows with no side ids AT ALL, for a
+// 4-player roster) the field freeze in GenerateSwissRound would now admit
+// NOBODY, dropping below the 2-participant minimum and returning a
+// validation error instead of a round -- there is no attribution left for
+// a converted test to assert on with THAT fixture. The two tests below are
+// the id-only twins bc-pnum review finding 5 asks for: same claim (a prior
+// row with no id contributes nothing), proven on fixtures shaped so the
+// round can still generate.
 
-	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID:                       compID,
-		Name:                     "Swiss Field Namesake",
-		Kind:                     "individual",
-		Format:                   state.CompFormatSwiss,
-		SwissRounds:              2,
-		Courts:                   []string{"A"},
-		StartTime:                "09:00",
-		Status:                   state.CompStatusSetup,
-		PoolMatchDurationSeconds: 180,
-	}))
-	players := snPlayers() // Tokyo Tanaka, Osaka Tanaka, Suzuki, Watanabe
-	require.NoError(t, store.SaveParticipants(compID, players))
+// TestSwissFieldKeysFromMatches_IDlessRow_AdmitsNobody is
+// TestSwissFieldKeysFromMatches_IDlessNamesakeRow_AdmitsBoth's id-only
+// twin, at the same unit level (direct call, no round generation needed).
+// Two round-1 rows -- an id-less regular match and an id-less bye -- name
+// three real roster players by NAME alone; none of the three may be
+// admitted to the frozen field, because swissFieldKeysFromMatches'
+// admit() goes through resolveSwissRosterKey, which is id-only. This is
+// also the "bye" half of finding 5: bye admission (hadBye, in
+// GenerateSwissRound) and field admission both gate on the SAME
+// resolveSwissRosterKey(byID, m.SideAID) call, so an id-less bye row is
+// provably inert on both counts via this one guard.
+func TestSwissFieldKeysFromMatches_IDlessRow_AdmitsNobody(t *testing.T) {
+	players := []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "Dojo A"},
+		{ID: helper.NewUUID4(), Name: "Bob", Dojo: "Dojo B"},
+		{ID: helper.NewUUID4(), Name: "Carol", Dojo: "Dojo C"},
+	}
+	rosterByID := buildSwissRosterIndex(players)
 
-	// Both Tanaka namesakes actually played round 1 (one against Suzuki, one
-	// against Watanabe), but the rows carry no per-side ids at all, so the
-	// row alone cannot say which Tanaka played which match.
+	priorMatches := []state.MatchResult{
+		// Id-less regular match: Alice beat Bob, but the row carries no
+		// per-side ids at all (the pre-bc-cse wire shape / a hand-edited file).
+		{ID: "Swiss-R1-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", Status: state.MatchStatusCompleted},
+		// Id-less bye: Carol received round 1's bye, same no-id shape.
+		{ID: "Swiss-R1-1", SideA: "Carol", SideB: "", Winner: "Carol", Status: state.MatchStatusCompleted},
+	}
+
+	field := swissFieldKeysFromMatches(priorMatches, rosterByID)
+	assert.Empty(t, field, "an id-less prior row must admit NOBODY to the frozen field, win or bye alike")
+}
+
+// TestGenerateSwissRound_LegacyWinnerIDRepairedOnLoad used to pin the
+// opposite: SideAID/SideBID present but WinnerID blank meant the winner's
+// win was never credited (TestGenerateSwissRound_IDlessWinnerIDContributesNoWin,
+// pre-bc-pnum). The bc-pnum load-time repair (state's
+// upgradePoolMatchSideIDsLocked, wired into the public Store.LoadPoolMatches
+// GenerateSwissRound calls to read priorMatches) closes exactly this gap:
+// Winner=="Alice"==SideA and SideAID is already on the row, so WinnerID is
+// derived from the row's OWN side id, never the roster -- the id-only rule
+// from legacy_upgrade.go's header comment holds throughout, this only moves
+// WHEN the id lands (on load, once, onto the persisted row) rather than
+// leaving the row permanently unresolvable. Alice's win over Bob is
+// therefore credited from here on.
+func TestGenerateSwissRound_LegacyWinnerIDRepairedOnLoad(t *testing.T) {
+	names := []string{"Alice", "Bob", "Carol", "Dave", "Eve", "Fay"}
+	seeds := map[string]int{"Alice": 1, "Bob": 2, "Carol": 3, "Dave": 4, "Eve": 5, "Fay": 6}
+	eng, store, compID, byName := setupSwissCompetition(t, names, seeds, 3)
+
 	round1 := []state.MatchResult{
-		{ID: "Swiss-R1-0", SideA: "Tanaka Kenji", SideB: "Suzuki Hiro",
-			Winner: "Suzuki Hiro", Status: state.MatchStatusCompleted},
-		{ID: "Swiss-R1-1", SideA: "Tanaka Kenji", SideB: "Watanabe Ryo",
-			Winner: "Watanabe Ryo", Status: state.MatchStatusCompleted},
+		// Alice beat Bob, but the legacy row never got a WinnerID stamped
+		// even though SideAID/SideBID are both present.
+		{ID: "Swiss-R1-0", SideA: "Alice", SideAID: byName["Alice"].ID, SideB: "Bob", SideBID: byName["Bob"].ID,
+			Winner: "Alice", WinnerID: "", Status: state.MatchStatusCompleted},
+		{ID: "Swiss-R1-1", SideA: "Carol", SideAID: byName["Carol"].ID, SideB: "Dave", SideBID: byName["Dave"].ID,
+			Winner: "Carol", WinnerID: byName["Carol"].ID, Status: state.MatchStatusCompleted},
+		{ID: "Swiss-R1-2", SideA: "Eve", SideAID: byName["Eve"].ID, SideB: "Fay", SideBID: byName["Fay"].ID,
+			Winner: "Eve", WinnerID: byName["Eve"].ID, Status: state.MatchStatusCompleted},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, round1))
 
 	r2, err := eng.GenerateSwissRound(compID, 2)
 	require.NoError(t, err)
+	require.Len(t, r2, 3, "6 active players -> 3 matches")
 
-	seen := make(map[string]bool)
-	for _, m := range r2 {
-		seen[m.SideAID] = true
-		if m.SideBID != "" {
-			seen[m.SideBID] = true
+	// The repair lands on disk the moment GenerateSwissRound's internal
+	// LoadPoolMatches call reads round 1 back, so it is visible to a plain
+	// reload afterwards too -- proving this is a persisted repair, not a
+	// read-time-only computation.
+	repaired, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	var r1m0 *state.MatchResult
+	for i := range repaired {
+		if repaired[i].ID == "Swiss-R1-0" {
+			r1m0 = &repaired[i]
 		}
 	}
-	assert.True(t, seen[snIDOsaka], "Osaka Tanaka must remain in the frozen field for round 2")
-	assert.True(t, seen[snIDTokyo], "Tokyo Tanaka must remain in the frozen field for round 2")
-}
+	require.NotNil(t, r1m0, "round-1 match must still be on disk")
+	assert.Equal(t, byName["Alice"].ID, r1m0.WinnerID,
+		"WinnerID is repaired from the row's own SideAID (Winner==SideA), not left blank")
 
-// TestResolveSwissRosterKey_MatchesStandingsLastWritePolicy_IDlessNamesake
-// pins the tie-break alignment: GenerateSwissRound's pairing-side resolver
-// (resolveSwissRosterKey) and the standings-side resolver
-// (registerStandingsPlayer/lookupStandingsPlayer, shared by SwissStandings,
-// computeStandingsFrom and applyTiebreakSort's newGroupKeyResolver) must
-// attribute the SAME id-less legacy row to the SAME namesake. Before this
-// fix, resolveSwissRosterKey picked the FIRST roster entry sharing a name
-// while the standings index -- a plain map assignment, last write wins --
-// resolved to the LAST, so a single persisted row was credited to opposite
-// people depending which surface read it.
-func TestResolveSwissRosterKey_MatchesStandingsLastWritePolicy_IDlessNamesake(t *testing.T) {
-	players := snPlayers() // Tokyo Tanaka, Osaka Tanaka (same name), Suzuki, Watanabe
-	rosterByID, rosterByName := buildSwissRosterIndex(players)
+	standings, err := eng.SwissStandings(compID)
+	require.NoError(t, err)
+	byID := make(map[string]state.PlayerStanding, len(standings))
+	for _, s := range standings {
+		byID[s.Player.ID] = s
+	}
+	assert.Equal(t, 1, byID[byName["Alice"].ID].Wins, "the repaired WinnerID credits Alice's win")
+	assert.Equal(t, 1, byID[byName["Bob"].ID].Losses, "and Bob's loss")
 
-	pairingKey, ok := resolveSwissRosterKey(rosterByID, rosterByName, "", "Tanaka Kenji")
-	require.True(t, ok)
-
-	byKey, _ := newStandingsIndex(players)
-	standingsPlayer := lookupStandingsPlayer(byKey, "", "Tanaka Kenji")
-	require.NotNil(t, standingsPlayer)
-	standingsKey := helper.CompetitorKey(standingsPlayer.Player.ID, standingsPlayer.Player.Name, standingsPlayer.Player.Dojo)
-
-	assert.Equal(t, standingsKey, pairingKey,
-		"the pairing-side and standings-side resolvers must attribute an id-less namesake row to the SAME roster entry")
+	// Rematch avoidance is orthogonal to win-crediting and must hold either way.
+	for _, m := range r2 {
+		if m.SideA == "Alice" || m.SideB == "Alice" {
+			other := m.SideB
+			if m.SideA != "Alice" {
+				other = m.SideA
+			}
+			assert.NotEqual(t, "Bob", other, "round 2 must not replay Alice vs Bob")
+		}
+	}
 }

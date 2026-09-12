@@ -77,12 +77,16 @@ func TestPoolQualifierPaths_MatchesRealPipeline(t *testing.T) {
 	require.Equal(t, (8-3+1)*2*3, total, "sweep shrank: expected every pools/winners/courts combination to have run")
 }
 
-// TestPoolPositionName_MatchesAssignPlayersToPools pins poolPositionName
-// (tournament.go) against the naming loop at the end of
-// assignPlayersToPools, which poolPositionName's own doc comment claims
-// equality with: build enough pools (poolSize 1, so pool i holds exactly
-// player i) to walk past the 26-letter wrap into the doubled-letter scheme,
-// and check every position's real name against poolPositionName(i).
+// TestPoolPositionName_MatchesAssignPlayersToPools pins that
+// assignPlayersToPools' naming loop actually calls poolPositionName
+// (tournament.go), rather than carrying its own copy of the arithmetic
+// (bc-drwx item 6: it used to, and the two copies were only pinned equal by
+// test rather than sharing one implementation): build enough pools
+// (poolSize 1, so pool i holds exactly player i) to walk past the 26-letter
+// wrap into the multi-letter scheme, and check every position's real name
+// against poolPositionName(i). See
+// TestPoolPositionName_UniqueBeyond52 for the property this refactor was
+// actually fixing (uniqueness past 52 pools).
 func TestPoolPositionName_MatchesAssignPlayersToPools(t *testing.T) {
 	n := 30 // past the a..z wrap at 26, into "Pool AA" etc.
 	players := make([]Player, n)

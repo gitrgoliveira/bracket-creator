@@ -25,9 +25,16 @@ import (
 //
 // Per NFR-002 the handler depends on the *state.Store concrete type (the
 // same boundary handlers_viewer.go uses); there is no snug-fit interface
-// in deps.go that covers the read methods we need here, and inventing one
-// for a single consumer would be premature. If a second polled surface
-// lands later we can hoist a DisplayStore interface then.
+// in deps.go that covers the OTHER read methods we need here, and inventing
+// one for a single consumer would be premature. If a second polled surface
+// lands later we can hoist a DisplayStore interface then. Number merging
+// (currentMatchPlayers) reaches engine.NumberKnockoutParticipants through
+// numbersFromDrawWithBracket (handlers_viewer.go, same package) exactly as
+// the viewer payload does (that shared helper calls the engine function
+// directly -- a plain package-level function, not threaded through as a
+// parameter -- so this file needs no engine reference of its own), the SAME
+// derivation the blank-template export uses, so this surface's numbers
+// cannot silently disagree with either of those.
 func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 	// P2 (mp-9afd style): singleflight group for the court-scoped match feed,
 	// mirroring the sf in RegisterViewerHandlers for GET /competitions.
@@ -83,12 +90,24 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				if !strings.EqualFold(m.Court, court) || m.Status != state.MatchStatusRunning {
 					continue
 				}
-				players := currentMatchPlayers(store, comp)
+				// No bracket loaded yet on this branch (it is loaded further
+				// below, only once the pool scan comes up empty), so numbering
+				// falls back to its own pools.csv read for a pooled competition.
+				players := currentMatchPlayers(store, comp, nil)
+				zek := comp.EffectiveWithZekkenName()
 				// Pool daihyosen/tiebreaker rep bouts carry team names in
 				// sideA/sideB; the representative fighter for each side lives in
 				// RepPlayerA/B. Empty for every regular match (mp-62vr).
-				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-					m.SideA, m.SideB, m.IpponsA, m.IpponsB, m.HansokuA, m.HansokuB,
+				//
+				// A pool MatchResult always carries a SideAID/SideBID field
+				// (even a legacy row where it is empty), so this is the id
+				// class: buildSideByID, never buildSideByIDOrName -- a name
+				// fallback here could silently resolve to the wrong same-name
+				// competitor across dojos.
+				c.JSON(http.StatusOK, currentMatchPayload(court, comp,
+					buildSideByID(m.SideA, m.SideAID, players, zek),
+					buildSideByID(m.SideB, m.SideBID, players, zek),
+					m.IpponsA, m.IpponsB, m.HansokuA, m.HansokuB,
 					phaseFromMatchID(m.ID), m.RepPlayerA, m.RepPlayerB))
 				return
 			}
@@ -109,9 +128,19 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 					if !strings.EqualFold(bm.Court, court) || bm.Status != state.MatchStatusRunning {
 						continue
 					}
-					players := currentMatchPlayers(store, comp)
-					c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-						bm.SideA, bm.SideB, bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
+					// bracket is already loaded (below the pool scan above), so
+					// pass it through rather than letting numbersFromDrawWithBracket
+					// read bracket.json a second time.
+					players := currentMatchPlayers(store, comp, bracket)
+					zek := comp.EffectiveWithZekkenName()
+					// bc-brid: BracketMatch carries a per-side id when its own
+					// row is stamped; buildSideByIDOrName prefers it and falls
+					// back to the pre-bc-brid name match for a bye, an
+					// unresolved feeder, or an unrepaired legacy row.
+					c.JSON(http.StatusOK, currentMatchPayload(court, comp,
+						buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
+						buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
+						bm.IpponsA, bm.IpponsB, bm.HansokuA, bm.HansokuB,
 						phaseFromMatchID(bm.ID), "", ""))
 					return
 				}
@@ -122,7 +151,10 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 			if bm := bracket.ThirdPlaceMatch; bm != nil &&
 				strings.EqualFold(bm.Court, court) &&
 				bm.Status == state.MatchStatusRunning {
-				players := currentMatchPlayers(store, comp)
+				// bracket is already loaded (above, this branch's own bm comes
+				// from it), so pass it through rather than a second read.
+				players := currentMatchPlayers(store, comp, bracket)
+				zek := comp.EffectiveWithZekkenName()
 				ipponsA, hansokuA := bm.IpponsA, bm.HansokuA
 				ipponsB, hansokuB := bm.IpponsB, bm.HansokuB
 				// phaseFromMatchID(bm.ID) would return "m" for the bronze
@@ -131,8 +163,13 @@ func RegisterDisplayHandlers(r *gin.RouterGroup, store *state.Store) {
 				// stable literal label instead of deriving one from the ID
 				// (matches the "3rd Place Match" label kachinuki_export.go
 				// uses for the same match).
-				c.JSON(http.StatusOK, currentMatchPayload(court, comp, players,
-					bm.SideA, bm.SideB, ipponsA, ipponsB, hansokuA, hansokuB,
+				// ThirdPlaceMatch is a BracketMatch too, so the same
+				// id-preferring, name-falling-back resolution applies
+				// (buildSideByIDOrName, matching the round branch above).
+				c.JSON(http.StatusOK, currentMatchPayload(court, comp,
+					buildSideByIDOrName(bm.SideA, bm.SideAID, players, zek),
+					buildSideByIDOrName(bm.SideB, bm.SideBID, players, zek),
+					ipponsA, ipponsB, hansokuA, hansokuB,
 					"3rd Place Match", "", ""))
 				return
 			}
@@ -294,26 +331,51 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // current-match payload (DisplayName/Dojo/number). LoadParticipantsOpt is the
 // canonical read so we pick up DisplayName/Dojo even on legacy competitions
 // that predate the HasParticipantIDs flag. mp-13y: when a numberPrefix is
-// configured, merge the pools.csv-derived numbers onto the slice so buildSide
-// can include "number" in the polled OBS/vMix overlay payload; the pools.csv
-// read is skipped entirely otherwise (the common case).
-func currentMatchPlayers(store *state.Store, comp *state.Competition) []domain.Player {
-	players, _ := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
-	if comp.NumberPrefix != "" {
-		pools, _ := store.LoadPools(comp.ID)
-		// comp.EffectiveFormat(): an unset Format ("") is standalone playoffs
-		// too, and mergePoolNumbersIntoPlayersSlice's playoffs-only branch must
-		// see that or it silently skips number assignment for those entrants.
-		mergePoolNumbersIntoPlayersSlice(comp.NumberPrefix, players, pools, comp.EffectiveFormat())
+// configured, merge the draw-derived numbers onto the slice so buildSide
+// can include "number" in the polled OBS/vMix overlay payload.
+//
+// bracket is the caller's own already-loaded read when it has one (nil
+// otherwise): the pool branch above has not loaded one at the point it
+// calls this, but both bracket-branch callers (the round scan and the
+// ThirdPlaceMatch check) already hold it, so passing it through here lets
+// numbersFromDrawWithBracket skip a second bracket.json read for a
+// playoffs-format competition.
+func currentMatchPlayers(store *state.Store, comp *state.Competition, bracket *state.Bracket) []domain.Player {
+	// the load error used to be discarded outright (`players, _ :=...`)
+	// while the pools load just below already logs its own. Logged, not
+	// returned/surfaced: the overlay must not vanish over an unreadable
+	// participants.csv, it degrades to whatever LoadParticipantsOpt still
+	// managed to return (possibly nil/empty), same contract as the pools
+	// branch below.
+	players, plErr := store.LoadParticipantsOpt(comp.ID, comp.EffectiveWithZekkenName(), state.LoadParticipantsOpts{WithSeeds: false, HasIDs: comp.ParticipantIDsHint()})
+	if plErr != nil {
+		log.Printf("mobileapp: court current %s: load participants: %v", comp.ID, plErr)
+	}
+	// numbersFromDrawWithBracket (bc-pnum ruling 2 successor to PR #416
+	// finding 3) owns the prefix/no-draw-yet skip and the format-specific
+	// read (pools.csv when needed; bracket is threaded through instead of
+	// re-read). An unreadable file is reported, not merged, so the overlay
+	// shows MISSING numbers, never composed ones (D1). The log line says
+	// "load draw", not "load pools": for a playoffs-format competition the
+	// file behind this error is bracket.json, not pools.csv.
+	if err := numbersFromDrawWithBracket(store, comp, players, bracket); err != nil {
+		log.Printf("mobileapp: court current %s: load draw: %v", comp.ID, err)
 	}
 	return players
 }
 
-// currentMatchPayload builds the GET /court/:court/current "current" body shared
-// by the pool and bracket branches. repA/repB are the representative-bout
-// fighters for a pool daihyosen (empty for regular and bracket matches).
-func currentMatchPayload(court string, comp *state.Competition, players []domain.Player,
-	sideAName, sideBName string, ipponsA, ipponsB []string, hansokuA, hansokuB int,
+// currentMatchPayload builds the GET /court/:court/current "current" body
+// shared by the pool and bracket branches. repA/repB are the
+// representative-bout fighters for a pool daihyosen (empty for regular and
+// bracket matches). sideA/sideB are pre-built by the caller via
+// buildSideByID (pool: id-only, no name fallback -- operator ruling
+// bc-pnum) or buildSideByIDOrName (bracket/ThirdPlaceMatch: prefers the id
+// but falls back to name for a bye, an unresolved feeder, or an unrepaired
+// legacy row) -- the CALLER picks the resolver, because only it knows
+// which record class it read the match from; this function must not
+// re-derive that choice from whether an id string happens to be empty.
+func currentMatchPayload(court string, comp *state.Competition, sideA, sideB gin.H,
+	ipponsA, ipponsB []string, hansokuA, hansokuB int,
 	phase, repA, repB string) gin.H {
 	return gin.H{
 		"court":  court,
@@ -323,8 +385,8 @@ func currentMatchPayload(court string, comp *state.Competition, players []domain
 			"name": comp.Name,
 		},
 		"phase": phase,
-		"sideA": buildSide(sideAName, players, comp.EffectiveWithZekkenName()),
-		"sideB": buildSide(sideBName, players, comp.EffectiveWithZekkenName()),
+		"sideA": sideA,
+		"sideB": sideB,
 		// Normalize nil → [] so the JSON encodes empty arrays, not null: the
 		// contract models ipponsA/ipponsB as arrays and overlay clients assume
 		// []. A nil slice reaches here from an unscored pool match or a
@@ -350,26 +412,49 @@ func emptyIfNil(s []string) []string {
 	return s
 }
 
-// buildSide turns a participant name (which is what MatchResult.SideA/SideB
-// carries, see state/models.go) into the per-side payload defined by the
-// court-current contract. When the participants list cannot resolve the name
-// we fall back to a name-only side so the overlay can still render
-// "Player vs Player" rather than blanking out.
-func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H {
+// findPlayerByID returns the roster player whose ID matches id, or nil when
+// id is empty or no player matches. Empty is refused outright rather than
+// matching an equally-empty Player.ID field, which would resolve a
+// never-stamped side to an arbitrary equally-id-less roster row.
+func findPlayerByID(players []domain.Player, id string) *domain.Player {
+	if id == "" {
+		return nil
+	}
+	for i := range players {
+		if players[i].ID == id {
+			return &players[i]
+		}
+	}
+	return nil
+}
+
+// findPlayerByName returns the roster player whose Name matches name, or
+// nil when no player matches.
+func findPlayerByName(players []domain.Player, name string) *domain.Player {
+	for i := range players {
+		if players[i].Name == name {
+			return &players[i]
+		}
+	}
+	return nil
+}
+
+// sidePayload builds the per-side payload the court-current contract
+// defines, from name (always present, even when p is nil) and the matched
+// roster player p, or nil when unresolved -- dojo/playerId/number stay
+// blank in that case, rather than fabricating a value.
+func sidePayload(name string, p *domain.Player, withZekkenName bool) gin.H {
 	displayName := name
 	dojo := ""
 	playerID := ""
 	number := ""
-	for i := range players {
-		if players[i].Name == name {
-			if withZekkenName && players[i].DisplayName != "" {
-				displayName = players[i].DisplayName
-			}
-			dojo = players[i].Dojo
-			playerID = players[i].ID
-			number = players[i].Number
-			break
+	if p != nil {
+		if withZekkenName && p.DisplayName != "" {
+			displayName = p.DisplayName
 		}
+		dojo = p.Dojo
+		playerID = p.ID
+		number = p.Number
 	}
 	return gin.H{
 		"playerId":    playerID,
@@ -378,6 +463,53 @@ func buildSide(name string, players []domain.Player, withZekkenName bool) gin.H 
 		"dojo":        dojo,
 		"number":      number,
 	}
+}
+
+// buildSideByID resolves a match side BY ID ONLY (operator ruling bc-pnum).
+// id is the side's participant id from a record that carries a per-side id
+// FIELD -- a POOL match's SideAID/SideBID (state.MatchResult has that
+// field, even when its value happens to be empty, e.g. a legacy row
+// stamped before SideAID/SideBID existed).
+//
+// An empty id -- foreign, stale, or simply never stamped -- resolves to NO
+// roster player (findPlayerByID's own guard) rather than falling back to a
+// name match, which could silently pick a different competitor sharing the
+// same display name across dojos (bc-pnum review finding 2; the old single
+// buildSide fell back to a name scan whenever id == "", which a legacy
+// id-less POOL row could reach just as easily as a genuinely id-less
+// record). Only buildSideByIDOrName may fall back to a name match -- see
+// its own doc comment for which record class (the bracket) that is, and why.
+func buildSideByID(name, id string, players []domain.Player, withZekkenName bool) gin.H {
+	return sidePayload(name, findPlayerByID(players, id), withZekkenName)
+}
+
+// buildSideByIDOrName is buildSideByID's bracket counterpart (bc-brid).
+// BracketMatch now carries a per-side id when its own row is stamped (see
+// BracketMatch.SideAID's own doc comment for the writers that stamp it and
+// the three shapes that carry none: a bye, an unresolved "Winner of ..."
+// feeder, or an unrepaired legacy row), so this prefers the id exactly like
+// buildSideByID, but falls back to the pre-bc-brid name match
+// (findPlayerByName) when the id is empty or does not resolve to a roster
+// player -- "this ADDS ids, it does not remove name handling" (bc-brid's own
+// instruction for every identity-critical reader). When the roster cannot
+// resolve either, this still returns a name-only side so the overlay can
+// render "Player vs Player" rather than blanking out.
+//
+// Deliberately NOT folded into buildSideByID itself: a pool MatchResult's
+// id-less residue (a row an earlier repair could not resolve) has ALWAYS
+// rendered unresolved via buildSideByID, with NO name fallback -- pool
+// sides are resolved BY ID ONLY (operator ruling bc-pnum), precisely to
+// avoid the same same-name misattribution this function's own fallback
+// re-admits for the bracket's residue. Widening buildSideByID itself would
+// regress that deliberate pool ruling; keeping this a separate function is
+// what lets the bracket keep its (necessarily weaker, but pre-existing)
+// name tolerance without touching the pool's stricter one.
+func buildSideByIDOrName(name, id string, players []domain.Player, withZekkenName bool) gin.H {
+	p := findPlayerByID(players, id)
+	if p == nil {
+		p = findPlayerByName(players, name)
+	}
+	return sidePayload(name, p, withZekkenName)
 }
 
 // phaseFromMatchID derives a human-readable phase label from a match ID.

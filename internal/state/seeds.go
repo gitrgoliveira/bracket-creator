@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -11,6 +12,14 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 )
+
+// ErrSeedsWithoutRoster marks a SaveSeeds call the operator can fix by
+// entering participants first: a competitor list must exist to define
+// seeds (operator ruling), so a NON-EMPTY seeding against a roster with no
+// participants at all has nothing to attach to. An EMPTY seed set is exempt
+// -- that is how an operator clears a seeding -- so this only ever fires for
+// a set that actually names somebody.
+var ErrSeedsWithoutRoster = errors.New("seeds: a competitor list must exist before seeds can be set")
 
 // LoadSeeds and SaveSeeds use the PER-COMPETITION lock (not the store-wide
 // `s.mu`) so they serialize against other per-comp readers/writers. In
@@ -79,6 +88,44 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 	mu.Lock()
 	defer mu.Unlock()
 
+	if len(assignments) > 0 {
+		// Load the roster under the lock already held above: LoadParticipants
+		// would try to re-acquire it and deadlock the non-reentrant mutex, so
+		// this goes through the no-lock loader every other locked caller in
+		// this package uses. WithSeeds:false because the merge this loader
+		// would otherwise do (seeds.csv onto players) reads the very file
+		// this call is about to overwrite -- irrelevant here and one fewer
+		// file this write depends on.
+		withZekken, _, err := s.withZekkenNameLocked(compID)
+		if err != nil {
+			return err
+		}
+		players, err := s.loadParticipantsNoLock(compID, withZekken, LoadParticipantsOpts{WithSeeds: false})
+		if err != nil {
+			return err
+		}
+		if len(players) == 0 {
+			return ErrSeedsWithoutRoster
+		}
+		// Stamp every row with its participant's id, resolved the same way
+		// every seed-row matcher resolves one (domain.RosterIndex.LookupSeed:
+		// id-first, else the (name, dojo) pair). SaveSeeds is the one door
+		// every seeds.csv write goes through (the participant-rename rewrite
+		// in updateParticipantNoLock is the sole exception, and it only ever
+		// PRESERVES an id it already read, never stamps a new one), so
+		// stamping here makes it automatic for every caller: the seeding
+		// panel, tournament import, and create-with-players. A row that
+		// resolves to nobody -- a ghost the caller's own gate should already
+		// have refused before reaching here -- is written with whatever id
+		// it arrived carrying, unchanged.
+		idx := domain.NewRosterIndex(players)
+		for i := range assignments {
+			if p, ok := idx.LookupSeed(assignments[i]); ok {
+				assignments[i].ID = p.ID
+			}
+		}
+	}
+
 	path := s.compPath(compID, "seeds.csv")
 
 	// Sort by rank for readability
@@ -112,14 +159,21 @@ func (s *Store) SaveSeeds(compID string, assignments []domain.SeedAssignment) er
 // encoding/csv rather than fmt.Fprintf so names containing commas / quotes
 // (e.g. "Smith, John") are properly escaped; hand-formatted rows would emit
 // broken CSV that ParseSeedsFile then mis-splits, silently dropping seeds.
+//
+// ID is APPENDED as a fourth column, not inserted alongside Rank/Name/Dojo:
+// ReadSeedsFileRaw locates every column by header name, so an older build
+// that has never heard of "ID" simply never looks the column up (same
+// backward-compatible story the Dojo column's own doc paragraph above
+// describes), and a file this build wrote is still readable by one that
+// predates the column.
 func marshalSeedsCSV(assignments []domain.SeedAssignment) ([]byte, error) {
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
-	if err := w.Write([]string{"Rank", "Name", "Dojo"}); err != nil {
+	if err := w.Write([]string{"Rank", "Name", "Dojo", "ID"}); err != nil {
 		return nil, fmt.Errorf("writing seeds CSV header: %w", err)
 	}
 	for _, a := range assignments {
-		if err := w.Write([]string{strconv.Itoa(a.SeedRank), a.Name, a.Dojo}); err != nil {
+		if err := w.Write([]string{strconv.Itoa(a.SeedRank), a.Name, a.Dojo, a.ID}); err != nil {
 			return nil, fmt.Errorf("writing seeds CSV record: %w", err)
 		}
 	}

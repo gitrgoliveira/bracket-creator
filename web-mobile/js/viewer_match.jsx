@@ -16,6 +16,7 @@ import { writeDidNotLand } from './write_result.jsx';
 import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 const { useState, useRef: useRefV, useCallback } = React;
 
@@ -101,8 +102,10 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   const isDone = match.status === "completed";
 
   // mp-13y: fetch per-match lineups for team matches so bout rows show
-  // competitor names instead of bout numbers.
-  const { lineupA, lineupB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
+  // competitor names instead of bout numbers. bc-pnum: squadA/squadB ride
+  // along the same fetch (this card passes no `competition`, so
+  // useTeamLineups resolves squads off its own fetchCompetitionDetails call).
+  const { lineupA, lineupB, squadA, squadB } = useTeamLineups(isTeam ? match : null, undefined, isTeam ? match.roundIndex : undefined);
   // Show the Daihyosen row when a rep-bout subResult exists (position DAIHYOSEN_POSITION);
   // TeamScoreboard additionally gates it on the match actually being tied.
   const showDH = isTeam && (match.subResults || []).some(s => s.position === DAIHYOSEN_POSITION);
@@ -150,10 +153,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           is gone, and empty slots next to each name read as "upcoming" exactly
           as they do in a lobby cell. */}
       {isTeam
-        ? <TeamScoreboard subResults={match.subResults || []} lineupA={lineupA} lineupB={lineupB}
+        ? <TeamScoreboard subResults={match.subResults || []} teamResult={match.teamResult} lineupA={lineupA} lineupB={lineupB}
             teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
+            squadA={squadA} squadB={squadB}
+            numberA={match.sideA?.number || ""} numberB={match.sideB?.number || ""}
             kachinuki={match.teamMatchType === "kachinuki"} />
         : <IndividualScore match={match} variant="card" showNames showDojo
             shiroName={bName} akaName={aName} />}
@@ -166,8 +171,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
 // ---------------------------------------------------------------------------
 
 export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, highlight }) => {
-  const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
-  const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+  // bc-pnum: sameCompetitor, never a bare `winner.id === side.id` (see
+  // bracket.jsx's MatchCard for why the naked equality lights both sides
+  // once both are id-less). No presence guard: sameCompetitor(null, x) is
+  // already false.
+  const aWin = sameCompetitor(m.winner, m.sideA);
+  const bWin = sameCompetitor(m.winner, m.sideB);
   // Score string for completed matches (final) and running matches (live, once
   // at least one ippon has landed). matchScoreStr returns "" before any score
   // exists, so a just-started running match falls through to the "vs" render.

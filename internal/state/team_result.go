@@ -30,9 +30,9 @@ func countScoringIppons(ippons []string) int {
 // TeamResultFrom aggregates sub-bouts into IV and PW per side. It is the single
 // source of truth for the team-match summary: the daihyosen placeholder
 // (Position <= DaihyosenSubPosition, the -1 daihyosen or any negative) is skipped so a re-validated tie does
-// not double-count, IV counts sub-bout winners via the same side-matching
-// fallback as scoring (winner may carry the match-level or sub-level side name),
-// and PW counts every scored ippon regardless of bout outcome (a drawn bout where
+// not double-count, IV counts sub-bout winners through SubBoutWinnerSide (member
+// ids first, then names, and neither side when two fighters share a name and the
+// ids cannot decide), and PW counts every scored ippon regardless of bout outcome (a drawn bout where
 // both sides scored still contributes), skipping unfilled "•" placeholder slots
 // via countScoringIppons. SideA is Aka, SideB is Shiro. Returns nil when there
 // are no countable sub-bouts (an individual match, or a slice containing
@@ -54,10 +54,10 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 			continue
 		}
 		hasBout = true
-		switch {
-		case sub.Winner == sideAName || (sub.SideA != "" && sub.Winner == sub.SideA):
+		switch SubBoutWinnerSide(sub, sideAName, sideBName) {
+		case domain.MatchSideA:
 			line.AkaIV++
-		case sub.Winner == sideBName || (sub.SideB != "" && sub.Winner == sub.SideB):
+		case domain.MatchSideB:
 			line.ShiroIV++
 		}
 		line.AkaPW += countScoringIppons(sub.IpponsA)
@@ -67,6 +67,59 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 		return nil
 	}
 	return line
+}
+
+// SubBoutWinnerSide answers "which side won this sub-bout", and is the one
+// owner of that question: the wire summary (TeamResultFrom, just above) and
+// the standings accrual (engine.accrueTeamSubResults) both route through it,
+// so the IV a spectator reads and the IV the tie-break ranks by cannot
+// disagree. Two tiers, in this order.
+//
+// MEMBER IDS FIRST (operator ruling bc-pnum, "this should only use the
+// IDs"). A kachinuki bout row carries SideAMemberID/SideBMemberID, stamped
+// when the pairing is appended, and WinnerMemberID, stamped by the score
+// editor from the side the operator actually picked. Three ids present and
+// the winner's matching one of them is a fact about identity, not about
+// spelling, so it settles the row outright. Routed through
+// domain.AttributeWinnerSide, the same owner the match-level triple uses,
+// which returns MatchSideNone when the ids cannot decide (one absent, or a
+// winner id matching neither side) and so falls through to the names.
+//
+// NAMES SECOND, and only where names can actually tell the two sides
+// apart. This is the pre-existing rule and still carries the quick-score
+// synth path, where a bout row names the TEAMS rather than two fighters.
+//
+// The guard between the tiers is the point of the change: when both sides
+// hold the SAME non-empty name, a name comparison cannot say who won, and
+// the old code's case order silently handed every such bout to Aka. Two
+// opposing fighters may legally share a display name, so that was a coin
+// flip written into the standings. Such a bout now counts for NEITHER side
+// until its ids can speak, which is the same refusal every other id repair
+// in this package makes rather than guess. A bout scored through the
+// editor since bc-pnum carries the winner's member id and is unaffected;
+// what loses an IV here is drifted or legacy data that never recorded who
+// won in a form that survives two fighters sharing a name.
+func SubBoutWinnerSide(sub SubMatchResult, sideAName, sideBName string) domain.MatchSide {
+	if side := domain.AttributeWinnerSide(domain.SubBoutAttribution(sub.Attribution())); side != domain.MatchSideNone {
+		return side
+	}
+	if sub.Winner == "" || (sub.SideA != "" && sub.SideA == sub.SideB) {
+		return domain.MatchSideNone
+	}
+	// The fighter-name comparison is repeated here rather than left to the
+	// call above, because AttributeWinnerSide's id branch SHORT-CIRCUITS: a
+	// row carrying all three ids whose winner id matches neither side
+	// returns no side and never reaches its own name tier. That row is
+	// drifted data whose NAMES can still tell the two fighters apart, so it
+	// is attributed rather than dropped. The team-name arms carry the
+	// quick-score synth path, where a bout row names the two TEAMS.
+	switch {
+	case sub.Winner == sideAName || (sub.SideA != "" && sub.Winner == sub.SideA):
+		return domain.MatchSideA
+	case sub.Winner == sideBName || (sub.SideB != "" && sub.Winner == sub.SideB):
+		return domain.MatchSideB
+	}
+	return domain.MatchSideNone
 }
 
 // TeamResult returns the team-match summary for this match, or nil for an

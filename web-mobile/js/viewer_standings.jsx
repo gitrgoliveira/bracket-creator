@@ -20,6 +20,7 @@ import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor 
 // does not say what the app expects, and for the admin-only gate on showing it.
 import { matchDataUnreadable, unreadableMatches, UnreadableBoutsNote, UnreadablePoolNote } from './data_integrity.jsx';
 import { realIppons } from './result_slot.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -402,13 +403,17 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
   const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
   // withNumber prepends the assigned competitor number (e.g. "K1") when
-  // present; the winner comparison below still uses the bare name.
+  // present; the winner comparison below still uses the bare name/id.
   const aName = typeof m.sideA === "object" ? withNumber(m.sideA) : aRawName;
   const bName = typeof m.sideB === "object" ? withNumber(m.sideB) : bRawName;
-  const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-  // Winner comparison must use the bare name (numberPrefix not included).
-  const aWin = winnerName && winnerName === aRawName;
-  const bWin = winnerName && winnerName === bRawName;
+  // sameCompetitor (competitor_identity.jsx): id decides whenever the
+  // winner carries one, name only when neither side does. A name-only
+  // compare would light BOTH sides when two competitors share a display
+  // name (different dojos) and face each other.
+  const aId = typeof m.sideA === "object" ? m.sideA?.id : "";
+  const bId = typeof m.sideB === "object" ? m.sideB?.id : "";
+  const aWin = sameCompetitor(m.winner, { id: aId, name: aRawName });
+  const bWin = sameCompetitor(m.winner, { id: bId, name: bRawName });
 
   // Render a non-interactive <div> when there's no click handler (read-only
   // reuse, e.g. the operator console passes onClick=null) so we don't leave a
@@ -457,11 +462,16 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
   // matchParticipantIds helper; names from matchParticipantNames.)
   const winnerId = (m) => (m.winner && typeof m.winner === "object" ? m.winner.id : null) || m.winnerId || "";
 
-  // Index every match under BOTH its id-pair and its name-pair. The id
-  // entries are collision-free and used first; the name entries are a
-  // fallback for partially-migrated data (players carry ids but an older
-  // pool-matches.csv does not, or vice versa). Same-name collisions only
-  // affect the name fallback, which is the pre-existing behavior.
+  // Index every match under its id-pair (bc-pnum: id decides whenever the
+  // record carries one; pool/league matches always carry sideAId/sideBId,
+  // so aKey/bKey already prefer the id per side, falling to that side's
+  // name only when it genuinely has none). There is deliberately NO second
+  // pass indexing every match by its bare NAME pair: that used to add an
+  // entry the cell lookup below would consult whenever the id-pair lookup
+  // missed, so an id-carrying row for one same-name/different-dojo
+  // participant could borrow a completely unrelated participant's match
+  // that merely shared a display name. A miss must render "not played",
+  // never a same-name borrow.
   const matchMap = {};
   matches.forEach(m => {
     const [aName, bName] = matchParticipantNames(m);
@@ -471,11 +481,6 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
     if (aKey && bKey) {
       matchMap[`${aKey}||${bKey}`] = m;
       matchMap[`${bKey}||${aKey}`] = m;
-    }
-    if (aName && bName) {
-      // Name fallback (does not clobber an existing id entry).
-      if (!matchMap[`${aName}||${bName}`]) matchMap[`${aName}||${bName}`] = m;
-      if (!matchMap[`${bName}||${aName}`]) matchMap[`${bName}||${aName}`] = m;
     }
   });
 
@@ -505,8 +510,8 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
         <thead>
           <tr>
             <th className="league-matrix__corner"></th>
-            {players.map((p, i) => (
-              <th key={pkey(p)} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || (i + 1)}</th>
+            {players.map((p) => (
+              <th key={pkey(p)} scope="col" aria-label={playerLabel(p)} className={`league-matrix__col-head${isHighlighted(p) ? " league-matrix__col--me" : ""}`} title={playerLabel(p)}>{p.number || ""}</th>
             ))}
           </tr>
         </thead>
@@ -514,25 +519,24 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
           {players.map((rowPlayer, ri) => (
             <tr key={pkey(rowPlayer)} className={isHighlighted(rowPlayer) ? "league-matrix__row--me" : ""}>
               <td className="league-matrix__row-head" title={playerLabel(rowPlayer)} aria-label={playerLabel(rowPlayer)}>
-                <span className="league-matrix__num">{rowPlayer.number || (ri + 1)}</span>
+                <span className="league-matrix__num">{rowPlayer.number || ""}</span>
                 <span className="league-matrix__pname">{tweaks.showDojo ? rowPlayer.name : shortName(rowPlayer)}</span>
               </td>
               {players.map((colPlayer, ci) => {
                 const colMe = isHighlighted(colPlayer) ? " league-matrix__col--me" : "";
                 if (ri === ci) return <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} className={`league-matrix__cell league-matrix__cell--self${colMe}`}>&mdash;</td>;
-                // Look up the match by id-pair first (collision-free),
-                // then by name-pair for legacy/un-migrated data.
-                const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`] || matchMap[`${rowPlayer.name}||${colPlayer.name}`];
+                // Look up the match by id-pair only (bc-pnum): a miss means
+                // "not played" for this row, never a same-name borrow via a
+                // bare name-pair fallback (see the matchMap comment above).
+                const m = matchMap[`${pkey(rowPlayer)}||${pkey(colPlayer)}`];
                 if (!m) return <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, "not played")} className={`league-matrix__cell league-matrix__cell--empty${colMe}`}></td>;
 
                 const [aName] = matchParticipantNames(m);
                 const [aId] = matchParticipantIds(m);
-                const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
-                // Which side is the row player? Match on id when both the
-                // match side and the player carry one; else by name.
-                const rowIsAka = (aId && rowPlayer.id)
-                  ? aId === rowPlayer.id
-                  : aName === rowPlayer.name;
+                // Which side is the row player? sameCompetitor
+                // (competitor_identity.jsx): id decides whenever the match
+                // side carries one, name only when rowPlayer has none either.
+                const rowIsAka = sameCompetitor({ id: aId, name: aName }, rowPlayer);
 
                 const interactiveProps = onMatchClick ? {
                   role: "button",
@@ -562,18 +566,27 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                 // head-to-head between two same-name/different-dojo players).
                 // Fall back to name for legacy data without a winner id.
                 const wId = winnerId(m);
-                // When both sides share a name and there is no winner id, the
-                // winner NAME is ambiguous: do NOT mark either row as winner
-                // (that would light up BOTH cells green for the one match). The
-                // id branch is the authoritative resolver; the name fallback is
-                // only safe for distinct-name matchups. (Source path now sends
-                // winnerId for same-name matches, so this is defense-in-depth
-                // for legacy data without ids.)
+                const winnerName = typeof m.winner === "object" ? m.winner?.name : m.winner;
+                // sameCompetitor decides id-vs-name (rowIsAka's comment above
+                // applies equally here). namesAmbiguous is a SEPARATE guard,
+                // only relevant to the name-fallback branch: when both sides
+                // of this match share rowPlayer's own name, a name-only
+                // winner compare can't tell the row and column player apart,
+                // so it must not mark either cell won (an id-decided result
+                // is unaffected -- ids never collide this way).
                 const namesAmbiguous = rowPlayer.name === colPlayer.name;
-                const rowWon = (wId && rowPlayer.id)
-                  ? wId === rowPlayer.id
-                  : (!namesAmbiguous && winnerName && winnerName === rowPlayer.name);
+                const rowWon = (!!wId || !namesAmbiguous) && sameCompetitor({ id: wId, name: winnerName }, rowPlayer);
+                const colWon = (!!wId || !namesAmbiguous) && sameCompetitor({ id: wId, name: winnerName }, colPlayer);
                 const isDraw = window.isHikiwake(m.decision) || window.isHikiwake(m.score?.type);
+                // Completed (this branch is only reached once the pending
+                // check above has passed) and not a draw, yet the winner
+                // attributes to NEITHER row nor column: a mixed pair
+                // sameCompetitor refuses to guess, or the match simply
+                // carries no resolvable winner. rowWon's own "else" used to
+                // assume colPlayer won whenever rowWon was false, painting
+                // this row --loss even though nothing here actually
+                // attributes the win to colPlayer either. Claim nothing.
+                const unattributed = !isDraw && !rowWon && !colWon;
 
                 let cellContent;
                 let resultLabel;
@@ -594,15 +607,21 @@ export function LeagueMatrix({ pool, matches, tweaks, onMatchClick, highlightPla
                   // (a number) instead: there are no ippon letters to show.
                   cellContent = <span className="league-matrix__win">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Win";
+                } else if (unattributed) {
+                  // Neutral: reuses the pending/empty cells' look (muted
+                  // text, no fill) rather than the red loss tint, since
+                  // nothing here actually says this row lost.
+                  cellContent = "–";
+                  resultLabel = "Result not attributed";
                 } else {
-                  // The loser's own ippons (red), or empty when they scored
-                  // none. Engi shows its own flag count instead.
+                  // colWon: the loser's own ippons (red), or empty when they
+                  // scored none. Engi shows its own flag count instead.
                   cellContent = <span className="league-matrix__loss">{isEngiCell ? rowFlags : rowIppons.join("")}</span>;
                   resultLabel = "Loss";
                 }
 
                 return (
-                  <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
+                  <td key={`${pkey(rowPlayer)}||${pkey(colPlayer)}`} title={cellTitle(rowPlayer, colPlayer, resultLabel)} className={`league-matrix__cell ${rowWon ? "league-matrix__cell--win" : isDraw ? "league-matrix__cell--draw" : unattributed ? "league-matrix__cell--unattributed" : "league-matrix__cell--loss"}${colMe}`} aria-label={cellLabel(rowPlayer, colPlayer, resultLabel)} {...interactiveProps}>
                     {cellContent}
                   </td>
                 );
@@ -648,12 +667,15 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
   const [aName, aDN] = isEngi && window.engiPairParts ? window.engiPairParts(aFull) : [aFull, ""];
   const [bName, bDN] = isEngi && window.engiPairParts ? window.engiPairParts(bFull) : [bFull, ""];
 
-  // DH badge: show which side won a completed daihyosen bout.
+  // DH badge: show which side won a completed daihyosen bout, via
+  // sameCompetitor (competitor_identity.jsx) -- a name-only compare would
+  // light BOTH badges when the two sides share a display name (two
+  // same-name/different-dojo competitors facing each other in a pool
+  // daihyosen).
   const isDH = isPoolDaihyosenBout(m.id) && m.status === "completed";
-  const winnerName = m.winner && typeof m.winner === "object" ? m.winner.name : m.winner;
-  const nameOf = (side) => (typeof side === "object" ? side?.name : side) || "";
-  const shiroWonDH = isDH && !!winnerName && winnerName === nameOf(m.sideB); // shiro = sideB
-  const akaWonDH = isDH && !!winnerName && winnerName === nameOf(m.sideA);   // aka = sideA
+  const wonDH = (side) => isDH && sameCompetitor(m.winner, side);
+  const shiroWonDH = wonDH(m.sideB); // shiro = sideB
+  const akaWonDH = wonDH(m.sideA);   // aka = sideA
 
   const handleClick = onMatchClick ? () => onMatchClick(m) : undefined;
 

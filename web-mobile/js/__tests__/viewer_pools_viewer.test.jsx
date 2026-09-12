@@ -20,6 +20,16 @@ function findAll(node, pred, acc = []) {
   return acc;
 }
 
+// Walk a vnode tree and return the first vnode matching a predicate.
+function findFirst(node, pred) {
+  if (node == null || typeof node !== 'object') return null;
+  if (Array.isArray(node)) { for (const k of node) { const f = findFirst(k, pred); if (f) return f; } return null; }
+  if (pred(node)) return node;
+  const kids = node.children || node.props?.children || [];
+  for (const k of [].concat(kids)) { const f = findFirst(k, pred); if (f) return f; }
+  return null;
+}
+
 // ------------------------------------------------------------------
 // mp-938b: Draw-order standings table and rank badges
 // ------------------------------------------------------------------
@@ -665,6 +675,172 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     const text = collectText(tree);
     expect(text).toContain('Solo Shiro');
     expect(text).toContain('Solo Aka');
+  });
+});
+
+// ------------------------------------------------------------------
+// bc-pnum: PoolNumberedMatchRow's DH badge used to compare the winner by
+// NAME alone (winnerName === nameOf(side)). Two competitors sharing a
+// display name from different dojos, facing each other in a pool
+// daihyosen, made BOTH sides' names equal the winner's name, so both the
+// Shiro and Aka DH badges lit up for a single winner.
+// ------------------------------------------------------------------
+describe('PoolNumberedMatchRow DH badge id-vs-name (bc-pnum)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolNumberedMatchRow, DHBadge;
+  const savedGlobals = {};
+  const STUBBED = ['Term', 'isHikiwake', 'formatIpponsScore', 'teamIVScore', 'matchScoreStr', 'matchStateCell', 'queueLabel', 'queueLabelCompact'];
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.Term = function Term(props) { return { type: 'span', props, children: props?.children }; };
+    global.window.isHikiwake = () => false;
+    global.window.formatIpponsScore = () => '';
+    global.window.teamIVScore = () => null;
+    global.window.matchScoreStr = (m) =>
+      (global.window.teamIVScore(m)) ||
+      global.window.formatIpponsScore(m?.ipponsB || [], m?.ipponsA || [], m?.score, m?.decision, m?.encho, m?.decidedByHantei);
+    global.window.matchStateCell = (m) =>
+      m?.status === 'completed' ? (global.window.matchScoreStr(m) || 'vs') : 'vs';
+    global.window.queueLabel = () => '';
+    global.window.queueLabelCompact = () => null;
+    vi.resetModules();
+    ({ PoolNumberedMatchRow, DHBadge } = await import('../viewer_standings.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('badges only the winning side by id, not both, when both sides share a display name', () => {
+    // Two "Sato" entries from different dojos facing each other in a pool
+    // daihyosen. sideA (Tokyo) won: winner.id === sideA.id. A name-only
+    // compare would match BOTH sides (winnerName === nameOf(sideA) AND
+    // === nameOf(sideB)), lighting both badges.
+    const m = {
+      id: 'Pool A-DH-0',
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+      winner: { id: 'S1', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+    const dhBadges = findAll(tree, n => n?.type === DHBadge);
+    expect(dhBadges).toHaveLength(1);
+  });
+
+  it('badges the Aka (sideA) side when sideA is the id-matched winner', () => {
+    const m = {
+      id: 'Pool A-DH-0',
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+      winner: { id: 'S1', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+    const akaSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--aka'));
+    expect(findAll(akaSide, n => n?.type === DHBadge)).toHaveLength(1);
+    const shiroSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--shiro'));
+    expect(findAll(shiroSide, n => n?.type === DHBadge)).toHaveLength(0);
+  });
+
+  // bc-pnum item 1 (BEHAVIOUR CHANGE): sameCompetitor never guesses a mixed
+  // pair -- an id-less winner beside an id-carrying side badges NOTHING,
+  // rather than falling through to a name compare.
+  it('badges no side when the winner is id-less but a side carries an id (mixed pair, never guess)', () => {
+    const m = {
+      id: 'Pool A-DH-0',
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: '', name: 'Tanaka' },
+      winner: { id: '', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+    const dhBadges = findAll(tree, n => n?.type === DHBadge);
+    expect(dhBadges).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------------------------
+// bc-pnum: PoolMatchRow's aWin/bWin used to compare the winner by NAME
+// alone. Two competitors sharing a display name from different dojos
+// facing each other made BOTH sides' names equal the winner's name, so
+// both sides showed the win highlight for a single winner.
+// ------------------------------------------------------------------
+describe('PoolMatchRow win highlight id-vs-name (bc-pnum)', () => {
+  const realReact = global.React;
+  let runtime;
+  let PoolMatchRow;
+  const savedGlobals = {};
+  const STUBBED = ['matchStateCell'];
+
+  beforeEach(async () => {
+    runtime = makeReactive();
+    global.React = runtime.React;
+    global.window = global.window || {};
+    STUBBED.forEach(k => {
+      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
+        ? { had: true, val: global.window[k] }
+        : { had: false };
+    });
+    global.window.matchStateCell = () => 'vs';
+    vi.resetModules();
+    ({ PoolMatchRow } = await import('../viewer_standings.jsx'));
+  });
+
+  afterEach(() => {
+    runtime.unmount();
+    global.React = realReact;
+    STUBBED.forEach(k => {
+      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
+      else delete global.window[k];
+    });
+    vi.restoreAllMocks();
+    vi.resetModules();
+  });
+
+  it('highlights only the id-matched winning side, not both, when both sides share a name', () => {
+    const m = {
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
+      winner: { id: 'S1', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolMatchRow, { m, onClick: null });
+    const winSides = findAll(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-row__side--win'));
+    expect(winSides).toHaveLength(1);
+  });
+
+  // bc-pnum item 1 (BEHAVIOUR CHANGE): routing through sameCompetitor means
+  // a mixed pair -- an id-less winner beside an id-carrying side -- is
+  // never guessed at by name. Before this item, aWin/bWin fell through to
+  // `winnerName === aRawName` whenever the winner carried no id at all,
+  // regardless of whether the side itself had one.
+  it('highlights no side when the winner is id-less but a side carries an id (mixed pair, never guess)', () => {
+    const m = {
+      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
+      sideB: { id: '', name: 'Tanaka' },
+      winner: { id: '', name: 'Sato' },
+      status: 'completed',
+    };
+    const tree = runtime.mount(PoolMatchRow, { m, onClick: null });
+    const winSides = findAll(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-row__side--win'));
+    expect(winSides).toHaveLength(0);
   });
 });
 

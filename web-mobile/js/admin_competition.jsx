@@ -478,7 +478,7 @@ function AdminCompetition({ tournament, competition, pools, poolMatches, standin
           </div>
           <div>
             {section === "overview" && <AdminCompOverview c={c} tournament={t} pools={pools} poolMatches={poolMatches} bracket={bracket} onSection={onSection} password={password} showToast={showToast} onRefreshCompetition={onRefreshCompetition} />}
-            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} onBack={onBack} />}
+            {section === "participants" && <AdminParticipants c={c} tournament={t} onUpdate={onUpdate} password={password} showToast={showToast} onSection={onSection} />}
             {section === "lineups" && window.AdminTeamLineupsList && <window.AdminTeamLineupsList comp={c} password={password} showToast={showToast} />}
             {section === "settings" && <AdminSettings c={c} tournament={t} onUpdate={onUpdate} onBack={onBack} password={password} showToast={showToast} onStatusChange={setLocalStatus} />}
             {section === "awards" && <FightingSpiritAwardsEditor c={c} password={password} showToast={showToast} />}

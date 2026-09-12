@@ -7,19 +7,35 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // saveParticipantsWithCheckIn writes participants where names listed in
 // checkedIn are flagged CheckedIn=true. Used by the mp-w7x exclusion tests.
+//
+// Each player is stamped with bctest.StampPlayerID(name, dojo), UUID-v4-
+// shaped (8-4-4-4-12 lowercase hex): the participants.csv parser's has-ids
+// sniff requires the first field to match that shape (internal/state/
+// participants.go's uuidRE), so a non-UUID-shaped id makes the file
+// round-trip as the LEGACY column layout instead, silently shifting every
+// field one column over. It is also deterministic per (name, dojo), which
+// matters here: some tests in this file re-save the roster mid-test (e.g.
+// to flip a late check-in), and Swiss round-2+ resolves prior-round match
+// sides back to the CURRENT roster by id (buildSwissRosterIndex /
+// swissFieldKeysFromMatches, operator ruling bc-pnum) -- a fresh random id
+// on each save would make every earlier round unresolvable against the
+// re-saved roster.
 func saveParticipantsWithCheckIn(t *testing.T, store *state.Store, compID string, names []string, checkedIn map[string]bool) {
 	t.Helper()
 	players := make([]domain.Player, len(names))
 	for i, n := range names {
+		dojo := "Dojo" + string(rune('A'+i%5))
 		players[i] = domain.Player{
+			ID:        bctest.StampPlayerID(n, dojo),
 			Name:      n,
-			Dojo:      "Dojo" + string(rune('A'+i%5)),
+			Dojo:      dojo,
 			CheckedIn: checkedIn[n],
 		}
 	}

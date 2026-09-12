@@ -169,3 +169,28 @@ func TestSaveParticipantsRestored_ExemptFromTeamNameRule(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 }
+
+// The archive-import path (SaveParticipantsRestored) is a second entry point
+// into the same write chokepoint as SaveParticipants (saveParticipantsNoLock
+// -> marshalParticipantsCSV): the mint is unconditional there, so this pins
+// the archive-restore path against a future write that bypasses it (e.g. a
+// new caller that writes participants.csv directly, or a restore fast-path
+// added that skips the shared marshaller).
+func TestSaveParticipantsRestored_MintsIDsForIDLessRows(t *testing.T) {
+	s, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+	id := "c1"
+	require.NoError(t, s.SaveCompetition(&Competition{ID: id, Name: "C1"}))
+	roster := []domain.Player{
+		{Name: "Dave", Dojo: "Dojo D"},
+		{Name: "Eve", Dojo: "Dojo E"},
+	}
+
+	require.NoError(t, s.SaveParticipantsRestored(id, roster))
+
+	got, err := s.LoadParticipants(id, false)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.NotEmpty(t, got[0].ID, "SaveParticipantsRestored must mint an id for an id-less row")
+	assert.NotEmpty(t, got[1].ID, "SaveParticipantsRestored must mint an id for an id-less row")
+}

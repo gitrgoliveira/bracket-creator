@@ -127,9 +127,13 @@ func adminGroup(r *gin.Engine, capBytes int64, verifier PasswordVerifier, store 
 // caller should `return` immediately.
 //
 // Every handler that reads `c.Param("id")` and passes it to
-// store.compPath(id, ...) must use this helper. compPath does
-// filepath.Clean(filepath.Join(folder, "competitions", id, ...)), an
-// id like "../../../etc/passwd" would cleanly escape the data dir.
+// store.compPath(id, ...) should still use this helper: compPath itself
+// now enforces containment under the competitions dir (an id like
+// "../../../etc/passwd" resolves to a fixed, nonexistent sentinel
+// directory rather than escaping it), but doing the check here turns a
+// bad id into a clear 400 instead of a confusing not-found. This is no
+// longer the only thing standing between a route parameter and the
+// filesystem, just the earlier and more legible one.
 //
 // Called from BOTH authenticated routes (handlers_competition.go gated
 // by AuthMiddleware via X-Tournament-Password) AND the public viewer
@@ -256,6 +260,10 @@ func isSelfRunMainGatedConfigRoute(method, fullPath string) bool {
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/lineups/:round",         // team lineup management, organiser
 		http.MethodPut + " /api/competitions/:id/teams/:tid/match-lineups/:matchId",    // team match lineup, organiser
 		http.MethodDelete + " /api/competitions/:id/teams/:tid/match-lineups/:matchId", // team match lineup, organiser
+		http.MethodGet + " /api/competitions/:id/squads",                               // bc-tmid: squad management, organiser setup
+		http.MethodPost + " /api/competitions/:id/teams/:tid/members",                  // bc-tmid: squad management, organiser setup
+		http.MethodPut + " /api/competitions/:id/teams/:tid/members/:memberId",         // bc-tmid: squad management, organiser setup
+		http.MethodDelete + " /api/competitions/:id/teams/:tid/members/:memberId",      // bc-pnum: squad member clear (name-only), organiser setup, same class as the PUT just above
 		http.MethodPost + " /api/competitions/:id/matches/:mid/decision",               // mp-ba3: kiken/fusenpai/daihyosen are admin-only decisions
 		http.MethodDelete + " /api/competitions/:id/matches/:mid/kachinuki-bout",       // mp-gmcg: removing a bout is an organiser correction, same class as reopen/override-winner; the participant score path gates itself via enforceSelfRunPolicy, this route does not
 		http.MethodPost + " /api/sponsors",                                             // mp-c38: sponsor logo upload, organiser setup, not operational play

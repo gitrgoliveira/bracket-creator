@@ -98,6 +98,17 @@ function normalizeViewerCompItem(item) {
         // inside one of them. Hoisted like poolMatches so the console can
         // render the notice off the flattened competition it already has.
         dataIssues: item.dataIssues,
+        // bc-pnum: squads is ALSO a sibling of config on the wire (present
+        // only for a team competition, keyed by the team's participant id --
+        // handlers_viewer.go's buildViewerCompetitionPayload), so it must be
+        // hoisted exactly like poolMatches/bracket/dataIssues above or it is
+        // silently dropped here: `c` (item.config) never carries it, and
+        // normalizeCompetitionDetail's `{...data}` spread only preserves
+        // whatever this function hands it. Without this, TvDisplay and
+        // StreamingOverlay (which consume this normalized shape via
+        // tournament.competitions, app.jsx's `t.competitions = comps`) could
+        // never see the squads the aggregate/court-feed payload now carries.
+        squads: item.squads,
         players: (c.players || []).map(normalizePlayer),
     });
 }
@@ -2435,16 +2446,15 @@ const API = {
         }
         return res.json();
     },
-    // playerId and playerDojo are OPTIONAL (bc-cse): two pool members can
-    // legally share a display name from different dojos (operator identity
-    // rule), so playerName alone cannot always tell them apart. When known,
-    // pass the competitor's id (preferred) and/or dojo so the server resolves
-    // the override unambiguously; omit them and only playerName is sent,
-    // exactly as before, for a caller that doesn't have that information.
-    async overridePoolRank(compID, poolID, playerName, rank, password, playerId, playerDojo) {
-        const body = { playerName, rank };
-        if (playerId) body.playerId = playerId;
-        if (playerDojo) body.playerDojo = playerDojo;
+    // playerId is REQUIRED (operator ruling bc-pnum): the server resolves a
+    // pool member by id only (resolvePoolOverrideTarget,
+    // handlers_competition.go) and rejects the request with 400 when it is
+    // missing -- two pool members can legally share a display name from
+    // different dojos, so playerName alone can never disambiguate them.
+    // playerDojo is NOT sent: the server never read it (id-only resolution
+    // has no use for it), so a caller has nothing to gain by supplying it.
+    async overridePoolRank(compID, poolID, playerName, rank, password, playerId) {
+        const body = { playerName, rank, playerId };
         const res = await fetch(`/api/competitions/${compID}/pools/${poolID}/override-rank`, {
             method: 'PUT',
             headers: {
@@ -2627,6 +2637,29 @@ const API = {
         }
         return res.json();
     },
+    // Preview of the number prefix a save would assign when the field is
+    // empty (bc-pnum G2/R6): the CREATE form calls this to pre-fill the
+    // prefix field with the SAME value assignDefaultNumberPrefix would pick
+    // server-side, so what the operator sees before saving matches what
+    // would actually land. Create only: the competition doesn't exist yet,
+    // so there is nothing to exclude from the taken set. bc-pnum B5: an
+    // excludeID parameter used to exist for a settings-screen pre-fill
+    // caller that was built and retired before this endpoint's first
+    // release; it never had a second caller and is removed, not merely
+    // unused.
+    async getNumberPrefixDefault(name, password, signal) {
+        const params = new URLSearchParams();
+        if (name) params.append('name', name);
+        const res = await fetch(`/api/number-prefix-default?${params.toString()}`, {
+            headers: { 'X-Tournament-Password': password },
+            signal,
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to derive number prefix");
+        }
+        return res.json();
+    },
     async moveMatchCourt(compID, matchID, court, password) {
         const res = await fetch(`/api/competitions/${compID}/matches/${matchID}/court`, {
             method: 'PUT',
@@ -2804,9 +2837,14 @@ const API = {
         }
         return res.json();
     },
-    async putTeamLineup(compID, teamId, round, positions, password) {
+    // memberIds (bc-tmid pass 3) is optional and keyed by the same position
+    // as positions: the squad member id half of a lineup, sent alongside
+    // the name so the server can persist both together. Omitted entirely
+    // when the caller passes nothing, so a caller that never adopted squad
+    // members (or an older bundle) round-trips exactly as before.
+    async putTeamLineup(compID, teamId, round, positions, password, memberIds) {
         const lineupUrl = `/api/competitions/${compID}/teams/${teamId}/lineups/${round}`;
-        const lineupBody = { teamId, competitionId: compID, round, positions };
+        const lineupBody = { teamId, competitionId: compID, round, positions, ...(memberIds ? { memberIds } : {}) };
         // F5: lineup queue key is distinct from score/decision keys so a lineup
         // write doesn't collide with a concurrent score write for the same match.
         const lineupKey = `lineup:${compID}:${teamId}:${round}`;
@@ -2855,6 +2893,77 @@ const API = {
         }
         return true;
     },
+    // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
+    // own per-competition store (squads.yaml), keyed by the team's
+    // participant id -- see internal/state/squad.go. Returns the whole
+    // map ({ teamId: [{id, index, name}, …] }) since the lineup editor
+    // needs its own team's list, not one member at a time.
+    async fetchSquads(compID, password) {
+        const res = await fetch(`/api/competitions/${compID}/squads`, {
+            headers: password ? { 'X-Tournament-Password': password } : {}
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to load squads");
+        }
+        const data = await res.json();
+        return data.squads || {};
+    },
+    // Mints the new member's id and display index server-side in one step
+    // (operator ruling: assigned automatically as members are added) and
+    // returns the created {id, index, name}. clearTeamMember below is the
+    // nearest counterpart and only blanks a name: an index, once minted, is
+    // never freed.
+    async addTeamMember(compID, teamId, name, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ name })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to add team member");
+        }
+        return res.json();
+    },
+    // Keeps memberId's id and index; only the display name changes.
+    // 204 No Content on success.
+    async renameTeamMember(compID, teamId, memberId, name, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tournament-Password': password
+            },
+            body: JSON.stringify({ name })
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to rename team member");
+        }
+        return true;
+    },
+    // The operator's "removal": blanks memberId's Name back to "" and
+    // leaves the id and display index untouched, so a bout already fought
+    // that names this position keeps meaning the same person (bc-pnum).
+    // 204 No Content on success. Refused with a 409 once the competition
+    // has started (state.ErrTeamMemberClearAfterStart); the server's own
+    // message is operator-facing, so it is surfaced verbatim rather than
+    // remapped here.
+    async clearTeamMember(compID, teamId, memberId, password) {
+        const res = await fetch(`/api/competitions/${compID}/teams/${teamId}/members/${memberId}`, {
+            method: 'DELETE',
+            headers: { 'X-Tournament-Password': password }
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || "Failed to clear team member");
+        }
+        return true;
+    },
     // mp-825 / mp-bkg: per-match lineup endpoints. Match ID takes the
     // place of the round key: successive encounters between the same
     // two teams each carry an independent lineup entry.
@@ -2868,8 +2977,17 @@ const API = {
         }
         return res.json();
     },
-    async putMatchLineup(compID, teamId, matchId, positions, password) {
-        const matchLineupBody = { teamId, competitionId: compID, matchId, positions };
+    // memberIds (bc-pnum gap closure) is optional and keyed by the same
+    // position as positions, exactly like putTeamLineup's own memberIds
+    // above: the squad member id half of a lineup, sent alongside the name
+    // so the server can persist both together. Omitted entirely when the
+    // caller passes nothing, so a caller that never adopted squad members
+    // (or an older bundle) round-trips exactly as before -- including into
+    // the offline queue: matchLineupBody (built once, below) is the SAME
+    // object fed to both the live fetch and _enqueueTerminalWrite, so a
+    // replayed lineup write carries the ids too.
+    async putMatchLineup(compID, teamId, matchId, positions, password, memberIds) {
+        const matchLineupBody = { teamId, competitionId: compID, matchId, positions, ...(memberIds ? { memberIds } : {}) };
         const matchLineupUrl = `/api/competitions/${compID}/teams/${teamId}/match-lineups/${matchId}`;
         // F5: per-match lineup key: distinct from round-scoped lineups.
         const matchLineupKey = `lineup:${compID}:${teamId}:match:${matchId}`;
@@ -3012,10 +3130,13 @@ const API = {
         return res.json();
     },
     // Bulk check-in for one competition. participantIds is an array of pids as
-    // built by checkinPid: a stable UUID, or the composite "name|dojo" key for
-    // legacy UUID-less rows (the server resolves either). Returns { checkedIn,
-    // alreadyCheckedIn, notFound }. Used by the Registration desk's "check in a
-    // whole dojo" action.
+    // built by checkinApiPid/rdApiPid: a stable UUID, or "" for a legacy
+    // UUID-less row (bc-pnum operator ruling: this write is id only, never
+    // the "name|dojo" composite -- name and dojo are operator-editable after
+    // the draw, so that composite is not a safe wire identifier). An
+    // id-less pid resolves to nothing server-side and is reported back via
+    // notFound. Returns { checkedIn, alreadyCheckedIn, notFound }. Used by
+    // the Registration desk's "check in a whole dojo" action.
     async bulkCheckIn(compID, participantIds, password) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/participants/checkin-bulk`, {
             method: 'POST',
@@ -3151,7 +3272,9 @@ const API = {
     // Phase 3b (mp-8rc9): league tie-breaker operator API.
     //
     // leagueTiebreakCandidates: GET /competitions/:id/league-tiebreak/candidates
-    // Returns { candidates: [{teamNames, minPosition, maxPosition}], finalized: bool }.
+    // Returns { candidates: [{teamNames, teams, minPosition, maxPosition}], finalized: bool }
+    // where teams is [{id, name, dojo}] (id "" for a legacy competitor): groupTeamIds
+    // in admin_pools.jsx derives the teamIds a namesake group needs from it.
     async leagueTiebreakCandidates(compID) {
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak/candidates`);
         if (!res.ok) {
@@ -3181,14 +3304,24 @@ const API = {
     },
 
     // leagueTiebreakGenerate: POST /competitions/:id/league-tiebreak
-    // Body: { teamNames: string[] }: the tied group to break the tie.
+    // Body: { teamNames: string[], teamIds: string[] }. teamIds is REQUIRED
+    // (operator ruling bc-pnum): the server selects the tied group by id
+    // only and 400s outright when teamIds is missing, has fewer than two
+    // entries, carries a blank entry, or has a duplicate -- teamNames alone
+    // is ambiguous the moment two tied teams share a display name across
+    // dojos, which this project explicitly allows. The caller MUST NOT
+    // invoke this without a real id for every team (admin_pools.jsx gates
+    // the "Run tie-breaker" button on groupTeamIds(...) !== undefined for
+    // exactly this reason, disabling it rather than sending a request that
+    // can only 400).
     // Returns { matches: MatchResult[] } on 201.
     // Throws on 400 (invalid group), 409 (matches already exist).
-    async leagueTiebreakGenerate(compID, teamNames, password) {
+    async leagueTiebreakGenerate(compID, teamNames, password, teamIds) {
+        const body = { teamNames, teamIds };
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ teamNames }),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -3200,14 +3333,21 @@ const API = {
     },
 
     // leagueTiebreakRemove: DELETE /competitions/:id/league-tiebreak
-    // Body: { teamNames: string[] }: the tied group whose unscored matches to remove.
+    // Body: { teamNames: string[], teamIds: string[] }: the tied group whose
+    // unscored matches to remove. teamIds is REQUIRED, same contract as
+    // leagueTiebreakGenerate above -- a namesake-holding group can only ever
+    // have been CREATED via teamIds, so it must be removable the same way
+    // or it could never be deleted again. Same UI-level gating applies: the
+    // "Remove unscored tie-breaker" button is disabled when groupTeamIds(...)
+    // is undefined.
     // Returns { deleted: number } on 200.
     // Throws on 404 (no matches found), 409 (any match already scored).
-    async leagueTiebreakRemove(compID, teamNames, password) {
+    async leagueTiebreakRemove(compID, teamNames, password, teamIds) {
+        const body = { teamNames, teamIds };
         const res = await fetch(`/api/competitions/${encodeURIComponent(compID)}/league-tiebreak`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json', 'X-Tournament-Password': password },
-            body: JSON.stringify({ teamNames }),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));

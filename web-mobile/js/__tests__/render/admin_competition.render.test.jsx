@@ -1,6 +1,10 @@
 import React from 'react';
 import { render, act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+// Pure helper (no fetch, no DOM, no globals), imported directly so the
+// dataIssues-on-detail render test below exercises the REAL normalisation
+// boundary rather than hand-setting the field on the fixture.
+import { normalizeCompetitionDetail } from '../../api_serializers.jsx';
 
 // mp-hpe3 Phase 0 safety net: RENDER-SMOKE characterization of the sections
 // inside admin_competition.jsx that the upcoming split moves into their own
@@ -1090,5 +1094,48 @@ describe('AdminSettings Knockout qualifiers (bc-qual LP-5a)', () => {
       .querySelector('input');
     await act(async () => { fireEvent.click(checkbox); });
     expect(preview().textContent).toContain('Needs seeded pools');
+  });
+});
+
+// bc-pnum ruling 1e follow-up: GET /api/viewer/competitions/:id used to
+// compute no dataIssues at all, so the Overview lost a competition's
+// missing-ids/corrupt-file notice the moment its detail loaded (admin.jsx
+// renders `detail?.config || c`, and `detail.config.dataIssues` did not
+// exist). handlers_viewer.go now shares viewerDataIssues with the aggregate
+// and puts the list on the detail response as a sibling of "config", and
+// api_serializers.jsx's normalizeCompetitionDetail maps that sibling key
+// onto the nested config exactly as the aggregate's own per-item mapping
+// does. This proves the WHOLE chain: a raw detail-shaped payload (the shape
+// the server now emits) goes through the real normaliser, and the resulting
+// config -- fed to AdminCompetition exactly as admin.jsx feeds
+// `detail.config` -- renders the notice.
+describe('AdminCompetition Overview renders a dataIssues notice from the detail response (bc-pnum ruling 1e follow-up)', () => {
+  it('shows the missing-ids notice text for a competition whose detail carried the issue', async () => {
+    const rawDetail = {
+      config: makeCompetition(),
+      pools: [],
+      poolMatches: [],
+      standings: {},
+      bracket: null,
+      dataIssues: [{
+        kind: 'missing-ids',
+        file: 'participants.csv',
+        detail: 'Dave (Dojo D): no id on file. Save the roster once and the ids are assigned.',
+      }],
+    };
+    const normalized = normalizeCompetitionDetail(rawDetail);
+    expect(normalized.config.dataIssues).toEqual(rawDetail.dataIssues);
+
+    const { container } = await mountSection('overview', { comp: normalized.config });
+    expect(container.textContent).toContain('Save the roster once and the ids are assigned.');
+  });
+
+  it('shows no notice when the detail carried no dataIssues', async () => {
+    const rawDetail = { config: makeCompetition(), pools: [], poolMatches: [], standings: {}, bracket: null };
+    const normalized = normalizeCompetitionDetail(rawDetail);
+    expect(normalized.config.dataIssues).toBeUndefined();
+
+    const { container } = await mountSection('overview', { comp: normalized.config });
+    expect(container.textContent).not.toContain('no id on file');
   });
 });

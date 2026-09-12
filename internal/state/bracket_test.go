@@ -426,11 +426,13 @@ func TestMatchStatusByID(t *testing.T) {
 // (mobileapp review): MatchSidesByID now returns sideAID/sideBID alongside
 // the existing sideA/sideB, sourced from the SAME pool-match/bracket lookup,
 // so a caller backfilling ids ahead of hantei-mark validation sees exactly
-// the ids the engine will later use. A pool match carries real ids; a
-// bracket match (BracketMatch persists no ids at all) must always report
-// empty ids while still resolving sideA/sideB by name, so the pre-existing
-// legacy-hantei name backfill caller's behaviour for bracket matches is
-// unchanged.
+// the ids the engine will later use. A pool match carries real ids; since
+// bc-brid a bracket match does too, whenever its own row is stamped
+// (BracketMatch.SideAID's own doc). An UNSTAMPED bracket row (a bye, an
+// unresolved feeder, or a legacy row a repair could not resolve) still
+// reports empty ids while resolving sideA/sideB by name, so the
+// pre-existing legacy-hantei name backfill caller's fallback behaviour for
+// that residue is unchanged.
 func TestMatchSidesByID_ReturnsIDs(t *testing.T) {
 	dir, err := os.MkdirTemp("", "state-match-sides-*")
 	require.NoError(t, err)
@@ -443,7 +445,7 @@ func TestMatchSidesByID_ReturnsIDs(t *testing.T) {
 		{ID: "P1-0", SideA: "Alice", SideB: "Alice", SideAID: "dojo-x-alice", SideBID: "dojo-y-alice"},
 	}))
 	require.NoError(t, store.SaveBracket(compID, &Bracket{
-		Rounds:          [][]BracketMatch{{{ID: "B1", SideA: "Carol", SideB: "Dave"}}},
+		Rounds:          [][]BracketMatch{{{ID: "B1", SideA: "Carol", SideAID: "carol-id", SideB: "Dave", SideBID: "dave-id"}}},
 		ThirdPlaceMatch: &BracketMatch{ID: "BRONZE", SideA: "Eve", SideB: "Frank"},
 	}))
 
@@ -457,23 +459,23 @@ func TestMatchSidesByID_ReturnsIDs(t *testing.T) {
 		assert.Equal(t, "dojo-y-alice", sideBID)
 	})
 
-	t.Run("bracket round match: names resolve, ids are always empty", func(t *testing.T) {
+	t.Run("bracket round match: names AND ids resolve from the stored pairing", func(t *testing.T) {
 		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "B1")
 		require.NoError(t, err)
 		require.True(t, found)
 		assert.Equal(t, "Carol", sideA)
 		assert.Equal(t, "Dave", sideB)
-		assert.Empty(t, sideAID, "BracketMatch persists no ids")
-		assert.Empty(t, sideBID, "BracketMatch persists no ids")
+		assert.Equal(t, "carol-id", sideAID, "bc-brid: a stamped bracket row's own id is returned, not guessed")
+		assert.Equal(t, "dave-id", sideBID)
 	})
 
-	t.Run("BRONZE sibling match: names resolve, ids are always empty", func(t *testing.T) {
+	t.Run("BRONZE sibling match: unstamped row reports names, empty ids", func(t *testing.T) {
 		sideA, sideB, sideAID, sideBID, found, err := store.MatchSidesByID(compID, "BRONZE")
 		require.NoError(t, err)
 		require.True(t, found)
 		assert.Equal(t, "Eve", sideA)
 		assert.Equal(t, "Frank", sideB)
-		assert.Empty(t, sideAID)
+		assert.Empty(t, sideAID, "this row's own id was never stamped, so it stays empty rather than guessed")
 		assert.Empty(t, sideBID)
 	})
 
@@ -568,6 +570,50 @@ func TestCopyBracket_Nil(t *testing.T) {
 
 	result := store.copyBracket(nil)
 	assert.Nil(t, result)
+}
+
+// TestSaveBracket_DrawOrderRoundTrip pins bc-pnum ruling 2's DrawOrder field
+// through the FULL round trip: SaveBracket refreshes the file cache via
+// copyBracket (bracket.go), and LoadBracket always returns copyBracket's
+// output, never the raw saved struct -- so a copyBracket that only copies
+// Rounds/Preview/ThirdPlaceMatch (as it did before this field existed) would
+// silently drop DrawOrder on every read even though the bytes on disk are
+// correct. A bare LoadBracket right after SaveBracket (served from the
+// freshly-refreshed cache, never touching disk) is the tightest repro.
+func TestSaveBracket_DrawOrderRoundTrip(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	require.NoError(t, err)
+
+	const compID = "draw-order-roundtrip"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "Test"}))
+
+	want := []string{"p3", "p1", "p2"}
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds:    [][]BracketMatch{{{ID: "m-r1-0", SideA: "A", SideB: "B"}}},
+		DrawOrder: want,
+	}))
+
+	// Served from the cache SaveBracket just refreshed (copyBracket), not disk.
+	fromCache, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, want, fromCache.DrawOrder, "DrawOrder must survive the cache refresh copyBracket performs on save")
+
+	// A cold read (fresh Store, so nothing is cached) must agree.
+	store2, err := NewStore(store.folder)
+	require.NoError(t, err)
+	fromDisk, err := store2.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, want, fromDisk.DrawOrder, "DrawOrder must round-trip through the on-disk JSON too")
+
+	// A bracket with no DrawOrder (a mixed competition's, or a legacy file)
+	// must load as nil/empty, never a zero-length-but-non-nil slice that
+	// would serialise differently than "the field was never set".
+	require.NoError(t, store.SaveBracket(compID, &Bracket{
+		Rounds: [][]BracketMatch{{{ID: "m-r1-0", SideA: "A", SideB: "B"}}},
+	}))
+	noOrder, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Empty(t, noOrder.DrawOrder)
 }
 
 // TestLoadBracket_DeepCopyIsolation guards copyBracket's deep-copy of the

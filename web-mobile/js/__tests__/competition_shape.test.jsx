@@ -23,6 +23,7 @@ import {
   resolvePoolSizeMode, POOL_SIZE_MODE_MAX, POOL_SIZE_MODE_MIN,
   configShapeChangeStaged, shapeConfigForSave,
   pendingConfigClears,
+  cutNumberPrefix, MAX_NUMBER_PREFIX_CHARS, HINT_NUMBER_PREFIX, numberPrefixHint,
 } from '../competition_shape.jsx';
 
 // The four format values a competition can hold. Used to sweep every
@@ -922,5 +923,106 @@ describe('shapeConfigForSave', () => {
     expect(named, 'it should still name what the format change really does clear').toEqual(
       expect.arrayContaining(['poolSize', 'poolWinners'])
     );
+  });
+});
+
+// cutNumberPrefix: the create form (admin_setup.jsx) and the
+// settings form (admin_competition_settings.jsx) both used to cut the
+// player-number-prefix field with `.trim().substring(0, 3)`, which counts
+// UTF-16 CODE UNITS. An astral character (outside the Basic Multilingual
+// Plane -- most emoji) is TWO code units, so substring(0, 3) can slice one
+// in half, keeping a lone unpaired surrogate on the wire. Array.from
+// iterates by Unicode code point, so cutNumberPrefix counts actual
+// characters instead.
+describe('cutNumberPrefix', () => {
+  it('keeps a 2-character non-ASCII string whole', () => {
+    expect(cutNumberPrefix('ÖÖ')).toBe('ÖÖ');
+  });
+
+  it('keeps a 3-character non-ASCII string whole (exactly at the cap)', () => {
+    expect(cutNumberPrefix('ÖÖÖ')).toBe('ÖÖÖ');
+  });
+
+  it('cuts a 4-character non-ASCII string to MAX_NUMBER_PREFIX_CHARS characters', () => {
+    const cut = cutNumberPrefix('ÖÖÖÖ');
+    expect(cut).toBe('ÖÖÖ');
+    expect(Array.from(cut).length).toBe(MAX_NUMBER_PREFIX_CHARS);
+  });
+
+  it('does not split an astral (surrogate-pair) character mid-pair', () => {
+    // U+1F600 (😀) is a single character but TWO UTF-16 code units.
+    // `.substring(0, 3)` on "😀😀" (4 code units total) would keep code
+    // units [0,1,2] -- the whole first emoji plus the leading (high)
+    // surrogate of the second, an unpaired/invalid surrogate half.
+    const twoEmoji = '\u{1F600}\u{1F600}';
+    expect(twoEmoji.length).toBe(4); // sanity: 2 code units per emoji
+    const cut = cutNumberPrefix(twoEmoji);
+    // Array.from-based slicing keeps whole characters: 3-char cap means
+    // both emoji are kept (2 characters < 3), never a broken third.
+    expect(cut).toBe(twoEmoji);
+    expect(Array.from(cut).length).toBe(2);
+    // The critical assertion: no lone surrogate anywhere in the result.
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false);
+  });
+
+  it('cuts three astral characters down to MAX_NUMBER_PREFIX_CHARS whole characters, never a lone surrogate', () => {
+    const threeEmoji = '\u{1F600}\u{1F601}\u{1F602}\u{1F603}'; // 4 emoji, 8 code units
+    const cut = cutNumberPrefix(threeEmoji);
+    expect(Array.from(cut).length).toBe(MAX_NUMBER_PREFIX_CHARS);
+    expect(cut).toBe('\u{1F600}\u{1F601}\u{1F602}');
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false);
+  });
+
+  it('trims leading/trailing whitespace before cutting', () => {
+    expect(cutNumberPrefix('  A  ')).toBe('A');
+  });
+
+  it('treats null/undefined/empty as an empty prefix', () => {
+    expect(cutNumberPrefix(null)).toBe('');
+    expect(cutNumberPrefix(undefined)).toBe('');
+    expect(cutNumberPrefix('')).toBe('');
+  });
+});
+
+// numberPrefixHint (PR #416 finding 13): the settings screen's own gating
+// rule for whether the number-prefix hint grows the reprint warning,
+// extracted so the render test (numberprefix_reprint_hint.render.test.jsx)
+// isn't the only coverage of it.
+describe('numberPrefixHint', () => {
+  it('is the plain hint when not locked-after-draw', () => {
+    expect(numberPrefixHint('X', 'K', FORMAT_MIXED, false)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('is the plain hint when locked but the value is unchanged', () => {
+    expect(numberPrefixHint('K', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('is the plain hint when locked and changed but the pending value is blank', () => {
+    // Blank is inherited as the stored prefix on save (G2a), so it renumbers nothing.
+    expect(numberPrefixHint('', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+    expect(numberPrefixHint('   ', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('is the plain hint for Swiss, even locked and changed and non-blank', () => {
+    // A7: Swiss competitors carry no number at all, so a renumber can never happen.
+    expect(numberPrefixHint('X', 'K', FORMAT_SWISS, true)).toBe(HINT_NUMBER_PREFIX);
+  });
+
+  it('appends the reprint warning when locked, changed, non-blank, and the format renumbers', () => {
+    const hint = numberPrefixHint('X', 'K', FORMAT_MIXED, true);
+    expect(hint).toContain(HINT_NUMBER_PREFIX);
+    expect(hint).toContain('renumbered');
+    expect(hint).toContain('reprinted');
+  });
+
+  it('normalises pending and stored through cutNumberPrefix before comparing', () => {
+    // Trailing whitespace and a same-value-different-casing-of-nothing
+    // comparison must not fire the warning: cutNumberPrefix trims both
+    // sides, so "K" and "  K  " compare equal.
+    expect(numberPrefixHint('  K  ', 'K', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
+    // An over-length pending value is capped the same way the TextField's
+    // own onChange already caps it, so comparing against a stored value at
+    // the cap still recognises "no real change".
+    expect(numberPrefixHint('KAB', 'KABC', FORMAT_MIXED, true)).toBe(HINT_NUMBER_PREFIX);
   });
 });

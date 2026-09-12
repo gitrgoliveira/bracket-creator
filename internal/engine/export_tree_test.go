@@ -14,6 +14,7 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 
 	excelize "github.com/xuri/excelize/v2"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
@@ -404,6 +406,304 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 7, countEliminationMatchBlocks(elim),
 		"an 8-entrant playoffs knockout must render 7 elimination match blocks")
+}
+
+// TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint pins
+// bc-pnum A8: a playoffs-only competition never has a pools.csv, so
+// ExportCompetitionXlsx used to feed CreateTagsSheet and (inside
+// RenderCompetitionWorkbook) CreateNamesWithPoolToPrint the EMPTY pools
+// slice, which produced a Tags sheet with zero rows and no Names-to-Print
+// sheet at all -- despite the competition having numbered competitors on
+// every other surface. The fix feeds those two sheets the numbered
+// participant list (NumberedParticipantsFor, the same
+// helper.AssignPlayerNumbers composition the public viewer merge uses), so
+// the numbers on the printed tags must equal what the app already shows.
+//
+// What this test can prove is narrow: it derives wantNumbers by
+// calling eng.NumberedParticipantsFor, the exact function ExportCompetitionXlsx
+// itself calls, so it can only catch the export disagreeing with ITSELF, not
+// with the public viewer payload. This package cannot hold the stronger
+// check -- internal/mobileapp already imports internal/engine, so the
+// reverse import needed to drive a real viewer HTTP handler from here would
+// cycle. That independent-oracle cross-check (export numbers against an
+// ACTUAL /api/viewer/competitions/:id response) lives in
+// internal/mobileapp/export_numbering_crosscheck_test.go,
+// TestExportedTagsNumbersMatchActualViewerPayload. This test remains as the
+// lighter same-package regression guard for the sheet-shape bug the doc
+// comment above describes (empty Tags, missing Names-to-Print sheet).
+//
+// [review, bc-pnum-knockout follow-up] the ORIGINAL fixture (4 unseeded
+// entrants, no dojo collision) made NumberedParticipantsFor's orderPlayersByDraw
+// call unfalsifiable: with nothing to reorder, roster order already equals
+// draw order, so `return players, nil` (skipping the reorder entirely) kept
+// this test green. Player04 is now the sole seed (StandardSeeding places
+// rank 1 at bracket slot 0, ahead of the three unseeded entrants that follow
+// it in roster order), and Player05 is present but not checked in, so
+// generatePlayoffs never draws them at all -- the two cases orderPlayersByDraw
+// exists to handle: numbered entrants in DRAW position, unnumbered ones
+// last, in roster order.
+func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-tags"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+		c.CheckInEnabled = true
+	})
+	// Unique dojos: delayDojoMeetings must never fire here, so the ONLY
+	// thing that can move Player04 ahead of Player01-03 is the seed below,
+	// not an incidental dojo-collision swap.
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Player01", Dojo: "DojoA", CheckedIn: true},
+		{Name: "Player02", Dojo: "DojoB", CheckedIn: true},
+		{Name: "Player03", Dojo: "DojoC", CheckedIn: true},
+		{Name: "Player04", Dojo: "DojoD", CheckedIn: true},
+		{Name: "Player05", Dojo: "DojoE", CheckedIn: false}, // excluded: not checked in
+	}))
+	require.NoError(t, store.SaveSeeds(compID, []domain.SeedAssignment{
+		{Name: "Player04", SeedRank: 1},
+	}))
+	require.NoError(t, eng.StartCompetition(compID))
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	wantNumbered, err := eng.NumberedParticipantsFor(comp, nil)
+	require.NoError(t, err)
+	require.Len(t, wantNumbered, 5, "premise: the checked-out entrant is still IN the returned roster, just unnumbered")
+	wantNumbers := make(map[string]string, len(wantNumbered))
+	wantOrder := make([]string, len(wantNumbered))
+	for i, p := range wantNumbered {
+		wantNumbers[p.Name] = p.Number
+		wantOrder[i] = p.Name
+	}
+	assert.Equal(t, []string{"Player04", "Player01", "Player02", "Player03", "Player05"}, wantOrder,
+		"NumberedParticipantsFor must return numbered entrants by draw position, unnumbered ones last")
+	assert.Equal(t, "K1", wantNumbers["Player04"], "the sole seed must claim K1 (bracket slot 0), not K4 (its roster position)")
+	assert.Equal(t, "K2", wantNumbers["Player01"])
+	assert.Equal(t, "K3", wantNumbers["Player02"])
+	assert.Equal(t, "K4", wantNumbers["Player03"])
+	assert.Equal(t, "", wantNumbers["Player05"], "excluded from the draw -> no number")
+
+	f := openExportedWorkbook(t, eng, compID)
+
+	// Tags sheet: one row (two cells, A and G columns of one row -- see
+	// CreateTagsSheet) per entrant, and the printed number must equal the
+	// one the rest of the app already shows for that entrant.
+	tagRows, err := f.GetRows(helper.SheetTags)
+	require.NoError(t, err)
+	gotTagNumbers := map[string]bool{}
+	var tagNumbersInOrder []string
+	for _, row := range tagRows {
+		for _, cell := range row {
+			cell = strings.TrimSpace(cell)
+			if cell != "" {
+				gotTagNumbers[cell] = true
+				tagNumbersInOrder = append(tagNumbersInOrder, cell)
+			}
+		}
+	}
+	for name, number := range wantNumbers {
+		if number == "" {
+			continue
+		}
+		assert.Truef(t, gotTagNumbers[number], "Tags sheet must print %q's number %q; got cells %v", name, number, gotTagNumbers)
+	}
+	// Each entrant's tag is written TWICE (top and bottom half of the A4
+	// page, see CreateTagsSheet); an unnumbered entrant's tag is empty and
+	// contributes no cell here. The four numbered entrants' tags must
+	// appear in BRACKET-POSITION order, matching NumberedParticipantsFor.
+	assert.Equal(t, []string{"K1", "K1", "K2", "K2", "K3", "K3", "K4", "K4"}, tagNumbersInOrder,
+		"Tags sheet cells must appear in bracket-position order, matching NumberedParticipantsFor")
+
+	// Names to Print: a sheet must now exist (deleted-with-nothing-created was
+	// the bug) and carry an entry per entrant.
+	sheetList := f.GetSheetList()
+	var namesSheet string
+	for _, s := range sheetList {
+		if strings.HasPrefix(s, "Names to Print") {
+			namesSheet = s
+			break
+		}
+	}
+	require.NotEmpty(t, namesSheet, "a playoffs-only competition must still get a Names to Print sheet")
+	nameRows, err := f.GetRows(namesSheet)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(nameRows), 5, "Names to Print must carry one row per entrant")
+
+	// Data sheet: column B is the name, D is the number (AddPlayerDataToSheet,
+	// non-sanitized layout). Rows must be written in the SAME bracket-position
+	// order the Tags sheet and NumberedParticipantsFor agree on, with the
+	// unnumbered entrant last.
+	dataRows, err := f.GetRows(helper.SheetData)
+	require.NoError(t, err)
+	var gotNames, gotNumbers []string
+	for i, row := range dataRows {
+		if i < 2 || len(row) < 2 { // rows 1-2 are the title/header block
+			continue
+		}
+		gotNames = append(gotNames, row[1])
+		if len(row) >= 4 {
+			gotNumbers = append(gotNumbers, row[3])
+		} else {
+			gotNumbers = append(gotNumbers, "")
+		}
+	}
+	assert.Equal(t, []string{"Player04", "Player01", "Player02", "Player03", "Player05"}, gotNames,
+		"the Data sheet's rows must be written in bracket-position order, unnumbered entrant last")
+	assert.Equal(t, []string{"K1", "K2", "K3", "K4", ""}, gotNumbers)
+}
+
+// TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered pins the
+// deliberate pre-draw exception documented on PlayoffsNamesToPrint
+// (numbering.go): the blank-template export is reachable BEFORE a draw
+// exists, precisely so an operator can print name tags and blank score
+// sheets ahead of the tournament. A never-started, setup-status
+// knockout-only competition must still get its Names to Print sheet, with
+// one row per entrant in roster order -- but no number, since there is no
+// DrawOrder yet to derive one from.
+//
+// This is the guard's only pin: mutating PlayoffsNamesToPrint's check from
+// comp.EffectiveFormat() != state.CompFormatPlayoffs to
+// DrawSourceFor(comp) != DrawInBracket (requiring an existing draw) leaves
+// the rest of the suite green while silently dropping this sheet for every
+// not-yet-drawn playoffs competition, since DrawSourceFor returns DrawNone
+// identically for "not drawn yet" and "Swiss".
+func TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "predraw-playoffs-names"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{Name: "Player01", Dojo: "DojoA"},
+		{Name: "Player02", Dojo: "DojoB"},
+		{Name: "Player03", Dojo: "DojoC"},
+		{Name: "Player04", Dojo: "DojoD"},
+	}))
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompetitionStatus("setup"), comp.Status, "premise: never started, no draw exists")
+
+	f := openExportedWorkbook(t, eng, compID)
+
+	sheetList := f.GetSheetList()
+	var namesSheet string
+	for _, s := range sheetList {
+		if strings.HasPrefix(s, helper.SheetNamesToPrint) {
+			namesSheet = s
+			break
+		}
+	}
+	require.NotEmpty(t, namesSheet, "a not-yet-drawn playoffs competition must still get a Names to Print sheet")
+
+	nameRows, err := f.GetRows(namesSheet)
+	require.NoError(t, err)
+	assert.Len(t, nameRows, 4, "one row per entrant, roster order (no draw position to sort by yet)")
+
+	// Column A (the number) carries NO formula pre-draw: every entrant's
+	// Number is still "", so AddPlayerDataToSheet's hasNumber gate never
+	// opens a Number column on the Data sheet, and printNameEntries leaves
+	// the position cell entirely unwritten rather than referencing an
+	// empty one. Column B (the name) is still a live formula reference to
+	// the Data sheet, so the sheet is genuinely populated, not merely
+	// present with blank rows.
+	for i := range nameRows {
+		row := i + 1
+		numberFormula, ferr := f.GetCellFormula(namesSheet, fmt.Sprintf("A%d", row))
+		require.NoError(t, ferr)
+		assert.Emptyf(t, numberFormula, "row %d's number cell must carry no formula before the draw", row)
+		nameFormula, nerr := f.GetCellFormula(namesSheet, fmt.Sprintf("B%d", row))
+		require.NoError(t, nerr)
+		assert.NotEmptyf(t, nameFormula, "row %d's name cell must still reference the roster", row)
+	}
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it, for pinning helper.finishDataSheet's
+// fmt.Printf("Data added to spreadsheet\n") call count below.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	defer r.Close()
+
+	// Drain the pipe CONCURRENTLY, started before fn()
+	// runs. A pipe's kernel buffer is bounded (64 KiB on Linux); fn() used
+	// to run to completion before anything read from r, so an export
+	// printing more than that in one call would block the writer forever --
+	// deadlocking the whole test binary, not just this test, since
+	// captureStdout exists specifically to count finishDataSheet's stdout
+	// line. The goroutine delivers the fully-drained buffer on `copied` once
+	// fn() has returned and w.Close() below gives io.Copy its EOF.
+	var buf bytes.Buffer
+	copied := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&buf, r)
+		copied <- copyErr
+	}()
+
+	fn()
+
+	require.NoError(t, w.Close())
+	require.NoError(t, <-copied)
+	return buf.String()
+}
+
+// TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce pins the
+// double-write fix: a playoffs-only export (no pools.csv) used to call
+// helper.AddPoolDataToSheet inside RenderCompetitionWorkbook's step 1 (over
+// the empty pools slice, writing only headers) and THEN call
+// helper.AddPlayerDataToSheet a second time in ExportCompetitionXlsx itself,
+// after the pipeline returned -- two writers of the same Data sheet, so
+// "Data added to spreadsheet" (finishDataSheet's own stdout line) printed
+// twice for this one shape. The fix (helper.AddDataToSheetForExport, called
+// once from RenderCompetitionWorkbook's step 1) collapses that to a single
+// guarded call. This is the ONLY reliable observable of "how many times was
+// the Data sheet written" available from outside the helper package: the
+// workbook itself has no artifact recording writer count once the file is
+// closed.
+func TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pure-playoffs-data-once"
+	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+		c.NumberPrefix = "K"
+	})
+	saveTestParticipants(t, store, compID, []string{"P1", "P2", "P3", "P4"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	output := captureStdout(t, func() {
+		_, exportErr := eng.ExportCompetitionXlsx(compID)
+		require.NoError(t, exportErr)
+	})
+	assert.Equal(t, 1, strings.Count(output, "Data added to spreadsheet"),
+		"the Data sheet must have exactly ONE writer for a playoffs-only export; captured stdout: %q", output)
+}
+
+// TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea pins a
+// review finding on top of bc-pnum A9: a mixed competition still in `setup`
+// (no draw generated, so pools.csv does not exist and CreateTagsSheet gets
+// zero players) used to have helper.SetPrintArea called with lastRow 0 (the
+// write loop never ran, so `row` stayed at its initial 1 and row-1 was 0),
+// defining the INVALID range "$A$1:$A$0" on the Tags sheet. The fix skips
+// the print area entirely when nothing was written.
+func TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "setup-mixed-no-draw"
+	createTestCompetition(t, store, compID, "mixed", 3)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie"})
+	// Deliberately NOT started: no draw, no pools.csv, status stays "setup".
+
+	f := openExportedWorkbook(t, eng, compID)
+	for _, d := range f.GetDefinedName() {
+		if d.Name == "_xlnm.Print_Area" && d.Scope == helper.SheetTags {
+			t.Errorf("expected NO print area for the zero-player Tags sheet of a setup competition, got %q", d.RefersTo)
+		}
+	}
 }
 
 // TestExportTournamentWorkbooks_MultiPageTree covers the PDF pipeline's input:

@@ -1,10 +1,14 @@
 package mobileapp
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -14,74 +18,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestMergePoolNumbersIntoPlayers, mp-13y: numbers from pools.csv must be
+// TestMergePoolNumbersIntoPlayersSlice, mp-13y: numbers from pools.csv must be
 // merged onto comp.Players so the viewer API carries the numberPrefix-derived
 // "K1", "K2", … on every player. The merge is the bridge that lets the TV
 // display / streaming overlay / viewer card render the prefix at all
 // (participants.csv does NOT persist Number).
-func TestMergePoolNumbersIntoPlayers(t *testing.T) {
+//
+// bc-pnum ruling 2: mergePoolNumbersIntoPlayersSlice no longer has a
+// playoffs-only branch (a knockout-only competition's number now comes from
+// the bracket's DrawOrder, exercised by TestApplyDrawNumbers below, not
+// pools.csv) and no longer falls back to (name, dojo): identity is the
+// participant id, ONLY. A pools.csv row or a roster row with no id
+// contributes/receives no number.
+func TestMergePoolNumbersIntoPlayersSlice(t *testing.T) {
 	t.Run("no-op when numberPrefix is empty", func(t *testing.T) {
 		comp := &state.Competition{
 			Players: []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "", comp.Players[0].Number, "no numberPrefix → never merge")
 	})
 
-	t.Run("no-op when pools is empty and format is not playoffs", func(t *testing.T) {
+	t.Run("no-op when pools is empty", func(t *testing.T) {
+		// Before the draw a mixed competition has no pools.csv and NO assigned
+		// number: a pooled competition's competitors carry no number at all
+		// until the draw runs (bc-pnum operator ruling), so a public surface
+		// cannot show a number the draw has not assigned.
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
-		mergePoolNumbersIntoPlayers(comp, nil)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, nil)
 		assert.Equal(t, "", comp.Players[0].Number)
-	})
-
-	t.Run("assigns sequential numbers for playoffs-only with no pools", func(t *testing.T) {
-		comp := &state.Competition{
-			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
-			Players: []domain.Player{
-				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
-				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
-				{ID: "p3", Name: "Santos Ana", Dojo: "Dojo Santos Ana"},
-			},
-		}
-		mergePoolNumbersIntoPlayers(comp, nil)
-		assert.Equal(t, "D1", comp.Players[0].Number)
-		assert.Equal(t, "D2", comp.Players[1].Number)
-		assert.Equal(t, "D3", comp.Players[2].Number)
-	})
-
-	t.Run("assigns sequential numbers for unset (empty) Format with no pools, same as playoffs", func(t *testing.T) {
-		// mp-yuy8: an unset Format ("") is standalone playoffs too (the draw
-		// pipeline's default branch calls generatePlayoffs for it exactly as
-		// it does for the literal "playoffs" value), so this call must go
-		// through comp.EffectiveFormat(), not comp.Format, or a competition
-		// that never had Format set silently never gets its numbers merged.
-		comp := &state.Competition{
-			NumberPrefix: "D",
-			Format:       "",
-			Players: []domain.Player{
-				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
-				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
-			},
-		}
-		mergePoolNumbersIntoPlayers(comp, nil)
-		assert.Equal(t, "D1", comp.Players[0].Number)
-		assert.Equal(t, "D2", comp.Players[1].Number)
-	})
-
-	t.Run("playoffs-only: preserves existing non-empty Number", func(t *testing.T) {
-		comp := &state.Competition{
-			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
-			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
-		}
-		mergePoolNumbersIntoPlayers(comp, nil)
-		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
 	})
 
 	t.Run("merges by id when HasParticipantIDs", func(t *testing.T) {
@@ -102,13 +72,15 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 				{ID: "p2", Name: "Suzuki", Number: "K3", Dojo: "Dojo Suzuki"},
 			}},
 		}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "K1", comp.Players[0].Number)
 		assert.Equal(t, "K3", comp.Players[1].Number)
 		assert.Equal(t, "K2", comp.Players[2].Number)
 	})
 
-	t.Run("falls back to name when id is empty (legacy roster)", func(t *testing.T) {
+	// bc-pnum ruling 2: a legacy roster (or pool row) with no id contributes
+	// no number at all -- there is no (name, dojo) fallback tier any more.
+	t.Run("no number when id is empty (legacy roster), even on an exact name/dojo match", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Players: []domain.Player{
@@ -120,9 +92,9 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			{Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"},
 			{Name: "Suzuki", Number: "K2", Dojo: "Dojo Suzuki"},
 		}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
-		assert.Equal(t, "K1", comp.Players[0].Number)
-		assert.Equal(t, "K2", comp.Players[1].Number)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
+		assert.Equal(t, "", comp.Players[0].Number, "an id-less roster row must get no number, not a name-matched one")
+		assert.Equal(t, "", comp.Players[1].Number)
 	})
 
 	t.Run("preserves existing non-empty Number (idempotent)", func(t *testing.T) {
@@ -131,7 +103,7 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Number: "EXISTING", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "EXISTING", comp.Players[0].Number, "must not overwrite an existing Number")
 	})
 
@@ -141,8 +113,108 @@ func TestMergePoolNumbersIntoPlayers(t *testing.T) {
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
 		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "", Dojo: "Dojo Tanaka"}}}}
-		mergePoolNumbersIntoPlayers(comp, pools)
+		mergePoolNumbersIntoPlayersSlice(comp, comp.Players, pools)
 		assert.Equal(t, "", comp.Players[0].Number)
+	})
+}
+
+// TestApplyDrawNumbers pins bc-pnum ruling 2's format switch: a playoffs
+// (knockout-only) competition is numbered from the bracket's DrawOrder
+// (engine.NumberKnockoutParticipants), never from pools.csv or participant
+// order; every other format is numbered from pools.csv, unchanged.
+func TestApplyDrawNumbers(t *testing.T) {
+	t.Run("playoffs: numbers from bracket.DrawOrder, in draw-position order", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "D",
+			Format:       state.CompFormatPlayoffs,
+			Status:       state.CompStatusDrawReady,
+			Players: []domain.Player{
+				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
+				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
+				{ID: "p3", Name: "Santos Ana", Dojo: "Dojo Santos Ana"},
+			},
+		}
+		bracket := &state.Bracket{DrawOrder: []string{"p3", "p1", "p2"}}
+		applyDrawNumbers(comp, comp.Players, nil, bracket)
+		assert.Equal(t, "D2", comp.Players[0].Number, "p1 is DrawOrder[1] -> D2")
+		assert.Equal(t, "D3", comp.Players[1].Number, "p2 is DrawOrder[2] -> D3")
+		assert.Equal(t, "D1", comp.Players[2].Number, "p3 is DrawOrder[0] -> D1")
+	})
+
+	// mp-yuy8: an unset Format ("") is standalone playoffs too (the draw
+	// pipeline's default branch calls generatePlayoffs for it exactly as it
+	// does for the literal "playoffs" value), so this must go through
+	// comp.EffectiveFormat(), not comp.Format.
+	t.Run("unset (empty) Format numbers from DrawOrder too, same as playoffs", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "D",
+			Format:       "",
+			Status:       state.CompStatusDrawReady,
+			Players: []domain.Player{
+				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
+				{ID: "p2", Name: "Dubois Claire", Dojo: "Dojo Dubois Claire"},
+			},
+		}
+		bracket := &state.Bracket{DrawOrder: []string{"p1", "p2"}}
+		applyDrawNumbers(comp, comp.Players, nil, bracket)
+		assert.Equal(t, "D1", comp.Players[0].Number)
+		assert.Equal(t, "D2", comp.Players[1].Number)
+	})
+
+	t.Run("playoffs pre-draw: no bracket, no DrawOrder -> no numbers at all", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "D",
+			Format:       state.CompFormatPlayoffs,
+			Status:       state.CompStatusSetup,
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
+		}
+		applyDrawNumbers(comp, comp.Players, nil, nil)
+		assert.Equal(t, "", comp.Players[0].Number, "pre-draw: no number even though a NumberPrefix is configured")
+	})
+
+	t.Run("playoffs: a player absent from DrawOrder (excluded from the draw) gets no number", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "D",
+			Format:       state.CompFormatPlayoffs,
+			Status:       state.CompStatusDrawReady,
+			Players: []domain.Player{
+				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
+				{ID: "p2", Name: "Not Checked In", Dojo: "Dojo Absent"},
+			},
+		}
+		bracket := &state.Bracket{DrawOrder: []string{"p1"}}
+		applyDrawNumbers(comp, comp.Players, nil, bracket)
+		assert.Equal(t, "D1", comp.Players[0].Number)
+		assert.Equal(t, "", comp.Players[1].Number, "excluded from the draw -> no number")
+	})
+
+	t.Run("playoffs: a prefix change shows on the next call with no rewrite", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "D",
+			Format:       state.CompFormatPlayoffs,
+			Status:       state.CompStatusDrawReady,
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
+		}
+		bracket := &state.Bracket{DrawOrder: []string{"p1"}}
+		applyDrawNumbers(comp, comp.Players, nil, bracket)
+		assert.Equal(t, "D1", comp.Players[0].Number)
+
+		comp.NumberPrefix = "Z"
+		comp.Players[0].Number = "" // simulate a fresh read, Number is never persisted
+		applyDrawNumbers(comp, comp.Players, nil, bracket)
+		assert.Equal(t, "Z1", comp.Players[0].Number, "the same DrawOrder under a new prefix relabels immediately")
+	})
+
+	t.Run("mixed: still numbers from pools.csv, unaffected by the playoffs branch", func(t *testing.T) {
+		comp := &state.Competition{
+			NumberPrefix: "K",
+			Format:       state.CompFormatMixed,
+			Status:       state.CompStatusDrawReady,
+			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
+		}
+		pools := []helper.Pool{{PoolName: "Pool A", Players: []domain.Player{{ID: "p1", Name: "Tanaka", Number: "K1", Dojo: "Dojo Tanaka"}}}}
+		applyDrawNumbers(comp, comp.Players, pools, nil)
+		assert.Equal(t, "K1", comp.Players[0].Number)
 	})
 }
 
@@ -272,4 +344,666 @@ func TestViewerAggregator_StripsPreviewBracket(t *testing.T) {
 	assert.Equal(t, float64(1), match0["hansokuB"])
 	assert.NotContains(t, match0, "scoreA")
 	assert.NotContains(t, match0, "scoreB")
+}
+
+// TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw pins the payload
+// the operator console's check-in list reads (bc-pnum operator ruling:
+// numbers are assigned pool by pool at the draw, and nothing is shown
+// before it): before a draw exists, players carry no "number" field at all
+// and the payload carries no "provisionalNumbers" key whatsoever; once
+// pools.csv exists, the draw's pool-order numbers fill Number. The revert
+// this pins: reintroducing a pre-draw number of any kind, provisional or
+// otherwise.
+func TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-numbers"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Viewer Numbers", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusSetup,
+		NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+
+	rawGet := func(t *testing.T) map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		return body
+	}
+
+	body := rawGet(t)
+	config, ok := body["config"].(map[string]any)
+	require.True(t, ok, "payload must carry a config object")
+	_, hasProvisionalKey := config["provisionalNumbers"]
+	assert.False(t, hasProvisionalKey, "pre-draw: the payload must not carry a provisionalNumbers key at all")
+	players, ok := config["players"].([]any)
+	require.True(t, ok, "payload must carry a players array")
+	require.Len(t, players, 2)
+	for _, raw := range players {
+		p, ok := raw.(map[string]any)
+		require.True(t, ok)
+		_, hasNumber := p["number"]
+		assert.False(t, hasNumber, "pre-draw: player %v must carry no number field at all", p["name"])
+	}
+
+	// The draw puts Bob first: pools.csv wins.
+	require.NoError(t, store.SavePools(cid, []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob", Number: "K1"},
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice", Number: "K2"},
+	}}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Viewer Numbers", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, PoolSize: 4, PoolWinners: 2, Status: state.CompStatusDrawReady,
+		NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	var typed struct {
+		Config state.Competition `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &typed))
+	numbers := make([]string, 0, len(typed.Config.Players))
+	for _, p := range typed.Config.Players {
+		numbers = append(numbers, p.Number)
+	}
+	assert.Equal(t, []string{"K2", "K1"}, numbers, "post-draw: pool-order numbers from pools.csv")
+}
+
+// TestViewerCompetitionDetail_PlayoffsNumbersFollowBracketPosition pins
+// bc-pnum ruling 2 end to end, through the REAL draw pipeline
+// (eng.GenerateDraw / eng.DiscardDraw) and the real HTTP viewer detail
+// endpoint, not just the applyDrawNumbers unit (TestApplyDrawNumbers
+// above). Seeds are set so bracket position genuinely differs from
+// registration order -- Dan (seed 1) and Alice (seed 2) land in opposite
+// halves of the draw -- so a wrong implementation that silently fell back
+// to participant order would print the WRONG numbers, not merely omit
+// them. Eve is not checked in, so the draw excludes her (bc-pnum ruling 2's
+// "absent from DrawOrder" case, exercised here over check-in specifically
+// rather than the synthetic bracket fixture TestApplyDrawNumbers used).
+func TestViewerCompetitionDetail_PlayoffsNumbersFollowBracketPosition(t *testing.T) {
+	r, store, eng, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "playoffs-viewer-numbers"
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Playoffs Viewer Numbers", Format: state.CompFormatPlayoffs, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusSetup, NumberPrefix: "K",
+		CheckInEnabled: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{Name: "Alice", Dojo: "Dojo Alice", CheckedIn: true},
+		{Name: "Bob", Dojo: "Dojo Bob", CheckedIn: true},
+		{Name: "Cleo", Dojo: "Dojo Cleo", CheckedIn: true},
+		{Name: "Dan", Dojo: "Dojo Dan", CheckedIn: true},
+		{Name: "Eve", Dojo: "Dojo Eve", CheckedIn: false}, // excluded: not checked in
+	}))
+	require.NoError(t, store.SaveSeeds(cid, []domain.SeedAssignment{
+		{Name: "Dan", SeedRank: 1},
+		{Name: "Alice", SeedRank: 2},
+	}))
+
+	getDetail := func(t *testing.T) map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+		r.ServeHTTP(w, req)
+		require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+		var body map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		return body
+	}
+	playersOf := func(body map[string]any) []map[string]any {
+		config := body["config"].(map[string]any)
+		raw := config["players"].([]any)
+		out := make([]map[string]any, len(raw))
+		for i, r := range raw {
+			out[i] = r.(map[string]any)
+		}
+		return out
+	}
+
+	// Pre-draw: no number field at all, per every competitor.
+	for _, p := range playersOf(getDetail(t)) {
+		_, hasNumber := p["number"]
+		assert.False(t, hasNumber, "pre-draw: player %v must carry no number field at all", p["name"])
+	}
+
+	// Generate (not start, so a later DiscardDraw is legal) the real draw.
+	require.NoError(t, eng.GenerateDraw(cid))
+
+	bracket, err := store.LoadBracket(cid)
+	require.NoError(t, err)
+	require.NotEmpty(t, bracket.DrawOrder, "premise: the draw stamped a DrawOrder")
+	require.Len(t, bracket.DrawOrder, 4, "Eve (not checked in) must be excluded from the draw")
+
+	roster, err := store.LoadParticipantsOpt(cid, false, state.LoadParticipantsOpts{})
+	require.NoError(t, err)
+	idToName := make(map[string]string, len(roster))
+	for _, p := range roster {
+		idToName[p.ID] = p.Name
+	}
+	wantNumberByName := make(map[string]string, len(bracket.DrawOrder))
+	for i, id := range bracket.DrawOrder {
+		wantNumberByName[idToName[id]] = fmt.Sprintf("K%d", i+1)
+	}
+	// The independent oracle (bracket.DrawOrder) must actually differ from
+	// plain registration order, or this test could not distinguish the
+	// bracket-position rule from a participant-order fallback.
+	assert.NotEqual(t, []string{"K1", "K2", "K3", "K4"},
+		[]string{wantNumberByName["Alice"], wantNumberByName["Bob"], wantNumberByName["Cleo"], wantNumberByName["Dan"]},
+		"premise: seeding must make bracket position differ from registration order")
+
+	for _, p := range playersOf(getDetail(t)) {
+		name := p["name"].(string)
+		if name == "Eve" {
+			_, hasNumber := p["number"]
+			assert.False(t, hasNumber, "Eve was excluded from the draw and must carry no number")
+			continue
+		}
+		assert.Equal(t, wantNumberByName[name], p["number"], "post-draw: %s's number must follow bracket position", name)
+	}
+
+	// Discard the draw: bracket.json is deleted and status reverts to Setup,
+	// so numbers must vanish again, exactly like pre-draw.
+	require.NoError(t, eng.DiscardDraw(cid))
+	for _, p := range playersOf(getDetail(t)) {
+		_, hasNumber := p["number"]
+		assert.False(t, hasNumber, "after discarding the draw: player %v must carry no number field at all", p["name"])
+	}
+}
+
+// TestViewerCompetitionsList_CorruptBracketShowsNoNumbers pins D1 on the
+// read side for a knockout-only competition (bc-pnum ruling 2's successor to
+// TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers, retired below): a
+// drawn playoffs competition whose bracket.json will not parse shows MISSING
+// numbers on the public list, never numbers invented from participant order
+// or any other fallback. Under ruling 2 a playoffs competition's number
+// comes from bracket.DrawOrder, so the analogous read-error risk moved from
+// pools.csv to bracket.json; a corrupt pools.csv is no longer even read for
+// this format (see TestCourtCurrentUnreadablePoolsShowsNoNumbers in
+// handlers_display_test.go for that boundary, exercised there instead over a
+// pooled format).
+func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "corrupt-bracket-list"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Corrupt Bracket", Format: state.CompFormatPlayoffs, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "bracket.json"), []byte("{not valid json"), 0o600))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+	// The aggregate is a list of {config, poolMatches, bracket, dataIssues} items.
+	var items []struct {
+		Config     state.Competition `json:"config"`
+		DataIssues []struct {
+			File string `json:"file"`
+		} `json:"dataIssues"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+	var found bool
+	for _, item := range items {
+		comp := item.Config
+		if comp.ID != cid {
+			continue
+		}
+		found = true
+		require.NotEmpty(t, comp.Players, "the roster must still be served")
+		for _, p := range comp.Players {
+			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable bracket.json, got %q", p.Name, p.Number)
+		}
+		// Exactly ONE dataIssues entry, not two: buildViewerCompetitionPayload
+		// loads the bracket once (for the court-feed check) and the numbering
+		// merge must reuse that same read/error rather than attempting a
+		// second bracket.json load and reporting the identical corrupt-file
+		// failure a second time (numbersFromDrawWithBracket takes the
+		// caller's own bracket read instead of repeating it).
+		var bracketIssues int
+		for _, di := range item.DataIssues {
+			if di.File == "bracket.json" {
+				bracketIssues++
+			}
+		}
+		assert.Equal(t, 1, bracketIssues, "bracket.json's unreadable-file issue must be reported exactly once, not duplicated")
+	}
+	assert.True(t, found, "the competition must still be listed")
+}
+
+// TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers is the
+// aggregate-payload counterpart of TestCourtCurrentUnreadablePoolsShowsNoNumbers
+// (handlers_display_test.go), covering numbersFromDrawWithBracket's own
+// pools.csv branch: a Mixed-format competition
+// whose pools.csv will not parse must both show NO numbers (already
+// covered by TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers-style
+// dataIssues assertions elsewhere) AND leave a log breadcrumb naming the
+// read that failed -- the response-only assertion cannot tell "the read
+// errored and was propagated" apart from "the read errored and was
+// swallowed into an empty pools slice", since mergePoolNumbersIntoPlayersSlice
+// is ALSO a no-op over an empty slice.
+func TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "corrupt-pools-aggregate"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Corrupt Pools Aggregate", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: "22222222-2222-4222-8222-222222222222", Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.Contains(t, logBuf.String(), "load pools",
+		"an unreadable pools.csv must leave a server-side log breadcrumb naming the read that failed, not be silently swallowed")
+	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
+
+	var items []struct {
+		Config state.Competition `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+	var found bool
+	for _, item := range items {
+		if item.Config.ID != cid {
+			continue
+		}
+		found = true
+		require.NotEmpty(t, item.Config.Players, "the roster must still be served")
+		for _, p := range item.Config.Players {
+			assert.Emptyf(t, p.Number, "competitor %q must show NO number over an unreadable pools.csv, got %q", p.Name, p.Number)
+		}
+	}
+	assert.True(t, found, "the competition must still be listed")
+}
+
+// TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead pins
+// drawInPoolsFile's (engine.DrawSourceFor's) setup-status skip (PR #416
+// finding 3): a competition that has never drawn cannot legitimately have
+// a pools.csv, so
+// the read must not even be attempted -- garbage bytes left at that path (a
+// stray fixture/leftover, not an operator-actionable file) must surface as
+// neither a dataIssue nor a log line. TestCourtCurrentUnreadablePoolsShowsNoNumbers
+// (handlers_display_test.go) is the DRAWN-competition counterpart, where the
+// identical bytes DO produce both.
+func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "setup-skips-pools-read"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Setup Skips Pools Read", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusSetup, NumberPrefix: "K", HasParticipantIDs: true,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.NotContains(t, w.Body.String(), "pools.csv", "a setup competition must never attempt the pools.csv read, so garbage bytes there produce no dataIssues entry")
+	assert.NotContains(t, logBuf.String(), "load pools", "a setup competition must never attempt the pools.csv read, so garbage bytes there produce no log line either")
+
+	var items []struct {
+		Config state.Competition `json:"config"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &items))
+	var found bool
+	for _, item := range items {
+		if item.Config.ID != cid {
+			continue
+		}
+		found = true
+		require.NotEmpty(t, item.Config.Players, "the roster must still be served")
+		assert.Empty(t, item.Config.Players[0].Number, "pre-draw: no number even though a NumberPrefix is configured")
+	}
+	assert.True(t, found, "the competition must still be listed")
+}
+
+// --- Squads on the public viewer detail payload (bc-pnum: "make a team
+// member's label available to the public surfaces") ---
+
+// TestViewerCompetitionDetail_TeamCompetitionCarriesSquads pins the wire
+// contract: a team competition's GET /api/viewer/competitions/:id payload
+// carries a "squads" key, keyed by the team's participant id (matching
+// the admin endpoint's shape, GET /api/competitions/:id/squads), so a
+// client can resolve a bout row's sideAMemberId/sideBMemberId without a
+// second, admin-gated call. A blank-named member (an unfilled seeded
+// position) is still present with its index: the index, not the name, is
+// what makes the "T10.2" numbering read correctly.
+func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-squads-team"
+	const redID = "11111111-1111-4111-8111-111111111111"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+	}))
+
+	member, err := store.AddTeamMember(cid, redID, "Alice")
+	require.NoError(t, err)
+	_, err = store.AddTeamMember(cid, redID, "") // unfilled seeded slot: blank name
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Contains(t, body.Squads, redID)
+	require.Len(t, body.Squads[redID], 2)
+	assert.Equal(t, member.ID, body.Squads[redID][0].ID)
+	assert.Equal(t, 1, body.Squads[redID][0].Index)
+	assert.Equal(t, "Alice", body.Squads[redID][0].Name)
+	assert.Equal(t, 2, body.Squads[redID][1].Index)
+	assert.Equal(t, "", body.Squads[redID][1].Name,
+		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+}
+
+// TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead
+// verifies both halves of "an individual competition's payload carries
+// none, and no squad read is attempted": the response carries no
+// "squads" key at all, and garbage bytes planted directly at
+// squads.yaml's path produce no log line, proving state.LoadSquads was
+// never called (mirrors TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead's
+// same proof-by-corruption technique for pools.csv above).
+func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-squads-individual"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Individual Comp", Kind: "individual", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "squads.yaml"), []byte("not: [valid yaml"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	_, hasSquads := body["squads"]
+	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	assert.NotContains(t, logBuf.String(), "load squads",
+		"an individual competition must never attempt the squads.yaml read, so garbage bytes there produce no log line")
+}
+
+// TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError verifies that
+// a team competition with no squads.yaml written yet (an individual
+// competition, or a team competition not yet loaded/never given a squad
+// member) still returns 200 with an empty "squads" object, never an
+// error: state.LoadSquads treats a missing file as "no squads recorded",
+// not a fault.
+func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-squads-missing-file"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp No Squads Yet", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
+	}))
+	// No AddTeamMember call, and confirm the premise directly: squads.yaml
+	// is not on disk yet.
+	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "squads.yaml"))
+	require.True(t, os.IsNotExist(statErr), "squads.yaml must not exist yet for this test to mean anything")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	// The exact CONTENT is deliberately not pinned here: this same request's
+	// own participants read (state.EnsureLegacyUpgraded, triggered inside
+	// LoadParticipantsOpt) may seed squads.yaml up to TeamSize as a side
+	// effect the very first time this team's squad is touched
+	// (state.upgradeSquadsFromMetadataLocked) -- so "a missing file loads
+	// fine" can legitimately observe either an empty map or the auto-seeded
+	// pad, depending on load order, and BOTH are "not an error". What this
+	// test pins is the one thing that must hold either way: no error, and a
+	// present, well-typed squads map (never a 500, never a bare null/string).
+	assert.NotNil(t, body.Squads, "a missing squads.yaml must decode to a present (possibly empty) map, never null")
+}
+
+// --- Squads on the aggregate/court-feed payload (bc-pnum, continued):
+// app.jsx's display route and StreamingOverlay both consume the aggregate
+// GET /api/viewer/competitions (competitions={displayTournament.competitions}),
+// never the detail endpoint, so the TV display and the streaming overlay
+// only ever see squads if buildViewerCompetitionPayload carries them too.
+// Same shape, same gate as the detail endpoint's own three tests above. ---
+
+// TestViewerAggregate_TeamCompetitionCarriesSquads mirrors
+// TestViewerCompetitionDetail_TeamCompetitionCarriesSquads for the
+// aggregate GET /api/viewer/competitions endpoint (buildViewerCompetitionPayload,
+// shared by the court feed).
+func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-agg-squads-team"
+	const redID = "11111111-1111-4111-8111-111111111111"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+	}))
+
+	member, err := store.AddTeamMember(cid, redID, "Alice")
+	require.NoError(t, err)
+	_, err = store.AddTeamMember(cid, redID, "") // unfilled seeded slot: blank name
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var comps []struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	require.Len(t, comps, 1)
+	require.Contains(t, comps[0].Squads, redID)
+	require.Len(t, comps[0].Squads[redID], 2)
+	assert.Equal(t, member.ID, comps[0].Squads[redID][0].ID)
+	assert.Equal(t, 1, comps[0].Squads[redID][0].Index)
+	assert.Equal(t, "Alice", comps[0].Squads[redID][0].Name)
+	assert.Equal(t, 2, comps[0].Squads[redID][1].Index)
+	assert.Equal(t, "", comps[0].Squads[redID][1].Name,
+		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+}
+
+// TestViewerAggregate_IndividualCompetitionSkipsSquadsRead mirrors
+// TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead for the
+// aggregate endpoint: no "squads" key, and garbage bytes at squads.yaml's
+// path produce no log line, proving state.LoadSquads was never called for
+// an individual competition even though buildViewerCompetitionPayload runs
+// once per competition in the whole tournament.
+func TestViewerAggregate_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-agg-squads-individual"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Individual Comp", Kind: "individual", Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "squads.yaml"), []byte("not: [valid yaml"), 0o600))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var comps []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	require.Len(t, comps, 1)
+	_, hasSquads := comps[0]["squads"]
+	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	assert.NotContains(t, logBuf.String(), "load squads",
+		"an individual competition must never attempt the squads.yaml read, so garbage bytes there produce no log line")
+}
+
+// TestViewerAggregate_MissingSquadsFileIsNotAnError mirrors
+// TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError for the
+// aggregate endpoint.
+func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-agg-squads-missing-file"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp No Squads Yet", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusSetup,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
+	}))
+	// No AddTeamMember call, and confirm the premise directly: squads.yaml
+	// is not on disk yet.
+	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "squads.yaml"))
+	require.True(t, os.IsNotExist(statErr), "squads.yaml must not exist yet for this test to mean anything")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var comps []struct {
+		Squads map[string][]domain.TeamMember `json:"squads"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
+	require.Len(t, comps, 1)
+	// Same non-pinned-content reasoning as the detail endpoint's twin test:
+	// this function loads participants/pools/bracket sequentially BEFORE
+	// the squads read (never concurrently -- see the squads read's own
+	// comment in buildViewerCompetitionPayload), so by the time it runs,
+	// the seed-on-touch side effect has deterministically already run for
+	// THIS builder specifically. What matters is that a missing file is
+	// never an error: a present, well-typed map either way.
+	assert.NotNil(t, comps[0].Squads, "a missing squads.yaml must decode to a present (possibly empty) map, never null")
+}
+
+// TestViewerCourtFeed_TeamCompetitionCarriesSquads verifies the court feed
+// (GET /api/viewer/court/:court/matches), the OTHER consumer of
+// buildViewerCompetitionPayload, also carries squads: app.jsx's own
+// comment (fetchCourtMatches, api_client.jsx) treats this as the cheap
+// per-court alternative to the full aggregate, so it must not silently
+// diverge on payload shape from the aggregate this test suite otherwise
+// covers.
+func TestViewerCourtFeed_TeamCompetitionCarriesSquads(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	const cid = "viewer-court-squads-team"
+	const redID = "11111111-1111-4111-8111-111111111111"
+	const whiteID = "22222222-2222-4222-8222-222222222222"
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "p", Courts: []string{"A"}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Team Comp", Kind: "team", TeamSize: 2,
+		TeamMatchType: state.TeamMatchTypeFixed, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "DojoW"},
+	}))
+	member, err := store.AddTeamMember(cid, redID, "Alice")
+	require.NoError(t, err)
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{
+			ID: "P1-0", SideA: "RedTeam", SideAID: redID, SideB: "WhiteTeam", SideBID: whiteID,
+			Court: "A", Status: state.MatchStatusScheduled,
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/matches", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var body struct {
+		Competitions []struct {
+			Squads map[string][]domain.TeamMember `json:"squads"`
+		} `json:"competitions"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Len(t, body.Competitions, 1)
+	require.Contains(t, body.Competitions[0].Squads, redID)
+	require.Equal(t, member.ID, body.Competitions[0].Squads[redID][0].ID)
 }

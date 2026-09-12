@@ -1,8 +1,6 @@
 package engine
 
 import (
-	"bytes"
-	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,19 +17,6 @@ import (
 // Both negative controls matter: a log that fires on every write is noise no one
 // will read, and a log that fires when nothing was bypassed is a false alarm.
 func TestApplyMatchWrite_LogsTheUnstampedOverwrite(t *testing.T) {
-	// captureLog swaps the default logger's sink for the duration of fn
-	// (same approach as TestK2ChecksItsHandleIsTransactional).
-	captureLog := func(t *testing.T, fn func()) string {
-		t.Helper()
-		var buf bytes.Buffer
-		prevOut, prevFlags := log.Writer(), log.Flags()
-		log.SetOutput(&buf)
-		log.SetFlags(0)
-		t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
-		fn()
-		return buf.String()
-	}
-
 	const marker = "unstamped write overwrites"
 
 	t.Run("an unstamped write over a stamped result is logged", func(t *testing.T) {

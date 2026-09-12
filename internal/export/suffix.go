@@ -77,12 +77,17 @@ func SideMarks(decision string, decidedByHantei bool) (winnerMark, loserMark str
 //
 // att carries the participant UUIDs, threaded from state.MatchResult where
 // available, and the names it always has. Pass the zero domain.WinnerAttribution{}
-// (bracket rows, sub-bouts) to fall back to the pre-existing name comparison —
-// that is clearer than a "", "", "" triple, which could not be told apart from
-// a genuine empty id. Side attribution goes through domain.AttributeWinnerSide,
-// the one owner of "which side won": ids win over names when a same-name pair
-// (legal: two participants from different dojos may share a name) would
-// otherwise pick the wrong side.
+// to fall back to the pre-existing name comparison — that is clearer than a
+// "", "", "" triple, which could not be told apart from a genuine empty id.
+// Sub-bouts have no id fields to thread at all; a bracket row now carries
+// SideAID/SideBID/WinnerID (bc-brid), but this export call path does not
+// thread them yet (internal/export/builder.go's bracket branch, a
+// deliberately deferred change -- see that bead's final report), so a
+// bracket row still reaches this function via the zero value too, for now.
+// Side attribution goes through domain.AttributeWinnerSide, the one owner
+// of "which side won": ids win over names when a same-name pair (legal: two
+// participants from different dojos may share a name) would otherwise pick
+// the wrong side.
 func SideMarksLR(decision string, decidedByHantei bool, att domain.WinnerAttribution, mirror bool) (left, right string) {
 	winnerMark, loserMark := SideMarks(decision, decidedByHantei)
 	if att.Winner == "" {
@@ -165,8 +170,10 @@ func FlagsScorePair(a, b int) (string, string) {
 // or the loser.
 //
 // att carries the participant UUIDs (the zero domain.WinnerAttribution{} when
-// unavailable — bracket rows and sub-bouts carry no ids) and the names it
-// always has, resolved through domain.AttributeWinnerSide, the SAME owner
+// unavailable — sub-bouts carry no id fields at all, and a bracket row's own
+// SideAID/SideBID/WinnerID (bc-brid) are not yet threaded through this export
+// call path either, a deliberately deferred change) and the names it always
+// has, resolved through domain.AttributeWinnerSide, the SAME owner
 // SideMarksLR uses: the two helpers compose one cell (score + result mark)
 // and must agree on which side won, or a same-name pair whose ids disagree
 // with the name order could print the maru fallback in one side's cell and

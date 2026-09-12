@@ -1,16 +1,17 @@
-// AdminLineup (competition-admin → Lineups) form behaviour.
+// AdminLineup (competition-admin → Lineups) form behaviour (bc-tmid pass 3).
 //
-// Regression guard: a team with NO member metadata used to render a fixed
-// <select> limited to roster members, with the Save button disabled when the
-// roster was empty: so for teams formed by grouping individuals (no metadata)
-// the operator could not enter ANY lineup. The form now uses LineupNameInput
-// (a typeable autocomplete combobox) so any name can be typed, and Save is
-// no longer gated on the roster being non-empty.
+// The round-scoped lineup editor now resolves a position to a squad MEMBER
+// (id + name), not a bare typed string. Per the operator's ruling there are
+// exactly three operations: SELECT an existing squad member into a
+// position, ADD a new name in a position (minting the member's id in that
+// one step), and RENAME a member (keeping its id). The squad itself is
+// read from GET /api/competitions/:id/squads, never from team.metadata.
 //
 // Because the test runtime (makeReactive) does NOT recurse into child
-// component bodies, LineupNameInput appears in the tree as a component
-// node with type === LineupNameInput function. Assertions check props on
-// those nodes rather than the inner <input>/<datalist> DOM elements.
+// component bodies, host elements (<select>, <option>, <input>, <button>)
+// DO appear fully in the tree with their real props: events are simulated
+// by calling the relevant prop function directly (onChange/onClick) rather
+// than through a DOM.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
@@ -38,15 +39,6 @@ function findHosts(tree, typeName) {
   return out;
 }
 
-// Find component nodes (where type is a function) by function name.
-function findComponents(tree, name) {
-  const out = [];
-  walk(tree, n => {
-    if (n && typeof n.type === 'function' && n.type.name === name) out.push(n);
-  });
-  return out;
-}
-
 function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -56,63 +48,48 @@ function collectText(node) {
   return '';
 }
 
-const saveButton = (tree) =>
-  findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));
+const mainSaveButton = (tree) =>
+  findHosts(tree, 'button').find(b => /^Save lineup$/.test(collectText(b).trim()));
 
-describe('AdminLineup form (competition-admin Lineups)', () => {
+const positionSelect = (tree, key) =>
+  findHosts(tree, 'select').find(s => s.props?.['data-testid'] === `lineup-position-${key}`);
+
+const squadRow = (tree, memberId) =>
+  findHosts(tree, 'div').find(d => d.props?.['data-testid'] === `squad-member-${memberId}`);
+
+const buttonNamed = (node, text) =>
+  findHosts(node, 'button').find(b => collectText(b).trim() === text);
+
+async function flush(times = 8) {
+  for (let i = 0; i < times; i++) await Promise.resolve();
+}
+
+describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
   let runtime;
   let AdminLineup;
   let origAPI;
   let origCompMatches;
-  let origAdminLineupHelpers;
+  let origConfirmDialog;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
 
   beforeEach(async () => {
     origAPI = global.window.API;
     origCompMatches = global.window.compMatches;
-    origAdminLineupHelpers = global.window.AdminLineupHelpers;
+    origConfirmDialog = global.window.confirmDialog;
     global.window.compMatches = () => [];
     global.window.API = {
       fetchTeamLineup: vi.fn().mockResolvedValue(null), // 404 → fresh form
+      fetchSquads: vi.fn().mockResolvedValue({}),
+      addTeamMember: vi.fn(),
+      renameTeamMember: vi.fn().mockResolvedValue(true),
       putTeamLineup: vi.fn().mockResolvedValue({}),
     };
-    // mergeRosterWithAssigned must be available for the suggestions computation
-    // in AdminLineup (it reads window.AdminLineupHelpers only in admin_schedule_lineup;
-    // admin_lineup.jsx calls mergeRosterWithAssigned directly from its own scope).
-    // But window.AdminLineupHelpers is used by admin_schedule_lineup: set it up
-    // here in case the module re-exports trigger it.
-    global.window.AdminLineupHelpers = {
-      positionsForSize: (n) => Array.from({ length: n }, (_, i) => ({
-        key: String(i + 1), label: String(i + 1),
-      })),
-      rosterFor: (team) => {
-        if (!team) return [];
-        if (Array.isArray(team.metadata) && team.metadata.length > 0) return team.metadata;
-        if (Array.isArray(team.Metadata) && team.Metadata.length > 0) return team.Metadata;
-        return [];
-      },
-      mergeRosterWithAssigned: (base, lineup) => {
-        const arr = Array.isArray(base) ? base : [];
-        const positions = lineup && lineup.positions ? lineup.positions : null;
-        if (!positions) return arr;
-        const seen = new Set(arr.map(n => String(n).trim().toLowerCase()));
-        const extras = [];
-        for (const raw of Object.values(positions)) {
-          const name = String(raw == null ? '' : raw).trim();
-          if (!name) continue;
-          const key = name.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          extras.push(name);
-        }
-        return extras.length ? [...arr, ...extras] : arr;
-      },
-      teamIdOf: (team) => team?.id || team?.ID || team?.name || team?.Name || '',
-    };
-    // useClickOutside is needed by LineupNameInput (called via window.useClickOutside).
-    // ui.jsx is loaded by vitest.setup.js, which sets window.useClickOutside.
-    // Nothing extra needed here.
+    // bc-pnum: commitAdd (operation 2) now confirms before minting. Default
+    // to "confirmed" here so the pre-existing ADD/RENAME/SELECT tests below
+    // keep exercising the real mint path; the dedicated confirmation tests
+    // further down override this per-case.
+    global.window.confirmDialog = vi.fn().mockResolvedValue(true);
 
     runtime = makeReactive();
     global.React = runtime.React;
@@ -125,82 +102,230 @@ describe('AdminLineup form (competition-admin Lineups)', () => {
     global.React = realReact;
     global.window.API = origAPI;
     global.window.compMatches = origCompMatches;
-    global.window.AdminLineupHelpers = origAdminLineupHelpers;
+    global.window.confirmDialog = origConfirmDialog;
     vi.resetModules();
   });
 
-  async function mountFor(team) {
+  async function mountFor(team, opts = {}) {
+    if (opts.lineup !== undefined) {
+      global.window.API.fetchTeamLineup.mockResolvedValue(opts.lineup);
+    }
+    if (opts.squads !== undefined) {
+      global.window.API.fetchSquads.mockResolvedValue(opts.squads);
+    }
     runtime.mount(AdminLineup, {
       comp: COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
     });
-    // Let the mount effect's fetchTeamLineup promise resolve and flip loading.
-    await Promise.resolve();
-    await Promise.resolve();
+    await flush();
     return runtime.currentTree();
   }
 
-  it('renders pickers for a team WITHOUT metadata', async () => {
-    const tree = await mountFor({ id: 'uuid-grouped', name: 'Grouped Team' });
-
-    // LineupNameInput component nodes: one per position (teamSize 3).
-    const pickers = findComponents(tree, 'LineupNameInput');
-    expect(pickers.length).toBe(3);
-
-    // No host <select> with a data-testid starting "lineup-position-".
-    const selects = findHosts(tree, 'select').filter(
-      s => String(s.props?.['data-testid'] || '').startsWith('lineup-position-'));
-    expect(selects.length).toBe(0);
-  });
-
-  it('does NOT disable Save when the team has no roster', async () => {
-    const tree = await mountFor({ id: 'uuid-grouped', name: 'Grouped Team' });
-    const btn = saveButton(tree);
-    expect(btn).toBeTruthy();
-    expect(btn.props.disabled).toBeFalsy();
-    // And the hint invites typing names directly.
-    expect(collectText(tree)).toContain('type each competitor');
-  });
-
-  it('offers the registered roster as suggestions when metadata exists', async () => {
-    const tree = await mountFor({
-      id: 'uuid-meta', name: 'Tora', metadata: ['Tanaka', 'Sato', 'Yamada'],
+  it('renders one <select> position picker per team-size slot, sourced from the squad', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
     });
-    // Each LineupNameInput receives the roster as a prop.
-    const pickers = findComponents(tree, 'LineupNameInput');
-    expect(pickers.length).toBeGreaterThan(0);
-    const roster = pickers[0].props.roster;
-    expect(roster).toContain('Tanaka');
-    expect(roster).toContain('Sato');
-    expect(roster).toContain('Yamada');
-    // Save is enabled here too.
-    expect(saveButton(tree).props.disabled).toBeFalsy();
+    const selects = ['1', '2', '3'].map(k => positionSelect(tree, k));
+    expect(selects.every(Boolean)).toBe(true);
+
+    const optionTexts = collectText(selects[0]);
+    expect(optionTexts).toContain('Sato');
+    expect(optionTexts).toContain('T10.1');
   });
 
-  it('trims leading/trailing whitespace before saving (onSelect + Save)', async () => {
-    const tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
-    // Drive the first LineupNameInput's onSelect with a padded name.
-    const pickers = findComponents(tree, 'LineupNameInput');
-    expect(pickers.length).toBeGreaterThan(0);
-    pickers[0].props.onSelect('  Padded  ');
+  it('reads the squad from GET .../squads rather than from team.metadata', async () => {
+    // metadata carries a name the squad endpoint does NOT: proves the
+    // picker's options come from the squad store, not team.metadata.
+    const tree = await mountFor(
+      { id: 'team-1', name: 'Tora A', number: 'T10', metadata: ['LegacyOnlyName'] },
+      { squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] } },
+    );
+    const select1 = positionSelect(tree, '1');
+    const optionTexts = collectText(select1);
+    expect(optionTexts).toContain('Sato');
+    expect(optionTexts).not.toContain('LegacyOnlyName');
+    expect(global.window.API.fetchSquads).toHaveBeenCalledWith('comp-1', 'pw');
+  });
+
+  it('operation 1 (SELECT): choosing an existing squad member sets its name AND id for that position', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+
     const tree2 = runtime.currentTree();
-    saveButton(tree2).props.onClick();
-    await Promise.resolve();
+    mainSaveButton(tree2).props.onClick();
+    await flush();
+
     expect(global.window.API.putTeamLineup).toHaveBeenCalled();
-    // putTeamLineup(compId, teamId, round, positionsOut, password)
-    const positionsOut = global.window.API.putTeamLineup.mock.calls.at(-1)[3];
-    expect(positionsOut['1']).toBe('Padded');
+    const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+    // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
+    expect(call[3]['1']).toBe('Sato');
+    expect(call[5]['1']).toBe('sq-sato');
   });
 
-  it('drops a whitespace-only position instead of persisting blanks', async () => {
-    const tree = await mountFor({ id: 'uuid-x', name: 'Grouped' });
-    const pickers = findComponents(tree, 'LineupNameInput');
-    expect(pickers.length).toBeGreaterThan(0);
-    // onSelect with whitespace-only string: save() trims to "" and drops it.
-    pickers[0].props.onSelect('   ');
+  it('operation 2 (ADD): typing a new name in a position mints a member and stores its id there', async () => {
+    global.window.API.addTeamMember.mockResolvedValue({ id: 'sq-new', index: 1, name: 'Ito' });
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
+
+    // Choosing "+ Add new member…" switches that position into add-mode.
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    expect(nameField).toBeTruthy();
+    nameField.props.onChange({ target: { value: 'Ito' } });
+
+    tree2 = runtime.currentTree();
+    const addBtn = buttonNamed(tree2, 'Add');
+    expect(addBtn).toBeTruthy();
+    addBtn.props.onClick();
+    await flush();
+
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+
+    // The minted member is now selected in that same position.
+    const tree3 = runtime.currentTree();
+    expect(positionSelect(tree3, '1').props.value).toBe('sq-new');
+
+    mainSaveButton(tree3).props.onClick();
+    await flush();
+    const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+    expect(call[3]['1']).toBe('Ito');
+    expect(call[5]['1']).toBe('sq-new');
+  });
+
+  it('operation 2 (ADD): confirms before minting, naming the team and the typed name', async () => {
+    global.window.API.addTeamMember.mockResolvedValue({ id: 'sq-new', index: 1, name: 'Ito' });
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Ito' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).toHaveBeenCalledTimes(1);
+    const [opts] = global.window.confirmDialog.mock.calls[0];
+    expect(opts.message).toContain('Ito');
+    expect(opts.message).toContain('Tora A');
+    // Called BEFORE the mint, not after: declining must prevent the write
+    // (pinned by the next test), which only holds if confirmation gates it.
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+  });
+
+  it('operation 2 (ADD): declining the confirmation never mints a member', async () => {
+    global.window.confirmDialog.mockResolvedValue(false);
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Ito' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+    // The add-row stays open with the typed name, rather than resetting, so
+    // the operator can correct a typo instead of starting the picker over.
+    const tree3 = runtime.currentTree();
+    const nameFieldAfter = findHosts(tree3, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    expect(nameFieldAfter, 'expected the add-name field to still be open after declining').toBeTruthy();
+    expect(nameFieldAfter.props.value).toBe('Ito');
+  });
+
+  it('operation 3 (RENAME): renaming a squad member keeps its id in the position that references it', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    // Select the member into position 1 first.
+    positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+
+    let tree2 = runtime.currentTree();
+    const row = squadRow(tree2, 'sq-sato');
+    expect(row).toBeTruthy();
+    buttonNamed(row, 'Rename').props.onClick();
+
+    tree2 = runtime.currentTree();
+    const rowAfterRenameStart = squadRow(tree2, 'sq-sato');
+    const renameField = findHosts(rowAfterRenameStart, 'input')[0];
+    expect(renameField).toBeTruthy();
+    renameField.props.onChange({ target: { value: 'Sato-Renamed' } });
+
+    tree2 = runtime.currentTree();
+    const rowMidRename = squadRow(tree2, 'sq-sato');
+    buttonNamed(rowMidRename, 'Save').props.onClick();
+    await flush();
+
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'Sato-Renamed', 'pw');
+
+    const tree3 = runtime.currentTree();
+    // The position's select value (the id) is unchanged...
+    expect(positionSelect(tree3, '1').props.value).toBe('sq-sato');
+    // ...but the squad row now shows the new name.
+    expect(collectText(squadRow(tree3, 'sq-sato'))).toContain('Sato-Renamed');
+
+    mainSaveButton(tree3).props.onClick();
+    await flush();
+    const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+    // Save persists the NEW name against the SAME (unchanged) id.
+    expect(call[3]['1']).toBe('Sato-Renamed');
+    expect(call[5]['1']).toBe('sq-sato');
+  });
+
+  it('there is no member-removal control anywhere in the form', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    const allText = collectText(tree);
+    expect(allText).not.toMatch(/remove/i);
+    expect(allText).not.toMatch(/delete member/i);
+  });
+
+  it('Save omits memberIds entirely when no position resolved to a squad member', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
+    mainSaveButton(tree).props.onClick();
+    await flush();
+    const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+    // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
+    expect(call[5]).toBeUndefined();
+  });
+
+  // bc-cse gap closure: make a silent failure visible, without ever blocking.
+  const memberWarning = (tree) =>
+    findHosts(tree, 'div').find(d => d.props?.['data-testid'] === 'lineup-member-warning');
+
+  it('shows the squad-unavailable warning after a save that still succeeded, when the squad failed to load', async () => {
+    global.window.API.fetchSquads.mockRejectedValue(new Error('network error'));
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' });
+
+    mainSaveButton(tree).props.onClick();
+    await flush();
+
     const tree2 = runtime.currentTree();
-    saveButton(tree2).props.onClick();
-    await Promise.resolve();
-    const positionsOut = global.window.API.putTeamLineup.mock.calls.at(-1)[3];
-    expect(positionsOut['1']).toBeUndefined();
+    // The save itself still succeeded (never blocked by the squad failure).
+    expect(global.window.API.putTeamLineup).toHaveBeenCalled();
+    const warning = memberWarning(tree2);
+    expect(warning).toBeTruthy();
+    const text = collectText(warning);
+    expect(text).toContain('Lineup saved');
+    expect(text).toContain('squad list could not be loaded');
+    expect(text).toContain('Scores will still record normally');
+  });
+
+  it('shows no member-identity warning after an ordinary successful save (squad loaded fine)', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+    const tree2 = runtime.currentTree();
+    mainSaveButton(tree2).props.onClick();
+    await flush();
+    const tree3 = runtime.currentTree();
+    expect(memberWarning(tree3)).toBeFalsy();
   });
 });

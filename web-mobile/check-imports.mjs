@@ -200,7 +200,13 @@ function checkScriptTagUrls() {
   // Only HTML comments are stripped. Running the JS comment-stripper over HTML
   // would delete from any "//" (e.g. inside an absolute src) to end of line,
   // which could swallow a live <script> tag and hide a real divergence.
-  const htmlLive = html.replace(/<!--[\s\S]*?-->/g, '');
+  // A single pass can leave a "<!--" behind when markers are nested or
+  // overlapping, so repeat the strip until it stops changing the string.
+  let htmlLive = html;
+  for (let prev = null; prev !== htmlLive; ) {
+    prev = htmlLive;
+    htmlLive = htmlLive.replace(/<!--[\s\S]*?-->/g, '');
+  }
 
   // stem -> [full src]. A LIST, not a single value: a module tagged twice is
   // the worst case this check exists for (two tags = two evaluations even

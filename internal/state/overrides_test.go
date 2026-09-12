@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -33,13 +34,14 @@ func TestOverrides(t *testing.T) {
 	assert.Empty(t, overrides.PoolRanks)
 	assert.Empty(t, overrides.Winners)
 
-	// 2. Save rank override. No id/dojo (an older/plumbing-only caller): the
-	// key is helper.CompetitorKey("", "Alice", ""), NOT the bare name -- see
-	// Overrides.PoolRanks' doc comment. Identity is verified in
-	// TestSaveRankOverride_SameNameDifferentDojo below; this test is plumbing
-	// only.
-	aliceKey := helper.CompetitorKey("", "Alice", "")
-	err = store.SaveRankOverride(compID, "Pool A", "", "Alice", "", 1)
+	// 2. Save rank override, keyed by participant id (bc-pnum: playerID is
+	// the only identity SaveRankOverrideChanged accepts); the key is
+	// helper.CompetitorKey("alice-id", "", ""), i.e. "id:alice-id" -- see
+	// Overrides.PoolRanks' doc comment. Same-name-different-dojo identity is
+	// verified in engine's TestCalculatePoolStandings_Override_SameNameDifferentDojo;
+	// this test is plumbing only.
+	aliceKey := helper.CompetitorKey("alice-id", "", "")
+	err = store.SaveRankOverride(compID, "Pool A", "alice-id", 1)
 	require.NoError(t, err)
 
 	// 3. Load overrides after save
@@ -111,6 +113,53 @@ func TestLoadOverrides_InvalidJSON(t *testing.T) {
 
 	_, err = store.LoadOverrides(compID)
 	assert.Error(t, err)
+	assert.True(t, errors.Is(err, ErrCorruptOverrides), "a JSON parse failure must be wrapped in ErrCorruptOverrides so callers can recognise and repair it")
+
+	// bc-pnum FIX 1: the same error must ALSO satisfy AsCorruptFile, located,
+	// so every reader that degrades on an operator-repairable file (e.g. the
+	// public viewer detail endpoint) recognises it too. Before the fix,
+	// ErrCorruptOverrides was a plain errors.New sentinel wrapped with %w, not
+	// a *CorruptFileError, so AsCorruptFile could never match it.
+	cf, ok := AsCorruptFile(err)
+	require.True(t, ok, "a corrupt overrides.json must be a located CorruptFileError, not just a bare sentinel")
+	assert.Equal(t, "overrides.json", cf.File)
+	assert.NotZero(t, cf.Line, "a JSON syntax error must resolve to a line an operator can open")
+}
+
+// TestResetOverridesForce_RepairsCorruptFile is PR #416 finding 10: every
+// OTHER override writer (SaveRankOverrideChanged, SaveWinnerOverride,
+// ResetOverridesChanged) goes through modifyOverridesChanged, which LOADS
+// the file first, so none of them can repair a corrupt overrides.json --
+// including "reset", which one might expect to be the escape hatch.
+// ResetOverridesForce is the one write that does not parse first.
+func TestResetOverridesForce_RepairsCorruptFile(t *testing.T) {
+	dir, err := os.MkdirTemp("", "overrides-repair-*")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+
+	store, err := NewStore(dir)
+	require.NoError(t, err)
+
+	compID := "repair-comp"
+	compDir := filepath.Join(dir, "competitions", compID)
+	require.NoError(t, os.MkdirAll(compDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "overrides.json"), []byte("{not valid json"), 0600))
+
+	// Precondition: the file is genuinely corrupt, and the ordinary reset
+	// path (load-then-save) fails identically to a plain load.
+	_, err = store.LoadOverrides(compID)
+	require.Error(t, err)
+	require.True(t, errors.Is(err, ErrCorruptOverrides))
+	_, err = store.ResetOverridesChanged(compID)
+	require.Error(t, err, "the ordinary reset path loads first and must fail the same way on a corrupt file")
+
+	// The repair door succeeds without reading the corrupt bytes at all.
+	require.NoError(t, store.ResetOverridesForce(compID))
+
+	o, err := store.LoadOverrides(compID)
+	require.NoError(t, err, "the file must be readable again after the repair")
+	assert.Empty(t, o.PoolRanks)
+	assert.Empty(t, o.Winners)
 }
 
 // TestLoadOverridesLocked_NilFieldInit verifies that loading a valid but empty
@@ -154,12 +203,12 @@ func TestModifyOverridesChanged_NoChange(t *testing.T) {
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: "No Change"}))
 
 	// First save sets a rank
-	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "", "Alice", "", 1)
+	changed1, err := store.SaveRankOverrideChanged(compID, "Pool1", "alice-id", 1)
 	require.NoError(t, err)
 	assert.True(t, changed1)
 
 	// Saving the same value again should return false (no change)
-	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "", "Alice", "", 1)
+	changed2, err := store.SaveRankOverrideChanged(compID, "Pool1", "alice-id", 1)
 	require.NoError(t, err)
 	assert.False(t, changed2)
 }

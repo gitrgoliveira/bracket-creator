@@ -10,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 // TestIsPoolDaihyosenMatchID covers the ID-recognition helper.
@@ -134,9 +135,51 @@ func TestGeneratePoolDaihyosenMatches_SkipsExistingPairs(t *testing.T) {
 		{Player: domain.Player{Name: "TeamB", Dojo: "Dojo TeamB"}},
 		{Player: domain.Player{Name: "TeamC", Dojo: "Dojo TeamC"}},
 	}
-	existingRows := []state.MatchResult{{SideA: "TeamA", SideB: "TeamB"}}
+	bctest.StampStandingIDs(group)
+	// The dedup resolver is id-only (operator ruling bc-pnum), so the
+	// existing row must carry the same ids the group was just stamped with.
+	existingRows := []state.MatchResult{{SideA: "TeamA", SideB: "TeamB", SideAID: group[0].Player.ID, SideBID: group[1].Player.ID}}
 	matches := generatePoolDaihyosenMatches("Pool X", group, 1, "A", existingRows)
 	require.Len(t, matches, 2, "TeamA-TeamB already exists; only other 2 pairs generated")
+}
+
+// TestGeneratePoolDaihyosenMatches_DuplicateIDRowStaysIdempotent pins that
+// the existingRows dedup scan recognizes a stored SELF-REFERENTIAL row
+// (SideAID == SideBID) as already existing. That shape is reachable when
+// two DISTINCT tiedGroup entries share a corrupted/hand-edited duplicate
+// participant id: generation itself pairs them by INDEX (i < j), not by
+// id, so it emits a row for that pair like any other, and the row's own
+// SideAID/SideBID both read the shared id back.
+//
+// The dedup scan is deliberately id-only (ids[m.SideAID] && ids[m.SideBID]),
+// with NO m.SideAID != m.SideBID guard: that guard belongs to the three
+// real self-pair PREVENTION sites (groupNeedsChusen, leagueGroupHasDH,
+// applyTiebreakSort), which decide whether a bout counts toward a win or a
+// needs-chusen verdict -- not whether a row already on disk is remembered.
+// Adding it here instead would make re-injection over the same group
+// regenerate the self-referential pair on every call.
+func TestGeneratePoolDaihyosenMatches_DuplicateIDRowStaysIdempotent(t *testing.T) {
+	group := []state.PlayerStanding{
+		{Player: domain.Player{ID: "dup-id", Name: "TeamA", Dojo: "Dojo TeamA"}},
+		{Player: domain.Player{ID: "team-b-id", Name: "TeamB", Dojo: "Dojo TeamB"}},
+		{Player: domain.Player{ID: "dup-id", Name: "TeamA-Clone", Dojo: "Dojo TeamA"}},
+	}
+
+	first := generatePoolDaihyosenMatches("Pool X", group, 0, "A", nil)
+	require.Len(t, first, 3, "3-way round-robin: 3 pairs")
+
+	var selfPaired int
+	for _, m := range first {
+		if m.SideAID == m.SideBID {
+			selfPaired++
+		}
+	}
+	require.Equal(t, 1, selfPaired, "premise: the (TeamA, TeamA-Clone) pair shares the duplicate id, so its own generated row is genuinely self-referential")
+
+	// Re-injecting over the SAME tiedGroup, with `first` now on disk, must
+	// add nothing -- including for the self-referential pair.
+	second := generatePoolDaihyosenMatches("Pool X", group, len(first), "A", first)
+	assert.Empty(t, second, "re-injection over the same tied group must be idempotent, including the duplicate-id pair")
 }
 
 // TestGeneratePoolDaihyosenMatches_NamesakeTeamsGenerated is the regression
@@ -184,7 +227,7 @@ func TestGeneratePoolDaihyosenMatches_ThreeWayWithNamesakeTeams(t *testing.T) {
 // TestGeneratePoolDaihyosenMatches_PrefillDedupsNamesakeInvolvingPair closes
 // the class the FIX2 doc comment used to describe as an "accepted, narrower
 // gap": generatePoolDaihyosenMatches now shares generateTiebreakerMatches'
-// existingRows contract (identity-keyed dedup via newGroupKeyResolver)
+// existingRows contract (identity-keyed dedup via groupMemberIDs)
 // instead of a bare-name existingPairs map, so this scenario is fixed for
 // EVERY caller of the shared function -- both InjectPoolDaihyosenMatches
 // (auto-injection) and GenerateLeagueTiebreakMatches (league_tiebreak.go,
@@ -244,11 +287,9 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 		Kind:     "team", // pin the real team config (Kind AND TeamSize)
 		TeamSize: 2,      // 2-person teams keeps the SubResults simple
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
+	}
 
 	var matches []state.MatchResult
 	if tieAll {
@@ -301,6 +342,10 @@ func setupTeamPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, *stat
 				}},
 		}
 	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
+	}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store
 }
@@ -322,11 +367,9 @@ func setupTeamMixedPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, 
 		Courts:   []string{"A"},
 		TeamSize: 2,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"}, {Name: "Beta", Dojo: "Dojo Beta"}, {Name: "Gamma", Dojo: "Dojo Gamma"},
+	}
 
 	var matches []state.MatchResult
 	if tieAll {
@@ -375,6 +418,10 @@ func setupTeamMixedPoolComp(t *testing.T, compID string, tieAll bool) (*Engine, 
 				}},
 		}
 	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
+	}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store
 }
@@ -395,7 +442,7 @@ func TestInjectPoolDaihyosenMatches_TwoWayTie(t *testing.T) {
 	// Override with a 2-way tie: Alpha/Beta both win one, draw one (same record),
 	// Gamma loses both, Alpha vs Beta draw decides the 2-way tie.
 	// Crucially, SubMatchResult.SideA/SideB are set to prevent "" == "" false-positives.
-	require.NoError(t, store.SavePoolMatches("dh-two-tie", []state.MatchResult{
+	dhTwoTieMatches := []state.MatchResult{
 		{ID: "Pool A-0", SideA: "Alpha", SideB: "Beta",
 			Status: state.MatchStatusCompleted,
 			Winner: "", Decision: string(domain.DecisionHikiwake), Court: "A",
@@ -415,7 +462,14 @@ func TestInjectPoolDaihyosenMatches_TwoWayTie(t *testing.T) {
 				{Position: 1, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
 				{Position: 2, SideA: "Beta", SideB: "Gamma", Winner: "Beta"},
 			}},
-	}))
+	}
+	// Resolve against the roster setupTeamPoolComp already saved (and
+	// stamped), so this override carries the SAME ids the on-disk pool uses.
+	dhTwoTiePools, err := store.LoadPools("dh-two-tie")
+	require.NoError(t, err)
+	require.Len(t, dhTwoTiePools, 1)
+	bctest.StampIDs(dhTwoTiePools[0].Players, dhTwoTieMatches)
+	require.NoError(t, store.SavePoolMatches("dh-two-tie", dhTwoTieMatches))
 
 	injected, err := eng.InjectPoolDaihyosenMatches("dh-two-tie")
 	require.NoError(t, err)
@@ -501,6 +555,11 @@ func TestMaybeAutoCompletePools_TeamDHCompleteTransitions(t *testing.T) {
 		allMatches[i].Status = state.MatchStatusCompleted
 		if IsPoolDaihyosenMatchID(allMatches[i].ID) && allMatches[i].Winner == "" {
 			allMatches[i].Winner = allMatches[i].SideA
+			// Winner is resolved by id only (operator ruling bc-pnum); the
+			// injected DH row already carries SideAID from
+			// generatePoolDaihyosenMatches, so WinnerID must be set
+			// alongside the name or resolveWinnerSide credits no one.
+			allMatches[i].WinnerID = allMatches[i].SideAID
 		}
 	}
 	require.NoError(t, store.SavePoolMatches("autocomplete-team-dhcomplete", allMatches))
@@ -539,15 +598,23 @@ func TestMaybeAutoCompletePools_TeamDHCompletedWithoutWinner(t *testing.T) {
 // TestDHCycleExists_NoCycle verifies that dhCycleExists returns false when
 // DH results unambiguously break all ties (A wins DH against B).
 func TestDHCycleExists_NoCycle(t *testing.T) {
-	standings := map[string][]state.PlayerStanding{
-		"Pool A": {
-			{Player: helper.Player{Name: "Alpha", Dojo: "Dojo Alpha"}, Points: 0},
-			{Player: helper.Player{Name: "Beta", Dojo: "Dojo Beta"}, Points: 0},
-		},
+	players := []domain.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"},
+		{Name: "Beta", Dojo: "Dojo Beta"},
 	}
 	matches := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta",
 			Status: state.MatchStatusCompleted, Winner: "Alpha"},
+	}
+	// The cycle check is id-only (groupNeedsChusen, operator ruling
+	// bc-pnum): without stamped ids the DH bout never resolves and the
+	// round reads as incomplete rather than genuinely decisive.
+	bctest.StampIDs(players, matches)
+	standings := map[string][]state.PlayerStanding{
+		"Pool A": {
+			{Player: players[0], Points: 0},
+			{Player: players[1], Points: 0},
+		},
 	}
 	assert.False(t, dhCycleExists(standings, matches, nil))
 }
@@ -555,17 +622,26 @@ func TestDHCycleExists_NoCycle(t *testing.T) {
 // TestDHCycleExists_Cycle verifies that dhCycleExists returns true for a
 // three-way cyclic result (A>B, B>C, C>A).
 func TestDHCycleExists_Cycle(t *testing.T) {
-	standings := map[string][]state.PlayerStanding{
-		"Pool A": {
-			{Player: helper.Player{Name: "Alpha", Dojo: "Dojo Alpha"}, Points: 0},
-			{Player: helper.Player{Name: "Beta", Dojo: "Dojo Beta"}, Points: 0},
-			{Player: helper.Player{Name: "Gamma", Dojo: "Dojo Gamma"}, Points: 0},
-		},
+	players := []domain.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"},
+		{Name: "Beta", Dojo: "Dojo Beta"},
+		{Name: "Gamma", Dojo: "Dojo Gamma"},
 	}
 	matches := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
 		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
 		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
+	}
+	// Id-only resolution (bc-pnum): without stamped ids, none of these DH
+	// bouts resolve, the round reads as incomplete, and the cycle is never
+	// detected at all -- this pins the genuine 3-way cycle, not that gap.
+	bctest.StampIDs(players, matches)
+	standings := map[string][]state.PlayerStanding{
+		"Pool A": {
+			{Player: players[0], Points: 0},
+			{Player: players[1], Points: 0},
+			{Player: players[2], Points: 0},
+		},
 	}
 	assert.True(t, dhCycleExists(standings, matches, nil))
 }
@@ -573,21 +649,38 @@ func TestDHCycleExists_Cycle(t *testing.T) {
 // TestDHCycleExists_CycleResolvedByOverrides verifies that a cyclic DH result
 // is NOT flagged when the operator has manually ranked all tied members.
 func TestDHCycleExists_CycleResolvedByOverrides(t *testing.T) {
-	standings := map[string][]state.PlayerStanding{
-		"Pool A": {
-			{Player: helper.Player{Name: "Alpha", Dojo: "Dojo Alpha"}, Points: 0},
-			{Player: helper.Player{Name: "Beta", Dojo: "Dojo Beta"}, Points: 0},
-			{Player: helper.Player{Name: "Gamma", Dojo: "Dojo Gamma"}, Points: 0},
-		},
+	players := []domain.Player{
+		{Name: "Alpha", Dojo: "Dojo Alpha"},
+		{Name: "Beta", Dojo: "Dojo Beta"},
+		{Name: "Gamma", Dojo: "Dojo Gamma"},
 	}
 	matches := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Alpha", SideB: "Beta", Status: state.MatchStatusCompleted, Winner: "Alpha"},
 		{ID: "Pool A-DH-1", SideA: "Beta", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Beta"},
 		{ID: "Pool A-DH-2", SideA: "Alpha", SideB: "Gamma", Status: state.MatchStatusCompleted, Winner: "Gamma"},
 	}
+	// Id-only resolution (bc-pnum) applies to the cycle detection AND to
+	// lookupPoolRankOverride, which resolves solely via
+	// helper.CompetitorKey(id, name, dojo) with no bare-name fallback
+	// (TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable
+	// pins the removal). A poolRanks map keyed by bare name would never
+	// match, silently leaving the group "unresolved" -- so the override
+	// must be keyed exactly as a real write would key it.
+	bctest.StampIDs(players, matches)
+	standings := map[string][]state.PlayerStanding{
+		"Pool A": {
+			{Player: players[0], Points: 0},
+			{Player: players[1], Points: 0},
+			{Player: players[2], Points: 0},
+		},
+	}
 	// Operator manually resolved the cycle by assigning explicit ranks.
 	poolRanks := map[string]map[string]int{
-		"Pool A": {"Alpha": 1, "Beta": 2, "Gamma": 3},
+		"Pool A": {
+			helper.CompetitorKey(players[0].ID, players[0].Name, players[0].Dojo): 1,
+			helper.CompetitorKey(players[1].ID, players[1].Name, players[1].Dojo): 2,
+			helper.CompetitorKey(players[2].ID, players[2].Name, players[2].Dojo): 3,
+		},
 	}
 	assert.False(t, dhCycleExists(standings, matches, poolRanks))
 }
@@ -644,10 +737,16 @@ func TestMaybeAutoCompletePools_TeamDHCycleBlocks(t *testing.T) {
 		allMatches[i].Status = state.MatchStatusCompleted
 		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
 			sA, sB := allMatches[i].SideA, allMatches[i].SideB
+			// Winner is resolved by id only (operator ruling bc-pnum), so
+			// WinnerID must accompany the name or every DH bout reads as
+			// winnerless (a degenerate all-drawn round) rather than the
+			// genuine win/loss cycle this test means to build.
 			if cycleBeats[sA] == sB {
 				allMatches[i].Winner = sA
+				allMatches[i].WinnerID = allMatches[i].SideAID
 			} else {
 				allMatches[i].Winner = sB
+				allMatches[i].WinnerID = allMatches[i].SideBID
 			}
 		}
 		// Leave regular match Winners unchanged, they were drawn (hikiwake)
@@ -697,10 +796,14 @@ func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T
 		allMatches[i].Status = state.MatchStatusCompleted
 		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
 			sA, sB := allMatches[i].SideA, allMatches[i].SideB
+			// Winner is resolved by id only (operator ruling bc-pnum); see
+			// the matching comment in TestMaybeAutoCompletePools_TeamDHCycleBlocks.
 			if cycleBeats[sA] == sB {
 				allMatches[i].Winner = sA
+				allMatches[i].WinnerID = allMatches[i].SideAID
 			} else {
 				allMatches[i].Winner = sB
+				allMatches[i].WinnerID = allMatches[i].SideBID
 			}
 		}
 	}
@@ -712,9 +815,24 @@ func TestMaybeAutoCompletePools_TeamDHCycleWithOverridesTransitions(t *testing.T
 	require.Equal(t, AutoCompleteNoChange, outcome, "cycle must block before overrides are set")
 
 	// Operator manually ranks all three tied teams, cycle is now resolved.
+	// PoolRanks is keyed by helper.CompetitorKey(id, name, dojo) (id-only
+	// resolution, operator ruling bc-pnum -- there is no bare-name
+	// fallback), so resolve each team's stamped id off the saved roster
+	// before building the override rather than keying by bare name.
+	overridePools, err := store.LoadPools("autocomplete-team-dh-cycle-override")
+	require.NoError(t, err)
+	require.Len(t, overridePools, 1)
+	byName := make(map[string]helper.Player, len(overridePools[0].Players))
+	for _, p := range overridePools[0].Players {
+		byName[p.Name] = p
+	}
+	rankKey := func(name string) string {
+		p := byName[name]
+		return helper.CompetitorKey(p.ID, p.Name, p.Dojo)
+	}
 	require.NoError(t, store.SaveOverrides("autocomplete-team-dh-cycle-override", &state.Overrides{
 		PoolRanks: map[string]map[string]int{
-			"Pool A": {sortedNames[0]: 1, sortedNames[1]: 2, sortedNames[2]: 3},
+			"Pool A": {rankKey(sortedNames[0]): 1, rankKey(sortedNames[1]): 2, rankKey(sortedNames[2]): 3},
 		},
 		Winners: map[string]string{},
 	}))
@@ -744,11 +862,31 @@ func TestDHStandingsApplied(t *testing.T) {
 		}
 		allMatches[i].Status = state.MatchStatusCompleted
 		sA, sB := allMatches[i].SideA, allMatches[i].SideB
+		// Winner is resolved by id only (operator ruling bc-pnum), so
+		// WinnerID must be stamped alongside the name -- otherwise every
+		// DH bout reads as winnerless and the standings below would
+		// coincidentally match the pool's on-disk roster order (Alpha,
+		// Beta, Gamma) without the DH sort ever actually running.
+		//
+		// Checked by NAME on both sides, never by assuming a side: the
+		// pre-DH tied group's order (and so which side of the Beta/Gamma
+		// bout is SideA) is itself sorted by Player.ID when Points tie
+		// (computeStandingsFrom's deterministic tiebreak), and ids are
+		// bctest.StampPlayerID's UUID-v4-shaped hash -- unrelated to name
+		// order -- so Beta is not guaranteed to land in SideA.
 		switch {
-		case sA == "Alpha" || sB == "Alpha":
+		case sA == "Alpha":
 			allMatches[i].Winner = "Alpha"
+			allMatches[i].WinnerID = allMatches[i].SideAID
+		case sB == "Alpha":
+			allMatches[i].Winner = "Alpha"
+			allMatches[i].WinnerID = allMatches[i].SideBID
+		case sA == "Beta":
+			allMatches[i].Winner = "Beta" // Beta beats Gamma
+			allMatches[i].WinnerID = allMatches[i].SideAID
 		default:
-			allMatches[i].Winner = sA // Beta beats Gamma
+			allMatches[i].Winner = "Beta" // Beta beats Gamma
+			allMatches[i].WinnerID = allMatches[i].SideBID
 		}
 	}
 	require.NoError(t, store.SavePoolMatches("dh-standings", allMatches))
@@ -758,9 +896,14 @@ func TestDHStandingsApplied(t *testing.T) {
 	standings, err := eng.CalculatePoolStandings("dh-standings")
 	require.NoError(t, err)
 	poolA := standings["Pool A"]
-	require.NotEmpty(t, poolA)
-	// Alpha should rank first after winning the DH (all three teams were tied).
+	require.Len(t, poolA, 3)
+	// Alpha should rank first after winning the DH (all three teams were
+	// tied); Beta beat Gamma in DH so ranks second. Asserting the full
+	// order (not just Alpha) rules out a false pass from the pool's
+	// already-Alpha-Beta-Gamma on-disk roster order.
 	assert.Equal(t, "Alpha", poolA[0].Player.Name, "Alpha should rank first after winning DH")
+	assert.Equal(t, "Beta", poolA[1].Player.Name, "Beta should rank second after beating Gamma in DH")
+	assert.Equal(t, "Gamma", poolA[2].Player.Name, "Gamma should rank last, losing every DH bout")
 }
 
 // TestInjectPoolDaihyosenMatches_PreservesExistingScheduledAt is the

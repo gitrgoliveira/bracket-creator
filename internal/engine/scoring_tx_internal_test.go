@@ -7,7 +7,6 @@ package engine
 // - lookupMatchSides through a tx handle (bracket path + not-found)
 // - checkConcurrentIneligibility through a tx handle (already-ineligible path)
 // - withPoolMatch through a tx handle (not-found branch)
-// - restoreCompetitorEligibility through a tx handle (empty priorLoser + happy path)
 
 import (
 	"testing"
@@ -274,7 +273,7 @@ func TestCheckConcurrentIneligibilityTx_AlreadyIneligible(t *testing.T) {
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
 		// "Alice" is the loser of a different match "Pool A-1".
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-1", "", "Alice")
 		return nil
 	})
 	require.Error(t, txErr)
@@ -302,7 +301,7 @@ func TestCheckConcurrentIneligibilityTx_SameMatchAllowed(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "Alice")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "", "Alice")
 		return nil
 	})
 	require.NoError(t, txErr, "same-match ineligibility must be allowed (undo path)")
@@ -317,7 +316,7 @@ func TestCheckConcurrentIneligibilityTx_EmptyLoser(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "M1", "", "")
 		return nil
 	})
 	require.NoError(t, txErr)
@@ -340,60 +339,6 @@ func TestWithPoolMatchTx_NotFound(t *testing.T) {
 	})
 	require.Error(t, txErr)
 	assert.ErrorIs(t, txErr, errMatchNotFound)
-}
-
-// TestRestoreCompetitorEligibilityTx_EmptyPriorLoser confirms the
-// empty-priorLoser fast path returns (nil, nil).
-func TestRestoreCompetitorEligibilityTx_EmptyPriorLoser(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "rcetx-empty"
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-
-	var (
-		got   *domain.CompetitorStatus
-		txErr error
-	)
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.restoreCompetitorEligibility(tx, compID, "", "M1")
-		return nil
-	})
-	require.NoError(t, txErr)
-	assert.Nil(t, got)
-}
-
-// TestRestoreCompetitorEligibilityTx_HappyPath confirms the function
-// writes an eligibility-restored status and returns it.
-func TestRestoreCompetitorEligibilityTx_HappyPath(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "rcetx-ok"
-
-	aliceID := helper.NewUUID4()
-	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
-	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
-		{ID: aliceID, Name: "Alice", Dojo: "A"},
-	}))
-	// Initially ineligible.
-	require.NoError(t, store.SetCompetitorStatus(compID, domain.CompetitorStatus{
-		PlayerID: aliceID, Eligible: false, MatchID: "Pool A-0", Reason: "kiken",
-	}))
-
-	var (
-		got   *domain.CompetitorStatus
-		txErr error
-	)
-	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		got, txErr = eng.restoreCompetitorEligibility(tx, compID, "Alice", "Pool A-0")
-		return nil
-	})
-	require.NoError(t, txErr)
-	require.NotNil(t, got)
-	assert.Equal(t, aliceID, got.PlayerID)
-	assert.True(t, got.Eligible)
-
-	// Verify the restored status landed on disk.
-	statuses, err := store.LoadCompetitorStatus(compID)
-	require.NoError(t, err)
-	assert.True(t, statuses[aliceID].Eligible)
 }
 
 // TestRecordMatchResultWithIneligibilityTx_BracketPath confirms the
@@ -676,7 +621,7 @@ func TestCheckConcurrentIneligibilityTx_PlayerNotInPool(t *testing.T) {
 
 	var txErr error
 	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
-		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "Unknown")
+		txErr = eng.checkConcurrentIneligibility(tx, compID, "Pool A-0", "", "Unknown")
 		return nil
 	})
 	require.NoError(t, txErr, "unknown player must not trigger an error (best-effort)")
@@ -696,6 +641,118 @@ func TestStartMatchTx_MatchNotFound(t *testing.T) {
 		return nil
 	})
 	require.Error(t, txErr)
+}
+
+// TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock pins the tx
+// entry point directly (eligibility_test.go's
+// TestStartMatch_RejectsSimultaneousMatch pins the non-tx entry point,
+// checkSimultaneousMatch, via StartMatch): two "Sam"s from different dojos
+// are a legal roster, and one running on another court must not block the
+// other from starting, whatever order the roster happens to list them in.
+// checkSimultaneousMatchTx resolves the CURRENT match's own identity via
+// findPoolMatch (its own stored SideAID/SideBID), never by re-deriving it
+// from the bare name.
+func TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "csmtx-same-name-diff-id"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	samSouthID := helper.NewUUID4()
+	samNorthID := helper.NewUUID4()
+	runningOpponentID := helper.NewUUID4()
+	waitingOpponentID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: samSouthID, Name: "Sam", Dojo: "South"},
+		{ID: samNorthID, Name: "Sam", Dojo: "North"},
+		{ID: runningOpponentID, Name: "RunningOpponent", Dojo: "O1"},
+		{ID: waitingOpponentID, Name: "WaitingOpponent", Dojo: "O2"},
+	}))
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "A-0", SideA: "Sam", SideAID: samSouthID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+			Status: state.MatchStatusRunning, Court: "A"},
+		{ID: "A-1", SideA: "Sam", SideAID: samNorthID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+			Status: state.MatchStatusScheduled, Court: "B"},
+	}))
+
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "A-1")
+		return nil
+	})
+	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere must not block")
+}
+
+// TestCheckSimultaneousMatchTx_Bracket_SameNameDifferentIDDoesNotBlock is the
+// bracket twin of TestCheckSimultaneousMatchTx_SameNameDifferentIDDoesNotBlock
+// above (bc-brid): before BracketMatch carried per-side ids, the
+// bracket-vs-bracket comparison was name-only, so two "Sam"s from different
+// dojos falsely blocked each other from starting concurrent knockout bouts.
+// Both round-0 matches carry their own stamped SideAID, exactly as
+// generation now produces, so matchesBracketSide can tell them apart.
+func TestCheckSimultaneousMatchTx_Bracket_SameNameDifferentIDDoesNotBlock(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "csmtx-bracket-same-name-diff-id"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	samSouthID := helper.NewUUID4()
+	samNorthID := helper.NewUUID4()
+	runningOpponentID := helper.NewUUID4()
+	waitingOpponentID := helper.NewUUID4()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Sam", SideAID: samSouthID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+					Status: state.MatchStatusRunning, Court: "A"},
+				{ID: "m-r1-1", SideA: "Sam", SideAID: samNorthID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+					Status: state.MatchStatusScheduled, Court: "B"},
+			},
+			{{ID: "m-r2-0"}},
+		},
+	}))
+
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "m-r1-1")
+		return nil
+	})
+	assert.NoError(t, txErr, "a same-name, different-id competitor running elsewhere in the bracket must not block")
+}
+
+// TestCheckSimultaneousMatchTx_Bracket_SameIDBlocks pins the positive
+// direction of the same guard: the SAME competitor (by id), not merely the
+// same display name, already running in another bracket match on a
+// different court, must still block -- confirming the id-preferring
+// comparison in matchesBracketSide has not traded away genuine simultaneity
+// detection while fixing the same-name false positive above.
+func TestCheckSimultaneousMatchTx_Bracket_SameIDBlocks(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "csmtx-bracket-same-id-blocks"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+
+	samID := helper.NewUUID4()
+	runningOpponentID := helper.NewUUID4()
+	waitingOpponentID := helper.NewUUID4()
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Sam", SideAID: samID, SideB: "RunningOpponent", SideBID: runningOpponentID,
+					Status: state.MatchStatusRunning, Court: "A"},
+				{ID: "m-r1-1", SideA: "Sam", SideAID: samID, SideB: "WaitingOpponent", SideBID: waitingOpponentID,
+					Status: state.MatchStatusScheduled, Court: "B"},
+			},
+			{{ID: "m-r2-0"}},
+		},
+	}))
+
+	var txErr error
+	_ = store.WithTransaction(compID, func(tx state.StoreTx) error {
+		txErr = eng.checkSimultaneousMatchTx(tx, compID, "m-r1-1")
+		return nil
+	})
+	require.Error(t, txErr)
+	var ineligErr *IneligibleCompetitorError
+	require.ErrorAs(t, txErr, &ineligErr)
+	assert.Equal(t, samID, ineligErr.PlayerID)
 }
 
 // TestRecordDecisionTx_ValidationError confirms RecordDecisionTx returns

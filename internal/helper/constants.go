@@ -78,10 +78,17 @@ const MaxCourts = 16
 // it builds the qualifier skeleton (buildQualifierSkeleton,
 // draw_qualifier_paths.go), and that allocation should be bounded by a stated
 // limit rather than by whatever number reached poolTargetSizes
-// (go/uncontrolled-allocation-size). Enforced at poolTargetSizes, the
-// arithmetic every pool path goes through, which can answer the operator with
-// an error; asserted again at the allocation itself, three call frames away,
-// where the bound has to be visible to be a bound.
+// (go/uncontrolled-allocation-size). Enforced at the TWO places a pool size
+// enters the draw, not one: poolTargetSizes for the ordinary paths, and
+// BuildPoolPhaseFillBracketTreeAware's own guard for the fill-bracket path,
+// which sizes its pools straight from minSize and never reaches that
+// arithmetic. Both answer the operator with the same named limit. Asserted
+// again at the allocation itself, three call frames away, where the bound has
+// to be visible to be a bound.
+//
+// This comment used to claim poolTargetSizes was "the arithmetic every pool
+// path goes through". It is not, and saying so invited the next writer to add
+// a third entry point and assume it was covered.
 const MaxPoolSize = 1000
 
 // courtLabelAlphabet names the shiaijo, in order: one letter per supported

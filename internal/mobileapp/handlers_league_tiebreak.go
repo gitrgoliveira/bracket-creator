@@ -18,9 +18,9 @@
 package mobileapp
 
 import (
-	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gitrgoliveira/bracket-creator/internal/engine"
@@ -32,7 +32,7 @@ import (
 // four endpoints actually call.
 type LeagueTiebreakEngine interface {
 	LeagueTiebreakCandidates(compID string) ([]engine.TiedGroup, error)
-	GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error)
+	GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error)
 	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 
@@ -49,11 +49,45 @@ type LeagueTiebreakStore interface {
 	WithTransaction(compID string, fn func(tx state.StoreTx) error) error
 }
 
+// competitorRef is the {id,name,dojo} identity shape for one competitor
+// (individual or team), shared by GET /league-tiebreak/candidates' "teams"
+// array below and GET /chusen-candidates' own "teams" array
+// (handlers_competition.go), for the same reason in both: two competitors
+// may share a display name across dojos (a namesake collision -- for teams,
+// reachable through the documented checkNewTeamNameCollisions restore hole),
+// and the name alone cannot disambiguate them for a subsequent write that
+// selects one (POST .../league-tiebreak's teamIds, PUT .../override-rank's
+// playerId).
+type competitorRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Dojo string `json:"dojo"`
+}
+
+// competitorRefsFrom projects a standings slice onto its competitorRef wire
+// shape, one entry per standing, order preserved. The ONE place both
+// candidate-group endpoints build their "teams" array from (PR #416
+// finding 6), so the shape cannot drift between them.
+func competitorRefsFrom(ts []state.PlayerStanding) []competitorRef {
+	refs := make([]competitorRef, len(ts))
+	for i, t := range ts {
+		refs[i] = competitorRef{ID: t.Player.ID, Name: t.Player.Name, Dojo: t.Player.Dojo}
+	}
+	return refs
+}
+
 // leagueTiebreakCandidateGroup is the JSON shape for one tied group returned
 // by GET /league-tiebreak/candidates.
 type leagueTiebreakCandidateGroup struct {
-	// TeamNames holds the names of the tied teams in standings order.
+	// TeamNames holds the names of the tied teams in standings order. Kept
+	// for backward compatibility; Teams (below) carries the same teams with
+	// identity, and is what a client selecting a namesake-holding group
+	// should use.
 	TeamNames []string `json:"teamNames"`
+	// Teams holds the same tied teams as TeamNames, with id/dojo alongside
+	// each name (bc-idfx) so the operator's selection can name a team
+	// unambiguously via POST .../league-tiebreak's teamIds.
+	Teams []competitorRef `json:"teams"`
 	// MinPosition is the 1-based best rank among the tied teams.
 	MinPosition int `json:"minPosition"`
 	// MaxPosition is the 1-based worst rank among the tied teams.
@@ -61,24 +95,107 @@ type leagueTiebreakCandidateGroup struct {
 }
 
 // leagueTiebreakRequest is the JSON body for POST /league-tiebreak.
-// The operator selects exactly one tied group (by team names) to tie-break.
+// The operator selects exactly one tied group to tie-break by participant
+// id (TeamIDs, REQUIRED, operator ruling bc-pnum): a namesake collision is
+// reachable through the documented checkNewTeamNameCollisions restore hole
+// (an unreadable config.md disables the uniqueness check for that write,
+// logged and allowed through), so name-based selection cannot always
+// disambiguate, and a record resolved by id has no name fallback.
 type leagueTiebreakRequest struct {
-	// TeamNames is the set of team names for which to generate tie-breaker
-	// matches. Must match exactly one consequential candidate group from
+	// TeamNames stays bound for older clients that still send it; unused --
+	// it never selects a group or a competitor, and is not passed to the
+	// engine.
+	TeamNames []string `json:"teamNames,omitempty"`
+	// TeamIDs is the set of team participant ids for which to generate
+	// tie-breaker matches. Required (operator ruling bc-pnum); must match
+	// exactly one consequential candidate group from
 	// LeagueTiebreakCandidates (order does not matter).
-	TeamNames []string `json:"teamNames"`
+	TeamIDs []string `json:"teamIds"`
 }
 
-// dedupedNameSet builds a presence set from names and reports whether the input
-// contained any duplicate. Handlers reject duplicates up front so downstream
-// group-size and pair-count comparisons (which use the deduped set) can't be
-// fooled by a repeated team name.
-func dedupedNameSet(names []string) (set map[string]bool, hadDuplicate bool) {
-	set = make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
+// dedupedStringSet builds a presence set from a string slice and reports
+// whether the input contained any duplicate. Generic over what the strings
+// ARE: callers below feed it both team names (dedup by display name) and
+// team ids (dedup by participant id) -- a single name-suffixed helper for
+// both would misdescribe the id call sites. Handlers reject duplicates up
+// front so downstream group-size and pair-count comparisons (which use the
+// deduped set) can't be fooled by a repeated entry.
+func dedupedStringSet(values []string) (set map[string]bool, hadDuplicate bool) {
+	set = make(map[string]bool, len(values))
+	for _, v := range values {
+		set[v] = true
 	}
-	return set, len(set) != len(names)
+	return set, len(set) != len(values)
+}
+
+// hasBlankEntry reports whether values contains an empty or whitespace-only
+// string. teamIds specifically: dedupedStringSet has no opinion on WHAT the
+// strings are, so a single "" entry dedupes cleanly and passes straight
+// through to the group-membership check as if "" were a real participant
+// id -- and every id-less DH row (SideAID/SideBID both "") then matches
+// BOTH sides of that check, group membership for a row that names no team
+// at all. Reachable concretely on DELETE: a caller sends a single blank
+// teamIds entry and every id-less DH row across every group reads as
+// "in the selected group", so a request meant to select nothing deletes an
+// unrelated group's bout instead (200 {"deleted":2} for zero real ids
+// supplied). Checked wherever teamIds is used at all, POST and DELETE
+// alike, before it reaches dedupedStringSet.
+func hasBlankEntry(values []string) bool {
+	for _, v := range values {
+		if strings.TrimSpace(v) == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// tiebreakSelectionField names the request field a selection/duplicate
+// error refers to: teamIds is the only field able to select a group or
+// disambiguate a namesake pair (operator ruling bc-pnum).
+const tiebreakSelectionField = "teamIds"
+
+// parseTiebreakSelection binds and validates the {teamIds} selection body
+// shared by POST and DELETE.../league-tiebreak: the blank/duplicate teamIds
+// checks used to be three near-identical blocks, one hand-copied into each
+// handler, that had already drifted on wording between the two. This is the
+// ONE parse+validate both now share.
+//
+// teamIds is REQUIRED (operator ruling bc-pnum); see leagueTiebreakRequest's
+// own doc comment for why there is no teamNames fallback.
+//
+// On success returns the bound request and the deduped team-ID set. On any
+// validation failure the JSON error response has already been written and
+// ok is false; the caller must return immediately.
+func parseTiebreakSelection(c *gin.Context) (req leagueTiebreakRequest, ids map[string]bool, ok bool) {
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return leagueTiebreakRequest{}, nil, false
+	}
+	if len(req.TeamIDs) < 2 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds must contain at least two teams"})
+		return leagueTiebreakRequest{}, nil, false
+	}
+	if hasBlankEntry(req.TeamIDs) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds entries must be non-empty"})
+		return leagueTiebreakRequest{}, nil, false
+	}
+	var hadDup bool
+	ids, hadDup = dedupedStringSet(req.TeamIDs)
+	if hadDup {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "teamIds contains duplicate entries"})
+		return leagueTiebreakRequest{}, nil, false
+	}
+	return req, ids, true
+}
+
+// inGroup is the per-DH-row membership test shared by POST's pairsExist
+// count and DELETE's group-collection loop. ID-only (operator ruling
+// bc-pnum): a DH row with no id on a side (e.g. one written before
+// generatePoolDaihyosenMatches began stamping SideAID/SideBID) simply is
+// not a member of the selected group on that side -- there is no name-based
+// fallback to fall through to.
+func inGroup(ids map[string]bool, m state.MatchResult) (inA, inB bool) {
+	return ids[m.SideAID], ids[m.SideBID]
 }
 
 // RegisterPublicLeagueTiebreakHandlers wires the unauthenticated league-tiebreak
@@ -121,14 +238,15 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			// LeagueTiebreakCandidates calls CalculatePoolStandings, which reads
+			// overrides.json (computeStandingsFrom). A corrupt file is an
+			// operator-recoverable state (repair via DELETE .../overrides), not
+			// an opaque server fault, so it gets the same terminal 422 every
+			// other LoadOverrides-reaching endpoint answers with.
+			if respondIfCorruptOverrides(c, err) {
 				return
 			}
-			// Public endpoint: opaque 500, log the real cause server-side.
-			log.Printf("league-tiebreak candidates LeagueTiebreakCandidates(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 
@@ -140,6 +258,7 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 			}
 			out = append(out, leagueTiebreakCandidateGroup{
 				TeamNames:   names,
+				Teams:       competitorRefsFrom(g.Teams),
 				MinPosition: g.MinPosition,
 				MaxPosition: g.MaxPosition,
 			})
@@ -159,7 +278,10 @@ func RegisterPublicLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreak
 // satisfy the local interfaces by structural match.
 func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine, store LeagueTiebreakStore, hub Broadcaster) {
 	// POST /competitions/:id/league-tiebreak
-	// Body: { "teamNames": ["TeamA", "TeamB", ...] }
+	// Body: { "teamNames": ["TeamA", "TeamB", ...], "teamIds": ["id-a", "id-b", ...] }
+	// teamIds is REQUIRED (operator ruling bc-pnum): the tied group is
+	// selected by id only, so the request 400s when teamIds is missing, has
+	// fewer than two entries, carries a blank entry, or has a duplicate.
 	// Generates round-robin tie-breaker matches for the selected tied group.
 	// Validates that the selection matches exactly one candidate group.
 	// 400 if the selection does not match any candidate group.
@@ -171,13 +293,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
-		var req leagueTiebreakRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if len(req.TeamNames) < 2 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames must contain at least two teams"})
+		req, reqIDSet, ok := parseTiebreakSelection(c)
+		if !ok {
 			return
 		}
 
@@ -205,34 +322,29 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 		// constraint itself, the handler is the gate.
 		candidates, err := eng.LeagueTiebreakCandidates(id)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			// See the GET candidates handler's identical guard above: a corrupt
+			// overrides.json is operator-recoverable state, not a server fault.
+			if respondIfCorruptOverrides(c, err) {
 				return
 			}
-			log.Printf("league-tiebreak POST LeagueTiebreakCandidates(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 
-		reqSet, hadDup := dedupedNameSet(req.TeamNames)
-		if hadDup {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames contains duplicate entries"})
-			return
-		}
-
+		// The candidate-group match is by id only (operator ruling bc-pnum;
+		// see leagueTiebreakRequest's doc comment).
 		matched := false
 		for _, g := range candidates {
-			if len(g.Teams) != len(reqSet) {
+			if len(g.Teams) != len(reqIDSet) {
 				continue
 			}
 			groupSet := make(map[string]bool, len(g.Teams))
 			for _, t := range g.Teams {
-				groupSet[t.Player.Name] = true
+				groupSet[t.Player.ID] = true
 			}
 			allMatch := true
-			for n := range reqSet {
-				if !groupSet[n] {
+			for id := range reqIDSet {
+				if !groupSet[id] {
 					allMatch = false
 					break
 				}
@@ -243,7 +355,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			}
 		}
 		if !matched {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames does not match any consequential tied group; check GET /league-tiebreak/candidates"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": tiebreakSelectionField + " does not match any consequential tied group; check GET /league-tiebreak/candidates"})
 			return
 		}
 
@@ -255,14 +367,16 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 			return
 		}
-		pairsNeeded := len(reqSet) * (len(reqSet) - 1) / 2
+		groupSize := len(reqIDSet)
+		pairsNeeded := groupSize * (groupSize - 1) / 2
 		pairsExist := 0
+		// inGroup decides membership per DH ROW by id only (operator ruling
+		// bc-pnum): a row with no side id contributes to neither side.
 		for _, m := range existing {
 			if !engine.IsPoolDaihyosenMatchID(m.ID) {
 				continue
 			}
-			// Check if this DH match is between two teams from the requested group.
-			if reqSet[m.SideA] && reqSet[m.SideB] {
+			if inA, inB := inGroup(reqIDSet, m); inA && inB {
 				pairsExist++
 			}
 		}
@@ -271,20 +385,9 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
-		injected, err := eng.GenerateLeagueTiebreakMatches(id, req.TeamNames)
+		injected, err := eng.GenerateLeagueTiebreakMatches(id, req.TeamIDs)
 		if err != nil {
-			var notFound *engine.NotFoundError
-			var validation *engine.ValidationError
-			if errors.As(err, &notFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-				return
-			}
-			if errors.As(err, &validation) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			log.Printf("league-tiebreak POST GenerateLeagueTiebreakMatches(%s): %v", id, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+			respondEngineError(c, err)
 			return
 		}
 
@@ -295,9 +398,10 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 	})
 
 	// DELETE /competitions/:id/league-tiebreak
-	// Body: { "teamNames": ["TeamA", "TeamB", ...] }
+	// Body: { "teamNames": ["TeamA", "TeamB", ...], "teamIds": ["id-a", "id-b", ...] }
+	// teamIds is REQUIRED, same contract as the POST endpoint above.
 	// Removes UNSCORED tie-breaker DH matches for the given group.
-	// 400 if teamNames has duplicates or names only part of a tie-breaker group.
+	// 400 if teamIds is missing/invalid, or teamNames has duplicates or names only part of a tie-breaker group.
 	// 409 if any match for the group is in progress or has already been scored.
 	// 404 if no tie-breaker matches exist for the group.
 	r.DELETE("/competitions/:id/league-tiebreak", func(c *gin.Context) {
@@ -306,19 +410,8 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			return
 		}
 
-		var req leagueTiebreakRequest
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if len(req.TeamNames) < 2 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames must contain at least two teams"})
-			return
-		}
-
-		reqSet, hadDup := dedupedNameSet(req.TeamNames)
-		if hadDup {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames contains duplicate entries"})
+		_, dedupedIDSet, ok := parseTiebreakSelection(c)
+		if !ok {
 			return
 		}
 
@@ -357,14 +450,16 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 
 			// Identify DH matches belonging to the requested group, and reject a
 			// selection that splits a tie-breaker group: a DH match with exactly
-			// one side in reqSet means the operator named a partial group, which
-			// would orphan the remaining round-robin bouts.
+			// one side in the request set means the operator named a partial
+			// group, which would orphan the remaining round-robin bouts.
+			// inGroup decides membership per DH ROW by id only, the SAME
+			// function POST's pairsExist loop uses.
 			var groupDH []state.MatchResult
 			for _, m := range allMatches {
 				if !engine.IsPoolDaihyosenMatchID(m.ID) {
 					continue
 				}
-				inA, inB := reqSet[m.SideA], reqSet[m.SideB]
+				inA, inB := inGroup(dedupedIDSet, m)
 				if inA != inB {
 					partialGroup = true
 					return nil
@@ -417,7 +512,7 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			c.JSON(http.StatusBadRequest, gin.H{"error": "league tie-breaker endpoints apply only to team-league competitions"})
 			return
 		case partialGroup:
-			c.JSON(http.StatusBadRequest, gin.H{"error": "teamNames does not cover a complete tie-breaker group"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": tiebreakSelectionField + " does not cover a complete tie-breaker group"})
 			return
 		case noneFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "no_tiebreak_matches", "detail": "no tie-breaker matches found for this group"})

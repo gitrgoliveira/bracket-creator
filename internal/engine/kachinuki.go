@@ -39,6 +39,20 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
+// kachinukiFighter names one un-retired fighter in an advancement queue: a
+// display NAME (always present, exactly as before bc-tmid) plus the squad
+// MEMBER id (empty for the bout-log-only heuristic, which has no lineup to
+// draw an id from at all, or for a slot a legacy-repair has not yet
+// reached). AdvanceKachinuki stamps whichever of these travels onto the
+// next appended bout (appendNextKachinukiBout's Next), so a fighter's
+// IDENTITY, not just their current name, rides forward onto the row that
+// will eventually retire them -- see RetiredPlayersFromBoutLog /
+// IsMemberRetired, the readers this exists to feed.
+type kachinukiFighter struct {
+	Name     string
+	MemberID string
+}
+
 // AdvanceKachinukiInput is the minimal snapshot AdvanceKachinuki needs.
 // The engine deliberately does NOT load the full match, callers pass
 // the completed bout plus the un-retired roster per team so this
@@ -54,8 +68,8 @@ import (
 //     carried on the parent MatchResult, not here.
 type AdvanceKachinukiInput struct {
 	LastBout state.SubMatchResult
-	SideA    []string
-	SideB    []string
+	SideA    []kachinukiFighter
+	SideB    []kachinukiFighter
 }
 
 // AdvanceKachinukiResult is the engine's verdict. Under the operator-led
@@ -141,9 +155,9 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 	case hikiwake:
 		return advanceAfterHikiwake(in)
 	case last.Winner == last.SideA && last.SideA != "":
-		return advanceWinnerStays(last.SideA, last.Position, in.SideB, "A")
+		return advanceWinnerStays(kachinukiFighter{Name: last.SideA, MemberID: last.SideAMemberID}, last.Position, in.SideB, "A")
 	case last.Winner == last.SideB && last.SideB != "":
-		return advanceWinnerStays(last.SideB, last.Position, in.SideA, "B")
+		return advanceWinnerStays(kachinukiFighter{Name: last.SideB, MemberID: last.SideBMemberID}, last.Position, in.SideA, "B")
 	default:
 		// Unexpected: Winner is set but doesn't match either bout
 		// side. Treat as a no-op (no advancement) so callers fall
@@ -158,8 +172,10 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 // advanceWinnerStays builds the next-bout descriptor when one side's
 // player stays on. The opposing side's queue (`oppQueue`) must contain
 // the next un-retired opponent at index 0. The `winnerSide` param is
-// just for the exhaustion-end path's WinningSide field.
-func advanceWinnerStays(stayingName string, lastPos int, oppQueue []string, winnerSide string) AdvanceKachinukiResult {
+// just for the exhaustion-end path's WinningSide field. `staying` carries
+// the member id alongside the name (bc-tmid pass 2) so the appended row
+// keeps the fighter's IDENTITY, not just the name they currently answer to.
+func advanceWinnerStays(staying kachinukiFighter, lastPos int, oppQueue []kachinukiFighter, winnerSide string) AdvanceKachinukiResult {
 	if len(oppQueue) == 0 {
 		// Opposing team is exhausted, current side wins.
 		return AdvanceKachinukiResult{
@@ -172,17 +188,19 @@ func advanceWinnerStays(stayingName string, lastPos int, oppQueue []string, winn
 	// Preserve the canonical SideA/SideB role from the previous bout:
 	// when SideA's player stays, they remain SideA in the new bout;
 	// when SideB's player stays, they remain SideB.
-	var sideA, sideB string
+	var sideA, sideB kachinukiFighter
 	if winnerSide == "A" {
-		sideA, sideB = stayingName, nextOpp
+		sideA, sideB = staying, nextOpp
 	} else {
-		sideA, sideB = nextOpp, stayingName
+		sideA, sideB = nextOpp, staying
 	}
 	return AdvanceKachinukiResult{
 		Next: &state.SubMatchResult{
-			Position: lastPos + 1,
-			SideA:    sideA,
-			SideB:    sideB,
+			Position:      lastPos + 1,
+			SideA:         sideA.Name,
+			SideAMemberID: sideA.MemberID,
+			SideB:         sideB.Name,
+			SideBMemberID: sideB.MemberID,
 		},
 	}
 }
@@ -220,48 +238,160 @@ func advanceAfterHikiwake(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 		// pairing is fought as-is. An abandoned trailing unscored slot is
 		// stripped on the completed write.
 		log.Printf("engine.AdvanceKachinuki: hikiwake left side A without a replacement at position %d (advisory); pairing %s against %s",
-			in.LastBout.Position, in.LastBout.SideA, in.SideB[0])
+			in.LastBout.Position, in.LastBout.SideA, in.SideB[0].Name)
 		return AdvanceKachinukiResult{
 			Next: &state.SubMatchResult{
-				Position: in.LastBout.Position + 1,
-				SideA:    in.LastBout.SideA,
-				SideB:    in.SideB[0],
+				Position:      in.LastBout.Position + 1,
+				SideA:         in.LastBout.SideA,
+				SideAMemberID: in.LastBout.SideAMemberID,
+				SideB:         in.SideB[0].Name,
+				SideBMemberID: in.SideB[0].MemberID,
 			},
 		}
 	case len(in.SideB) == 0:
 		log.Printf("engine.AdvanceKachinuki: hikiwake left side B without a replacement at position %d (advisory); pairing %s against %s",
-			in.LastBout.Position, in.SideA[0], in.LastBout.SideB)
+			in.LastBout.Position, in.SideA[0].Name, in.LastBout.SideB)
 		return AdvanceKachinukiResult{
 			Next: &state.SubMatchResult{
-				Position: in.LastBout.Position + 1,
-				SideA:    in.SideA[0],
-				SideB:    in.LastBout.SideB,
+				Position:      in.LastBout.Position + 1,
+				SideA:         in.SideA[0].Name,
+				SideAMemberID: in.SideA[0].MemberID,
+				SideB:         in.LastBout.SideB,
+				SideBMemberID: in.LastBout.SideBMemberID,
 			},
 		}
 	}
 	return AdvanceKachinukiResult{
 		Next: &state.SubMatchResult{
-			Position: in.LastBout.Position + 1,
-			SideA:    in.SideA[0],
-			SideB:    in.SideB[0],
+			Position:      in.LastBout.Position + 1,
+			SideA:         in.SideA[0].Name,
+			SideAMemberID: in.SideA[0].MemberID,
+			SideB:         in.SideB[0].Name,
+			SideBMemberID: in.SideB[0].MemberID,
 		},
 	}
 }
 
-// RetiredPlayersFromBoutLog walks a bout log and returns, per side,
-// the set of player names that have retired (lost or hikiwake'd out)
-// up to and including the supplied log. The returned maps key off
-// player name; presence == retired.
+// RetiredMemberSet records everyone who has retired on ONE side of a
+// kachinuki encounter, keyed BOTH ways at once (bc-tmid pass 2): by squad
+// member id, when the retiring bout row carries one, and by display name,
+// always, when the row names one. Both are populated from the SAME
+// retirement event, never independently, so they can never disagree about
+// WHO retired -- only about which key a later lookup can use to find them.
+// IsMemberRetired is the one place that decides which key wins.
+type RetiredMemberSet struct {
+	IDs   map[string]struct{}
+	Names map[string]struct{}
+}
+
+func newRetiredMemberSet() RetiredMemberSet {
+	return RetiredMemberSet{IDs: map[string]struct{}{}, Names: map[string]struct{}{}}
+}
+
+// retire records one retirement: name (when non-empty) into Names,
+// memberID (when non-empty) into IDs. A row missing its member id (an
+// unrepaired legacy row, or one the bout-log-only heuristic synthesised)
+// simply contributes nothing to IDs -- IsMemberRetired's name fallback is
+// what still finds it.
+func (r RetiredMemberSet) retire(name, memberID string) {
+	if name != "" {
+		r.Names[name] = struct{}{}
+	}
+	if memberID != "" {
+		r.IDs[memberID] = struct{}{}
+	}
+}
+
+// ambiguousFighterNames returns the names carried by MORE THAN ONE entry of
+// roster. A retirement recorded under such a name cannot say WHICH of them
+// retired, so IsMemberRetired refuses to act on it. Members of one team may
+// legally share a display name -- the uniqueness rule is grandfathered, so
+// rosters written before it exist and still load.
 //
-// Helper for callers building AdvanceKachinukiInput.{SideA,SideB} from
-// a roster, they subtract retired names from the initial roster to
-// derive the remaining un-retired queue.
+// Deliberately not helper.DuplicateNamesWithKeys, which answers a nearby
+// question differently: it folds names through NormalizeParticipantName and
+// reports the FIRST-SEEN label of each duplicate group. Both differences
+// break this use. The set it gates (RetiredMemberSet.Names) holds the raw
+// names bout rows store, and the lookup compares a fighter's own raw name
+// against it, so a normalised set would be keyed differently from the thing
+// it guards; and a first-seen label misses the other spellings, which is the
+// silent-miss direction. Reusing it would mean normalising the retirement
+// comparison too, a change to what that set means rather than a tidy-up.
+func ambiguousFighterNames(roster []kachinukiFighter) map[string]struct{} {
+	count := make(map[string]int, len(roster))
+	for _, f := range roster {
+		if f.Name != "" {
+			count[f.Name]++
+		}
+	}
+	out := make(map[string]struct{})
+	for name, n := range count {
+		if n > 1 {
+			out[name] = struct{}{}
+		}
+	}
+	return out
+}
+
+// IsMemberRetired reports whether fighter f -- named, and possibly
+// id-stamped, exactly like a bout-log side or a lineup slot -- has retired
+// per `retired`. ambiguousNames is the set of names more than one member of
+// f's OWN roster carries (ambiguousFighterNames); pass nil when there is no
+// roster to compute it from.
+//
+// The member id wins whenever f carries one (operator ruling bc-pnum, "a
+// record that carries an id field is resolved by id only"): a renamed
+// member's slot keeps ITS id, so a retirement recorded under the member's
+// OLD name is still found -- this is the mechanism that closes the rename
+// defect this pass exists for.
+//
+// An id MISS then falls through to the name, and that tier is not a
+// weakening of the id rule but the only way to read a row that has no id to
+// be resolved by. The two keys live on opposite ends of one comparison:
+// f's id comes from a LINEUP SLOT, which the load-time repair fills, while
+// the retirement was recorded by a BOUT ROW, which the same repair can only
+// fill when that row's name resolves to exactly one squad member. A row it
+// could not resolve -- or one written after it ran, by a client too old to
+// send ids -- contributes a name and nothing else, so an id-only check
+// finds nothing and puts a fighter who has already lost back in the queue,
+// ahead of the reserve who has not. That is the defect this tier exists for,
+// and it is the same defect the id rule was introduced to fix, arriving
+// through the other door.
+//
+// The gate is what keeps it honest: the fallback applies only when f's name
+// belongs to f alone on this roster, because a shared name cannot say which
+// teammate the row meant. One case stays wrong and cannot be fixed from
+// stored data: a member renamed AFTER losing, whose old name a teammate now
+// carries, retires that teammate instead. Nothing links the old name to the
+// id, so every rule guesses there; this one guesses in the direction that
+// keeps a beaten fighter out of the queue.
+func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet, ambiguousNames map[string]struct{}) bool {
+	if f.MemberID != "" {
+		if _, ok := retired.IDs[f.MemberID]; ok {
+			return true
+		}
+		if _, ambiguous := ambiguousNames[f.Name]; ambiguous {
+			return false
+		}
+	}
+	_, ok := retired.Names[f.Name]
+	return ok
+}
+
+// RetiredPlayersFromBoutLog walks a bout log and returns, per side, the set
+// of fighters that have retired (lost or hikiwake'd out) up to and
+// including the supplied log.
+//
+// Helper for callers building AdvanceKachinukiInput.{SideA,SideB} from a
+// roster; they filter the initial roster by IsMemberRetired against the
+// returned sets to derive the remaining un-retired queue (filterRemainingFighters
+// for a lineup-resolved roster, retired.Names directly for the bout-log-only
+// heuristic, which has no member ids to offer either side of the check).
 //
 // teamAName / teamBName are the parent MatchResult.SideA / SideB
 // (the team names), used to disambiguate which side won each bout.
-func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBName string) (retiredA, retiredB map[string]struct{}) {
-	retiredA = map[string]struct{}{}
-	retiredB = map[string]struct{}{}
+func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBName string) (retiredA, retiredB RetiredMemberSet) {
+	retiredA, retiredB = newRetiredMemberSet(), newRetiredMemberSet()
 	for _, b := range boutLog {
 		if b.Position == state.DaihyosenSubPosition {
 			// The daihyosen (rep bout) is not a kachinuki bout: its side
@@ -271,37 +401,72 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 		}
 		hikiwake := state.IsDraw(b.Decision)
 		if hikiwake {
-			if b.SideA != "" {
-				retiredA[b.SideA] = struct{}{}
-			}
-			if b.SideB != "" {
-				retiredB[b.SideB] = struct{}{}
-			}
+			retiredA.retire(b.SideA, b.SideAMemberID)
+			retiredB.retire(b.SideB, b.SideBMemberID)
 			continue
 		}
-		// Map per-bout winner to the team side. A team-name match on
-		// the parent (b.Winner == teamAName) is the legacy synth path
-		// from quick-score; the per-player path keys on the bout's
-		// SideA/SideB names.
+		// Map per-bout winner to the team side. MEMBER IDS FIRST (operator
+		// ruling bc-pnum): who won decides who stays on, so the same
+		// same-name hazard that used to hand an individual victory to the
+		// wrong team also used to retire the wrong fighter here, which is
+		// worse -- it changes who fights next. The ids settle it whenever
+		// the row carries them, which every bout scored since the editor
+		// began stamping the winner's member id does.
+		//
+		// The name switch below still answers for a row they cannot settle,
+		// aka-first on a same-name pair exactly as before. That residue is
+		// deliberately NOT converted into "nobody retires": a kachinuki
+		// queue whose head never clears would re-offer the same pairing,
+		// turning a wrong-but-recoverable answer into a stuck encounter. A
+		// team-name match on the parent (b.Winner == teamAName) is the
+		// legacy synth path from quick-score; the per-player path keys on
+		// the bout's own side names.
+		switch domain.AttributeWinnerSide(domain.SubBoutAttribution(b.Attribution())) {
+		case domain.MatchSideA:
+			retiredB.retire(b.SideB, b.SideBMemberID)
+			continue
+		case domain.MatchSideB:
+			retiredA.retire(b.SideA, b.SideAMemberID)
+			continue
+		}
 		switch b.Winner {
 		case b.SideA, teamAName:
 			// SideA player stays; SideB player retires.
-			if b.SideB != "" {
-				retiredB[b.SideB] = struct{}{}
-			}
+			retiredB.retire(b.SideB, b.SideBMemberID)
 		case b.SideB, teamBName:
-			if b.SideA != "" {
-				retiredA[b.SideA] = struct{}{}
-			}
+			retiredA.retire(b.SideA, b.SideAMemberID)
 		}
 	}
 	return retiredA, retiredB
 }
 
+// filterRemainingFighters is FilterRemaining's member-aware twin: it
+// filters a slice of kachinukiFighter (name + possible member id) via
+// IsMemberRetired, preserving order. Used by the lineup-resolved branch of
+// kachinukiRemainingRoster; the bout-log-only heuristic branch has no
+// lineup to draw ids from and keeps using plain FilterRemaining over
+// retired.Names.
+func filterRemainingFighters(roster []kachinukiFighter, retired RetiredMemberSet) []kachinukiFighter {
+	// The roster IS the context IsMemberRetired's name tier needs: whether a
+	// name belongs to one member of this team or to several is a fact about
+	// this slice, computed once here rather than re-derived per fighter.
+	ambiguous := ambiguousFighterNames(roster)
+	out := make([]kachinukiFighter, 0, len(roster))
+	for _, f := range roster {
+		if IsMemberRetired(f, retired, ambiguous) {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // FilterRemaining returns roster entries that are NOT present in the
 // retired set, preserving original order. Helper for callers building
 // AdvanceKachinukiInput.{SideA,SideB} from a roster and a retired set
-// produced by RetiredPlayersFromBoutLog.
+// produced by RetiredPlayersFromBoutLog -- pass retired.Names, since this
+// is the plain NAME-only filter the bout-log-only heuristic (no lineup, no
+// member ids) has always used.
 func FilterRemaining(roster []string, retired map[string]struct{}) []string {
 	out := make([]string, 0, len(roster))
 	for _, name := range roster {
@@ -334,6 +499,7 @@ func appendNextKachinukiBout(bm *state.BracketMatch, next state.SubMatchResult) 
 	bm.SubResults = append(bm.SubResults, next)
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
+	bm.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 	bm.Decision = ""
 }
 
@@ -488,6 +654,7 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		parent.SubResults = append(parent.SubResults, *out.Next)
 		parent.Status = state.MatchStatusRunning
 		parent.Winner = ""
+		parent.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 		parent.Decision = ""
 		postLog = append([]state.SubMatchResult(nil), parent.SubResults...)
 		return nil
@@ -1151,11 +1318,13 @@ func (e *Engine) checkPoolReopenDownstreamTx(tx state.StoreTx, compID string, co
 
 // reopenPoolMatch is reopenBracketMatch's twin for a pool/league match. Same
 // rule, same field set: MatchResult and BracketMatch both carry the
-// scoreline as IpponsA/IpponsB (+ HansokuA/B), the shape they share. This
-// twin adds WinnerID and the rep-bout nominations. The hantei verdict needs
-// no clear of its own: it is the domain.HanteiMark entry inside the
-// scoreline being cleared. See reopenBracketMatch for why each of these is
-// verdict rather than bout record.
+// scoreline as IpponsA/IpponsB (+ HansokuA/B) and, since bc-brid, the winner
+// id as WinnerID. This twin adds the rep-bout nominations, which have no
+// BracketMatch counterpart (a bracket daihyosen is a numbered sub-bout, not
+// a team rep-player nomination). The hantei verdict needs no clear of its
+// own: it is the domain.HanteiMark entry inside the scoreline being cleared.
+// See reopenBracketMatch for why each of these is verdict rather than bout
+// record.
 //
 // RepPlayerA/B name who fought a pool daihyosen. That bout's own record lives
 // in SubResults like any other; these two fields are the discarded verdict's
@@ -1218,6 +1387,7 @@ func reopenPoolMatch(m *state.MatchResult, reason string) {
 func reopenBracketMatch(bm *state.BracketMatch, reason string) {
 	bm.Status = state.MatchStatusRunning
 	bm.Winner = ""
+	bm.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
 	bm.IpponsA = nil
 	bm.IpponsB = nil
 	bm.HansokuA = 0
@@ -1294,11 +1464,17 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
 	if bronze != nil {
 		// Mirror propagateBracketWinner's positional assignment: semifinal
-		// mIdx 0 feeds the bronze SideA, mIdx 1 feeds SideB.
+		// mIdx 0 feeds the bronze SideA, mIdx 1 feeds SideB. The id clears
+		// alongside the name (bc-brid): propagateBracketWinner set both
+		// together, so undoing it must clear both together too, or the
+		// bronze slot would keep a stale id pointing at a name it no longer
+		// carries.
 		if mIdx%2 == 0 {
 			bronze.SideA = ""
+			bronze.SideAID = ""
 		} else {
 			bronze.SideB = ""
+			bronze.SideBID = ""
 		}
 	}
 	if next != nil {
@@ -1306,10 +1482,15 @@ func retractPropagatedWinner(bracket *state.Bracket, rIdx, mIdx int) error {
 		// with generation and parseWinnerOf: depth is 1-based from the final,
 		// so the source match at round rIdx is depth len(Rounds)-rIdx.
 		placeholder := winnerOfPlaceholder(len(bracket.Rounds)-rIdx, mIdx)
+		// Same id-follows-name rule as the bronze clear above: a "Winner of
+		// ..." placeholder is not a resolved competitor, so its slot must
+		// carry no id (bc-brid).
 		if mIdx%2 == 0 {
 			next.SideA = placeholder
+			next.SideAID = ""
 		} else {
 			next.SideB = placeholder
+			next.SideBID = ""
 		}
 	}
 	return nil
@@ -1412,6 +1593,37 @@ func deriveKachinukiWinner(result *state.MatchResult) error {
 	if last.Winner == "" {
 		return validationErrorf("a kachinuki match ending on a tied bout is not a decisive win: record the last bout's winner, take it to overtime, or end the encounter as a draw (hikiwake)")
 	}
+	// MEMBER IDS FIRST (operator ruling bc-pnum). The deciding bout names its
+	// winner by the FIGHTER's name, and two opposing fighters may legally
+	// share one, so the name comparison below cannot tell them apart and its
+	// case order silently handed the ENCOUNTER to side A. That is the same
+	// coin flip as the individual victory, one level up and far more
+	// expensive: it decides who advances. The score editor stamps all three
+	// member ids on the row it writes, so this settles every bout scored
+	// through it.
+	switch domain.AttributeWinnerSide(domain.SubBoutAttribution(last.Attribution())) {
+	case domain.MatchSideA:
+		result.Winner = result.SideA
+		return nil
+	case domain.MatchSideB:
+		result.Winner = result.SideB
+		return nil
+	}
+	// No ids, and the two fighters share a name. The name comparison below
+	// MUST NOT run: both of its cases match, and the first one wins, which
+	// is how the encounter used to be handed to side A. The only evidence
+	// left is the operator's own verdict, already on result.Winner from the
+	// payload, so keep it -- rather than overturning it by case order, and
+	// rather than rejecting the write, which would leave a legitimate
+	// encounter on legacy data impossible to finish at all. A verdict naming
+	// neither team is still refused: the relaxation trusts the operator's
+	// CHOICE OF SIDE, not any string they send.
+	if last.SideA != "" && last.SideA == last.SideB {
+		if result.Winner == result.SideA || result.Winner == result.SideB {
+			return nil
+		}
+		return validationErrorf("a kachinuki match's deciding bout was fought between two competitors with the same name (%q) and carries no member ids, so the winner cannot be derived: record the encounter winner from the score editor, which knows which side scored", last.SideA)
+	}
 	switch {
 	case isWinForSide(last.Winner, result.SideA, last.SideA):
 		result.Winner = result.SideA
@@ -1480,12 +1692,32 @@ func stripTrailingUnscoredKachinukiBouts(subs []state.SubMatchResult) []state.Su
 // daihyosen. Output order: numbered positions ascending, daihyosen last,
 // matching the append order the advancement logic relies on (the LAST
 // entry drives AdvanceKachinuki).
+//
+// Member ids (bc-tmid pass 2): a bout the engine itself appended
+// (appendNextKachinukiBout, drawn from a resolved lineup slot) already
+// carries its two fighters' SideAMemberID/SideBMemberID before the
+// operator ever scores it. The score editor does not yet round-trip them
+// on the wire (pass three's change), so its write for the SAME position
+// would otherwise silently overwrite them with nothing on every "overwrite
+// the stored entry at the same position" above -- the exact
+// verdict-silence problem preserveSubHantei solves for the daihyosen mark,
+// here for the member id instead. preserveKachinukiMemberIDs inherits the
+// stored ids onto an incoming row that is silent about them (empty) AND
+// still names the same fighter on that side, and SubMatchResult.
+// ResolveMemberWinnerID then derives WinnerMemberID from whichever side
+// ids are now known -- the SAME derivation the legacy-load repair uses
+// (state.resolveSubMemberIDs), so the rule has one owner between the two
+// call sites.
 func mergeKachinukiSubResults(stored, incoming []state.SubMatchResult) []state.SubMatchResult {
+	storedByPos := make(map[int]state.SubMatchResult, len(stored))
 	byPos := make(map[int]state.SubMatchResult, len(stored)+len(incoming))
 	for _, s := range stored {
+		storedByPos[s.Position] = s
 		byPos[s.Position] = s
 	}
 	for _, s := range incoming {
+		preserveKachinukiMemberIDs(storedByPos, &s)
+		s.ResolveMemberWinnerID()
 		byPos[s.Position] = s
 	}
 	numbered := make([]int, 0, len(byPos))
@@ -1513,6 +1745,26 @@ func mergeKachinukiSubResults(stored, incoming []state.SubMatchResult) []state.S
 		out = append(out, byPos[state.DaihyosenSubPosition])
 	}
 	return out
+}
+
+// preserveKachinukiMemberIDs inherits storedByPos[in.Position]'s member
+// ids onto in when in is silent about them (empty) AND the two rows still
+// name the SAME fighter on that side -- the same side-matching guard
+// preserveLoserScore/preserveSubHantei use, so a position genuinely
+// re-used for a different pairing (only reachable via a hand-edited file;
+// a real pairing is never re-used once it has fought) is never
+// mis-attributed to the wrong fighter.
+func preserveKachinukiMemberIDs(storedByPos map[int]state.SubMatchResult, in *state.SubMatchResult) {
+	prior, ok := storedByPos[in.Position]
+	if !ok {
+		return
+	}
+	if in.SideAMemberID == "" && prior.SideAMemberID != "" && in.SideA == prior.SideA {
+		in.SideAMemberID = prior.SideAMemberID
+	}
+	if in.SideBMemberID == "" && prior.SideBMemberID != "" && in.SideB == prior.SideB {
+		in.SideBMemberID = prior.SideBMemberID
+	}
 }
 
 // findTeamMatch locates a match by ID, returning the parent record (a
@@ -1574,9 +1826,23 @@ func (e *Engine) findTeamMatch(compID, matchID string) (*state.MatchResult, bool
 // its own in-place-append call site).
 func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 	return &state.MatchResult{
-		ID:          bm.ID,
-		SideA:       bm.SideA,
-		SideB:       bm.SideB,
+		ID:    bm.ID,
+		SideA: bm.SideA,
+		SideB: bm.SideB,
+		// SideAID/SideBID carry the bracket match's own id-only side
+		// resolution (bc-brid) through this read-only projection, so a
+		// caller that needs to resolve a bracket-origin bout's fighter to a
+		// squad member (kachinuki_export.go's team-number/label lookup) can
+		// do so without a second, parallel read of the raw BracketMatch.
+		// This function is a read-only projection used by callers that only
+		// ever inspect the result (findTeamMatch, MaybeAdvanceKachinuki's
+		// advancement math, the kachinuki detail export); it is never fed
+		// into a match-write policy (matchWriteForward/matchWriteRestore),
+		// so adding fields here carries none of the "omitted field means
+		// clear" risk that governs bracketMatchAsResult's own projection in
+		// bracket_result.go.
+		SideAID:     bm.SideAID,
+		SideBID:     bm.SideBID,
 		Winner:      bm.Winner,
 		Status:      bm.Status,
 		Court:       bm.Court,
@@ -1597,9 +1863,15 @@ func bracketMatchToTeamResult(bm state.BracketMatch) *state.MatchResult {
 //  3. Round-scoped lineup: highest round overall (fallback).
 //  4. Bout-log-only heuristic (anyone who appeared in a bout, minus retired).
 //
-// The full ordered roster (from lineup.OrderedRoster) is filtered by
-// RetiredPlayersFromBoutLog to produce the remaining queue.
-func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Competition, parent *state.MatchResult, roundIdx int) ([]string, []string, bool) {
+// The full ordered roster (from lineup.OrderedMembers, bc-tmid pass 2) is
+// filtered by IsMemberRetired against RetiredPlayersFromBoutLog's sets to
+// produce the remaining queue, so a lineup-resolved fighter's member id
+// (when the slot has one) rather than their possibly-stale name decides
+// whether they have retired -- falling back to the name only where the
+// retiring bout row carried no id to match against and the name belongs to
+// one member of this roster alone. See IsMemberRetired for why both tiers
+// are needed and what the gate protects.
+func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Competition, parent *state.MatchResult, roundIdx int) ([]kachinukiFighter, []kachinukiFighter, bool) {
 	retiredA, retiredB := RetiredPlayersFromBoutLog(parent.SubResults, parent.SideA, parent.SideB)
 
 	// Attempt lineup-based roster resolution.
@@ -1639,19 +1911,26 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 		return append(keys, teamName)
 	}
 
-	resolveRoster := func(teamName string, retired map[string]struct{}) ([]string, bool) {
+	resolveRoster := func(teamName string, retired RetiredMemberSet) ([]kachinukiFighter, bool) {
 		if lineups != nil {
 			if lineup, found := state.FindBestLineupAny(lineups, teamKeys(teamName), matchID, roundIdx); found {
-				full := lineup.OrderedRoster(comp.TeamSize)
-				return FilterRemaining(full, retired), true
+				full := lineup.OrderedMembers(comp.TeamSize)
+				fighters := make([]kachinukiFighter, len(full))
+				for i, slot := range full {
+					fighters[i] = kachinukiFighter{Name: slot.Name, MemberID: slot.MemberID}
+				}
+				return filterRemainingFighters(fighters, retired), true
 			}
 		}
 		// Preserve first-appearance order from the bout log: AdvanceKachinuki
 		// treats this slice as an ordered queue (index 0 is the next fighter
 		// in), so a map-iteration order would make the next pairing
 		// nondeterministic when a kachinuki match runs without saved lineups.
+		// No lineup means no member ids either, so every entry here carries
+		// an empty MemberID and IsMemberRetired falls back to the name --
+		// exactly the pre-bc-tmid behaviour for this branch.
 		seen := map[string]struct{}{}
-		out := make([]string, 0)
+		out := make([]kachinukiFighter, 0)
 		isA := teamName == parent.SideA
 		for _, b := range parent.SubResults {
 			if b.Position == state.DaihyosenSubPosition {
@@ -1668,10 +1947,10 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 				continue
 			}
 			seen[name] = struct{}{}
-			if _, gone := retired[name]; gone {
+			if _, gone := retired.Names[name]; gone {
 				continue
 			}
-			out = append(out, name)
+			out = append(out, kachinukiFighter{Name: name})
 		}
 		return out, false
 	}

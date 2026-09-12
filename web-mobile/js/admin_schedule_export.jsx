@@ -43,20 +43,25 @@ export function buildXlsxBody(cfg, cName, players) {
 
   // Roster lines match the canonical participant CSV the generator parses:
   // with effective zekken → "Name, DisplayName, Dojo"; otherwise → "Name, Dojo".
+  // A blank dojo is sent blank, never substituted: the generator refuses a
+  // row without a dojo ("entry N: missing dojo") and that refusal must reach
+  // the operator, since a substitute would silently draw every dojo-less
+  // competitor as one fake dojo (the no-fallbacks rule; a legacy roster is
+  // repaired on the participants page, not papered over here).
   const rosterLine = (p) => effectiveZekken
-    ? [csvField(p.name), csvField(p.displayName || p.name), csvField(p.dojo || "NA")].join(", ")
-    : [csvField(p.name), csvField(p.dojo || "NA")].join(", ");
+    ? [csvField(p.name), csvField(p.displayName || p.name), csvField(p.dojo || "")].join(", ")
+    : [csvField(p.name), csvField(p.dojo || "")].join(", ");
   const playerList = players.map(rosterLine).join("\n");
 
-  // dojo must match the roster line's dojo (p.dojo || "NA", same fallback as
-  // rosterLine above): domain.SeedKey matches a seed to its participant by
+  // dojo must match the roster line's dojo (p.dojo || "", the same value
+  // rosterLine sends above): domain.SeedKey matches a seed to its participant by
   // the (name, dojo) COMPOSITE key, so a same-name pair (two competitors
   // sharing a display name, distinguished only by dojo) needs the dojo here
   // or /create 400s with "seeded participant not found" (domain.SeedAssignment's
   // json tags are name/dojo/seedRank; see internal/domain/seed.go).
   const seeded = players
     .filter((p) => p.seed && p.seed > 0)
-    .map((p) => ({ name: p.name, dojo: p.dojo || "NA", seedRank: p.seed }));
+    .map((p) => ({ name: p.name, dojo: p.dojo || "", seedRank: p.seed }));
 
   const courtsCount = Array.isArray(cfg.courts) ? cfg.courts.length : 0;
   const body = new URLSearchParams({

@@ -2,6 +2,7 @@
 // pickCopySource, MatchLineupSideEditor (local), MatchLineupPanel.
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
+import { sideLookupKey } from './competitor_identity.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -80,7 +81,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const positions = (typeof lineupPositionsForSize === "function")
     ? lineupPositionsForSize(teamSize)
     : [];
-  const roster = (typeof lineupRosterFor === "function")
+  // The team's members as the PRE-SQUAD model stored them, in the roster
+  // row's untyped metadata array. Kept only as a fallback: see `roster`
+  // below, which prefers the squad.
+  const legacyRoster = (typeof lineupRosterFor === "function")
     ? lineupRosterFor(team)
     : [];
   const teamId = (typeof lineupTeamIdOf === "function")
@@ -107,9 +111,6 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     positions.forEach(p => { init[p.key] = ""; });
     return init;
   });
-  const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
-    ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
-    : roster;
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
@@ -117,6 +118,61 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // Track whether the current match's lineup was loaded from a per-match
   // entry (true) or is inheriting the round default (false).
   const [isMatchOverride, setIsMatchOverride] = useStateA(false);
+  // bc-cse gap closure: the composed operator-facing warning shown after a
+  // SUCCESSFUL save whose squad-member attachment fell short (see doSave
+  // below). Deliberately a separate channel from `error`: the save did not
+  // fail, so it must never look like the red error banner above it.
+  const [lineupWarning, setLineupWarning] = useStateA("");
+
+  // bc-pnum gap closure: this team's squad, loaded once so save() can
+  // resolve a typed/picked name to its member id (see doSave below) --
+  // this panel is free-text (LineupNameInput), unlike the round-scoped
+  // AdminLineup form's select-by-id picker, so a name→id lookup is needed
+  // here at all. Independent of the lineup-load effect below: a squad
+  // fetch failure must not block loading OR saving the lineup itself, so
+  // it is swallowed and the resolver (window.AdminLineupHelpers.
+  // resolveMemberIdsForPositions) simply mints for every name it cannot
+  // find against an empty list. bc-cse: `squadUnavailable` records that this
+  // happened, so doSave's warning names the real root cause instead of
+  // reporting every position the resolver then "failed" to match.
+  const [squad, setSquad] = useStateA([]);
+  const [squadUnavailable, setSquadUnavailable] = useStateA(false);
+
+  // bc-pnum: the suggestion list reads the SQUAD, because that is where a
+  // team's members now live. rosterFor reads the roster row's metadata array,
+  // which was their home before this PR moved them out, so a team whose
+  // members were entered through the squad UI arrived here looking empty --
+  // the operator was told "this team has no registered members" under a full
+  // squad, and had to retype every name the app already knew. Blank entries
+  // are skipped: a squad is seeded with one unnamed position per team size,
+  // and an unnamed position is not a person to suggest.
+  //
+  // The metadata array stays as the fallback for the two cases where no
+  // squad comes back, both of them reachable. The load-time migration folds
+  // a team's metadata into a squad keyed by its PARTICIPANT ID, and skips a
+  // roster row that has no id -- the legacy state this PR's own data-issue
+  // notices describe -- so such a team has members in metadata and nothing
+  // under its key. And the fetch above can simply fail, where falling back
+  // beats suggesting nothing. Migration does not clear metadata, so the
+  // fallback still has names to offer in both.
+  const squadNames = squad.map(m => ((m && m.name) || "").trim()).filter(Boolean);
+  const roster = squadNames.length > 0 ? squadNames : legacyRoster;
+  const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
+    : roster;
+  useEffectA(() => {
+    let cancelled = false;
+    if (!compId || !teamId) return;
+    (async () => {
+      try {
+        const squads = await window.API.fetchSquads(compId, password);
+        if (!cancelled) setSquad((squads && squads[teamId]) || []);
+      } catch (_e) {
+        if (!cancelled) setSquadUnavailable(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [compId, teamId]);
 
   // Load per-match lineup on mount; record whether it was a real hit.
   useEffectA(() => {
@@ -164,9 +220,41 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
   const doSave = async (positionsOut, successMsg = "Match lineup saved") => {
     setError("");
+    setLineupWarning("");
     setSaving(true);
     try {
-      const updated = await window.API.putMatchLineup(compId, teamId, matchId, positionsOut, password);
+      // bc-pnum gap closure: resolve each occupied position's name to a
+      // squad member id before writing. A name not on the squad is a
+      // substitute typed straight into the slot; per operator ruling,
+      // adding a new name in a position MINTS the member in that one step
+      // (see resolveMemberIdsForPositions, admin_lineup.jsx -- the ONE
+      // place this resolve/mint contract lives, shared with the inline
+      // in-modal picker in admin_scoring_team.jsx). A resolve/mint failure
+      // (offline venue wifi -- this panel's whole reason for existing) must
+      // never block the save: the helper simply omits that position's id
+      // and the write proceeds with the names alone, exactly as it
+      // behaves today. bc-cse: the failure is no longer discarded either --
+      // `memberFailures` carries it through to the warning shown below on
+      // a successful save.
+      let memberIdsOut = {};
+      let memberFailures = [];
+      try {
+        const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
+        if (typeof resolver === "function") {
+          const resolved = await resolver(compId, teamId, positionsOut, squad, password);
+          memberIdsOut = resolved.memberIds || {};
+          memberFailures = resolved.failures || [];
+          setSquad(resolved.squad);
+        }
+      } catch (_e) {
+        // Defense in depth on top of the helper's own per-position mint
+        // catch: even an unexpected failure IN the resolver itself must
+        // not block the save. Proceed with the names alone.
+      }
+      const hasMemberIds = Object.keys(memberIdsOut).length > 0;
+      const updated = await window.API.putMatchLineup(
+        compId, teamId, matchId, positionsOut, password, hasMemberIds ? memberIdsOut : undefined
+      );
       // F5: a queued (offline/transient) write is NOT confirmed. Do NOT rebuild
       // the form from updated.positions (which is absent, would clear every
       // field) or show success; keep the operator's entered values and report
@@ -181,6 +269,10 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setValues(next);
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast(successMsg);
+      const composer = window.AdminLineupHelpers?.memberIdentityWarning;
+      if (typeof composer === "function") {
+        setLineupWarning(composer(memberFailures, squadUnavailable));
+      }
     } catch (e) {
       setError(e?.message || "Failed to save lineup");
     } finally {
@@ -269,6 +361,14 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         </div>
       )}
 
+      {/* Non-blocking: the save above already succeeded. Amber .alert--warn
+          so it can never be mistaken for the red error banner above. */}
+      {lineupWarning && (
+        <div className="alert alert--warn" role="status" data-testid={`match-lineup-warning-${teamId}`} style={{ marginBottom: 8 }}>
+          {lineupWarning}
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {positions.map(p => (
           <label key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
@@ -328,19 +428,21 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
   // (loaded via /api/viewer/competitions) already carries each team's
   // metadata (member roster): no extra participants fetch is needed.
   //
-  // The match's sideA/sideB are normalized to { id, name }, where `id`
-  // falls back to the team NAME when the backend has no UUID for that slot
-  // (see api_serializers.normalizeMatch). A real participant's id is a
-  // UUID, so the side key may be a name while the participant key is a
-  // UUID (or vice-versa). We must therefore match on EITHER id OR name:
-  // the previous `(p.id || p.name) === sideId` form compared only the
+  // The match's sideA/sideB are normalized to { id, name } (see
+  // api_serializers.resolveSide); `id` is the participant's real UUID when
+  // resolved, or "" when the backend has no UUID for that slot -- resolveSide
+  // never invents an id from the team NAME. sideLookupKey (competitor_
+  // identity.jsx) falls back to side.name in that "" case, which is the
+  // recovery path this file needs: id over name (a real id decides, since a
+  // UUID never coincidentally equals another team's display name), so
+  // matchesKey's `p.id === key || p.name === key` only ever succeeds by
+  // name when key itself carries no real id to offer (an id-less side).
+  // The previous `(p.id || p.name) === sideId` form compared only the
   // first truthy key (the UUID), which never equals a name-keyed sideId,
   // so the roster silently failed to resolve and every dropdown showed
-  // "No roster found".
-  const sideKey = (side) =>
-    (side && typeof side === "object" ? (side.id || side.name) : side) || "";
-  const sideAKey = sideKey(m.sideA);
-  const sideBKey = sideKey(m.sideB);
+  // "No roster found" -- do not reintroduce that single-key form.
+  const sideAKey = sideLookupKey(m.sideA);
+  const sideBKey = sideLookupKey(m.sideB);
   const players = comp.players || [];
   const matchesKey = (p, key) =>
     !!key && (p.id === key || p.ID === key || p.name === key || p.Name === key);

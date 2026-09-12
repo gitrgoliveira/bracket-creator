@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +33,7 @@ func writeCompetitionFolderDirectly(t *testing.T, dir, id, name string) {
 }
 
 func TestNumberPrefixAssignedOnLoadForACompetitionThatArrivedLater(t *testing.T) {
-	r, _, _, _, tempDir := setupTestRouter(t)
+	r, store, _, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
 	body := `{"name":"Legacy Cup","date":"12-09-2026","venue":"Crystal Palace NSC","courts":["A"],"password":"pfx-pass"}`
@@ -67,6 +68,30 @@ func TestNumberPrefixAssignedOnLoadForACompetitionThatArrivedLater(t *testing.T)
 
 	raw, err = os.ReadFile(cfgPath)
 	require.NoError(t, err)
-	assert.Contains(t, string(raw), "number_prefix: K",
-		"and persists it, so the derivation is not repeated on every request")
+	assert.Contains(t, string(raw), "number_prefix: K", "and persists it")
+
+	// A SECOND listing must not run the migration at all. Persisting the
+	// prefix does not show that, and neither does the absence of the
+	// "assigned" log line -- a second pass would assign nothing and log
+	// nothing either way. What DOES distinguish the two is the pass's other
+	// half: it renumbers every prefixed competition's pools.csv on every
+	// call. So this re-corrupts that file and asserts the next listing
+	// leaves it alone. Without the gate the scan runs on an endpoint the
+	// SPA polls.
+	require.NoError(t, store.SavePools("kendo-open", []helper.Pool{
+		{PoolName: "Pool A", Players: []helper.Player{{Name: "Rin Sato", Dojo: "Seibukan", Number: "WRONG9"}}},
+	}))
+
+	req = httptest.NewRequest(http.MethodGet, "/api/competitions", nil)
+	req.Header.Set("X-Tournament-Password", "pfx-pass")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	pools, err := store.LoadPools("kendo-open")
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 1)
+	assert.Equal(t, "WRONG9", pools[0].Players[0].Number,
+		"nothing was missing this time, so the migration -- and its renumber scan -- must not have run")
 }

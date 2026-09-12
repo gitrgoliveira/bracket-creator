@@ -130,12 +130,27 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		if err != nil {
 			// Wrapped as a *ValidationError (-> HTTP 400 at the
 			// generate-draw handler), matching the fill-bracket branch
-			// above: every error this call can return -- formation
-			// (poolTargetSizes), the blank-dojo pre-flight
-			// (helper.ErrBlankDojoInDraw, bc-dojo-least-conflicted-pool FIX 1),
-			// or the defensive "no pool has room" placement guard -- is an
-			// operator-actionable roster/config problem, never an internal
-			// bug the operator cannot act on.
+			// above. Two of the three errors this call can return are
+			// operator-actionable roster/config problems: formation
+			// (poolTargetSizes) and the blank-dojo pre-flight
+			// (helper.ErrBlankDojoInDraw, bc-dojo-least-conflicted-pool FIX 1).
+			//
+			// The third is NOT, and this comment used to say it was. The
+			// "no pool has room" placement guard (assignUnseededByDojoTree)
+			// is an internal invariant check whose own comment states it
+			// cannot fire while sum(targetSizes) == len(players), which
+			// realTargetSizes guarantees. If it ever did fire, a 400 would
+			// blame the operator for an engine fault and they would edit the
+			// roster to no effect.
+			//
+			// It is still wrapped, deliberately: the case is unreachable, so
+			// branching on it would be handling for something that cannot
+			// happen, and a 500 carrying the same "cannot place player X"
+			// text is no more actionable to an operator mid-tournament than
+			// a 400 is. What is NOT acceptable is the comment claiming the
+			// guard belongs to the actionable class -- that is what would
+			// let a future writer add a genuine internal fault here and
+			// assume 400 was the considered answer.
 			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	}

@@ -207,3 +207,41 @@ func TestLegacyRosterMintedWhenTheDrawCorroboratesTheDojo(t *testing.T) {
 	}
 	assert.Equal(t, "Seibukan", players[0].Dojo)
 }
+
+// TestLegacyTeamRosterMintedAndSquadsMigratedInOnePass is where the two
+// legacy repairs meet, and the population the squad work exists for.
+//
+// A team's members live in Player.Metadata, so a team roster row is WIDE
+// (name, dojo, then one field per member) in a competition with no zekken
+// column -- the same shape the display-name check refuses when the draw
+// contradicts it. Here the draw agrees, the parse is right, and both
+// repairs must land in the SAME pass: ids first, then the squads keyed
+// under them. Before the roster repair existed, the squad migration had no
+// id to key on and silently did nothing.
+func TestLegacyTeamRosterMintedAndSquadsMigratedInOnePass(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	require.NoError(t, s.SaveCompetition(&state.Competition{ID: "c1", Name: "C1", Kind: "team", TeamSize: 3}))
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "participants.csv"),
+		[]byte("Tora, Tora Dojo, Sato, Kimura, Abe\nKaze, Kaze Dojo, Mori, Oda, Ito\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", "c1", "pools.csv"),
+		[]byte("Pool A,Tora,0,,Tora Dojo,,\nPool A,Kaze,1,,Kaze Dojo,,\n"), 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	players, err := fresh.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.Len(t, players, 2)
+	byName := map[string]string{}
+	for _, p := range players {
+		require.NotEmpty(t, p.ID, "%s is identified", p.Name)
+		byName[p.Name] = p.ID
+	}
+	assert.Equal(t, "Tora Dojo", players[0].Dojo, "a team row is wide because of its MEMBERS, and the draw corroborates the dojo")
+	assert.Equal(t, []string{"Sato", "Kimura", "Abe"}, players[0].Metadata, "the members survive the rewrite")
+
+	squads, err := fresh.LoadSquads("c1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Sato", "Kimura", "Abe"}, squadNames(squads[byName["Tora"]]),
+		"and the squad is migrated under the id the same pass just minted")
+	assert.Equal(t, []string{"Mori", "Oda", "Ito"}, squadNames(squads[byName["Kaze"]]))
+}

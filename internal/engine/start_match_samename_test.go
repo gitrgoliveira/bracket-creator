@@ -91,6 +91,37 @@ func TestStartMatch_SameNameEligibilityUsesTheRowIDs(t *testing.T) {
 			"a bracket row carries its own side ids too (bc-brid); the namesake must not block it")
 	})
 
+	// The roster scan that fills a side its row never stamped must not guess
+	// either. An unrepaired legacy row carries no side id precisely BECAUSE its
+	// name was ambiguous (the load-time repair refuses to stamp one it cannot
+	// resolve), so this is the shape that reaches the scan in practice, and
+	// answering with the first namesake would reinstate the defect one layer
+	// down.
+	t.Run("an id-less row whose name two competitors answer to resolves to nobody", func(t *testing.T) {
+		f := roster(t, "samename-unstamped", "league")
+		require.NoError(t, f.store.SavePoolMatches(f.compID, []state.MatchResult{{
+			ID: "Pool A-0", SideA: "Sam", SideB: "Kenji",
+			Status: state.MatchStatusScheduled,
+		}}))
+		withdraw(t, f, f.samSouth)
+		assert.NoError(t, f.eng.StartMatch(f.compID, "Pool A-0"),
+			"the row names no id and its name names two people; neither may be assumed, so no status applies")
+
+		// The same row with an UNAMBIGUOUS name still resolves by the scan, so
+		// the gate keeps working for every legacy row that is not ambiguous.
+		require.NoError(t, f.store.SavePoolMatches(f.compID, []state.MatchResult{{
+			ID: "Pool A-1", SideA: "Kenji", SideB: "Sam",
+			Status: state.MatchStatusScheduled,
+		}}))
+		require.NoError(t, f.store.SetCompetitorStatus(f.compID, domain.CompetitorStatus{
+			PlayerID: "b1e7b5f6-0000-4000-8000-00000000000a", Eligible: false,
+			Reason: "kiken", MatchID: "other-match", RecordedAt: time.Now().UTC(),
+		}))
+		err := f.eng.StartMatch(f.compID, "Pool A-1")
+		require.Error(t, err, "a unique name still resolves to its one competitor")
+		assert.ErrorIs(t, err, ErrIneligibleCompetitor)
+	})
+
 	// The production start path is the TRANSACTIONAL door (handlers_match.go
 	// calls StartMatchTx inside the court-exclusivity lock), so it is pinned
 	// here too rather than left to the shared body: a twin that drifts is how

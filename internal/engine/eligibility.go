@@ -583,16 +583,38 @@ func (e *Engine) lookupMatchSides(h state.StoreTx, compID, matchID string) (stri
 	return "", "", notFoundErrorf("match %q not found in competition %q", matchID, compID)
 }
 
+// lookupPlayerID resolves name to a participant id, and answers "" when the
+// name does not name exactly ONE competitor.
+//
+// The uniqueness gate is the point. Two competitors from different dojos may
+// legally share a display name, so returning the FIRST namesake is a guess
+// among candidates, and every caller here feeds that id to a check that
+// decides something about a person: whether they may start, whether they are
+// already fighting, whose eligibility a withdrawal revokes. Guessing there
+// both refuses an eligible competitor and clears a withdrawn one, which is the
+// misattribution the id fields exist to end. This mirrors the rule the rest of
+// the repair paths already apply -- the legacy upgrade refuses an ambiguous
+// name rather than stamping an id, and the squad resolver answers only for a
+// name unique within its team.
+//
+// "" means "this name does not identify anybody", and every caller already
+// treats an empty id that way: it is skipped, never matched against a status
+// map, and never compared to another side's id.
 func lookupPlayerID(players []domain.Player, name string) string {
 	if name == "" {
 		return ""
 	}
+	found := ""
 	for _, p := range players {
-		if p.Name == name {
-			return p.ID
+		if p.Name != name {
+			continue
 		}
+		if found != "" && found != p.ID {
+			return "" // two competitors answer to this name: it identifies neither
+		}
+		found = p.ID
 	}
-	return ""
+	return found
 }
 
 // combinedPlayerPool merges comp.Players and freshly-loaded participants

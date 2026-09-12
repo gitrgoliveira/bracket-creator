@@ -77,11 +77,20 @@ func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ippon
 	}
 	// Attribution goes through the one owner, domain.AttributeWinnerSide, so a
 	// legacy flag lands on the same side every other surface would choose:
-	// by participant id when the caller has all three (a same-name pair is
-	// only separable that way), else by name with the sideA-first fallback.
-	// SubMatchResult always passes the zero value and takes the name path
-	// (byte-identical to the pre-id behaviour); BracketMatch does too, but
-	// only when its own row carries no id for that side.
+	// by id when the caller has all three (a same-name pair is only separable
+	// that way), else by name with the sideA-first fallback. Each caller
+	// supplies the ids ITS record carries: MatchResult and BracketMatch pass
+	// participant ids, and pass "" only for a row of theirs that carries none
+	// (a bye, an unresolved feeder, an unrepaired legacy row); SubMatchResult
+	// passes MEMBER ids through domain.SubBoutAttribution, which additionally
+	// drops a display name both fighters share, because two fighters on
+	// opposing teams may legally hold one.
+	//
+	// A flag that cannot be attributed is dropped by the default arm below, and
+	// the flag itself is cleared either way: it is a legacy read-only channel
+	// whose whole purpose is to become the mark. The bout still records its
+	// WINNER, so what an unattributable row loses is the marker saying the
+	// referees decided it, not the result.
 	switch domain.AttributeWinnerSide(att) {
 	case domain.MatchSideA:
 		return domain.AppendHantei(ipponsA), ipponsB

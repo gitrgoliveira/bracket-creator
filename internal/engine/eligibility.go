@@ -496,30 +496,62 @@ func (e *Engine) hasDownstreamMatchStarted(h state.StoreTx, compID string, playe
 	return false, nil
 }
 
-// resolveMatchParticipantIDs finds the match (pool or bracket) and
-// resolves SideA/SideB names to player IDs via the competition's
-// participants list.
+// matchSideParticipantIDs resolves matchID's two participant ids the way every
+// other identity-critical reader in this package does: from the match row's OWN
+// SideAID/SideBID, with the roster name scan (resolvePlayerIDs) filling only a
+// side the row did not stamp -- a bye, an unresolved feeder, or an unrepaired
+// legacy row.
+//
+// Deriving BOTH ids from the side NAMES is what this replaces, and it was a live
+// misattribution rather than an indirection: two competitors from different dojos
+// may legally share a display name, and lookupPlayerID answers with whichever
+// namesake the roster lists first. The eligibility gate then read the WRONG
+// competitor's status, in both directions -- it refused an eligible competitor's
+// start because their namesake had withdrawn, and it let a withdrawn competitor
+// start because their namesake had not. checkSimultaneousMatchTx was converted to
+// the row's own ids for exactly this reason (see findPoolMatch); this is the
+// other half of the same gate.
+func (e *Engine) matchSideParticipantIDs(h state.StoreTx, compID, matchID string) ([]string, error) {
+	var sideA, sideB, idA, idB string
+	found := false
+	if poolMatches, err := h.LoadPoolMatches(compID); err == nil {
+		if m, ok := findPoolMatch(poolMatches, matchID); ok {
+			sideA, sideB, idA, idB, found = m.SideA, m.SideB, m.SideAID, m.SideBID, true
+		}
+	}
+	if !found {
+		if bracket, err := h.LoadBracket(compID); err == nil {
+			if bm := findBracketMatchInBracket(bracket, matchID); bm != nil {
+				sideA, sideB, idA, idB, found = bm.SideA, bm.SideB, bm.SideAID, bm.SideBID, true
+			}
+		}
+	}
+	if !found {
+		// Neither store held the row under this id, or one of them failed to
+		// load: lookupMatchSides is the shared resolver that reports which,
+		// returning the not-found error this method's callers already surface.
+		var err error
+		sideA, sideB, err = e.lookupMatchSides(h, compID, matchID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if idA == "" || idB == "" {
+		fallbackA, fallbackB := resolvePlayerIDs(h, compID, sideA, sideB)
+		if idA == "" {
+			idA = fallbackA
+		}
+		if idB == "" {
+			idB = fallbackB
+		}
+	}
+	return []string{idA, idB}, nil
+}
+
+// resolveMatchParticipantIDs is the non-transactional door to
+// matchSideParticipantIDs, which holds the body and its full doc comment.
 func (e *Engine) resolveMatchParticipantIDs(compID, matchID string) ([]string, error) {
-	sideA, sideB, err := e.lookupMatchSides(e.store, compID, matchID)
-	if err != nil {
-		return nil, err
-	}
-	comp, err := e.store.LoadCompetition(compID)
-	if err != nil {
-		return nil, err
-	}
-	if comp == nil {
-		// This helper returns an error path already, so fail cleanly rather
-		// than panic when the competition record is missing/deleted.
-		return nil, notFoundErrorf("competition %s not found", compID)
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := e.store.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return nil, err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	return []string{lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)}, nil
+	return e.matchSideParticipantIDs(e.store, compID, matchID)
 }
 
 // lookupMatchSides resolves matchID's SideA/SideB names from the

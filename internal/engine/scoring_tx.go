@@ -314,21 +314,10 @@ func (e *Engine) StartMatchTx(tx state.StoreTx, compID, matchID string) error {
 	if err := e.checkSimultaneousMatchTx(tx, compID, matchID); err != nil {
 		return err
 	}
-	sideA, sideB, err := e.lookupMatchSides(tx, compID, matchID)
+	ids, err := e.matchSideParticipantIDs(tx, compID, matchID)
 	if err != nil {
 		return err
 	}
-	comp, err := tx.LoadCompetition(compID)
-	if err != nil || comp == nil {
-		return err
-	}
-	// Engi forces the zekken layout; make the effective flag explicit (Finding 10).
-	participants, err := tx.LoadParticipants(compID, comp.EffectiveWithZekkenName())
-	if err != nil {
-		return err
-	}
-	pool := combinedPlayerPool(comp.Players, participants)
-	ids := []string{lookupPlayerID(pool, sideA), lookupPlayerID(pool, sideB)}
 
 	statuses, err := tx.LoadCompetitorStatus(compID)
 	if err != nil {

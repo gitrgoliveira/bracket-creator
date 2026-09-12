@@ -96,14 +96,16 @@ function formatClearedValue(key, value) {
   return String(value);
 }
 
-// Resolve a team Player's stable id the same way admin_lineup.jsx's
-// teamIdOf does (id, ID, name, Name -- pre-persist teams may carry no id
-// yet). A local copy rather than an ES import of admin_lineup.jsx: that
-// file deliberately stays reachable only via window.AdminLineupHelpers for
-// its OTHER consumers (see its own module header), and this is a two-line
-// fallback chain, not a rule worth a cross-module dependency for.
+// Resolve a team Player's stable id for the SQUAD api, which addresses a
+// team by its participant id and nothing else: state.requireTeamParticipantLocked
+// compares players[i].ID, so a name here is not a weaker key, it is a
+// guaranteed miss -- every read returns no squad and every write 404s with
+// nothing the operator can act on. This deliberately does NOT mirror
+// admin_lineup.jsx's teamIdOf, whose name arm serves a PRE-PERSIST team on
+// the create form (no server call behind it); the caller below renders the
+// id-less team an explanation instead.
 function squadTeamIdOf(team) {
-  return (team && (team.id || team.ID || team.name || team.Name)) || "";
+  return (team && (team.id || team.ID)) || "";
 }
 
 // bc-pnum: the operator surface for managing a team's squad (its actual
@@ -341,7 +343,11 @@ function SquadManager({ compId, teams, isStarted, password }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [compId]);
+    // password is a dependency, not just a closure read: the operator can
+    // reach this screen before entering it (or with a rotated one), and the
+    // 401 that follows used to strand the section in its error state until
+    // the whole route remounted, because compId never changed.
+  }, [compId, password]);
 
   const setTeamSquad = (teamId, members) => {
     setSquads((prev) => ({ ...prev, [teamId]: members }));
@@ -373,17 +379,32 @@ function SquadManager({ compId, teams, isStarted, password }) {
       )}
       {loadErr && <div className="field__hint field__hint--warn">Could not load squad members: {loadErr}</div>}
       {teams.length === 0 && <div className="field__hint">No teams registered yet.</div>}
-      {teams.map((t) => (
-        <TeamSquadSection
-          key={squadTeamIdOf(t)}
-          compId={compId}
-          team={t}
-          squad={squads[squadTeamIdOf(t)] || []}
-          clearDisabled={isStarted}
-          password={password}
-          onSquadChange={setTeamSquad}
-        />
-      ))}
+      {teams.map((t) => {
+        const teamId = squadTeamIdOf(t);
+        // A roster saved before ids existed carries none, and the squad api
+        // can only address a team by id. Saying so -- in the same words the
+        // console's data-issues banner and the draw refusal already use
+        // (helper.MissingParticipantIDsMessage) -- beats rendering an empty
+        // list whose every control fails.
+        if (!teamId) {
+          return (
+            <div key={`no-id-${t.name || t.Name}`} className="field__hint field__hint--warn" data-testid="settings-squad-no-id">
+              {t.name || t.Name || "This team"}: no id on file. Save the roster once and the ids are assigned.
+            </div>
+          );
+        }
+        return (
+          <TeamSquadSection
+            key={teamId}
+            compId={compId}
+            team={t}
+            squad={squads[teamId] || []}
+            clearDisabled={isStarted}
+            password={password}
+            onSquadChange={setTeamSquad}
+          />
+        );
+      })}
     </div>
   );
 }

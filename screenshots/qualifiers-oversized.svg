@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 250" font-family="system-ui, sans-serif">
+  <rect width="760" height="250" fill="#ffffff"/>
+  <text x="20" y="28" font-size="15" font-weight="600" fill="#1a1d21">Oversized send +1: same pools; 4-person pools send their top 2</text>
+  <text x="20" y="48" font-size="12" fill="#5c6570">Same 16 entrants, same 5 pools</text>
+  <g>
+    <rect x="20" y="66" width="86" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="83" r="4" fill="#39424c"/><circle cx="56" cy="83" r="4" fill="#39424c"/><circle cx="72" cy="83" r="4" fill="#39424c"/>
+    <rect x="20" y="106" width="86" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="123" r="4" fill="#39424c"/><circle cx="56" cy="123" r="4" fill="#39424c"/><circle cx="72" cy="123" r="4" fill="#39424c"/>
+    <rect x="20" y="146" width="86" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="163" r="4" fill="#39424c"/><circle cx="56" cy="163" r="4" fill="#39424c"/><circle cx="72" cy="163" r="4" fill="#39424c"/>
+    <rect x="20" y="186" width="86" height="34" rx="6" fill="#eef1f4" stroke="#8a94a0"/>
+    <circle cx="40" cy="203" r="4" fill="#39424c"/><circle cx="56" cy="203" r="4" fill="#39424c"/><circle cx="72" cy="203" r="4" fill="#39424c"/>
+    <rect x="126" y="126" width="102" height="34" rx="6" fill="#e3eefb" stroke="#1f5fa8" stroke-width="1.6"/>
+    <circle cx="146" cy="143" r="4" fill="#1f5fa8"/><circle cx="162" cy="143" r="4" fill="#1f5fa8"/><circle cx="178" cy="143" r="4" fill="#1f5fa8"/><circle cx="194" cy="143" r="4" fill="#1f5fa8"/>
+    <text x="126" y="176" font-size="11" fill="#1f5fa8" font-weight="600">4-person pool</text>
+  </g>
+  <defs>
+    <marker id="b" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#1e7d46"/></marker>
+    <marker id="b2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8z" fill="#1f5fa8"/></marker>
+  </defs>
+  <g stroke="#1e7d46" stroke-width="2" fill="none">
+    <path d="M108 83 H286" marker-end="url(#b)"/>
+    <path d="M108 123 H286" marker-end="url(#b)"/>
+    <path d="M108 163 H286" marker-end="url(#b)"/>
+    <path d="M108 203 H286" marker-end="url(#b)"/>
+    <path d="M230 137 H286" marker-end="url(#b)"/>
+  </g>
+  <path d="M230 152 Q262 196 286 208" stroke="#1f5fa8" stroke-width="2.4" fill="none" marker-end="url(#b2)"/>
+  <text x="234" y="70" font-size="12" fill="#1e7d46" font-weight="600">top 1 each</text>
+  <text x="236" y="230" font-size="12" fill="#1f5fa8" font-weight="600">+ its 2nd place</text>
+  <g font-size="11">
+    <text x="300" y="60" font-size="12" font-weight="600" fill="#1a1d21">6 qualifiers</text>
+    <rect x="300" y="66" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="80" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="88" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="102" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="110" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="124" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="132" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="146" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="154" width="120" height="20" rx="4" fill="#e2f3e9" stroke="#1e7d46"/><text x="308" y="168" fill="#1a1d21">qualifier</text>
+    <rect x="300" y="176" width="120" height="20" rx="4" fill="#e3eefb" stroke="#1f5fa8" stroke-width="1.6"/><text x="308" y="190" fill="#1f5fa8" font-weight="600">extra qualifier</text>
+    <rect x="300" y="198" width="120" height="20" rx="4" fill="none" stroke="#9aa4af" stroke-dasharray="4 3"/><text x="308" y="212" fill="#5c6570">bye</text>
+    <rect x="300" y="220" width="120" height="20" rx="4" fill="none" stroke="#9aa4af" stroke-dasharray="4 3"/><text x="308" y="234" fill="#5c6570">bye</text>
+  </g>
+  <g font-size="13" fill="#1a1d21">
+    <text x="460" y="110" font-weight="600">8-slot knockout, one bye fewer</text>
+    <text x="460" y="132">The extra qualifier goes to a different</text>
+    <text x="460" y="152">part of the bracket from its pool's</text>
+    <text x="460" y="172">winner, and always fights in the first</text>
+    <text x="460" y="192">round: it never takes a bye.</text>
+  </g>
+</svg>

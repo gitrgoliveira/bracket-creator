@@ -1,0 +1,484 @@
+/* bracket-creator docs theme: a bold, sporting design language layered onto
+ * MkDocs Material. The brand navy (#1d3557, see DESIGN.md) is the single
+ * interactive colour; Aka red (#c1121f) appears only as a hairline accent.
+ * Material owns the page chrome (header, tabs, sidebar, TOC, search); this
+ * file owns the design language: type rhythm, surfaces, the home hero,
+ * tool cards, code/table/tab styling.
+ *
+ * Colour is scoped PER SCHEME. Material derives link/interactive colours from
+ * the --md-* tokens; an unscoped :root override forces one value into both
+ * light and dark (which made dark links invisible). The :root block below
+ * defines every brand anchor and derived tint as a named token; every
+ * colour at a use site references a token, nothing is improvised inline.
+ * ------------------------------------------------------------------------- */
+
+/* ===== Brand + surface tokens (scheme-independent) ===== */
+:root {
+	/* Brand anchors: exact hex, single-sourced with the product (DESIGN.md). */
+	--bc-navy:       #1d3557;
+	--bc-navy-deep:  #142840;
+	--bc-navy-700:   #2a4a72;
+	--bc-aka:        #c1121f;
+
+	/* Neutrals + navy tints (used on dark surfaces / the hero). */
+	--bc-white:      #ffffff;
+	--bc-paper:      #fbfcfe;   /* reading surface, a whisper toward navy */
+	--bc-sky:        #93b3e0;   /* lightened navy: dark-scheme links, hero kicker + outline */
+	--bc-ice:        #eef2fb;   /* near-white on navy: hero text, dark table head */
+	--bc-lede:       #cdd9ee;   /* hero lede on navy */
+	--bc-sky-soft:   color-mix(in srgb, var(--bc-sky) 16%, transparent);
+
+	/* Derived surfaces (OKLCH). */
+	--bc-line:       oklch(0.925 0.006 260);
+	--bc-line-soft:  oklch(0.955 0.004 260);
+	--bc-wash:       oklch(0.965 0.012 255);   /* faint navy wash for card chips */
+
+	/* Motion. */
+	--bc-ease-out:   cubic-bezier(0.16, 1, 0.3, 1);
+	--bc-dur:        200ms;
+
+	/* Geometry. */
+	--bc-radius:     10px;
+	--bc-radius-sm:  6px;
+	--bc-rule:       3px;       /* the "court-line" tick weight */
+}
+
+/* No horizontal overflow at any width. Material manages its own layout; this is
+ * the belt-and-suspenders root rule. clip (not hidden) keeps the sticky header
+ * working, since clip does not create a scrolling container. */
+html, body { overflow-x: clip; }
+
+/* ===== Light scheme ===== */
+[data-md-color-scheme="default"] {
+	--md-primary-fg-color:        var(--bc-navy);
+	--md-primary-fg-color--light: var(--bc-navy-700);
+	--md-primary-fg-color--dark:  var(--bc-navy-deep);
+
+	/* Navy carries every interactive state + in-prose links (12.3:1 on white). */
+	--md-accent-fg-color:  var(--bc-navy);
+	--md-typeset-a-color:  var(--bc-navy);
+
+	/* Reading surface tinted a whisper toward navy so it reads as the
+	 * product's own paper rather than a default white. */
+	--md-default-bg-color: var(--bc-paper);
+
+	--bc-card-bg:    var(--bc-white);
+	--bc-code-bg:    oklch(0.975 0.008 255);
+	--bc-table-head: var(--bc-navy);
+	--bc-table-head-fg: var(--bc-white);
+	--bc-table-alt:  var(--bc-wash);
+	--bc-tick:       var(--bc-navy);
+}
+
+/* ===== Dark (slate) scheme ===== */
+[data-md-color-scheme="slate"] {
+	--md-primary-fg-color:        var(--bc-navy);
+	--md-primary-fg-color--light: var(--bc-navy-700);
+	--md-primary-fg-color--dark:  var(--bc-navy-deep);
+
+	/* Lightened navy (same hue) so links/accent clear 4.5:1 on slate.
+	 * --bc-sky on the slate surface measures ~6.1:1. */
+	--md-accent-fg-color:  var(--bc-sky);
+	--md-typeset-a-color:  var(--bc-sky);
+
+	--bc-card-bg:    oklch(0.27 0.02 262);
+	--bc-code-bg:    oklch(0.23 0.02 262);
+	--bc-table-head: oklch(0.32 0.04 258);
+	--bc-table-head-fg: var(--bc-ice);
+	--bc-table-alt:  oklch(0.30 0.018 262);
+	--bc-tick:       var(--bc-sky);
+	--bc-line:       oklch(0.40 0.02 262);
+	--bc-line-soft:  oklch(0.34 0.02 262);
+	--bc-wash:       oklch(0.30 0.02 262);
+}
+
+/* ===== Typography: sporting display headings ===== */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3 {
+	font-weight: 800;
+	letter-spacing: -0.018em;
+	line-height: 1.12;
+	overflow-wrap: anywhere;
+	text-wrap: balance;
+}
+
+.md-typeset h1 {
+	font-size: 2.1rem;
+	min-width: 0;
+}
+
+/* Fewer orphans in running prose (graceful no-op where unsupported). */
+.md-typeset p { text-wrap: pretty; }
+
+/* "Court-line" tick before every h2: a short bold navy bar, the spatial
+ * motif from the bracket courts. Section heads collapse cleanly on mobile. */
+.md-typeset h2 {
+	font-size: 1.5rem;
+	margin-top: 2.4em;
+	padding-top: 0.6em;
+	border-top: 1px solid var(--bc-line);
+}
+
+.md-typeset h2::before {
+	content: "";
+	display: block;
+	width: 2.2rem;
+	height: var(--bc-rule);
+	margin-bottom: 0.7rem;
+	background: var(--bc-tick);
+	border-radius: 2px;
+}
+
+.md-typeset h3 { font-size: 1.18rem; }
+
+/* ===== In-prose links: underline marks the link, navy hue is secondary ===== */
+.md-typeset a {
+	text-decoration: underline;
+	text-underline-offset: 0.15em;
+	text-decoration-thickness: 1px;
+	transition: text-decoration-thickness var(--bc-dur) var(--bc-ease-out);
+}
+.md-typeset a:hover { text-decoration-thickness: 2px; }
+
+/* Permalink anchors (¶), buttons, and image-only links are not prose links. */
+.md-typeset a.headerlink,
+.md-typeset .md-button { text-decoration: none; }
+.md-typeset a:has(img) { text-decoration: none; }
+
+/* ===== Buttons: sporting fills + outlines ===== */
+/* Shared shape, weight, and hover lift across the prose and hero contexts.
+ * Scoped to both (not bare .md-button) so it never bleeds into Material's
+ * own page chrome (nav, search). */
+.md-typeset .md-button,
+.bc-hero .md-button {
+	border-radius: var(--bc-radius-sm);
+	font-weight: 700;
+}
+.md-typeset .md-button:hover,
+.bc-hero .md-button:hover { transform: translateY(-2px); }
+
+.md-typeset .md-button {
+	border-width: 2px;
+	padding: 0.5em 1.25em;
+	transition: transform var(--bc-dur) var(--bc-ease-out),
+	            background-color var(--bc-dur) var(--bc-ease-out),
+	            box-shadow var(--bc-dur) var(--bc-ease-out);
+}
+.md-typeset .md-button:active { transform: translateY(0); }
+.md-typeset .md-button--primary {
+	background: var(--bc-navy);
+	border-color: var(--bc-navy);
+	color: var(--bc-white);
+}
+.md-typeset .md-button--primary:hover {
+	background: var(--bc-navy-deep);
+	border-color: var(--bc-navy-deep);
+	box-shadow: 0 8px 22px -10px var(--bc-navy);
+}
+
+/* ===== Home hero (rendered by overrides/home.html) ===== */
+.bc-hero {
+	/* Clean directional navy field (no corner glow, no decorative lines). */
+	background: linear-gradient(158deg, var(--bc-navy-700) 0%, var(--bc-navy) 46%, var(--bc-navy-deep) 100%);
+	color: var(--bc-ice);
+	position: relative;
+	overflow: hidden;
+}
+/* Hairline Aka accent: the single sanctioned red, a thin diagonal strike. */
+.bc-hero::after {
+	content: "";
+	position: absolute;
+	left: 0; right: 0; bottom: 0;
+	height: var(--bc-rule);
+	background: linear-gradient(90deg, var(--bc-aka) 0 22%, transparent 22%);
+}
+.bc-hero__inner {
+	max-width: 61rem;
+	margin: 0 auto;
+	padding: clamp(2.75rem, 6vw, 5.5rem) 1.2rem clamp(2.75rem, 5vw, 4.5rem);
+}
+.bc-hero__mark {
+	display: block;
+	width: clamp(56px, 9vw, 84px);
+	height: auto;
+	margin-bottom: 1.1rem;
+}
+.bc-hero__kicker {
+	font-size: 0.72rem;
+	font-weight: 800;
+	letter-spacing: 0.2em;
+	text-transform: uppercase;
+	color: var(--bc-sky);
+	margin: 0 0 0.9rem;
+}
+.bc-hero__title {
+	font-size: clamp(2.4rem, 6vw, 3.9rem);
+	font-weight: 800;
+	letter-spacing: -0.03em;
+	line-height: 1.02;
+	margin: 0;
+	color: var(--bc-white);
+	overflow-wrap: anywhere;
+	min-width: 0;
+	text-wrap: balance;
+}
+.bc-hero__lede {
+	font-size: clamp(1.02rem, 1.6vw, 1.2rem);
+	line-height: 1.5;
+	max-width: 40ch;
+	margin: 1.1rem 0 1.9rem;
+	color: var(--bc-lede);
+	text-wrap: pretty;
+}
+.bc-hero__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.8rem;
+}
+.bc-hero .md-button {
+	border: 2px solid var(--bc-sky);
+	color: var(--bc-white);
+	padding: 0.6em 1.4em;
+	transition: transform var(--bc-dur) var(--bc-ease-out),
+	            background-color var(--bc-dur) var(--bc-ease-out);
+}
+.bc-hero .md-button--primary {
+	background: var(--bc-white);
+	border-color: var(--bc-white);
+	color: var(--bc-navy);
+}
+.bc-hero .md-button--primary:hover { background: var(--bc-ice); border-color: var(--bc-ice); }
+.bc-hero .md-button:not(.md-button--primary):hover { background: var(--bc-sky-soft); }
+
+/* The home page's duplicate "Home" <h1> is suppressed in the template
+ * (overrides/home.html overrides the content block to skip Material's
+ * auto-injected page title), so no CSS hiding is needed here. */
+
+/* ===== Badge strip on the home page ===== */
+/* Scoped under .md-typeset so it outranks Material's paragraph margin without
+ * needing !important. */
+.md-typeset .bc-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem 0.75rem;
+	align-items: center;
+	margin: 1.6rem 0 0;
+}
+.md-typeset .bc-badges img { display: block; }
+
+/* ===== Tool cards (Material .grid.cards, restyled) ===== */
+/* Self-contained grid: declare display:grid + list-style:none ourselves rather
+ * than rely on Material's grid-cards bundle CSS. A local `mkdocs serve` may run
+ * an older Material whose grid-cards stylesheet is absent; without these the
+ * cards stack as a bulleted <ul>. minmax(min(100%, 16rem), 1fr) keeps a single
+ * card from overflowing below 256px. */
+.md-typeset .grid.cards > ul {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+	gap: 1rem;
+	margin: 1em 0;
+	padding: 0;
+	list-style: none;
+}
+.md-typeset .grid.cards > ul > li {
+	margin: 0;
+	border: 1px solid var(--bc-line);
+	border-top: var(--bc-rule) solid var(--bc-navy);
+	border-radius: var(--bc-radius);
+	background: var(--bc-card-bg);
+	padding: 1.25rem 1.25rem 1.4rem;
+	transition: transform var(--bc-dur) var(--bc-ease-out),
+	            box-shadow var(--bc-dur) var(--bc-ease-out),
+	            border-color var(--bc-dur) var(--bc-ease-out);
+}
+.md-typeset .grid.cards > ul > li:hover {
+	transform: translateY(-4px);
+	border-top-color: var(--bc-aka);
+	box-shadow: 0 14px 34px -18px var(--bc-navy);
+}
+.md-typeset .grid.cards > ul > li > hr {
+	margin: 0.7rem 0;
+	border: 0;
+	border-top: 1px solid var(--bc-line-soft);
+}
+.md-typeset .grid.cards > ul > li > p:first-child strong {
+	font-size: 1.05rem;
+	letter-spacing: -0.01em;
+}
+/* The mono command chip inside each card. */
+.md-typeset .grid.cards code {
+	background: var(--bc-wash);
+	color: var(--md-typeset-a-color);
+	font-weight: 600;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm);
+	padding: 0.12em 0.5em;
+}
+
+/* "Three ways to run a tournament" mode cards (.grid.cards.bc-modes): a LEFT
+ * rule instead of the top rule, so the modes read as a distinct band from the
+ * Tools cards rather than a second identical wall. */
+.md-typeset .bc-modes.cards > ul > li {
+	/* Wash fill (vs the Tools cards' plain surface) so the two card grids on the
+	 * home page read as separate bands rather than one repeated wall. */
+	background: var(--bc-wash);
+	border-top: 1px solid var(--bc-line);
+	border-left: var(--bc-rule) solid var(--bc-navy);
+}
+.md-typeset .bc-modes.cards > ul > li:hover {
+	border-top-color: var(--bc-line);
+	border-left-color: var(--bc-aka);
+}
+
+/* ===== Code blocks: navy-headed, crisp border ===== */
+.md-typeset pre > code {
+	border-radius: var(--bc-radius-sm);
+}
+.md-typeset .highlight {
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm);
+	overflow: hidden;
+}
+.md-typeset .highlight pre { margin: 0; }
+.md-typeset .highlight > pre > code { background: var(--bc-code-bg); }
+/* Inline code (outside cards). */
+.md-typeset :not(pre):not(.grid) > code {
+	border-radius: 4px;
+}
+
+/* ===== Tables: bold navy header, subtle zebra ===== */
+.md-typeset table:not([class]) {
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius-sm);
+	overflow: hidden;
+}
+.md-typeset table:not([class]) th {
+	background: var(--bc-table-head);
+	color: var(--bc-table-head-fg);
+	font-weight: 700;
+	letter-spacing: 0.01em;
+}
+.md-typeset table:not([class]) tr:nth-child(even) td {
+	background: var(--bc-table-alt);
+}
+
+/* Mobile table polish (preserved): keep command/flag tokens whole... */
+.md-typeset table:not([class]) td code,
+.md-typeset table:not([class]) th code {
+	white-space: nowrap;
+}
+/* ...and let the wrapper scroll horizontally past the content column. */
+.md-typeset__table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+}
+
+/* ===== Phone screenshots: render at device scale, not column width ===== */
+/* Portrait phone captures are saved at 2x; unconstrained they fill the whole
+ * content column and read as a wall. Tag them `{ .bc-phone }` (attr_list) to
+ * cap them near a real phone's logical width, centred, with a hairline frame
+ * so light UI chrome doesn't dissolve into the page surface. */
+.md-typeset img.bc-phone,
+.md-typeset video.bc-phone {
+	display: block;
+	/* Material's root font-size is 125% (1rem = 20px), so 20rem = 400px:
+	 * a large phone's logical width. */
+	max-width: min(20rem, 100%);
+	height: auto;
+	margin: 1em auto;
+	border: 1px solid var(--bc-line);
+	border-radius: var(--bc-radius);
+}
+
+/* On slate the hairline is invisible against a light capture and the white
+ * screenshot glares on the near-black page; drop the dead border and take
+ * the capture down a notch instead. */
+[data-md-color-scheme="slate"] .md-typeset img.bc-phone,
+[data-md-color-scheme="slate"] .md-typeset video.bc-phone {
+	border-color: transparent;
+	filter: brightness(0.92);
+}
+
+/* Any embedded video stays inside the content column (Material has no
+ * default video sizing). */
+.md-typeset video {
+	max-width: 100%;
+	height: auto;
+}
+
+/* Figure + caption around framed captures: the caption names which app
+ * screen the reader is looking at, so stacked screenshots stay skimmable. */
+.md-typeset figure.bc-fig {
+	display: block;
+	margin: 1.2em auto;
+	text-align: center;
+}
+.md-typeset figure.bc-fig > figcaption {
+	margin: 0.55em auto 0;
+	max-width: 26rem;
+	font-size: 0.72rem;
+	color: var(--md-default-fg-color--light);
+	text-wrap: pretty;
+}
+
+/* ===== Tabbed content: heavier labels. Material already colours the active
+ * tab + its underline with --md-accent-fg-color (navy), so no active-state
+ * rule is needed here. ===== */
+.md-typeset .tabbed-labels > label {
+	font-weight: 700;
+}
+
+/* ===== Admonitions: sporting left bar (in case docs add them) ===== */
+.md-typeset .admonition,
+.md-typeset details {
+	border-left-width: var(--bc-rule);
+	border-radius: var(--bc-radius-sm);
+}
+
+/* ===== Material nav tabs: bold, navy active underline ===== */
+.md-tabs__link { font-weight: 600; opacity: 1; }
+.md-tabs__item--active .md-tabs__link { font-weight: 800; }
+
+/* ===== Primary sidebar: section titles read as headings ===== */
+/* Groups are collapsible rows (navigation.sections is off, see mkdocs.yaml).
+ * Bold the group labels so a section title is identifiable at a glance next
+ * to plain page links; Material adds the expander caret on top of this. */
+.md-nav--primary .md-nav__item--nested > .md-nav__link {
+	font-weight: 700;
+}
+
+/* ===== Footer: slim navy strip ===== */
+.md-footer-meta { background: var(--bc-navy-deep); }
+
+/* ===== Mobile (≤ 768px): verified 320 / 375 / 414 / 768 ===== */
+@media screen and (max-width: 768px) {
+	.bc-hero__inner { padding-left: 1rem; padding-right: 1rem; }
+	.bc-hero__actions .md-button { flex: 1 1 auto; text-align: center; }
+	.md-typeset h1 { font-size: 1.85rem; }
+	.md-typeset h2 { font-size: 1.35rem; }
+}
+
+/* On phones the primary persona wants the three modes fast, so tighten the
+ * hero's vertical rhythm and shrink the crest to lift content toward the fold. */
+@media screen and (max-width: 480px) {
+	.bc-hero__inner { padding-top: 2rem; padding-bottom: 2rem; }
+	.bc-hero__mark { width: 48px; margin-bottom: 0.8rem; }
+	.bc-hero__lede { margin-bottom: 1.4rem; }
+}
+
+/* ===== Reduced motion ===== */
+@media (prefers-reduced-motion: reduce) {
+	.md-typeset .md-button,
+	.bc-hero .md-button,
+	.md-typeset .grid.cards > ul > li,
+	.md-typeset a {
+		transition-duration: 0.01ms;
+	}
+	.md-typeset .md-button:hover,
+	.bc-hero .md-button:hover,
+	.md-typeset .grid.cards > ul > li:hover {
+		transform: none;
+	}
+}

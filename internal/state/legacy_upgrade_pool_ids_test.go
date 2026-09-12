@@ -282,85 +282,101 @@ func TestLegacyPoolUpgrade_AlreadyStampedNotRewritten(t *testing.T) {
 	assert.Equal(t, matchesVerBefore, fresh.FileVersion("c1", "pool-matches.csv"), "no version bump for an untouched file")
 }
 
+// TestLegacyUpgrade_RepairsTheRosterItselfOnFirstRead: a genuinely legacy
+// competition -- participants.csv, pools.csv AND pool-matches.csv all
+// predating their id columns -- is now fully repaired by the FIRST read.
+//
+// It used not to be. The pools/pool-matches repairs COPY ids from the
+// roster, and the roster had none of its own, so the first pass found
+// nothing to copy and the operator had to apply the participant list before
+// anything could resolve. The roster repair now runs first in the same pass
+// (upgradeParticipantIDsLocked), and here it can prove what column 0 holds:
+// pools.csv and pool-matches.csv name these competitors, and those names sit
+// in column 0, so column 0 is a name and the rows are genuinely id-less.
+func TestLegacyUpgrade_RepairsTheRosterItselfOnFirstRead(t *testing.T) {
+	dir, _ := newLegacyUpgradeFixture(t)
+
+	participantsPath := filepath.Join(dir, "competitions", "c1", "participants.csv")
+	require.NoError(t, os.WriteFile(participantsPath, []byte("Rin Sato,Seibukan\nYuki Tanaka,Tobukan\n"), 0o600))
+	poolsPath := filepath.Join(dir, "competitions", "c1", "pools.csv")
+	require.NoError(t, os.WriteFile(poolsPath, []byte("Pool A,Rin Sato,0,,Seibukan,,\nPool A,Yuki Tanaka,1,,Tobukan,,\n"), 0o600))
+	matchesPath := filepath.Join(dir, "competitions", "c1", "pool-matches.csv")
+	require.NoError(t, os.WriteFile(matchesPath, []byte("Pool A,0,Rin Sato,Yuki Tanaka,Rin Sato,,,0,0,,completed,1,,,,1\n"), 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	roster, err := fresh.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.Len(t, roster, 2)
+	byName := map[string]string{}
+	for _, p := range roster {
+		require.NotEmpty(t, p.ID, "%s is identified by the first read, with no operator action", p.Name)
+		byName[p.Name] = p.ID
+	}
+	assert.Equal(t, "Rin Sato", roster[0].Name, "and the columns did not shift")
+	assert.Equal(t, "Seibukan", roster[0].Dojo)
+
+	pools, err := fresh.LoadPools("c1")
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	for _, pl := range pools[0].Players {
+		assert.Equal(t, byName[pl.Name], pl.ID, "the draw is repaired in the same pass")
+	}
+	assert.Empty(t, helper.PoolsMissingParticipantIDsMessage(pools))
+
+	matches, err := fresh.LoadPoolMatches("c1")
+	require.NoError(t, err)
+	require.Len(t, matches, 1)
+	assert.Equal(t, byName["Rin Sato"], matches[0].SideAID)
+	assert.Equal(t, byName["Yuki Tanaka"], matches[0].SideBID)
+	assert.Equal(t, byName["Rin Sato"], matches[0].WinnerID, "so the match counts in standings, which resolve by id only")
+	assert.Empty(t, engine.PoolMatchesMissingSideIDsMessage(matches))
+}
+
 // TestLegacyUpgrade_ReArmsOnParticipantsSave pins bc-pnum review blocker 1:
 // EnsureLegacyUpgraded's once-map is stamped per competition per process on
-// the FIRST read, and (pre-fix) only DeleteCompetition ever cleared it. But
-// the ids the pools.csv/pool-matches.csv repairs copy are minted when the
-// ROSTER is saved. For a GENUINELY legacy competition, participants.csv has
-// no ids either, so the first read finds nothing to copy, repairs nothing,
-// and marked the competition done for the life of the Store. The operator
-// then applies the participant list, exactly as the setup notice already
-// tells them to -- which mints the ids the repair needed all along -- but
-// pre-fix, pools.csv/pool-matches.csv were never repaired until the app
-// restarted. saveParticipantsNoLock now re-arms the gate on every roster
-// write, so the very next read retries. This test saves a legacy
-// competition whose roster ALSO has no ids, loads it (asserting nothing is
-// repaired), saves the roster so ids are minted, and loads again on the
-// SAME Store instance, asserting pools.csv AND pool-matches.csv are now
-// repaired -- no restart, no second Store.
+// the first read, and only DeleteCompetition used to clear it. A draw row
+// added for a competitor the first pass never saw would then wait for a
+// restart. saveParticipantsNoLock re-arms the gate on every roster write, so
+// the next read retries.
+//
+// The roster repair above does NOT retire this: it closes the case where the
+// ROSTER was the thing missing ids, while this closes the case where the
+// roster was fine and the DRAW gained a row afterwards.
 func TestLegacyUpgrade_ReArmsOnParticipantsSave(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)
 
-	// A genuinely legacy competition: participants.csv, pools.csv AND
-	// pool-matches.csv all predate their id columns.
-	participantsPath := filepath.Join(dir, "competitions", "c1", "participants.csv")
-	require.NoError(t, os.WriteFile(participantsPath, []byte("Rin Sato,Seibukan\nYuki Tanaka,Tobukan\n"), 0o600))
+	require.NoError(t, s.SaveParticipants("c1", []domain.Player{
+		{Name: "Rin Sato", Dojo: "Seibukan"},
+	}))
+	pools, err := s.LoadPools("c1") // first read: stamps the once-map
+	require.NoError(t, err)
+	require.Empty(t, pools)
+
+	// A second competitor joins, and a legacy-shaped pools.csv naming both
+	// is written behind the store's back.
+	loaded, err := s.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.NoError(t, s.SaveParticipants("c1", append(loaded, domain.Player{Name: "Yuki Tanaka", Dojo: "Tobukan"})))
 
 	poolsPath := filepath.Join(dir, "competitions", "c1", "pools.csv")
 	require.NoError(t, os.WriteFile(poolsPath, []byte("Pool A,Rin Sato,0,,Seibukan,,\nPool A,Yuki Tanaka,1,,Tobukan,,\n"), 0o600))
 
-	matchesPath := filepath.Join(dir, "competitions", "c1", "pool-matches.csv")
-	require.NoError(t, os.WriteFile(matchesPath, []byte("Pool A,0,Rin Sato,Yuki Tanaka,Rin Sato,,,0,0,,completed,1,,,,1\n"), 0o600))
-
-	// First read: participants.csv is ITSELF legacy, so there is nothing to
-	// copy an id FROM. EnsureLegacyUpgraded's first pass repairs nothing.
-	pools, err := s.LoadPools("c1")
-	require.NoError(t, err)
-	require.Len(t, pools, 1)
-	for _, p := range pools[0].Players {
-		assert.Empty(t, p.ID, "nothing to copy from a roster that is itself legacy")
-	}
-	matches, err := s.LoadPoolMatches("c1")
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Empty(t, matches[0].SideAID, "same reason: the roster has no ids yet")
-	assert.Empty(t, matches[0].WinnerID)
-
-	// The operator applies the participant list, exactly as the Overview
-	// notice says: a plain roster save, which mints an id for every id-less
-	// row (marshalParticipantsCSV, participants.csv's one write chokepoint).
-	loaded, err := s.LoadParticipants("c1", false)
-	require.NoError(t, err)
-	require.Len(t, loaded, 2)
-	require.NoError(t, s.SaveParticipants("c1", loaded))
-
+	// The roster save above re-armed the gate, so THIS read repairs the new
+	// pools.csv on the same Store -- no restart.
 	minted, err := s.LoadParticipants("c1", false)
 	require.NoError(t, err)
 	byName := map[string]string{}
 	for _, p := range minted {
-		require.NotEmpty(t, p.ID, "the roster save mints an id for every id-less row")
+		require.NotEmpty(t, p.ID)
 		byName[p.Name] = p.ID
 	}
-
-	// Load again, on the SAME Store: the save above must have re-armed the
-	// once-per-process gate (saveParticipantsNoLock's
-	// s.legacyUpgraded.Delete), so THIS read retries the repair against a
-	// roster that now carries ids -- no restart, no new Store.
-	repairedPools, err := s.LoadPools("c1")
+	repaired, err := s.LoadPools("c1")
 	require.NoError(t, err)
-	require.Len(t, repairedPools, 1)
-	for _, p := range repairedPools[0].Players {
+	require.Len(t, repaired, 1)
+	for _, p := range repaired[0].Players {
 		assert.Equal(t, byName[p.Name], p.ID, "pools.csv is repaired on the very next read after the roster save")
 	}
-	assert.Empty(t, helper.PoolsMissingParticipantIDsMessage(repairedPools))
-
-	repairedMatches, err := s.LoadPoolMatches("c1")
-	require.NoError(t, err)
-	require.Len(t, repairedMatches, 1)
-	assert.Equal(t, byName["Rin Sato"], repairedMatches[0].SideAID)
-	assert.Equal(t, byName["Yuki Tanaka"], repairedMatches[0].SideBID)
-	assert.Equal(t, byName["Rin Sato"], repairedMatches[0].WinnerID, "WinnerID is derived once SideAID resolves")
-	assert.Empty(t, engine.PoolMatchesMissingSideIDsMessage(repairedMatches))
+	assert.Empty(t, helper.PoolsMissingParticipantIDsMessage(repaired))
 }
 
 // TestLegacyUpgrade_SameNameWinnerLeftUnresolved pins two review rounds'

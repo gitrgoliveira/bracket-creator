@@ -1,7 +1,10 @@
 package state
 
 import (
+	"fmt"
 	"log"
+	"os"
+	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
@@ -220,6 +223,11 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// itself, so the roster this instance already loaded stays accurate for
 	// every step that follows it in the same call.
 	roster := &legacyUpgradeRoster{store: s, compID: compID}
+	// FIRST: every step below resolves against the roster's participant ids,
+	// so a roster that has none makes all of them no-ops.
+	if err := s.upgradeParticipantIDsLocked(compID, roster); err != nil {
+		log.Printf("state: legacy participant-id upgrade for %s: %v", compID, err)
+	}
 	if err := s.upgradeSeedRowsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy seed-row upgrade for %s: %v", compID, err)
 	}
@@ -365,6 +373,21 @@ func (r *legacyUpgradeRoster) rosterPlayers() ([]domain.Player, error) {
 // squads.yaml sibling of get()/rosterPlayers() above (bc-tmid pass 2). A
 // nil map with a nil error means "no squads recorded", which every caller
 // below treats as "nothing to resolve against".
+// reset drops what this pass has already read off disk, so the steps below
+// re-read it. Used after the participant-id repair changes how
+// participants.csv PARSES (the has_participant_ids flip): everything after
+// that point resolves against the roster, and a cached pre-flip parse is the
+// column-shifted one.
+func (r *legacyUpgradeRoster) reset() {
+	r.loaded = false
+	r.loadErr = nil
+	r.index = nil
+	r.players = nil
+	r.compLoaded = false
+	r.comp = nil
+	r.compErr = nil
+}
+
 func (r *legacyUpgradeRoster) squads() (map[string][]domain.TeamMember, error) {
 	if r.squadsLoaded {
 		return r.squadsData, r.squadsErr
@@ -1019,6 +1042,274 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 // so a save that blanks a team's Metadata (the Apply flow's shape) cannot
 // destroy members that were never migrated: see that call site's own
 // comment for why a load-only trigger is not enough.
+// rosterFirstColumn is what column 0 of participants.csv actually holds.
+// The whole participant-id repair turns on this one question, because a
+// legacy roster with no id column and a roster carrying non-UUID ids whose
+// has_participant_ids flag never landed are BYTE-IDENTICAL on disk: both
+// parse as "no ids", and the second one parses SHIFTED (id read as the name,
+// name read as the dojo). Minting over that shift rewrites it permanently
+// and destroys the id every other record points at, which is why this file's
+// header forbids a read-side roster rewrite without an unambiguous
+// discriminator. This type IS that discriminator, or says it has none.
+type rosterFirstColumn int
+
+const (
+	// rosterFirstColumnUnknown: nothing on disk can say. The roster is left
+	// exactly as it is -- the one honest answer, and the reason a
+	// competition still in setup with non-UUID ids keeps its file untouched.
+	rosterFirstColumnUnknown rosterFirstColumn = iota
+	rosterFirstColumnID
+	rosterFirstColumnName
+)
+
+// referencedParticipantKeys returns every participant id and every competitor
+// NAME that some OTHER file of this competition records, read through the
+// same locked readers the repairs below use (never the public Load*, which
+// would re-enter EnsureLegacyUpgraded and deadlock on the lock this caller
+// already holds).
+//
+// Both halves are evidence, and the name half is the stronger one: an id
+// reference proves column 0 is an id only when it matches, whereas a name
+// reference decides by WHICH column it lands in -- names in column 1 mean
+// column 0 is the id, names in column 0 mean column 0 is the name. That is
+// what lets this tell the two byte-identical files apart.
+//
+// Bracket placeholder sides ("Pool A-1st", "Winner of M1", byes) simply match
+// no roster row and fall out harmlessly.
+func (s *Store) referencedParticipantKeys(compID string) (ids, names map[string]bool) {
+	ids, names = map[string]bool{}, map[string]bool{}
+	add := func(set map[string]bool, v string) {
+		if v = strings.TrimSpace(v); v != "" {
+			set[v] = true
+		}
+	}
+	if pools, err := s.loadPoolsLocked(compID); err == nil {
+		for _, pool := range pools {
+			for _, p := range pool.Players {
+				add(ids, p.ID)
+				add(names, p.Name)
+			}
+		}
+	}
+	if matches, err := s.LoadPoolMatchesLocked(compID); err == nil {
+		for _, m := range matches {
+			add(ids, m.SideAID)
+			add(ids, m.SideBID)
+			add(ids, m.WinnerID)
+			add(names, m.SideA)
+			add(names, m.SideB)
+		}
+	}
+	if bracket, err := s.loadBracketLocked(compID); err == nil && bracket != nil {
+		for _, round := range bracket.Rounds {
+			for _, m := range round {
+				add(ids, m.SideAID)
+				add(ids, m.SideBID)
+				add(ids, m.WinnerID)
+				add(names, m.SideA)
+				add(names, m.SideB)
+			}
+		}
+		for _, id := range bracket.DrawOrder {
+			add(ids, id)
+		}
+	}
+	return ids, names
+}
+
+// classifyRosterFirstColumn answers the question rosterFirstColumn poses,
+// for a competition whose has_participant_ids flag is false.
+//
+// Tier 1 is shape: every non-empty column-0 value being a UUID is the SAME
+// discriminator the loader's own auto-detect already trusts, so agreeing
+// with it adds no new guess.
+//
+// Tier 2 is evidence from the competition's other files, and it is what
+// makes this repair safe rather than a coin flip. Anything else returns
+// Unknown and the caller leaves the file alone.
+func (s *Store) classifyRosterFirstColumn(compID string, rows [][]string) rosterFirstColumn {
+	col0, col1 := map[string]bool{}, map[string]bool{}
+	allUUID, any := true, false
+	for _, rec := range rows {
+		if len(rec) == 0 {
+			continue
+		}
+		v := strings.TrimSpace(rec[0])
+		if v == "" {
+			continue
+		}
+		any = true
+		col0[v] = true
+		if !uuidRE(v) {
+			allUUID = false
+		}
+		if len(rec) > 1 {
+			if n := strings.TrimSpace(rec[1]); n != "" {
+				col1[n] = true
+			}
+		}
+	}
+	if !any {
+		return rosterFirstColumnUnknown
+	}
+	if allUUID {
+		return rosterFirstColumnID
+	}
+
+	refIDs, refNames := s.referencedParticipantKeys(compID)
+	if intersects(refIDs, col0) {
+		return rosterFirstColumnID
+	}
+	inCol0, inCol1 := intersects(refNames, col0), intersects(refNames, col1)
+	switch {
+	case inCol1 && !inCol0:
+		return rosterFirstColumnID
+	case inCol0 && !inCol1:
+		return rosterFirstColumnName
+	}
+	return rosterFirstColumnUnknown
+}
+
+func intersects(a, b map[string]bool) bool {
+	for k := range a {
+		if b[k] {
+			return true
+		}
+	}
+	return false
+}
+
+// upgradeParticipantIDsLocked is the participants.csv storage-format repair,
+// and it runs FIRST in EnsureLegacyUpgraded because every step after it
+// resolves against the roster's ids: pools.csv, the pool-match and bracket
+// side ids, the squad keys, the lineup member ids. While the roster has none,
+// all of them copy an empty string and the competition's matches count for
+// nobody, since competitors are resolved BY ID.
+//
+// Two repairs, one question (see rosterFirstColumn):
+//
+//   - column 0 IS an id: the file was always right and only the flag is
+//     wrong -- the deferred has_participant_ids flip that failed after the
+//     roster save succeeded. Flip it. Nothing is minted and no id is
+//     replaced, which is the whole point of preferring this over a rewrite.
+//
+//   - column 0 is a NAME: a genuine pre-id roster. Mint an id per row and
+//     rewrite, using the roster as it PARSED, which for this case is the
+//     correct parse.
+//
+//   - neither provable: leave the file untouched and log it. The operator
+//     notice (helper.MissingParticipantIDsMessage) keeps naming the roster.
+func (s *Store) upgradeParticipantIDsLocked(compID string, roster *legacyUpgradeRoster) error {
+	comp, err := roster.competition()
+	if err != nil || comp == nil {
+		return err
+	}
+	if comp.HasParticipantIDs {
+		return nil // the flag is already authoritative; the loader strips column 0
+	}
+	rows, err := helper.ReadCSVFile(s.compPath(compID, "participants.csv"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	switch s.classifyRosterFirstColumn(compID, rows) {
+	case rosterFirstColumnID:
+		return s.repairParticipantIDFlagLocked(compID, comp, roster)
+	case rosterFirstColumnName:
+		return s.mintRosterParticipantIDsLocked(compID, comp, roster)
+	default:
+		log.Printf("state: %s: participants.csv carries no id column and nothing on disk can say whether column 0 is an id or a name; left untouched", compID)
+		return nil
+	}
+}
+
+// repairParticipantIDFlagLocked writes has_participant_ids=true for a roster
+// whose first column is proven to be an id. The bytes of participants.csv are
+// not touched: they were never wrong.
+func (s *Store) repairParticipantIDFlagLocked(compID string, comp *Competition, roster *legacyUpgradeRoster) error {
+	updated := *comp
+	updated.HasParticipantIDs = true
+	if _, err := s.saveCompetitionChangedLocked(&updated, s.directWrite); err != nil {
+		return fmt.Errorf("participant-id flag not repaired: %w", err)
+	}
+	// saveCompetitionChangedLocked invalidates the participant caches itself
+	// (the loader derives its id-strip decision from this flag), and the
+	// roster this pass already read is the PRE-flip, column-shifted parse.
+	roster.reset()
+	log.Printf("state: %s: participants.csv has an id column its has_participant_ids flag did not record; flag repaired, no id replaced", compID)
+	return nil
+}
+
+// mintRosterParticipantIDsLocked gives every row an id and rewrites the file.
+//
+// Writes DIRECTLY (marshalParticipantsCSV + atomicWrite) rather than through
+// SaveParticipants, because loading is deliberately tolerant where saving is
+// strict: ErrBlankDojo refuses every roster save precisely so a legacy roster
+// can be LOADED and repaired. Routing a load through the strict path would
+// refuse this for exactly the rosters that need it, and take the load with it.
+//
+// The column layout comes from the roster's own withZekken, never guessed.
+func (s *Store) mintRosterParticipantIDsLocked(compID string, comp *Competition, roster *legacyUpgradeRoster) error {
+	players, err := roster.rosterPlayers()
+	if err != nil || len(players) == 0 {
+		return err
+	}
+	stamped := make([]domain.Player, len(players))
+	copy(stamped, players)
+	minted := 0
+	for i := range stamped {
+		if helper.ParticipantIDMissing(stamped[i].ID) {
+			stamped[i].ID = newParticipantID()
+			minted++
+		}
+	}
+	if minted == 0 {
+		return nil
+	}
+	data, err := marshalParticipantsCSV(stamped, roster.withZekken)
+	if err != nil {
+		return err
+	}
+	if err := s.atomicWrite(s.compPath(compID, "participants.csv"), data, 0600); err != nil {
+		return err
+	}
+	s.invalidateParticipantCaches(compID)
+	roster.adoptStampedPlayers(stamped)
+
+	updated := *comp
+	updated.HasParticipantIDs = true
+	if _, err := s.saveCompetitionChangedLocked(&updated, s.directWrite); err != nil {
+		// The ids are on disk and every one is a UUID, so the loader's own
+		// auto-detect still reads them: the narrow window ParticipantIDsHint
+		// documents. Report it; the repair itself landed.
+		return fmt.Errorf("participant ids written but the has_participant_ids flag was not: %w", err)
+	}
+	comp.HasParticipantIDs = true
+	log.Printf("state: %s: assigned participant ids to %d roster row(s) written before the id column existed", compID, minted)
+	return nil
+}
+
+// adoptStampedPlayers replaces the roster this pass is working from after the
+// mint rewrites participants.csv. The instance is shared by every step below
+// and loaded at most once, so without this the five steps that resolve
+// AGAINST the roster would keep matching on the id-less copy read before the
+// stamp -- resolving nothing, for a whole extra load, with nothing logged.
+func (r *legacyUpgradeRoster) adoptStampedPlayers(players []domain.Player) {
+	r.loaded = true
+	r.loadErr = nil
+	r.players = players
+	r.index = nil
+	if len(players) > 0 {
+		r.index = domain.NewRosterIndex(players)
+	}
+}
+
 // mintedByCompetitor lets the PRE-WRITE call site (saveParticipantsNoLock)
 // migrate a stored row that has no id of its own, under the id that same
 // save is about to give it. It is keyed by helper.CompetitorKey's id-less

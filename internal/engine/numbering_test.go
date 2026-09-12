@@ -638,3 +638,65 @@ func TestTakenNumberPrefixesAndDefaultFor(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "KO", prefix, "re-deriving for b may reuse b's own prefix")
 }
+
+// TestMigrateNumberPrefixes_ConcurrentWriterKeepsTheStoredPrefix pins the
+// branch the migration's own guard exists for: a competition that gains a
+// prefix BETWEEN this pass's scan and its write.
+//
+// The guard declines, and what the loop does next used to be wrong in both
+// directions. It had already reserved the prefix it DERIVED, so that string
+// was held against a competition not carrying it and the next competition
+// was pushed one along; meanwhile the prefix actually stored went unreserved
+// (a later derivation could collide with it) and its competition never
+// reached the renumber pass, so its competitors kept no numbers at all.
+//
+// The race is reproduced deterministically rather than with goroutines: the
+// scan reads through Store's mtime-keyed cache, so priming that cache and
+// then writing config.md through a SECOND store with the mtime restored
+// leaves this store's scan seeing the stale prefix-less copy while
+// UpdateCompetitionChanged, which re-reads config.md under the lock, sees
+// the stored one. That is exactly the interleaving, with no sleeps.
+func TestMigrateNumberPrefixes_ConcurrentWriterKeepsTheStoredPrefix(t *testing.T) {
+	dir := t.TempDir()
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	eng := New(store)
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "kendo-open", Name: "Kendo Open", Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePools("kendo-open", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{Name: "A", Dojo: "D"}}}}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "kendo-open-2", Name: "Kendo Open", Format: state.CompFormatMixed, Status: state.CompStatusPools}))
+	require.NoError(t, store.SavePools("kendo-open-2", []helper.Pool{{PoolName: "Pool A", Players: []helper.Player{{Name: "B", Dojo: "D"}}}}))
+
+	// Prime this store's cache with the prefix-less copy the scan must see.
+	primed, err := store.LoadCompetition("kendo-open")
+	require.NoError(t, err)
+	require.Empty(t, primed.NumberPrefix)
+
+	cfg := filepath.Join(dir, "competitions", "kendo-open", "config.md")
+	before, err := os.Stat(cfg)
+	require.NoError(t, err)
+
+	other, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, other.SaveCompetition(&state.Competition{ID: "kendo-open", Name: "Kendo Open", Format: state.CompFormatMixed, Status: state.CompStatusPools, NumberPrefix: "Z"}))
+	require.NoError(t, os.Chtimes(cfg, before.ModTime(), before.ModTime()))
+
+	_, err = eng.MigrateNumberPrefixes()
+	require.NoError(t, err)
+
+	raced, err := other.LoadCompetition("kendo-open")
+	require.NoError(t, err)
+	assert.Equal(t, "Z", raced.NumberPrefix, "the concurrent writer's prefix stands; this pass never overwrites one")
+
+	next, err := other.LoadCompetition("kendo-open-2")
+	require.NoError(t, err)
+	assert.Equal(t, "K", next.NumberPrefix,
+		"the derived prefix was never taken, so the next competition gets it rather than being pushed along")
+
+	pools, err := other.LoadPools("kendo-open")
+	require.NoError(t, err)
+	require.Len(t, pools, 1)
+	require.Len(t, pools[0].Players, 1)
+	assert.Equal(t, "Z1", pools[0].Players[0].Number,
+		"the competition still reaches the renumber pass, under the prefix it actually holds")
+}

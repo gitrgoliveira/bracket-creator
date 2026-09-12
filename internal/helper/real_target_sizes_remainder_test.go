@@ -71,3 +71,27 @@ func TestRealTargetSizes_SumMatchesNumPlayers(t *testing.T) {
 		})
 	}
 }
+
+// TestRealTargetSizesNeverAliasesItsInput: both paths return storage the
+// caller can mutate without reaching back into the slice it passed in. The
+// no-remainder path used to return `base` itself, so whether the result
+// aliased depended entirely on whether the roster divided evenly -- a
+// difference invisible at the call site and reproducible only on the tidy
+// rosters, never the awkward ones.
+func TestRealTargetSizesNeverAliasesItsInput(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		base       []int
+		numPlayers int
+	}{
+		{"exact multiple (the path that used to alias)", []int{4, 4, 4}, 12},
+		{"with a remainder", []int{4, 4, 4}, 14},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := append([]int(nil), tc.base...)
+			got := realTargetSizes(base, tc.numPlayers)
+			got[0] += 100
+			assert.Equal(t, tc.base, base, "mutating the result must not reach the caller's slice")
+		})
+	}
+}

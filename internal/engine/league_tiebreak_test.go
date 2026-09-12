@@ -10,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 // setupTeamLeagueComp sets up a team-league competition with four teams
@@ -41,15 +42,10 @@ func setupTeamLeagueComp(t *testing.T, compID string, scenario string, opts ...f
 	require.NoError(t, store.SaveCompetition(comp))
 
 	teams := []string{"Alpha", "Beta", "Gamma", "Delta"}
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: func() []helper.Player {
-			ps := make([]helper.Player, len(teams))
-			for i, n := range teams {
-				ps[i] = helper.Player{Name: n}
-			}
-			return ps
-		}()},
-	}))
+	players := make([]helper.Player, len(teams))
+	for i, n := range teams {
+		players[i] = helper.Player{Name: n}
+	}
 
 	var matches []state.MatchResult
 	switch scenario {
@@ -110,6 +106,8 @@ func setupTeamLeagueComp(t *testing.T, compID string, scenario string, opts ...f
 	default:
 		t.Fatalf("unknown scenario %q", scenario)
 	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store
 }
@@ -284,15 +282,10 @@ func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
 
 	// 6 teams: Alpha > Beta > Gamma > Delta, then Epsilon and Zeta tied at 5th.
 	teams := []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"}
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: func() []helper.Player {
-			ps := make([]helper.Player, len(teams))
-			for i, n := range teams {
-				ps[i] = helper.Player{Name: n}
-			}
-			return ps
-		}()},
-	}))
+	players := make([]helper.Player, len(teams))
+	for i, n := range teams {
+		players[i] = helper.Player{Name: n}
+	}
 
 	// Build a match set where Alpha wins everything, Beta wins all except Alpha,
 	// Gamma wins all except Alpha/Beta, Delta wins all except Alpha/Beta/Gamma,
@@ -337,6 +330,8 @@ func TestLeagueTiebreakCandidates_BelowBandWithTopN4(t *testing.T) {
 			idx++
 		}
 	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	candidates, err := eng.LeagueTiebreakCandidates(compID)
@@ -433,8 +428,12 @@ func TestMaybeAutoCompletePools_TeamLeague_DHCompletedAfterOperatorInject(t *tes
 	require.NoError(t, err)
 	require.Equal(t, AutoCompleteAwaitingLeagueTiebreak, outcome)
 
-	// Operator injects DH for the tied group (Phase 3b path).
-	injected, injErr := eng.GenerateLeagueTiebreakMatches("league-operator-dh", []string{"Alpha", "Beta"})
+	// Operator injects DH for the tied group (Phase 3b path). Selection is
+	// id-only (operator ruling bc-pnum): the ids (deterministic via
+	// bctest.StampPlayerID, dojo "" since setupTeamLeagueComp's teams carry
+	// no dojo) must be passed.
+	injected, injErr := eng.GenerateLeagueTiebreakMatches("league-operator-dh",
+		[]string{bctest.StampPlayerID("Alpha", ""), bctest.StampPlayerID("Beta", "")})
 	require.NoError(t, injErr)
 	require.Len(t, injected, 1, "one DH match for a two-way tie")
 
@@ -451,6 +450,10 @@ func TestMaybeAutoCompletePools_TeamLeague_DHCompletedAfterOperatorInject(t *tes
 		if IsPoolDaihyosenMatchID(allMatches[i].ID) {
 			allMatches[i].Status = state.MatchStatusCompleted
 			allMatches[i].Winner = allMatches[i].SideA
+			// WinnerID too: resolveWinnerSide/dhCycleExists resolve the winner
+			// by id only (operator ruling bc-pnum), so a name-only Winner
+			// would read as an unresolved DH and block completion forever.
+			allMatches[i].WinnerID = allMatches[i].SideAID
 		}
 	}
 	require.NoError(t, store.SavePoolMatches("league-operator-dh", allMatches))
@@ -607,15 +610,10 @@ func TestLeagueTiebreakCandidates_LargeTieSpanningBand(t *testing.T) {
 	}))
 
 	teams := []string{"Alpha", "Beta", "Gamma", "Delta"}
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: func() []helper.Player {
-			ps := make([]helper.Player, len(teams))
-			for i, n := range teams {
-				ps[i] = helper.Player{Name: n}
-			}
-			return ps
-		}()},
-	}))
+	players := make([]helper.Player, len(teams))
+	for i, n := range teams {
+		players[i] = helper.Player{Name: n}
+	}
 
 	// All teams draw every match: everyone ends with 0 wins, 0 losses, 3 draws →
 	// perfectly tied across all criteria at positions 1–4.
@@ -638,6 +636,8 @@ func TestLeagueTiebreakCandidates_LargeTieSpanningBand(t *testing.T) {
 			idx++
 		}
 	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	candidates, err := eng.LeagueTiebreakCandidates(compID)
@@ -672,15 +672,10 @@ func TestLeagueTiebreakCandidates_BelowBandSharedRanks(t *testing.T) {
 			}))
 
 			teams := []string{"Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"}
-			require.NoError(t, store.SavePools(compID, []helper.Pool{
-				{PoolName: "Pool A", Players: func() []helper.Player {
-					ps := make([]helper.Player, len(teams))
-					for i, n := range teams {
-						ps[i] = helper.Player{Name: n}
-					}
-					return ps
-				}()},
-			}))
+			players := make([]helper.Player, len(teams))
+			for i, n := range teams {
+				players[i] = helper.Player{Name: n}
+			}
 
 			// Top 4 have clear ordering (each beats all below); Epsilon/Zeta draw each
 			// other and lose all others → both stuck at position 5 (below the band).
@@ -712,6 +707,8 @@ func TestLeagueTiebreakCandidates_BelowBandSharedRanks(t *testing.T) {
 					idx++
 				}
 			}
+			bctest.StampIDs(players, ms)
+			require.NoError(t, store.SavePools(compID, []helper.Pool{{PoolName: "Pool A", Players: players}}))
 			require.NoError(t, store.SavePoolMatches(compID, ms))
 
 			candidates, err := eng.LeagueTiebreakCandidates(compID)

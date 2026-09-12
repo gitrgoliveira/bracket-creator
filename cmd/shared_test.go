@@ -76,10 +76,12 @@ func TestProcessEntries_BlankName(t *testing.T) {
 			entries: []string{"John Doe, Dojo A", "Jane Smith, Dojo B"},
 		},
 		{
-			// The CLI reads a missing dojo as NA; a name-only entry is
-			// documented behaviour and must not be rejected here.
-			name:    "name-only entry still passes",
-			entries: []string{"Bob Brown"},
+			// bc-pnum made the dojo column required on this path too
+			// (CreatePlayersFromRecords requireDojo=true), so a name-only
+			// entry is refused, not read as a placeholder dojo.
+			name:        "name-only entry is rejected for its missing dojo",
+			entries:     []string{"Bob Brown"},
+			errContains: "entry 1: missing dojo",
 		},
 		{
 			// A whitespace-only entry is dropped as a blank line before
@@ -101,4 +103,56 @@ func TestProcessEntries_BlankName(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+// TestResolveNumberPrefix pins bc-pnum A10: the ONE derivation shared by
+// create-pools and create-playoffs, which used to each carry a byte-identical
+// unvalidated copy -- an explicit --number-prefix was used verbatim, so
+// "SENIORS1" (well past the length cap) was accepted, and " K " kept its
+// surrounding whitespace baked into every competitor's tag.
+func TestResolveNumberPrefix(t *testing.T) {
+	t.Run("an explicit value is trimmed", func(t *testing.T) {
+		got, err := resolveNumberPrefix(" K ", "Kendo Open")
+		require.NoError(t, err)
+		assert.Equal(t, "K", got)
+	})
+
+	t.Run("an over-long explicit value errors instead of being accepted verbatim", func(t *testing.T) {
+		_, err := resolveNumberPrefix("SENIORS1", "Senior Open")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "SENIORS1")
+	})
+
+	// bc-pnum D2 (correction over the original finding): "Senior Men" has TWO
+	// words, so its initials are "SM", but with nothing else taken the
+	// initials loop returns the BARE first initial "S" immediately -- it
+	// never needs to escalate to "SM". The shortest non-taken candidate,
+	// not the full initials, is what a CLI run with no --number-prefix gets.
+	t.Run("empty value derives from title-prefix: the shortest non-taken candidate, not the full initials", func(t *testing.T) {
+		got, err := resolveNumberPrefix("", "Senior Men")
+		require.NoError(t, err)
+		assert.Equal(t, "S", got)
+	})
+
+	t.Run("empty value and empty title-prefix falls back to the kendo default", func(t *testing.T) {
+		got, err := resolveNumberPrefix("", "")
+		require.NoError(t, err)
+		assert.Equal(t, "K", got)
+	})
+
+	// bc-pnum review: the length check counted BYTES while the error
+	// message says "characters", so a 2-character multi-byte prefix like
+	// "ÖÖ" (4 UTF-8 bytes) was wrongly refused as too long even though
+	// MaxNumberPrefixLen is 3 CHARACTERS.
+	t.Run("a multi-byte prefix is measured in characters, not bytes", func(t *testing.T) {
+		got, err := resolveNumberPrefix("ÖÖ", "")
+		require.NoError(t, err)
+		assert.Equal(t, "ÖÖ", got)
+	})
+
+	t.Run("a multi-byte prefix over the character cap is still refused", func(t *testing.T) {
+		_, err := resolveNumberPrefix("ÖÖÖÖ", "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ÖÖÖÖ")
+	})
 }

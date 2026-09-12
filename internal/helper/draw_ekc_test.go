@@ -384,7 +384,7 @@ func TestSeedsLandInD6HalvesAndQuarters(t *testing.T) {
 					players[s-1].Seed = s
 				}
 
-				ordered := PoolSeeding(players, numPools, courts)
+				ordered := referencePoolSeeding(players, numPools, courts)
 				pools, err := CreatePools(ordered, 4, false)
 				require.NoError(t, err)
 				pools = ReorderPoolsForCourts(pools, courts)

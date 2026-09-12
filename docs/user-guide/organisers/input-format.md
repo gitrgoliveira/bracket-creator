@@ -11,7 +11,7 @@ Luke Rodriguez, Team Beta
 Michael Lewis, Team Gamma
 ```
 
-The first column is the participant name. The second column is the dojo or team affiliation. **Both are needed**: a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. The tournament app rejects a row with no dojo. The command line does not: a row with only a name is read with the dojo `NA`, so every such row counts as one shared dojo for the draw. Further columns are accepted and kept as metadata, such as a dan grade; they do not affect the draw.
+The first column is the participant name. The second column is the dojo or team affiliation. **Both are required**: a competitor is identified by name and dojo together, and two competitors who share a name can only be told apart by it. A row with no dojo is rejected on every path: the command line, the legacy web UI, archive import, and the tournament app. Further columns are accepted and kept as metadata, such as a dan grade; they do not affect the draw.
 
 ## Zekken display name
 

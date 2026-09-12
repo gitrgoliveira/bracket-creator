@@ -17,9 +17,20 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf } from './result_slot.jsx';
+import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
+import { sideLookupKey } from './competitor_identity.jsx';
+
+// bc-pnum: inline style for the squad member label riding beside a bout
+// row's fighter name (BoutSubRow below), the public twin of
+// admin_scoring_team.jsx's identical SQUAD_MEMBER_LABEL_STYLE badge. Kept
+// local (not imported) since importing from an admin_*.jsx module into this
+// PUBLIC-surface shared component is exactly the layering lineup_resolver.jsx's
+// own header warns against for admin_lineup.jsx specifically -- the same
+// reasoning applies to any admin panel. `em` sizing (rather than a fixed px)
+// scales with the name it rides beside across variant="card"/"tv".
+const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75, marginRight: "0.35em" };
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -33,9 +44,20 @@ export function boutHansokuMark(foulCount) {
 // useTeamLineups: fetch per-match lineups for both sides of a team match.
 // Unifies the former viewer useTeamLineups + display useTvTeamLineups: pass the
 // competition explicitly when available (TV/SSE), else it falls back to
-// match.compId (viewer). Returns { lineupA, lineupB }; degrades to null/null
-// when window.API is unavailable (public surfaces) → callers fall back to bout
-// numbers.
+// match.compId (viewer). Returns { lineupA, lineupB, squadA, squadB };
+// degrades to null/null/[]/[] when window.API is unavailable (public
+// surfaces) → callers fall back to bout numbers and no squad labels.
+//
+// squadA/squadB (bc-pnum: extend the squad member label to the public
+// surfaces) are resolved from the SAME source the players list already
+// comes from: the passed `competition.squads` when present (TvDisplay /
+// StreamingOverlay carry the aggregate item, which now carries it), else
+// the `fetchCompetitionDetails` fallback fetch's own top-level `squads`
+// (the viewer card, which never gets a `competition` prop at all). Both are
+// the identical {teamParticipantId: [{id,index,name}]} shape the public
+// viewer payload carries only for a team competition, so an individual
+// competition (or a payload predating this field) simply yields {} and
+// every lookup below degrades to [].
 //
 // `roundIndex` (optional, 0-based) is the authoritative round for the
 // round-scoped lineup fallback. Callers that know the bracket round (the TV
@@ -45,12 +67,24 @@ export function boutHansokuMark(foulCount) {
 export function useTeamLineups(match, competition, roundIndex) {
   const [lineupA, setLineupA] = useSB(null);
   const [lineupB, setLineupB] = useSB(null);
+  const [squadA, setSquadA] = useSB([]);
+  const [squadB, setSquadB] = useSB([]);
   const [lineupVersion, setLineupVersion] = useSB(0);
 
   const compId = (competition && competition.id) || match?.compId;
   const matchId = match?.id;
-  const sideAId = match?.sideA?.id || match?.sideA?.name || (typeof match?.sideA === "string" ? match?.sideA : "");
-  const sideBId = match?.sideB?.id || match?.sideB?.name || (typeof match?.sideB === "string" ? match?.sideB : "");
+  // sideLookupKey (competitor_identity.jsx) already prefers side.id over
+  // side.name (a real id decides, since a UUID never coincidentally equals
+  // another team's display name -- resolveLineupTeamId's bare-string branch
+  // then either confirms it against the roster by name or, finding
+  // nothing, returns it unchanged). Deliberately NOT passing the side
+  // object straight through: resolveSide (api_serializers.jsx) never
+  // invents an id from the name -- a side with no real id at all (the
+  // player map lookup misses entirely) carries id "" -- so the object
+  // form's id-decides branch would stop at that empty id and never fall
+  // through to the name lookup the string key still performs.
+  const sideAId = sideLookupKey(match?.sideA);
+  const sideBId = sideLookupKey(match?.sideB);
 
   // Subscribe to lineup-updated window CustomEvent (dispatched by app.jsx when
   // the backend emits an SSE lineup_updated for this competition). Incrementing
@@ -72,6 +106,8 @@ export function useTeamLineups(match, competition, roundIndex) {
     // into the next render (Copilot review: stale lineup state).
     setLineupA(null);
     setLineupB(null);
+    setSquadA([]);
+    setSquadB([]);
     if (!compId || !matchId || !window.API) return undefined;
     let cancelled = false;
     (async () => {
@@ -81,6 +117,11 @@ export function useTeamLineups(match, competition, roundIndex) {
       let players = (competition && competition.players && competition.players.length)
         ? competition.players
         : [];
+      // squads (bc-pnum): prefer the passed competition's own squads map
+      // (present only for a team competition); only fall through to the
+      // detail fetch's squads when the caller passed no competition at all
+      // (the viewer card) or it carried no squads of its own.
+      let squadsMap = (competition && competition.squads) || null;
       if (!players.length) {
         try {
           const detail = await window.API.fetchCompetitionDetails(compId);
@@ -89,6 +130,7 @@ export function useTeamLineups(match, competition, roundIndex) {
             (detail && detail.players && detail.players.length ? detail.players : null)
             || (detail && detail.config && detail.config.players)
             || [];
+          if (!squadsMap) squadsMap = (detail && detail.squads) || null;
         } catch (_e) {
           console.warn("useTeamLineups: competition fetch failed", _e);
         }
@@ -118,13 +160,16 @@ export function useTeamLineups(match, competition, roundIndex) {
       if (cancelled) return;
       if (teamAId) setLineupA(la);
       if (teamBId) setLineupB(lb);
+      const squads = squadsMap || {};
+      if (teamAId) setSquadA(squads[teamAId] || []);
+      if (teamBId) setSquadB(squads[teamBId] || []);
     })();
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round
     // change on a reused match id must re-run the effect.
   }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion]);
 
-  return { lineupA, lineupB };
+  return { lineupA, lineupB, squadA, squadB };
 }
 
 // Real ippon letters for a side (realIppons, the shared leaf filter), capped
@@ -137,20 +182,50 @@ function ipponLetters(arr) {
 // subWinnerSides: does sub.winner name the shiro or aka side? The ONE
 // cross-level chain (sub side → daihyosen team alias → match-level side),
 // shared by centreMarks' marks and teamIVPW's IV attribution so the bout rows
-// and the summary row can never disagree about who a winner names. A winner
-// matching BOTH sides is INVALID data (team names are unique by rule; only
-// drifted or hand-edited files can produce it) and resolves defensively to
-// AKA — the side-A-first order Go uses everywhere for the identical case
-// (isWinForSide in engine/scoring.go, TeamResultFrom in state/team_result.go,
-// SideMarksLR in export/suffix.go) — so the on-screen rows, the IV summary,
-// the server standings and the Excel export all agree on the SAME arbitrary
-// side. Never both: asserting two winners was the bug; disagreeing with the
-// server's numbers was the fix's bug. The truth is not in the data
-// (arbitrary-but-consistent, see api_serializers.jsx).
+// and the summary row can never disagree about who a winner names. Never
+// both: asserting two winners was the bug; disagreeing with the server's
+// numbers was the fix's bug.
+//
+// A winner matching BOTH sides splits into two cases that used to be one.
+// At MATCH level a team name is unique by rule, so a winner matching both is
+// drifted or hand-edited data and still resolves defensively to AKA, the
+// side-A-first order Go uses for the identical case (isWinForSide in
+// engine/scoring.go, SideMarksLR in export/suffix.go). At SUB-BOUT level two
+// opposing fighters may legally share a display name, so that same order was
+// a coin flip on ordinary valid data: such a row now resolves to NEITHER
+// side unless the member ids settle it (operator ruling bc-pnum, mirroring
+// state.SubBoutWinnerSide). Either way the on-screen rows, the IV summary,
+// the server standings and the Excel export agree with each other.
 function subWinnerSides(sub, matchSideA, matchSideB) {
+  // MEMBER IDS FIRST (operator ruling bc-pnum, "this should only use the
+  // IDs"), mirroring state.SubBoutWinnerSide: the score editor stamps the
+  // winner's member id from the SIDE it was told won, so three ids present
+  // and the winner's matching one of them settles the row without consulting
+  // a single name. Asked through attributeWinnerSide (result_slot.jsx), the
+  // declared JS twin of domain.AttributeWinnerSide, rather than re-spelling
+  // its id branch here: a winner id matching neither side returns null and
+  // falls through to the names, exactly as the Go owner does.
+  const side = attributeWinnerSide(subBoutAttribution(sub));
+  if (side === "a") return { shiro: false, aka: true };
+  if (side === "b") return { shiro: true, aka: false };
   const w = sub.winner;
-  const aka = !!(w && (w === sub.sideA || w === sub.teamA || (matchSideA && w === matchSideA)));
-  const shiro = !aka && !!(w && (w === sub.sideB || w === sub.teamB || (matchSideB && w === matchSideB)));
+  // Two opposing fighters may legally share a display name. When they do and
+  // no id decided above, NOTHING here can say who won, so the row names
+  // neither side rather than taking the aka-first order below -- which would
+  // be a coin flip, and used to be one. `ambiguous` is how teamIVPW tells
+  // this apart from an ordinary winner-less row, whose IV it still infers
+  // from the scoreline.
+  if (sub.sideA && sub.sideA === sub.sideB) return { shiro: false, aka: false, ambiguous: true };
+  // The fighter-name arms are repeated here rather than left to the shared
+  // owner above, because attributeWinnerSide's id branch SHORT-CIRCUITS: a row
+  // carrying all three ids whose winner id matches neither side returns null
+  // and never reaches its own name tier. That row is drifted data whose NAMES
+  // still tell the two fighters apart, so it is attributed rather than
+  // dropped -- exactly what state.SubBoutWinnerSide does for the identical
+  // case, and the reason this mirror cannot stop at the team aliases. The
+  // shared-name row is already gone above, so no coin flip can reach here.
+  const aka = !!(w && (w === sub.teamA || (matchSideA && w === matchSideA) || (sub.sideA && w === sub.sideA)));
+  const shiro = !aka && !!(w && (w === sub.teamB || (matchSideB && w === matchSideB) || (sub.sideB && w === sub.sideB)));
   return { shiro, aka };
 }
 
@@ -246,9 +321,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   const markable = (sub.decidedByHantei && hanteiTied(sub.ipponsA, sub.ipponsB)) || noIppons;
   // Which side the result mark belongs to (sideB = shiro/left, sideA = aka/right),
   // via subWinnerSides: the one cross-level chain, shared with teamIVPW, that
-  // falls back sub-level side → daihyosen team alias → match-level side for the
-  // quick-score bouts with empty sub.sideA/sideB, and resolves a both-sides
-  // match aka-first to align every JS surface with the Go standings/export.
+  // reads the row's member ids first and otherwise falls back sub-level side →
+  // daihyosen team alias → match-level side for the quick-score bouts with
+  // empty sub.sideA/sideB. Two fighters sharing a display name get NO mark
+  // unless an id settles them (bc-pnum), which is what keeps every JS surface
+  // aligned with the Go standings and the export.
   const { shiro: winShiro, aka: winAka } = markable
     ? subWinnerSides(sub, matchSideA, matchSideB)
     : { shiro: false, aka: false };
@@ -287,6 +364,11 @@ function centreMarks(sub, matchSideA, matchSideB) {
   );
 }
 
+// A squad the caller did not supply. Hoisted out of the default prop because a
+// literal there is a NEW array on every render, so every consumer keyed on the
+// prop's identity re-runs for a value that never changed.
+const NO_SQUAD = [];
+
 // BoutSubRow: one FIK bout row: Shiro name | ippon slots · vs · ippon slots | Aka name.
 // TV sizing is driven by the parent `.msb--tv` CSS selector, not a prop.
 // state: "now" | "queued" | "done" (TV highlight only). Names come from the
@@ -298,7 +380,16 @@ function centreMarks(sub, matchSideA, matchSideB) {
 // Lineup fallback is used ONLY for the index-0 bootstrap (the initial
 // senpo-vs-senpo pairing); later rows must never show position-N lineup
 // names because kachinuki bouts are winner-stays, not position-keyed.
-export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki }) {
+//
+// squadA/squadB (bc-pnum: extend the squad member label to the public
+// surfaces, operator ruling "visible everywhere, together with the name")
+// are the team's squad member lists ({id,index,name}[], from useTeamLineups);
+// numberA/numberB are the team's own competitor numbers (side.number, the
+// SAME field withNumber already reads). All four default to "no label"
+// (empty array / empty string) so a caller that never adopted squads (an
+// individual competition, or a host that has not been updated yet) renders
+// exactly as before.
+export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki, squadA = NO_SQUAD, squadB = NO_SQUAD, numberA = "", numberB = "" }) {
   const subSideName = (v) => {
     const n = nameOf(v);
     if (!n) return "";
@@ -316,12 +407,31 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // server-driven kachinuki bout, so never blank its lineup pick (the DH row is
   // rendered without the kachinuki prop today, but !isDH keeps this correct if
   // a caller ever passes it).
-  const lineupNameFor = (lu) =>
-    kachinukiHidesLineupPosition(kachinuki, isDH, index) ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
+  const lineupHidden = kachinukiHidesLineupPosition(kachinuki, isDH, index);
+  const lineupNameFor = (lu) => lineupHidden ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
   const resolveSide = (subSide, lu) =>
     resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);
   const akaName = resolveSide(sub && sub.sideA, lineupA);
+  // The squad member label rides beside the SAME name resolved above, via the
+  // ONE shared composer (resolveBoutSideSquadLabel, lineup_resolver.jsx): the
+  // member id comes from the SAME kachinuki/fixed-format tier the name used
+  // (sub.sideBMemberId/sub.sideAMemberId are the server-recorded ids,
+  // pickMemberIdFromLineup the lineup-pinned ones, gated on the SAME
+  // lineupHidden flag as the name), falling back to matching the resolved
+  // NAME against the squad when no id resolved at all.
+  const shiroLabel = resolveBoutSideSquadLabel({
+    isKachinuki: kachinuki, isDaihyosen: isDH,
+    existingMemberId: (sub && sub.sideBMemberId) || "",
+    lineupMemberId: lineupHidden ? "" : pickMemberIdFromLineup(lineupB, index, teamSize),
+    squad: squadB, name: shiroName, teamNumber: numberB,
+  });
+  const akaLabel = resolveBoutSideSquadLabel({
+    isKachinuki: kachinuki, isDaihyosen: isDH,
+    existingMemberId: (sub && sub.sideAMemberId) || "",
+    lineupMemberId: lineupHidden ? "" : pickMemberIdFromLineup(lineupA, index, teamSize),
+    squad: squadA, name: akaName, teamNumber: numberA,
+  });
   // TV sizing comes from the parent `.msb--tv .msb-row` selector, so no
   // per-row --tv modifier is needed here.
   const cls = "msb-row"
@@ -330,9 +440,15 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     + (isDH ? " msb-row--dh" : "");
   return (
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
-      <span className="msb-name" data-testid="sub-shiro-name">{shiroName}</span>
+      <span className="msb-name">
+        {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
+        <span data-testid="sub-shiro-name">{shiroName}</span>
+      </span>
       {centreMarks(sub, matchSideA, matchSideB)}
-      <span className="msb-name msb-name--aka" data-testid="sub-aka-name">{akaName}</span>
+      <span className="msb-name msb-name--aka">
+        {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-a">{akaLabel}</span>}
+        <span data-testid="sub-aka-name">{akaName}</span>
+      </span>
     </div>
   );
 }
@@ -348,18 +464,23 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
     const a = ipponLetters(s.ipponsA).filter(Boolean).length;
     const b = ipponLetters(s.ipponsB).filter(Boolean).length;
     pwShiro += b; pwAka += a;
-    // Mirror Go backend pattern (scoring.go): check match-level side name
-    // first, then sub-level side name (guarded against "" == "" false
-    // positive). Quick-scored bouts have empty sub-level sides.
-    // IV attribution runs through subWinnerSides — the SAME resolver the bout
-    // rows use, aka-first on a both-sides match like Go's isWinForSide — so
-    // rows, summary, server standings and the Excel export all agree. The
-    // ippon comparison below still decides where the winner names nobody.
+    // IV attribution runs through subWinnerSides, the SAME resolver the bout
+    // rows use and the mirror of state.SubBoutWinnerSide: member ids first,
+    // then the match-level side name, then the sub-level one (guarded against
+    // an "" == "" false positive, since quick-scored bouts have empty
+    // sub-level sides). Rows, summary, server standings and the Excel export
+    // therefore all agree. The ippon comparison below still decides where the
+    // winner names nobody -- but NOT where the two fighters share a name, see
+    // the ambiguous branch.
     const wsides = subWinnerSides(s, matchSideA, matchSideB);
     const isAkaWin = wsides.aka;
     const isShiroWin = wsides.shiro;
     if (isAkaWin) ivAka++;
     else if (isShiroWin) ivShiro++;
+    // An unattributable same-name bout counts for NEITHER side, matching the
+    // server (state.SubBoutWinnerSide). The scoreline fallback below must not
+    // step in here: it would hand the summary an IV the standings do not have.
+    else if (wsides.ambiguous) { /* no IV either side */ }
     else if (b > a) ivShiro++;
     else if (a > b) ivAka++;
   }
@@ -476,11 +597,28 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
 // kachinuki (boolean, default false): when true the match uses winner-stays
 // ordering. Row count is driven by recorded bouts (never padded to teamSize)
 // and name resolution is server-bout-first (see BoutSubRow).
-export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki }) {
+//
+// squadA/squadB/numberA/numberB (bc-pnum): threaded straight through to every
+// BoutSubRow, which is where the label is actually composed and rendered;
+// see that component's header for the props' shape and defaults.
+export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamSize, showDH, variant, shiroName, akaName, matchSideA, matchSideB, isRunning, kachinuki, squadA, squadB, numberA, numberB }) {
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
-  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPW(subResults, matchSideA, matchSideB);
+  // THE SERVER'S FIGURE WINS (operator ruling: there can be only one source of
+  // truth, and it is the data on the server). Go attaches teamResult to every
+  // team match on both marshal paths, computed by the same state.TeamResultFrom
+  // that feeds the standings, so taking it here makes this row, the bracket
+  // card (teamIVPWScore, bracket.jsx, which already did), the pool table and
+  // the Excel export one number rather than four agreeing ones.
+  //
+  // teamIVPW stays as the fallback for a payload that predates the field, and
+  // is the mirror the summary used to derive from unconditionally. Note what
+  // rides on these four values below: `tied` gates whether the daihyosen row
+  // renders at all, so this is the structural answer, not just a label.
+  const { ivShiro, ivAka, pwShiro, pwAka } = teamResult && typeof teamResult === "object"
+    ? { ivShiro: teamResult.shiroIV || 0, ivAka: teamResult.akaIV || 0, pwShiro: teamResult.shiroPW || 0, pwAka: teamResult.akaPW || 0 }
+    : teamIVPW(subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts: equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a
@@ -554,7 +692,8 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
           lineup name when present, else the bout number (mp-13y #4/#6). */}
       {Array.from({ length: rowCount }, (_, i) => (
         <BoutSubRow key={i} sub={regular[i] || {}} index={i} lineupA={lineupA} lineupB={lineupB}
-          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki} />
+          teamSize={teamSize} isDH={false} state={rowState(i)} matchSideA={matchSideA} matchSideB={matchSideB} kachinuki={!!kachinuki}
+          squadA={squadA} squadB={squadB} numberA={numberA} numberB={numberB} />
       ))}
 
       {/* Rep bout (knockout tie only). No separate "DAIHYOSEN" text banner:
@@ -567,7 +706,8 @@ export function TeamScoreboard({ subResults, lineupA, lineupB, teamSize, showDH,
       {renderDH && (dhSub
         ? <BoutSubRow sub={{ ...dhSub, teamB: shiroName, teamA: akaName }}
             index={regular.length} lineupA={lineupA} lineupB={lineupB}
-            teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB} />
+            teamSize={teamSize} isDH={true} state={isRunning ? "now" : "done"} matchSideA={matchSideA} matchSideB={matchSideB}
+            squadA={squadA} squadB={squadB} numberA={numberA} numberB={numberB} />
         : <div className="msb-dh-pending" data-testid="tvd-dh-pending">Daihyosen pending</div>)}
     </div>
   );

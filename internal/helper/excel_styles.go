@@ -25,6 +25,7 @@ const (
 	styleText                 styleKey = "text"
 	styleNameID               styleKey = "name_id"
 	styleNameIDPosition       styleKey = "name_id_position"
+	styleNameIDPositionStack  styleKey = "name_id_position_stacked"
 	styleTime                 styleKey = "time"
 	styleDuration             styleKey = "duration"
 	styleUnlockedText         styleKey = "unlocked_text"
@@ -348,6 +349,9 @@ func buildNameIDStyle(f *excelize.File) int {
 		Alignment: &excelize.Alignment{
 			Horizontal: "center",
 			Vertical:   "center",
+			// The name column has a fixed width (namesToPrintNameColWidth); a
+			// long name shrinks into it rather than overflowing or wrapping.
+			ShrinkToFit: true,
 		},
 		Font: &excelize.Font{Family: "Calibri", Bold: false, Color: "000000", Size: 110},
 		Border: []excelize.Border{
@@ -365,15 +369,43 @@ func getNameIDPositionStyle(f *excelize.File) int {
 }
 
 // buildNameIDPositionStyle creates a large, bold style for the position-number
-// row in "Names to Print" column A.  The font size matches the Tags sheet so
-// the number is clearly visible when printed.
+// row in "Names to Print" column A, for a one-letter (or empty) number
+// prefix that prints on a SINGLE line (bc-pnum operator ruling: "K20" stays
+// one line, "KO20" stacks -- see getNameIDPositionStackedStyle below). The
+// font size matches the Tags sheet so the number is clearly visible when
+// printed.
+//
+// ShrinkToFit (bc-pnum A9): a 4- or 5-character number (a one-letter prefix
+// plus a multi-digit counter, e.g. "K1234") rasterised byte-identically to
+// shorter numbers in the same column ("K1230".."K1234" were indistinguishable
+// in the reproduction) because the cell clipped rather than shrinking the
+// glyphs to fit. No width/font change is needed here (unlike the Tags
+// sheet): this column's width already comes from setupNamesToPrintLayout, so
+// this flag alone is the fix.
 func buildNameIDPositionStyle(f *excelize.File) int {
-	style := mustNewStyle(f, &excelize.Style{
-		Alignment: &excelize.Alignment{
-			Horizontal: "center",
-			Vertical:   "center",
-		},
-		Font: &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: 100},
+	return buildNameIDPositionStyleFor(f, false, 0)
+}
+
+// buildNameIDPositionStyleFor holds the border/font/alignment block shared
+// by buildNameIDPositionStyle and buildNameIDPositionStackedStyle, which
+// differ only in ShrinkToFit-vs-WrapText and font size (bc-pnum review(d)).
+// letterCount is unused when stacked is false (buildNameIDPositionStyle
+// passes 0).
+func buildNameIDPositionStyleFor(f *excelize.File, stacked bool, letterCount int) int {
+	alignment := &excelize.Alignment{
+		Horizontal: "center",
+		Vertical:   "center",
+	}
+	fontSize := 100.0
+	if stacked {
+		alignment.WrapText = true
+		fontSize = nameIDPositionStackedFontSize(letterCount)
+	} else {
+		alignment.ShrinkToFit = true
+	}
+	return mustNewStyle(f, &excelize.Style{
+		Alignment: alignment,
+		Font:      &excelize.Font{Family: "Calibri", Bold: true, Color: "000000", Size: fontSize},
 		Border: []excelize.Border{
 			{Type: "top", Color: "000000", Style: 2},
 			{Type: "bottom", Color: "000000", Style: 2},
@@ -381,7 +413,51 @@ func buildNameIDPositionStyle(f *excelize.File) int {
 			{Type: "right", Color: "000000", Style: 2},
 		},
 	})
-	return style
+}
+
+// getNameIDPositionStackedStyle returns the stacked position style sized for
+// letterCount letters (a rune count -- see printNameEntries in excel.go).
+// Cached per size: two prefixes of the same letter count share one style
+// object, but a two-letter and a three-letter prefix need DIFFERENT font
+// sizes (see buildNameIDPositionStackedStyle) and so cannot share a cache
+// entry keyed only on styleNameIDPositionStack (bc-pnum review).
+func getNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
+	key := styleKey(fmt.Sprintf("%s_%d", styleNameIDPositionStack, letterCount))
+	return getCachedStyle(f, key, func(f *excelize.File) int {
+		return buildNameIDPositionStackedStyle(f, letterCount)
+	})
+}
+
+// nameIDPositionStackedFontSize returns the stacked position style's font
+// size for a prefix of letterCount letters. Two letters fit the 40-unit
+// column at 100pt ("WW1234" -> "WW"/"1234" renders clean). Rendered with
+// LibreOffice, a WIDE three-letter prefix ("WOM", "MMM", "WWW") at 100pt
+// does not: the letters line itself is too wide for the column and wraps
+// onto a THIRD line, overflowing the 270pt row cap ("WOM"/"119" rendered as
+// "WO"/"M"/"119") -- KOR's narrower glyphs happened to fit at 100pt, which
+// is why that fixture alone gave false confidence (bc-pnum review). 80pt is
+// the measured fix for three letters (rendered clean for KOR, WOM and WWW);
+// 90pt still wraps. MaxNumberPrefixLen caps a prefix at 3 characters, so
+// letterCount is never reachable above 3 in practice, but any count of 3 or
+// more takes the smaller size rather than assuming the cap holds.
+func nameIDPositionStackedFontSize(letterCount int) float64 {
+	if letterCount >= 3 {
+		return 80
+	}
+	return 100
+}
+
+// buildNameIDPositionStackedStyle is the wrap-text counterpart of
+// buildNameIDPositionStyle above, used when the sheet's number prefix is
+// more than one letter (bc-pnum operator ruling): the position cell then
+// holds a two-line LEFT/MID formula (letters over digits, see
+// printNameEntries in excel.go) instead of a plain cross-sheet reference, so
+// it needs WrapText rather than ShrinkToFit. The row height (270pt) is set
+// per-row in printNameEntries (excel.go), not by setupNamesToPrintLayout,
+// which sets the page layout and column widths; see nameIDPositionStackedFontSize above
+// for why the font size depends on letterCount.
+func buildNameIDPositionStackedStyle(f *excelize.File, letterCount int) int {
+	return buildNameIDPositionStyleFor(f, true, letterCount)
 }
 
 func getTimeStyle(f *excelize.File) int {

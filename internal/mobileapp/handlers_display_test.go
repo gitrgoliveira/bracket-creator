@@ -1,7 +1,9 @@
 package mobileapp
 
 import (
+	"bytes"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,6 +115,308 @@ func TestCourtCurrentReturnsCurrentPayload(t *testing.T) {
 	assert.Equal(t, "Ichiro Tanaka", resp.SideB.Name)
 }
 
+// TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos pins buildSide's
+// id-only resolution for a POOL match (operator ruling bc-pnum): when the
+// source MatchResult carries SideAID/SideBID, the roster entry is matched by
+// Player.ID ONLY, never by name. Every other pool-match fixture in this file
+// leaves SideAID/SideBID empty, which only exercises buildSide's unchanged
+// name-fallback branch (id == ""); this test is the one that actually drives
+// the id-only branch end to end through the handler. Two "Sam"s from
+// different dojos are a legal roster (name uniqueness is only enforced
+// within (name, dojo)), and the South entry is listed FIRST so that a
+// name-based lookup for "Sam" would find the wrong dojo first: the
+// assertions below can only pass if resolution went by id.
+func TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "same-name-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Same Name Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+
+	northID := helper.NewUUID4()
+	southID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: southID, Name: "Sam", Dojo: "South"},
+		{ID: northID, Name: "Sam", Dojo: "North"},
+	}))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{
+			ID: "PoolA-1", SideA: "Sam", SideAID: northID, SideB: "Sam", SideBID: southID,
+			Status: state.MatchStatusRunning, Court: "A",
+		},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "North", resp.SideA.Dojo, "SideAID must resolve to the North Sam, not whichever Sam the roster lists first")
+	assert.Equal(t, "South", resp.SideB.Dojo, "SideBID must resolve to the South Sam")
+	assert.Equal(t, northID, resp.SideA.PlayerID)
+	assert.Equal(t, southID, resp.SideB.PlayerID)
+}
+
+// TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing pins bc-pnum review
+// finding 2: buildSideByID must NEVER fall back to a name match when a pool
+// row's SideAID/SideBID is empty (a legacy row stamped before that field
+// existed). The old single buildSide fell back to scanning players[i].Name
+// == name whenever id == "" -- reachable from a POOL row just as easily as
+// from a genuinely id-less record -- so a legacy id-less row could silently
+// resolve to the wrong same-name competitor. Two "Sam"s from different
+// dojos, exactly like the sibling id-resolves test above, but here NEITHER
+// side carries an id: the assertions below can only pass if resolution
+// stayed BY ID (finding nothing) rather than falling back to a name scan
+// (which would find the first-listed "Sam").
+func TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "empty-side-id-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Empty Side Id Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Sam", Dojo: "South"},
+		{ID: helper.NewUUID4(), Name: "Sam", Dojo: "North"},
+	}))
+	// SideAID/SideBID left empty on purpose (the legacy-row shape).
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Sam", SideB: "Sam", Status: state.MatchStatusRunning, Court: "A"},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "Sam", resp.SideA.Name, "the raw match-row name is still echoed")
+	assert.Empty(t, resp.SideA.Dojo, "an empty SideAID must resolve NO dojo, never a name-matched guess")
+	assert.Empty(t, resp.SideA.PlayerID, "an empty SideAID must resolve NO playerId")
+	assert.Empty(t, resp.SideA.Number, "an empty SideAID must resolve NO number")
+	assert.Empty(t, resp.SideB.Dojo, "an empty SideBID must resolve NO dojo, never a name-matched guess")
+	assert.Empty(t, resp.SideB.PlayerID, "an empty SideBID must resolve NO playerId")
+	assert.Empty(t, resp.SideB.Number, "an empty SideBID must resolve NO number")
+}
+
+// TestCourtCurrentUnreadablePoolsShowsNoNumbers pins bc-pnum D3: the same
+// corrupt-pools scenario TestViewerCompetitionsList_CorruptBracketShowsNoNumbers
+// pins for the aggregate viewer payload (over bracket.json, for a playoffs
+// competition), exercised here through currentMatchPlayers
+// (handlers_display.go), the court-overlay read path, for a POOLED
+// competition instead. pools.csv unreadable must show as MISSING numbers,
+// never as composed ones (D1): numbersFromDrawWithBracket returns the LoadPools error
+// rather than merging against a nil/empty pools slice, which
+// applyDrawNumbers would otherwise read as "no draw yet".
+//
+// The response-only assertion used to be vacuous: mergePoolNumbersIntoPlayersSlice
+// is ALSO a no-op over an empty/nil pools slice, so "the read errored and was
+// correctly propagated" and "the read errored and was silently swallowed
+// into an empty slice" produce the IDENTICAL response body -- a mutation
+// that swallowed the error (`if err != nil { pools = nil }` instead of
+// `return err`) left the whole package green. The log line is the only
+// observable difference, so it is asserted the same way
+// TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins the
+// participants-read log.
+//
+// bc-pnum ruling 2 moved a playoffs competition's numbering off pools.csv
+// entirely (onto bracket.DrawOrder), so this fixture is Mixed format on
+// purpose now: for playoffs, a corrupt pools.csv is never even read (see
+// TestViewerCompetitionsList_CorruptBracketShowsNoNumbers for that format's
+// own read-error case, over bracket.json instead, and
+// TestViewerAggregatePayload_CorruptPoolsLogsAndShowsNoNumbers below for
+// the aggregate-payload counterpart of THIS test).
+func TestCourtCurrentUnreadablePoolsShowsNoNumbers(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "corrupt-pools-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Corrupt Pools Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K",
+	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+	// A running MATCH on court A, shaped as a pool match (MatchResult), so the
+	// handler takes the pool-match branch (currentMatchPlayers) rather than
+	// falling through to the bracket branch. Nothing about the endpoint cares
+	// whether the competition's OWN format normally has pool matches; this
+	// pins the merge's read-error handling, not the format/match-type pairing.
+	//
+	// SideAID/SideBID stamped so each side IS resolvable by id (buildSideByID,
+	// bc-pnum): the assertion below must show the unreadable pools.csv still
+	// suppresses the number for a side the roster CAN otherwise resolve,
+	// rather than merely showing "an unresolved side has no number" (which an
+	// id-less fixture would prove trivially and for the wrong reason).
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusRunning, Court: "A"},
+	}))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.Contains(t, logBuf.String(), "load draw",
+		"an unreadable pools.csv must leave a server-side log breadcrumb naming the read that failed, not be silently swallowed")
+	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Emptyf(t, resp.SideA.Number, "sideA must show NO number over an unreadable pools.csv, got %q", resp.SideA.Number)
+	assert.Emptyf(t, resp.SideB.Number, "sideB must show NO number over an unreadable pools.csv, got %q", resp.SideB.Number)
+}
+
+// TestCourtCurrentSwissNeverReadsPoolsFile pins engine.DrawSourceFor's
+// agreement with drawInPoolsFile (bc-pnum item 2): a Swiss competition
+// writes its rounds to pool-matches.csv only and never has a pools.csv, so
+// a stray/leftover one (e.g. left behind by a format change, or hand
+// placed) must never be read for this competition, corrupt or not. Before
+// engine.DrawSourceFor existed, numberingApplies did not exclude Swiss (it
+// fell through the same default branch as mixed/league), so
+// currentMatchPlayers' numbersFromDrawWithBracket call attempted to parse the stray
+// file and logged the failure as "load draw" -- RED without the fix.
+func TestCourtCurrentSwissNeverReadsPoolsFile(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "swiss-stray-pools-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Swiss Stray Pools Current", Format: state.CompFormatSwiss, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K",
+	}))
+	aliceID, bobID := helper.NewUUID4(), helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
+		{ID: aliceID, Name: "Alice", Dojo: "Dojo Alice"},
+		{ID: bobID, Name: "Bob", Dojo: "Dojo Bob"},
+	}))
+	// A stray, CORRUPT pools.csv: Swiss never writes this file, so any bytes
+	// found here are leftovers, not an operator-actionable file (matches
+	// drawInPoolsFile's own rule for the aggregate/detail viewer payloads).
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "pools.csv"), []byte("a,b\na,\"bad\nquote"), 0o600))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "Swiss-R1-1", SideA: "Alice", SideAID: aliceID, SideB: "Bob", SideBID: bobID, Status: state.MatchStatusRunning, Court: "A"},
+	}))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.NotContains(t, logBuf.String(), "load draw",
+		"a Swiss competition must never attempt to read pools.csv at all, corrupt or not")
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Emptyf(t, resp.SideA.Number, "Swiss never assigns a Number, got %q", resp.SideA.Number)
+	assert.Emptyf(t, resp.SideB.Number, "Swiss never assigns a Number, got %q", resp.SideB.Number)
+}
+
+// TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames pins the logged participants error:
+// currentMatchPlayers used to discard LoadParticipantsOpt's error outright
+// (`players, _ := ...`), unlike the pools load just below it in the same
+// function, which already logs its own failure -- an unreadable
+// participants.csv left no server-side breadcrumb at all. The overlay must
+// also not vanish: buildSide falls back to the raw name
+// MatchResult.SideA/SideB carries when the (now empty) players slice can't
+// resolve it, so the response is still 200 with the match row's own names,
+// dojo/number simply blank. Both halves are asserted: the log line (the
+// actual fix; RED without it) and the non-vanishing response (already
+// correct pre-fix, asserted so a future change can't regress the fallback
+// while "fixing" the log).
+func TestCourtCurrentUnreadableParticipantsLogsAndShowsMatchRowNames(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory-shaped-file read errors")
+	}
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+
+	const cid = "unreadable-participants-current"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: cid, Name: "Unreadable Participants Current", Format: state.CompFormatMixed, Kind: "individual",
+		Courts: []string{"A"}, Status: state.CompStatusPools,
+	}))
+	require.NoError(t, store.SavePoolMatches(cid, []state.MatchResult{
+		{ID: "PoolA-1", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusRunning, Court: "A"},
+	}))
+	// participants.csv as a DIRECTORY, not a file: LoadParticipantsOpt's
+	// underlying os.ReadFile fails with EISDIR, a read error rather than a
+	// parse error, exercising the plain `_, err := ...` path this finding is
+	// about (never a CSV-parse failure).
+	require.NoError(t, os.MkdirAll(filepath.Join(tempDir, "competitions", cid, "participants.csv"), 0o755))
+
+	var logBuf bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	assert.Contains(t, logBuf.String(), "load participants",
+		"an unreadable participants.csv must leave a server-side log breadcrumb, matching the pools load's own logging in the same function")
+	assert.Contains(t, logBuf.String(), cid, "the log line must name the competition")
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA, "the overlay must not vanish over an unreadable participants.csv")
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "Alice", resp.SideA.Name, "must fall back to the match row's own name")
+	assert.Equal(t, "Bob", resp.SideB.Name)
+}
+
 // TestCourtCurrentReturnsRunningBracketMatch, mp-9h1f follow-up. A running
 // KNOCKOUT (bracket) bout must surface as the court's current match; the prior
 // handler scanned only poolMatches, so an elimination bout read as idle. The
@@ -171,6 +476,100 @@ func TestCourtCurrentReturnsRunningBracketMatch(t *testing.T) {
 	assert.Contains(t, body, `"ipponsA":["M","K"]`, "body=%q", body)
 	assert.NotContains(t, body, `"scoreA"`, "body=%q", body)
 	assert.NotContains(t, body, `"scoreB"`, "body=%q", body)
+}
+
+// TestCourtCurrentBracketMatch_ResolvesSideByIDNotNameAcrossDojos is
+// TestCourtCurrentPoolMatch_ResolvesSideByIDNotNameAcrossDojos's bracket
+// twin (bc-brid): before BracketMatch carried per-side ids, the OBS/vMix
+// overlay resolved a running knockout bout's dojo/number by NAME
+// (buildSideByIDOrName's predecessor, then unconditionally name-only), so
+// two "Sam"s from different dojos meeting in the same match always showed
+// whichever Sam the roster happened to list first, on BOTH sides. A
+// stamped bracket row now resolves by id via buildSideByIDOrName, exactly
+// like a pool match.
+func TestCourtCurrentBracketMatch_ResolvesSideByIDNotNameAcrossDojos(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "same-name-bracket-current", Name: "Same Name Bracket Current",
+		Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+
+	northID := helper.NewUUID4()
+	southID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("same-name-bracket-current", []domain.Player{
+		{ID: southID, Name: "Sam", Dojo: "South"},
+		{ID: northID, Name: "Sam", Dojo: "North"},
+	}))
+	require.NoError(t, store.SaveBracket("same-name-bracket-current", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Sam", SideAID: northID, SideB: "Sam", SideBID: southID,
+				Status: state.MatchStatusRunning, Court: "A"},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	require.NotNil(t, resp.SideB)
+	assert.Equal(t, "North", resp.SideA.Dojo, "SideAID must resolve to the North Sam, not whichever Sam the roster lists first")
+	assert.Equal(t, "South", resp.SideB.Dojo, "SideBID must resolve to the South Sam")
+	assert.Equal(t, northID, resp.SideA.PlayerID)
+	assert.Equal(t, southID, resp.SideB.PlayerID)
+}
+
+// TestCourtCurrentBracketMatch_EmptySideIDStillResolvesByName is the
+// falling-back direction paired with the test above: an
+// UNREPAIRED bracket row (both SideAID/SideBID empty, the pre-bc-brid or
+// hand-edited shape) must still resolve by name -- bc-brid's own
+// instruction is that adding ids must never remove the pre-existing name
+// handling for a row a repair could not stamp. Unlike the pool branch's
+// TestCourtCurrentPoolMatch_EmptySideIDResolvesNothing (a DELIBERATE,
+// stricter ruling for pool matches), the bracket keeps its weaker,
+// pre-existing name tolerance.
+func TestCourtCurrentBracketMatch_EmptySideIDStillResolvesByName(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	require.NoError(t, store.SaveTournament(&state.Tournament{
+		Name: "Test Tournament", Password: "secret", Courts: []string{"A"},
+	}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "unstamped-bracket-current", Name: "Unstamped Bracket Current",
+		Status: state.CompStatusPlayoffs, Courts: []string{"A"},
+	}))
+	aoiID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants("unstamped-bracket-current", []domain.Player{
+		{ID: aoiID, Name: "Aoi Mori", Dojo: "North"},
+	}))
+	// SideAID left empty on purpose (the unrepaired/legacy shape).
+	require.NoError(t, store.SaveBracket("unstamped-bracket-current", &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{ID: "m-r1-0", SideA: "Aoi Mori", SideB: "Ken Sato",
+				Status: state.MatchStatusRunning, Court: "A"},
+		}},
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/viewer/court/A/current", nil)
+	r.ServeHTTP(w, req)
+	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
+
+	var resp courtCurrentResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.NotNil(t, resp.SideA)
+	assert.Equal(t, "Aoi Mori", resp.SideA.Name)
+	assert.Equal(t, "North", resp.SideA.Dojo, "an unstamped row still resolves its unique-name side")
+	assert.Equal(t, aoiID, resp.SideA.PlayerID)
 }
 
 // TestCourtCurrentEmptyIpponsAreArraysNotNull, Copilot review. An unscored
@@ -338,17 +737,24 @@ func TestCourtCurrentRespectsZekkenName(t *testing.T) {
 		WithZekkenName: true,
 	}
 	require.NoError(t, store.SaveCompetition(&comp))
+	yamadaID, tanakaID := helper.NewUUID4(), helper.NewUUID4()
 	require.NoError(t, store.SaveParticipants("zekken-comp", []domain.Player{
-		{Name: "Takeshi Yamada", DisplayName: "Yamada", Dojo: "Nakano Kendo Club"},
-		{Name: "Ichiro Tanaka", DisplayName: "Tanaka", Dojo: "Setagaya Dojo"},
+		{ID: yamadaID, Name: "Takeshi Yamada", DisplayName: "Yamada", Dojo: "Nakano Kendo Club"},
+		{ID: tanakaID, Name: "Ichiro Tanaka", DisplayName: "Tanaka", Dojo: "Setagaya Dojo"},
 	}))
+	// SideAID/SideBID stamped: buildSideByID (bc-pnum) resolves a pool
+	// side BY ID ONLY, so a real (modern) roster/match pair -- ids minted
+	// for every row at draw time -- must carry them for this test to keep
+	// exercising the zekken/displayName lookup at all.
 	require.NoError(t, store.SavePoolMatches("zekken-comp", []state.MatchResult{
 		{
-			ID:     "PoolA-1",
-			SideA:  "Takeshi Yamada",
-			SideB:  "Ichiro Tanaka",
-			Status: state.MatchStatusRunning,
-			Court:  "A",
+			ID:      "PoolA-1",
+			SideA:   "Takeshi Yamada",
+			SideAID: yamadaID,
+			SideB:   "Ichiro Tanaka",
+			SideBID: tanakaID,
+			Status:  state.MatchStatusRunning,
+			Court:   "A",
 		},
 	}))
 

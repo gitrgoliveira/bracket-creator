@@ -662,6 +662,61 @@ func loadAllCompetitions(store *state.Store) ([]*state.Competition, error) {
 	return comps, nil
 }
 
+// migrateMissingNumberPrefixes runs the load-time number-prefix migration
+// when the set just read off disk contains a competition without one, and
+// returns the set to serve.
+//
+// The mobile-app command runs the same migration once at startup, which
+// covers every competition present when the process began. It does not cover
+// one that appears afterwards, and on a laptop at a venue that happens: an
+// operator restores a folder from a backup, or copies a competition across
+// from another machine, while the app is running. Measured before this
+// existed, such a competition was listed with no prefix at all and stayed
+// that way until the next restart or until someone tried to draw it.
+//
+// This is a WRITE reached from a read, deliberately, and it is the operator
+// ruling of 2026-09-03 applied where the load actually happens: migrate on
+// load, not on the next save. It is safe in the way the participants.csv
+// id migration is NOT: an absent number_prefix is an absent YAML field with
+// exactly one meaning, so nothing here has to guess what the stored bytes
+// were -- contrast internal/state/legacy_upgrade.go's header, where a
+// no-id roster and a non-UUID-id roster are byte-identical and a read-side
+// rewrite corrupted both.
+//
+// Gated on something actually being missing, so the steady state pays one
+// loop over structs already in memory. Idempotent and safe to race: the
+// migration takes the competition-rename lock and re-reads under it, so a
+// second caller that saw the same gap assigns nothing. A failure is logged
+// and the competitions are served as they were -- a listing must not fail
+// over a repair.
+func migrateMissingNumberPrefixes(store *state.Store, eng *engine.Engine, comps []*state.Competition) []*state.Competition {
+	missing := false
+	for _, comp := range comps {
+		if comp != nil && strings.TrimSpace(comp.NumberPrefix) == "" {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return comps
+	}
+	migrated, err := eng.MigrateNumberPrefixes()
+	if err != nil {
+		log.Printf("mobileapp: number-prefix migration on load: %v", err)
+		return comps
+	}
+	if len(migrated) == 0 {
+		return comps
+	}
+	log.Printf("mobileapp: assigned number prefixes on load to competitions saved elsewhere: %v", migrated)
+	reloaded, err := loadAllCompetitions(store)
+	if err != nil {
+		log.Printf("mobileapp: number-prefix migration on load: re-list: %v", err)
+		return comps
+	}
+	return reloaded
+}
+
 func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.Engine, hub *Hub, elevated ElevatedVerifier) {
 	r.GET("/competitions", func(c *gin.Context) {
 		comps, err := loadAllCompetitions(store)
@@ -669,7 +724,7 @@ func RegisterCompetitionHandlers(r *gin.RouterGroup, store *state.Store, eng *en
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, comps)
+		c.JSON(http.StatusOK, migrateMissingNumberPrefixes(store, eng, comps))
 	})
 
 	// GET /number-prefix-default?name=, previews the number prefix

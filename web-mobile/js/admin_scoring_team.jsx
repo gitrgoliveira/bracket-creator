@@ -1146,12 +1146,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // grid behaviour.
   const teamMatchType = m.teamMatchType || compMeta?.config?.teamMatchType || "fixed";
   const isKachinuki = teamMatchType === "kachinuki";
-  // Compact "Instrument Panel" mode fits the modal on one viewport page
+  // Compact "Instrument Panel" mode fits the editor on one viewport page
   // for ≤5-person teams. Kachinuki renders only the current bout while
   // running (see kachinukiVisiblePositions), so it always fits even
   // with a 9-person roster. Larger fixed-format
   // teams keep the roomier layout and use .team-bouts-scroll for
   // independent bout-list scrolling.
+  // bc-dnst: BOTH hosts read this one condition, the overlay and the inline
+  // shiaijo panel, so a team never changes layout by which one it is opened in.
   const useCompact = teamSize <= 5 || isKachinuki;
   // T141: daihyosen is knockout-only: pool matches resolve ties via
   // the standings tiebreak, not a representative bout. Format comes
@@ -2603,20 +2605,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // match is always live bout-by-bout scoring, even when a
             // sub-result carries a kachinuki-exhaustion decision (roster
             // data is advisory; the operator decides when it's over).
+            // bc-dnst: one line, not a boxed callout. The full walk-through
+            // lives in the court-operator guide (scoring-a-match.md); the row
+            // here only has to name the format and the two buttons.
             isKachinuki && (
-              <div key="kachinuki-banner" style={{ background: "var(--bg-2, #f1f5f9)", border: "1px solid var(--accent, #ddd)", borderRadius: 4, padding: "8px 12px", marginBottom: 12, fontSize: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 700 }}><TermAS name="kachinuki">Kachinuki</TermAS> (winner stays on)</span>
-                  <span style={{ color: "var(--ink-2)" }}>
-                    {isComplete
-                      ? "Match ended."
-                      : "Score the current bout, then Record bout to continue (the next pairing is added), or End match to finish on the last scored bout."}
-                  </span>
-                </div>
-                {/* TODO(T136): inline auto-refresh after each score so
-                    operators don't have to close+reopen the modal:
-                    requires hooking the onSubmit response (current
-                    flow forwards through parent + closes the modal). */}
+              <div key="kachinuki-banner" className="kachinuki-note">
+                <span className="kachinuki-note__term"><TermAS name="kachinuki">Kachinuki</TermAS> (winner stays on):</span>
+                <span>
+                  {isComplete
+                    ? "Match ended."
+                    : "Record bout continues, End match finishes."}
+                </span>
               </div>
             ),
             // mp-gmcg: the bouts already fought render as read-only rows above
@@ -2843,10 +2842,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               : <span className="tsm-name__static tsm-name__static--empty">-</span>
                           )}
                         </div>
-                        {/* Row 1: point slots + M/K/D/T/H buttons. In compact
-                            mode these align on one horizontal channel-strip;
-                            in roomy mode the wrapper is display:contents so the
-                            legacy column stack is preserved. */}
+                        {/* Row 1: the ippon mark buttons and, riding the same
+                            wrap, the per-bout Fusensho button. In compact mode
+                            the wrapper is a real flex row whose items are the
+                            marks themselves (.team-sub-match__btns goes
+                            display:contents), so Fusensho joins the trailing
+                            marks on the wrapped line instead of claiming a line
+                            of its own (the wrap point shifts with naginata's
+                            extra S mark); in roomy mode the wrapper is
+                            display:contents and the side stacks name, marks,
+                            Fusensho, fouls.
+                            T096/FR-031: per-bout Fusensho awards the bout 2-0 to
+                            this side. Re-clicking the active side undoes the
+                            fusensho; manual pts/fouls edits while active clear
+                            the flag and discard the snapshot. */}
                         <div className="tsm-row-1">
                           {/* Buttons only: the scored ippon letters show in the
                               centre column (between the two competitors), like an
@@ -2857,26 +2866,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                                 onClick={() => rs.setPts(rs.pts.length < MAX_IPPONS_PER_SIDE ? [...rs.pts, cc] : rs.pts)}
                                 disabled={subBoutDecided}>{cc}</button>
                             ))}
-                          </div>
-                        </div>
-                        {/* Row 2: foul stepper + per-bout Fusensho button.
-                            Independent foul counter. The `+` button calls
-                            onIncrement which applies the FIK 2-foul rule via
-                            applyFoulIncrement (auto-award H to opponent, reset
-                            counter to 0). The discharged H is physically in
-                            the opponent's pts array: no derived display.
-                            T096/FR-031: per-bout Fusensho: awards the bout
-                            2-0 to this side. Re-clicking the active side
-                            undoes the fusensho; manual pts/fouls edits while
-                            active clear the flag and discard the snapshot. */}
-                        <div className="tsm-row-2">
-                          <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
-                            <span className="tsm-fouls__label">{rs.label} Fouls</span>
-                            <div className="tsm-fouls__controls">
-                              <button className="tsm-fouls__btn" onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
-                              <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                              <button className="tsm-fouls__btn" onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
-                            </div>
                           </div>
                           <div className="tsm-fusensho">
                             <button
@@ -2890,6 +2879,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             >
                               {s.fusensho === rs.key ? "✓ Fusensho" : "Fusensho"}
                             </button>
+                          </div>
+                        </div>
+                        {/* Row 2: the independent foul stepper. The `+` button
+                            calls onIncrement which applies the FIK 2-foul rule
+                            via applyFoulIncrement (auto-award H to opponent,
+                            reset counter to 0). The discharged H is physically in
+                            the opponent's pts array: no derived display. */}
+                        <div className="tsm-row-2">
+                          <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
+                            <span className="tsm-fouls__label">{rs.label} Fouls</span>
+                            <div className="tsm-fouls__controls">
+                              <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
+                              <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
+                              <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2947,56 +2951,62 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           })}
           </div>
 
-          {/* mp-gmcg: manual next bout. Secondary/unobtrusive: Record bout
-              stays the primary flow (the server auto-appends the pairing it
-              can infer). This is for the unknown-roster continue path: team
+          {/* Bout-list actions, one row (bc-dnst). Both are secondary: Record
+              bout stays the primary flow (the server auto-appends the pairing
+              it can infer).
+              mp-gmcg: manual next bout is the unknown-roster continue path (team
               sizes are unregulated, so the server may not know the next
-              fighter. Disabled until the current bout is scored (the next
-              bout comes after the current one) and at the theoretical
-              kachinuki bout cap. */}
-          {kachinukiBoutMode && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12 }}>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                data-testid="kachinuki-add-bout-button"
-                onClick={addManualBout}
-                disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiNextManualPos > kachinukiMaxBouts}
-                title={!kachinukiCurrentBoutPlayed
-                  ? "Score the current bout first"
-                  : kachinukiNextManualPos > kachinukiMaxBouts
-                  ? "Bout limit reached"
-                  : "Add the next pairing yourself when it isn't added automatically"}
-              >
-                + Add next bout manually
-              </button>
-              <span style={{ color: "var(--ink-3)" }}>
-                For fighters the app doesn’t know: pick or type both players on the new row.
-              </span>
-            </div>
-          )}
-
-          {/* mp-gmcg: explicit undo for a bout appended by mistake. Renders only
-              when the current bout is an unscored EXTRA (a prior bout was
-              scored), i.e. exactly the row the End-match strip would drop — made
-              visible and reversible on the spot instead of silent. */}
-          {kachinukiBoutRemovable && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                data-testid="kachinuki-remove-bout-button"
-                onClick={removeCurrentBout}
-                disabled={submitting || removingBout}
-                title="Remove this empty bout — added by mistake. Nothing has been recorded for it, so nothing is lost."
-              >
-                {removingBout ? "Removing…" : "× Remove this bout"}
-              </button>
-              <span style={{ color: "var(--ink-3)" }}>
-                Added a pairing by mistake? This bout has no score yet, so removing it loses nothing.
-              </span>
-              {removeBoutErr && (
-                <span data-testid="kachinuki-remove-bout-error" style={{ color: "var(--danger, #c00)", width: "100%" }}>{removeBoutErr}</span>
+              fighter); it is disabled until the current bout is scored and at
+              the theoretical kachinuki bout cap. Remove is the explicit undo for
+              a bout appended by mistake, shown only when the current bout is an
+              unscored EXTRA (a prior bout was scored), i.e. exactly the row the
+              End-match strip would drop, made visible and reversible on the spot
+              instead of silent.
+              Each hint is a VISIBLE span, because a title tooltip is
+              unreachable on the tablets operators score on; the buttons keep
+              their title only as extra detail for pointer users. */}
+          {(kachinukiBoutMode || kachinukiBoutRemovable) && (
+            <div className="kachinuki-bout-actions">
+              {kachinukiBoutMode && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    data-testid="kachinuki-add-bout-button"
+                    onClick={addManualBout}
+                    disabled={submitting || !kachinukiCurrentBoutPlayed || kachinukiNextManualPos > kachinukiMaxBouts}
+                    title={!kachinukiCurrentBoutPlayed
+                      ? "Score the current bout first"
+                      : kachinukiNextManualPos > kachinukiMaxBouts
+                      ? "Bout limit reached"
+                      : "Add the next pairing yourself when it isn't added automatically"}
+                  >
+                    + Add next bout manually
+                  </button>
+                  <span className="kachinuki-bout-actions__hint">
+                    pick or type both fighters on the new row
+                  </span>
+                </>
+              )}
+              {kachinukiBoutRemovable && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    data-testid="kachinuki-remove-bout-button"
+                    onClick={removeCurrentBout}
+                    disabled={submitting || removingBout}
+                    title="Remove this empty bout: added by mistake. Nothing has been recorded for it, so nothing is lost."
+                  >
+                    {removingBout ? "Removing…" : "× Remove this bout"}
+                  </button>
+                  <span className="kachinuki-bout-actions__hint">
+                    nothing scored yet
+                  </span>
+                  {removeBoutErr && (
+                    <span data-testid="kachinuki-remove-bout-error" className="kachinuki-bout-actions__error">{removeBoutErr}</span>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -3644,8 +3654,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     </>
   );
 
+  // bc-dnst: both hosts read the ONE useCompact condition, so a >5 fixed-order
+  // team keeps the roomy layout inline exactly as it does in the overlay.
   if (variant === "inline") {
-    return <div className="scoring-panel scoring-panel--team" aria-label={dialogLabel}>{inner}</div>;
+    return <div className={`scoring-panel scoring-panel--team ${useCompact ? "editor-modal--compact" : ""}`} aria-label={dialogLabel}>{inner}</div>;
   }
 
   return (

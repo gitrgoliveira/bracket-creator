@@ -7515,12 +7515,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* ======================================================================
-   Scoring modal, "Instrument Panel" compact mode.
-   Activated by `.editor-modal--compact` on the outer modal div. Compact
-   mode applies to: individual matches (always), team matches with
-   teamSize ≤ 5, and kachinuki team matches (regardless of size, since
-   kachinuki renders the current bout only). Fixed-format team matches
-   with teamSize > 5 keep the roomy legacy layout but get the
+   Scoring editor, "Instrument Panel" compact mode.
+   Activated by `.editor-modal--compact`, carried by BOTH hosts: the outer
+   modal div of the overlay and the inline `.scoring-panel` of the shiaijo
+   console (bc-dnst). Compact mode applies to: individual matches (always),
+   team matches with teamSize ≤ 5, and kachinuki team matches (regardless
+   of size, since kachinuki renders the current bout only). Fixed-format
+   team matches with teamSize > 5 keep the roomy legacy layout but get the
    `.team-bouts-scroll` rule below for independent bout-list scrolling.
 
    All compact rules are layered after the duplicate
@@ -7707,8 +7708,22 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   transform: none;
   box-shadow: inset 0 0 0 2px currentColor;
 }
+/* bc-dnst: a compact side column has room for four 44px marks on one line
+   (4 x 44 + 3 gaps = 194 in the ~216px inner column measured in-browser on a
+   1180-wide inline panel), so M K D T share a line and H takes the next one
+   instead of the 2 + 2 + 1 stack. auto-fit keeps it container-driven: a
+   narrower column simply fits fewer per line. */
 .editor-modal--compact .sb-points-grid {
   gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+}
+/* auto-fit can only count tracks against a definite width, and the side's own
+   grid column is content-sized (justify-content: center), so it would hand the
+   marks a one-column track however wide the side is. Stretch that column in
+   compact mode; the names keep their inward text-align pin, and the slots and
+   the side badge have their own justify-self, so none of them move. */
+.editor-modal--compact .sb-match:has(.sb-slots) > .sb-side {
+  justify-content: stretch;
 }
 .editor-modal--compact .sb-points-grid .ipt-btn {
   min-height: 34px;
@@ -7754,41 +7769,126 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   /* Same width as the base .editor-modal--team, canonical layout applies to both. */
   width: min(760px, 96vw);
 }
-/* Scope to the team modal only, the individual modal has its own .sb-match
-   rule above (line ~4652) with a wider 120px centre column. Without this
-   scoping the team override would win the cascade and shrink the individual
-   board's VS column to 80px. */
-.editor-modal--compact.editor-modal--team .sb-match {
-  grid-template-columns: 1fr 80px 1fr;
+/* Scope to the team editors only, the individual editor keeps the base
+   .sb-match rule's 140px centre column. Without this scoping the team override
+   would win the cascade and resize the individual board's VS column.
+   The centre column is the bout rows' 160px centre plus the two 8px column
+   gaps either side of it (.team-bouts-scroll .team-sub-match__row), and the
+   left margin is a bout row's own 8px padding + 34px number gutter + 8px gap,
+   so the team names sit exactly over the SHIRO / score / AKA columns of every
+   bout down the sheet. Values verified in-browser at 1180x820. */
+.editor-modal--compact.editor-modal--team .sb-match,
+.editor-modal--compact.scoring-panel--team .sb-match {
+  grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
+  margin-left: 50px;
+  margin-right: 8px;
   margin-bottom: 4px !important;
   box-shadow: none;
   border-radius: 8px;
 }
-.editor-modal--compact.editor-modal--team .sb-side {
+.editor-modal--compact.editor-modal--team .sb-side,
+.editor-modal--compact.scoring-panel--team .sb-side {
   padding: 6px 12px;
 }
-.editor-modal--compact.editor-modal--team .sb-name {
+.editor-modal--compact.editor-modal--team .sb-name,
+.editor-modal--compact.scoring-panel--team .sb-name {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 0;
   line-height: 1.2;
 }
-.editor-modal--compact.editor-modal--team .sb-dojo {
+.editor-modal--compact.editor-modal--team .sb-dojo,
+.editor-modal--compact.scoring-panel--team .sb-dojo {
   font-size: 9px;
   line-height: 1.2;
 }
-.editor-modal--compact.editor-modal--team .sb-vs {
+.editor-modal--compact.editor-modal--team .sb-vs,
+.editor-modal--compact.scoring-panel--team .sb-vs {
   font-size: 12px;
   letter-spacing: 0.2em;
 }
 
-/* --- Compact mode: team-sub-match layout (removed, canonical layout via
-   .team-bouts-scroll now applies to both the inline panel and the modal) --- */
-/* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible so the
-   canonical column stack is preserved exactly. */
+/* --- Compact mode: team-sub-match layout (canonical layout via
+   .team-bouts-scroll applies to both the inline panel and the modal) --- */
+/* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible and the
+   side stacks its children in DOM order: name, marks, Fusensho, fouls. */
 .tsm-row-1,
 .tsm-row-2 {
   display: contents;
+}
+
+/* bc-dnst: compact bout rows. The ippon marks already wrap 3 + 2 in a side
+   column this narrow, so the second wrap line has room for the per-bout
+   Fusensho button: making row 1 the wrap container (and the mark group
+   display:contents inside it) hands the current bout a whole 44px line back
+   without shrinking one tap target. The foul stepper keeps its own labelled
+   line below. Chrome (row and side padding, the name's bottom margin) is
+   trimmed in the same pass; a fought bout above the live one is all chrome,
+   so it gains the most. */
+.editor-modal--compact .team-bouts-scroll .tsm-row-1 {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.editor-modal--compact .team-bouts-scroll .team-sub-match__btns {
+  display: contents;
+}
+.editor-modal--compact .team-bouts-scroll .tsm-row-2 {
+  display: flex;
+  justify-content: center;
+}
+.editor-modal--compact .team-bouts-scroll .tsm-fouls {
+  margin-top: 0;
+  flex-wrap: nowrap;
+}
+.editor-modal--compact .team-bouts-scroll .team-sub-match {
+  padding: 4px 8px;
+}
+.editor-modal--compact .team-bouts-scroll .team-sub-match__side--aka,
+.editor-modal--compact .team-bouts-scroll .team-sub-match__side--shiro {
+  padding: 4px 8px;
+}
+.editor-modal--compact .team-bouts-scroll .tsm-name {
+  margin-bottom: 2px;
+}
+
+/* bc-dnst: the kachinuki format note is one quiet line above the bout list,
+   not a boxed callout. The walk-through it used to carry lives in the
+   court-operator guide. */
+.kachinuki-note {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.kachinuki-note__term {
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+/* bc-dnst: the bout list's two secondary actions share one row, each with a
+   short visible hint beside it. An error takes the full width so it reads as
+   its own line. */
+.kachinuki-bout-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.kachinuki-bout-actions__hint {
+  color: var(--ink-3);
+}
+.kachinuki-bout-actions__error {
+  width: 100%;
+  color: var(--danger, #c00);
 }
 
 /* --- Compact mode: team summary + decision controls --------------------- */
@@ -7863,10 +7963,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
    Restore the floor at equal-or-greater specificity, placed AFTER the compact
    blocks so source order also favours it. Fine pointers keep the dense 34px.
-   (Team sub-match button floor is now handled by .team-bouts-scroll context.) */
+   (Team sub-match button floor is now handled by .team-bouts-scroll context.)
+   The same applies to the other compact-shrunk controls: the point slots
+   (buttons, 38px in compact), the draw toggle and the decision buttons (32px),
+   all of which reach the tablet now that the inline panel is compact too. */
 @media (pointer: coarse) {
-  .editor-modal--compact .sb-points-grid .ipt-btn {
+  .editor-modal--compact .sb-points-grid .ipt-btn,
+  .editor-modal--compact .sb-slot {
     min-width: 44px;
+    min-height: 44px;
+  }
+  .editor-modal--compact .sb-draw-toggle,
+  .editor-modal--compact .decision-controls .btn {
     min-height: 44px;
   }
 }
@@ -7875,10 +7983,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    The shiaijo console is the surface operators actually score on, on a
    tablet, so every in-bout control takes the DESIGN.md §6 ≥44px coarse-pointer
    floor. Scoped to .team-bouts-scroll so BOTH the inline .scoring-panel and the
-   .editor-modal team modal inherit it. The ippon mark row (.team-sub-match__btns)
-   is already flex-wrap, so at full 44px width the 5 marks wrap to two rows
-   (3 + 2) when a side column is tight (≈147px on a 1024 landscape iPad) and
-   stay on one row when there's room, container-driven, no viewport query.
+   .editor-modal team modal inherit it. The marks sit in a flex-wrap row (the
+   .team-sub-match__btns box in roomy mode, .tsm-row-1 with the Fusensho button
+   riding along in compact mode), so at full 44px width they wrap to two lines
+   when a side column is tight (≈147px on a 1024 landscape iPad) and stay on
+   one when there's room, container-driven, no viewport query.
    The centre score slots can't take 44px WIDTH (the centre column is a fixed
    160px shared by both sides' 2 slots + the result; 4×34 already overflows),
    so they keep their fitting 26px width and take the full 44px height,
@@ -7894,6 +8003,16 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   }
   .team-bouts-scroll .team-sub-match__center .editor-side__pt {
     min-height: 44px;
+  }
+  /* bc-dnst: on a FOUGHT bout those slots are display spans, not controls, so
+     the floor belongs to the row, which is itself the tap target (it opens the
+     bout for correction). Each read-only row is 10px shorter for it, and a
+     kachinuki encounter shows one per bout fought. */
+  .team-bouts-scroll .team-sub-match--readonly {
+    min-height: 44px;
+  }
+  .team-bouts-scroll .team-sub-match--readonly .team-sub-match__center .editor-side__pt {
+    min-height: 0;
   }
   .team-bouts-scroll .lineup-name__clear {
     min-width: 44px;
@@ -9112,6 +9231,20 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-color: var(--line);
 }
 
+/* bc-dnst: the court page's head is one line: title (the court switcher) and
+   Refresh side by side, no subtitle. Scoped to .page-head--shiaijo so every
+   other admin page keeps the stacked head. */
+.page-head--shiaijo {
+  align-items: center;
+  margin-bottom: 12px;
+}
+.shiaijo-head__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 /* Page title doubles as the court switcher: the H1 shows a chevron and a
    transparent native <select> overlays it (native picker + a11y, no duplicate
    control). Only rendered when there is more than one court. */
@@ -9164,7 +9297,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Competition selector in page-head (AC3), mirrors the Shiaijo title on the
    right edge: the competition name gets the full display-title treatment (same
    size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
-   caption beneath that lines up with the title's own sub-caption on the left. */
+   caption beneath it. (The left title's own sub-caption it used to line up with
+   was dropped in bc-dnst; the two blocks now centre on the title row.) */
 .shiaijo-officiating {
   text-align: right;
 }

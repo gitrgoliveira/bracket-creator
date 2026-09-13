@@ -481,3 +481,28 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     expect(nums).toEqual(['1', '2']);
   });
 });
+
+describe('TeamScoreEditorModal compact density is ONE condition on both hosts (bc-dnst)', () => {
+  // The overlay and the inline shiaijo panel must never disagree on density:
+  // teamSize <= 5 or kachinuki is compact, a larger fixed-order team stays roomy.
+  const FP = { format: 'mixed', phase: 'pool', naginata: false };
+  const CELLS = [
+    { teamSize: 5, tmt: 'fixed', compact: true },
+    { teamSize: 5, tmt: 'kachinuki', compact: true },
+    { teamSize: 7, tmt: 'kachinuki', compact: true },
+    { teamSize: 7, tmt: 'fixed', compact: false },
+  ];
+  it.each(CELLS)('inline panel size=$teamSize $tmt -> compact=$compact', async (cell) => {
+    const { container } = await renderCell({ ...FP, ...cell }, {}, { variant: 'inline' });
+    const panel = container.querySelector('.scoring-panel--team');
+    expect(panel).not.toBeNull();
+    expect(container.querySelector('.editor-modal--team')).toBeNull();
+    expect(panel.classList.contains('editor-modal--compact')).toBe(cell.compact);
+  });
+  it.each(CELLS)('overlay modal size=$teamSize $tmt -> compact=$compact', async (cell) => {
+    const { container } = await renderCell({ ...FP, ...cell });
+    const modal = container.querySelector('.editor-modal--team');
+    expect(modal).not.toBeNull();
+    expect(modal.classList.contains('editor-modal--compact')).toBe(cell.compact);
+  });
+});

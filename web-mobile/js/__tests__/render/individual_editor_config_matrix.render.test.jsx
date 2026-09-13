@@ -193,3 +193,20 @@ describe('individual editor selfReport (public self-run surface)', () => {
     expect(screen.queryByTestId('scoring-modal-hantei-row')).not.toBeNull();
   });
 });
+
+describe('individual editor compact density reaches both hosts (bc-dnst)', () => {
+  const CELL = { format: 'mixed', phase: 'pool', naginata: false };
+  it('the inline shiaijo panel carries the compact class', async () => {
+    const { container } = await renderCell(CELL, {}, { variant: 'inline' });
+    const panel = container.querySelector('.scoring-panel');
+    expect(panel).not.toBeNull();
+    expect(container.querySelector('.editor-modal')).toBeNull();
+    expect(panel.classList.contains('editor-modal--compact')).toBe(true);
+  });
+  it('the overlay modal carries the compact class', async () => {
+    const { container } = await renderCell(CELL);
+    const modal = container.querySelector('.editor-modal');
+    expect(modal).not.toBeNull();
+    expect(modal.classList.contains('editor-modal--compact')).toBe(true);
+  });
+});

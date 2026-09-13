@@ -1148,8 +1148,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // the panel lives in the page. The shiaijo page passes no prevMatch/
   // nextMatch (queue drives navigation) so the foot's prev/next render as
   // empty spans; Cancel/Close still call onClose to deselect.
+  // bc-dnst: the inline panel takes the same compact density as the overlay.
+  // The shiaijo console is the surface operators actually score on, so it must
+  // not be the one surface that misses the density pass.
   if (variant === "inline") {
-    return <div className="scoring-panel" aria-label={dialogLabel}>{inner}</div>;
+    return <div className="scoring-panel editor-modal--compact" aria-label={dialogLabel}>{inner}</div>;
   }
 
   return (

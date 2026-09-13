@@ -185,4 +185,4 @@ flowchart TD
 
 Because every real-time update is fanned out to **every** connected viewer, **network egress is the
 practical ceiling**, not CPU/RAM. Refer to [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
-for per-tier audience guidance (for example, GCP free tier compared with Oracle for 1000+ viewers).
+for per-tier audience guidance (for example, GCP free tier compared with Oracle for large events).

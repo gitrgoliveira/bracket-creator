@@ -66,7 +66,7 @@ flowchart TD
     bin --> bare["Bare: run directly<br/>PORT=8080 ./bracket-creator mobile-app<br/>(put any TLS proxy in front)"]
     bin --> compose["Docker Compose (deploy/docker/)<br/>app + Caddy, provider-agnostic"]
     bin --> gcp["GCP Always Free (deploy/gcp/)<br/>Terraform: e2-micro + Caddy"]
-    bin --> oracle["Oracle Always Free (deploy/oracle/)<br/>Terraform: larger free tier (1000+ viewers)"]
+    bin --> oracle["Oracle Always Free (deploy/oracle/)<br/>Terraform: larger free tier (large events)"]
 ```
 
 | Target | What it is | Best for |
@@ -74,7 +74,7 @@ flowchart TD
 | **Bare binary** | run the binary, bring your own TLS proxy | local / dev / custom hosts |
 | **Docker Compose** (`deploy/docker/`) | `app` + `caddy` services, host volume for data | self-managed VMs / on-prem |
 | **GCP Always Free** (`deploy/gcp/`) | Terraform; `e2-micro` + firewall + persistent disk + Caddy auto-HTTPS | club / regional events (~≤50–300 viewers) |
-| **Oracle Always Free** (`deploy/oracle/`) | Terraform; larger free allowance | large events (1000+ concurrent viewers) |
+| **Oracle Always Free** (`deploy/oracle/`) | Terraform; larger free allowance | large events |
 
 ### Cloud topology (GCP Always-Free example)
 
@@ -217,7 +217,7 @@ Real-time updates fan out to every viewer, so **egress is the limit**, not CPU/R
 flowchart LR
     a["≤ ~50 viewers"] --> g1["GCP free tier: comfortable"]
     b["~100–300 viewers"] --> g2["GCP free tier: watch egress (1 GB/mo)"]
-    c["1000+ viewers"] --> o["Oracle deployment"]
+    c["Large events"] --> o["Oracle deployment"]
 ```
 
 Set a **billing budget alert** (for example, $1) on cloud deployments so you're warned if usage ever

@@ -148,12 +148,16 @@ js/lint: js/deps ## Run Javascript linters
 	@# than beside the override itself.
 	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 
-js/sec: js/deps ## Run Javascript security scans (audit-ci + npm audit)
+js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."
-	@# web-mobile uses audit-ci so one proven-unfixable dev-only advisory can be
-	@# allowlisted (web-mobile/audit-ci.jsonc) without disabling the whole scan.
+	@# Both trees use audit-ci so a proven-unfixable advisory can be allowlisted
+	@# (web-mobile/audit-ci.jsonc, web/audit-ci.jsonc) without disabling the
+	@# whole scan. web/ used a bare `npm audit --audit-level=high` until bc-jsec:
+	@# that calls npm's legacy quick-audit endpoint, which reports itself as
+	@# being retired and intermittently answers 400 or 503, so the gate failed
+	@# over a registry blip rather than over this repository's dependencies.
 	@cd web-mobile && npm run --silent audit
-	@cd web && npm audit --audit-level=high
+	@cd web && npm run --silent audit
 
 js/outdated: ## Check for outdated npm packages
 	@echo "Checking for outdated npm packages..."
@@ -173,11 +177,18 @@ js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split mod
 	@echo "Checking the write-result rule is asked, not re-derived..."
 	@node web-mobile/check-write-result.mjs
 
-js/validate: js/lint js/security js/check-imports js/test ## Run all Javascript checks
+js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript checks
 
-go/test: go/lint go/security js/validate ## Run tests
+# Tests FIRST, security scans last. Prerequisites run in order, so a scan
+# listed ahead of the tests aborts the chain before a single test runs: an
+# outage at an advisory service then reads as "the suite failed" when the suite
+# never executed. That is not hypothetical, it is bc-jsec. Ordering the scans
+# last keeps the gate exactly as strict (a real advisory still fails it) while
+# making sure the test results are already on screen when it happens.
+go/test: go/lint js/lint js/check-imports js/test ## Run tests, then the security scans
 	@echo "Running tests..."
 	go test -cover . ./cmd/... ./internal/... ./tests/...
+	@$(MAKE) go/security js/security
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."

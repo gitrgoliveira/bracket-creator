@@ -277,7 +277,10 @@ func TestLoadCompetitionWithNoIDStillLoads(t *testing.T) {
 	require.NotNil(t, comp)
 	assert.Equal(t, state.CompFormatKnockout, comp.Format)
 	assert.Equal(t, state.CompStatusKnockout, comp.Status)
-	assert.Equal(t, "", comp.ID, "the file carries no id:, and a load must not invent or validate one")
+	// The directory IS the identity (ids are name slugs, and every other
+	// store path keys off the folder), so a file with no id: has its ID
+	// adopted from the directory on load rather than reaching callers empty.
+	assert.Equal(t, "no-id-comp", comp.ID, "a blank id: is adopted from the directory on load")
 }
 
 // TestLoadCompetitionKnockoutSecondsWinOverLegacyMinutes is a regression test
@@ -456,14 +459,18 @@ func TestLegacyUpgradeSweepSkipsMismatchedCompetitionID(t *testing.T) {
 	assert.ElementsMatch(t, []string{"victim", "mismatched"}, names, "no new directory must be created for the foreign id")
 }
 
-// TestLegacyUpgradeSweepSkipsBlankCompetitionID is BUG 2's regression test
-// against the startup-sweep path: a config.md with no id: field must still
-// load normally after the sweep has run over it, rather than becoming
-// permanently unreadable. The sweep must skip saving it (comp.ID == "" can
-// never equal the non-empty directory name -- the same guard bug 1 uses),
-// so saveCompetitionLocked's ValidateCompetitionID("") is never reached from
-// this path.
-func TestLegacyUpgradeSweepSkipsBlankCompetitionID(t *testing.T) {
+// TestLegacyUpgradeSweepConvergesBlankCompetitionID covers BUG 2's territory
+// after the blank-id fix. The original bug was that a config.md with no id:
+// became permanently UNREADABLE, because the save's ValidateCompetitionID("")
+// error propagated out through every load path; that must never return.
+//
+// It is no longer merely tolerated, though. adoptDirectoryID (competition.go)
+// fills the ID from the directory on load, so the record reaches the sweep
+// with a valid identity, the id/directory guard passes, and the file
+// CONVERGES -- gaining the id: it was missing along with the canonical
+// format/status. A MISMATCHED id is still skipped; that is two competing
+// claims, whereas a blank one has none.
+func TestLegacyUpgradeSweepConvergesBlankCompetitionID(t *testing.T) {
 	dir := t.TempDir()
 	compDir := filepath.Join(dir, "competitions", "no-id-comp")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
@@ -483,7 +490,15 @@ func TestLegacyUpgradeSweepSkipsBlankCompetitionID(t *testing.T) {
 	require.NotNil(t, comp)
 	assert.Equal(t, state.CompFormatKnockout, comp.Format)
 	assert.Equal(t, state.CompStatusKnockout, comp.Status)
-	assert.Equal(t, "", comp.ID, "the file carries no id:, and the sweep must not invent or validate one")
+	assert.Equal(t, "no-id-comp", comp.ID, "the ID is adopted from the directory")
+
+	// And the file itself converges, id included, instead of being skipped.
+	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "id: no-id-comp", "the missing id: is written back")
+	assert.Contains(t, string(raw), "format: knockout")
+	assert.Contains(t, string(raw), "status: knockout")
+	assert.NotContains(t, string(raw), "playoffs")
 }
 
 // TestLegacyUpgradeSweepKnockoutSecondsWinOverGlobalMinutes is BUG 3's

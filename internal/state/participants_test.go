@@ -576,6 +576,18 @@ func TestSaveParticipants_RejectsDuplicateNameDojo(t *testing.T) {
 		{Name: "Shudokan D", Dojo: "   "},
 	})
 	assert.ErrorIs(t, err, ErrBlankDojo, "a whitespace-only dojo must be refused")
+
+	// A blank name is refused outright for the same reason.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "", Dojo: "Shudokan HQ"},
+	})
+	assert.ErrorIs(t, err, ErrBlankName, "a blank name must be refused at the write floor")
+
+	// Whitespace is not a name either.
+	err = store.SaveParticipants(compID, []domain.Player{
+		{Name: "   ", Dojo: "Shudokan HQ"},
+	})
+	assert.ErrorIs(t, err, ErrBlankName, "a whitespace-only name must be refused")
 }
 
 func TestSaveParticipants_RejectsReservedNames(t *testing.T) {

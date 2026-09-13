@@ -71,7 +71,7 @@ func lineupStorageKey(l domain.TeamLineup) string {
 // parseTeamLineupsFile reads and parses lineups.yaml at path. A missing
 // file is "no lineups yet" and returns an empty map.
 func parseTeamLineupsFile(path string) (map[string]domain.TeamLineup, error) {
-	data, err := os.ReadFile(path) // #nosec G304, compPath cleans the path.
+	data, err := os.ReadFile(path) // #nosec G304, compPath enforces containment under the competitions dir.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]domain.TeamLineup{}, nil
@@ -117,6 +117,12 @@ func copyTeamLineups(in map[string]domain.TeamLineup) map[string]domain.TeamLine
 	out := make(map[string]domain.TeamLineup, len(in))
 	for k, l := range in {
 		l.Positions = maps.Clone(l.Positions)
+		// MemberIDs (bc-tmid pass 2) is a map too, and cloned for the exact
+		// reason Positions is: callers of LoadTeamLineups mutate the
+		// returned map in load-mutate-save flows (setTeamLineupLocked), so
+		// an unclosed map here would alias the cache. maps.Clone(nil) is
+		// nil, matching an unrepaired/legacy lineup that never had one.
+		l.MemberIDs = maps.Clone(l.MemberIDs)
 		out[k] = l
 	}
 	return out

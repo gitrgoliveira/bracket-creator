@@ -25,7 +25,7 @@ else
 endif
 
 # Define phony targets
-.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/clean run run-mobile esbuild-jsx goreleaser/test release version
+.PHONY: default help clean local/deps hooks/install go/fmt go/generate go/test go/build go/lint go/sec go/sec-tests go/vuln go/security js/deps js/lint js/sec js/outdated js/security js/check-imports js/validate examples docker/build docker/run pre-commit docs/deps docs/serve docs/open docs/build docs/linkcheck docs/prose docs/clean run run-mobile esbuild-jsx goreleaser/test release version
 
 default: help ## Show help information (default)
 
@@ -134,7 +134,19 @@ js/lint: js/deps ## Run Javascript linters
 	@# saw it and the docs widgets were linted by nothing at all. oxlint refuses
 	@# a path containing "..", so it is run from the repo root against
 	@# web-mobile's installed binary rather than by cd-ing and reaching back.
-	@npx --prefix web-mobile oxlint --deny-warnings docs/assets/javascripts/
+	@# -c points it at web-mobile's config explicitly: run from the repo root
+	@# with no -c, oxlint does not discover .oxlintrc.json upward from
+	@# web-mobile/, so the react/unicorn/oxc plugins and project rules it
+	@# configures never applied and this line silently exited 0 (bc-appx item 4).
+	@# web-mobile/.oxlintrc.json's `overrides` entry for docs/assets/javascripts/**
+	@# turns off react/no-this-in-sfc there ONLY: that directory is plain
+	@# ES5-constructor JS with no React/Preact runtime in scope (see
+	@# pool-draw-animation.js's own header), so `this` inside a PascalCase-named
+	@# constructor function is a false positive for the rule's real target
+	@# (an actual React/Preact stateless functional component). JSON has no
+	@# comment syntax, hence the rationale living here (bc-appx item 9) rather
+	@# than beside the override itself.
+	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 
 js/sec: js/deps ## Run Javascript security scans (audit-ci + npm audit)
 	@echo "Running Javascript security scans..."
@@ -241,7 +253,7 @@ docker/build: ## Build Docker image
 docker/run: docker/build ## Run the application in Docker
 	docker run -p 8080:8080 $(IMAGE_NAME):latest
 
-pre-commit: go/test go/security ## Run pre-commit checks
+pre-commit: docs/prose go/test go/security ## Run pre-commit checks
 	@echo "Code is ready to commit!"
 
 # Documentation (MkDocs Material): pinned toolchain.
@@ -276,13 +288,16 @@ docs/open: $(DOCS_STAMP) ## Serve the documentation and open it in a browser
 	@echo "Serving docs and opening http://localhost:$(DOCS_PORT)..."
 	$(DOCS_BIN)/mkdocs serve -f mkdocs.yaml --dev-addr localhost:$(DOCS_PORT) --open
 
-docs/build: $(DOCS_STAMP) ## Build static documentation site (output: site/)
+docs/build: $(DOCS_STAMP) docs/prose ## Build static documentation site (output: site/)
 	@echo "Building documentation..."
 	$(DOCS_BIN)/mkdocs build -f mkdocs.yaml --strict
 
 docs/linkcheck: docs/build ## Build docs, then check the built site for broken links/anchors
 	@echo "Checking internal documentation links..."
 	$(DOCS_BIN)/python docs/check_links.py site
+
+docs/prose: ## Check the docs sources against the public-prose rules (stdlib-only, no venv needed)
+	$(PYTHON) docs/check_prose.py docs
 
 docs/clean: ## Remove the docs venv and the built site
 	@echo "Removing $(DOCS_VENV) and site/..."

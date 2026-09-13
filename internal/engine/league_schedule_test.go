@@ -14,7 +14,10 @@ import (
 
 // buildLeagueMatches builds a []state.MatchResult for all n*(n-1)/2 pairs
 // using CircleMethodRounds so each match carries its Round number. Players
-// are named "P0".."P{n-1}".
+// are named "P0".."P{n-1}" and carry a matching participant id
+// ("id-P0".."id-P{n-1}"): scheduleLeagueSlots resolves the rest guarantee by
+// SideAID/SideBID (operator ruling bc-pnum), so a fixture with no ids would
+// have every player collapse onto the same empty-string bucket.
 func buildLeagueMatches(n int) []state.MatchResult {
 	rounds := helper.CircleMethodRounds(n)
 	var matches []state.MatchResult
@@ -22,11 +25,13 @@ func buildLeagueMatches(n int) []state.MatchResult {
 	for ri, round := range rounds {
 		for _, pair := range round {
 			matches = append(matches, state.MatchResult{
-				ID:     fmt.Sprintf("m%03d", k),
-				SideA:  fmt.Sprintf("P%d", pair.A),
-				SideB:  fmt.Sprintf("P%d", pair.B),
-				Round:  ri,
-				Status: state.MatchStatusScheduled,
+				ID:      fmt.Sprintf("m%03d", k),
+				SideA:   fmt.Sprintf("P%d", pair.A),
+				SideB:   fmt.Sprintf("P%d", pair.B),
+				SideAID: fmt.Sprintf("id-P%d", pair.A),
+				SideBID: fmt.Sprintf("id-P%d", pair.B),
+				Round:   ri,
+				Status:  state.MatchStatusScheduled,
 			})
 			k++
 		}
@@ -203,6 +208,32 @@ func TestScheduleLeagueSlots_Empty(t *testing.T) {
 	ordered, slots := scheduleLeagueSlots(nil, []string{"A"})
 	assert.Empty(t, ordered)
 	assert.Empty(t, slots)
+}
+
+// TestScheduleLeagueSlots_IDlessMatchesFailClosed pins bc-pnum review
+// finding 10: getLastSlot/used are keyed by SideAID/SideBID, so every
+// id-less match (a hand-built fixture that predates the draw -- production
+// matches always carry ids, see this function's own doc comment) shares
+// the SAME "" bucket regardless of which real players it names. Two
+// UNRELATED id-less matches (no player in common) therefore cannot be
+// placed in the same slot even on a two-court schedule: the first one
+// placed sets used[""], which then reads as a G1 violation for the second.
+// This is the safe (fails CLOSED) direction -- it denies a legitimate
+// simultaneous pairing rather than risking two matches that actually DO
+// share a player colliding -- so this test pins that behavior rather than
+// treating it as a bug to fix.
+func TestScheduleLeagueSlots_IDlessMatchesFailClosed(t *testing.T) {
+	matches := []state.MatchResult{
+		{ID: "m0", SideA: "Alice", SideB: "Bob", Round: 0, Status: state.MatchStatusScheduled},
+		{ID: "m1", SideA: "Carol", SideB: "Dave", Round: 0, Status: state.MatchStatusScheduled},
+	}
+	ordered, slots := scheduleLeagueSlots(matches, []string{"A", "B"})
+
+	require.Len(t, slots, 2)
+	require.Len(t, ordered, 2, "both matches must still appear exactly once (completeness)")
+	assert.NotEqual(t, slots[0], slots[1],
+		"two unrelated id-less matches must NOT share a slot: used[\"\"] fails closed rather than "+
+			"risking two matches that actually share a player colliding")
 }
 
 // --- assignLeagueSlotTimes ---

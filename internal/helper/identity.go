@@ -1,5 +1,7 @@
 package helper
 
+import "github.com/gitrgoliveira/bracket-creator/internal/domain"
+
 // CompetitorKey returns the competitor IDENTITY string used everywhere a
 // competitor must be resolved unambiguously from (id, name, dojo): the
 // participant ID when present -- globally unique, and minted for essentially
@@ -33,4 +35,11 @@ func CompetitorKey(id, name, dojo string) string {
 		return "id:" + id
 	}
 	return "nd:" + NormalizeParticipantName(name) + "|" + NormalizeParticipantName(dojo)
+}
+
+// PlayerKey is CompetitorKey applied to a domain.Player, for the many
+// callers whose identity key is just "this player's own identity" rather
+// than an (id, name, dojo) triple assembled by hand at the call site.
+func PlayerKey(p domain.Player) string {
+	return CompetitorKey(p.ID, p.Name, p.Dojo)
 }

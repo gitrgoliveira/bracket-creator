@@ -42,7 +42,7 @@ Two environment variables tune the API rate limiter for large events:
 
 ## The admin console
 
-Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. See [Operating modes](operating-modes.md) for the full access-control rules.
+Click **Admin** in the navigation bar and enter the admin password. The rules for who can access which features depend on your tournament's operating mode. Refer to [Operating modes](operating-modes.md) for the full access-control rules.
 
 ## Dashboard
 
@@ -63,7 +63,7 @@ Open **Edit details** from the dashboard to fill in the public information your 
 Set the **Public URL** field to the externally reachable address of your app (for example, `https://my-tournament.example.com`). Setting this field enables QR codes on competitor tags and makes every shareable link work. The public URL also populates the public info page in the viewer and on spectator display screens.
 
 !!! note
-    For guidance on making the app reachable over the internet, see [Hosting](../install/hosting.md).
+    For guidance on making the app reachable over the internet, refer to [Hosting](../install/hosting.md).
 
 ## Branding and sponsors
 
@@ -125,7 +125,7 @@ Switching back to the original format keeps them.
 
 The competition **Settings** page has an **Assigned shiai-jo (courts)** field listing every shiai-jo in the venue. Pick the ones this competition runs on; the number you pick is how many of its matches can run at the same time.
 
-Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead, and it always offers 1. A single shiai-jo is always allowed. Where a competition sends two or more qualifiers up from each pool, its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a two-shiai-jo one; where each pool sends up a single competitor, nothing crosses between shiai-jo and the bracket is left whole. 16 is the highest, and it is also the most shiai-jo a tournament can have, so no shiai-jo you can add is one a competition could not be given. See [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
+Assign **1, 2, 4, 8 or 16 shiai-jo**. The knockout draw gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Being even is not enough on its own: six blocks pair off into three, and three cannot pair off again, so 6 and 10 are refused just as 3, 5 and 7 are. When you pick a count the rule does not allow, the settings page names the counts to use instead, and it always offers 1. A single shiai-jo is always allowed. Where a competition sends two or more qualifiers up from each pool, its bracket splits into two half-blocks that act as partner shiai-jo, so the draw has the same shape as a two-shiai-jo one. Where each pool sends up a single competitor, nothing crosses between shiai-jo, and the bracket is left whole. 16 is the highest, and it is also the most shiai-jo a tournament can have, so no shiai-jo you can add is one a competition could not be given. Refer to [The knockout draw](knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
 **This is a rule about each competition, never about your venue.** A hall with three shiai-jo is completely normal, and nothing asks you to change it. What it means is that each competition there runs on 1 or 2 of the three, not that the third stands idle: run the seniors on 2 shiai-jo and the juniors on the remaining 1 at the same time, and all three are busy. A five shiai-jo hall works the same way, with one competition on 4 and another on 1, or two competitions of 2 alongside a third on 1.
 
@@ -137,23 +137,23 @@ The rule applies only to the formats that produce a knockout bracket, which are 
 
 The draw never uses more shiai-jo than the competition has pools, because a shiai-jo with no pool of its own would own an empty block of the bracket. When you assign more than that, nothing is refused and no warning is shown: the draw steps down to the largest allowed count that fits and is generated on that. A competition with seven pools assigned eight shiai-jo runs on four. The count you assign is therefore not always the count you get.
 
-The step-down applies to the whole competition, not only to the knockout, and the blocks are handed to the assigned shiai-jo in order. Assign A to H to a seven-pool competition and it runs entirely on A, B, C and D: the pools split 2 / 2 / 2 / 1 across those four, and every knockout match from the first round to the final is on them as well. Open the Shiaijo operator view for E, F, G or H and it reads "No matches on this court".
+The step-down applies to the whole competition, not only to the knockout, and the blocks are handed to the assigned shiai-jo in order. Assign A to H to a seven-pool competition, and it runs entirely on A, B, C and D. The pools split 2 / 2 / 2 / 1 across those four, and every knockout match from the first round to the final is on them as well. Open the Shiaijo operator view for E, F, G or H and it reads "No matches on this court".
 
 So assign a count the competition can fill, and give the rest to another competition running alongside it. If you want eight shiai-jo busy, the competition needs at least eight pools.
 
 #### If a competition already has a count the rule does not allow
 
-You can meet this after an upgrade, because the rule is newer than the data folder: a competition set up on 3, 5 or 6 shiai-jo before the rule existed keeps that allocation on disk, and so does one whose data folder was edited by hand.
+You can meet this after an upgrade, because the rule is newer than the data folder. A competition set up on 3, 5 or 6 shiai-jo before the rule existed keeps that allocation on disk, and so does one whose data folder was edited by hand.
 
-Such a competition is not broken. It loads, its matches and results are intact, it appears to spectators as usual, and its Settings page stays fully editable, so renaming it or changing anything else on that page still saves normally. The page carries a standing warning naming the counts to use instead.
+Such a competition is not broken. It loads, and its matches and results are intact. It appears to spectators as usual, and its Settings page stays fully editable, so renaming it or changing anything else on that page still saves normally. The page carries a standing warning naming the counts to use instead.
 
 What you cannot do is draw or start it. **Generate draw** and **Start competition** are disabled with the reason shown, and the app refuses the same action from anywhere else, until you reassign its shiai-jo to 1, 2, 4, 8 or 16.
 
 ### Knockout qualifiers
 
-For a **Pools + Knockout** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**, on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized send +1**, and **Fit the knockout**. See [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
+For a **Pools + Knockout** competition with **Pool size is a** set to **minimum**, a **Knockout qualifiers** control appears alongside **Players per pool** and **Winners per pool**, on both the competition create form and its Settings page. It offers three options: **Standard** (every pool sends the same number of qualifiers), **Oversized send +1**, and **Fit the knockout**. Refer to [How many qualify from each pool](knockout-draw.md#how-many-qualify-from-each-pool) for what each one does, with worked examples.
 
-Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both currently require it; switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster, reading something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. On the create form the preview is a placeholder until the competition has participants; on the Settings page it previews against the real roster, and is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
+Selecting either of the two non-standard options sets **Winners per pool** to 1 and disables the field, because both require it. Switching back to Standard makes the field editable again. Below the options, a preview line updates as you adjust pool size and roster, reading something like "34 pools -> 36 qualifiers -> 64-slot knockout (28 byes)" for whichever option is selected. On the create form the preview is a placeholder until the competition has participants; on the Settings page it previews against the real roster, and is locked once the competition reaches `draw-ready`, alongside the rest of the pool configuration.
 
 ### Adding participants
 
@@ -166,6 +166,15 @@ The **Participant list** panel (labelled **Team list** for team competitions) co
 
 Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list.
 
+Applying the list gives every competitor a participant id, shown beside the row in the working roster (hover it for the full value). Competitor numbers come later: every competition numbers its competitors when the draw is generated, pool by pool for a pooled competition or down the bracket for a knockout-only one, and nothing is shown before that. Refer to [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app whose list has no ids shows a notice on its **Overview** naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
+
+Two more notices can appear on the **Overview** for the same reason, once a competition has drawn. The app tries to repair these automatically, behind the scenes, the next time it reads the competition's data. Saving the participant list again lets it try once more. It matches a pool member to a participant by name and dojo together, or by name alone when the row records no dojo and only one competitor has that name. It matches a match side by name alone, because a match row only records a name. A notice remains only for a row it could not match this way:
+
+- A notice naming pool members with no id. The app could not match that member to a participant on the current roster (for example, the roster changed after the draw was made). That competitor shows no competitor number. Regenerate the draw, while it is still draw-ready, to fix it.
+- A notice naming pool matches with no id on a side or a winner. The app could not match that side automatically, most often because two competitors share the same name. That match is not counted in the standings. Re-entering the result assigns a missing winner id. Regenerating the draw, while it is still draw-ready, restores a missing side id.
+
+Both notices are advisory, not blocking: the competition keeps running, and nothing you have already recorded is lost.
+
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
 The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:
@@ -174,9 +183,9 @@ The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled
 - Click **Shuffle unseeded** to randomise unranked positions.
 - Click **Import seeds (CSV)** to load a seed file, or **Clear seeds** to remove all ranks.
 
-The order you rank the seeds in is used, not just the set of seeded competitors: seeds 1 and 3 land in one half of the knockout draw and seeds 2 and 4 in the other, each in its own quarter, and a seeded pool's winner is first in line for any bye in its shiai-jo's block. Fewer than four seeds, including none at all, is a normal configuration. See [Seeding in the knockout draw](knockout-draw.md#seeding).
+The order you rank the seeds in is used, not just the set of seeded competitors. Seeds 1 and 3 land in one half of the knockout draw, and seeds 2 and 4 land in the other, each in its own quarter. A seeded pool's winner is first in line for any bye in its shiai-jo's block. Fewer than four seeds, including none at all, is a normal configuration. Refer to [Seeding in the knockout draw](knockout-draw.md#seeding).
 
-Ranks must run from 1 with none missing. You can enter them in any order and each is saved as you type it, so a partly-entered seeding is expected; while it has a hole in it the panel names the ranks still to set and the **Generate draw** and **Start competition** buttons are disabled. Fill in the missing ranks, or click **Clear seeds** to start again.
+Ranks must run from 1 with none missing. You can enter them in any order, and each is saved as you type it, so a partly-entered seeding is expected. While it has a hole in it, the panel names the ranks still to set, and the **Generate draw** and **Start competition** buttons are disabled. Fill in the missing ranks, or click **Clear seeds** to start again.
 
 #### Editing a single competitor
 
@@ -196,6 +205,8 @@ Click **Generate draw** to produce the bracket. The competition enters `draw-rea
 - Knockout competitions show the bracket tree.
 - Swiss competitions show round 1.
 
+If a seeding rule could not be honoured, a banner above the preview reads **Seeding: the draw could not honour every rule** and lists what gave way. The draw still stands; refer to [Seeding](knockout-draw.md#seeding) for which rule gives way first.
+
 You can still toggle individual check-in status during `draw-ready`, but roster edits (add, remove, reorder) are locked.
 
 When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
@@ -212,35 +223,35 @@ When the preview looks correct, click **Start competition** to move to match pla
 
 ## Pools and bracket
 
-The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results; operators do not edit them by hand, with one exception: chusen (drawing lots), the last-resort tie-break for a consequential team-pool tie that a daihyosen cannot settle (see [Recording decisions](../court-operators/recording-decisions.md)). When a daihyosen settles a tie that determines pool advancement, the winning side carries a **DH** badge in the standings.
+The **Pools** tab shows standings for every pool. Ranks are computed automatically from match results. Operators do not edit them by hand, with one exception: chusen (drawing lots), the last-resort tie-break for a consequential team-pool tie that a daihyosen cannot settle. Refer to [Recording decisions](../court-operators/recording-decisions.md). When a daihyosen settles a tie that determines pool advancement, the winning side carries a **DH** badge in the standings.
 
-After all pool matches are complete, advance pool winners to the elimination bracket from the Pools tab. The bracket updates in real time as results come in.
+Pool finishers move into the knockout bracket on their own: as soon as a pool's last match is scored, its qualifiers are seeded into their bracket slots. Those knockout matches can be scored without waiting for the other pools. Once the last pool is seeded, the competition moves to the knockout phase. The bracket updates in real time as results come in.
 
 ![Pools view](../../screenshots/mobile-pool-standings.png)
 
-For the four competition formats and the Swiss round-by-round flow, see [Formats](formats.md).
+For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
 
-For team lineups and team scoring rules, see [Team tournaments](team-tournaments.md).
+For team lineups and team scoring rules, refer to [Team tournaments](team-tournaments.md).
 
-For how to enter scores and navigate between matches, see [Scoring a match](../court-operators/scoring-a-match.md).
+For how to enter scores and navigate between matches, refer to [Scoring a match](../court-operators/scoring-a-match.md).
 
-For kiken, fusenpai, daihyosen, and other special decisions, see [Recording decisions](../court-operators/recording-decisions.md).
+For kiken, fusenpai, daihyosen, and other special decisions, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
-For naginata and Engi-kyogi divisions, see [Naginata](naginata.md).
+For naginata and Engi-kyogi divisions, refer to [Naginata](naginata.md).
 
 ## Results and awards
 
 The public viewer shows a competition's podium when it finishes, and a provisional ranking while it is still in progress.
 
-Whether a competition awards two joint 3rd places or decides a single one with a bronze match is controlled by the **Award two joint 3rd places** setting, on the competition's Settings tab. It is on by default (the standard kendo convention) and applies to knockout, pools-then-knockout, and league competitions; it is not shown for Swiss, which has no bracket and no bronze match. Naginata competitions default the setting off (a single 3rd, decided by a bronze match), but you can turn it back on for a naginata competition too, and you can turn it off for a kendo competition that needs a single 3rd, for example a selection event with one bronze medal. See [Naginata](naginata.md#third-place-match) for the bronze match itself.
+The **Award two joint 3rd places** setting, on the competition's Settings tab, controls whether a competition awards two joint 3rd places or decides a single one with a bronze match. It is on by default (the standard kendo convention) and applies to knockout, pools-then-knockout, and league competitions. It is not shown for Swiss, which has no bracket and no bronze match. Naginata competitions default the setting off (a single 3rd, decided by a bronze match). You can turn it back on for a naginata competition too, and you can turn it off for a kendo competition that needs a single 3rd, for example a selection event with one bronze medal. Refer to [Naginata](naginata.md#third-place-match) for the bronze match itself.
 
 - **Knockout** (default: joint 3rds on): 1st place, 2nd place, and two equal 3rd places. There is no bronze match; both semi-final losers share third.
 - **Knockout with joint 3rds off**: a single 3rd place is decided by a bronze match.
 - **Pools + Knockout** (still in its pool phase): the viewer shows a provisional cross-pool ranking until the knockout decides the final places.
 
-Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; see [Operating modes](operating-modes.md#destructive-ops-password).
+Operators see an all-competition winners view from the dashboard. You can also record optional **fighting-spirit** (敢闘賞) awards as free text; these appear on the viewer for all spectators. Saving awards requires the destructive-ops password in self-run mode; refer to [Operating modes](operating-modes.md#destructive-ops-password).
 
-**League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (see [Naginata](naginata.md#standings)). The one exception is 3rd place: with **Award two joint 3rd places** enabled, competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; see [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
+**League competitions** derive the podium from final standings. In an individual league, any tie within the top three places triggers a short ippon-shobu tie-breaker automatically, so the competition never closes with an unearned tie. Engi kata competitions never hold supplementary bouts; they rank by wins, then accumulated flags (refer to [Naginata](naginata.md#standings)). The one exception is 3rd place: with **Award two joint 3rd places** enabled, competitors tied entirely for third share the position instead, with no decider. In a team league, the operator chooses whether to run a tie-breaker or accept a tie at any position; refer to [Team standings and tie-breaks](team-tournaments.md#team-standings-and-tie-breaks).
 
 Set the **Award two joint 3rd places** option during setup, before you generate the draw. Once the draw exists, the option is locked; discard the draw to change it.
 
@@ -262,7 +273,7 @@ PDF exports (competitor tags, name sheets, and bracket trees) are available to a
 
 The lean container image omits LibreOffice and returns a clear message when a PDF is requested.
 
-When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens that competitor's public page. See [Hosting](../install/hosting.md) for guidance on setting the public URL.
+When the **Public URL** is set and competitors have assigned numbers, each printed tag includes a QR code that opens that competitor's public page. Refer to [Hosting](../install/hosting.md) for guidance on setting the public URL.
 
 ## Data format
 
@@ -271,6 +282,8 @@ Tournament state is stored as plain files inside the data folder you specified w
 - `tournament.md`: YAML front-matter with the tournament name, date, venue, court count, and the admin password and destructive-ops password.
 - `competitions/<id>/config.md`: YAML front-matter with competition kind, format, pool settings, and courts.
 - `competitions/<id>/participants.csv`: one participant per line with name, optional display name (zekken), dojo, and optional dan grade.
+
+Refer to [Data model](../../architecture/data-model.md) for every file in the folder and what each holds.
 
 !!! warning
     Edit data files only between rounds, not while the server is actively processing match results. Concurrent writes can produce inconsistent state.

@@ -123,7 +123,7 @@ func TestBuildKachinukiDetail(t *testing.T) {
 		},
 	}
 
-	detail := buildKachinukiDetail(m, "Pool Match 1", positions)
+	detail := buildKachinukiDetail(m, "Pool Match 1", positions, map[string]string{}, map[string][]domain.TeamMember{})
 
 	assert.Equal(t, "Pool Match 1", detail.Label)
 	assert.Equal(t, "RedTeam", detail.SideATeam)
@@ -153,7 +153,7 @@ func TestBuildKachinukiDetail_NoPositions(t *testing.T) {
 			{Position: 1, SideA: "A1", SideB: "B1", Winner: "A1"},
 		},
 	}
-	detail := buildKachinukiDetail(m, "label", map[string]string{})
+	detail := buildKachinukiDetail(m, "label", map[string]string{}, map[string]string{}, map[string][]domain.TeamMember{})
 	require.Len(t, detail.Bouts, 1)
 	assert.Empty(t, detail.Bouts[0].SideAPos)
 	assert.Empty(t, detail.Bouts[0].SideBPos)
@@ -651,4 +651,207 @@ func TestBuildKachinukiPositionMap_MatchScoped(t *testing.T) {
 		"no match-scoped entry for PoolA-2 → round fallback Senpo")
 	assert.Equal(t, "Taisho", resolveKachinukiPosition(m, "PoolA-1", "TeamA", "alice"),
 		"match-scoped PoolA-1 overrides alice to Taisho")
+}
+
+// --- Squad member labels (bc-pnum: "make a team member's label
+// available to the public surfaces") ---
+
+// TestResolveKachinukiMemberLabel exercises resolveKachinukiMemberLabel's
+// pure lookup: the happy path (including a BLANK-named member, which
+// still resolves through its index, since a squad slot's label comes
+// from Index alone, never Name), and every miss shape (unknown member,
+// unknown team, no number yet, no team/member id recorded on the row).
+func TestResolveKachinukiMemberLabel(t *testing.T) {
+	squads := map[string][]domain.TeamMember{
+		"team-red": {
+			{ID: "m1", Index: 1, Name: "Alice"},
+			{ID: "m2", Index: 2, Name: ""}, // unfilled seeded slot
+		},
+	}
+	teamNumbers := map[string]string{"team-red": "T10"}
+
+	assert.Equal(t, "T10.1", resolveKachinukiMemberLabel(teamNumbers, squads, "team-red", "m1"))
+	assert.Equal(t, "T10.2", resolveKachinukiMemberLabel(teamNumbers, squads, "team-red", "m2"),
+		"a blank-named member still gets a label: the label comes from its index, not its name")
+	assert.Equal(t, "", resolveKachinukiMemberLabel(teamNumbers, squads, "team-red", "no-such-member"))
+	assert.Equal(t, "", resolveKachinukiMemberLabel(teamNumbers, squads, "no-such-team", "m1"))
+	assert.Equal(t, "", resolveKachinukiMemberLabel(map[string]string{}, squads, "team-red", "m1"),
+		"team has no assigned number yet")
+	assert.Equal(t, "", resolveKachinukiMemberLabel(teamNumbers, squads, "", "m1"),
+		"no team id recorded on the bout row")
+	assert.Equal(t, "", resolveKachinukiMemberLabel(teamNumbers, squads, "team-red", ""),
+		"no member id recorded on the bout row")
+}
+
+// TestBuildKachinukiTeamNumbers_NilOrNoPrefix verifies the guard clause:
+// a nil competition or one with no number prefix assigned yet returns an
+// empty map without attempting any read.
+func TestBuildKachinukiTeamNumbers_NilOrNoPrefix(t *testing.T) {
+	eng, _, _ := setupTestEngine(t)
+	assert.Empty(t, eng.buildKachinukiTeamNumbers("any-comp", nil))
+	assert.Empty(t, eng.buildKachinukiTeamNumbers("any-comp", &state.Competition{ID: "any-comp"}))
+}
+
+// TestBuildKachinukiTeamNumbers_DrawInPools verifies the pooled-format
+// branch reads pools.csv directly (RenumberCompetitors' own persisted
+// Number column), keyed by participant id.
+func TestBuildKachinukiTeamNumbers_DrawInPools(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-numbers-pools"
+	redID := helper.NewUUID4()
+	whiteID := helper.NewUUID4()
+
+	comp := &state.Competition{
+		ID:            compID,
+		Format:        state.CompFormatMixed,
+		Status:        state.CompStatusPools,
+		NumberPrefix:  "T",
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []domain.Player{
+			{ID: redID, Name: "RedTeam", Number: "T1"},
+			{ID: whiteID, Name: "WhiteTeam", Number: "T2"},
+		}},
+	}))
+
+	numbers := eng.buildKachinukiTeamNumbers(compID, comp)
+	assert.Equal(t, "T1", numbers[redID])
+	assert.Equal(t, "T2", numbers[whiteID])
+}
+
+// TestBuildKachinukiTeamNumbers_DrawInBracket verifies the knockout-only
+// branch composes numbers from the bracket's DrawOrder (bc-pnum ruling 2,
+// NumberKnockoutParticipants), matching the viewer/display merge rather
+// than reading a persisted column that does not exist for this format.
+func TestBuildKachinukiTeamNumbers_DrawInBracket(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "team-numbers-bracket"
+	redID := helper.NewUUID4()
+	whiteID := helper.NewUUID4()
+
+	comp := &state.Competition{
+		ID:            compID,
+		Format:        state.CompFormatPlayoffs,
+		Status:        state.CompStatusPlayoffs,
+		NumberPrefix:  "T",
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      5,
+	}
+	require.NoError(t, store.SaveCompetition(comp))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "DojoW"},
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{DrawOrder: []string{redID, whiteID}}))
+
+	numbers := eng.buildKachinukiTeamNumbers(compID, comp)
+	assert.Equal(t, "T1", numbers[redID], "RedTeam is DrawOrder[0]")
+	assert.Equal(t, "T2", numbers[whiteID], "WhiteTeam is DrawOrder[1]")
+}
+
+// TestKachinukiDetailMatches_SquadLabel_PoolMatch is the end-to-end path
+// for a pooled-format kachinuki competition: a pool match bout that
+// carries a resolvable team id (SideAID) and squad member id
+// (SubMatchResult.SideAMemberID) gets its SideALabel composed from the
+// team's pools.csv number and the squad member's stable index. Side B
+// carries no member id (a legacy/unresolved bout row) and stays blank,
+// matching resolveKachinukiMemberLabel's own miss case.
+func TestKachinukiDetailMatches_SquadLabel_PoolMatch(t *testing.T) {
+	compID := "kachinuki-squad-label-pool"
+	eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) {
+		c.Format = state.CompFormatMixed
+		c.Status = state.CompStatusPools
+		c.NumberPrefix = "T"
+	})
+
+	redID := helper.NewUUID4()
+	whiteID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "DojoW"},
+	}))
+
+	member, err := store.AddTeamMember(compID, redID, "Alice")
+	require.NoError(t, err)
+
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: []domain.Player{
+			{ID: redID, Name: "RedTeam", Number: "T1"},
+			{ID: whiteID, Name: "WhiteTeam", Number: "T2"},
+		}},
+	}))
+
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:      "P1-0",
+			SideA:   "RedTeam",
+			SideAID: redID,
+			SideB:   "WhiteTeam",
+			SideBID: whiteID,
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "Alice", SideAMemberID: member.ID, SideB: "W-Senpo", Winner: "Alice", Decision: "fought"},
+			},
+		},
+	}))
+
+	out, err := eng.KachinukiDetailMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Bouts, 1)
+	assert.Equal(t, "T1.1", out[0].Bouts[0].SideALabel, "RedTeam=T1, Alice is squad member index 1")
+	assert.Equal(t, "", out[0].Bouts[0].SideBLabel, "no member id recorded for Side B")
+}
+
+// TestKachinukiDetailMatches_SquadLabel_BracketMatch is the end-to-end
+// path for a knockout-only (playoffs) kachinuki competition: the team
+// number comes from the bracket's DrawOrder rather than pools.csv, and
+// bracketMatchToTeamResult's SideAID/SideBID (bc-brid) carry the bout's
+// team identity through the read-only projection collectKachinukiMatches
+// uses for a bracket-origin match.
+func TestKachinukiDetailMatches_SquadLabel_BracketMatch(t *testing.T) {
+	compID := "kachinuki-squad-label-bracket"
+	eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) {
+		c.Format = state.CompFormatPlayoffs
+		c.Status = state.CompStatusPlayoffs
+		c.NumberPrefix = "T"
+	})
+
+	redID := helper.NewUUID4()
+	whiteID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: redID, Name: "RedTeam", Dojo: "DojoR"},
+		{ID: whiteID, Name: "WhiteTeam", Dojo: "DojoW"},
+	}))
+
+	member, err := store.AddTeamMember(compID, redID, "Alice")
+	require.NoError(t, err)
+
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		DrawOrder: []string{redID, whiteID},
+		Rounds: [][]state.BracketMatch{
+			{
+				{
+					ID:      "SF1",
+					SideA:   "RedTeam",
+					SideAID: redID,
+					SideB:   "WhiteTeam",
+					SideBID: whiteID,
+					Winner:  "RedTeam",
+					Status:  state.MatchStatusCompleted,
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "Alice", SideAMemberID: member.ID, SideB: "W-Senpo", Winner: "Alice", Decision: "fought"},
+					},
+				},
+			},
+		},
+	}))
+
+	out, err := eng.KachinukiDetailMatches(compID)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, out[0].Bouts, 1)
+	assert.Equal(t, "T1.1", out[0].Bouts[0].SideALabel, "RedTeam is DrawOrder[0] -> T1, Alice is squad member index 1")
 }

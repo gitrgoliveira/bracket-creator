@@ -1,6 +1,6 @@
 import { act, fireEvent } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
-import { installSettingsHarness, mountSettings } from './settings_mount_harness.jsx';
+import { installSettingsHarness, mountSettings, makeSettingsCompetition } from './settings_mount_harness.jsx';
 
 // bc-symm: pins the wiring behind a browser-verified gap this PR itself made
 // reachable. normalizePoolConfig (internal/mobileapp/handlers_competition.go)
@@ -39,29 +39,10 @@ const noop = () => {};
 // courts: ['A'] (a single shiaijo) is legal for every format regardless of
 // venue size (shiaijoCountError short-circuits at n <= 1), which keeps
 // blockingCourtsErr out of these tests entirely -- the only thing under
-// test is the pool-settings gate.
+// test is the pool-settings gate. No differences from the shared settings
+// fixture (playoffs, no pools).
 function makeCompetition(overrides = {}) {
-  return {
-    id: 'c1',
-    name: 'Autumn Cup',
-    status: 'setup',
-    format: 'playoffs',
-    kind: 'individual',
-    teamSize: 0,
-    teamMatchType: 'fixed',
-    poolSize: 0,
-    poolSizeMode: 'min',
-    poolWinners: 0,
-    extraQualifiers: '',
-    players: [],
-    courts: ['A'],
-    startTime: '09:00',
-    date: '',
-    fightingSpiritAwards: [],
-    swissCurrentRound: 0,
-    swissRounds: 0,
-    ...overrides,
-  };
+  return makeSettingsCompetition(overrides);
 }
 
 const byText = (container, tag, text) =>

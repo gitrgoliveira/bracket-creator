@@ -171,6 +171,27 @@ describe('ScoreEditorModal ippon seeding', () => {
     expect(akaSlots(container)).toEqual(['·', '·']);
   });
 
+  // bc-pnum (HIGH regression class from dfe6ea24): the
+  // score.ippons seeding used a bare `winner?.id === side?.id`. With BOTH
+  // sides id-less (resolveSide/buildPlayerMap now keep id "" honestly
+  // instead of inventing one from the name), winner.id === sideA.id AND
+  // winner.id === sideB.id are BOTH trivially true ("" === ""), so the same
+  // score.ippons got seeded onto BOTH sides at once -- the exact
+  // "4d602de2 regression class" this file's own header references.
+  it('attributes score.ippons to exactly the winning side when both sides are id-less (legacy)', () => {
+    const idLessA = { id: '', name: 'Ryu' };
+    const idLessB = { id: '', name: 'Phoenix' };
+    const { container } = renderEditor(knockoutMatch({
+      sideA: idLessA,
+      sideB: idLessB,
+      status: 'completed',
+      winner: idLessA,
+      score: { type: 'ippon', ippons: ['M', 'K'] },
+    }));
+    expect(akaSlots(container)).toEqual(['M', 'K']);
+    expect(shiroSlots(container)).toEqual(['·', '·']);
+  });
+
   // ── the "•" placeholder filter applies to the ippon arrays ───────────────
   it('filters the "•" placeholder out of the ippon arrays', () => {
     const { container } = renderEditor(knockoutMatch({

@@ -11,13 +11,15 @@ import (
 
 // buildSetsFromPools reconstructs the per-pool dojo/name conflict sets from
 // pools that already have players assigned, so that direct calls to discoverPool
-// in tests start from the correct initial state.
+// in tests start from the correct initial state. Keyed by dojoKey (bc-drwx
+// item 3), matching discoverPool's and assignPlayersToPools' own normalized
+// map keys -- a raw key here would silently never match a normalized lookup.
 func buildSetsFromPools(pools []Pool) (dojoSets []map[string]bool) {
 	dojoSets = make([]map[string]bool, len(pools))
 	for i, pool := range pools {
 		dojoSets[i] = make(map[string]bool, len(pool.Players))
 		for _, p := range pool.Players {
-			dojoSets[i][p.Dojo] = true
+			dojoSets[i][dojoKey(p.Dojo)] = true
 		}
 	}
 	return
@@ -55,7 +57,6 @@ func TestCreatePlayersWithZekkenNameFallback(t *testing.T) {
 func TestCreatePlayersWithoutZekkenName(t *testing.T) {
 	entries := []string{
 		"John Smith, Tokyo Kendo Club",
-		"Yuki Tanaka",
 	}
 
 	players, err := CreatePlayers(entries, false)
@@ -63,7 +64,60 @@ func TestCreatePlayersWithoutZekkenName(t *testing.T) {
 
 	assert.Equal(t, "Tokyo Kendo Club", players[0].Dojo)
 	assert.Equal(t, "J. SMITH", players[0].DisplayName)
-	assert.Equal(t, "NA", players[1].Dojo)
+}
+
+// TestCreatePlayersWithoutZekkenName_MissingDojoRejected pins bc-drwx item
+// 10: a row with no dojo column is REFUSED, not silently defaulted to the
+// literal string "NA" (the pre-fix behaviour this test used to pin), per
+// docs/user-guide/organisers/input-format.md's promise that "a row with no
+// dojo is rejected" -- a promise this non-zekken branch did not keep before
+// this fix, even though the zekken branch already did.
+func TestCreatePlayersWithoutZekkenName_MissingDojoRejected(t *testing.T) {
+	entries := []string{
+		"John Smith, Tokyo Kendo Club",
+		"Yuki Tanaka",
+	}
+
+	_, err := CreatePlayers(entries, false)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "entry 2: missing dojo")
+}
+
+// TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo pins bc-pnum
+// review: the zekken branch's blank-dojo checks used to be UNCONDITIONAL
+// while the non-zekken branch already honoured requireDojo, so
+// state.LoadParticipants (which always passes requireDojo=false so a
+// legacy roster still loads and can be repaired -- see this function's own
+// doc comment) failed outright on a zekken roster carrying one blank-dojo
+// legacy row instead of loading it tolerantly like every other format.
+// requireDojo=false must load the row with an empty Dojo; requireDojo=true
+// must still refuse it with the same error the non-zekken branch uses.
+func TestCreatePlayersFromRecords_ZekkenBranchHonoursRequireDojo(t *testing.T) {
+	t.Run("three-column (Name, DisplayName, Dojo) row", func(t *testing.T) {
+		records := [][]string{{"Alice", "A1", ""}}
+
+		players, err := CreatePlayersFromRecords(records, true, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		assert.Equal(t, "", players[0].Dojo)
+
+		_, err = CreatePlayersFromRecords(records, true, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "entry 1: missing dojo")
+	})
+
+	t.Run("two-column (Name, Dojo) row", func(t *testing.T) {
+		records := [][]string{{"Alice", ""}}
+
+		players, err := CreatePlayersFromRecords(records, true, false)
+		require.NoError(t, err)
+		require.Len(t, players, 1)
+		assert.Equal(t, "", players[0].Dojo)
+
+		_, err = CreatePlayersFromRecords(records, true, true)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "entry 1: missing dojo")
+	})
 }
 
 func TestCreatePlayersZekkenTwoColumnFallback(t *testing.T) {
@@ -206,6 +260,55 @@ func TestCreatePlayersDuplicates(t *testing.T) {
 	}
 	if len(players2) != 2 {
 		t.Errorf("Expected 2 players, got %d", len(players2))
+	}
+}
+
+func TestCreatePlayers_MissingName(t *testing.T) {
+	tests := []struct {
+		name        string
+		entries     []string
+		withZekken  bool
+		wantErr     bool
+		errContains []string
+	}{
+		{
+			name:        "blank name is reported with its entry number",
+			entries:     []string{"John Doe, Dojo A", ", Dojo B"},
+			wantErr:     true,
+			errContains: []string{"participant validation failed", "entry 2: missing name"},
+		},
+		{
+			name:    "whitespace-only entry is skipped",
+			entries: []string{"John Doe, Dojo A", "   "},
+		},
+		{
+			name:        "two blank names are both reported",
+			entries:     []string{", Dojo A", ", Dojo B"},
+			wantErr:     true,
+			errContains: []string{"entry 1: missing name", "entry 2: missing name"},
+		},
+		{
+			name:        "blank name and missing dojo are both reported",
+			entries:     []string{"Alice, ALICE, ", ", BOB, Dojo B"},
+			withZekken:  true,
+			wantErr:     true,
+			errContains: []string{"entry 1: missing dojo", "entry 2: missing name"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			players, err := CreatePlayers(tt.entries, tt.withZekken)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, players)
+				for _, s := range tt.errContains {
+					assert.Contains(t, err.Error(), s)
+				}
+				return
+			}
+			require.NoError(t, err)
+		})
 	}
 }
 
@@ -632,7 +735,7 @@ func TestDiscoverPool(t *testing.T) {
 	t.Run("finds empty pool", func(t *testing.T) {
 		dojoSets := buildSetsFromPools(pools)
 		player := Player{Name: "P2", Dojo: "Dojo B"}
-		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0, make(dojoKeyCache))
 
 		if poolIdx != 0 {
 			t.Errorf("Expected pool 0, got %d", poolIdx)
@@ -642,7 +745,7 @@ func TestDiscoverPool(t *testing.T) {
 	t.Run("avoids same dojo", func(t *testing.T) {
 		dojoSets := buildSetsFromPools(pools)
 		player := Player{Name: "P3", Dojo: "Dojo A"}
-		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0)
+		poolIdx := discoverPool(pools, dojoSets, player, []int{2, 2}, 0, make(dojoKeyCache))
 
 		// Should find pool 1 since pool 0 has same dojo
 		if poolIdx != 1 {
@@ -662,7 +765,7 @@ func TestDiscoverPool(t *testing.T) {
 		}
 		dojoSets := buildSetsFromPools(fullPools)
 		player := Player{Name: "P3", Dojo: "D3"}
-		poolIdx := discoverPool(fullPools, dojoSets, player, []int{2}, 0)
+		poolIdx := discoverPool(fullPools, dojoSets, player, []int{2}, 0, make(dojoKeyCache))
 
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
@@ -677,7 +780,7 @@ func TestLeastConflictedPool(t *testing.T) {
 			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}}},
 		}
 
-		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo", make(dojoKeyCache))
 		if poolIdx != 1 {
 			t.Errorf("Expected pool 1, got %d", poolIdx)
 		}
@@ -689,7 +792,7 @@ func TestLeastConflictedPool(t *testing.T) {
 			{Players: []Player{{Name: "P3", Dojo: "Dojo P3"}, {Name: "P4", Dojo: "Dojo P4"}}},
 		}
 
-		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo")
+		poolIdx := leastConflictedPool(pools, []int{2, 2}, "AnyDojo", make(dojoKeyCache))
 		if poolIdx != -1 {
 			t.Errorf("Expected -1, got %d", poolIdx)
 		}
@@ -775,7 +878,7 @@ func TestLeastConflictedPool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := leastConflictedPool(tt.pools, tt.targetSizes, tt.dojo)
+			got := leastConflictedPool(tt.pools, tt.targetSizes, tt.dojo, make(dojoKeyCache))
 			if got != tt.want {
 				t.Errorf("leastConflictedPool() = %d, want %d", got, tt.want)
 			}
@@ -952,21 +1055,17 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			errContains: "missing dojo",
 		},
 		{
-			name:       "non-zekken mode with single column",
-			entries:    []string{"John Doe"},
-			withZekken: false,
-			wantErr:    false,
-			validate: func(t *testing.T, players []Player) {
-				if len(players) != 1 {
-					t.Fatalf("Expected 1 player, got %d", len(players))
-				}
-				if players[0].Name != "John Doe" {
-					t.Errorf("Expected name 'John Doe', got %s", players[0].Name)
-				}
-				if players[0].Dojo != "NA" {
-					t.Errorf("Expected dojo 'NA', got %s", players[0].Dojo)
-				}
-			},
+			// bc-drwx item 10: a single-column, non-zekken row used to
+			// default its missing dojo to the literal string "NA"; it is
+			// now refused with the same "entry N: missing dojo" error the
+			// zekken branch already used, matching
+			// docs/user-guide/organisers/input-format.md's promise that a
+			// row with no dojo is rejected.
+			name:        "non-zekken mode with single column is refused",
+			entries:     []string{"John Doe"},
+			withZekken:  false,
+			wantErr:     true,
+			errContains: "entry 1: missing dojo",
 		},
 		{
 			name:       "unicode names and dojos",
@@ -1014,16 +1113,23 @@ func TestCreatePlayersEdgeCases(t *testing.T) {
 			},
 		},
 		{
-			name:       "leading and trailing commas",
-			entries:    []string{",John Doe, Dojo A,", "Jane Smith, Dojo B,"},
+			// A leading comma shifts the name out of the first field, so the
+			// first field is blank: the missing-name check now rejects it
+			// rather than silently building a player with an empty name.
+			name:        "leading comma produces a blank name",
+			entries:     []string{",John Doe, Dojo A"},
+			withZekken:  false,
+			wantErr:     true,
+			errContains: "entry 1: missing name",
+		},
+		{
+			name:       "trailing comma still parses",
+			entries:    []string{"Jane Smith, Dojo B,"},
 			withZekken: false,
 			wantErr:    false,
 			validate: func(t *testing.T, players []Player) {
-				if len(players) != 2 {
-					t.Fatalf("Expected 2 players, got %d", len(players))
-				}
-				// First entry has empty first field, so name becomes ""
-				// This might be a valid test case or might need error handling
+				require.Len(t, players, 1)
+				assert.Equal(t, "Jane Smith", players[0].Name)
 			},
 		},
 		{
@@ -1706,13 +1812,14 @@ func TestDiscoverPool_StartIndexRoundRobin(t *testing.T) {
 	dojoSets := buildSetsFromPools(pools)
 	player := Player{Name: "P", Dojo: "D"}
 
-	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 1); got != 1 {
+	keys := make(dojoKeyCache)
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 1, keys); got != 1 {
 		t.Errorf("expected start-index 1, got %d", got)
 	}
-	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 2); got != 2 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 2, keys); got != 2 {
 		t.Errorf("expected start-index 2, got %d", got)
 	}
-	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 0); got != 0 {
+	if got := discoverPool(pools, dojoSets, player, []int{2, 2, 2}, 0, keys); got != 0 {
 		t.Errorf("expected start-index 0, got %d", got)
 	}
 }

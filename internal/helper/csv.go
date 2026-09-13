@@ -75,6 +75,7 @@ func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
 	rankCol := -1
 	nameCol := -1
 	dojoCol := -1
+	idCol := -1
 	for i, h := range header {
 		switch strings.ToLower(strings.TrimSpace(h)) {
 		case "rank":
@@ -83,6 +84,8 @@ func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
 			nameCol = i
 		case "dojo":
 			dojoCol = i
+		case "id":
+			idCol = i
 		}
 	}
 
@@ -121,7 +124,17 @@ func ReadSeedsFileRaw(filePath string) ([]domain.SeedAssignment, error) {
 			dojoStr = strings.TrimSpace(record[dojoCol])
 		}
 
+		// idCol is -1 for a file written before this column existed (or a
+		// hand-written --seeds CSV); idStr stays "" exactly as it would for
+		// any other absent column, which is what makes this backward
+		// compatible with every older reader that never looks for it.
+		idStr := ""
+		if idCol >= 0 && len(record) > idCol {
+			idStr = strings.TrimSpace(record[idCol])
+		}
+
 		assignments = append(assignments, domain.SeedAssignment{
+			ID:       idStr,
 			Name:     nameStr,
 			Dojo:     dojoStr,
 			SeedRank: rank,

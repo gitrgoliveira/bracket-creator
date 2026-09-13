@@ -1,6 +1,6 @@
 import { act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { installSettingsHarness, mountSettings } from './settings_mount_harness.jsx';
+import { installSettingsHarness, mountSettings, makeSettingsCompetition } from './settings_mount_harness.jsx';
 
 // bc-qual review round: the "Knockout qualifiers" radio on the competition
 // SETTINGS page must be able to save its STANDARD value.
@@ -25,30 +25,21 @@ import { installSettingsHarness, mountSettings } from './settings_mount_harness.
 installSettingsHarness();
 
 // A mixed competition already saved with a NON-standard qualifier mode: the
-// only starting state from which "save Standard" is a change at all.
+// only starting state from which "save Standard" is a change at all. This
+// scenario's own differences from the shared settings fixture.
 function makeCompetition(overrides = {}) {
-  return {
-    id: 'c1',
+  return makeSettingsCompetition({
     name: 'Mudansha',
-    status: 'setup',
     format: 'mixed',
-    kind: 'individual',
     poolSize: 3,
-    poolSizeMode: 'min',
     poolWinners: 1,
     extraQualifiers: 'larger-pools',
     players: [
       { id: 'p1', name: 'Yamada', seed: 1 },
       { id: 'p2', name: 'Tanaka' },
     ],
-    courts: ['A'],
-    startTime: '09:00',
-    date: '',
-    fightingSpiritAwards: [],
-    swissCurrentRound: 0,
-    swissRounds: 0,
     ...overrides,
-  };
+  });
 }
 
 const byText = (container, text) =>

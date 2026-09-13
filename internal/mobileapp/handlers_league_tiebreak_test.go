@@ -1157,6 +1157,30 @@ func TestLeagueTiebreakFinalize_BroadcastsCompleted(t *testing.T) {
 	assert.True(t, found, "expected EventCompetitionCompleted to be broadcast; got %v", hub.events)
 }
 
+// Finalize, AutoCompleteStarted broadcasts EventCompetitionStarted (bc-prow):
+// the outcome exists on every MaybeAutoCompletePools caller, so this handler
+// must not swallow it into the bare schedule refresh of its default arm.
+func TestLeagueTiebreakFinalize_BroadcastsStarted(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
+		autoOutcome: engine.AutoCompleteStarted,
+	}
+	store := &stubLeagueTiebreakStore{
+		comp: makeTeamLeagueComp(state.CompStatusPools),
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak/finalize", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, hub.events, EventCompetitionStarted,
+		"expected EventCompetitionStarted to be broadcast; got %v", hub.events)
+	assert.Contains(t, hub.events, EventScheduleUpdated,
+		"expected EventScheduleUpdated to be broadcast; got %v", hub.events)
+}
+
 // ---------------------------------------------------------------------------
 // Auth-split tests, verify GET is public and POST is admin-gated.
 //

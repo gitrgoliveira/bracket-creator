@@ -118,8 +118,12 @@ type ScoringEngine interface {
 	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done, or injects supplementary
-	// ippon-shobu tiebreaker matches when ties are detected. Mirrors
-	// engine.Engine.MaybeAutoCompletePools.
+	// ippon-shobu tiebreaker matches when ties are detected. It runs one
+	// check BEFORE those: a competition still draw-ready that now holds a
+	// recorded result (a match left running or completed) is STARTED, and
+	// returns engine.AutoCompleteStarted when nothing else followed, so a
+	// score from the shiaijo view starts the competition just as
+	// POST .../start does. Mirrors engine.Engine.MaybeAutoCompletePools.
 	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 	// UpdateMatchCourt reassigns a match to a different court. Mirrors
 	// engine.Engine.UpdateMatchCourt.

@@ -3997,6 +3997,13 @@ button.pool-match-row {
 }
 
 @media (pointer: coarse) {
+  /* The 44px looks like a repeat of the shared .btn--icon-sm coarse rule and
+     is not: the desktop 36px above is a two-class selector, so it outranks
+     that one-class rule whatever the media query, and dropping these two
+     declarations silently leaves this button at 36px on touch. The border
+     comes back here because the row's buttons are borderless on a fine
+     pointer (hover reveals them) and there is no hover to reveal them on
+     touch. */
   .seed-row__actions .btn--icon-sm {
     min-width: 44px;
     min-height: 44px;

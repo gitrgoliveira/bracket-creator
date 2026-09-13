@@ -20,7 +20,7 @@ If the form says someone with your name is already registered, your name and doj
 
 ## Check in on the day
 
-If the competition uses check-in, mark yourself present before the organiser generates the draw. Self-run mode does not require a password for this: open the competition from the dashboard and mark yourself present in the participant list. Competitors who have not checked in are excluded from the draw.
+If the competition uses check-in, mark yourself present before the organiser generates the draw. Check-in happens at the **Registration desk**, which you open from the dashboard: it gathers the competitors of every competition that uses check-in, so find your name there and mark yourself present. Self-run mode does not require a password for this. Competitors who have not checked in are excluded from the draw.
 
 ## Report your own score
 

@@ -348,6 +348,57 @@ func TestDaihyosenHandler_HappyPath(t *testing.T) {
 	assert.NotNil(t, resp["subResult"])
 }
 
+// startedAutoEngine is the real engine with one method overridden, so the
+// daihyosen handler's auto-complete switch takes its AutoCompleteStarted arm
+// while every other call the endpoint makes stays production code.
+type startedAutoEngine struct{ *engine.Engine }
+
+func (startedAutoEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
+	return engine.AutoCompleteStarted, nil
+}
+
+// TestDaihyosenHandler_BroadcastsStarted: adding the rep bout leaves the match
+// running, which is a recorded result, so a still-draw-ready competition is
+// started by it (bc-prow). The handler must broadcast competition_started
+// rather than drop the outcome on the floor, as it did before bc-prow added
+// the case.
+func TestDaihyosenHandler_BroadcastsStarted(t *testing.T) {
+	dir, err := os.MkdirTemp("", "daihyosen-started-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	hub := &recordingBroadcaster{}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterDaihyosenHandlers(r.Group("/api"), startedAutoEngine{engine.New(store)}, store, hub)
+
+	compID := "dh-started"
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID}))
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
+		{ID: "11111111-1111-4111-1111-111111111111", Name: "Alice", Dojo: "A"},
+	}))
+	// Bracket match with empty SubResults → IV:0-0, PW:0-0 → tied, the
+	// precondition for a daihyosen.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{{ID: "B1", SideA: "TeamA", SideB: "TeamB", Status: state.MatchStatusRunning}},
+		},
+	}))
+
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/"+compID+"/matches/B1/daihyosen", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	assert.Contains(t, hub.events, EventCompetitionStarted,
+		"expected EventCompetitionStarted to be broadcast; got %v", hub.events)
+	assert.Contains(t, hub.events, EventScheduleUpdated,
+		"expected EventScheduleUpdated to be broadcast; got %v", hub.events)
+}
+
 // TestRemoveDaihyosen covers the DELETE /daihyosen endpoint with four
 // subtests: successful removal, 404 when no DH exists, 409 when the DH
 // is already scored, and 404 when the match itself is not found.

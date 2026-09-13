@@ -430,6 +430,12 @@ func RegisterDaihyosenHandlers(r *gin.RouterGroup, eng DaihyosenEngine, store Da
 		case outcome == engine.AutoCompleteTiebreakInjected:
 			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id})
 			hub.Broadcast(EventScheduleUpdated, nil)
+		case outcome == engine.AutoCompleteStarted:
+			// The added rep bout left the match running, which is a recorded
+			// result, so a still-draw-ready competition was started by it
+			// (bc-prow). Same events as tryAutoCompletePools' own branch.
+			hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+			hub.Broadcast(EventScheduleUpdated, nil)
 		}
 
 		c.JSON(http.StatusOK, gin.H{"subResult": subOut, "result": &updated})

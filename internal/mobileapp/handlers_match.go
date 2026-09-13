@@ -416,7 +416,10 @@ func backfillMatchIdentityForHantei(store CompetitionStore, compID, matchID stri
 // server-side and set AutoCompleteErrorHeader to a generic sentinel so
 // clients can detect the failure (and refresh) without us leaking
 // internal store details. Broadcasts EventCompetitionCompleted when the
-// transition actually happens.
+// transition actually happens, and EventCompetitionStarted for the two
+// outcomes that start something (AutoCompleteStarted, where this result
+// started a draw-ready competition, and AutoCompleteKnockoutStarted, where
+// the last pool moved a mixed competition into its knockout).
 //
 // Takes the consumer-boundary interfaces (T014) so handler tests can
 // stub the engine + hub without spinning up the full state/engine

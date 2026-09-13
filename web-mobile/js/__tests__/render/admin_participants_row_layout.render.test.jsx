@@ -54,6 +54,12 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
       players: [{ id: 'p-1', name: 'Alice', dojo: 'D', number: 'K1' }],
     }));
     expect(drawReady.container.querySelector('button[aria-label="Edit Alice"]')).toBeTruthy();
+    // One owner for the lock (seedsLocked) and one for its wording
+    // (seedsLockedTitle): the drag handle says what the card's seed buttons
+    // say, and the seed input locks at the same moment they do.
+    expect(drawReady.container.querySelector('.seed-row__handle').getAttribute('title'))
+      .toBe('Discard the draw to reorder');
+    expect(drawReady.container.querySelector('input.seed-row__input').disabled).toBe(true);
     drawReady.unmount();
 
     const started = await mountParticipants(makeParticipantsCompetition({
@@ -72,6 +78,8 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
       expect(r.querySelector('button[aria-label="Move up"]').disabled).toBe(true);
       expect(r.querySelector('button[aria-label="Move down"]').disabled).toBe(true);
       expect(r.querySelector('input.seed-row__input').disabled).toBe(true);
+      expect(r.querySelector('.seed-row__handle').getAttribute('title'))
+        .toBe('The competition has started; the order and seeds are fixed');
     }
     // The card-level seed actions follow the same lock, with a title that
     // says so. The roster itself stays editable after the start (bc-pnum

@@ -268,6 +268,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const rosterFormat = c.kind === "team" ? "Team name, Dojo"
     : c.engi ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
       : withZekken ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]";
+  // Singular noun for one entrant in this competition, for pluralize() (a team
+  // competition's roster rows are teams, not people). One owner so the roster
+  // readout, the replace dialog and the save toast cannot disagree.
+  const kindLabel = c.kind === "team" ? "team" : "participant";
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
   const [addName, setAddName] = useStateA("");
@@ -303,6 +307,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // React 18 but still a real teardown-race signal.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
+  // The latest competition prop, for the code that runs AFTER an await. apply()
+  // can sit on a confirm dialog for as long as the operator takes to read it,
+  // and SSE keeps re-rendering this component with a fresher `c` underneath the
+  // suspended closure; anything reading the captured `c` past that point would
+  // write a snapshot taken before the wait. Assigned on every render (not in an
+  // effect) so the value is current even mid-render.
+  const cRef = useRefA(c);
+  cRef.current = c;
 
   const generateText = (playersList) => generateRosterText(playersList, withZekken);
 
@@ -641,9 +653,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // are already toasted by updateCompetition's catch, so a second
   // toast would double up.
   const apply = async () => {
-    let np, added, updatedCount;
+    let parsed, np, added, updatedCount;
     try {
-      const parsed = window.parseParticipantLines(lines, withZekken);
+      parsed = window.parseParticipantLines(lines, withZekken);
 
       // Reject rows missing a required column before sending. Catches a
       // misformatted paste (e.g. a two-column "Name, Dojo" line in a zekken
@@ -660,7 +672,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
       // Tier-1: Duplicate detection: reject on perfect (normalizedName,
       // normalizedDojo) collision.  Uses name+dojo so two people from
-      // different clubs with the same name are allowed.
+      // different dojos with the same name are allowed.
       // Fallback mirrors the shared normalizer (lower → trim → collapse
       // internal whitespace) and guards undefined, so a missing
       // window.normalizeParticipantName can't miss dups or throw.
@@ -684,11 +696,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // by the roster PUT (see doSave) so Go is the single source of truth:
       // the client no longer runs its own fuzzy pass (which would drift from
       // Go's algorithm).
-      ({ np, added, updatedCount } = mintParticipantIds(c.id, c.players, parsed));
     } catch (err) {
       // Local errors: parseParticipantLines throws on malformed input
-      // (bad column counts, etc.), mintParticipantIds can throw on
-      // unexpected shape. Surface so the user knows what went wrong.
+      // (bad column counts, etc.). Surface so the user knows what went wrong.
       console.error("AdminParticipants: parse failed", err);
       showToast("Failed to parse participants: " + err.message, "error");
       return;
@@ -697,15 +707,30 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // Apply REPLACES the roster: anyone not in the box is dropped. With the
     // box no longer mirroring the saved list, a second Apply is always an
     // overwrite of a list the operator cannot see in the box, so ask first.
+    // The counts in the question are the roster as it stood when the operator
+    // clicked (the page they are looking at) and the rows in the box.
     if (players.length > 0) {
-      const label = c.kind === "team" ? "teams" : "participants";
       const ok = await window.confirmDialog({
         title: "Replace the current list?",
-        message: `This replaces the current ${players.length} ${label} with the ${np.length} in the box. Anyone not in the new list is removed; names already on the list keep their id and seed.`,
+        message: `This replaces the current ${pluralize(players.length, kindLabel)} with the ${parsed.length} in the box. Anyone not in the new list is removed; names already on the list keep their id and seed.`,
         confirmLabel: "Replace list",
         danger: true,
       });
       if (!ok) return;
+    }
+
+    // Minted AFTER the dialog, from the LATEST roster. The dialog can stand
+    // open for minutes, and a colleague saving from another desk in that
+    // window re-renders this component with a fresher `c`; minting before the
+    // wait would carry a pre-dialog snapshot into the PUT and silently revert
+    // their change. The ids and seeds preserved are the ones on the server now.
+    try {
+      ({ np, added, updatedCount } = mintParticipantIds(cRef.current.id, cRef.current.players, parsed));
+    } catch (err) {
+      // mintParticipantIds can throw on unexpected shape.
+      console.error("AdminParticipants: mint failed", err);
+      showToast("Failed to parse participants: " + err.message, "error");
+      return;
     }
 
     await doSave(np, added, updatedCount);
@@ -720,7 +745,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // or failed save can't leave a misleading "Saved: …" banner on screen.
     setNearDupPending(null);
     try {
-      const warnings = await onUpdate({ ...c, players: np });
+      // Spread the LATEST competition, not the one apply() captured before its
+      // confirm dialog: every field except `players` must be whatever the
+      // server holds now (see the re-mint in apply()).
+      const warnings = await onUpdate({ ...cRef.current, players: np });
 
       // Bail if we unmounted during the in-flight PUT: see mountedRef
       // declaration above. showToast is safe (lifted to AdminApp, still
@@ -734,8 +762,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       // warnings array (possibly empty).
       if (warnings === undefined) return;
 
-      const label = c.kind === "team" ? "team" : "participant";
-      let msg = `Saved ${pluralize(np.length, label)}`;
+      let msg = `Saved ${pluralize(np.length, kindLabel)}`;
       if (added > 0 || updatedCount > 0) {
         msg += ` (${added} new, ${updatedCount} updated)`;
       }
@@ -811,8 +838,27 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // The roster itself stays editable after the start (bc-pnum ruling 1: a
   // clean Apply on a started competition goes to Scoring), so the paste box
   // and CSV import only lock in draw-ready.
+  //
+  // THE owner of that rule: the card-level seed buttons, every row's drag
+  // handle / move arrows and the seed-rank input all ask seedsLocked rather
+  // than re-spelling `isDrawReady || isStarted`, and every lock title comes
+  // from seedsLockedTitle, so the surfaces cannot lock at different moments
+  // or explain the same lock in different words.
   const seedsLocked = isDrawReady || isStarted;
   const seedsLockedTitle = (action) => (isStarted ? "The competition has started; the order and seeds are fixed" : `Discard the draw to ${action}`);
+
+  // Apply appears twice (card head and below the preview) and both buttons are
+  // the SAME action, so the enabled rule and its reason live here once. An
+  // empty box must not be applicable: Apply replaces the roster, so applying
+  // nothing would wipe it.
+  const applyDisabled = !!seedProblem || isDrawReady || lines.length === 0;
+  const applyTitle = isDrawReady
+    ? "Discard the draw to apply roster changes"
+    : lines.length === 0 ? "Paste or import a list first" : undefined;
+  // Same reason: the unsaved-list marker sits beside each Apply button.
+  const unappliedNote = rosterDirty && !isDrawReady
+    ? <span className="unapplied-note">● Not applied yet</span>
+    : null;
 
   return (
     <>
@@ -863,7 +909,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               {/* Check-in is not on this page: the registration desk owns it
                   (operator ruling, bc-prow). This card orders and seeds. */}
               <div className="card__title">Ordering & seeding</div>
-              <div className="card__sub">{seededRanks(players).length} seeded</div>
+              {/* The saved roster's size lives here, since this card IS the
+                  saved roster: the paste box opposite starts empty, so its own
+                  sub-line counts what is typed there and nothing else. */}
+              <div className="card__sub">{pluralize(players.length, kindLabel)} · {seededRanks(players).length} seeded</div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               {/* draw-ready lock: seed mutations disabled until the draw is discarded. */}
@@ -1035,7 +1084,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 // Also locked once the competition has started: the list is
                 // then in competitor-number order, so a roster-index move would
                 // act on a row other than the one shown, and re-rank live seeds.
-                const reorderDisabled = !!sourceFilter || !!trimmedSearch || isDrawReady || isStarted;
+                const reorderDisabled = !!sourceFilter || !!trimmedSearch || seedsLocked;
                 return (
                   <div
                     key={window.checkinPid(p)}
@@ -1055,7 +1104,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     }}
                     style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
-                    <span className="seed-row__handle" aria-hidden="true" title={isStarted ? "The order is fixed once the competition has started" : isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
+                    {/* The lock wording comes from seedsLockedTitle, the same
+                        owner as the card-level seed buttons, so the handle
+                        cannot describe the lock in words of its own. */}
+                    <span className="seed-row__handle" aria-hidden="true" title={seedsLocked ? seedsLockedTitle("reorder") : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
                     <div className="seed-row__line">
                       <div className="seed-row__who">
                         <div className="seed-row__name" title={p.name}>
@@ -1095,7 +1147,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         value={p.seed || ""}
                         onChange={(val) => updateSeed(i, val)}
                         autoSelect={false}
-                        disabled={isDrawReady || isStarted}
+                        disabled={seedsLocked}
                       />
                   </div>
                 );
@@ -1110,7 +1162,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div>
               <div className="card__title">{c.kind === "team" ? "Team list" : "Participant list"}</div>
               <div className="card__sub">
-                {lines.length} entries · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
+                {/* Describes the BOX, not the roster: the box is an input for
+                    a new list and mounts empty, so a count here would read
+                    "0" over a competition that has a full saved roster. The
+                    roster's own size is on the Ordering & seeding card. */}
+                {lines.length === 0 ? "Empty" : pluralize(lines.length, "line")} · One per line · <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>Example: {c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? (c.withZekkenName ? "Emi Sasaki - Ren Fujita, SASAKI - FUJITA, Getsurin, 3" : "Emi Sasaki - Ren Fujita, Getsurin, 3") : c.withZekkenName ? "Alice Smith, SMITH, Gyokusen, 3" : "Alice Smith, Gyokusen, 3"}</span>
               </div>
               <div className="field__hint" style={{ marginTop: 2, fontSize: 11 }}>
                 Format: "{rosterFormat}"
@@ -1120,11 +1176,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {rosterDirty && !isDrawReady && <span className="unapplied-note">● Not applied yet</span>}
+              {unappliedNote}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
-              {/* An empty box must not be applicable: Apply replaces the roster,
-                  so applying nothing would wipe it. */}
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady || lines.length === 0} title={isDrawReady ? "Discard the draw to apply roster changes" : lines.length === 0 ? "Paste or import a list first" : undefined}>Apply changes</button>
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={applyDisabled} title={applyTitle}>Apply changes</button>
             </div>
           </div>
 
@@ -1230,12 +1284,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             );
           })()}
           {/* Repeat Apply at the bottom so the operator doesn't have to scroll
-              back up after pasting/reviewing a long roster. Same handler and
-              disabled rules as the top button. */}
+              back up after pasting/reviewing a long roster. The same handler,
+              the same applyDisabled/applyTitle and the same unapplied note as
+              the top button: only the render guard differs, since there is
+              nothing to scroll past until the box holds a list. */}
           {lines.length > 0 && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
-              {rosterDirty && !isDrawReady && <span className="unapplied-note">● Not applied yet</span>}
-              <button className="btn btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              {unappliedNote}
+              <button className="btn btn--primary" type="button" onClick={apply} disabled={applyDisabled} title={applyTitle}>Apply changes</button>
             </div>
           )}
         </div>

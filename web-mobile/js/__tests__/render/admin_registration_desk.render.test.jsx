@@ -103,9 +103,17 @@ describe('AdminRegistrationDeskPage render-smoke', () => {
     unmount();
   });
 
-  it('mounts the empty (no competitions) state', async () => {
-    const { getByText, unmount } = await mount(makeTournament({ competitions: [] }));
-    expect(getByText('No competition has check-in tracking on')).toBeTruthy();
+  // Two empty states, two remedies: a tournament with no competitions at all
+  // needs one created; a tournament whose competitions all have check-in
+  // tracking off needs the setting turned on. Scoping `comps` at both set
+  // sites lost that distinction (the filtered list is empty either way), so
+  // the desk told an operator with no competitions to go and turn on a
+  // setting that has nowhere to live.
+  it('mounts the empty (no competitions at all) state', async () => {
+    const { getByText, queryByText, unmount } = await mount(makeTournament({ competitions: [] }));
+    expect(getByText('No competitions yet')).toBeTruthy();
+    expect(getByText(/Add a competition and its participants first/)).toBeTruthy();
+    expect(queryByText('No competition has check-in tracking on')).toBeNull();
     unmount();
   });
 });
@@ -142,7 +150,7 @@ describe('AdminRegistrationDeskPage scopes to competitions with check-in trackin
     unmount();
   });
 
-  it('shows the empty state when every competition has check-in tracking off', async () => {
+  it('shows the tracking-off empty state, not the no-competitions one, when every competition has check-in tracking off', async () => {
     const tournament = makeTournament({
       competitions: [{
         id: 'kata', name: 'Kata Individual', kind: 'individual', status: 'setup', checkInEnabled: false,
@@ -151,8 +159,58 @@ describe('AdminRegistrationDeskPage scopes to competitions with check-in trackin
     });
     const { getByText, queryByText, unmount } = await mount(tournament);
     expect(getByText('No competition has check-in tracking on')).toBeTruthy();
+    expect(getByText(/Turn on/)).toBeTruthy();
+    // The competitions exist, so the "add a competition" remedy is wrong here.
+    expect(queryByText('No competitions yet')).toBeNull();
     expect(queryByText('Kata Individual')).toBeNull();
     unmount();
+  });
+
+  // `selected` can name a competition that LEAVES the scoped list: another
+  // admin turns its check-in tracking off and the desk's SSE-driven refresh
+  // drops it. Without a fallback the rail has no selected item and the roster,
+  // headline and walk-up button all describe an absent competition.
+  it('falls back to "All competitions" when the selected competition loses check-in tracking', async () => {
+    const tracked = (checkInEnabled) => ([
+      {
+        id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready', checkInEnabled: true,
+        players: [{ id: 'p-men', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      },
+      {
+        id: 'kata', name: 'Kata Individual', kind: 'individual', status: 'draw-ready', checkInEnabled,
+        players: [{ id: 'p-kata', name: 'Yuki Ito', dojo: 'Tora', checkedIn: false }],
+      },
+    ]);
+    const { container, unmount } = await mount(makeTournament({ competitions: tracked(true) }));
+
+    // Select "Kata Individual" (rail index 0 is the pinned "All competitions").
+    const kataItem = [...container.querySelectorAll('.rd-rail__item')].find((el) => el.textContent.includes('Kata Individual'));
+    expect(kataItem).toBeTruthy();
+    await act(async () => { fireEvent.click(kataItem); });
+    expect(kataItem.getAttribute('aria-current')).toBe('true');
+
+    // The refresh the desk's own SSE subscription triggers now reports Kata
+    // with check-in tracking off. Drive it through the subscribed callback so
+    // this is the real path, not a re-mount.
+    const savedFetch = window.API.fetchCompetitions;
+    window.API.fetchCompetitions = vi.fn().mockResolvedValue(tracked(false));
+    try {
+      const onEvent = window.API.subscribeToEvents.mock.calls.at(-1)[0];
+      await act(async () => {
+        onEvent({ type: 'participants_updated' });
+        // The desk debounces the refetch by 600ms.
+        await new Promise((r) => setTimeout(r, 900));
+      });
+
+      const items = [...container.querySelectorAll('.rd-rail__item')];
+      expect(items.map((el) => el.textContent.includes('Kata Individual'))).not.toContain(true);
+      const current = items.filter((el) => el.getAttribute('aria-current') === 'true');
+      expect(current.length).toBe(1);
+      expect(current[0].textContent).toContain('All competitions');
+    } finally {
+      window.API.fetchCompetitions = savedFetch;
+      unmount();
+    }
   });
 });
 

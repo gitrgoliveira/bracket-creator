@@ -810,7 +810,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-          Draw generated: the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in continues at the registration desk.
+          Draw generated: the roster order and seeds are locked. Discard the draw (from the competition header) to change them. A competitor's details can still be edited with the pencil; check-in continues at the registration desk.
         </div>
       )}
       {isStarted && (
@@ -1070,8 +1070,12 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
                         <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
                       </div>
-                      {/* draw-ready lock: edit is setup-only; editing participants requires discarding the draw first */}
-                      {isSetup && (
+                      {/* Editable in setup AND draw-ready: the single-competitor PUT
+                          accepts both and cascades a draw-ready rename into the
+                          draw (engine.ReplaceParticipantInDraw, mp-et2); it 409s
+                          once the competition has started, so the pencil goes then.
+                          Operator ruling bc-prow, reversing the 26dcd631 hide. */}
+                      {(isSetup || isDrawReady) && (
                         <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>

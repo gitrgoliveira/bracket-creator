@@ -45,6 +45,24 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
     expect(names).toEqual(['One', 'Nine', 'Ten', 'Left out']);
   });
 
+  it('keeps the edit pencil while the draw is pending and drops it once the competition has started', async () => {
+    // The single-competitor PUT accepts setup and draw-ready (and cascades a
+    // draw-ready rename into the draw) but 409s after the start, so the
+    // pencil follows the server (operator ruling bc-prow).
+    const drawReady = await mountParticipants(makeParticipantsCompetition({
+      status: 'draw-ready',
+      players: [{ id: 'p-1', name: 'Alice', dojo: 'D', number: 'K1' }],
+    }));
+    expect(drawReady.container.querySelector('button[aria-label="Edit Alice"]')).toBeTruthy();
+    drawReady.unmount();
+
+    const started = await mountParticipants(makeParticipantsCompetition({
+      status: 'pools',
+      players: [{ id: 'p-1', name: 'Alice', dojo: 'D', number: 'K1' }],
+    }));
+    expect(started.container.querySelector('button[aria-label="Edit Alice"]')).toBeNull();
+  });
+
   it('keeps roster order before the draw, when no competitor has a number', async () => {
     const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [

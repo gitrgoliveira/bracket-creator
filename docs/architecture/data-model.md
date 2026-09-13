@@ -9,15 +9,15 @@ disk.
 ## 1. Why files
 
 The format is chosen for the room the software runs in, not for query power. A tournament
-runs for a day in a sports hall, often on a laptop behind a flaky network, and the person
+runs for a day in a sports hall, often on a laptop behind a flaky network. The person
 responsible for the results is a volunteer with a spreadsheet, not a database administrator.
 
 Inspectability, repairability and diffability matter more here than normalisation:
 
 * **Inspectable.** An organiser can open the results in Excel or a text editor mid event.
-* **Repairable.** A wrong cell can be corrected by hand and the app picks it up on reload.
+* **Repairable.** An organiser can correct a wrong cell by hand, and the app picks it up on reload.
 * **Diffable.** The whole tournament state can be committed to version control or copied to
-  a USB stick as a backup, and two copies can be compared line by line.
+  a USB stick as a backup. Two copies can then be compared line by line.
   One exception: `tournament.md` holds the tournament and admin passwords in plain text, so
   strip or change them before sharing a copy.
 
@@ -30,8 +30,8 @@ consistency boundary: every write is serialised per competition, and no write sp
 
 One rule does span them, and it comes from the venue rather than from the data. Competitions
 run at the same time on a shared set of courts, so a court may hold only one running match in
-the whole tournament. Starting a match therefore checks every other competition first, and that
-check and the write it guards are taken under one tournament wide lock, so two operators in
+the whole tournament. Starting a match therefore checks every other competition first. That
+check and the write it guards run under one tournament-wide lock, so two operators in
 different competitions cannot both claim the same court.
 
 ```mermaid
@@ -128,14 +128,12 @@ classDiagram
     TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
-The competition box lists the settings that shape the model, not every field it holds: the
-scheduling, display and format-specific settings are left out because nothing else on this
+The competition box lists the settings that shape the model, not every field it holds. Scheduling, display and format-specific settings are left out because nothing else on this
 page depends on them.
 
 `Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
-competitions. A competition in the `team` kind treats each `Player` entry as a team, and
-the people on that team are its squad, stored in `squads.yaml` under the team's participant
+competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its squad, stored in `squads.yaml` under the team's participant
 id.
 
 That one setting decides which records exist at all. An individual competition has no
@@ -143,7 +141,7 @@ That one setting decides which records exist at all. An individual competition h
 directly. A team competition has both, and its entrants are teams, so the person who fights
 a given bout is named one level further down. The positions a round has are the five FIK
 names, senpo, jiho, chuken, fukusho and taisho, when the team size is five, and numbers for
-any other size. Everything else on the diagram above, the pools, the eligibility records and
+any other size. Everything else, the pools, the eligibility records and
 the ranking overrides, is the same for either kind, and reads a `Player` row without caring
 which of the two it is.
 
@@ -151,10 +149,8 @@ Each squad member carries a stable id, minted once when the member is added and 
 reused, and a display index. The id is what a lineup position and a bout row record, so a
 member can be renamed without any record losing track of who fought. A squad is seeded with
 one member per position the competition's team size defines, so a team has its shape before
-anyone is named. No member is ever removed, which is why an index is never freed and no
-renumbering question arises; what an organiser can do instead is clear a name, which empties
-that position and keeps its id and index, and only until the competition starts. After that a
-name can still be corrected, which is what renaming one is for: a bout row holds the member's
+anyone is named. No member is ever removed, so an index is never freed and no
+renumbering question arises. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
 id, so a bout already fought names the same person whatever the name is changed to. Adding a
 member stays available at any time, including after the start, because a team fields
 replacements mid tournament.
@@ -305,8 +301,8 @@ draws shiro on the left.
 **A team match is an aggregate.** `SubMatchResult` is a full bout in its own right: its own
 pairing, score, decision, overtime and judges' decision. A five person team encounter holds
 five of them, plus an optional representative bout at position `-1`. Ranking figures such as
-individual victories and points won are DERIVED from these by one function, never entered by
-hand and never a second source of truth: every read serves them alongside the bouts, every
+individual victories and points won are DERIVED from these by one function. They are
+never entered by hand and never a second source of truth: every read serves them alongside the bouts, every
 save of an elimination match recomputes them, and every surface that shows them takes what
 the server computed rather than re-deriving its own.
 
@@ -327,7 +323,7 @@ match side carries a PARTICIPANT id, which names a competitor or a whole team; a
 carries a SQUAD MEMBER id, which names one person inside a team. They sit one level apart
 and are never interchangeable.
 
-The cost of the pattern is worth stating, because it is this model's sharpest edge. A name
+The cost of the pattern is this model's sharpest edge. A name
 and its id are stored as two fields, or in a lineup's case as two maps keyed by the same
 position, so nothing in the storage forces a writer to set both. A record with a name and
 no id is therefore representable, and does occur: rows written before the id existed, and
@@ -460,9 +456,9 @@ is how an operator removes one, and there is nothing to attach either way.
 
 The seed list stores the participant's own id alongside the name and dojo, and once a row
 carries that id it is the one thing a seed is matched to its participant by. The name and dojo
-are kept for two other jobs: they are what an older reader that has never heard of the id
-column still matches by, and they are the fallback for a row the id column has not reached
-yet, matched by name and dojo together because two competitors may share a name across
+are kept for two other jobs. They are what an older reader that has never heard of the id
+column still matches by. They are also the fallback for a row the id column has not reached
+yet, matched by name and dojo together, because two competitors may share a name across
 dojos and a file that stored only the name could not say which of them the rank belonged to.
 A row without a dojo still matches by name alone when that name is unique in the roster, and
 a file without the dojo or the id column is completed from the roster on first load.
@@ -543,9 +539,9 @@ enter the same result again. Entering it again is safe precisely because the ref
 never landed.
 
 The check is applied when the write arrives, not when it was stamped, so a write held in
-the outbox escapes it in proportion to how long it waited: a device whose clock is ahead by
+the outbox escapes it in proportion to how long it waited. A device whose clock is ahead by
 less than the time its write spent queued delivers a stamp that has already fallen into the
-server's past, where it is honoured like any other and can still beat a result recorded
+server's past. There it is honoured like any other, and it can still beat a result recorded
 moments later on another court. What the check catches is a clock wrong by more than the
 queue age plus the few seconds of tolerance, which is the case that would otherwise freeze
 the match or overwrite a newer result with nobody told.
@@ -582,8 +578,8 @@ will not parse, and a whole file that will not parse.
 **A wrong cell degrades, and the file keeps loading.** A malformed cell falls back to its
 documented default and never fails the row it lives in or the load the row belongs to. A team
 match's sub-bout cell that will not parse as JSON loads as an empty encounter rather than
-aborting the read; a seed row missing its rank or name, or too short to hold them, is skipped
-rather than guessed; a number that will not parse is left at the column's documented default,
+aborting the read. A seed row missing its rank or name, or too short to hold them, is skipped
+rather than guessed. A number that will not parse is left at the column's documented default,
 and a negative count is clamped to zero. One bad cell cannot stop a tournament. Two cases go
 further and discard data outright, because there is nothing safe to default to: a legacy
 judges'-decision flag with no attributable winner is dropped rather than guessed onto a side,
@@ -591,8 +587,8 @@ and a hand-edited bracket file carrying both a legacy score string and the curre
 arrays keeps the arrays and clears the string.
 
 **A degraded cell is kept, not overwritten.** The results file is rewritten in full every time
-any match in it is scored, so a cell that read as empty would otherwise be written back as
-empty, and the bytes needed to repair it would be gone within seconds of the next bout. A
+any match in it is scored. A cell that read as empty would otherwise be written back as
+empty, so the bytes needed to repair it would be gone within seconds of the next bout. A
 sub-bout cell that will not parse is therefore held exactly as it was read and written back
 unchanged for as long as the encounter stays empty. Re-entering the encounter in the app
 replaces it, which is the other way to repair it. While it is unrepaired the operator console
@@ -616,9 +612,9 @@ timestamp appended, so it stays in the competition's folder for a later repair b
 
 **Pools then knockout.** The knockout can be reset. The draw survives in the pool file, so the
 tree is built again from it and every finished pool has its qualifiers seeded back in. That
-trade is real and the console states it: the knockout results are not recorded anywhere else
-and have to be re-entered from the score sheets, and the rebuilt pairings should be checked
-against the printed bracket, because the tree is laid out by the current draw algorithm and the
+trade is real, and the console states it. The knockout results are not recorded anywhere else
+and have to be re-entered from the score sheets. The rebuilt pairings should be checked
+against the printed bracket, because the tree is laid out by the current draw algorithm, and the
 one that produced the original died with the file.
 
 **League and Swiss.** Nothing is rebuilt, because neither format draws a knockout bracket at
@@ -652,8 +648,8 @@ two point match reads `M|K` rather than occupying two columns.
 
 **The judges' decision rides in the score.** A match won on referee decision has no column
 of its own. The mark occupies a point slot in the winner's score field, which is exactly how
-it is drawn on a paper score sheet, and it stays there when the file is read: the mark is
-part of the recorded score, and everything that counts points knows to skip it, so it can
+it is drawn on a paper score sheet, and it stays there when the file is read. The mark is
+part of the recorded score, but everything that counts points knows to skip it, so it can
 never inflate a result.
 
 Appending columns and leaving some fields unwritten are the two consequences that follow:
@@ -664,8 +660,8 @@ Appending columns and leaving some fields unwritten are the two consequences tha
 * Some fields are useful only in flight and are not written at all. Client revision markers
   used to discard out of order writes are one example: they exist to order writes within one
   session and carry no meaning once the result has landed. A match's queue position is
-  another: it is derived from court, status and scheduled time each time a match list is
-  served, so the queue shrinks as matches finish, and persisting it would let a stale copy
+  another. It is derived from court, status and scheduled time each time a match list is
+  served, so the queue shrinks as matches finish. Persisting it would let a stale copy
   disagree with the schedule it was drawn from, so it is
   excluded from `pool-matches.csv` by name, on top of carrying a tag that already keeps it out
   of the YAML-marshalled forms.
@@ -686,10 +682,10 @@ contract:
 
     Only the results file is built this way, because only it earns the machinery: it is by
     far the widest, and it is the one that grows a column whenever the rules do. Of the
-    others, two could not use a positional column list at all (the roster file's layout
-    varies by row, and the seed file is read by column name rather than position) and one
-    derives a column from row order rather than from a field (pools.csv); the round trip
-    guard below is what protects each of them.
+    others, two could not use a positional column list at all: the roster file's layout
+    varies by row, and the seed file is read by column name rather than position. A third
+    derives a column from row order rather than from a field (pools.csv). The round trip
+    guard that follows protects each of them.
 * **Every CSV file has a round trip guard.** Each guard sweeps the persisted struct's
   fields and fails when a field neither survives a save and reload nor appears in an
   allow list with the reason it is legitimately transient. The files persisted by

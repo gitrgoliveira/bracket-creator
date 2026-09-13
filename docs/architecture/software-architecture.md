@@ -50,7 +50,7 @@ flowchart LR
     root --> mn["man / version"]
 ```
 
-Each command is an options struct with a `run()` method (`cmd/*.go`); `create-pools` and
+Each command is an options struct with a `run()` method (`cmd/*.go`). `create-pools` and
 `create-playoffs` share `cmd/shared.go`. `main.go` embeds the web assets and calls
 `cmd.ExecuteWithResources(res)`.
 
@@ -90,7 +90,7 @@ flowchart TD
     mobileapp --> pdf
 ```
 
-**Dual domain model (in transition).** `internal/helper` is where the real algorithms are implemented.
+**Dual domain model (in transition).** `internal/helper` implements the real algorithms.
 Its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to output generation.
 `internal/domain` holds clean models being phased in gradually. Don't confuse the two.
 
@@ -163,7 +163,7 @@ sequenceDiagram
 
 Core invariant: **persist then broadcast**. A write is durable
 (`fsync` + atomic rename, WAL for multi-file changes) before the 200 and before any SSE
-fan-out. Scoring is ACID; a legitimate operator change is never dropped.
+fan-out. Scoring is ACID. A legitimate operator change is never dropped.
 
 ## 6. Bracket generation (engine → helper)
 
@@ -197,9 +197,7 @@ flowchart TB
     end
 ```
 
-The operator console is a tablet/desktop surface; the viewer is mobile-first. The client's
-**offline write queue, SSE resume, and reconnect resilience** are depicted in
-[Network architecture](network-architecture.md).
+The operator console is a tablet/desktop surface; the viewer is mobile-first. Refer to [Network architecture](network-architecture.md) for the client's **offline write queue, SSE resume, and reconnect resilience**.
 
 ## Key design rules
 

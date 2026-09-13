@@ -12,8 +12,8 @@ Four rules are enforced, each of which the public docs must never contain:
 * ``internal-id``: an internal issue-tracker ID like ``mp-xxxx`` or
   ``bc-xxxx``. These are internal-tooling identifiers with no meaning to a
   public reader.
-* ``mat``: the word "mat"/"mats". Kendo has no mats; the fighting area is a
-  shiai-jo (court).
+* ``mat``: the word "mat"/"mats"/"matside". Kendo has no mats; the fighting area
+  is a shiai-jo (court).
 
 ``docs/dev-guide/code_of_conduct.md`` is skipped because it is third-party
 text (the Contributor Covenant) that this repo does not control the wording
@@ -40,7 +40,7 @@ SKIP_FILES = {
 
 SEE_LINK_RE = re.compile(r"\b[Ss]ee (the |also )?\[")
 INTERNAL_ID_RE = re.compile(r"\b(mp|bc)-[a-z0-9]{3,4}\b")
-MAT_RE = re.compile(r"\bmats?\b", re.IGNORECASE)
+MAT_RE = re.compile(r"\bmat(s|side)?\b", re.IGNORECASE)
 HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 # (rule name, pattern) pairs checked against each prose line, in report order.

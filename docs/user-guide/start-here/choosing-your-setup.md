@@ -12,7 +12,7 @@ How far you digitise determines which surfaces you use on the day. Refer to [Thr
 
 ## Operating model
 
-The operating model controls who can record scores and advance matches. In **officiated** mode, staff authenticate with the admin password and run every match. In **self-run** mode, competitors report their own results with no password barrier. Refer to [Operating modes](../organisers/operating-modes.md) for the full rules on both models, including guidance on when to choose each one. Self-run needs the tournament app, so it requires at least the partially connected level; an officiated event can run at any level, including fully offline.
+The operating model controls who can record scores and advance matches. In **officiated** mode, staff authenticate with the admin password and run every match. In **self-run** mode, competitors report their own results with no password. Refer to [Operating modes](../organisers/operating-modes.md) for the full rules on both models, including guidance on when to choose each one. Self-run needs the tournament app, so it requires at least the partially connected level. An officiated event can run at any level, including fully offline.
 
 ## Choose by how you run the day
 
@@ -37,7 +37,7 @@ If you know your role at the event, the following table takes you directly to th
 
 ## Devices and screens
 
-The app runs on several screens at the same time, and each surface is designed for a different one. Nothing needs installing on any of them: every surface is a web page served by the tournament app, so each device only needs a current browser and a way to reach the server.
+The app runs on several screens at the same time, and each surface is designed for a different one. Nothing needs installing on any of them. Every surface is a web page served by the tournament app. Each device only needs a current browser and a way to reach the server.
 
 | Surface | Who uses it | Device to plan for |
 |---|---|---|
@@ -48,9 +48,9 @@ The app runs on several screens at the same time, and each surface is designed f
 
 A few consequences worth planning around:
 
-- **The operator console is the one surface with a real minimum.** Scoring screens put a full team encounter, its bout rows, and the controls on one screen, so a small phone is not a practical operator device. A laptop works equally well if you have one per shiai-jo.
-- **Display screens are optional.** Without them you are at the partially connected level of [Digitisation level](#digitisation-level): results still reach phones, but you will also print scoreboards for the courts. Competitor tags are printed at every level, so they are not a cost of skipping the screens.
-- **The court display is usually driven from the operator's own machine** over an HDMI cable rather than from a separate device. The console and the board are then two tabs in one browser on one computer, so scores reach the board without a network hop and it keeps updating through a Wi-Fi drop. This is a client-side arrangement at the court and holds whichever way you host the server. Refer to [Keep the court scoreboard alive on the same machine](../../architecture/infrastructure-architecture.md#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi).
+- **The operator console is the one surface with a real minimum.** Scoring screens put a full team encounter, its bout rows, and the controls on one screen. A small phone is not a practical operator device. A laptop works equally well if you have one per shiai-jo.
+- **Display screens are optional.** Without them you are at the partially connected level of [Digitisation level](#digitisation-level). Results still reach phones, but you also print scoreboards for the courts. Competitor tags are printed at every level, so they are not a cost of skipping the screens.
+- **The court display is usually driven from the operator's own machine** over an HDMI cable rather than from a separate device. The console and the board are then two tabs in one browser on one computer. Scores reach the board without a network hop, and it keeps updating through a Wi-Fi drop. This is a client-side arrangement at the court and holds whichever way you host the server. Refer to [Keep the court scoreboard alive on the same machine](../../architecture/infrastructure-architecture.md#keep-the-court-scoreboard-alive-on-the-same-machine-hdmi).
 - **Spectator phones may be on cellular** rather than venue Wi-Fi when the app is cloud-hosted, so they do not add to your local network load.
 
 Refer to [Following a tournament](../spectators/following.md) for the full list of display and viewer URLs, including the streaming overlay variant.

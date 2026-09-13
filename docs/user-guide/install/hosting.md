@@ -28,4 +28,4 @@ Any deployment reachable over the internet should run in locked mode rather than
 
 ## What still needs printing
 
-A fully digital setup still leaves one job on paper: organisers print player tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. Refer to the [three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.
+A fully digital setup still leaves one job on paper: organisers print competitor tags and numbers before the event. Everything else (pools, scoring, scoreboards, and result pages) runs on screen. Refer to the [three ways to run a tournament](../../index.md#three-ways-to-run-a-tournament) for how this mode compares to the offline and partially connected setups.

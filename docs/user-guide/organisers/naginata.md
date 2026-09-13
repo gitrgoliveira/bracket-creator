@@ -6,8 +6,8 @@ Naginata has two competition forms:
 
 - **Combat** (shiai): armoured matches scored by ippon, with one extra target,
   Sune (a strike to the shin). Naginata divisions conventionally decide a
-  single 3rd place with a bronze match instead of kendo's two joint 3rds; see
-  [Third-place match](#third-place-match) below for how that is set.
+  single 3rd place with a bronze match instead of kendo's two joint 3rds. Refer to
+  [Third-place match](#third-place-match) for how that is set.
 - **Engi-kyogi**: the kata form, in which a pair perform choreographed forms
   scored by referee flags rather than ippon.
 
@@ -44,16 +44,14 @@ exactly as it does for kendo.
 ## Third-place match
 
 Whether a competition awards two joint 3rd places or decides a single one with
-a bronze match is its own setting, the **Award two joint 3rd places**
-checkbox on the competition's **Settings** tab, independent of the Naginata
-and Engi checkboxes above. It applies to knockout, pools-then-knockout, and
+a bronze match is its own setting: the **Award two joint 3rd places**
+checkbox on the competition's **Settings** tab. It is independent of the **Naginata competition** and **Engi (kata competition)** checkboxes. It applies to knockout, pools-then-knockout, and
 league competitions; it is not shown for Swiss, which has no bracket.
 
 Kendo awards two equal 3rd places to the beaten semi-finalists and plays no
 bronze match; that is the default for every new competition. Naginata
 conventionally awards a single 3rd instead, so turning on **Naginata
-competition** also unticks **Award two joint 3rd places** for you, but you can
-tick it back on afterwards if your event wants naginata to share 3rd place
+competition** also unticks **Award two joint 3rd places** for you. You can tick it back on afterwards if your event wants naginata to share 3rd place
 too. The same applies in reverse: a kendo (non-naginata) competition can turn
 the checkbox off to decide a single 3rd with a bronze match, for example for a
 selection event that needs exactly one bronze medal.
@@ -72,7 +70,7 @@ podium behaviour, including how the same setting works for league standings.
 
 ## Engi-kyogi (kata competition)
 
-Engi-kyogi is the kata form of naginata competition: a pair of competitors
+Engi-kyogi is the kata form of naginata competition. A pair of competitors
 perform a set of choreographed forms, judged by a panel of referees who each
 raise a flag for the side they judge superior. It is scored entirely differently
 from a combat (shiai) bout: there are no ippon, no time on the clock, and no
@@ -105,7 +103,7 @@ combined zekken the same way:
 Name 1 - Name 2, ZEKKEN1 - ZEKKEN2, Dojo
 ```
 
-The two names display stacked on one side of the match, and the pair counts as
+The two names display stacked on one side of the match. The pair counts as
 one entry in the draw and one line in the standings.
 
 ### Score with flags
@@ -113,9 +111,9 @@ one entry in the draw and one line in the standings.
 The score editor becomes a flag counter with one column per side, Aka (red)
 and Shiro (white):
 
-- Use the **+ / -** buttons under each side, or the keyboard: **`a`** adds a flag
-  to **Aka**, **`s`** adds a flag to **Shiro** (either key works with or without
-  Shift), **`Backspace`** undoes the last flag you added, and **`Enter`** saves.
+- Use the **+ / -** buttons under each side, or the keyboard. **`a`** adds a flag
+  to **Aka** and **`s`** adds a flag to **Shiro** (either key works with or without
+  Shift). **`Backspace`** undoes the last flag you added, and **`Enter`** saves.
 - A bout's flags must total 1, 3, or 5. The panel is always an odd size, so
   there is always a majority and a bout can never end in a draw. The editor
   flags any other total and does not let you save it.
@@ -131,16 +129,16 @@ following criteria, in order:
 3. Head-to-head (Swiss only): when two pairs are tied on wins and flags, the
    pair that won their direct bout ranks higher.
 4. Name order (alphabetical by the pair's first listed member), when the
-   criteria listed in this section are all equal.
+   first three criteria are all equal.
 
-Both the winning and the losing side's flags count toward that side's own tally,
-so a pair that loses by three flags to two still keeps its two flags.
+Both the winning and the losing side's flags count toward that side's own tally.
+A pair that loses by three flags to two still keeps its two flags.
 
 ![Engi Swiss standings: a winner banner above a final standings table with rank, pair, victories (V), and total flags columns, and a caption reading "Ranked by: wins, total flags, head-to-head".](../../screenshots/swiss-standings-engi.png)
 
-Engi never holds a supplementary tie-break bout (no ippon-shobu, no daihyosen):
-a ranking that is still tied after wins and flags is settled by the head-to-head
-(in Swiss) and name-order fallbacks listed in this section.
+Engi never holds a supplementary tie-break bout: no ippon-shobu, no daihyosen.
+A ranking still tied after wins and flags is settled by the head-to-head
+(in Swiss) and name-order fallbacks in this section.
 
 ### Excel exports
 
@@ -148,15 +146,15 @@ Both Excel downloads on the competition page (refer to
 [Export and print](run-tournament.md#export-and-print)) understand Engi:
 
 - Each pair is a single competitor throughout both workbooks. The data sheet
-  lists the combined pair name under **Player Name** with the shared dojo, and
-  every sheet that shows the pair (pool draw, match grids, standings, bracket
+  lists the combined pair name under **Player Name** with the shared dojo. Every
+  sheet that shows the pair (pool draw, match grids, standings, bracket
   pages, and the printable name sheets) shows both members together on one
-  line as "Member 1 - Member 2".
+  line as `Member 1 - Member 2`.
 - Pool standings in both workbooks use the Engi columns: **W** (wins),
   **Flags** (total flags), and **Rank**. Losses are not recorded because
   ranking is determined by wins then accumulated own-side flags. The kendo
   points columns do not appear.
 - The results workbook records each side's referee flag count in the score
-  cells instead of ippon letters, and a bout decided without flags (for
+  cells instead of ippon letters. A bout decided without flags (for
   example a kiken withdrawal) leaves the score cells blank with the decision
   marked in the centre column.

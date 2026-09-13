@@ -1,6 +1,6 @@
 # Team tournaments
 
-Team tournaments work with any of the four formats described in [Tournament formats](formats.md). The format controls how rounds and brackets are structured; the team setting changes how individual bouts are grouped into team encounters and how standings are calculated.
+Team tournaments work with any of the four formats described in [Tournament formats](formats.md). The format controls how rounds and brackets are structured. The team setting changes how individual bouts are grouped into team encounters and how standings are calculated.
 
 ## Team lineups
 
@@ -15,22 +15,21 @@ Each team encounter has its own lineup. To carry over the same order from the pr
 A team's people are its squad. A team starts with one position per fighter the
 competition's team size defines, each numbered and waiting for a name. Fill those
 names in from the **Squad members** section of the competition's **Settings**
-page, or build the squad as you go from the lineup panel: pick an existing member
-for a position, or type a new name into a position and the app adds that person
-to the squad in the same step. Adding someone new is confirmed first, so a
+page, or build the squad as you go from the lineup panel. In the panel, pick an existing member
+for a position, or type a new name. The app adds a new name to the squad in the same step, but confirms first, so a
 mistyped name cannot quietly create a person nobody expected.
 
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person
-after the change, so you can correct a spelling or switch to a full name mid
+after the change. You can correct a spelling or switch to a full name mid
 tournament without disturbing results already recorded. Rename from either
 place, at any time.
 
-Nobody is removed from a squad. What you can do instead is clear a name, which
-empties that position and keeps its number, and you can only do that before the
+Nobody is removed from a squad. Instead, you can clear a name, which
+empties that position and keeps its number. You can only do that before the
 competition starts. Once it has started every name stays, so a bout already
-fought always names the same person. An unused member is harmless: they simply
-never appear in a lineup.
+fought always names the same person. An unused member is harmless: they never
+appear in a lineup.
 
 The squad can be larger than the number of positions a round has. Add the
 replacements a team brings and field whichever of them you need in each
@@ -46,9 +45,9 @@ sheet a winner-stays-on competition adds to its export.
 
 ### Incomplete and uneven teams
 
-Team sizes are not fixed. A lineup can leave any position empty, teams in the same competition can field different numbers of fighters, and the app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started, so you can complete or adjust the order as a round is running.
+Team sizes are not fixed. A lineup can leave any position empty. Teams in the same competition can field different numbers of fighters, and the app never blocks a save or disqualifies a team over a vacancy. Fill in as many positions as each team brings and save. You can edit a lineup at any time, including after the match has started, so you can complete or adjust the order as a round is running.
 
-If your rules require a full team or set conditions on which positions may be left open, apply those off the app; the app treats the lineup you save as authoritative and scores against it.
+If your rules require a full team or set conditions on which positions may be left open, apply those off the app. The app treats the lineup you save as authoritative and scores against it.
 
 Lineups appear on the viewer, the court display, and the streaming overlay, so competitors and spectators can follow the order in real time.
 
@@ -62,15 +61,15 @@ Individual bouts are scored first. Once all bouts are done, the encounter result
 2. If wins are equal, the team with the highest points scored wins.
 3. If both wins and points are equal, the encounter is a draw in pools or league. In a knockout stage, the encounter goes to a representative bout (daihyosen). Refer to [Recording decisions](../court-operators/recording-decisions.md) for how daihyosen is handled.
 
-Two fighters from opposing teams may share a name, so the app records who won each bout by identity rather than by the name on the sheet. You do not have to do anything for this, and bouts you score now are unaffected. The one case you may see is an encounter scored by a much older version: a bout between two same-named fighters there can show no individual win for either team, because the name it stored cannot say which of the two it meant. The points scored in that bout still count.
+Two fighters from opposing teams may share a name, so the app records who won each bout by identity rather than by the name on the sheet. You do not have to do anything for this, and bouts you score now are unaffected. The one exception is an encounter scored by a much older version. A bout there between two same-named fighters can show no individual win for either team, because the name it stored cannot say which of the two it meant. The points scored in that bout still count.
 
 ## Kachinuki (winner stays on)
 
-In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. Kachinuki is run under one of two rule sets, described in [Kachinuki modes](#kachinuki-modes). Because only the shiai-jo operator knows which rule set governs a match, and because team sizes are flexible, the app never decides on its own when a kachinuki encounter is over: the court operator does, using the buttons in the score editor.
+In kachinuki format, the winner of each bout remains on the court to face the next opponent from the opposing team. If a bout ends in a hikiwake (draw), both fighters retire instead of one continuing, and the next pair takes the court. Kachinuki is run under one of two rule sets, described in [Kachinuki modes](#kachinuki-modes). Because only the shiai-jo operator knows which rule set governs a match, and because team sizes are flexible, the app never decides on its own when a kachinuki encounter is over. The court operator ends it, using the buttons in the score editor.
 
 ### Kachinuki modes
 
-Which mode governs a match comes from your tournament rules, and it can differ between rounds of the same competition: for example, plain exhaustion in the pools and the taisho rule in the final rounds. The app has no mode setting. You apply the mode through the scoring buttons, and the app follows your lead.
+Which mode governs a match comes from your tournament rules. It can differ between rounds of the same competition, for example plain exhaustion in the pools and the taisho rule in the final rounds. The app has no mode setting. You apply the mode through the scoring buttons.
 
 **Exhaustion (plain winner stays on).** A win eliminates the loser; a tie eliminates both fighters. The encounter ends when one team has no fighters left, and that team loses. If the two Taisho meet and draw, both teams are out at the same time and the encounter is drawn. A drawn encounter is a legal result in pools and leagues; in a knockout the bracket needs a winner, so the final pair fights on in overtime (encho) instead.
 
@@ -108,15 +107,15 @@ Kachinuki encounters are scored one bout at a time. Score the current bout, then
 - **Record bout** keeps the encounter going. The winner stays on and the app adds the next pairing; if the bout was a draw, both fighters retire and the next pair comes up. When the app cannot work out who fights next, for example when a team brings fighters it has not seen, use **Add next bout manually** and pick or type both players on the new row.
 - **End match** finishes the encounter on the last scored bout. The winning team is the one that won that bout; you do not pick it, the app reads it from the score.
 
-If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use **× Remove this bout** to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. The bouts you have already fought stay on screen as read-only rows above the current bout, so the encounter reads like a regular team sheet and you can check the winner-stays-on order at a glance.
+If the app adds a pairing you did not want, for example an extra bout after the encounter was really over, use **× Remove this bout** to take it back. It only removes a bout that has no score yet, so nothing you have recorded is lost. The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance.
 
 ![The kachinuki score editor: the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), the × Remove this bout undo for a pairing added by mistake, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)
 
-To fix a bout you have already recorded, without ending the encounter, tap its row. It reopens in place with the same scoring controls as the current bout, so you can adjust the points or change who won, and the change saves as you go. Each fought bout carries a black triangle in its number column: it points right when the bout is collapsed and down when it is open, so tapping it expands the bout to correct it and collapses it again when you are finished.
+To fix a bout you have already recorded, without ending the encounter, tap its row. It reopens in place with the same scoring controls as the current bout. You can adjust the points or change who won, and the change saves as you go. Each fought bout carries a black triangle in its number column: it points right when the bout is collapsed and down when it is open. Tap it to expand the bout for a correction, and tap it again to collapse it when you are finished.
 
 ![The kachinuki score editor with an earlier bout reopened for correction: the bout sits in an accent frame with its ippon buttons for each side and a downward black triangle in its number column that collapses it again, while the other fought bouts stay as read-only rows above and below, each with a rightward triangle.](../../screenshots/kachinuki-correct-bout.png)
 
-If your correction changes who won that bout, the bouts after it were fought on the old result, so the app flags them for you to check and put right. It never re-shuffles the later bouts on its own: only you, at the court, know how they actually went.
+If your correction changes who won that bout, the bouts after it were fought on the old result. The app flags them for you to check and put right. It never re-shuffles the later bouts on its own: only you, at the court, know how they actually went.
 
 When the last bout is tied, the editor offers every legitimate way forward and you choose, according to the [kachinuki mode](#kachinuki-modes) in force; the app never decides it from the stage:
 
@@ -128,9 +127,9 @@ When the last bout is tied, the editor offers every legitimate way forward and y
 
 There is no representative bout (daihyosen) in kachinuki: a tied pairing that must produce a result is settled by encho on that same bout, not by a separate rep bout.
 
-If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**: a single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. Reopening discards a result that has already been recorded, so a reason is still kept with the result, but it is asked for when you end the match again rather than before you can get back in. That applies however you end it, whether you finish on a scored bout or record a withdrawal or a no-show. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started. If that later match has already started or been scored, the app refuses the reopen outright; sort out that later match first.
+If you finish an encounter too early or record the wrong result, reopen it. Open the completed match and use **Reopen match**. A single tap returns the encounter to in progress with its bouts kept, so you can add or rescore bouts and end it again. Reopening discards a result that has already been recorded, so a reason is still kept with the result. You give it when you end the match again, not before you can get back in. That applies however you end it, whether you finish on a scored bout or record a withdrawal or a no-show. In a knockout, reopening also rolls back the next-round slot that this result had filled, as long as that later match has not started. If that later match has already started or been scored, the app refuses the reopen outright; sort out that later match first.
 
-Reopening keeps every bout that was fought. The bout log is preserved in full, including who fought each bout, the points scored, and any overtime, so nothing you have already recorded is lost. What reopening clears is the finished-match verdict it is discarding: the winning team, the final score line, and any withdrawal or no-show recorded against the encounter.
+Reopening keeps every bout that was fought. The bout log is preserved in full, including who fought each bout, the points scored, and any overtime, so nothing you have already recorded is lost. Reopening clears the finished-match verdict it is discarding: the winning team, the final score line, and any withdrawal or no-show recorded against the encounter.
 
 Reopening is refused while another match is already running on the same court, because the reopened encounter would go back into play alongside it. Finish the running match, or send it back to the queue, and then reopen.
 
@@ -158,7 +157,7 @@ name order as the final deterministic fallback.
 ![Team Swiss standings: a table with rank, team, and the full tie-break columns W, L, T, IV, IL, IT, PW, and PL, with a caption reading "Ranked by: team wins, IV, PW, head-to-head".](../../screenshots/swiss-standings-team.png)
 
 !!! note
-    When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), what happens next depends on format:
+    When two or more teams remain tied after all eight criteria and the tie is consequential (it decides who advances or how they are seeded), the next step depends on format:
 
     - **Pools + Knockout**: the app schedules a daihyosen automatically to break the tie.
     - **League**: the operator decides. From the League tab, either run a daihyosen among the tied teams or accept the shared ranks to finalise standings with the tie left in place. This choice is available for any tied position, including joint first, once every regular league match is complete.

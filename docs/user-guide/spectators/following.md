@@ -2,14 +2,14 @@
 
 The public viewer needs no password. It is the shared screen for competitors, coaches, and spectators. Open the tournament URL on any device on the same network and you see results as they happen, the standings, and the bracket as the day unfolds.
 
-Not sure which role fits you? Refer to [Choosing your setup](../start-here/choosing-your-setup.md) for a full guide.
+If you are not sure which role fits you, refer to [Choosing your setup](../start-here/choosing-your-setup.md) for a full guide.
 
 ## What the public viewer shows
 
 The viewer brings together everything you need to follow the day in one place:
 
-- A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so players know when to warm up and coaches know when to be matside.
-- The full match schedule across all shiai-jo, filterable by player or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example, "A1"), so you can jump straight to their bouts.
+- A personal **Watchlist** so you can track yourself, specific competitors, or a whole dojo. As a watched match approaches, the viewer nudges you so competitors know when to warm up and coaches know when to be at the court.
+- The full match schedule across all shiai-jo, filterable by competitor or team. The free-text filter matches a competitor's name, their assigned number, or their tag (for example, "A1"), so you can jump straight to their bouts.
 - Pool standings that update as scores are entered, with no page refresh needed.
 - The elimination bracket filling in as matches are completed.
 
@@ -18,7 +18,7 @@ The viewer brings together everything you need to follow the day in one place:
   <figcaption>The public home: the watchlist, the full schedule, and one card per competition.</figcaption>
 </figure>
 
-Tap a competition to drill into its schedule, standings, and bracket. Aka (red) and Shiro (white) sides are colour-coded throughout.
+Tap a competition to see its schedule, standings, and bracket. Aka (red) and Shiro (white) sides are colour-coded throughout.
 
 <figure class="bc-fig" markdown="span">
   ![A competition's public page: upcoming matches and recent results with waza-level scores.](../../screenshots/viewer-competition.png){ .bc-phone }
@@ -33,7 +33,7 @@ The app provides three display URLs:
 
 - `/display?court=A` shows a single court's current match, upcoming queue, and recent results.
 - `/display?court=all` shows every court at once, for a lobby or overview screen.
-- Add `&overlay=true` to a single-court URL (for example, `/display?court=A&overlay=true`) for a transparent variant you key into a video stream as a browser source (for example, OBS or vMix), so online viewers see player names and the current score over the video.
+- Add `&overlay=true` to a single-court URL (for example, `/display?court=A&overlay=true`) for a transparent variant you key into a video stream as a browser source (for example, OBS or vMix), so online viewers see competitor names and the current score over the video.
 
 ![Single-court scoreboard for shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../../screenshots/display-scoreboard.png)
 

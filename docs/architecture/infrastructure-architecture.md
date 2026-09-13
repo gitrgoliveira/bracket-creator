@@ -1,8 +1,7 @@
 # Infrastructure architecture
 
 How bracket-creator is built, packaged, deployed, and persisted. The whole product is a
-**single self-contained Go binary** (web assets embedded) running behind a TLS proxy, with
-tournament state on a plain disk; deployable from a laptop to a free-tier cloud VM.
+**single self-contained Go binary** (web assets embedded) that runs behind a TLS proxy, with tournament state on a plain disk. You can deploy it from a laptop to a free-tier cloud VM.
 
 > Related: [Software architecture](software-architecture.md) · [Network architecture](network-architecture.md)
 
@@ -56,8 +55,7 @@ flowchart TB
     caddy --> cvol
 ```
 
-- App runs as **non-root (uid 65534)**; the data volume must be owned by that uid or the app
-  refuses to start. App port 8080 is `expose`d to the proxy only, never published to the host.
+- App runs as **non-root (uid 65534)**. The data volume must be owned by that uid, or the app refuses to start. App port 8080 is `expose`d to the proxy only, never published to the host.
 - `restart: unless-stopped` (compose) / auto-restart (cloud) brings the app back after reboots.
 
 ## 3. Deployment options
@@ -145,7 +143,7 @@ flowchart TB
 
 **Per-client load.** Every console, display, and phone holds **one SSE stream** plus its REST
 calls. A four-court event is roughly 4 operators + 4 displays + N spectators of concurrent SSE
-clients, comfortably within `SSE_MAX_CLIENTS`, but every real-time update fans out to all of them
+clients, comfortably within `SSE_MAX_CLIENTS`. Every real-time update still fans out to all of them
 (refer to [Capacity & scaling](#5-capacity-scaling)).
 
 **Two venue patterns:**
@@ -158,11 +156,7 @@ clients, comfortably within `SSE_MAX_CLIENTS`, but every real-time update fans o
   all**. Put a local TLS proxy in front for secure-context features, or serve plain HTTP on the LAN.
 
 **The network is the real fix.** Client resilience (offline write queue, SSE resync, silence
-watchdog) keeps the app usable across blips. For a smooth event, **wire the operator consoles**
-where you can, put operators on a **dedicated AP** separate from spectator guest Wi-Fi, prefer
-the **on-prem** pattern when the venue's internet is unreliable, and **drive each court's display
-from the operator's own machine over HDMI** so the scoreboard keeps moving even when the network
-does not (next section).
+watchdog) keeps the app usable across blips. For a smooth event, **wire the operator consoles** where you can. Put operators on a **dedicated AP** separate from spectator guest Wi-Fi. Prefer the **on-prem** pattern when the venue's internet is unreliable. **Drive each court's display from the operator's own machine over HDMI** so the scoreboard keeps moving even when the network does not (next section).
 
 ### Keep the court scoreboard alive on the same machine (HDMI)
 
@@ -171,16 +165,11 @@ scoreboard freezes during a Wi-Fi outage:
 
 - **Same machine as the operator console (recommended).** Connect a TV or monitor to the
   operator's laptop or mini-PC with an **HDMI cable**, extend the desktop, and open the court's
-  display URL in a second browser window on that same machine. The operator console and the
-  display board are then two tabs in the same browser on the same computer, so they share a
-  private same-origin channel: every score the operator records reaches the board **directly,
-  on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
+  display URL in a second browser window on that same machine. The operator console and the display board are then two tabs in the same browser on the same computer. They share a private same-origin channel, so every score the operator records reaches the board **directly, on the machine, with no network hop**. If the venue Wi-Fi drops mid-match, that court's
   scoreboard keeps updating from the operator's entries for as long as the scoring tab stays
   open. The board shows a small amber dot while it is running on this local feed (refer to
   [the scoreboard status dot](../user-guide/spectators/following.md#scoreboards-and-court-displays)).
-- **Separate device (a smart-TV browser, or the display on its own mini-PC).** Simpler cabling,
-  but the board only ever updates over the network, so a Wi-Fi outage freezes it until the link
-  returns (the board then shows a red dot).
+- **Separate device (a smart-TV browser, or the display on its own mini-PC).** Simpler cabling. The board only ever updates over the network, so a Wi-Fi outage freezes it until the link returns (the board then shows a red dot).
 
 ```mermaid
 flowchart LR
@@ -193,12 +182,8 @@ flowchart LR
     op -->|writes, queued + synced<br/>when the link returns| net["Venue network / app server"]
 ```
 
-This local hub needs no internet, no secure context, and no extra software, and it works in
-every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes
-in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them: the operator's writes are still queued locally and synced to
-the server once the link returns, so the authoritative record stays correct. It is per machine
-and per court. Reloading the **display** tab during an outage is fine: it cold-starts from the
-operator tab's snapshot over the same channel, as long as an operator tab is still open on that
+This local hub needs no internet, no secure context, and no extra software. It works in every topology (cloud-hosted, on-prem, or bare-IP HTTP). It **complements** the network fixes in [Venue connectivity](#venue-connectivity-a-four-court-event) rather than replacing them. The operator's writes are still queued locally and synced to the server once the link returns, so the authoritative record stays correct. It is per machine
+and per court. Reloading the **display** tab during an outage is fine. It cold-starts from the operator tab's snapshot over the same channel, as long as an operator tab is still open on that
 machine to answer (it only stays blank if none is). The genuine gap is reloading the **operator**
 tab itself mid-outage, since it holds the court's working data while offline and would have
 nothing to fetch from the down server.

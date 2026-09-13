@@ -35,14 +35,14 @@ You can create a branch for your changes and try to build from the source as you
 make go/build
 ```
 
-When you are satisfied with the changes, we suggest you run:
+When you are satisfied with the changes, run:
 
 ```sh
 make go/test
 make go/test-race
 ```
 
-Before you commit the changes, we also suggest you run:
+Before you commit the changes, run:
 
 ```sh
 make pre-commit
@@ -65,7 +65,7 @@ PORT=8082 make run-mobile                           # custom port
 TOURNAMENT_DATA_DIR=/path/to/data make run-mobile  # custom data dir
 ```
 
-`PORT`, `BIND_ADDRESS`, and `TOURNAMENT_DATA_DIR` are read by the binary directly, so they also work without `make`:
+The binary reads `PORT`, `BIND_ADDRESS`, and `TOURNAMENT_DATA_DIR` directly, so they also work without `make`:
 
 ```sh
 TOURNAMENT_DATA_DIR=/path PORT=8082 ./bin/bracket-creator mobile-app
@@ -79,7 +79,7 @@ An explicit `--folder`, `--port`, or `--bind` flag still overrides the env var.
 2. Rebuild the binary: `make go/build`
 3. Restart the server: `make run-mobile`
 
-Editing these frontend sources and refreshing the browser does **not** pick up changes; the browser is served the embedded bundle baked into the last binary build.
+Editing these frontend sources and refreshing the browser does **not** pick up changes. The browser still gets the embedded bundle from the last binary build.
 
 ## Create a commit
 

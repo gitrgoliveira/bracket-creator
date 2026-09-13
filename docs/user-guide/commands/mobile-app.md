@@ -34,7 +34,7 @@ The server has two authentication modes for the admin console; viewer routes are
 
 The admin password is stored plaintext in `tournament-data/tournament.md` and compared by exact-string match. Set the password during the in-app **Create tournament** flow, or edit `tournament.md` directly.
 
-- `POST /api/tournament/reset` is enabled and unauthenticated; browse to `http://<host>/reset` from any device on the same network to set a new password if you've forgotten the current one.
+- `POST /api/tournament/reset` is enabled and unauthenticated. If you've forgotten the current password, browse to `http://<host>/reset` from any device on the same network to set a new one.
 - `GET /api/auth-config` returns `{"mode": "file", "resetEnabled": true}`.
 
 ### Locked mode (`--lock-password`)
@@ -54,12 +54,12 @@ TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-- `POST /api/tournament/reset` returns 404. The `/reset` SPA route still serves the embedded page but renders an "operator-disabled" message instead of the form, and the AuthModal hides the "Forgot password?" link.
+- `POST /api/tournament/reset` returns 404. The `/reset` SPA route still serves the embedded page, but renders an "operator-disabled" message instead of the form. The AuthModal also hides the "Forgot password?" link.
 - `GET /api/auth-config` returns `{"mode": "locked", "resetEnabled": false}`.
 - The server **refuses to start** if the env var is empty or malformed (fail-closed; no silent fallback to file mode).
 - Rotation requires restarting with a new hash. The hash is read once at startup.
 
-**Recommended for any deployment reachable over the internet.** The plaintext-in-file pattern of file mode is intended for trusted-network use only.
+Recommended for any deployment reachable over the internet. The plaintext-in-file pattern of file mode is intended for trusted-network use only.
 
 #### Operational caveats
 

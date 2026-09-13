@@ -17,10 +17,10 @@ template: home.html
   </a>
 </p>
 
-**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitisation fits the venue. Give it a CSV of participants and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees), and it can run pools and scores on the day. Choose how digital you go.
+**bracket-creator** lets any club or organisation run kendo tournaments at whatever level of digitisation fits the venue. Give it a CSV of participants, and it produces fully formatted, print-ready Excel brackets (pool draws, match schedules, and elimination trees). It can also run pools and scores on the day. Choose how digital you go.
 
-!!! tip "New here? Start with these"
-    Not sure where to begin? [Choosing your setup](user-guide/start-here/choosing-your-setup.md) narrows it down in two questions, and [Your first tournament](user-guide/start-here/first-tournament.md) walks you from an empty folder to results on a screen.
+!!! tip "Start here"
+    [Choosing your setup](user-guide/start-here/choosing-your-setup.md) narrows the choice down in two questions. [Your first tournament](user-guide/start-here/first-tournament.md) walks you from an empty folder to results on a screen.
 
 ## Three ways to run a tournament
 
@@ -52,7 +52,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
     ---
 
-    On-screen scoreboards and mobile result pages, updated in real time. Organisers still print player tags and numbers.
+    On-screen scoreboards and mobile result pages, updated in real time. Organisers still print competitor tags and numbers.
 
     *Needs:* a device and monitor per shiai-jo, plus network access for competitors.
 
@@ -62,7 +62,7 @@ The same toolkit scales from a fully printed event to a fully online one. Pick t
 
 ## Tools
 
-Three programs ship in the single binary. The three ways to run a tournament decide how digital your event is; these tools are what you actually run to do it.
+Three programs ship in the single binary. The three ways to run a tournament decide how digital your event is. These tools are what you run to do it.
 
 <div class="grid cards" markdown>
 
@@ -111,11 +111,11 @@ The simplest way to run the tournament app, no Go toolchain needed:
 
 3. Open `http://localhost:8080` and follow the setup in the [tournament app guide](user-guide/organisers/run-tournament.md).
 
-Prefer Go or Docker? Refer to the [install options](user-guide/install/install.md).
+For Go or Docker, refer to the [install options](user-guide/install/install.md).
 
 ## What you need on tournament day
 
-- **A3 printer**: for team/player name sheets
+- **A3 printer**: for team/competitor name sheets
 - **A4 printer**: for the bracket trees
 - **Scoreboards, whiteboard markers, scissors, tasuki**: for keeping score at the courts and marking competitors
 

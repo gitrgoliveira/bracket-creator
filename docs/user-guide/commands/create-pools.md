@@ -61,13 +61,13 @@ bracket-creator create-pools \
 
 ## Shiai-jo count
 
-`--courts` takes **1, 2, 4, 8 or 16**. The elimination tree gives each shiai-jo its own block of the bracket and the blocks merge in pairs, so the count has to halve cleanly all the way down. Any other value stops the command with an error naming the counts to use instead, and the error always offers 1.
+`--courts` takes **1, 2, 4, 8 or 16**. The elimination tree gives each shiai-jo its own block of the bracket. The blocks then merge in pairs, so the count has to halve cleanly all the way down. Any other value stops the command with an error naming the counts to use instead, and the error always offers 1.
 
-Being even is not enough on its own. With `-c 6` the six blocks pair off into three, and three cannot pair off again, so one of them would reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
+Being even is not enough on its own. With `-c 6` the six blocks pair off into three, but three cannot pair off again. One of them would then reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
 
-A single shiai-jo is always allowed. With two or more qualifiers per pool (`-w 2` and above), `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a `-c 2` run; with `-w 1` nothing crosses between shiai-jo, so the block is left whole and each bye is chosen from every pool winner on it. 16 is the highest, and it is also the most shiai-jo a tournament can have, which puts 32 out of reach.
+A single shiai-jo is always allowed. With two or more qualifiers per pool (`-w 2` and above), `-c 1` splits its block into two halves that act as partner shiai-jo, producing the same bracket shape as a `-c 2` run. With `-w 1`, nothing crosses between shiai-jo: the block stays whole, and each bye is chosen from every pool winner on it. 16 is the highest. It is also the most shiai-jo a tournament can have, so 32 is out of reach.
 
-The draw also never uses more shiai-jo than there are pools, because a shiai-jo with no pools of its own would own an empty block. When you ask for more, the count steps down to the largest allowed value that fits, and the file is generated without an error: with 7 pools, `-c 8` produces a draw on 4 shiai-jo.
+The draw also never uses more shiai-jo than there are pools, because a shiai-jo with no pools of its own would own an empty block. When you ask for more, the count steps down to the largest allowed value that fits. The file is generated without an error: with 7 pools, `-c 8` produces a draw on 4 shiai-jo.
 
 This is a per-tournament-file rule, not a rule about your venue. A hall with three shiai-jo generates one file for two shiai-jo and another for one, and runs both at the same time. Refer to [How many shiai-jo a competition can use](../organisers/knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
@@ -81,9 +81,9 @@ This is a per-tournament-file rule, not a rule about your venue. A hall with thr
 | `2` | Pool winners stay in their own shiai-jo's block; runners-up cross to the partner shiai-jo's block. Partners are in opposite halves, so a pool's two qualifiers can only meet in the final. |
 | `3` | As for `2`, plus the third qualifier crosses to the other pair of shiai-jo, in the half that does not hold the pool winner. All three land in different quarters of the draw. |
 
-Higher values continue the same rotation, but a bracket has only four quarters, so from the fifth qualifier per pool onward two of a pool's qualifiers must share one.
+Higher values continue the same rotation, but a bracket has only four quarters. From the fifth qualifier per pool onward, two of a pool's qualifiers must share one.
 
-Byes follow from the size of each block rather than from the total field: a block with an even number of competitors gets none at all, and a block with an odd number gets exactly one, awarded first to a seeded pool's winner. Refer to [The knockout draw](../organisers/knockout-draw.md) for the full rules and worked examples.
+Byes follow from the size of each block, not the total field. A block with an even number of competitors gets none. A block with an odd number gets exactly one, awarded first to a seeded pool's winner. Refer to [The knockout draw](../organisers/knockout-draw.md) for the full rules and worked examples.
 
 ## Extra qualifiers
 
@@ -118,9 +118,9 @@ Rank,Name
 3,Eddard Stark
 ```
 
-Pass it with `--seeds seeds.csv`. Names must match the participant name exactly, accents included; both lists are title-cased on read, so only differences beyond the first letter of each word matter. Unseeded participants are placed randomly around the seeds.
+Pass it with `--seeds seeds.csv`. Names must match the participant name exactly, including accents. Both lists are title-cased on read, so only differences beyond each word's first letter matter. Unseeded participants are placed randomly around the seeds.
 
-The rank order matters in the elimination tree as well as in the pool draw: seeds 1 and 3 land in one half and seeds 2 and 4 in the other, each in its own quarter. Refer to [Seeding in the knockout draw](../organisers/knockout-draw.md#seeding).
+The rank order matters in the elimination tree as well as in the pool draw. Seeds 1 and 3 land in one half, and seeds 2 and 4 in the other, each in its own quarter. Refer to [Seeding in the knockout draw](../organisers/knockout-draw.md#seeding).
 
 ## Output sheets
 

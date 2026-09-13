@@ -30,7 +30,7 @@ A pool with more members than the smallest pool in the competition sends one add
 
 The [oversized-pool bye priority](#byes) does not apply under this option. Being oversized earns a pool's winner no priority for an ordinary bye; the extra qualifier is the pool's compensation instead.
 
-Requires **Winners per pool** set to 1. It works at any size, including a competition on a single shiai-jo: where there is more than one shiai-jo the extra qualifier is drawn onto a neighbouring one, and where there is only one it stays in that shiai-jo's bracket but in the opposite half from its own pool's winner. Either way the two qualifiers from the same pool cannot meet before the final, and the extra qualifier always fights in the first round.
+Requires **Winners per pool** set to 1. It works at any size, including a competition on a single shiai-jo. Where there is more than one shiai-jo, the extra qualifier is drawn onto a neighbouring one. Where there is only one, it stays in that shiai-jo's bracket but in the opposite half from its own pool's winner. Either way the two qualifiers from the same pool cannot meet before the final, and the extra qualifier always fights in the first round.
 
 ### Fit the knockout
 
@@ -103,11 +103,11 @@ Beyond three qualifiers per pool the same rotation continues, but a draw only ha
 
 ### One or two shiai-jo
 
-From two qualifiers per pool upwards, a competition on fewer than four shiai-jo does not get a simpler draw. Its pools are split in two, and where there are enough qualifiers each of those in two again, until the bracket is divided into **blocks that act as partner shiai-jo**: winners stay in their own block, runners-up cross to its partner, and a third or fourth qualifier crosses to one of the other two, exactly as they would on four real shiai-jo. On two shiai-jo each shiai-jo owns its share of those blocks; on one shiai-jo the single shiai-jo owns all of them.
+From two qualifiers per pool upwards, a competition on fewer than four shiai-jo does not get a simpler draw. Its pools are split in two, and each of those splits in two again where there are enough qualifiers, until the bracket is divided into **blocks that act as partner shiai-jo**. Within each block, winners stay, runners-up cross to its partner, and a third or fourth qualifier crosses to one of the other two, exactly as they would on four real shiai-jo. On two shiai-jo each shiai-jo owns its share of those blocks; on one shiai-jo the single shiai-jo owns all of them.
 
-A one-shiai-jo competition and a two-shiai-jo one with the same pools and the same number of qualifiers therefore get the same draw, with the same first-round matches and the same byes. Against four shiai-jo the match is close but not exact, because pools are allocated to shiai-jo before the draw is built and that allocation does not always divide the same way; six, ten or fourteen pools split five and five across two shiai-jo but three, three, two and two across four, which puts a different pool in the first half.
+A one-shiai-jo competition and a two-shiai-jo one with the same pools and the same number of qualifiers therefore get the same draw, with the same first-round matches and the same byes. Against four shiai-jo the match is close but not exact, because pools are allocated to shiai-jo before the draw is built and that allocation does not always divide the same way. Six, ten or fourteen pools split five and five across two shiai-jo but three, three, two and two across four, which puts a different pool in the first half.
 
-Two things limit the splitting. A block is only split again while every block would still hold two competitors on average, because a block left holding a single competitor gives that competitor a bye whatever the order in [Byes](#byes) says, and a bye handed out by the shape of the split rather than chosen is not one the draw should be creating. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go, so that the two halves of the draw stay the ones a two-shiai-jo competition would have.
+Two things limit the splitting. A block is only split again while every block would still hold two competitors on average. A block left holding a single competitor gets a bye whatever the order in [Byes](#byes) says, and a bye handed out by the shape of the split rather than chosen is not one the draw should be creating. And the splitting is done by repeated halving rather than by cutting the pool list into four in one go, so that the two halves of the draw stay the ones a two-shiai-jo competition would have.
 
 At **one qualifier per pool** nothing is split at all. Nothing crosses between shiai-jo when each pool sends up a single competitor, so there is no partner structure to imitate, and each shiai-jo's block is left whole. That also lets the bye be chosen from every pool winner on that shiai-jo rather than from whichever half the split happened to leave with an odd number.
 
@@ -137,7 +137,7 @@ The count you assign is also not always the count the draw uses. A competition i
 
 ## Dojo-mates in the first round
 
-The draw avoids opening a knockout with two competitors from the same dojo. After the places are worked out it checks each first-round match and, where the pairing is between two members of one dojo, exchanges one of them with a competitor elsewhere in the draw, choosing a partner as far away as the shape allows so the two meet as late as possible rather than merely not first.
+The draw avoids opening a knockout with two competitors from the same dojo. After the places are worked out, it checks each first-round match. Where the pairing is between two members of one dojo, it exchanges one of them with a competitor elsewhere in the draw, choosing a partner as far away as the shape allows so the two meet as late as possible rather than merely not first.
 
 This matters most for a **Knockout only** competition, where there is no pool phase to separate dojo-mates beforehand and the draw follows the order your roster is in. Rosters are usually entered a dojo at a time, and without this the first round can be almost entirely dojo against dojo.
 
@@ -194,7 +194,7 @@ So if the seeds hold, the semi-finals are **seed 1 against seed 3** and **seed 2
 
 Fewer than four seeds is a normal configuration, and so is none at all. The rule applies to whichever ranks you have set, in rank order, so with three seeds one quarter has no seed in it, and with no seeds the draw is built from crossing and block shape alone. A competition without seeds produces no warning.
 
-Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first, and you are told what was relaxed: the competition page shows a banner, **Seeding: the draw could not honour every rule**, and the command line prints the same as a `Warning:` line. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
+Some configurations cannot satisfy every constraint at once, for example four seeds across two shiai-jo and five pools. The draw always happens: the deepest constraint that cannot be met gives way, for the lowest-priority seed first. You are told what was relaxed: the competition page shows a banner, **Seeding: the draw could not honour every rule**, and the command line prints the same as a `Warning:` line. Two seeds never share a pool. If you set more seeds than there are pools, the surplus ranks are ignored with a warning rather than refused.
 
 Seeding also decides who receives a bye, as described in [Byes](#byes).
 

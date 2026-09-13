@@ -22,7 +22,7 @@ docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
 
 The app is available at `http://localhost:8080`.
 
-The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder: if the folder does not exist, Docker creates it owned by root, and if you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
+The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder. If the folder does not exist, Docker creates it owned by root. If you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
 
 Refer to the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
 
@@ -57,7 +57,7 @@ brew trust gitrgoliveira/tap
 brew install bracket-creator
 ```
 
-`brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
+`brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source. Building it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
 
@@ -83,7 +83,7 @@ Each release attaches `.deb`, `.rpm`, and `.apk` packages for amd64/x86_64 and a
     apk add --allow-untrusted ./bracket-creator_*_$(apk --print-arch).apk
     ```
 
-    The package is not signed with an Alpine key, hence `--allow-untrusted`.
+    The package is not signed with an Alpine key, so it needs `--allow-untrusted`.
 
 The packages install the binary to `/usr/bin`, plus the man page and bash/zsh/fish shell completions.
 

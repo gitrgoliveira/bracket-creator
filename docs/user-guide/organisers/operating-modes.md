@@ -19,7 +19,7 @@ Two kinds of action stay gated in self-run mode. Organiser setup (creating and e
 Results in self-run mode carry a provenance label. A score entered without a password is tagged "self-reported"; a score entered by an authenticated operator is tagged "admin". Officiated mode always produces "admin" results.
 
 !!! note
-    In file mode, self-run requires a destructive-ops password. Without one, destructive actions would be completely unprotected, so the app refuses to create or save a self-run tournament until a destructive-ops password is set (you can set it in the same step).
+    In file mode, self-run requires a destructive-ops password. Without one, destructive actions would be unprotected, so the app refuses to create or save a self-run tournament until a destructive-ops password is set (you can set it in the same step).
 
 Refer to the [Competitor self-run guide](../competitors/self-run.md) for the attendee-facing workflow.
 
@@ -42,7 +42,7 @@ Locked mode is recommended for any deployment reachable from the internet. Inste
 
 To set up locked mode:
 
-1. Generate the hash with the `hash-password` command. The command reads the password from standard input with no prompt, and the terminal does not hide what you type, so pipe it in from a secrets manager or a here-doc rather than typing it interactively:
+1. Generate the hash with the `hash-password` command. The command reads the password from standard input with no prompt, and the terminal does not hide what you type. Pipe it in from a secrets manager or a here-doc rather than typing it interactively:
 
     ```bash
     printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
@@ -65,7 +65,7 @@ Refer to the [`hash-password` command reference](../commands/hash-password.md) f
 
 ## Destructive-ops password
 
-The destructive-ops password is a second, separately held credential that gates actions which are difficult to reverse. It lets table staff hold the main admin password for scoring, check-in, and match management without being able to accidentally or maliciously destroy data.
+The destructive-ops password is a second, separately held credential that gates actions which are difficult to reverse. It lets table staff hold the main admin password for scoring, check-in, and match management, so they cannot accidentally or maliciously destroy data.
 
 Actions gated by the destructive-ops password include:
 
@@ -79,11 +79,11 @@ Actions gated by the destructive-ops password include:
 
 The following are NOT gated by the destructive-ops password: scoring, match decisions, check-in, starting a competition, lineup management, or the `/reset` path.
 
-The admin UI prompts for the destructive-ops password each time a gated action is requested. There is no cached session between prompts.
+The admin UI prompts for the destructive-ops password each time you request a gated action. There is no cached session between prompts.
 
 ### In file mode
 
-Set the destructive-ops password from **Admin > Edit details > Destructive-ops password**. The field is write-only and is never displayed. Changing it after it has been set requires supplying the current value first. While the field is unset, gated actions fall back to requiring the main admin password only. If you forget it, edit the `admin_password` field in `tournament.md` between rounds, as with any hand edit to the data folder; the main admin password is the `password` field in the same file.
+Set the destructive-ops password from **Admin > Edit details > Destructive-ops password**. The field is write-only and is never displayed. Changing it after it has been set requires supplying the current value first. While the field is unset, gated actions fall back to requiring the main admin password only. If you forget it, edit the `admin_password` field in `tournament.md` between rounds, as with any hand edit to the data folder. The main admin password is the `password` field in the same file.
 
 ### In locked mode
 
@@ -109,4 +109,4 @@ For a real security boundary:
 
 - Run the server behind TLS. Refer to [Hosting](../install/hosting.md) for guidance.
 - Use locked mode for any deployment reachable from the internet.
-- Be aware that in file mode the password reset is unauthenticated: anyone who can reach the server can set a new admin password without knowing the current one, which locks out the operator or takes over the tournament. Locked mode disables reset entirely, so any internet-exposed deployment should use locked mode.
+- In file mode, the password reset is unauthenticated: anyone who can reach the server can set a new admin password without knowing the current one, which locks out the operator or takes over the tournament. Locked mode disables reset entirely, so any internet-exposed deployment should use locked mode.

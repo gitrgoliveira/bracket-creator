@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { compMatches } from '../viewer_utils.jsx';
 
-// The bronze (3rd-place) playoff is a sibling of bracket.rounds, so it must be
+// The bronze (3rd-place) knockout is a sibling of bracket.rounds, so it must be
 // explicitly surfaced by compMatches to appear in the shiaijo court queue /
 // find-my-matches / schedule alongside the final.
-describe('compMatches: bronze (3rd-place) playoff', () => {
+describe('compMatches: bronze (3rd-place) knockout', () => {
   beforeEach(() => {
     global.window = global.window || {};
     global.window.roundLabel = (i, n) => (i === n - 1 ? 'Final' : `Round ${i + 1}`);
@@ -12,7 +12,7 @@ describe('compMatches: bronze (3rd-place) playoff', () => {
   });
 
   const comp = () => ({
-    id: 'c1', name: 'Naginata Cup', status: 'playoffs', format: 'playoffs',
+    id: 'c1', name: 'Naginata Cup', status: 'knockout', format: 'knockout',
     engi: false, kind: 'individual', teamSize: 0,
     bracket: {
       rounds: [

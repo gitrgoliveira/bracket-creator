@@ -87,7 +87,7 @@ describe('row labels agree with bracket columns across a collapsed bye round (mp
   });
 
   const comp = () => ({
-    id: 'c1', name: 'Knockout5', status: 'playoffs', format: 'playoffs',
+    id: 'c1', name: 'Knockout5', status: 'knockout', format: 'knockout',
     kind: 'individual', teamSize: 0, engi: false,
     bracket: { rounds: fivePlayerRounds() },
   });
@@ -124,9 +124,9 @@ describe('row labels agree with bracket columns across a collapsed bye round (mp
     const byColumn = columnLabelByMatchId(rounds);
     rounds.forEach((round, ri) => round.forEach((m) => {
       if (!byColumn[m.id]) return; // phantom: never promoted to a board
-      expect(phaseLabel(m, true, ri, rounds.length, 'playoffs')).toBe(byColumn[m.id]);
+      expect(phaseLabel(m, true, ri, rounds.length, 'knockout')).toBe(byColumn[m.id]);
     }));
-    expect(phaseLabel(rounds[0][0], true, 0, 3, 'playoffs')).toBe('Semifinals');
+    expect(phaseLabel(rounds[0][0], true, 0, 3, 'knockout')).toBe('Semifinals');
   });
 
   it('keeps roundIndex RAW so lineup fetches still key on the backend round', () => {

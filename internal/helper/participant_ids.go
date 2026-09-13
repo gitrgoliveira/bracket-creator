@@ -150,7 +150,7 @@ func PoolsMissingParticipantIDsMessage(pools []Pool) string {
 //
 // Mirrors ValidateNoBlankIdentity's shape and calling convention (both are
 // roster pre-flights the engine's runDrawPipeline runs ahead of the format
-// switch, so every format -- pools, playoffs, league, Swiss -- is covered by
+// switch, so every format -- pools, knockout, league, Swiss -- is covered by
 // one check rather than by the pool distributor alone). Unlike blank dojo,
 // there is no participant-SAVE-time floor to distinguish this from: every
 // write path mints an id for an id-less row (marshalParticipantsCSV), so the

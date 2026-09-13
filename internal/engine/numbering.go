@@ -27,7 +27,7 @@ const (
 	// DrawInPools: a pooled format (mixed, league) whose draw has been
 	// generated; competitor numbers and pool membership live in pools.csv.
 	DrawInPools
-	// DrawInBracket: a standalone knockout (playoffs, or an unset Format,
+	// DrawInBracket: a standalone knockout (knockout, or an unset Format,
 	// which generation treats identically) whose draw has been generated;
 	// competitor numbers are composed from bracket.json's DrawOrder.
 	DrawInBracket
@@ -35,13 +35,13 @@ const (
 
 // DrawSourceFor derives comp's DrawSource from its status and effective
 // format (comp.EffectiveFormat(), never comp.Format directly: an unset
-// Format ("") is standalone playoffs too).
+// Format ("") is standalone knockout too).
 func DrawSourceFor(comp *state.Competition) DrawSource {
 	if comp == nil || state.CanGenerateDraw(comp.Status) {
 		return DrawNone
 	}
 	switch comp.EffectiveFormat() {
-	case state.CompFormatPlayoffs:
+	case state.CompFormatKnockout:
 		return DrawInBracket
 	case state.CompFormatSwiss:
 		return DrawNone
@@ -67,7 +67,7 @@ func drawPositions(drawOrder []string) map[string]int {
 // NumberKnockoutParticipants is the ONE derivation of a knockout-only
 // competition's numbers (bc-pnum ruling 2): a number belongs to a POSITION
 // in the draw, so it composes players[i].Number from drawOrder, the
-// participant-id list generatePlayoffs stamped onto bracket.DrawOrder in
+// participant-id list generateKnockout stamped onto bracket.DrawOrder in
 // bracket-position order (top of the tree to the bottom). A player whose id
 // is not in drawOrder (never drawn, e.g. excluded by check-in, or the
 // competition has not drawn yet so drawOrder is empty) gets NO number --
@@ -157,9 +157,9 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 	return orderPlayersByDraw(players, pos), nil
 }
 
-// PlayoffsNamesToPrint is the ONE derivation of the numbered roster
+// KnockoutNamesToPrint is the ONE derivation of the numbered roster
 // RenderCompetitionWorkbook itself derives internally as namesToPrintPlayers
-// (see that field's own doc comment in workbook.go): a playoffs-only
+// (see that field's own doc comment in workbook.go): a knockout-only
 // competition never has a pools.csv, so nothing else populates the shared
 // pipeline's Data / Names-to-Print sheets for it, and a prefix is what tells
 // the pipeline there is a numbered roster worth printing at all.
@@ -193,14 +193,14 @@ func (e *Engine) NumberedParticipantsFor(comp *state.Competition, bracket *state
 // blank-template export) is reachable BEFORE a draw exists, precisely so an
 // operator can print name tags and blank score sheets ahead of the
 // tournament, and DrawSourceFor returns DrawNone for a not-yet-drawn
-// playoffs competition exactly as it does for one with no draw at all --
+// knockout competition exactly as it does for one with no draw at all --
 // gating on it here would blank the Names-to-Print/Tags sheets pre-draw.
 // bracket may therefore be the tolerant empty value LoadBracket returns for
 // a competition that has never drawn (NumberedParticipantsFor's own nil
 // handling), which is fine: NumberKnockoutParticipants is a no-op over an
 // empty DrawOrder, so the roster comes back unnumbered rather than absent.
-func (e *Engine) PlayoffsNamesToPrint(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) ([]helper.Player, error) {
-	if comp.EffectiveFormat() != state.CompFormatPlayoffs || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
+func (e *Engine) KnockoutNamesToPrint(comp *state.Competition, pools []helper.Pool, bracket *state.Bracket) ([]helper.Player, error) {
+	if comp.EffectiveFormat() != state.CompFormatKnockout || len(pools) != 0 || comp.EffectiveNumberPrefix() == "" {
 		return nil, nil
 	}
 	return e.NumberedParticipantsFor(comp, bracket)

@@ -28,7 +28,7 @@ import (
 func writeCompetitionFolderDirectly(t *testing.T, dir, id, name string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "competitions", id), 0o700))
-	cfg := "---\nid: " + id + "\nname: " + name + "\nformat: playoffs\ncourts:\n  - A\nstatus: setup\n---\n"
+	cfg := "---\nid: " + id + "\nname: " + name + "\nformat: knockout\ncourts:\n  - A\nstatus: setup\n---\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "competitions", id, "config.md"), []byte(cfg), 0o600))
 }
 

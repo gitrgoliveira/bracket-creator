@@ -36,9 +36,9 @@ func makeSeededPlayers(n, numSeeds int) []domain.Player {
 	return players
 }
 
-// excelPlayoffsLeaves mirrors the Excel create-playoffs.go path:
+// excelKnockoutLeaves mirrors the Excel create-knockout.go path:
 // StandardSeeding → extract names → CreateBalancedTree → TreeToLeafArray.
-func excelPlayoffsLeaves(players []domain.Player) []string {
+func excelKnockoutLeaves(players []domain.Player) []string {
 	seeded := helper.StandardSeeding(players)
 	names := make([]string, len(seeded))
 	for i, p := range seeded {
@@ -48,18 +48,18 @@ func excelPlayoffsLeaves(players []domain.Player) []string {
 	return helper.TreeToLeafArray(tree)
 }
 
-// enginePlayoffsLeaves runs the REAL engine path (StartCompetition) and
+// engineKnockoutLeaves runs the REAL engine path (StartCompetition) and
 // extracts the round-0 leaf ordering from the generated bracket. This exercises
-// generatePlayoffs end-to-end so any drift in the engine path (seeding,
+// generateKnockout end-to-end so any drift in the engine path (seeding,
 // tree construction, leaf flattening, bye resolution) is caught.
-func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
+func engineKnockoutLeaves(t *testing.T, players []domain.Player) []string {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 
 	compID := fmt.Sprintf("identity-%d", len(players))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:        compID,
-		Format:    state.CompFormatPlayoffs,
+		Format:    state.CompFormatKnockout,
 		Kind:      "individual",
 		Courts:    []string{"A"},
 		StartTime: "09:00",
@@ -110,18 +110,18 @@ func enginePlayoffsLeaves(t *testing.T, players []domain.Player) []string {
 	return leaves
 }
 
-// TestBracketIdentity_PurePlayoffs verifies that the engine's generatePlayoffs
-// path produces leaf arrays identical to the Excel create-playoffs reference
+// TestBracketIdentity_PureKnockout verifies that the engine's generateKnockout
+// path produces leaf arrays identical to the Excel create-knockout reference
 // for various roster sizes.
 //
 // SCOPE, so this is not mistaken for proof about the printed workbook: both
-// sides here are computed, and excelPlayoffsLeaves is a transcription of
-// cmd/create-playoffs.go's INPUT tree, not a rendered sheet. What it pins is
+// sides here are computed, and excelKnockoutLeaves is a transcription of
+// cmd/create-knockout.go's INPUT tree, not a rendered sheet. What it pins is
 // that the engine feeds the elimination renderer the same tree the CLI does.
 // The artifact-level equivalent - render a workbook and read the sheets back -
 // is TestExcelWorkbookMatchesEngineBracket_Mixed (excel_draw_parity_test.go),
 // which covers the pool-fed draw.
-func TestBracketIdentity_PurePlayoffs(t *testing.T) {
+func TestBracketIdentity_PureKnockout(t *testing.T) {
 	cases := []struct {
 		name        string
 		playerCount int
@@ -142,8 +142,8 @@ func TestBracketIdentity_PurePlayoffs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			players := makeSeededPlayers(tt.playerCount, tt.numSeeds)
 
-			excelLeaves := excelPlayoffsLeaves(players)
-			engineLeaves := enginePlayoffsLeaves(t, players)
+			excelLeaves := excelKnockoutLeaves(players)
+			engineLeaves := engineKnockoutLeaves(t, players)
 
 			require.Equal(t, len(excelLeaves), len(engineLeaves),
 				"leaf array lengths must match")
@@ -165,16 +165,16 @@ func TestBracketIdentity_PurePlayoffs(t *testing.T) {
 	}
 }
 
-// enginePlayoffsBracket runs the real engine path (StartCompetition) and
+// engineKnockoutBracket runs the real engine path (StartCompetition) and
 // returns the generated bracket so display metadata (mp-7f2w) can be asserted.
-func enginePlayoffsBracket(t *testing.T, players []domain.Player) *state.Bracket {
+func engineKnockoutBracket(t *testing.T, players []domain.Player) *state.Bracket {
 	t.Helper()
 	eng, store, _ := setupTestEngine(t)
 
 	compID := fmt.Sprintf("display-%d", len(players))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:        compID,
-		Format:    state.CompFormatPlayoffs,
+		Format:    state.CompFormatKnockout,
 		Kind:      "individual",
 		Courts:    []string{"A"},
 		StartTime: "09:00",
@@ -207,14 +207,14 @@ func enginePlayoffsBracket(t *testing.T, players []domain.Player) *state.Bracket
 
 // excelRoundSizes returns the Excel Tree sheet's elimination-round match counts,
 // ordered earliest → latest (e.g. [QF, SF, Final]), via the same unbalanced-tree
-// depth traversal create-playoffs.go uses.
+// depth traversal create-knockout.go uses.
 func excelRoundSizes(players []domain.Player) []int {
 	seeded := helper.StandardSeeding(players)
 	names := make([]string, len(seeded))
 	for i, p := range seeded {
 		names[i] = p.Name
 	}
-	// Normalize through the slot codec exactly as NewPlayoffDraw does for the
+	// Normalize through the slot codec exactly as NewKnockoutDraw does for the
 	// printed workbook: the raw CreateBalancedTree tree is riseless and
 	// classifies a phantom-risen pair a round late, which is the old geometry
 	// this test would otherwise re-assert.
@@ -248,7 +248,7 @@ func TestBracketDisplayMetadata_MatchesExcelRounds(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			players := makeSeededPlayers(tt.playerCount, tt.numSeeds)
-			bracket := enginePlayoffsBracket(t, players)
+			bracket := engineKnockoutBracket(t, players)
 
 			// Group real (non-hidden) matches by DisplayRound.
 			byDR := map[int]int{}
@@ -313,7 +313,7 @@ func TestBracketDisplayMetadata_Feeders(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			bracket := enginePlayoffsBracket(t, makeSeededPlayers(tt.playerCount, tt.numSeeds))
+			bracket := engineKnockoutBracket(t, makeSeededPlayers(tt.playerCount, tt.numSeeds))
 
 			byID := map[string]state.BracketMatch{}
 			var real []state.BracketMatch

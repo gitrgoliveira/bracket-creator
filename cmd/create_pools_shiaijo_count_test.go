@@ -28,7 +28,7 @@ func poolRoster(t *testing.T, dir string, n int) string {
 }
 
 // TestPoolOptionsRun_ShiaijoCount sweeps --courts on create-pools across
-// 1..17. Same rule as create-playoffs: the tree gives each shiaijo its own
+// 1..17. Same rule as create-knockout: the tree gives each shiaijo its own
 // block and the blocks merge in pairs, so only a power of two is accepted and
 // everything else is refused before any file is written. The sweep spans the
 // counts the retired "1 or an even number" rule wrongly accepted (6, 10, 12,

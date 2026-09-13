@@ -7,7 +7,7 @@ Before implementing features or making architectural decisions, read the project
 
 ## Project Overview
 
-`bracket-creator` is a specialized CLI and Web application designed to generate tournament brackets for Kendo competitions. It supports both straight knockout (Playoffs) and round-robin (Pools) formats, accommodating both individual and team matches.
+`bracket-creator` is a specialized CLI and Web application designed to generate tournament brackets for Kendo competitions. It supports both straight knockout and round-robin (Pools) formats, accommodating both individual and team matches.
 
 ### Key Technologies
 - **Language:** Go (Golang)
@@ -19,7 +19,7 @@ Before implementing features or making architectural decisions, read the project
 - **Containerization:** Docker & Docker Compose
 
 ### Architecture
-- `cmd/`: CLI command definitions (serve, create-playoffs, create-pools, mobile-app, version).
+- `cmd/`: CLI command definitions (serve, create-knockout, create-pools, mobile-app, version).
 - `internal/`: Core logic and domain models.
     - `domain/`: Domain entities (Tournament, Pool, Match, Player, Seed).
     - `helper/`: Implementation of bracket generation, pool creation, Excel file creation, and business logic.
@@ -34,7 +34,7 @@ Before implementing features or making architectural decisions, read the project
 - `specs/`: OpenAPI specification (`openapi.yaml`) for the web API, fully synchronized with the backend implementation.
 
 ### Seeding Logic
-- **Playoffs (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.
+- **Knockout (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.
 - **Pools (`PoolSeeding`)**: Distributes seeds across pools using an "extremes and middle" balanced priority distribution (e.g., for 12 pools: Pool 1, Pool 12, Pool 6, Pool 7), with cyclic priority for additional seeds.
 
 ### Pool Scoring Rules
@@ -73,7 +73,7 @@ Individual encounters between teams are decided by:
 A match (individual or sub-match) is ONLY considered a tie if the operator enters an **'X'** (or 'x') in the "vs" column between the players. Equal scores without an 'X' are NOT treated as ties. The "vs" column is unlocked on all sheets to facilitate this.
 
 ### Match Colors
-On tree and playoff brackets, the player/team on the top of the bracket is always assigned the color **Red (Aka)** and the player/team on the bottom is assigned **White (Shiro)**.
+On tree and knockout brackets, the player/team on the top of the bracket is always assigned the color **Red (Aka)** and the player/team on the bottom is assigned **White (Shiro)**.
 
 ### Excel Layout Standards
 - **Court Structure:** Each court uses exactly **8 columns**. (Court A: A–H, Court B: I–P, etc.)
@@ -101,9 +101,9 @@ On tree and playoff brackets, the player/team on the top of the bracket is alway
 - **Build Docker Image:** `make docker/build`
 
 ### CLI Usage Examples
-- **Create Playoffs:**
+- **Create Knockout:**
   ```bash
-  ./bin/bracket-creator create-playoffs -f players.csv -o bracket.xlsx
+  ./bin/bracket-creator create-knockout -f players.csv -o bracket.xlsx
   ```
 - **Create Pools:**
   ```bash

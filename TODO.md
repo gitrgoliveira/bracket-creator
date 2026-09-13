@@ -5,7 +5,7 @@
 1. Make brew install work.
 
 
-4. Schedule also needs an admin view, so we can setup the times per match on pools and playoffs, and get an estimation of the tournament duration. We will need to include breaks in the schedule. 
+4. Schedule also needs an admin view, so we can setup the times per match on pools and knockout, and get an estimation of the tournament duration. We will need to include breaks in the schedule. 
 4. Improve the schedule view.
 5. in brackets and pools, it needs to be very clear which side is Red and which side is White. when scoring and for the viewer mode and the schedule view.
 6. When displaying the results/scores, it needs to be visible if what points those were, for example: MM-K. Having the number of points is not useful.
@@ -32,7 +32,7 @@
 * By default, the competition date is one of the tournament days.
 
 * schedule estimator is per competition.
-* We need to have pool match times, playoff match times, and also take into consideration breaks
+* We need to have pool match times, knockout match times, and also take into consideration breaks
 
 * in the viewer UI, the announcements should stagger on top of the UI. the webapp will also need to support browser notifications for announcements.
 

@@ -128,13 +128,13 @@ describe('validatePoolSettings', () => {
   // negative/fractional values pass the truthy gate entirely.
   // validatePoolSettings is the submit-time guard.
 
-  describe('playoffs format short-circuits', () => {
-    it('format=playoffs ignores pool fields entirely', () => {
+  describe('knockout format short-circuits', () => {
+    it('format=knockout ignores pool fields entirely', () => {
       // Knockout-only competitions don't render the pool inputs, so
       // their state can legitimately be NaN/0/whatever; don't block.
-      expect(validatePoolSettings('playoffs', NaN, NaN)).toEqual({ ok: true, error: null });
-      expect(validatePoolSettings('playoffs', 0, 0)).toEqual({ ok: true, error: null });
-      expect(validatePoolSettings('playoffs', 3, 2)).toEqual({ ok: true, error: null });
+      expect(validatePoolSettings('knockout', NaN, NaN)).toEqual({ ok: true, error: null });
+      expect(validatePoolSettings('knockout', 0, 0)).toEqual({ ok: true, error: null });
+      expect(validatePoolSettings('knockout', 3, 2)).toEqual({ ok: true, error: null });
     });
   });
 
@@ -216,9 +216,9 @@ describe('validateSwissSettings (T190 / FR-050a)', () => {
   // create payload. This guard rejects them at submit time.
 
   describe('non-swiss formats short-circuit', () => {
-    it('format=playoffs ignores swissRounds', () => {
-      expect(validateSwissSettings('playoffs', NaN)).toEqual({ ok: true, error: null });
-      expect(validateSwissSettings('playoffs', 0)).toEqual({ ok: true, error: null });
+    it('format=knockout ignores swissRounds', () => {
+      expect(validateSwissSettings('knockout', NaN)).toEqual({ ok: true, error: null });
+      expect(validateSwissSettings('knockout', 0)).toEqual({ ok: true, error: null });
     });
 
     it('format=mixed / league all skip the guard', () => {

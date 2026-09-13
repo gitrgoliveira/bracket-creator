@@ -418,7 +418,7 @@ func TestCheckEligibility_EmptyIDsSkipped(t *testing.T) {
 func TestRecordDecision_OnBracketMatch(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-kiken"
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -449,7 +449,7 @@ func TestRecordDecision_OnBracketMatch(t *testing.T) {
 func TestStartMatch_BracketMatch_Eligible(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-start-match"
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -1058,7 +1058,7 @@ func TestRollback_BracketSubResults_Cleared(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-rollback-subs"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -1156,7 +1156,7 @@ func TestRollback_BracketSubResults_ClearedTx(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-rollback-subs-tx"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 
 	players := []domain.Player{
 		{ID: helper.NewUUID4(), Name: "Alice", Dojo: "A"},
@@ -1722,7 +1722,7 @@ func TestRecordDecision_TeamWithdrawalKeepsSubResults(t *testing.T) {
 func TestRecordDecision_BracketLoserKeepsStruckPoints(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-loser-keeps-points"
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 2, func(c *state.Competition) {
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 2, func(c *state.Competition) {
 		c.Status = state.CompStatusPools
 	})
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
@@ -1765,7 +1765,7 @@ func TestRecordDecision_BracketLoserKeepsStruckPoints(t *testing.T) {
 func TestRecordDecision_BracketTeamWithdrawalKeepsSubResults(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "bracket-team-withdrawal-subs"
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 2, func(c *state.Competition) {
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 2, func(c *state.Competition) {
 		c.Kind = "team"
 		c.TeamSize = 3
 		c.Status = state.CompStatusPools

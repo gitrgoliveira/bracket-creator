@@ -297,7 +297,7 @@ func (o *poolOptions) createPools(entries []string) error {
 	courtNames := helper.CourtLabels(o.courts)
 
 	// resolveNumberPrefix (bc-pnum A10, cmd/shared.go) is the ONE derivation
-	// shared with create-playoffs: trims an explicit value, derives from
+	// shared with create-knockout: trims an explicit value, derives from
 	// --title-prefix when omitted, and refuses one over the length cap
 	// rather than accepting it verbatim.
 	o.numberPrefix, err = resolveNumberPrefix(o.numberPrefix, o.titlePrefix)

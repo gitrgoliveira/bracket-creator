@@ -67,7 +67,7 @@ func createTournamentHandler(c *gin.Context) {
 	}
 
 	tournamentType := c.PostForm("tournamentType")
-	if tournamentType != "pools" && tournamentType != "playoffs" {
+	if tournamentType != "pools" && tournamentType != "knockout" {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid tournament type",
 		})
@@ -198,8 +198,8 @@ func createTournamentHandler(c *gin.Context) {
 			return
 		}
 
-	case "playoffs":
-		o := &playoffOptions{
+	case "knockout":
+		o := &knockoutOptions{
 			singleTree:      singleTree,
 			withZekkenName:  withZekkenName,
 			thirdPlaceMatch: thirdPlaceMatch,
@@ -214,18 +214,18 @@ func createTournamentHandler(c *gin.Context) {
 
 		o.outputWriter = inMemoryWriter
 
-		err := o.createPlayoffs(entries)
+		err := o.createKnockout(entries)
 		if err != nil {
-			// As with pools, playoff generation failures are typically
+			// As with pools, knockout generation failures are typically
 			// request-caused (invalid roster, seed validation), report 400.
-			log.Printf("failed to create playoffs: %s", err.Error())
+			log.Printf("failed to create knockout: %s", err.Error())
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": fmt.Sprintf("Failed to create playoffs: %s", err.Error()),
+				"error": fmt.Sprintf("Failed to create knockout: %s", err.Error()),
 			})
 			return
 		}
 	}
-	// No default: tournamentType is validated to be "pools" or "playoffs" by
+	// No default: tournamentType is validated to be "pools" or "knockout" by
 	// the guard near the top of this handler.
 
 	// Ensure data is written to the buffer

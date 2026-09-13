@@ -62,7 +62,7 @@ Highlights:
 
 * **Admin console** (password-protected): competitions, participants, seeding, draws, scheduling, and scoring.
 * **Public viewer and court displays**: real-time schedule, standings, and brackets for spectators, plus big-screen court displays and a transparent overlay for streaming.
-* **All formats**: Playoffs, Pools + playoffs, League, and Swiss, for individuals and teams (including kachinuki), plus naginata and Engi-kyogi (kata) competitions.
+* **All formats**: Knockout, Pools + Knockout, League, and Swiss, for individuals and teams (including kachinuki), plus naginata and Engi-kyogi (kata) competitions.
 * **Excel export**: download the results as a workbook at any point during the event.
 
 Start with these guides on the documentation site:
@@ -82,13 +82,13 @@ The original core of the project is still there: give it a CSV of participants a
 bracket-creator create-pools -z -p 5 -w 3 -f players.csv -o pools.xlsx
 
 # Straight knockout for teams of 5
-bracket-creator create-playoffs -t 5 -f teams.csv -o playoffs.xlsx
+bracket-creator create-knockout -t 5 -f teams.csv -o knockout.xlsx
 ```
 
 See the docs for the full command references and the input format:
 
 * [create-pools](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-pools/)
-* [create-playoffs](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-playoffs/)
+* [create-knockout](https://gitrgoliveira.github.io/bracket-creator/user-guide/commands/create-knockout/)
 * [Input format](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/input-format/)
 * [Tournament formats](https://gitrgoliveira.github.io/bracket-creator/user-guide/organisers/formats/)
 

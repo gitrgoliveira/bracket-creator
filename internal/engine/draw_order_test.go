@@ -10,11 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestGeneratePlayoffs_DrawOrderMatchesRoundOneLeaves pins bc-pnum operator
+// TestGenerateKnockout_DrawOrderMatchesRoundOneLeaves pins bc-pnum operator
 // ruling 2: "Knockout-only numbering ... needs to follow bracket positions,
 // so the numbering is clear and sequential." bracket.DrawOrder is stamped by
-// generatePlayoffs from the order helper.StandardSeeding returns (the
-// seeded-players slice, before CreateBalancedTree/NewPlayoffDraw's slot-codec
+// generateKnockout from the order helper.StandardSeeding returns (the
+// seeded-players slice, before CreateBalancedTree/NewKnockoutDraw's slot-codec
 // round trip); this test verifies that order is EXACTLY the round-1 leaf
 // order read top to bottom (Rounds[0][i].SideA then SideB, byes and "Winner
 // of" placeholders skipped) -- the property that makes "a number belongs to
@@ -44,14 +44,14 @@ func makeCollidingDojoPlayers(n int) []domain.Player {
 }
 
 // Runs through the real store-backed engine path (StartCompetition ->
-// generatePlayoffs), the same harness enginePlayoffsLeaves/enginePlayoffsBracket
+// generateKnockout), the same harness engineKnockoutLeaves/engineKnockoutBracket
 // use in bracket_identity_test.go, across entrant counts that are and are not
 // powers of two, several court counts (court count only changes each match's
 // Court field, never the leaf order, but the ruling asks it be checked),
 // with/without seeds, and with unique vs. colliding dojos (the latter is
 // what actually exercises delayDojoMeetings' unseeded-permuting pass; see
 // makeCollidingDojoPlayers).
-func TestGeneratePlayoffs_DrawOrderMatchesRoundOneLeaves(t *testing.T) {
+func TestGenerateKnockout_DrawOrderMatchesRoundOneLeaves(t *testing.T) {
 	entrantCounts := []int{5, 8, 13, 16, 33}
 	courtCounts := []int{1, 2, 4}
 	dojoModes := []struct {
@@ -89,13 +89,13 @@ func TestGeneratePlayoffs_DrawOrderMatchesRoundOneLeaves(t *testing.T) {
 						}
 						require.NoError(t, store.SaveCompetition(&state.Competition{
 							ID:        compID,
-							Format:    state.CompFormatPlayoffs,
+							Format:    state.CompFormatKnockout,
 							Kind:      "individual",
 							Courts:    courtNames,
 							StartTime: "09:00",
 							Status:    state.CompStatusSetup,
 						}))
-						// Strip IDs before saving (as enginePlayoffsLeaves does): a
+						// Strip IDs before saving (as engineKnockoutLeaves does): a
 						// non-UUID id confuses the CSV hasIDs detector. Let the store
 						// mint real UUIDs, which is what DrawOrder must carry.
 						stripped := make([]domain.Player, len(players))
@@ -117,7 +117,7 @@ func TestGeneratePlayoffs_DrawOrderMatchesRoundOneLeaves(t *testing.T) {
 						bracket, err := store.LoadBracket(compID)
 						require.NoError(t, err)
 						require.NotNil(t, bracket)
-						require.NotEmpty(t, bracket.DrawOrder, "generatePlayoffs must stamp DrawOrder")
+						require.NotEmpty(t, bracket.DrawOrder, "generateKnockout must stamp DrawOrder")
 						require.Len(t, bracket.DrawOrder, n, "DrawOrder must name every entrant exactly once, no byes")
 
 						roster, err := store.LoadParticipantsOpt(compID, false, state.LoadParticipantsOpts{})

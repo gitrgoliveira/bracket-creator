@@ -102,7 +102,7 @@ describe('buildAllWinners', () => {
         [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
       ],
     };
-    const comp = { id: 'ko-1', name: 'Knockout', format: 'playoffs', status: 'completed', players: [] };
+    const comp = { id: 'ko-1', name: 'Knockout', format: 'knockout', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket, standings: null, pools: null, config: comp, players: [] });
 
     const results = await window.buildAllWinners([comp], {
@@ -122,7 +122,7 @@ describe('buildAllWinners', () => {
   });
 
   it('mixed comp whose OWN knockout final is undecided → state "in-progress", podium []', async () => {
-    const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'playoffs' };
+    const mixedComp = { id: 'mixed-2', name: 'Pools+KO', format: 'mixed', status: 'knockout' };
     // undecided final
     const bracket = {
       rounds: [
@@ -167,7 +167,7 @@ describe('buildAllWinners', () => {
   });
 
   it('excludes non-completed competitions (caller is responsible for pre-filtering)', async () => {
-    const comp = { id: 'running-1', name: 'In Progress', format: 'playoffs', status: 'pools', players: [] };
+    const comp = { id: 'running-1', name: 'In Progress', format: 'knockout', status: 'pools', players: [] };
     const fetchCompetitionDetails = vi.fn().mockResolvedValue({ bracket: null, standings: null, pools: null, config: comp, players: [] });
 
     // Caller passes only completed comps; if we pass none the result is empty.
@@ -199,7 +199,7 @@ describe('buildAllWinners', () => {
   });
 
   it('returns error field when fetchCompetitionDetails throws, without rejecting the whole Promise', async () => {
-    const comp = { id: 'err-1', name: 'Broken', format: 'playoffs', status: 'completed', players: [] };
+    const comp = { id: 'err-1', name: 'Broken', format: 'knockout', status: 'completed', players: [] };
     const fetchCompetitionDetails = vi.fn().mockRejectedValue(new Error('Network error'));
 
     const results = await window.buildAllWinners([comp], {
@@ -234,7 +234,7 @@ describe('AllWinnersModal', () => {
   });
 
   it('shows loading state initially (useState returns initial value in static stub)', () => {
-    const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'playoffs', players: [] };
+    const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'knockout', players: [] };
     const vnode = window.AllWinnersModal({ comps: [comp], onClose: vi.fn() });
     const text = collectText(vnode);
     // Initial state is loading:true: should render loading text

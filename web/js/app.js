@@ -116,7 +116,7 @@ function validateForm() {
 
     if (isValid) {
         const lines = playerList.split('\n').filter(line => line.trim() !== '');
-        const tournamentType = document.getElementById('pools').checked ? 'Pools and Playoffs' : 'Playoffs';
+        const tournamentType = document.getElementById('pools').checked ? 'Pools + Knockout' : 'Knockout';
 
         // Show confirmation dialog
         if (confirm(`You are about to create a ${tournamentType} tournament with ${lines.length} participants.\nAre you sure you want to continue?`)) {
@@ -174,7 +174,7 @@ function checkDownloadComplete(downloadToken) {
 }
 
 // Tournament type toggle functionality
-document.getElementById('playoffs').addEventListener('change', function () {
+document.getElementById('knockout').addEventListener('change', function () {
     document.getElementById('poolOptionsSection').style.display = 'none';
 });
 
@@ -780,12 +780,12 @@ function calculateStatistics() {
 
         // Calculate number of pools needed
         const numPools = isMaxMode ? Math.ceil(totalPlayers / playersPerPool) : Math.floor(totalPlayers / playersPerPool);
-        const playoffParticipants = numPools * winnersPerPool;
+        const knockoutParticipants = numPools * winnersPerPool;
 
         document.getElementById('poolCount').textContent = numPools;
         document.getElementById('statsPlayersPerPool').textContent = playersPerPool + (isMaxMode ? ' (Max)' : ' (Min)');
         document.getElementById('statsWinnersPerPool').textContent = winnersPerPool;
-        document.getElementById('playoffParticipants').textContent = playoffParticipants;
+        document.getElementById('knockoutParticipants').textContent = knockoutParticipants;
     } else {
         poolStatsSection.style.display = 'none';
     }
@@ -1012,7 +1012,7 @@ function calculateTimeEstimate() {
 }
 
 // refreshServerEstimate fetches the canonical elapsed-time estimate from
-// GET /api/schedule/estimate, splitting Pools+Playoffs into one fetch per
+// GET /api/schedule/estimate, splitting Pools+Knockout into one fetch per
 // phase so each phase's matchDuration is respected. Renders the result to
 // #estElapsedTimeResult and recomputes #estFinishTimeResult against it.
 // Silent on failure: the placeholder stays so the user sees that the
@@ -1068,7 +1068,7 @@ const estimatorInputIds = [
 estimatorInputIds.forEach(id => {
     document.getElementById(id).addEventListener('input', calculateTimeEstimate);
 });
-['playoffs', 'pools', 'roundRobin', 'poolSizeMin', 'poolSizeMax'].forEach(id => {
+['knockout', 'pools', 'roundRobin', 'poolSizeMin', 'poolSizeMax'].forEach(id => {
     document.getElementById(id).addEventListener('change', calculateTimeEstimate);
 });
 document.getElementById('playerList').addEventListener('input', calculateTimeEstimate);

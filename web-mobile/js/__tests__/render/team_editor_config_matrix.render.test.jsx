@@ -9,7 +9,7 @@
 // stamped by viewer_utils.compMatches) and the async competition fetch
 // (naginata — via window.API.fetchCompetitionDetails).
 //
-// Formats map to phases: playoffs has ONLY bracket matches; league and swiss
+// Formats map to phases: knockout has ONLY bracket matches; league and swiss
 // have ONLY pool-shaped matches; mixed has both. Cells outside that mapping
 // are product-impossible and asserted as such in the IMPOSSIBLE CELLS block
 // below, not silently skipped.
@@ -161,7 +161,7 @@ describe('TeamScoreEditorModal config matrix (running match, admin surface)', ()
     }
 
     // Daihyosen affordance is knockout-only (T141): phase "bracket", or the
-    // playoffs/mixed fallback for non-pool phases. Pool matches resolve ties
+    // knockout/mixed fallback for non-pool phases. Pool matches resolve ties
     // via standings + the auto-injected pool daihyosen instead. mp-gmcg:
     // daihyosen does not exist in kachinuki (a tied final bout goes to encho
     // on that same bout), so the ADD affordance is hidden for kachinuki even
@@ -188,18 +188,18 @@ describe('TeamScoreEditorModal IMPOSSIBLE CELLS (asserted, not skipped)', () => 
   // visibly excluded rather than forgotten.
 
   // Expectations are pinned explicitly because the team editor's knockout gate
-  // is TWO clauses (phase === "bracket" OR playoffs/mixed with a non-pool
+  // is TWO clauses (phase === "bracket" OR knockout/mixed with a non-pool
   // phase, admin_scoring_team.jsx isKnockoutPhase) — deriving the expected
   // value from phase alone would silently mis-pin a future cell exercising the
   // format clause. Pinned:
-  //   playoffs × pool      → NON-knockout: no in-match daihyosen (a drawn pool
+  //   knockout × pool      → NON-knockout: no in-match daihyosen (a drawn pool
   //                          match must never grow one). Ruled on by mp-yqxn.2.
   //   league|swiss × bracket → the phase clause runs FIRST, so the daihyosen
   //                          affordance renders although the round-robin format
   //                          has no rules for it. Ruled on by mp-yqxn.3
   //                          (league) / mp-yqxn.4 (swiss).
   const IMPOSSIBLE_EXPECT_DAIHYOSEN = {
-    'playoffs/pool': false,
+    'knockout/pool': false,
     'league/bracket': true,
     'swiss/bracket': true,
   };
@@ -263,7 +263,7 @@ describe('TeamScoreEditorModal encho stepper is unbounded (mp-m4bn)', () => {
 });
 
 describe('TeamScoreEditorModal kachinuki bout navigation', () => {
-  const KACHI_CELL = { format: 'playoffs', phase: 'bracket', teamSize: 5, tmt: 'kachinuki', naginata: false };
+  const KACHI_CELL = { format: 'knockout', phase: 'bracket', teamSize: 5, tmt: 'kachinuki', naginata: false };
 
   it('RUNNING: the fought bouts render as read-only rows above the current editable bout', async () => {
     // Server bout log: bout 1 fought (won by A1), bout 2 appended by

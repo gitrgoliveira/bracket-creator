@@ -4,9 +4,11 @@
   "description": "Frontend for bracket-creator Excel CLI web wrapper",
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "audit": "audit-ci --config audit-ci.jsonc"
   },
   "devDependencies": {
+    "audit-ci": "^7.1.0",
     "vitest": "^4.1.11"
   }
 }

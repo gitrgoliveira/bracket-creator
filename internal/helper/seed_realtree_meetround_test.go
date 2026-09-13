@@ -9,8 +9,8 @@ import (
 
 // TestDelayDojoMeetings_RealTreeRound1_NonPowerOfTwo pins bc-drwx item 1:
 // dojoMeetRound used to score meeting rounds by XORing DENSE StandardSeeding
-// indices directly, but every production consumer (cmd/create-playoffs.go,
-// internal/engine/bracket.go, internal/engine/playoff_skeleton.go) feeds that
+// indices directly, but every production consumer (cmd/create-knockout.go,
+// internal/engine/bracket.go, internal/engine/knockout_skeleton.go) feeds that
 // dense slice to CreateBalancedTree, whose recursion splits the leaf list in
 // half at EVERY level rather than padding byes onto the tail -- so for any
 // non-power-of-two entrant count the dense-index XOR scores pairs that are
@@ -19,7 +19,7 @@ import (
 // checking the wrong geometry whenever len(players) was not a power of two.
 //
 // This test builds the REAL tree exactly the way engine/bracket.go and
-// cmd/create-playoffs.go do (StandardSeeding -> names -> CreateBalancedTree)
+// cmd/create-knockout.go do (StandardSeeding -> names -> CreateBalancedTree)
 // and counts genuine round-1 same-dojo pairs by walking the actual tree
 // leaves, rather than trusting dojoMeetRound's own (buggy) arithmetic as the
 // oracle. Every roster here pastes entrants dojo-by-dojo (the operator
@@ -47,7 +47,7 @@ func TestDelayDojoMeetings_RealTreeRound1_NonPowerOfTwo(t *testing.T) {
 			assert.Equal(t, 0, clashes,
 				"n=%d: %d avoidable same-dojo round-1 pairing(s) found in the REAL tree "+
 					"(CreateBalancedTree over StandardSeeding's own dense output, exactly as "+
-					"engine/bracket.go and cmd/create-playoffs.go build it)", len(roster), clashes)
+					"engine/bracket.go and cmd/create-knockout.go build it)", len(roster), clashes)
 		})
 	}
 }
@@ -70,7 +70,7 @@ func dojoByDojoRoster(sizes []int) []Player {
 }
 
 // realTreeRound1DojoClashes builds the tree exactly as engine/bracket.go and
-// cmd/create-playoffs.go do (StandardSeeding's own dense output fed straight
+// cmd/create-knockout.go do (StandardSeeding's own dense output fed straight
 // into CreateBalancedTree) and counts genuine round-1 same-dojo pairs by
 // walking the tree's actual leaves: a node counts as a round-1 match only
 // when BOTH its children are leaves (a leaf paired against an internal

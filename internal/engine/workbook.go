@@ -26,7 +26,7 @@ import (
 //  2. Pool Draw sheet (helper.AddPoolsToSheet)
 //  3. Pool Matches sheet (helper.PrintPoolMatches)
 //  4. Knockout: Tree pages + Elimination Matches, when the competition has a
-//     playoff phase AND a derivable draw (helper.RenderKnockoutPages ->
+//     knockout phase AND a derivable draw (helper.RenderKnockoutPages ->
 //     helper.PrintEliminationWithBronze), else ErrBracketDrawMismatch when
 //     the persisted bracket already carries knockout content (see
 //     bracketHasKnockoutContent) that this call's draw cannot re-derive --
@@ -56,8 +56,8 @@ import (
 // derivation that this function does not repeat:
 //
 //   - draw is the caller's own EliminationDraw(...) result. EliminationDraw
-//     itself needs a *state.Store (for the pure-playoffs participant-seeding
-//     fallback, PlayoffFinalsFromParticipants), so it cannot move into this
+//     itself needs a *state.Store (for the pure-knockout participant-seeding
+//     fallback, KnockoutFinalsFromParticipants), so it cannot move into this
 //     store-free function; both callers already compute it before their call
 //     here (they need numCourts, courts derived from comp, for it too).
 //   - kachinukiMatches is the caller's own bout-log read: the two callers use
@@ -80,8 +80,8 @@ import (
 // matchWinners) is read again once this function's own steps that consume
 // them have run, so returning them would be dead weight at every call site.
 //
-// namesToPrintPlayers is derived internally, via e.PlayoffsNamesToPrint(comp,
-// pools) -- bc-pnum A8's single guarded branch for a playoffs-only
+// namesToPrintPlayers is derived internally, via e.KnockoutNamesToPrint(comp,
+// pools) -- bc-pnum A8's single guarded branch for a knockout-only
 // competition (never has a pools.csv, so nothing above would otherwise
 // populate the Data / Names-to-Print sheets at all): non-nil only for that
 // one shape, nil for every other competition. Unlike draw and
@@ -95,13 +95,13 @@ import (
 // headers) and THEN called helper.AddPlayerDataToSheet a second time,
 // itself, after this function returned -- two writers of the same sheet,
 // which is why "Data added to spreadsheet" used to print twice for the one
-// playoffs-only shape that needed the second writer at all. Steps 1 and 6
+// knockout-only shape that needed the second writer at all. Steps 1 and 6
 // below are now the ONE place that decides which writer runs, so the sheet
 // is written exactly once regardless of caller.
 //
 // It is also returned as a second value so ExportCompetitionXlsx's Tags-
 // sheet extra (which needs the identical numbered roster) reads it off this
-// call instead of calling PlayoffsNamesToPrint a second time over the same
+// call instead of calling KnockoutNamesToPrint a second time over the same
 // comp/pools/bracket; export.BuildResultsWorkbook has no such extra and
 // discards it.
 func (e *Engine) RenderCompetitionWorkbook(
@@ -114,7 +114,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	draw *helper.KnockoutDraw,
 	kachinukiMatches []helper.KachinukiMatchDetail,
 ) ([][]int, []helper.Player, error) {
-	namesToPrintPlayers, err := e.PlayoffsNamesToPrint(comp, pools, bracket)
+	namesToPrintPlayers, err := e.KnockoutNamesToPrint(comp, pools, bracket)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -122,7 +122,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	// 1. Data sheet (Player Name, Dojo, Display Name). AddDataToSheetForExport
 	//    is the ONE writer of this sheet: it picks AddPlayerDataToSheet over
 	//    the numbered roster when namesToPrintPlayers is non-empty (the
-	//    playoffs-only shape with no pools.csv), else AddPoolDataToSheet as
+	//    knockout-only shape with no pools.csv), else AddPoolDataToSheet as
 	//    before. AddPoolDataToSheet is never ALSO called in the
 	//    namesToPrintPlayers branch, which is what used to make "Data added
 	//    to spreadsheet" print twice for that one shape (see the doc comment
@@ -163,7 +163,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 	// /api/competitions/:id rejects a change while started; a bracket only
 	// exists once started). So a non-nil ThirdPlaceMatch here always implies
 	// RequiresSingleThirdPlace() was true at draw time, and testing it directly
-	// is equivalent to (comp.RequiresSingleThirdPlace() || isPurePlayoffs(comp,
+	// is equivalent to (comp.RequiresSingleThirdPlace() || isPureKnockout(comp,
 	// pools)) && bracket != nil && bracket.ThirdPlaceMatch != nil, the
 	// formula the blank-template export used pre-extraction -- the extra
 	// disjunct was redundant against the writer (mp-yuy8 criterion 5). This
@@ -175,12 +175,12 @@ func (e *Engine) RenderCompetitionWorkbook(
 
 	// 4. Knockout: Tree pages + Elimination Matches, in the one mandatory
 	//    order RenderKnockoutPages enforces, for a competition with a
-	//    playoff phase and a derivable draw. Band each bout by the shiaijo it
+	//    knockout phase and a derivable draw. Band each bout by the shiaijo it
 	//    is CURRENTLY on, read off the stored bracket, falling back to the
 	//    draw's regions where there is none -- the operator reassigns
 	//    matches between courts while the competition runs, and these sheets
 	//    are what their shiaijo runs off.
-	if draw != nil && comp.IsPlayoffEnabled() {
+	if draw != nil && comp.IsKnockoutEnabled() {
 		plan := LiveCourtPlan(draw, courts, bracket)
 		eliminationMatchRounds, _, err := helper.RenderKnockoutPages(f, plan, false, pools, poolCoords, playerCoords, matchWinners)
 		if err != nil {
@@ -188,7 +188,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 		}
 		helper.PrintEliminationWithBronze(f, matchWinners, eliminationMatchRounds, comp.TeamSize,
 			plan, comp.Mirror, comp.Engi, hasBronze)
-	} else if comp.IsPlayoffEnabled() && bracketHasKnockoutContent(bracket) {
+	} else if comp.IsKnockoutEnabled() && bracketHasKnockoutContent(bracket) {
 		// The stored bracket already carries knockout content -- a
 		// third-place bout, or at least one round-1-or-later match -- but
 		// this call's draw came back empty: the bracket and the
@@ -219,17 +219,17 @@ func (e *Engine) RenderCompetitionWorkbook(
 		// and regenerate the draw, or restore the settings the bracket was
 		// built with.
 		//
-		// comp.IsPlayoffEnabled() is required here, and is a NARROWER gate
+		// comp.IsKnockoutEnabled() is required here, and is a NARROWER gate
 		// than "this competition has a knockout": it excludes league and
 		// swiss, which never have a bracket to mismatch in the first place.
 		//
-		// Format == "" is IN scope here, not an exclusion: IsPlayoffEnabled
-		// and isPurePlayoffs (playoff_skeleton.go) both go through
+		// Format == "" is IN scope here, not an exclusion: IsKnockoutEnabled
+		// and isPureKnockout (knockout_skeleton.go) both go through
 		// state.Competition.EffectiveFormat(), which reads an unset Format as
-		// standalone playoffs -- matching runDrawPipeline's generation switch,
+		// standalone knockout -- matching runDrawPipeline's generation switch,
 		// whose `default:` case has always built a real bracket via
-		// generatePlayoffs for "" exactly as it does for the literal
-		// "playoffs" value. Before EffectiveFormat existed, both predicates
+		// generateKnockout for "" exactly as it does for the literal
+		// "knockout" value. Before EffectiveFormat existed, both predicates
 		// compared Format literally and were blind to "", so a stored bracket
 		// with real Rounds content but no re-derivable draw for an
 		// empty-Format competition fell through this guard unrefused and step
@@ -247,7 +247,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 
 	// 6. Names to Print sheet, one per shiaijo. Clamps the allocation to the
 	//    pool phase's own shiaijo count internally, as step 3 does. Same
-	//    namesToPrintPlayers branch as step 1: a playoffs-only export routes
+	//    namesToPrintPlayers branch as step 1: a knockout-only export routes
 	//    through CreateNamesToPrint over the numbered roster instead of
 	//    CreateNamesWithPoolToPrint's empty-pools no-op (which used to leave
 	//    this sheet missing entirely, see bc-pnum A8).
@@ -267,7 +267,7 @@ func (e *Engine) RenderCompetitionWorkbook(
 
 	// namesToPrintPlayers is returned as a second value so callers that also
 	// need it for their own extras (ExportCompetitionXlsx's Tags sheet)
-	// derive it once here rather than calling PlayoffsNamesToPrint a second
+	// derive it once here rather than calling KnockoutNamesToPrint a second
 	// time over the same comp/pools/bracket. export.BuildResultsWorkbook has
 	// no such extra and ignores it.
 	return poolsByCourt, namesToPrintPlayers, nil

@@ -111,7 +111,7 @@ describe('bc-symm review: a cleared or under-floor Team size blocks Save with a 
   // later change re-enabled the button.
   it('clearing "Team size" while ALSO staging a format flip blocks the save', async () => {
     let sent = null;
-    const comp = makeCompetition({ kind: 'team', teamSize: 3, format: 'playoffs' });
+    const comp = makeCompetition({ kind: 'team', teamSize: 3, format: 'knockout' });
     const { container } = await mountSettings(comp, (payload) => { sent = payload; });
 
     await act(async () => { fireEvent.change(fieldInput(container, 'Team size'), { target: { value: '' } }); });
@@ -200,7 +200,7 @@ describe('bc-symm review: the clears notice never names a value the save will no
 describe('bc-symm review: Settings gates Save on swissSettingsError, change-scoped', () => {
   const SWISS_ERR = 'Number of Swiss rounds must be a whole number ≥ 1.';
 
-  it('switching a stored playoffs competition (swissRounds 0) to "Swiss" blocks Save and shows the error, until repaired', async () => {
+  it('switching a stored knockout competition (swissRounds 0) to "Swiss" blocks Save and shows the error, until repaired', async () => {
     const { container } = await mountSettings(makeCompetition(), noop);
 
     const swissPill = byText(container, 'button', 'Swiss');

@@ -36,7 +36,7 @@ func TestGenerateDraw_RefusesDuplicateTeamMemberRoster(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "dup-team-member-roster"
 
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0, func(c *state.Competition) {
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 	})
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -52,7 +52,7 @@ func TestGenerateDraw_RefusesDuplicateTeamMemberRoster(t *testing.T) {
 		Name:      "Test Competition",
 		Kind:      "team",
 		TeamSize:  3,
-		Format:    state.CompFormatPlayoffs,
+		Format:    state.CompFormatKnockout,
 		Courts:    []string{"A"},
 		StartTime: "09:00",
 		Status:    state.CompStatusSetup,
@@ -80,7 +80,7 @@ func TestGenerateDraw_CleanTeamRosterUnaffected(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "clean-team-member-roster"
 
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0, func(c *state.Competition) {
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0, func(c *state.Competition) {
 		c.Kind = "team"
 		c.TeamSize = 3
 		c.Courts = []string{"A"}

@@ -73,7 +73,7 @@ func TestReplaceParticipantInDraw_LegacyDojoOnlyEdit_NoSelfAmbiguityWarning(t *t
 	compID := "legacy-dojo-only-edit"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Legacy Dojo Only", Kind: "individual",
-		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Courts: []string{"A"},
 		StartTime: "09:00", Status: state.CompStatusDrawReady,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{

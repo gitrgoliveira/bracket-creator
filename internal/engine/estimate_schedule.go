@@ -7,7 +7,7 @@ import (
 
 // EstimateScheduleForCompetition returns a pre-draw ScheduleEstimate for the
 // competition identified by compID. It loads the competition and participant
-// roster, derives pool + playoff match counts via helper.EstimateMatchCounts,
+// roster, derives pool + knockout match counts via helper.EstimateMatchCounts,
 // and delegates to EstimateForCounts.
 func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate, error) {
 	// Step 1: load competition.
@@ -48,7 +48,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 		PoolFormat:   comp.PoolFormat,
 		SwissRounds:  comp.SwissRounds,
 	}
-	poolCount, playoffCount, err := helper.EstimateMatchCounts(in)
+	poolCount, knockoutCount, err := helper.EstimateMatchCounts(in)
 	if err != nil {
 		// EstimateMatchCounts errors are config-caused (unknown format, zero
 		// pool size, player count < pool size), surface as ValidationError
@@ -57,7 +57,7 @@ func (e *Engine) EstimateScheduleForCompetition(compID string) (ScheduleEstimate
 	}
 
 	// Step 5: delegate to EstimateForCounts.
-	return EstimateForCounts(poolCount, playoffCount, comp, tournament), nil
+	return EstimateForCounts(poolCount, knockoutCount, comp, tournament), nil
 }
 
 // estimateParticipantCount returns the number of participants for a

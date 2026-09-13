@@ -6,12 +6,12 @@
 //
 // Not a test file: the render project only collects *.render.test.jsx.
 
-// Product-possible format+phase pairs: playoffs has ONLY bracket matches;
+// Product-possible format+phase pairs: knockout has ONLY bracket matches;
 // league and swiss have ONLY pool-shaped matches; mixed has both. This list is
 // the single source of truth for the whole axis space: the format/phase value
 // sets below and the impossible complement are both derived from it.
 export const FORMAT_PHASES = [
-  { format: 'playoffs', phase: 'bracket' },
+  { format: 'knockout', phase: 'bracket' },
   { format: 'mixed', phase: 'pool' },
   { format: 'mixed', phase: 'bracket' },
   { format: 'league', phase: 'pool' },

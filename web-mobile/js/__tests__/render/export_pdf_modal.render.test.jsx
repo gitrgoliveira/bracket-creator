@@ -60,7 +60,7 @@ afterEach(() => {
 
 const comps = [
   { id: 'c-swiss', name: 'U12 Swiss' },
-  { id: 'c-mismatch', name: 'Senior Playoffs' },
+  { id: 'c-mismatch', name: 'Senior Knockout' },
 ];
 
 function mount({ exportPDFs, showToast = vi.fn(), compsProp = comps } = {}) {
@@ -140,7 +140,7 @@ describe('ExportPdfModal: skipped-competitions warning', () => {
 
     const banner = container.querySelector('[data-testid="export-pdf-skipped-banner"]');
     expect(banner).not.toBeNull();
-    expect(banner.textContent).toContain('Senior Playoffs');
+    expect(banner.textContent).toContain('Senior Knockout');
     expect(banner.textContent).toContain('stored bracket does not match current settings');
   });
 

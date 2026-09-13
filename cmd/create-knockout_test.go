@@ -13,7 +13,7 @@ import (
 	excelize "github.com/xuri/excelize/v2"
 )
 
-func TestPlayoffOptionsRun_Success(t *testing.T) {
+func TestKnockoutOptionsRun_Success(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
@@ -28,7 +28,7 @@ func TestPlayoffOptionsRun_Success(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		determined: true,
@@ -39,7 +39,7 @@ func TestPlayoffOptionsRun_Success(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
+func TestKnockoutOptionsRun_WithSeeds(t *testing.T) {
 	// Create a temporary input file
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
@@ -62,7 +62,7 @@ func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		seedsPath:  tmpSeeds.Name(),
@@ -74,7 +74,7 @@ func TestPlayoffOptionsRun_WithSeeds(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestCreatePlayoffs_WithSeeds(t *testing.T) {
+func TestCreateKnockout_WithSeeds(t *testing.T) {
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
@@ -82,7 +82,7 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	// Path relative to cmd/ directory
 	seedsPath := filepath.Join("..", "tests", "fixtures", "winners.csv")
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter:   writer,
 		outputPath:     "dummy.xlsx",
 		seedsPath:      seedsPath,
@@ -96,8 +96,8 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	// Create playoffs
-	err := o.createPlayoffs(entries)
+	// Create knockout
+	err := o.createKnockout(entries)
 
 	// Ensure no error because seeds path is valid and names match
 	assert.NoError(t, err)
@@ -109,12 +109,12 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 	assert.Greater(t, b.Len(), 0)
 }
 
-// TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering is the playoffs
+// TestCreateKnockout_NumberPrefix_ByteIdenticalNumbering is the knockout
 // analogue of create-pools_test.go's TestCreatePools_NumberPrefix_ByteIdenticalNumbering
 // (bc-pnum D1): an explicit --number-prefix numbers byte-identically to how
 // it always has, prefix plus one counter running straight through the
 // SEEDED order (bc-pnum ruling 2 moved numbering to after
-// helper.StandardSeeding; see TestCreatePlayoffs_NumbersFollowSeededBracketOrder
+// helper.StandardSeeding; see TestCreateKnockout_NumbersFollowSeededBracketOrder
 // below for the case where that distinguishes anything). This fixture has
 // no seeds and no dojo collision for delayDojoMeetings to repair, so
 // StandardSeeding is an identity reorder and seeded order coincides with
@@ -123,10 +123,10 @@ func TestCreatePlayoffs_WithSeeds(t *testing.T) {
 // Mutation: gating helper.AssignPlayerNumbers on a non-empty prefix would be
 // a no-op here (the default is never empty), so this pins the wiring
 // itself, not just the composition helper.
-func TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
+func TestCreateKnockout_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "prefix.xlsx",
 		determined:   true, // no shuffle: roster order must match expected numbering
@@ -138,7 +138,7 @@ func TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
 		"Carol,DojoC",
 		"Dave,DojoD",
 	}
-	require.NoError(t, o.createPlayoffs(entries))
+	require.NoError(t, o.createKnockout(entries))
 	require.NoError(t, writer.Flush())
 
 	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
@@ -158,14 +158,14 @@ func TestCreatePlayoffs_NumberPrefix_ByteIdenticalNumbering(t *testing.T) {
 		"an explicit --number-prefix must number straight through the roster with no gap, duplicate or reordering")
 }
 
-// TestCreatePlayoffs_NumbersFollowSeededBracketOrder pins bc-pnum ruling 2
+// TestCreateKnockout_NumbersFollowSeededBracketOrder pins bc-pnum ruling 2
 // for the CLI: a number belongs to a position in the DRAW, not to the
 // roster's entry order. Dave is the sole seed (rank 1); StandardSeeding
 // places rank 1 at bracket slot 0 regardless of where Dave sits in the
 // input roster (last), so Dave must be numbered K1, not K4. Both the Data
 // sheet and Names to Print must agree, since both are written from the
 // same seeded, numbered slice.
-func TestCreatePlayoffs_NumbersFollowSeededBracketOrder(t *testing.T) {
+func TestCreateKnockout_NumbersFollowSeededBracketOrder(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
@@ -176,7 +176,7 @@ func TestCreatePlayoffs_NumbersFollowSeededBracketOrder(t *testing.T) {
 	require.NoError(t, err)
 	tmpSeeds.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "seeded-numbering.xlsx",
 		determined:   true, // no shuffle: roster order is exactly the input order
@@ -189,7 +189,7 @@ func TestCreatePlayoffs_NumbersFollowSeededBracketOrder(t *testing.T) {
 		"Carol,DojoC",
 		"Dave,DojoD",
 	}
-	require.NoError(t, o.createPlayoffs(entries))
+	require.NoError(t, o.createKnockout(entries))
 	require.NoError(t, writer.Flush())
 
 	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
@@ -225,33 +225,33 @@ func TestCreatePlayoffs_NumbersFollowSeededBracketOrder(t *testing.T) {
 		"the Data sheet's rows must be written in bracket order, matching the Player Number column")
 }
 
-// TestCreatePlayoffs_NumberPrefix_OverLongExplicit_Errors pins bc-pnum A10:
+// TestCreateKnockout_NumberPrefix_OverLongExplicit_Errors pins bc-pnum A10:
 // an over-long explicit --number-prefix must be refused, not accepted
 // verbatim.
-func TestCreatePlayoffs_NumberPrefix_OverLongExplicit_Errors(t *testing.T) {
+func TestCreateKnockout_NumberPrefix_OverLongExplicit_Errors(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "dummy.xlsx",
 		numberPrefix: "SENIORS1",
 	}
-	err := o.createPlayoffs([]string{"Alice,DojoA", "Bob,DojoB"})
+	err := o.createKnockout([]string{"Alice,DojoA", "Bob,DojoB"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SENIORS1")
 }
 
-// TestCreatePlayoffs_TitlePrefixDerivation pins bc-pnum A10/D2: with no
+// TestCreateKnockout_TitlePrefixDerivation pins bc-pnum A10/D2: with no
 // explicit --number-prefix, the CLI derives one from --title-prefix through
 // the shared resolveNumberPrefix. "Senior Men" has two words (initials "SM"),
 // but with nothing else taken the initials loop returns the bare first
 // initial "S" immediately -- the shortest non-taken candidate, not the full
 // initials. Mutation: replacing o.titlePrefix with "" here must go red (the
 // fallback "K" would print instead).
-func TestCreatePlayoffs_TitlePrefixDerivation(t *testing.T) {
+func TestCreateKnockout_TitlePrefixDerivation(t *testing.T) {
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "titleprefix.xlsx",
 		determined:   true,
@@ -263,7 +263,7 @@ func TestCreatePlayoffs_TitlePrefixDerivation(t *testing.T) {
 		"Carol,DojoC",
 		"Dave,DojoD",
 	}
-	require.NoError(t, o.createPlayoffs(entries))
+	require.NoError(t, o.createKnockout(entries))
 	require.NoError(t, writer.Flush())
 
 	f, err := excelize.OpenReader(bytes.NewReader(b.Bytes()))
@@ -283,14 +283,14 @@ func TestCreatePlayoffs_TitlePrefixDerivation(t *testing.T) {
 		"derivation from --title-prefix 'Senior Men' must give S1.., not SM1..")
 }
 
-func TestCreatePlayoffs_MissingSeed(t *testing.T) {
+func TestCreateKnockout_MissingSeed(t *testing.T) {
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
 	seedsPath := filepath.Join("..", "tests", "fixtures", "winners.csv")
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "dummy.xlsx",
 		seedsPath:    seedsPath,
@@ -303,17 +303,17 @@ func TestCreatePlayoffs_MissingSeed(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	err := o.createPlayoffs(entries)
+	err := o.createKnockout(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "seeded participant not found")
 }
 
-func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
+func TestCreateKnockout_InvalidSeedsFile(t *testing.T) {
 
 	var b bytes.Buffer
 	writer := bufio.NewWriter(&b)
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: writer,
 		outputPath:   "dummy.xlsx",
 		seedsPath:    filepath.Join("..", "tests", "fixtures", "missing.csv"),
@@ -326,35 +326,35 @@ func TestCreatePlayoffs_InvalidSeedsFile(t *testing.T) {
 		"Bob,Dojo4",
 	}
 
-	err := o.createPlayoffs(entries)
+	err := o.createKnockout(entries)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse seeds file")
 }
 
-func TestCreatePlayoffs_DuplicateEntries(t *testing.T) {
+func TestCreateKnockout_DuplicateEntries(t *testing.T) {
 	var b bytes.Buffer
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter: bufio.NewWriter(&b),
 	}
-	err := o.createPlayoffs([]string{"Alice", "Alice"})
+	err := o.createKnockout([]string{"Alice", "Alice"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "duplicate participant entries")
 }
 
-func TestCreatePlayoffs_WithZekken(t *testing.T) {
+func TestCreateKnockout_WithZekken(t *testing.T) {
 	var b bytes.Buffer
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		outputWriter:   bufio.NewWriter(&b),
 		withZekkenName: true,
 		courts:         2,
 	}
-	err := o.createPlayoffs([]string{"Alice,Ali,D1", "Bob,Bobby,D2"})
+	err := o.createKnockout([]string{"Alice,Ali,D1", "Bob,Bobby,D2"})
 	assert.NoError(t, err)
 }
 
-// TestPlayoffOptionsRun_EmptyFile verifies that an empty input file returns
+// TestKnockoutOptionsRun_EmptyFile verifies that an empty input file returns
 // a "no entries found" error.
-func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
+func TestKnockoutOptionsRun_EmptyFile(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "empty-input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
@@ -365,7 +365,7 @@ func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		courts:     2,
@@ -375,9 +375,9 @@ func TestPlayoffOptionsRun_EmptyFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "no entries")
 }
 
-// TestPlayoffOptionsRun_InvalidCourts verifies that an invalid court count
+// TestKnockoutOptionsRun_InvalidCourts verifies that an invalid court count
 // (over the court cap) returns an error from ValidateCourts.
-func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
+func TestKnockoutOptionsRun_InvalidCourts(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
@@ -390,7 +390,7 @@ func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	defer os.Remove(tmpOutput.Name())
 	tmpOutput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: tmpOutput.Name(),
 		courts:     27, // exceeds the court cap
@@ -399,7 +399,7 @@ func TestPlayoffOptionsRun_InvalidCourts(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
+func TestKnockoutOptionsRun_InvalidOutputPath(t *testing.T) {
 	tmpInput, err := os.CreateTemp("", "input-*.csv")
 	require.NoError(t, err)
 	defer os.Remove(tmpInput.Name())
@@ -407,7 +407,7 @@ func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
 	require.NoError(t, err)
 	tmpInput.Close()
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   tmpInput.Name(),
 		outputPath: filepath.Join(t.TempDir(), "nonexistent", "output.xlsx"), // parent dir missing
 		courts:     1,
@@ -417,8 +417,8 @@ func TestPlayoffOptionsRun_InvalidOutputPath(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to open output file")
 }
 
-func TestPlayoffOptionsRun_FileNotFound(t *testing.T) {
-	o := &playoffOptions{
+func TestKnockoutOptionsRun_FileNotFound(t *testing.T) {
+	o := &knockoutOptions{
 		filePath:   "/nonexistent/input.csv",
 		outputPath: filepath.Join(t.TempDir(), "output.xlsx"),
 		courts:     1,

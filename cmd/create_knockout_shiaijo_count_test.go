@@ -17,11 +17,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestPlayoffOptionsRun_ShiaijoCount sweeps --courts on create-playoffs across
+// TestKnockoutOptionsRun_ShiaijoCount sweeps --courts on create-knockout across
 // 1..17. The tree gives each shiaijo its own block and the blocks merge in
 // pairs, so a power of two (1, 2, 4, 8 or 16) is accepted and everything else
 // is refused before any file is written.
-func TestPlayoffOptionsRun_ShiaijoCount(t *testing.T) {
+func TestKnockoutOptionsRun_ShiaijoCount(t *testing.T) {
 	for n := 1; n <= helper.MaxCourts; n++ {
 		t.Run(fmt.Sprintf("courts=%d", n), func(t *testing.T) {
 			dir := t.TempDir()
@@ -30,7 +30,7 @@ func TestPlayoffOptionsRun_ShiaijoCount(t *testing.T) {
 				[]byte("John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4\n"), 0o600))
 			output := filepath.Join(dir, "out.xlsx")
 
-			o := &playoffOptions{
+			o := &knockoutOptions{
 				filePath:   input,
 				outputPath: output,
 				determined: true,
@@ -55,15 +55,15 @@ func TestPlayoffOptionsRun_ShiaijoCount(t *testing.T) {
 	}
 }
 
-// TestPlayoffOptionsRun_RejectsEvenNonPowerOfTwo is the regression for the rule
+// TestKnockoutOptionsRun_RejectsEvenNonPowerOfTwo is the regression for the rule
 // change: --courts 6 passed the retired "1 or an even number" rule.
-func TestPlayoffOptionsRun_RejectsEvenNonPowerOfTwo(t *testing.T) {
+func TestKnockoutOptionsRun_RejectsEvenNonPowerOfTwo(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.csv")
 	require.NoError(t, os.WriteFile(input,
 		[]byte("John Doe,Dojo1\nJane Smith,Dojo2\nAlice,Dojo3\nBob,Dojo4\n"), 0o600))
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   input,
 		outputPath: filepath.Join(dir, "out.xlsx"),
 		determined: true,
@@ -74,15 +74,15 @@ func TestPlayoffOptionsRun_RejectsEvenNonPowerOfTwo(t *testing.T) {
 	assert.Contains(t, err.Error(), "use 4 or 8, or 1")
 }
 
-// TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount pins the order of the two
+// TestKnockoutOptionsRun_CourtCapBeforeShiaijoCount pins the order of the two
 // court checks: 27 breaks both the court-range cap and the shiaijo-count rule,
 // and the cap is the one an operator needs to hear about first.
-func TestPlayoffOptionsRun_CourtCapBeforeShiaijoCount(t *testing.T) {
+func TestKnockoutOptionsRun_CourtCapBeforeShiaijoCount(t *testing.T) {
 	dir := t.TempDir()
 	input := filepath.Join(dir, "input.csv")
 	require.NoError(t, os.WriteFile(input, []byte("John Doe,Dojo1\nJane Smith,Dojo2\n"), 0o600))
 
-	o := &playoffOptions{
+	o := &knockoutOptions{
 		filePath:   input,
 		outputPath: filepath.Join(dir, "out.xlsx"),
 		determined: true,

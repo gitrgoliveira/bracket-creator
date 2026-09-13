@@ -232,7 +232,7 @@ func TestAddPoolDataToSheet_HasNumberChecksEveryPlayer(t *testing.T) {
 // A11 against the shape CreatePlayers (tournament.go) actually produces: the
 // FIRST entrant carries PoolPosition 0 (len(players) BEFORE the append), a
 // value pool distribution overwrites 1-based for every pooled competition
-// but nothing ever touches for a playoffs-only one. Before the fix, row 3
+// but nothing ever touches for a knockout-only one. Before the fix, row 3
 // (the first entrant) read "0" in the renamed "Entry order" column (bc-pnum
 // review: relabelled from "Draw order", which implied bracket slot order
 // this column has never held -- this function runs before StandardSeeding)
@@ -262,7 +262,7 @@ func TestAddPlayerDataToSheet_EntryOrderMatchesRealZeroBasedRoster(t *testing.T)
 
 // TestAddDataToSheetForExport_ColumnAHeader pins bc-pnum review's
 // relabel through the export wrapper's own branch selection: the
-// namesToPrintPlayers branch (a playoffs-only export with no pools.csv,
+// namesToPrintPlayers branch (a knockout-only export with no pools.csv,
 // routed to AddPlayerDataToSheet) must show "Entry order", never the
 // "Draw order" name that implied a bracket slot order this column has
 // never held; the pools branch (routed to AddPoolDataToSheet) keeps its
@@ -403,7 +403,7 @@ func TestAddPlayerDataToSheet(t *testing.T) {
 
 				// Verify position number. bc-pnum A11: written 1-based
 				// (PoolPosition+1) now, since PoolPosition itself is 0-based
-				// for a playoffs-only roster (CreatePlayers, tournament.go).
+				// for a knockout-only roster (CreatePlayers, tournament.go).
 				position, err := f.GetCellValue(SheetData, fmt.Sprintf("A%d", row))
 				require.NoError(t, err)
 				assert.Equal(t, fmt.Sprint(player.PoolPosition+1), position)

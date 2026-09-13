@@ -182,10 +182,10 @@ function competitionNextSteps(c, tournamentCourts) {
 // ---------------------------------------------------------------------------
 // Maps a CompetitionStatus wire value to the overview's render mode. The wire
 // values (internal/state/models.go:441-446) are:
-//   "setup" → "draw-ready" → "pools" / "playoffs" (the two RUNNING phases) →
+//   "setup" → "draw-ready" → "pools" / "knockout" (the two RUNNING phases) →
 //   "completed", plus "invalid". There is NO literal "running" status. An
-//   active competition reports its phase ("pools" or "playoffs"). Anything that
-//   is not setup/draw-ready/completed (including "pools", "playoffs", "invalid",
+//   active competition reports its phase ("pools" or "knockout"). Anything that
+//   is not setup/draw-ready/completed (including "pools", "knockout", "invalid",
 //   or any future phase) maps to "running", so an active competition keeps the
 //   progress + scores/results widgets instead of mis-rendering the "completed"
 //   card. Extracted as a pure function so this mapping is unit-tested and the
@@ -287,9 +287,9 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
   // Status derivation (single source of truth, derived once)
   // ---------------------------------------------------------------------------
   // CompetitionStatus wire values (internal/state/models.go:441-446):
-  //   "setup" → "draw-ready" → "pools"/"playoffs" (running phases) → "completed",
+  //   "setup" → "draw-ready" → "pools"/"knockout" (running phases) → "completed",
   //   plus "invalid". There is NO literal "running" status. An active
-  //   competition is in its phase status ("pools" or "playoffs"). isRunning is
+  //   competition is in its phase status ("pools" or "knockout"). isRunning is
   //   therefore the catch-all for any status that is not setup/draw-ready/
   //   completed, which also lets an "invalid" competition keep the progress +
   //   scores/results widgets (matching the pre-redesign always-on behaviour)
@@ -331,7 +331,7 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
     // When check-in is enabled the backend counts only checked-in participants, so
     // toggling check-in changes the effective count even if roster size stays fixed.
     // Tournament ceremony/timing fields mirror AdminSettings' estimate effect deps.
-  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.playoffMatchDurationSeconds, c.courts,
+  }, [c.id, c.format, c.kind, c.poolMatchDurationSeconds, c.knockoutMatchDurationSeconds, c.courts,
     c.teamSize, c.poolSize, c.poolSizeMode, c.poolWinners, c.roundRobin, c.poolFormat,
     c.swissRounds, c.checkInEnabled, password,
     (c.players || []).length,
@@ -418,10 +418,10 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       const swissRoundCount = Number(c.swissRounds) || 0;
       const drawSizeVal = isSwissDraw
         ? (swissRoundCount ? `${swissRoundCount} round${swissRoundCount !== 1 ? "s" : ""}` : "n/a")
-        : (c.format === "playoffs" || (!poolCount && bracketRounds)
+        : (c.format === "knockout" || (!poolCount && bracketRounds)
           ? (bracketRounds ? `${Math.pow(2, bracketRounds - 1) * 2} max` : "n/a")
           : (poolCount ? `${poolCount} pool${poolCount !== 1 ? "s" : ""}` : "n/a"));
-      const drawSizeLabel = c.format === "playoffs" ? "Bracket size"
+      const drawSizeLabel = c.format === "knockout" ? "Bracket size"
         : c.format === "league" ? "League"
         : isSwissDraw ? "Swiss"
         : "Pools";
@@ -554,8 +554,8 @@ function AdminCompOverview({ c, tournament, pools, poolMatches, bracket, onSecti
       // pools/bracket preview to show. Only non-swiss formats expose a preview
       // section in the nav at this stage.
       const isSwiss = c.format === "swiss";
-      const previewSection = c.format === "playoffs" ? "bracket" : "pools";
-      const previewLabel = c.format === "playoffs" ? "bracket" : c.format === "league" ? "league" : "pools";
+      const previewSection = c.format === "knockout" ? "bracket" : "pools";
+      const previewLabel = c.format === "knockout" ? "bracket" : c.format === "league" ? "league" : "pools";
       return (
         <div className="card" style={{ marginBottom: 16 }} data-testid="draw-ready-card">
           <div className="card__head">

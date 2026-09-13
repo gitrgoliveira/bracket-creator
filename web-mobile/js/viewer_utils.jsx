@@ -160,7 +160,7 @@ export function compMatches(c) {
     teamMatchType: compTMT,
   })));
 
-  // Bronze (3rd-place) playoff: a sibling of bracket.rounds (naginata only),
+  // Bronze (3rd-place) knockout: a sibling of bracket.rounds (naginata only),
   // so the rounds loop above does not cover it. Surface it as a first-class
   // bracket match so it appears in the shiaijo court queue / find-my-matches /
   // schedule alongside the final (the two are conventionally run on the same

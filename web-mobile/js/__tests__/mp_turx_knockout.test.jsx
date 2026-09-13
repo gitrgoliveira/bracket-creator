@@ -140,7 +140,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     vi.resetModules();
   });
 
-  it('does NOT render the cross-link when no playoffs comp references this comp', () => {
+  it('does NOT render the cross-link when no knockout comp references this comp', () => {
     const tree = runtime.mount(ViewerCompetition, {
       tournament: { competitions: [mkMixedComp()] },
       competition: mkMixedComp(),
@@ -153,7 +153,7 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
       tweaks: {},
     });
     const text = collectText(tree);
-    expect(text).not.toContain('View the playoffs bracket');
+    expect(text).not.toContain('View the knockout bracket');
     expect(text).not.toContain('View the pools');
   });
 
@@ -176,10 +176,10 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
     expect(labels.some(l => l.includes('Bracket'))).toBe(true);
   });
 
-  it('shows Bracket tab with running bracket (preview=false, status playoffs)', () => {
+  it('shows Bracket tab with running bracket (preview=false, status knockout)', () => {
     const tree = runtime.mount(ViewerCompetition, {
-      tournament: { competitions: [mkMixedComp({ status: 'playoffs' })] },
-      competition: mkMixedComp({ status: 'playoffs' }),
+      tournament: { competitions: [mkMixedComp({ status: 'knockout' })] },
+      competition: mkMixedComp({ status: 'knockout' }),
       pools: samplePools,
       poolMatches: [],
       standings: [],
@@ -196,14 +196,14 @@ describe('ViewerCompetition: merged mixed comp shows no cross-link (mp-turx back
 
   it('does NOT render "Start knockout" text for a mixed comp in any state', () => {
     // The "Start knockout" affordance has been removed entirely.
-    for (const status of ['pools', 'playoffs', 'completed']) {
+    for (const status of ['pools', 'knockout', 'completed']) {
       const tree = runtime.mount(ViewerCompetition, {
         tournament: { competitions: [mkMixedComp({ status })] },
         competition: mkMixedComp({ status }),
         pools: samplePools,
         poolMatches: [],
         standings: [],
-        bracket: status === 'playoffs' ? runningBracket : previewBracket,
+        bracket: status === 'knockout' ? runningBracket : previewBracket,
         onBack: () => {},
         onSelectCompetition: () => {},
         tweaks: {},
@@ -356,10 +356,10 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     expect(collectText(tree)).not.toContain('Finish all pool matches');
   });
 
-  it('does NOT render "Knockout in progress" for mixed comp in playoffs status', () => {
+  it('does NOT render "Knockout in progress" for mixed comp in knockout status', () => {
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
-      competition: mkMixedComp({ status: 'playoffs' }),
+      competition: mkMixedComp({ status: 'knockout' }),
       bracket: runningBracket,
     });
     expect(collectText(tree)).not.toContain('Knockout in progress');
@@ -380,7 +380,7 @@ describe('AdminCompetition: page-head has no Start-knockout affordance (mp-turx)
     const tree = runtime.mount(AdminCompetition, {
       ...baseProps,
       section: 'overview',
-      competition: mkMixedComp({ status: 'playoffs' }),
+      competition: mkMixedComp({ status: 'knockout' }),
       bracket: runningBracket,
     });
     const text = collectText(tree);
@@ -625,14 +625,14 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
   });
 
   it('onMatchClick is a no-op for a "Winner of rX-mY" feeder match', () => {
-    const { onMatchClick } = mountAdminBracket(winnerFeederBracket, { status: 'playoffs' });
+    const { onMatchClick } = mountAdminBracket(winnerFeederBracket, { status: 'knockout' });
     expect(onMatchClick).toBeTypeOf('function');
     const feederMatch = { id: 'r1-m0', sideA: { name: 'Winner of r0-m0' }, sideB: { name: 'Winner of r0-m1' }, status: 'scheduled' };
     expect(() => onMatchClick(feederMatch, 1, 0)).not.toThrow();
   });
 
   it('onMatchClick does not throw for a resolved match (hasBothSides returns true)', () => {
-    const { onMatchClick } = mountAdminBracket(runningBracket, { status: 'playoffs' });
+    const { onMatchClick } = mountAdminBracket(runningBracket, { status: 'knockout' });
     expect(onMatchClick).toBeTypeOf('function');
     const resolvedMatch = { id: 'r0-m0', sideA: { id: 'p1', name: 'Alice' }, sideB: { id: 'p2', name: 'Bob' }, status: 'scheduled' };
     expect(() => onMatchClick(resolvedMatch, 0, 0)).not.toThrow();
@@ -644,7 +644,7 @@ describe('AdminBracket: per-match playability (mp-turx)', () => {
   });
 
   it('does NOT show the incremental-fill banner when all bracket matches are resolved', () => {
-    const { tree } = mountAdminBracket(runningBracket, { status: 'playoffs' });
+    const { tree } = mountAdminBracket(runningBracket, { status: 'knockout' });
     expect(collectText(tree)).not.toContain('fills in automatically');
   });
 });

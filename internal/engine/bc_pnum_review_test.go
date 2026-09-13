@@ -19,7 +19,7 @@ import (
 // --- Finding F1: OverrideBracketWinner must set WinnerID alongside Winner ---
 
 // TestOverrideBracketWinner_SetsMatchingWinnerID is F1's primary repro: a
-// plain 4-player playoffs bracket with no same-name pair and no legacy data.
+// plain 4-player knockout bracket with no same-name pair and no legacy data.
 // Before the fix, OverrideBracketWinner's round branch did `m.Winner =
 // winnerName` with no WinnerID assignment, so correcting the winner from
 // SideA to SideB left the row holding SideB's NAME with SideA's stale ID
@@ -30,7 +30,7 @@ func TestOverrideBracketWinner_SetsMatchingWinnerID(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "override-sets-winnerid"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
 	require.NoError(t, eng.StartCompetition(compID))
 
@@ -80,7 +80,7 @@ func TestOverrideBracketWinner_SameNamePairing_WinnerIDLeftEmpty(t *testing.T) {
 	tokyoID := helper.NewUUID4()
 	osakaID := helper.NewUUID4()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Override Same Name", Format: state.CompFormatPlayoffs,
+		ID: compID, Name: "Override Same Name", Format: state.CompFormatKnockout,
 		Courts: []string{"A"}, Status: state.CompStatusDrawReady,
 	}))
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
@@ -202,7 +202,7 @@ func TestRevertMatchToQueue_Bracket_ClearsWinnerID(t *testing.T) {
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Revert WinnerID", Format: state.CompFormatPlayoffs,
+		ID: compID, Name: "Revert WinnerID", Format: state.CompFormatKnockout,
 		Courts: []string{"A"}, Status: state.CompStatusDrawReady,
 	}))
 	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
@@ -240,9 +240,9 @@ func TestRevertMatchToQueue_Bracket_ClearsWinnerID(t *testing.T) {
 // whole engine suite otherwise stays green, so it needs its own pin.
 func TestBuildBracketFromDraw_ThreePlayers_ByeWinnerIDPropagatesToFinal(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "playoffs-3-bye-id"
+	compID := "knockout-3-bye-id"
 
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
 	charlieID := helper.NewUUID4()
@@ -310,7 +310,7 @@ func TestBracketRollback_SameNamePair_RestoresWinnerID(t *testing.T) {
 	tokyoID := helper.NewUUID4()
 	osakaID := helper.NewUUID4()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Rollback Same Name", Format: state.CompFormatPlayoffs,
+		ID: compID, Name: "Rollback Same Name", Format: state.CompFormatKnockout,
 		Courts: []string{"A"}, Status: state.CompStatusDrawReady,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{

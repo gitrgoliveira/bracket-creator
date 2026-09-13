@@ -181,21 +181,21 @@ describe('ViewerCompetition Overview shows Swiss round matches (mp-dej2)', () =>
   });
 
   // mp-dej2 follow-up: collapsing onto compMatches also pulled in the bronze
-  // (3rd-place) playoff, which the hand-rolled loop never walked. Two halves,
+  // (3rd-place) knockout, which the hand-rolled loop never walked. Two halves,
   // and they pull in opposite directions, so both are pinned here:
   //   1. the bronze SHOULD reach the lists (it is a real bout, and every other
   //      surface already showed it), and
   //   2. it must NOT become the bracket auto-scroll target, because it renders
   //      outside BracketTree and useAutoScrollToMatch bails on a missing ref,
   //      which would silently stop the tab centring on anything.
-  describe('bronze (3rd-place) playoff', () => {
+  describe('bronze (3rd-place) knockout', () => {
     const bronzeDetail = () => ({
       id: 'c2',
       name: 'Naginata KO',
       kind: 'individual',
       teamSize: 0,
-      format: 'playoffs',
-      status: 'playoffs',
+      format: 'knockout',
+      status: 'knockout',
       startTime: '09:00',
       courts: ['A'],
       config: { players: [] },

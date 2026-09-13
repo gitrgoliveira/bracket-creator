@@ -19,7 +19,7 @@ import (
 )
 
 // TestExportedTagsNumbersMatchActualViewerPayload is the cross-package half
-// of bc-pnum A8: engine.TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint
+// of bc-pnum A8: engine.TestExportCompetitionXlsx_PureKnockoutRendersTagsAndNamesToPrint
 // derives its expectation by calling eng.NumberedParticipantsFor -- the very
 // function under test -- so it can never catch the viewer surface silently
 // deriving a DIFFERENT number for the same competitor; it can only catch the
@@ -45,7 +45,7 @@ func TestExportedTagsNumbersMatchActualViewerPayload(t *testing.T) {
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "A8 Crosscheck", Kind: "individual",
-		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Courts: []string{"A"},
 		NumberPrefix: "K", Status: state.CompStatusSetup,
 	}))
 	require.NoError(t, store.SaveParticipants(compID, []domain.Player{
@@ -71,7 +71,7 @@ func TestExportedTagsNumbersMatchActualViewerPayload(t *testing.T) {
 
 	wantNumbers := make(map[string]bool, 4)
 	for _, p := range detail.Config.Players {
-		require.NotEmptyf(t, p.Number, "viewer payload must carry a number for %q (playoffs-only, prefix set)", p.Name)
+		require.NotEmptyf(t, p.Number, "viewer payload must carry a number for %q (knockout-only, prefix set)", p.Name)
 		wantNumbers[p.Number] = true
 	}
 	require.Lenf(t, wantNumbers, 4, "every entrant must carry its OWN distinct number: got %v", wantNumbers)
@@ -108,7 +108,7 @@ func TestExportedTagsNumbersMatchActualViewerPayload(t *testing.T) {
 			break
 		}
 	}
-	require.NotEmpty(t, namesSheet, "a playoffs-only competition must still get a Names to Print sheet")
+	require.NotEmpty(t, namesSheet, "a knockout-only competition must still get a Names to Print sheet")
 	// The position cell here is a live SetCellFormula reference onto the
 	// Tags sheet (see printNameEntries), not a literal value: excelize's
 	// GetRows returns the unevaluated formula's empty cached value for a

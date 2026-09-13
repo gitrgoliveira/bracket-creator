@@ -102,7 +102,7 @@ async function seed() {
     await api('POST', '/api/tournament',
       { name: 'Kachinuki Demo', date: '01-01-2026', courts: ['A'], password: PW }, false);
   } catch (e) { console.warn('tournament create skipped:', e.message, '(is the data dir fresh?)'); }
-  const ko = await seedComp('KO Demo', 'playoffs', 'Aka', 'Shiro');
+  const ko = await seedComp('KO Demo', 'knockout', 'Aka', 'Shiro');
   const lg = await seedComp('League Demo', 'league', 'Kita', 'Minami');
   return { ko, lg };
 }

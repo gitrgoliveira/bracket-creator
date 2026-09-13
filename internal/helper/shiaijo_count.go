@@ -44,7 +44,7 @@ var validShiaijoCounts = []int{1, 2, 4, 8, 16}
 // empty court list as "inherit the tournament's courts").
 //
 // This is the single source of truth for every enforcement point: the CLI
-// --courts flag (cmd/create-pools.go, cmd/create-playoffs.go and the web form
+// --courts flag (cmd/create-pools.go, cmd/create-knockout.go and the web form
 // in cmd/create_handler.go) and, through engine.ValidateCompetitionShiaijoCount,
 // both the mobile API and the engine's draw pipeline. That one wraps this rule
 // in the competition-level exemptions (empty list, non-bracket format), so the

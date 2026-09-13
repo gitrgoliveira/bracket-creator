@@ -50,7 +50,7 @@ function hasBothSides(m) {
 // "Pool A-1st" side (a mixed comp whose feeder pool hasn't finished). Unlike
 // !hasBothSides, this is TRUE only for pool placeholders: NOT for normal
 // "Winner of rX-mY" feeders or structural byes: so the "Knockout filling in"
-// banner shows ONLY for an incomplete mixed knockout, not standalone playoffs or
+// banner shows ONLY for an incomplete mixed knockout, not standalone knockout or
 // bye-containing brackets.
 function hasPoolOriginPlaceholder(m) {
   if (!m) return false;
@@ -661,7 +661,7 @@ function shiaijoVenueHint(venueCourtCount) {
 // builds a knockout bracket. Mirrors engine.CompetitionDrawsBracket
 // (internal/engine/court_validation.go), which in turn mirrors the format
 // switch in the engine's draw pipeline: league and Swiss produce pools or
-// rounds and never a bracket, while mixed, playoffs and a legacy record
+// rounds and never a bracket, while mixed, knockout and a legacy record
 // with no format at all all end up building one.
 //
 // League and Swiss courts run in parallel with no bracket blocks to merge,

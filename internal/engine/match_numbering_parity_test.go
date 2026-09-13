@@ -42,7 +42,7 @@ func excelLeafNames(n *helper.Node) []string {
 }
 
 // excelNumberBySignature reproduces the AUTHORITATIVE printed-sheet numbering:
-// build the unbalanced tree the Excel create-playoffs path builds, collect the
+// build the unbalanced tree the Excel create-knockout path builds, collect the
 // elimination rounds in the exact eliminationMatchRounds order, run the shared
 // helper.AssignMatchNumbers, then map each numbered node to its leaf-set signature.
 func excelNumberBySignature(players []domain.Player) map[string]int {
@@ -51,7 +51,7 @@ func excelNumberBySignature(players []domain.Player) map[string]int {
 	for i, p := range seeded {
 		names[i] = p.Name
 	}
-	// Same construction as cmd/create-playoffs.go: NewPlayoffDraw normalizes
+	// Same construction as cmd/create-knockout.go: NewKnockoutDraw normalizes
 	// the tree through the slot codec (a phantom-risen pair fights in round 1,
 	// as the reference sheets print), and the workbook numbers the rounds of
 	// THAT tree.
@@ -82,7 +82,7 @@ func excelNumberBySignature(players []domain.Player) map[string]int {
 // (non-"Winner of") sides plus the leaves of each real feeder match.
 func engineNumberBySignature(t *testing.T, players []domain.Player) map[string]int {
 	t.Helper()
-	bracket := enginePlayoffsBracket(t, players)
+	bracket := engineKnockoutBracket(t, players)
 
 	byID := map[string]*state.BracketMatch{}
 	for r := range bracket.Rounds {
@@ -150,8 +150,8 @@ func engineNumberBySignature(t *testing.T, players []domain.Player) map[string]i
 // SCOPE. Two things this does NOT do, both covered by
 // TestExcelWorkbookMatchesEngineBracket_Mixed (excel_draw_parity_test.go): it never
 // opens a workbook (it drives the real numbering function, but its round
-// construction is transcribed from cmd/create-playoffs.go rather than read off a
-// rendered sheet), and it only covers PLAYOFFS brackets. The pool-fed draw, where
+// construction is transcribed from cmd/create-knockout.go rather than read off a
+// rendered sheet), and it only covers KNOCKOUT brackets. The pool-fed draw, where
 // one effective round can hold matches from several pow2 rounds at once, is where
 // the two numbering walks actually drifted (bc-draw Phase 5).
 func TestMatchNumberingParity_ExcelVsWeb(t *testing.T) {

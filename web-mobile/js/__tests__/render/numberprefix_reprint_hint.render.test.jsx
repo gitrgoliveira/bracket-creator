@@ -20,7 +20,7 @@ installSettingsHarness();
 const noop = () => {};
 
 // This scenario's own differences from the shared settings fixture: a mixed
-// competition with pools, rather than the default playoffs/no-pools shape.
+// competition with pools, rather than the default knockout/no-pools shape.
 function makeCompetition(overrides = {}) {
   return makeSettingsCompetition({ format: 'mixed', poolSize: 4, poolWinners: 2, ...overrides });
 }

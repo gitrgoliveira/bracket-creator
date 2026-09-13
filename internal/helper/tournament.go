@@ -49,7 +49,7 @@ type Match struct {
 }
 
 // CreatePlayers is the CLI/web-facing entry point: create-pools,
-// create-playoffs, the /api/parse-participants preview and the mobile app's
+// create-knockout, the /api/parse-participants preview and the mobile app's
 // tournament-import path all build a NEW roster from raw pasted/uploaded
 // text through this function, so it enforces the dojo requirement
 // (CreatePlayersFromRecords' requireDojo=true) -- see that parameter's own

@@ -37,7 +37,7 @@ func CompetitorNumber(prefix string, n int) string {
 // place the competitor-number string is composed -- AssignPlayerNumbers is
 // only the "number players in the order they're already in" shape of that
 // composition, used by the pool loop (engine/pools.go, its verbatim twin in
-// cmd/create-pools.go) and by cmd/create-playoffs.go (over the SEEDED slice,
+// cmd/create-pools.go) and by cmd/create-knockout.go (over the SEEDED slice,
 // bc-pnum ruling 2, so "the order they're already in" is bracket order
 // there, not roster order). A knockout-only competition's number on the web
 // app does NOT route through here: it is composed at READ time, per

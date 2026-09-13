@@ -58,11 +58,11 @@ func TestGenerateDraw_RefusesMissingIDsRoster(t *testing.T) {
 	assert.Empty(t, pools, "nothing may be persisted for a refused draw")
 }
 
-func TestGenerateDraw_RefusesMissingIDsRoster_Playoffs(t *testing.T) {
+func TestGenerateDraw_RefusesMissingIDsRoster_Knockout(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
-	compID := "missing-ids-roster-playoffs"
+	compID := "missing-ids-roster-knockout"
 
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0, func(c *state.Competition) {
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 	})
 	writeMissingIDsRosterCSV(t, dir, compID)

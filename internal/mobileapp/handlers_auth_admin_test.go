@@ -202,7 +202,7 @@ func TestBulkCompetitionPut_RosterMutationIsGated(t *testing.T) {
 	// Activate the gate (file mode) and create a competition.
 	setAdminPassword(t, store, "destroypw")
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "c1", Name: "C1", Format: "playoffs", Courts: []string{"A"}, Status: state.CompStatusSetup,
+		ID: "c1", Name: "C1", Format: "knockout", Courts: []string{"A"}, Status: state.CompStatusSetup,
 	}))
 
 	putComp := func(body string, admin string, withAdmin bool) *httptest.ResponseRecorder {
@@ -216,8 +216,8 @@ func TestBulkCompetitionPut_RosterMutationIsGated(t *testing.T) {
 		return w
 	}
 
-	rosterBody := `{"id":"c1","name":"C1","format":"playoffs","courts":["A"],"players":[{"name":"Alice","dojo":"D"}]}`
-	settingsBody := `{"id":"c1","name":"C1 Renamed","format":"playoffs","courts":["A"]}` // no players field → nil
+	rosterBody := `{"id":"c1","name":"C1","format":"knockout","courts":["A"],"players":[{"name":"Alice","dojo":"D"}]}`
+	settingsBody := `{"id":"c1","name":"C1 Renamed","format":"knockout","courts":["A"]}` // no players field → nil
 
 	t.Run("roster mutation without admin header → 401", func(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, putComp(rosterBody, "", false).Code)

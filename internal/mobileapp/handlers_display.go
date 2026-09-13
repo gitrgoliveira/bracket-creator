@@ -339,7 +339,7 @@ func matchesPresentOnCourt(poolMatches []state.MatchResult, bracket *state.Brack
 // calls this, but both bracket-branch callers (the round scan and the
 // ThirdPlaceMatch check) already hold it, so passing it through here lets
 // numbersFromDrawWithBracket skip a second bracket.json read for a
-// playoffs-format competition.
+// knockout-format competition.
 func currentMatchPlayers(store *state.Store, comp *state.Competition, bracket *state.Bracket) []domain.Player {
 	// the load error used to be discarded outright (`players, _ :=...`)
 	// while the pools load just below already logs its own. Logged, not
@@ -356,7 +356,7 @@ func currentMatchPlayers(store *state.Store, comp *state.Competition, bracket *s
 	// read (pools.csv when needed; bracket is threaded through instead of
 	// re-read). An unreadable file is reported, not merged, so the overlay
 	// shows MISSING numbers, never composed ones (D1). The log line says
-	// "load draw", not "load pools": for a playoffs-format competition the
+	// "load draw", not "load pools": for a knockout-format competition the
 	// file behind this error is bracket.json, not pools.csv.
 	if err := numbersFromDrawWithBracket(store, comp, players, bracket); err != nil {
 		log.Printf("mobileapp: court current %s: load draw: %v", comp.ID, err)

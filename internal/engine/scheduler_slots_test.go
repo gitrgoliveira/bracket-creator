@@ -267,7 +267,7 @@ func TestAssignSlotsZeroDurationFallback(t *testing.T) {
 	comp := &state.Competition{
 		StartTime: "09:00",
 		Courts:    []string{"A"},
-		// PoolMatchDuration / PlayoffMatchDuration / MatchDuration all zero
+		// PoolMatchDuration / KnockoutMatchDuration / MatchDuration all zero
 	}
 	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
 
@@ -343,11 +343,11 @@ func TestPerMatchElapsedSubMinuteFloors(t *testing.T) {
 func TestPerMatchElapsedMinutesBouts(t *testing.T) {
 	comp2min := func() *state.Competition {
 		return &state.Competition{
-			Kind:                        "team",
-			TeamSize:                    3,
-			Courts:                      []string{"A"},
-			PoolMatchDurationSeconds:    120, // 2min clock
-			PlayoffMatchDurationSeconds: 180, // 3min clock
+			Kind:                         "team",
+			TeamSize:                     3,
+			Courts:                       []string{"A"},
+			PoolMatchDurationSeconds:     120, // 2min clock
+			KnockoutMatchDurationSeconds: 180, // 3min clock
 		}
 	}
 	tourn := &state.Tournament{ClockToElapsedMultiplier: 1.5}
@@ -372,7 +372,7 @@ func TestPerMatchElapsedMinutesBouts(t *testing.T) {
 		assert.Equal(t, 3, perMatchElapsedMinutesBouts(comp2min(), tourn, false, 0))
 	})
 
-	t.Run("isPlayoff reads the playoff clock", func(t *testing.T) {
+	t.Run("isKnockout reads the knockout clock", func(t *testing.T) {
 		// 3min × 1.5 = 4.5 → rounds to 5 (bouts=0 individual path).
 		assert.Equal(t, 5, perMatchElapsedMinutesBouts(comp2min(), tourn, true, 0))
 	})
@@ -398,9 +398,9 @@ func TestPerMatchElapsedMinutesBouts(t *testing.T) {
 // delays from each byte. T150.
 func TestAssignSlotsBracketByesSkipCursor(t *testing.T) {
 	comp := &state.Competition{
-		StartTime:                   "09:00",
-		PlayoffMatchDurationSeconds: 240,
-		Courts:                      []string{"A"},
+		StartTime:                    "09:00",
+		KnockoutMatchDurationSeconds: 240,
+		Courts:                       []string{"A"},
 	}
 	tournament := &state.Tournament{ClockToElapsedMultiplier: 1.5}
 
@@ -552,7 +552,7 @@ func TestAssignSlots_EmptyReturnsStartAnchorNotZero(t *testing.T) {
 // AFTER the final everywhere. scheduleBronze must give it the final's slot and
 // push the final one match-duration later, so bronze-then-final holds.
 func TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt(t *testing.T) {
-	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDurationSeconds: 300, Courts: []string{"A"}, Naginata: true}
+	comp := &state.Competition{StartTime: "09:00", KnockoutMatchDurationSeconds: 300, Courts: []string{"A"}, Naginata: true}
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "sf1", Court: "A"}, {ID: "sf2", Court: "A"}},
@@ -580,7 +580,7 @@ func TestScheduleBronze_PlacesBronzeBeforeFinalOnSharedCourt(t *testing.T) {
 // reassigned to a different court, it just borrows the final's time as a sane
 // default and must NOT disturb the final's own court timeline.
 func TestScheduleBronze_DifferentCourtInheritsFinalTimeOnly(t *testing.T) {
-	comp := &state.Competition{StartTime: "09:00", PlayoffMatchDurationSeconds: 300, Courts: []string{"A", "B"}, Naginata: true}
+	comp := &state.Competition{StartTime: "09:00", KnockoutMatchDurationSeconds: 300, Courts: []string{"A", "B"}, Naginata: true}
 	bracket := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{{ID: "sf1", Court: "A"}, {ID: "sf2", Court: "A"}},

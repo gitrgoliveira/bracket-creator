@@ -119,7 +119,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	courtOfPool := engine.PoolCourtByName(matchResults)
 
 	// EliminationDraw owns the leaf order -- pool winners, or the frozen
-	// bracket's own leaves for a pure playoffs competition -- and is shared
+	// bracket's own leaves for a pure knockout competition -- and is shared
 	// with the blank-template export so the two exports of one competition
 	// render the identical bracket, with numbering that matches the stored
 	// bracket overlayBracketScores fills in (mp-ndfu).
@@ -151,7 +151,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// per shiaijo band); everything else PrintPoolMatches/AddPoolDataToSheet
 	// return is consumed entirely inside the shared pipeline. The pipeline
 	// derives its own numbered-roster (namesToPrintPlayers) internally for a
-	// playoffs-only competition (bc-pnum A8, PlayoffsNamesToPrint in
+	// knockout-only competition (bc-pnum A8, KnockoutNamesToPrint in
 	// numbering.go): its Names-to-Print/Data writers use it for the sheets
 	// that read straight off a numbered roster, but the elimination entrant
 	// NAMES in the bracket sheets are a SEPARATE concern -- they still need
@@ -159,7 +159,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// len(pools) == 0 branch below), because this workbook is a results
 	// snapshot and the pool-oriented renderer's formula references have
 	// nowhere valid to point without a pool data sheet.
-	// The second return value (the playoffs-only numbered roster) is the
+	// The second return value (the knockout-only numbered roster) is the
 	// blank-template export's own extra (its Tags sheet); this results
 	// export has no such extra and discards it.
 	poolsByCourt, _, err := eng.RenderCompetitionWorkbook(f, comp, pools, bracket, courts, courtOfPool, draw, kachinukiMatches)
@@ -187,9 +187,9 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 
 	// Elimination Matches: literal scores from the live bracket state.
 	// Gated on `bracket != nil` alone (not also `draw != nil &&
-	// comp.IsPlayoffEnabled()`, the condition RenderCompetitionWorkbook's own
+	// comp.IsKnockoutEnabled()`, the condition RenderCompetitionWorkbook's own
 	// knockout step gates on): both overlayBracketScores and
-	// overlayPlayoffBracketNames work by SCANNING the sheet the shared
+	// overlayKnockoutBracketNames work by SCANNING the sheet the shared
 	// pipeline just produced for header cells ("Round N - Match N" / "3rd
 	// Place"), so when the pipeline rendered nothing there (no derivable
 	// draw, and no stored knockout content to disagree about it --
@@ -197,7 +197,7 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 	// ERRORS OUT of RenderCompetitionWorkbook before this function ever
 	// reaches here) they find nothing and are a no-op -- identical to
 	// skipping the call outright. Keeping the broader gate rather than
-	// nesting inside `draw != nil && IsPlayoffEnabled()` is therefore just
+	// nesting inside `draw != nil && IsKnockoutEnabled()` is therefore just
 	// avoiding a redundant condition, not covering a reachable divergence.
 	if bracket != nil {
 		bracketByNum := buildBracketMatchIndex(bracket)
@@ -205,17 +205,17 @@ func BuildResultsWorkbook(store *state.Store, eng *engine.Engine, compID string)
 		if err := overlayBracketScores(f, bracketByNum, comp.TeamSize, comp.Mirror, comp.Engi, thirdPlaceMatch); err != nil {
 			return nil, fmt.Errorf("export: overlay bracket scores: %w", err)
 		}
-		// Playoffs have no pool data sheet, so the pool-oriented renderer emits
+		// Knockout competitions have no pool data sheet, so the pool-oriented renderer emits
 		// broken ''! references for the entrant name cells. Overwrite them with
 		// the stored bracket's literal names (empty for unresolved slots) so the
 		// sheet is a valid literal snapshot with no broken formulas.
 		//
 		// comp.EffectiveFormat(), not comp.Format directly: an unset Format ("")
-		// is standalone playoffs too (generation's default case), so it has the
+		// is standalone knockout too (generation's default case), so it has the
 		// identical no-pool-data-sheet shape and needs the identical overlay.
-		if len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatPlayoffs {
-			if err := overlayPlayoffBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
-				return nil, fmt.Errorf("export: overlay playoff names: %w", err)
+		if len(pools) == 0 && comp.EffectiveFormat() == state.CompFormatKnockout {
+			if err := overlayKnockoutBracketNames(f, bracketByNum, comp.TeamSize, comp.Mirror); err != nil {
+				return nil, fmt.Errorf("export: overlay knockout names: %w", err)
 			}
 		}
 	}
@@ -1085,7 +1085,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 // whenever the app knows it (non-empty), even before the bronze bout is
 // played, because the app's semifinal loser is authoritative (it accounts for
 // kiken/decision outcomes the sheet formulas cannot derive); this matches the
-// literal-name snapshot semantics overlayPlayoffBracketNames applies to every
+// literal-name snapshot semantics overlayKnockoutBracketNames applies to every
 // other match. An EMPTY side is skipped so the cell keeps the self-populating
 // CONCATENATE formula written by PrintThirdPlaceBlock (pinned by the
 // no-scoring-yet formulas test in builder_test.go). The return value reports
@@ -1107,8 +1107,8 @@ func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.Bracke
 	return bm.Status == state.MatchStatusCompleted
 }
 
-// overlayPlayoffBracketNames overwrites the elimination entrant name cells with
-// the stored bracket's literal SideA/SideB. Playoffs have no pool data sheet, so
+// overlayKnockoutBracketNames overwrites the elimination entrant name cells with
+// the stored bracket's literal SideA/SideB. Knockout have no pool data sheet, so
 // the pool-oriented renderer points those cells at an empty pool-winner cell,
 // producing a broken ”! formula. Writing the literal names (or "" for an
 // unresolved slot, which clears the broken formula) yields a valid snapshot.
@@ -1117,11 +1117,11 @@ func writeThirdPlaceEntrants(f *excelize.File, sheetName string, bm state.Bracke
 // entrant row (header + 2). Team brackets repeat the entrant name formulas on the
 // summary row (header + 4 + teamSize, just above the "Victories / Points" row), so
 // those are overwritten too.
-func overlayPlayoffBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
+func overlayKnockoutBracketNames(f *excelize.File, bracketByNum map[int]state.BracketMatch, teamSize int, mirror bool) error {
 	sheetName := helper.SheetEliminationMatches
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
-		return fmt.Errorf("overlayPlayoffBracketNames: get rows: %w", err)
+		return fmt.Errorf("overlayKnockoutBracketNames: get rows: %w", err)
 	}
 
 	for rowIdx, row := range rows {

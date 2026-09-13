@@ -49,8 +49,8 @@ func TestCourtCountIsBoundedAboveNotJustBelow(t *testing.T) {
 		require.NotNil(t, draw)
 		assert.LessOrEqual(t, draw.NumCourts(), MaxCourts)
 
-		// Playoffs: same bound, different entry.
-		pd := NewPlayoffDraw(CreateBalancedTree([]string{"A", "B", "C", "D"}), huge)
+		// Knockout: same bound, different entry.
+		pd := NewKnockoutDraw(CreateBalancedTree([]string{"A", "B", "C", "D"}), huge)
 		require.NotNil(t, pd)
 		assert.LessOrEqual(t, len(pd.Regions), MaxCourts)
 	})

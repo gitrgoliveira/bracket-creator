@@ -734,8 +734,8 @@ func TestBuildKachinukiTeamNumbers_DrawInBracket(t *testing.T) {
 
 	comp := &state.Competition{
 		ID:            compID,
-		Format:        state.CompFormatPlayoffs,
-		Status:        state.CompStatusPlayoffs,
+		Format:        state.CompFormatKnockout,
+		Status:        state.CompStatusKnockout,
 		NumberPrefix:  "T",
 		TeamMatchType: state.TeamMatchTypeKachinuki,
 		TeamSize:      5,
@@ -806,7 +806,7 @@ func TestKachinukiDetailMatches_SquadLabel_PoolMatch(t *testing.T) {
 }
 
 // TestKachinukiDetailMatches_SquadLabel_BracketMatch is the end-to-end
-// path for a knockout-only (playoffs) kachinuki competition: the team
+// path for a knockout-only (knockout) kachinuki competition: the team
 // number comes from the bracket's DrawOrder rather than pools.csv, and
 // bracketMatchToTeamResult's SideAID/SideBID (bc-brid) carry the bout's
 // team identity through the read-only projection collectKachinukiMatches
@@ -814,8 +814,8 @@ func TestKachinukiDetailMatches_SquadLabel_PoolMatch(t *testing.T) {
 func TestKachinukiDetailMatches_SquadLabel_BracketMatch(t *testing.T) {
 	compID := "kachinuki-squad-label-bracket"
 	eng, store, _ := setupKachinukiComp(t, compID, 5, func(c *state.Competition) {
-		c.Format = state.CompFormatPlayoffs
-		c.Status = state.CompStatusPlayoffs
+		c.Format = state.CompFormatKnockout
+		c.Status = state.CompStatusKnockout
 		c.NumberPrefix = "T"
 	})
 

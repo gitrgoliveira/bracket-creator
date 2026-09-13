@@ -53,7 +53,7 @@ func TestStartMatch_SameNameEligibilityUsesTheRowIDs(t *testing.T) {
 	}
 	bracketFixture := func(t *testing.T, compID string) fixture {
 		t.Helper()
-		f := roster(t, compID, "playoffs")
+		f := roster(t, compID, "knockout")
 		require.NoError(t, f.store.SaveBracket(compID, &state.Bracket{Rounds: [][]state.BracketMatch{{{
 			ID: "m1", SideA: "Sam", SideAID: f.samNorth,
 			SideB: "Kenji", SideBID: "b1e7b5f6-0000-4000-8000-00000000000a",

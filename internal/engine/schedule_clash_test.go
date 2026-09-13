@@ -15,7 +15,7 @@ func emptyComp(t *testing.T, store *state.Store, id, name, date, start string, c
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID:        id,
 		Name:      name,
-		Format:    state.CompFormatPlayoffs,
+		Format:    state.CompFormatKnockout,
 		Kind:      "individual",
 		Date:      date,
 		StartTime: start,
@@ -165,9 +165,9 @@ func TestDetectClashes_RosteredFootprintExtendsWindow(t *testing.T) {
 	// Alpha gets a roster so its real estimate exceeds the 30-min floor and its
 	// window stretches to overlap a competition that starts 40 min later.
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: "a", Name: "Alpha", Format: state.CompFormatPlayoffs, Kind: "individual",
+		ID: "a", Name: "Alpha", Format: state.CompFormatKnockout, Kind: "individual",
 		Date: "01-07-2026", StartTime: "09:00", Courts: []string{"A"},
-		PoolMatchDurationSeconds: 180, PlayoffMatchDurationSeconds: 300, Status: state.CompStatusSetup,
+		PoolMatchDurationSeconds: 180, KnockoutMatchDurationSeconds: 300, Status: state.CompStatusSetup,
 	}))
 	saveTestParticipants(t, store, "a", []string{"P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"})
 	est, err := eng.EstimateScheduleForCompetition("a")

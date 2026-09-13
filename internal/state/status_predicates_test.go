@@ -22,7 +22,7 @@ func TestCanStartCanGenerateDraw(t *testing.T) {
 		{"", true, true},
 		{CompStatusDrawReady, true, false},
 		{CompStatusPools, false, false},
-		{CompStatusPlayoffs, false, false},
+		{CompStatusKnockout, false, false},
 		{CompStatusComplete, false, false},
 		{CompStatusInvalid, false, false},
 	} {

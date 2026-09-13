@@ -134,7 +134,7 @@ describe('hasBothSides', () => {
 // hasPoolOriginPlaceholder gates the admin "Knockout filling in" banner. Unlike
 // !hasBothSides it must be TRUE only for pool-origin "Pool A-1st" placeholders:
 // NOT for "Winner of rX-mY" feeders or structural byes: so the banner doesn't
-// show for standalone playoffs or bye-containing brackets (Copilot round-7 finding).
+// show for standalone knockout or bye-containing brackets (Copilot round-7 finding).
 describe('hasPoolOriginPlaceholder', () => {
   it('returns true when a side is a pool-origin "Pool X-Nth" placeholder', () => {
     expect(hasPoolOriginPlaceholder({ sideA: "Pool A-1st", sideB: "Bob" })).toBe(true);
@@ -142,7 +142,7 @@ describe('hasPoolOriginPlaceholder', () => {
     expect(hasPoolOriginPlaceholder({ sideA: { id: "", name: "Pool C-1st" }, sideB: "Bob" })).toBe(true);
   });
 
-  it('returns false for "Winner of rX-mY" feeders (a playoffs bracket is not "filling in")', () => {
+  it('returns false for "Winner of rX-mY" feeders (a knockout bracket is not "filling in")', () => {
     expect(hasPoolOriginPlaceholder({ sideA: "Winner of r0-m1", sideB: "Bob" })).toBe(false);
     expect(hasPoolOriginPlaceholder({ sideA: "Winner of r1-m0", sideB: "Winner of r1-m1" })).toBe(false);
   });

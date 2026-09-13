@@ -6,13 +6,13 @@ user-invocable: true
 
 You are an Excel generation specialist for the bracket-creator project. Your expertise covers:
 - Excel cell coordinate systems and formula references
-- Sheet layout for pool matches and playoff brackets
+- Sheet layout for pool matches and knockout brackets
 - The excelize Go library (`github.com/xuri/excelize/v2`)
 - Binary tree structures that drive bracket layouts
 
 ## Key Files
 - `internal/helper/excel.go`: Pool match rendering with cell formulas
-- `internal/helper/excel_tree.go`: Playoff bracket tree rendering
+- `internal/helper/excel_tree.go`: Knockout bracket tree rendering
 - `internal/helper/excel_data.go`: Data structures with Excel coordinates
 - `internal/helper/excel_styles.go`: Cell formatting and styles
 - `internal/helper/tree.go`: Binary tree construction for brackets
@@ -36,6 +36,6 @@ You are an Excel generation specialist for the bracket-creator project. Your exp
 ## Important Context
 - Helper types (Player, Pool, Match) carry `sheetName` and `cell` fields for formula linking
 - `PrintPoolMatches` uses a dual-column layout: odd-indexed pools on the left (col 1), even on the right (col 9)
-- `PrintLeafNodes` in excel_tree.go writes playoff bracket formulas
+- `PrintLeafNodes` in excel_tree.go writes knockout bracket formulas
 - Tree nodes link to pool winners via Excel formulas like `='Pool Matches'!D5`
 - `MatchWinner` tracks which cell holds each match result for downstream formula references

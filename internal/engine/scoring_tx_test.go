@@ -235,7 +235,7 @@ func TestRecordDecisionTx_KikenUndoSucceeds(t *testing.T) {
 func TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "renamed-loser-bracket"
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()
@@ -302,7 +302,7 @@ func TestRecordDecisionTx_RenamedLoser_RescoreStillResolvesByID(t *testing.T) {
 func TestRecordDecisionTx_RenamedLoser_UnstampedBracketRescoreDoesNotRestore(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "renamed-loser-unstamped-bracket"
-	createTestCompetition(t, store, compID, "playoffs", 3)
+	createTestCompetition(t, store, compID, "knockout", 3)
 
 	aliceID := helper.NewUUID4()
 	bobID := helper.NewUUID4()

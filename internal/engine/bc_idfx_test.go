@@ -997,7 +997,7 @@ func TestReplaceParticipantInDraw_CheckedOutNamesakeBlocksRewrite(t *testing.T) 
 	compID := "replace-checked-out-namesake"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "Checked Out Namesake", Kind: "individual",
-		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Courts: []string{"A"},
 		StartTime: "09:00", Status: state.CompStatusDrawReady,
 	}))
 
@@ -1047,7 +1047,7 @@ func TestReplaceParticipantInDraw_IDStampedNamesakeRenameCascades(t *testing.T) 
 	compID := "replace-id-stamped-namesake"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "ID Stamped Namesake", Kind: "individual",
-		Format: state.CompFormatPlayoffs, Courts: []string{"A"},
+		Format: state.CompFormatKnockout, Courts: []string{"A"},
 		StartTime: "09:00", Status: state.CompStatusDrawReady,
 	}))
 

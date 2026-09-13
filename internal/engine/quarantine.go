@@ -95,7 +95,7 @@ func (e *Engine) QuarantineCorruptBracket(id string) (*QuarantineResult, error) 
 	// Format == ""`, which let every UNRECOGNISED format through -- a typo in a
 	// hand-edited config.md, exactly the class of edit this whole area exists
 	// for. Such a competition takes the pipeline's DEFAULT branch and gets a
-	// standalone playoffs bracket, so bracket.json is the only record of its
+	// standalone knockout bracket, so bracket.json is the only record of its
 	// draw, and it was being quarantined with nothing rebuilt in its place.
 	if CompetitionDrawsBracket(comp.Format) && !CompetitionRebuildableFromPools(comp.Format) {
 		return nil, validationErrorf(

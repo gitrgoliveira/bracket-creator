@@ -34,7 +34,7 @@
 // CourtsColumnsPerCourt) and is opt-in: the engine export path
 // (internal/engine/export.go → collectKachinukiMatches) emits it only
 // when comp.TeamMatchType == kachinuki AND at least one match carries
-// bouts. CLI export paths (cmd/create-pools.go, create-playoffs.go) are
+// bouts. CLI export paths (cmd/create-pools.go, create-knockout.go) are
 // kachinuki-agnostic and produce zero changes to existing example files.
 package helper
 

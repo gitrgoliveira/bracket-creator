@@ -20,7 +20,7 @@ function makeTeamCompetition(overrides = {}) {
   return makeSettingsCompetition({
     kind: 'team',
     teamSize: 3,
-    format: 'playoffs',
+    format: 'knockout',
     players: [{ id: 'team-1', name: 'Tora A', number: 'T10' }],
     ...overrides,
   });
@@ -245,7 +245,7 @@ describe('bc-pnum: Settings "Squad members" section', () => {
     // never the competition's status. Reading a status lock into that
     // emptiness is a mistake that has already been made once, against a real
     // started competition.
-    const comp = makeTeamCompetition({ status: 'playoffs' });
+    const comp = makeTeamCompetition({ status: 'knockout' });
     window.API.fetchSquads.mockResolvedValue({
       'team-1': [{ id: 'm1', index: 1, name: 'Sato' }],
     });

@@ -86,7 +86,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	}()
 
 	// Load the stored bracket ONCE, unconditionally, strictly (mp-yuy8 criterion
-	// 4). It used to load only for naginata/pure-playoffs and otherwise fall
+	// 4). It used to load only for naginata/pure-knockout and otherwise fall
 	// through best-effort on a load error, silently continuing with a nil
 	// bracket -- but the bracket carries the LIVE court of every bout (the
 	// operator reassigns matches between shiaijo as the day runs), which is the
@@ -104,7 +104,7 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// Elimination leaves for the knockout phase, shared with the results workbook
 	// (EliminationDraw) so both exports of one competition render the identical
 	// bracket: pool winners for pooled formats, or the stored bracket's leaves for
-	// a pure playoffs competition (mp-ndfu, mp-0yd8). RenderCompetitionWorkbook's
+	// a pure knockout competition (mp-ndfu, mp-0yd8). RenderCompetitionWorkbook's
 	// own gate then drops the phantom bracket a league's placeholder finals imply.
 	draw := EliminationDraw(e.store, comp, pools, bracket, numCourts)
 
@@ -119,8 +119,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// knockout, Tree cleanup, Names to Print, Kachinuki Detail -- identical
 	// steps and order to internal/export.BuildResultsWorkbook.
 	// RenderCompetitionWorkbook derives namesToPrintPlayers via
-	// PlayoffsNamesToPrint (numbering.go, bc-pnum A8: a
-	// playoffs-only competition never has a pools.csv, so feeding it the
+	// KnockoutNamesToPrint (numbering.go, bc-pnum A8: a
+	// knockout-only competition never has a pools.csv, so feeding it the
 	// empty pools slice alone would make its Data and Names-to-Print steps
 	// no-ops) -- internal/export.BuildResultsWorkbook resolves through the
 	// SAME derivation, so the two exports of one competition agree on
@@ -142,8 +142,8 @@ func (e *Engine) ExportCompetitionXlsx(id string) ([]byte, error) {
 	// namesToPrintPlayers is the SAME numbered roster the Names-to-Print
 	// sheet above just used (RenderCompetitionWorkbook's second return
 	// value), not re-derived here: CreateTagsSheet needs it for the
-	// identical playoffs-only shape, and deriving it a second time would
-	// just be a second PlayoffsNamesToPrint call over the same inputs.
+	// identical knockout-only shape, and deriving it a second time would
+	// just be a second KnockoutNamesToPrint call over the same inputs.
 	tagsPools := pools
 	if namesToPrintPlayers != nil {
 		// Same numbered roster as the Names-to-Print sheet above (bc-pnum A8):

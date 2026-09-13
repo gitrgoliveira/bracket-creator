@@ -219,7 +219,7 @@ describe('extraQualifiersRadioVisible', () => {
     expect(extraQualifiersRadioVisible('mixed', 'max')).toBe(false);
   });
   it('hidden for non-mixed formats, even at poolMode=min', () => {
-    expect(extraQualifiersRadioVisible('playoffs', 'min')).toBe(false);
+    expect(extraQualifiersRadioVisible('knockout', 'min')).toBe(false);
     expect(extraQualifiersRadioVisible('league', 'min')).toBe(false);
     expect(extraQualifiersRadioVisible('swiss', 'min')).toBe(false);
   });

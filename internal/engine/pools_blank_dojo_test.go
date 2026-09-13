@@ -74,22 +74,22 @@ func writeBlankDojoRosterCSV(t *testing.T, dir, compID string) {
 		"Grace,DojoA\n")
 }
 
-// TestGenerateDraw_RefusesBlankDojoRoster_Playoffs and
+// TestGenerateDraw_RefusesBlankDojoRoster_Knockout and
 // TestGenerateDraw_RefusesBlankDojoRoster_Swiss pin bc-drwx item 8: the
 // blank-dojo refusal used to live ONLY inside the pool distributor
 // (BuildPoolPhaseTreeAware*, reached by generatePools for mixed/league), so
-// a standalone playoffs or Swiss competition over the exact same
+// a standalone knockout or Swiss competition over the exact same
 // legacy/hand-edited blank-dojo roster TestGenerateDraw_RefusesBlankDojoRoster
 // exercises for mixed drew SILENTLY instead of refusing -- neither
-// generatePlayoffs (helper.StandardSeeding has no dojo opinion) nor
+// generateKnockout (helper.StandardSeeding has no dojo opinion) nor
 // GenerateSwissRound goes anywhere near the distributor. runDrawPipeline's
 // own pre-flight (helper.ValidateNoBlankIdentity, called once ahead of the
 // format switch) now covers every format.
-func TestGenerateDraw_RefusesBlankDojoRoster_Playoffs(t *testing.T) {
+func TestGenerateDraw_RefusesBlankDojoRoster_Knockout(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
-	compID := "blank-dojo-roster-playoffs"
+	compID := "blank-dojo-roster-knockout"
 
-	createTestCompetition(t, store, compID, state.CompFormatPlayoffs, 0, func(c *state.Competition) {
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 	})
 	writeBlankDojoRosterCSV(t, dir, compID)

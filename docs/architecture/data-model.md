@@ -131,7 +131,7 @@ classDiagram
 The competition box lists the settings that shape the model, not every field it holds. Scheduling, display and format-specific settings are left out because nothing else on this
 page depends on them.
 
-`Kind` separates individual from team competitions; `Format` selects playoffs, pools plus
+`Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
 competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its squad, stored in `squads.yaml` under the team's participant
 id.

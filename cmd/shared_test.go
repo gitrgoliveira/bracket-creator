@@ -106,7 +106,7 @@ func TestProcessEntries_BlankName(t *testing.T) {
 }
 
 // TestResolveNumberPrefix pins bc-pnum A10: the ONE derivation shared by
-// create-pools and create-playoffs, which used to each carry a byte-identical
+// create-pools and create-knockout, which used to each carry a byte-identical
 // unvalidated copy -- an explicit --number-prefix was used verbatim, so
 // "SENIORS1" (well past the length cap) was accepted, and " K " kept its
 // surrounding whitespace baked into every competitor's tag.

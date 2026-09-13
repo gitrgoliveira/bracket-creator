@@ -51,14 +51,14 @@ func SetTreePageLayout(f *excelize.File, sheetName string, depth, lastRow int) {
 // its shiaijo, renders the subtree's leaves, overlays that court's pool rosters
 // (when pools are provided), and bounds the page's print area to the drawn
 // region. This is the single implementation behind the CLI (create-pools /
-// create-playoffs), the blank-template export (engine), and the results
+// create-knockout), the blank-template export (engine), and the results
 // workbook (export) - the loop used to be copied at each call site, and a
 // geometry fix in one had to be replicated by hand into the others.
 //
 // Passing pools drives the per-page roster overlay. It drives no reordering:
 // placement is decided when the draw is BUILT (helper.BuildKnockoutDraw), so by
 // the time a page is drawn its leaves are already final. Callers with no pool
-// phase (create-playoffs) pass nil and get no overlay.
+// phase (create-knockout) pass nil and get no overlay.
 //
 // subtrees must be SubdivideRegions' output, i.e. exactly numCourts x {1,2,4}
 // pages in court order. That exact multiple is what makes the page title and
@@ -140,7 +140,7 @@ func RenderTreePages(f *excelize.File, subtrees []*Node, plan CourtPlan, pools [
 // page count.
 //
 // It is the single funnel for every workbook generator (cmd/create-pools,
-// cmd/create-playoffs, internal/export/builder, internal/engine/export), which
+// cmd/create-knockout, internal/export/builder, internal/engine/export), which
 // is what lets these invariants be enforced here once instead of at four call
 // sites:
 //
@@ -345,7 +345,7 @@ func AddPoolsToTree(f *excelize.File, sheetName string, pools []Pool, poolCoords
 // internal/engine, which builds both numberings from identical entrant sets
 // (including bye-producing, non-power-of-two sizes) and asserts the sequences match
 // position-for-position, and by TestExcelWorkbookMatchesEngineBracket_Mixed and
-// _Playoffs, which cover the pool-fed and standalone draws by reading the numbers
+// _Knockout, which cover the pool-fed and standalone draws by reading the numbers
 // back off a RENDERED workbook.
 // The printed Excel sheet is authoritative; if they ever diverge, the web path must
 // be corrected to match this one (it already had to be: the walk here numbers each

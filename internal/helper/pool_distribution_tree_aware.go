@@ -369,9 +369,9 @@ var ErrBlankNameInDraw = errors.New("cannot draw pools: every competitor must ha
 // Exported (bc-drwx item 8) so internal/engine's runDrawPipeline can call it
 // as ONE roster pre-flight covering every competition format, not just the
 // pool-distributor formats (mixed/league) that reach it via
-// buildPoolPhaseTreeAwareCore: a standalone playoffs or Swiss competition
+// buildPoolPhaseTreeAwareCore: a standalone knockout or Swiss competition
 // used to draw silently over a blank-dojo roster, since neither
-// generatePlayoffs nor GenerateSwissRound ever passes through the
+// generateKnockout nor GenerateSwissRound ever passes through the
 // distributor at all. The call INSIDE buildPoolPhaseTreeAwareCore stays --
 // it is what makes this function true for a caller that reaches the
 // distributor some OTHER way (a CLI/test caller of BuildPoolPhaseTreeAware*
@@ -404,7 +404,7 @@ func ValidateNoBlankIdentity(players []Player) error {
 var ErrDuplicateTeamMemberInDraw = errors.New("cannot draw: a team lists the same member name twice")
 
 // ValidateNoDuplicateTeamMembers is the roster pre-flight covering every
-// competition format runDrawPipeline can generate (playoffs, Swiss, pools) --
+// competition format runDrawPipeline can generate (knockout, Swiss, pools) --
 // engine.StartCompetition calls it beside ValidateNoBlankIdentity, ahead of the
 // format switch, so no format-specific path has to carry its own copy of
 // this check.

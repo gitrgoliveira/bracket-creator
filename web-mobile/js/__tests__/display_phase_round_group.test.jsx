@@ -132,7 +132,7 @@ describe('phaseProgressOnCourt; the denominator matches the heading (mp-u37s)', 
     const rounds = fivePlayerRounds();
     [['m-r1-0', 'Semifinals'], ['m-r1-3', 'Quarterfinals']].forEach(([id, expected]) => {
       const p = promotedFor(rounds, id);
-      const heading = phaseLabel(p.match, true, p.roundIndex, p.totalRounds, 'playoffs');
+      const heading = phaseLabel(p.match, true, p.roundIndex, p.totalRounds, 'knockout');
       expect(heading).toBe(expected);
       const counted = bracketRoundSiblings(rounds, p.match, p.roundIndex);
       expect(counted.length).toBeGreaterThan(0);
@@ -141,7 +141,7 @@ describe('phaseProgressOnCourt; the denominator matches the heading (mp-u37s)', 
         // as the heading. (m-r2-1 lives in raw round 1, whose raw label is
         // "Semifinals" only because the effective round says so.)
         const ri = rounds.findIndex((r) => r.includes(m));
-        expect(phaseLabel(m, true, ri, rounds.length, 'playoffs')).toBe(heading);
+        expect(phaseLabel(m, true, ri, rounds.length, 'knockout')).toBe(heading);
       });
     });
   });
@@ -169,7 +169,7 @@ describe('gatherIndividualGroup; the rows under the heading are that round (mp-u
   it('does not list a quarterfinal among the semifinal rows', () => {
     const rounds = fivePlayerRounds();
     const p = promotedFor(rounds, 'm-r1-0');
-    expect(phaseLabel(p.match, true, p.roundIndex, p.totalRounds, 'playoffs')).toBe('Semifinals');
+    expect(phaseLabel(p.match, true, p.roundIndex, p.totalRounds, 'knockout')).toBe('Semifinals');
     // Bracket phase shows completed + current only. The other semifinal is
     // still scheduled, so the running one is alone — and the COMPLETED
     // quarterfinal from the same backend round must not appear beside it.

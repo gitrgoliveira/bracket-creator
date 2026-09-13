@@ -54,7 +54,7 @@ beforeEach(() => {
   window.API = {
     fetchCompetitionDetails: vi.fn().mockResolvedValue({
       id: 'comp1',
-      config: { format: 'playoffs', teamMatchType: 'fixed', naginata: false, players: [] },
+      config: { format: 'knockout', teamMatchType: 'fixed', naginata: false, players: [] },
     }),
     recordScore: vi.fn().mockResolvedValue(undefined),
     recordDaihyosen: vi.fn(),
@@ -78,7 +78,7 @@ function matchWithDaihyosen(overrides = {}) {
     court: 'A',
     compKind: 'team',
     teamSize: 3,
-    compFormat: 'playoffs',
+    compFormat: 'knockout',
     teamMatchType: 'fixed',
     sideA: { id: 'team-A', name: 'Team A' },
     sideB: { id: 'team-B', name: 'Team B' },

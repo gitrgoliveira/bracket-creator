@@ -25,7 +25,7 @@ import (
 // (participants.csv does NOT persist Number).
 //
 // bc-pnum ruling 2: mergePoolNumbersIntoPlayersSlice no longer has a
-// playoffs-only branch (a knockout-only competition's number now comes from
+// knockout-only branch (a knockout-only competition's number now comes from
 // the bracket's DrawOrder, exercised by TestApplyDrawNumbers below, not
 // pools.csv) and no longer falls back to (name, dojo): identity is the
 // participant id, ONLY. A pools.csv row or a roster row with no id
@@ -118,15 +118,15 @@ func TestMergePoolNumbersIntoPlayersSlice(t *testing.T) {
 	})
 }
 
-// TestApplyDrawNumbers pins bc-pnum ruling 2's format switch: a playoffs
+// TestApplyDrawNumbers pins bc-pnum ruling 2's format switch: a knockout
 // (knockout-only) competition is numbered from the bracket's DrawOrder
 // (engine.NumberKnockoutParticipants), never from pools.csv or participant
 // order; every other format is numbered from pools.csv, unchanged.
 func TestApplyDrawNumbers(t *testing.T) {
-	t.Run("playoffs: numbers from bracket.DrawOrder, in draw-position order", func(t *testing.T) {
+	t.Run("knockout: numbers from bracket.DrawOrder, in draw-position order", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Status:       state.CompStatusDrawReady,
 			Players: []domain.Player{
 				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
@@ -141,11 +141,11 @@ func TestApplyDrawNumbers(t *testing.T) {
 		assert.Equal(t, "D1", comp.Players[2].Number, "p3 is DrawOrder[0] -> D1")
 	})
 
-	// mp-yuy8: an unset Format ("") is standalone playoffs too (the draw
-	// pipeline's default branch calls generatePlayoffs for it exactly as it
-	// does for the literal "playoffs" value), so this must go through
+	// mp-yuy8: an unset Format ("") is standalone knockout too (the draw
+	// pipeline's default branch calls generateKnockout for it exactly as it
+	// does for the literal "knockout" value), so this must go through
 	// comp.EffectiveFormat(), not comp.Format.
-	t.Run("unset (empty) Format numbers from DrawOrder too, same as playoffs", func(t *testing.T) {
+	t.Run("unset (empty) Format numbers from DrawOrder too, same as knockout", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
 			Format:       "",
@@ -161,10 +161,10 @@ func TestApplyDrawNumbers(t *testing.T) {
 		assert.Equal(t, "D2", comp.Players[1].Number)
 	})
 
-	t.Run("playoffs pre-draw: no bracket, no DrawOrder -> no numbers at all", func(t *testing.T) {
+	t.Run("knockout pre-draw: no bracket, no DrawOrder -> no numbers at all", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Status:       state.CompStatusSetup,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
@@ -172,10 +172,10 @@ func TestApplyDrawNumbers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[0].Number, "pre-draw: no number even though a NumberPrefix is configured")
 	})
 
-	t.Run("playoffs: a player absent from DrawOrder (excluded from the draw) gets no number", func(t *testing.T) {
+	t.Run("knockout: a player absent from DrawOrder (excluded from the draw) gets no number", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Status:       state.CompStatusDrawReady,
 			Players: []domain.Player{
 				{ID: "p1", Name: "Rossi Marco", Dojo: "Dojo Rossi Marco"},
@@ -188,10 +188,10 @@ func TestApplyDrawNumbers(t *testing.T) {
 		assert.Equal(t, "", comp.Players[1].Number, "excluded from the draw -> no number")
 	})
 
-	t.Run("playoffs: a prefix change shows on the next call with no rewrite", func(t *testing.T) {
+	t.Run("knockout: a prefix change shows on the next call with no rewrite", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "D",
-			Format:       state.CompFormatPlayoffs,
+			Format:       state.CompFormatKnockout,
 			Status:       state.CompStatusDrawReady,
 			Players:      []domain.Player{{ID: "p1", Name: "Tanaka", Dojo: "Dojo Tanaka"}},
 		}
@@ -205,7 +205,7 @@ func TestApplyDrawNumbers(t *testing.T) {
 		assert.Equal(t, "Z1", comp.Players[0].Number, "the same DrawOrder under a new prefix relabels immediately")
 	})
 
-	t.Run("mixed: still numbers from pools.csv, unaffected by the playoffs branch", func(t *testing.T) {
+	t.Run("mixed: still numbers from pools.csv, unaffected by the knockout branch", func(t *testing.T) {
 		comp := &state.Competition{
 			NumberPrefix: "K",
 			Format:       state.CompFormatMixed,
@@ -421,7 +421,7 @@ func TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw(t *testing.T) {
 	assert.Equal(t, []string{"K2", "K1"}, numbers, "post-draw: pool-order numbers from pools.csv")
 }
 
-// TestViewerCompetitionDetail_PlayoffsNumbersFollowBracketPosition pins
+// TestViewerCompetitionDetail_KnockoutNumbersFollowBracketPosition pins
 // bc-pnum ruling 2 end to end, through the REAL draw pipeline
 // (eng.GenerateDraw / eng.DiscardDraw) and the real HTTP viewer detail
 // endpoint, not just the applyDrawNumbers unit (TestApplyDrawNumbers
@@ -432,14 +432,14 @@ func TestViewerCompetitionDetail_NumbersBeforeAndAfterTheDraw(t *testing.T) {
 // them. Eve is not checked in, so the draw excludes her (bc-pnum ruling 2's
 // "absent from DrawOrder" case, exercised here over check-in specifically
 // rather than the synthetic bracket fixture TestApplyDrawNumbers used).
-func TestViewerCompetitionDetail_PlayoffsNumbersFollowBracketPosition(t *testing.T) {
+func TestViewerCompetitionDetail_KnockoutNumbersFollowBracketPosition(t *testing.T) {
 	r, store, eng, _, tempDir := setupTestRouter(t)
 	defer os.RemoveAll(tempDir)
 
-	const cid = "playoffs-viewer-numbers"
+	const cid = "knockout-viewer-numbers"
 	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret", Courts: []string{"A"}}))
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "Playoffs Viewer Numbers", Format: state.CompFormatPlayoffs, Kind: "individual",
+		ID: cid, Name: "Knockout Viewer Numbers", Format: state.CompFormatKnockout, Kind: "individual",
 		Courts: []string{"A"}, Status: state.CompStatusSetup, NumberPrefix: "K",
 		CheckInEnabled: true,
 	}))
@@ -528,9 +528,9 @@ func TestViewerCompetitionDetail_PlayoffsNumbersFollowBracketPosition(t *testing
 // TestViewerCompetitionsList_CorruptBracketShowsNoNumbers pins D1 on the
 // read side for a knockout-only competition (bc-pnum ruling 2's successor to
 // TestViewerCompetitionsList_CorruptPoolsShowsNoNumbers, retired below): a
-// drawn playoffs competition whose bracket.json will not parse shows MISSING
+// drawn knockout competition whose bracket.json will not parse shows MISSING
 // numbers on the public list, never numbers invented from participant order
-// or any other fallback. Under ruling 2 a playoffs competition's number
+// or any other fallback. Under ruling 2 a knockout competition's number
 // comes from bracket.DrawOrder, so the analogous read-error risk moved from
 // pools.csv to bracket.json; a corrupt pools.csv is no longer even read for
 // this format (see TestCourtCurrentUnreadablePoolsShowsNoNumbers in
@@ -542,7 +542,7 @@ func TestViewerCompetitionsList_CorruptBracketShowsNoNumbers(t *testing.T) {
 
 	const cid = "corrupt-bracket-list"
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: cid, Name: "Corrupt Bracket", Format: state.CompFormatPlayoffs, Kind: "individual",
+		ID: cid, Name: "Corrupt Bracket", Format: state.CompFormatKnockout, Kind: "individual",
 		Courts: []string{"A"}, Status: state.CompStatusPools, NumberPrefix: "K", HasParticipantIDs: true,
 	}))
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{

@@ -62,12 +62,12 @@ func TestEstimateMatchCounts_PoolMatchCountPerPoolSize(t *testing.T) {
 	}
 }
 
-// TestEstimateMatchCounts_BracketMatchCount pins the playoff bracket match count
+// TestEstimateMatchCounts_BracketMatchCount pins the knockout bracket match count
 // for various roster sizes. bracketMatchCount returns the count of matches that
 // actually CONSUME COURT TIME (i.e., Status != Completed at generation time),
 // not the total slot count NextPow2(players)-1.
 //
-// Since mp-5ng7, generatePlayoffs uses StandardSeeding + CreateBalancedTree +
+// Since mp-5ng7, generateKnockout uses StandardSeeding + CreateBalancedTree +
 // TreeToLeafArray, which clusters structural byes where the tree is asymmetric.
 // This can produce "" vs "" double-bye slots and later-round "" vs "Winner of…"
 // latent byes. All such slots are auto-completed at generation time (Status=
@@ -114,7 +114,7 @@ func TestEstimateMatchCounts_BracketMatchCount(t *testing.T) {
 //
 //	numPools    = ceil or floor of playerCount/poolSize (driven by poolSizeMode)
 //	poolMatches = sum over each pool of C(poolN, 2) (full RR)
-//	playoffs    = NextPow2(numPools * poolWinners) - 1
+//	knockout    = NextPow2(numPools * poolWinners) - 1
 func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -125,7 +125,7 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 		roundRobin   bool
 		wantPools    int
 		wantPool     int // total pool matches
-		wantPlayoff  int // total bracket matches
+		wantKnockout int // total bracket matches
 	}{
 		{
 			// 12 players, poolSize 4, min-mode → 3 pools of 4
@@ -133,7 +133,7 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "12p size4 min rr winners2",
 			playerCount: 12, poolSize: 4, poolSizeMode: "min", poolWinners: 2, roundRobin: true,
-			wantPools: 3, wantPool: 18, wantPlayoff: 5,
+			wantPools: 3, wantPool: 18, wantKnockout: 5,
 		},
 		{
 			// 13 players, poolSize 4, max-mode → ceil(13/4)=4 pools
@@ -142,7 +142,7 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 			// finalists: 8; bracketMatchCount(8)=7 (pow2=8, no byes: real=7)
 			name:        "13p size4 max rr winners2",
 			playerCount: 13, poolSize: 4, poolSizeMode: "max", poolWinners: 2, roundRobin: true,
-			wantPools: 4, wantPool: 15, wantPlayoff: 7,
+			wantPools: 4, wantPool: 15, wantKnockout: 7,
 		},
 		{
 			// 9 players, poolSize 3, min-mode → 3 pools of 3
@@ -150,14 +150,14 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "9p size3 min rr winners2",
 			playerCount: 9, poolSize: 3, poolSizeMode: "min", poolWinners: 2, roundRobin: true,
-			wantPools: 3, wantPool: 9, wantPlayoff: 5,
+			wantPools: 3, wantPool: 9, wantKnockout: 5,
 		},
 		{
 			// 12 players, poolSize 4, min-mode, 1 winner per pool → 3 pools of 4
 			// finalists: 3; bracketMatchCount(3)=2 (pow2=4, byes=1, completed=1, real=2)
 			name:        "12p size4 min rr winners1",
 			playerCount: 12, poolSize: 4, poolSizeMode: "min", poolWinners: 1, roundRobin: true,
-			wantPools: 3, wantPool: 18, wantPlayoff: 2,
+			wantPools: 3, wantPool: 18, wantKnockout: 2,
 		},
 	}
 
@@ -172,10 +172,10 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 				RoundRobin:   tc.roundRobin,
 				PoolFormat:   "",
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPool, poolCount, "pool matches")
-			assert.Equal(t, tc.wantPlayoff, playoffCount, "playoff matches")
+			assert.Equal(t, tc.wantKnockout, knockoutCount, "knockout matches")
 		})
 	}
 }
@@ -184,28 +184,28 @@ func TestEstimateMatchCounts_Mixed_IndividualFullRR(t *testing.T) {
 // non-round-robin pool matches (CreatePoolMatches path).
 func TestEstimateMatchCounts_Mixed_NonRR(t *testing.T) {
 	tests := []struct {
-		name        string
-		playerCount int
-		poolSize    int
-		poolSizeMd  string
-		poolWinners int
-		wantPools   int
-		wantPool    int
-		wantPlayoff int
+		name         string
+		playerCount  int
+		poolSize     int
+		poolSizeMd   string
+		poolWinners  int
+		wantPools    int
+		wantPool     int
+		wantKnockout int
 	}{
 		{
 			// 12p size4 min → 3 pools of 4 → 4 matches each (non-RR size 4)
 			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "12p size4 min non-rr winners2",
 			playerCount: 12, poolSize: 4, poolSizeMd: "min", poolWinners: 2,
-			wantPools: 3, wantPool: 12, wantPlayoff: 5,
+			wantPools: 3, wantPool: 12, wantKnockout: 5,
 		},
 		{
 			// 15p size5 min → 3 pools of 5 → 5 matches each (non-RR size 5)
 			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "15p size5 min non-rr winners2",
 			playerCount: 15, poolSize: 5, poolSizeMd: "min", poolWinners: 2,
-			wantPools: 3, wantPool: 15, wantPlayoff: 5,
+			wantPools: 3, wantPool: 15, wantKnockout: 5,
 		},
 	}
 	for _, tc := range tests {
@@ -219,10 +219,10 @@ func TestEstimateMatchCounts_Mixed_NonRR(t *testing.T) {
 				RoundRobin:   false,
 				PoolFormat:   "",
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPool, poolCount, "pool matches")
-			assert.Equal(t, tc.wantPlayoff, playoffCount, "playoff matches")
+			assert.Equal(t, tc.wantKnockout, knockoutCount, "knockout matches")
 		})
 	}
 }
@@ -230,27 +230,27 @@ func TestEstimateMatchCounts_Mixed_NonRR(t *testing.T) {
 // TestEstimateMatchCounts_Mixed_PartialRR covers the partial pool format.
 func TestEstimateMatchCounts_Mixed_PartialRR(t *testing.T) {
 	tests := []struct {
-		name        string
-		playerCount int
-		poolSize    int
-		poolSizeMd  string
-		poolWinners int
-		wantPool    int
-		wantPlayoff int
+		name         string
+		playerCount  int
+		poolSize     int
+		poolSizeMd   string
+		poolWinners  int
+		wantPool     int
+		wantKnockout int
 	}{
 		{
 			// 12p size4 min → 3 pools of 4 → N-1=3 matches each → 9
 			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "12p size4 partial",
 			playerCount: 12, poolSize: 4, poolSizeMd: "min", poolWinners: 2,
-			wantPool: 9, wantPlayoff: 5,
+			wantPool: 9, wantKnockout: 5,
 		},
 		{
 			// 9p size3 min → 3 pools of 3 → N-1=2 matches each → 6
 			// finalists: 6; bracketMatchCount(6)=5 (distributed byes - mp-sess: real=N-1=5)
 			name:        "9p size3 partial",
 			playerCount: 9, poolSize: 3, poolSizeMd: "min", poolWinners: 2,
-			wantPool: 6, wantPlayoff: 5,
+			wantPool: 6, wantKnockout: 5,
 		},
 	}
 	for _, tc := range tests {
@@ -263,23 +263,23 @@ func TestEstimateMatchCounts_Mixed_PartialRR(t *testing.T) {
 				PoolWinners:  tc.poolWinners,
 				PoolFormat:   "partial",
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPool, poolCount, "pool matches")
-			assert.Equal(t, tc.wantPlayoff, playoffCount, "playoff matches")
+			assert.Equal(t, tc.wantKnockout, knockoutCount, "knockout matches")
 		})
 	}
 }
 
-// TestEstimateMatchCounts_PlayoffsOnly verifies that a playoffs-only competition
+// TestEstimateMatchCounts_KnockoutOnly verifies that a knockout-only competition
 // has zero pool matches and the correct non-bye bracket match count: only real
 // court-time-consuming matches, not total slots including auto-resolved byes.
 // With distributed byes (mp-sess) the count is the single-elimination identity
 // N-1 for every N.
-func TestEstimateMatchCounts_PlayoffsOnly(t *testing.T) {
+func TestEstimateMatchCounts_KnockoutOnly(t *testing.T) {
 	tests := []struct {
-		playerCount int
-		wantPlayoff int // real court-time matches = N-1 (distributed byes)
+		playerCount  int
+		wantKnockout int // real court-time matches = N-1 (distributed byes)
 	}{
 		{4, 3},   // pow2=4, no byes: 3 real
 		{8, 7},   // pow2=8, no byes: 7 real
@@ -290,20 +290,20 @@ func TestEstimateMatchCounts_PlayoffsOnly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(fmt.Sprintf("players=%d", tc.playerCount), func(t *testing.T) {
 			in := EstimateMatchCountsInput{
-				Format:      "playoffs",
+				Format:      "knockout",
 				PlayerCount: tc.playerCount,
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
-			assert.Equal(t, 0, poolCount, "playoffs-only must have 0 pool matches")
-			assert.Equal(t, tc.wantPlayoff, playoffCount)
+			assert.Equal(t, 0, poolCount, "knockout-only must have 0 pool matches")
+			assert.Equal(t, tc.wantKnockout, knockoutCount)
 		})
 	}
 }
 
 // TestEstimateMatchCounts_League verifies that a league competition
 // produces a single pool of all players with full round-robin, and zero
-// playoff matches.
+// knockout matches.
 func TestEstimateMatchCounts_League(t *testing.T) {
 	tests := []struct {
 		playerCount int
@@ -321,10 +321,10 @@ func TestEstimateMatchCounts_League(t *testing.T) {
 				Format:      "league",
 				PlayerCount: tc.playerCount,
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPool, poolCount, "league pool matches (C(n,2))")
-			assert.Equal(t, 0, playoffCount, "league has no playoff bracket")
+			assert.Equal(t, 0, knockoutCount, "league has no knockout bracket")
 		})
 	}
 }
@@ -361,10 +361,10 @@ func TestEstimateMatchCounts_Swiss(t *testing.T) {
 				PlayerCount: tc.playerCount,
 				SwissRounds: tc.swissRounds,
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantPool, poolCount, "swiss total matches")
-			assert.Equal(t, 0, playoffCount, "swiss has no playoff bracket")
+			assert.Equal(t, 0, knockoutCount, "swiss has no knockout bracket")
 		})
 	}
 }
@@ -373,7 +373,7 @@ func TestEstimateMatchCounts_Swiss(t *testing.T) {
 // produces zero matches without an error (the engine would reject it earlier,
 // but the estimator should not panic or corrupt its math).
 func TestEstimateMatchCounts_ZeroPlayers(t *testing.T) {
-	for _, format := range []string{"mixed", "playoffs", "league", "swiss"} {
+	for _, format := range []string{"mixed", "knockout", "league", "swiss"} {
 		t.Run(format, func(t *testing.T) {
 			in := EstimateMatchCountsInput{
 				Format:      format,
@@ -382,10 +382,10 @@ func TestEstimateMatchCounts_ZeroPlayers(t *testing.T) {
 				PoolWinners: 2,
 				SwissRounds: 3,
 			}
-			poolCount, playoffCount, err := EstimateMatchCounts(in)
+			poolCount, knockoutCount, err := EstimateMatchCounts(in)
 			require.NoError(t, err)
 			assert.Equal(t, 0, poolCount)
-			assert.Equal(t, 0, playoffCount)
+			assert.Equal(t, 0, knockoutCount)
 		})
 	}
 }

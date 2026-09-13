@@ -336,10 +336,10 @@ describe('formatDrawsBracket', () => {
   // Mirrors engine.CompetitionDrawsBracket: league and Swiss courts are
   // independent parallel courts with no bracket blocks to merge, so the rule is not applied
   // to them. The unset format IS in scope: the engine's draw pipeline builds a
-  // standalone playoffs bracket for it.
+  // standalone knockout bracket for it.
   it.each([
     ['mixed', true],
-    ['playoffs', true],
+    ['knockout', true],
     ['', true],
     ['league', false],
     ['swiss', false],

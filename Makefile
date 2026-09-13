@@ -148,12 +148,16 @@ js/lint: js/deps ## Run Javascript linters
 	@# than beside the override itself.
 	@npx --prefix web-mobile oxlint --deny-warnings -c web-mobile/.oxlintrc.json docs/assets/javascripts/
 
-js/sec: js/deps ## Run Javascript security scans (audit-ci + npm audit)
+js/sec: js/deps ## Run Javascript security scans (audit-ci)
 	@echo "Running Javascript security scans..."
-	@# web-mobile uses audit-ci so one proven-unfixable dev-only advisory can be
-	@# allowlisted (web-mobile/audit-ci.jsonc) without disabling the whole scan.
+	@# Both trees use audit-ci so a proven-unfixable advisory can be allowlisted
+	@# (web-mobile/audit-ci.jsonc, web/audit-ci.jsonc) without disabling the
+	@# whole scan. web/ used a bare `npm audit --audit-level=high` until bc-jsec:
+	@# that calls npm's legacy quick-audit endpoint, which reports itself as
+	@# being retired and intermittently answers 400 or 503, so the gate failed
+	@# over a registry blip rather than over this repository's dependencies.
 	@cd web-mobile && npm run --silent audit
-	@cd web && npm audit --audit-level=high
+	@cd web && npm run --silent audit
 
 js/outdated: ## Check for outdated npm packages
 	@echo "Checking for outdated npm packages..."
@@ -173,11 +177,18 @@ js/check-imports: ## Check cross-module named imports resolve (mp-zac3 split mod
 	@echo "Checking the write-result rule is asked, not re-derived..."
 	@node web-mobile/check-write-result.mjs
 
-js/validate: js/lint js/security js/check-imports js/test ## Run all Javascript checks
+js/validate: js/lint js/check-imports js/test js/security ## Run all Javascript checks
 
-go/test: go/lint go/security js/validate ## Run tests
+# Tests FIRST, security scans last. Prerequisites run in order, so a scan
+# listed ahead of the tests aborts the chain before a single test runs: an
+# outage at an advisory service then reads as "the suite failed" when the suite
+# never executed. That is not hypothetical, it is bc-jsec. Ordering the scans
+# last keeps the gate exactly as strict (a real advisory still fails it) while
+# making sure the test results are already on screen when it happens.
+go/test: go/lint js/lint js/check-imports js/test ## Run tests, then the security scans
 	@echo "Running tests..."
 	go test -cover . ./cmd/... ./internal/... ./tests/...
+	@$(MAKE) go/security js/security
 
 go/test-race: go/lint ## Run tests with race detection
 	@echo "Running tests with race detection..."
@@ -213,24 +224,24 @@ $(BIN_PATH)/$(BIN_NAME): vendor-frontend esbuild-jsx go/generate $(GO_SOURCES) $
 
 examples: go/build ## Build locally and create example files
 	@echo "Cleaning previous examples..."
-	rm -f pools-example-*.xlsx playoffs-example-*.xlsx
+	rm -f pools-example-*.xlsx playoffs-example-*.xlsx knockout-example-*.xlsx
 	@echo "Building examples..."
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -t 5 -f ./test-data/mock_data_small.csv -o ./pools-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_small_3_teams.csv -o ./pools-example-small-3-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 8 -w 2 -c 1 -f ./test-data/mock_data_single_pool_8.csv -o ./pools-example-single-pool-8-round-robin.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -r -p 3 -w 2 -c 1 -t 3 -f ./test-data/mock_data_teams_of_3_pool_3.csv -o ./pools-example-teams-of-3-round-robin.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -t 5 -f ./test-data/mock_data_small.csv -o ./playoffs-example-small.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -t 5 -f ./test-data/mock_data_small.csv -o ./knockout-example-small.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -r -p 3 -w 2 -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_medium_zekken.csv -o ./knockout-example-medium.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -t 5 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-teams-max-size.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -m 3 -w 2 -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-max-size.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 -f ./test-data/mock_data_large_zekken.csv -o ./knockout-example-large.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./pools-example-medium-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./playoffs-example-medium-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_medium.csv -f ./test-data/mock_data_medium_zekken.csv -o ./knockout-example-medium-seeded.xlsx
 	$(BIN_PATH)/$(BIN_NAME) create-pools -d -z -p 3 -w 2 -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./pools-example-large-seeded.xlsx
-	$(BIN_PATH)/$(BIN_NAME) create-playoffs -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./playoffs-example-large-seeded.xlsx
+	$(BIN_PATH)/$(BIN_NAME) create-knockout -d -z -c 2 --seeds ./test-data/seeds_large.csv -f ./test-data/mock_data_large_zekken.csv -o ./knockout-example-large-seeded.xlsx
 # 5 pools sending ONE qualifier each, seeded, on two shiaijo. Every other
 # example uses -w 2, and no 2-qualifier draw changed shape in the pool-to-
 # knockout rework, so without this the workbooks exercise none of it. Here

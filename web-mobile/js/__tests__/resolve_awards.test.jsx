@@ -1,5 +1,5 @@
 // Tests for bracketHasDecidedFinal and resolveCompetitionAwards (viewer.jsx).
-// These helpers are the single source of truth for mixed→linked-playoffs
+// These helpers are the single source of truth for mixed→linked-knockout
 // podium resolution.
 import { describe, it, expect, vi } from 'vitest';
 import { bracketHasDecidedFinal, resolveCompetitionAwards } from '../viewer.jsx';
@@ -82,7 +82,7 @@ function undecidedBracket() {
 
 describe('resolveCompetitionAwards', () => {
   // Single-competition mixed model (mp-turx): the knockout fills in place on the
-  // mixed comp's OWN bracket; there is no linked "- Playoffs" comp to fetch.
+  // mixed comp's OWN bracket; there is no linked "- Knockout" comp to fetch.
 
   // ── mixed → final (two 3rds), derived from the comp's OWN bracket ─────────
   it('mixed comp with decided OWN-bracket final → state "final", podium has two 3rds', async () => {
@@ -137,9 +137,9 @@ describe('resolveCompetitionAwards', () => {
     expect(result.podium).toEqual([]);
   });
 
-  // ── standalone playoffs → final ───────────────────────────────────────────
-  it('standalone playoffs comp with decided final → state "final", podium has two 3rds', async () => {
-    const comp = { id: 'ko-1', format: 'playoffs' }; // no sourceCompID
+  // ── standalone knockout → final ───────────────────────────────────────────
+  it('standalone knockout comp with decided final → state "final", podium has two 3rds', async () => {
+    const comp = { id: 'ko-1', format: 'knockout' }; // no sourceCompID
     const bracket = decidedBracket();
     const fetchers = {
       fetchCompetitionDetails: vi.fn().mockResolvedValue({ bracket, players: [] }),
@@ -155,9 +155,9 @@ describe('resolveCompetitionAwards', () => {
     expect(result.podium[3]).toMatchObject({ place: 3 });
   });
 
-  // ── linked-playoffs shell → skip ─────────────────────────────────────────
-  it('playoffs comp with sourceCompID → state "skip", no fetch, podium []', async () => {
-    const comp = { id: 'playoffs-linked', format: 'playoffs', sourceCompID: 'mixed-1' };
+  // ── linked-knockout shell → skip ─────────────────────────────────────────
+  it('knockout comp with sourceCompID → state "skip", no fetch, podium []', async () => {
+    const comp = { id: 'knockout-linked', format: 'knockout', sourceCompID: 'mixed-1' };
     const fetchers = {
       fetchCompetitionDetails: vi.fn(),
       swissStandings: null,
@@ -167,7 +167,7 @@ describe('resolveCompetitionAwards', () => {
 
     expect(result.state).toBe('skip');
     expect(result.podium).toEqual([]);
-    // The linked playoffs shell is skipped without fetching its details.
+    // The linked knockout shell is skipped without fetching its details.
     expect(fetchers.fetchCompetitionDetails).not.toHaveBeenCalled();
   });
 

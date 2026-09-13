@@ -138,7 +138,7 @@ describe('AwardsView + Fighting Spirit awards', () => {
   it('includes a FightingSpiritSection vnode when bracket has no final winner (no-podium branch)', () => {
     // A bracket with no winner → awards array empty → early-return branch.
     // The FS section vnode must still be in the tree.
-    const comp = { id: 'c1', name: 'Test Comp', format: 'playoffs', fightingSpiritAwards: fsAwards };
+    const comp = { id: 'c1', name: 'Test Comp', format: 'knockout', fightingSpiritAwards: fsAwards };
     const result = AwardsView({ c: comp, bracket: null, standings: null, pools: null, players: [] });
     const fsVnode = findFightingSpiritVnode(result);
     expect(fsVnode).not.toBeNull();
@@ -147,7 +147,7 @@ describe('AwardsView + Fighting Spirit awards', () => {
   });
 
   it('does NOT include a FightingSpiritSection vnode when comp has no awards (empty-bracket branch)', () => {
-    const comp = { id: 'c2', name: 'Test Comp', format: 'playoffs', fightingSpiritAwards: [] };
+    const comp = { id: 'c2', name: 'Test Comp', format: 'knockout', fightingSpiritAwards: [] };
     const result = AwardsView({ c: comp, bracket: null, standings: null, pools: null, players: [] });
     const fsVnode = findFightingSpiritVnode(result);
     expect(fsVnode).toBeNull();
@@ -164,7 +164,7 @@ describe('AwardsView + Fighting Spirit awards', () => {
         [{ sideA: 'Alice', sideB: 'Carol', winner: 'Alice' }],
       ],
     };
-    const comp = { id: 'c3', name: 'Comp', format: 'playoffs', fightingSpiritAwards: fsAwards };
+    const comp = { id: 'c3', name: 'Comp', format: 'knockout', fightingSpiritAwards: fsAwards };
     const result = AwardsView({ c: comp, bracket, standings: null, pools: null, players: [] });
     // The main tree text must include the champion name.
     expect(collectText(result)).toContain('Alice');
@@ -182,7 +182,7 @@ describe('AwardsView + Fighting Spirit awards', () => {
         [{ sideA: 'X', sideB: 'Z', winner: 'X' }],
       ],
     };
-    const comp = { id: 'c4', name: 'Comp', format: 'playoffs', fightingSpiritAwards: fsAwards };
+    const comp = { id: 'c4', name: 'Comp', format: 'knockout', fightingSpiritAwards: fsAwards };
     const result = AwardsView({ c: comp, bracket, standings: null, pools: null, players: [] });
     // The FS vnode must exist.
     const fsVnode = findFightingSpiritVnode(result);

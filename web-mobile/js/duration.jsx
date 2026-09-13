@@ -1,7 +1,7 @@
 // duration.jsx: shared masked m:ss match-duration input (mp-m5kf).
 // Operators enter match durations with sub-minute granularity (e.g. 2:30);
 // the control is bound to a single integer-seconds value so callers persist
-// one canonical field (poolMatchDurationSeconds / playoffMatchDurationSeconds
+// one canonical field (poolMatchDurationSeconds / knockoutMatchDurationSeconds
 // on the Go side).
 //
 // This is ONE masked text field, not a minutes box plus a seconds box. The

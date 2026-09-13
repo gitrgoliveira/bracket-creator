@@ -187,7 +187,7 @@ func TestRenumberCompetitors_HealsAPreviouslyUnhealedFile(t *testing.T) {
 	assert.Equal(t, "K2", pools[0].Players[1].Number)
 }
 
-// TestRenumberCompetitors_NoPools_IsANoOp covers the playoffs-only /
+// TestRenumberCompetitors_NoPools_IsANoOp covers the knockout-only /
 // not-yet-drawn case: no pools.csv exists, so there is nothing to rewrite,
 // and the call must not error or create one.
 func TestRenumberCompetitors_NoPools_IsANoOp(t *testing.T) {
@@ -195,7 +195,7 @@ func TestRenumberCompetitors_NoPools_IsANoOp(t *testing.T) {
 	const compID = "renumber-no-pools"
 
 	require.NoError(t, store.SaveCompetition(&state.Competition{
-		ID: compID, Name: "Renumber No Pools", Kind: "individual", Format: "playoffs",
+		ID: compID, Name: "Renumber No Pools", Kind: "individual", Format: "knockout",
 		Status: "setup", NumberPrefix: "K",
 	}))
 
@@ -586,7 +586,7 @@ func TestNumberedParticipantsFor_LegacyBracketWithNoDrawOrder(t *testing.T) {
 	const compID = "legacy-bracket-no-draw-order"
 
 	comp := &state.Competition{
-		ID: compID, Name: "Legacy Bracket", Kind: "individual", Format: state.CompFormatPlayoffs,
+		ID: compID, Name: "Legacy Bracket", Kind: "individual", Format: state.CompFormatKnockout,
 		Status: state.CompStatusDrawReady, NumberPrefix: "K", Courts: []string{"A"},
 	}
 	require.NoError(t, store.SaveCompetition(comp))

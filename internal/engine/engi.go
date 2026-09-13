@@ -56,7 +56,7 @@ func engiWinnerSide(flagsA, flagsB int) string {
 // Pool match: updates the pool-match record in place (winner from flag majority,
 // flag counts stored, status completed).
 //
-// Bracket match (including the "m-bronze" 3rd-place playoff): sets
+// Bracket match (including the "m-bronze" 3rd-place knockout): sets
 // Winner/FlagsA/FlagsB on the stored match, then calls the pure
 // propagateBracketWinner to advance the decided winner (no advancement out of
 // bronze).

@@ -359,17 +359,17 @@ func TestExportCompetitionXlsx_LeagueHasNoTreeSheet(t *testing.T) {
 	assert.Empty(t, treeSheets(f), "a league has no knockout, so it must export no bracket page")
 }
 
-// TestExportCompetitionXlsx_PurePlayoffsRendersBracket pins mp-ndfu: a pure
-// playoffs competition has NO pools, so the pool-fed draw returns nothing and
+// TestExportCompetitionXlsx_PureKnockoutRendersBracket pins mp-ndfu: a pure
+// knockout competition has NO pools, so the pool-fed draw returns nothing and
 // the blank-template export used to skip the entire knockout block -- shipping a
 // workbook (and PDF booklet) with no tree pages and an empty Elimination Matches
 // sheet. The fix derives the elimination leaves from the stored bracket
-// (PlayoffLeavesFromBracket), exactly as the results workbook does, so the two
+// (KnockoutLeavesFromBracket), exactly as the results workbook does, so the two
 // exports of the same draw agree.
-func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
+func TestExportCompetitionXlsx_PureKnockoutRendersBracket(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "pure-playoffs-bracket"
-	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+	compID := "pure-knockout-bracket"
+	createTestCompetition(t, store, compID, "knockout", 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 	})
 	names := make([]string, 8)
@@ -384,9 +384,9 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	// (1) The bracket page(s) must be rendered, not skipped, and carry content --
 	// not left as a blank sheet. (leafLabelsOnSheet is not usable here: its regex
 	// matches the pool CONCATENATE("Pool A-1st ", ...) placeholder form, but a
-	// pure-playoffs leaf renders a participant name via a different formula.)
+	// pure-knockout leaf renders a participant name via a different formula.)
 	pages := treeSheets(f)
-	require.NotEmpty(t, pages, "a pure playoffs competition must render its bracket page(s)")
+	require.NotEmpty(t, pages, "a pure knockout competition must render its bracket page(s)")
 	nonEmpty := 0
 	rows, err := f.GetRows(pages[0])
 	require.NoError(t, err)
@@ -405,11 +405,11 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 	elim, err := f.GetRows(helper.SheetEliminationMatches)
 	require.NoError(t, err)
 	assert.Equal(t, 7, countEliminationMatchBlocks(elim),
-		"an 8-entrant playoffs knockout must render 7 elimination match blocks")
+		"an 8-entrant knockout knockout must render 7 elimination match blocks")
 }
 
-// TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint pins
-// bc-pnum A8: a playoffs-only competition never has a pools.csv, so
+// TestExportCompetitionXlsx_PureKnockoutRendersTagsAndNamesToPrint pins
+// bc-pnum A8: a knockout-only competition never has a pools.csv, so
 // ExportCompetitionXlsx used to feed CreateTagsSheet and (inside
 // RenderCompetitionWorkbook) CreateNamesWithPoolToPrint the EMPTY pools
 // slice, which produced a Tags sheet with zero rows and no Names-to-Print
@@ -439,13 +439,13 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersBracket(t *testing.T) {
 // this test green. Player04 is now the sole seed (StandardSeeding places
 // rank 1 at bracket slot 0, ahead of the three unseeded entrants that follow
 // it in roster order), and Player05 is present but not checked in, so
-// generatePlayoffs never draws them at all -- the two cases orderPlayersByDraw
+// generateKnockout never draws them at all -- the two cases orderPlayersByDraw
 // exists to handle: numbered entrants in DRAW position, unnumbered ones
 // last, in roster order.
-func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing.T) {
+func TestExportCompetitionXlsx_PureKnockoutRendersTagsAndNamesToPrint(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "pure-playoffs-tags"
-	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+	compID := "pure-knockout-tags"
+	createTestCompetition(t, store, compID, "knockout", 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 		c.NumberPrefix = "K"
 		c.CheckInEnabled = true
@@ -525,7 +525,7 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 			break
 		}
 	}
-	require.NotEmpty(t, namesSheet, "a playoffs-only competition must still get a Names to Print sheet")
+	require.NotEmpty(t, namesSheet, "a knockout-only competition must still get a Names to Print sheet")
 	nameRows, err := f.GetRows(namesSheet)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(nameRows), 5, "Names to Print must carry one row per entrant")
@@ -553,8 +553,8 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 	assert.Equal(t, []string{"K1", "K2", "K3", "K4", ""}, gotNumbers)
 }
 
-// TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered pins the
-// deliberate pre-draw exception documented on PlayoffsNamesToPrint
+// TestExportCompetitionXlsx_PreDrawKnockoutNamesToPrintUnnumbered pins the
+// deliberate pre-draw exception documented on KnockoutNamesToPrint
 // (numbering.go): the blank-template export is reachable BEFORE a draw
 // exists, precisely so an operator can print name tags and blank score
 // sheets ahead of the tournament. A never-started, setup-status
@@ -562,16 +562,16 @@ func TestExportCompetitionXlsx_PurePlayoffsRendersTagsAndNamesToPrint(t *testing
 // one row per entrant in roster order -- but no number, since there is no
 // DrawOrder yet to derive one from.
 //
-// This is the guard's only pin: mutating PlayoffsNamesToPrint's check from
-// comp.EffectiveFormat() != state.CompFormatPlayoffs to
+// This is the guard's only pin: mutating KnockoutNamesToPrint's check from
+// comp.EffectiveFormat() != state.CompFormatKnockout to
 // DrawSourceFor(comp) != DrawInBracket (requiring an existing draw) leaves
 // the rest of the suite green while silently dropping this sheet for every
-// not-yet-drawn playoffs competition, since DrawSourceFor returns DrawNone
+// not-yet-drawn knockout competition, since DrawSourceFor returns DrawNone
 // identically for "not drawn yet" and "Swiss".
-func TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered(t *testing.T) {
+func TestExportCompetitionXlsx_PreDrawKnockoutNamesToPrintUnnumbered(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "predraw-playoffs-names"
-	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+	compID := "predraw-knockout-names"
+	createTestCompetition(t, store, compID, "knockout", 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 		c.NumberPrefix = "K"
 	})
@@ -595,7 +595,7 @@ func TestExportCompetitionXlsx_PreDrawPlayoffsNamesToPrintUnnumbered(t *testing.
 			break
 		}
 	}
-	require.NotEmpty(t, namesSheet, "a not-yet-drawn playoffs competition must still get a Names to Print sheet")
+	require.NotEmpty(t, namesSheet, "a not-yet-drawn knockout competition must still get a Names to Print sheet")
 
 	nameRows, err := f.GetRows(namesSheet)
 	require.NoError(t, err)
@@ -653,8 +653,8 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-// TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce pins the
-// double-write fix: a playoffs-only export (no pools.csv) used to call
+// TestExportCompetitionXlsx_PureKnockoutWritesDataSheetExactlyOnce pins the
+// double-write fix: a knockout-only export (no pools.csv) used to call
 // helper.AddPoolDataToSheet inside RenderCompetitionWorkbook's step 1 (over
 // the empty pools slice, writing only headers) and THEN call
 // helper.AddPlayerDataToSheet a second time in ExportCompetitionXlsx itself,
@@ -666,10 +666,10 @@ func captureStdout(t *testing.T, fn func()) string {
 // the Data sheet written" available from outside the helper package: the
 // workbook itself has no artifact recording writer count once the file is
 // closed.
-func TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce(t *testing.T) {
+func TestExportCompetitionXlsx_PureKnockoutWritesDataSheetExactlyOnce(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
-	compID := "pure-playoffs-data-once"
-	createTestCompetition(t, store, compID, "playoffs", 0, func(c *state.Competition) {
+	compID := "pure-knockout-data-once"
+	createTestCompetition(t, store, compID, "knockout", 0, func(c *state.Competition) {
 		c.Courts = []string{"A"}
 		c.NumberPrefix = "K"
 	})
@@ -681,7 +681,7 @@ func TestExportCompetitionXlsx_PurePlayoffsWritesDataSheetExactlyOnce(t *testing
 		require.NoError(t, exportErr)
 	})
 	assert.Equal(t, 1, strings.Count(output, "Data added to spreadsheet"),
-		"the Data sheet must have exactly ONE writer for a playoffs-only export; captured stdout: %q", output)
+		"the Data sheet must have exactly ONE writer for a knockout-only export; captured stdout: %q", output)
 }
 
 // TestExportCompetitionXlsx_SetupMixedCompetitionHasNoTagsPrintArea pins a

@@ -92,7 +92,7 @@ Three programs ship in the single binary. The three ways to run a tournament dec
 
     Generate print-ready Excel brackets from the command line.
 
-    `create-pools` (pools + knockout) · `create-playoffs` (straight knockout)
+    `create-pools` (pools + knockout) · `create-knockout` (straight knockout)
 
     [Command reference](user-guide/commands/create-pools.md)
 
@@ -126,7 +126,7 @@ If you have multiple shiai-jo, upload the Excel file to Google Drive (or similar
 ## Before the tournament
 
 1. **Collect participants**: one name per line in a CSV file ([input format](user-guide/organisers/input-format.md))
-2. **Generate the bracket**: run `create-pools` or `create-playoffs` ([commands](user-guide/commands/create-pools.md))
+2. **Generate the bracket**: run `create-pools` or `create-knockout` ([commands](user-guide/commands/create-pools.md))
 3. **Optionally seed** top competitors so they land in separate pools/sides of the bracket ([seeding](user-guide/commands/create-pools.md#seeding))
 4. **Print**: the Excel file is laid out to print cleanly on A4/A3
 

@@ -15,7 +15,7 @@ import "testing"
 // how the pre-bc-3rdp code answered them.
 func TestEffectiveTwoThirdPlaces_BehaviourPreservation(t *testing.T) {
 	t.Run("naginata knockout requires a single 3rd (bronze match)", func(t *testing.T) {
-		c := Competition{Format: CompFormatPlayoffs, Naginata: true}
+		c := Competition{Format: CompFormatKnockout, Naginata: true}
 		if got := c.RequiresSingleThirdPlace(); !got {
 			t.Fatalf("RequiresSingleThirdPlace() = %v, want true (bronze match for naginata knockout)", got)
 		}
@@ -25,7 +25,7 @@ func TestEffectiveTwoThirdPlaces_BehaviourPreservation(t *testing.T) {
 	})
 
 	t.Run("non-naginata knockout does not require a single 3rd (no bronze match)", func(t *testing.T) {
-		c := Competition{Format: CompFormatPlayoffs, Naginata: false}
+		c := Competition{Format: CompFormatKnockout, Naginata: false}
 		if got := c.RequiresSingleThirdPlace(); got {
 			t.Fatalf("RequiresSingleThirdPlace() = %v, want false (kendo knockout awards joint 3rd, no bronze)", got)
 		}
@@ -73,7 +73,7 @@ func TestEffectiveTwoThirdPlaces_BehaviourPreservation(t *testing.T) {
 // into the knockout-side rule (step 3: "!Naginata").
 func TestEffectiveTwoThirdPlaces_TrapCase(t *testing.T) {
 	t.Run("absent LeagueTwoThirdPlaces on a non-naginata knockout", func(t *testing.T) {
-		c := Competition{Format: CompFormatPlayoffs, Naginata: false}
+		c := Competition{Format: CompFormatKnockout, Naginata: false}
 		// LeagueTwoThirdPlaces left at its Go zero value (false/absent).
 		if got := c.RequiresSingleThirdPlace(); got {
 			t.Fatalf("RequiresSingleThirdPlace() = %v, want false: a non-naginata knockout must not gain a bronze match merely because a league-only legacy field is unset", got)
@@ -83,16 +83,16 @@ func TestEffectiveTwoThirdPlaces_TrapCase(t *testing.T) {
 	t.Run("LeagueTwoThirdPlaces=true on a non-naginata knockout is still ignored", func(t *testing.T) {
 		// Dead data: every create-form submission sends leagueTwoThirdPlaces
 		// for every format (see COMPETITION_DEFAULTS' history), so a real
-		// on-disk playoffs/mixed competition can carry LeagueTwoThirdPlaces:
+		// on-disk knockout/mixed competition can carry LeagueTwoThirdPlaces:
 		// true even though it was never meaningful for that format. It must
 		// not leak into the knockout-side rule either.
-		c := Competition{Format: CompFormatPlayoffs, Naginata: false, LeagueTwoThirdPlaces: true}
+		c := Competition{Format: CompFormatKnockout, Naginata: false, LeagueTwoThirdPlaces: true}
 		if got := c.RequiresSingleThirdPlace(); got {
 			t.Fatalf("RequiresSingleThirdPlace() = %v, want false: LeagueTwoThirdPlaces must never be read for a non-league format", got)
 		}
 	})
 
-	t.Run("mixed format follows the same knockout-side rule as playoffs", func(t *testing.T) {
+	t.Run("mixed format follows the same knockout-side rule as knockout", func(t *testing.T) {
 		c := Competition{Format: CompFormatMixed, Naginata: true}
 		if got := c.RequiresSingleThirdPlace(); !got {
 			t.Fatalf("RequiresSingleThirdPlace() = %v, want true for a naginata mixed competition", got)
@@ -109,7 +109,7 @@ func TestEffectiveTwoThirdPlaces_ExplicitOverride(t *testing.T) {
 	falseVal := false
 
 	t.Run("naginata knockout explicitly opted into joint 3rds", func(t *testing.T) {
-		c := Competition{Format: CompFormatPlayoffs, Naginata: true, TwoThirdPlaces: &trueVal}
+		c := Competition{Format: CompFormatKnockout, Naginata: true, TwoThirdPlaces: &trueVal}
 		if got := c.EffectiveTwoThirdPlaces(); !got {
 			t.Fatalf("EffectiveTwoThirdPlaces() = %v, want true (explicit override beats !Naginata fallback)", got)
 		}

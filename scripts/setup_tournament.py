@@ -195,7 +195,7 @@ def run_competition_setup(cat):
 
     # NOTE: a mixed (Pools + Knockout) competition is a SINGLE competition. Its
     # knockout bracket fills in automatically as each pool finishes, there is no
-    # separate playoffs competition to create. Cross-competition promotion (the
+    # separate knockout competition to create. Cross-competition promotion (the
     # old "reserved slots" feature) has also been removed.
 
     seeds = parse_seeds(seeds_path)
@@ -248,7 +248,7 @@ def score_all_matches(comp_id):
         bracket_matches = []
         bracket = detail.get('bracket', {})
         # A mixed competition's knockout bracket fills in IN PLACE as each pool
-        # finishes, there is no separate playoffs competition. Score any bracket
+        # finishes, there is no separate knockout competition. Score any bracket
         # match whose BOTH sides are resolved competitors: skip "Winner of …"
         # feeders, empty bye slots, and unseeded pool-origin placeholders
         # ("Pool A-1st") whose feeder pool hasn't finished yet. Re-fetching each
@@ -336,7 +336,7 @@ def score_all_matches(comp_id):
     detail = resp.json()
     fmt = detail['config'].get('format', '')
     # league = pool-only (winner is decided by standings); everything else
-    # (mixed/playoffs) culminates in a knockout final.
+    # (mixed/knockout) culminates in a knockout final.
     if fmt == 'league':
         standings = detail.get('standings', {})
         for pool, std in standings.items():
@@ -360,7 +360,7 @@ def main():
         # finishing. Don't let that abort seeding of the remaining categories.
         try:
             # 1. Setup pools (mixed competition, its knockout bracket fills in
-            #    automatically as each pool finishes; no separate playoff comp).
+            #    automatically as each pool finishes; no separate knockout comp).
             comp_id = run_competition_setup(cat)
 
             # 2. Score everything: score_all_matches loops until no scoreable
@@ -370,7 +370,7 @@ def main():
             #    and knockout are all driven by this one call.
             score_all_matches(comp_id)
 
-            # 3. Finalize. A mixed comp ends in 'playoffs' status once the
+            # 3. Finalize. A mixed comp ends in 'knockout' status once the
             #    bracket final is scored; mark it completed (idempotent, a
             #    league comp already auto-completes, so /complete is a no-op or
             #    harmless there).

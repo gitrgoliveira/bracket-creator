@@ -155,7 +155,7 @@ describe('bc-symm-settings-create-parity: a format round trip does not destroy s
 
     await waitFor(() => expect(onUpdate).toHaveBeenCalled());
     const payload = onUpdate.mock.calls[0][0];
-    expect(payload.format).toBe('playoffs');
+    expect(payload.format).toBe('knockout');
     expect(
       payload.poolSize,
       'the PUT must still clear poolSize for a knockout-only competition even though `local` no longer holds 0 -- ' +

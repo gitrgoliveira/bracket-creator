@@ -19,7 +19,7 @@ import (
 // "K1") from pools.csv, in place. participants.csv never persists Number:
 // the draw assigns it and persists it only in pools.csv, so every pooled
 // payload that shows a number derives it here at read time (mp-13y). A
-// knockout-only (playoffs) competition's number lives in the bracket's
+// knockout-only (knockout) competition's number lives in the bracket's
 // DrawOrder instead, merged by engine.NumberKnockoutParticipants -- see
 // applyDrawNumbers below, this function's sibling for that format.
 //
@@ -131,7 +131,7 @@ func numberingApplies(comp *state.Competition) (needsBracket, ok bool) {
 // cost a second bracket.json read and report the identical corrupt-file
 // error a second time.
 //
-// Only the playoffs branch can skip an I/O read this way (bracket is the
+// Only the knockout branch can skip an I/O read this way (bracket is the
 // ONLY file that format ever needs for numbering); every other format still
 // performs its own pools.csv read here. Skips ALL reads (pools or bracket)
 // when the competition has no draw yet: pools.csv/bracket.json cannot exist
@@ -328,7 +328,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// no-I/O owner (applyDrawNumbers, bc-pnum ruling 2): pools.csv for a
 	// pooled format, the bracket's DrawOrder for a standalone knockout.
 	// bracket is already loaded above for the court-feed check, so a
-	// playoffs-format competition's number never re-reads (and, on a corrupt
+	// knockout-format competition's number never re-reads (and, on a corrupt
 	// file, never re-reports) bracket.json.
 	applyDrawNumbers(comp, players, pools, bracket)
 

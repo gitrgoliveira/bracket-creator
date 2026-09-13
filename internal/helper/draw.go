@@ -80,7 +80,7 @@ type KnockoutDraw struct {
 	// so anything asking "which shiaijo is this pool on?" has to read what the
 	// draw used rather than re-derive an answer that may not match it.
 	//
-	// nil for a draw with no pool phase (NewPlayoffDraw).
+	// nil for a draw with no pool phase (NewKnockoutDraw).
 	poolCourt []int
 }
 
@@ -100,8 +100,8 @@ func (d *KnockoutDraw) PoolCourt(numPools int) []int {
 // This, not the requested court count, is the band count for the Elimination
 // Matches sheet. That sheet cannot self-clamp the way the pool sheets do,
 // because it takes no pools. On the pool-fed path NumCourts equals the count
-// those sheets clamp to; on the PURE PLAYOFFS path (pools empty, so
-// EffectiveDrawCourts returns the raw count) NewPlayoffDraw -> splitIntoSubtrees
+// those sheets clamp to; on the PURE KNOCKOUT path (pools empty, so
+// EffectiveDrawCourts returns the raw count) NewKnockoutDraw -> splitIntoSubtrees
 // can honestly yield FEWER regions than numCourts when the tree has too few
 // splittable levels. Using it makes the elimination banding equal the tree-page
 // count in BOTH formats, which is why both export paths pass it.
@@ -215,20 +215,20 @@ func BuildKnockoutDrawFromAssignment(pools []Pool, poolWinners int, poolCourt []
 	}
 }
 
-// NewPlayoffDraw wraps an already-built elimination tree (a standalone playoffs
+// NewKnockoutDraw wraps an already-built elimination tree (a standalone knockout
 // bracket: StandardSeeding -> CreateBalancedTree, no pool phase) in the same
 // region structure a pool-fed draw carries, by cutting it into numCourts
 // genuine subtrees.
 //
-// R2-R7 do not apply to a playoffs bracket -- its placement is StandardSeeding's
+// R2-R7 do not apply to a knockout bracket -- its placement is StandardSeeding's
 // -- but R8 (pages per shiaijo) and the per-match court derivation do, and both
 // read Regions. Cutting rather than rebuilding keeps the seeded placement
 // untouched.
-func NewPlayoffDraw(root *Node, numCourts int) *KnockoutDraw {
+func NewKnockoutDraw(root *Node, numCourts int) *KnockoutDraw {
 	if root == nil {
 		return nil
 	}
-	// Normalize through the slot codec so every playoffs consumer sees ONE
+	// Normalize through the slot codec so every knockout consumer sees ONE
 	// geometry. CreateBalancedTree gives a ragged roster a riseless tree whose
 	// shallow pairs classify a round late; the skeleton export rebuilds from
 	// the bracket's slots and gets the risen tree, which fights those pairs in
@@ -887,13 +887,13 @@ func interleaveGroups(groups [][]drawOccupant) []drawOccupant {
 // every slot a node, so an all-empty half becomes a phantom match that
 // PrintLeafNodes draws and AssignMatchNumbers numbers -- a bye's empty slots
 // printed as a bout, and every later number shifted off the bracket's own
-// (bc-cse: a 5-entrant playoffs sheet printed 7 junctions for a 4-bout draw,
+// (bc-cse: a 5-entrant knockout sheet printed 7 junctions for a 4-bout draw,
 // and the results workbook, which matches score blocks BY printed number, then
 // wrote each result into the wrong block). CreateBalancedTree stays correct for
 // its own input, an entrant list with no bye slots in it: with no empty slot to
 // collapse the two builders produce the identical tree.
 //
-// Exported for the standalone-playoffs export path (engine.EliminationDraw),
+// Exported for the standalone-knockout export path (engine.EliminationDraw),
 // which rebuilds its tree from the frozen bracket's pow2 first round; the
 // pool-fed draw reaches it through buildBlock.
 func BuildSlotTree(slots []string) *Node {

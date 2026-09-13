@@ -1,0 +1,28 @@
+{
+  // Security gate for web/'s npm dependency tree, run from `make js/sec`.
+  //
+  // Replaces a bare `npm audit --audit-level=high`, which called npm's legacy
+  // quick-audit endpoint. That endpoint announces itself as being retired and
+  // intermittently answers 400 or 503, so the gate failed for reasons that had
+  // nothing to do with this repository's dependencies. web-mobile has run
+  // through audit-ci for a while without hitting that, so web/ now matches it
+  // (bc-jsec).
+  //
+  // The gate level is unchanged: HIGH and CRITICAL still fail.
+  "high": true,
+
+  // Terse output: a pass/fail line plus a counts block (vulnerabilities by
+  // severity, dependency totals), rather than the per-advisory detail. Note
+  // this still prints a small JSON object on every run; it is the summary
+  // counts, not the full advisory report. Matches web-mobile/audit-ci.jsonc.
+  "report-type": "summary",
+
+  // Dev dependencies stay in scope. web/'s only dependency is vitest, so
+  // skipping dev would leave this file gating nothing at all.
+  "skip-dev": false,
+
+  // Allowlist: intentionally EMPTY. web/ has no suppressed advisory today.
+  // Add one only for an advisory proven unfixable by an upgrade, with a
+  // comment naming it and why, exactly as web-mobile/audit-ci.jsonc does.
+  "allowlist": []
+}

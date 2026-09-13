@@ -220,14 +220,14 @@ func TestPrintPoolMatchesMirroring(t *testing.T) {
 }
 
 // testDrawFor builds the draw a hand-written rounds slice describes: the final
-// is the root, cut into numCourts regions exactly as a playoffs draw is. The
+// is the root, cut into numCourts regions exactly as a knockout draw is. The
 // elimination sheet bands by the draw's regions, so these tests need the draw
 // the rounds came from rather than a bare court count.
 func testDrawFor(rounds [][]*Node, numCourts int) *KnockoutDraw {
 	if len(rounds) == 0 || len(rounds[len(rounds)-1]) == 0 {
 		return nil
 	}
-	return NewPlayoffDraw(rounds[len(rounds)-1][0], numCourts)
+	return NewKnockoutDraw(rounds[len(rounds)-1][0], numCourts)
 }
 
 func TestPrintTeamEliminationMatchesMirroring(t *testing.T) {
@@ -519,8 +519,8 @@ func TestPoolWinnerFormulaReferences(t *testing.T) {
 // TestPrintTeamEliminationMatches_CellRefLikeLeafNames is a regression test for
 // mp-uagg: printSingleEliminationMatch used to decide leaf- vs match-feeder
 // nodes by asking whether Node.LeafVal parsed as an Excel cell reference
-// (excelize.SplitCellName). A no-pools playoffs bracket (the blank-template CLI
-// export, cmd/create-playoffs.go) renders raw participant names as leaves via
+// (excelize.SplitCellName). A no-pools knockout bracket (the blank-template CLI
+// export, cmd/create-knockout.go) renders raw participant names as leaves via
 // ConvertPlayersToWinners, so a competitor named like a cell coordinate
 // ("P1" = column P row 1, "M3", "A4") was misclassified as a match-feeder,
 // producing a broken CONCATENATE(...,”!) formula. Fixed by checking the

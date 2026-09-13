@@ -118,7 +118,7 @@ func TestLegacyRosterMintedWhenTheDrawNamesTheCompetitors(t *testing.T) {
 // TestLegacyRosterProvedByTheBracket: a knockout-only competition has no
 // pools.csv and no pool-matches.csv, so bracket.json is the only file that
 // can answer. This pins that it is actually consulted -- the population it
-// serves (a legacy playoffs competition) would otherwise fall silently into
+// serves (a legacy knockout competition) would otherwise fall silently into
 // the unprovable class and never be repaired.
 func TestLegacyRosterProvedByTheBracket(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)

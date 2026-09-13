@@ -34,7 +34,7 @@ func TestDrawPipelineRejectsShiaijoTheTournamentLacks(t *testing.T) {
 	// court no operator can open is just as invisible as a knockout one.
 	for _, format := range []string{
 		state.CompFormatMixed,
-		state.CompFormatPlayoffs,
+		state.CompFormatKnockout,
 		state.CompFormatLeague,
 		state.CompFormatSwiss,
 	} {
@@ -86,7 +86,7 @@ func TestDrawPipelineAcceptsASubsetOfTheTournamentsShiaijo(t *testing.T) {
 	// the venue's courts draws exactly as before.
 	eng, store, _ := setupTestEngine(t)
 	saveVenue(t, store, "A", "B", "C", "D")
-	createTestCompetition(t, store, "subset", state.CompFormatPlayoffs, 4, func(c *state.Competition) {
+	createTestCompetition(t, store, "subset", state.CompFormatKnockout, 4, func(c *state.Competition) {
 		c.Courts = []string{"A", "B"}
 	})
 	saveTestParticipants(t, store, "subset", []string{"P1", "P2", "P3", "P4"})
@@ -98,7 +98,7 @@ func TestDrawPipelineSkipsMembershipWithoutATournament(t *testing.T) {
 	// in): "unknown court list", not "the venue has no courts". Refusing here
 	// would block every draw in that window.
 	eng, store, _ := setupTestEngine(t)
-	createTestCompetition(t, store, "no-tourn", state.CompFormatPlayoffs, 4, func(c *state.Competition) {
+	createTestCompetition(t, store, "no-tourn", state.CompFormatKnockout, 4, func(c *state.Competition) {
 		c.Courts = []string{"A", "B"}
 	})
 	saveTestParticipants(t, store, "no-tourn", []string{"P1", "P2", "P3", "P4"})

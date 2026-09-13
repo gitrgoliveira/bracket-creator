@@ -74,7 +74,7 @@ func partitionSeeded(players []Player) (seeded, unseeded []Player) {
 // players in a 2^k draw gives the top
 // 2^k, N seeds a first-round bye, and because every bye rank pairs with a
 // distinct low (top-seed) rank in round 1, the draw never contains an
-// empty-vs-empty match. Used by the live-playoffs leaf builder so the knockout
+// empty-vs-empty match. Used by the live-knockout leaf builder so the knockout
 // tree matches conventional seeding instead of clustering all byes at the bottom.
 func StandardSeedingFull(players []Player) []Player {
 	if len(players) == 0 {
@@ -487,8 +487,8 @@ func dojoMeetRound(i, j int) int {
 // denseSlotMap maps a StandardSeeding DENSE index (0..n-1, no padding) to the
 // real, padded knockout leaf slot that entrant lands on in the tree every
 // production consumer actually builds from that same dense array
-// (cmd/create-playoffs.go, internal/engine/bracket.go,
-// internal/engine/playoff_skeleton.go all run
+// (cmd/create-knockout.go, internal/engine/bracket.go,
+// internal/engine/knockout_skeleton.go all run
 // CreateBalancedTree(namesInDenseOrder)). It builds a tree over placeholder
 // labels ("0".."n-1") the identical way -- CreateBalancedTree, then
 // TreeToLeafArray to reproduce that tree's real, per-level-padded slot

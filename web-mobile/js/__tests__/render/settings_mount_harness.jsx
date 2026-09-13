@@ -119,7 +119,7 @@ export function makeSettingsCompetition(overrides = {}) {
     id: 'c1',
     name: 'Autumn Cup',
     status: 'setup',
-    format: 'playoffs',
+    format: 'knockout',
     kind: 'individual',
     teamSize: 0,
     teamMatchType: 'fixed',

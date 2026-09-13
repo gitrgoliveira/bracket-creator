@@ -114,6 +114,15 @@ func captureStateLog(t *testing.T, fn func()) string {
 // parseTeamLineupsFile reads that as an empty map, the ordinary state of
 // every competition that has never set a lineup, and logging it would bury
 // the real failure this test pins.
+//
+// The log is captured around state.NewStore itself, not around a separate,
+// later EnsureLegacyUpgraded("c1") call: NewStore's own startup sweep
+// (sweepLegacyUpgrades, legacy_upgrade.go) now runs EnsureLegacyUpgraded for
+// every competition it finds, including "c1" here, so the upgrade -- and
+// this log line -- fires the moment the fresh store opens. A later explicit
+// call would hit the once-per-process map's fast path and log nothing,
+// which is exactly the failure mode this comment is warning the next editor
+// away from reintroducing.
 func TestUnreadableLineupsIsReported(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)
 	legacyUpgradeTeams(t, s, "Tora", "Kaze")
@@ -121,21 +130,26 @@ func TestUnreadableLineupsIsReported(t *testing.T) {
 	path := filepath.Join(dir, "competitions", "c1", "lineups.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("\tnot: [valid\n  yaml: here\n"), 0o600))
 
-	fresh := freshLegacyUpgradeStore(t, dir)
-	logged := captureStateLog(t, func() { fresh.EnsureLegacyUpgraded("c1") })
+	logged := captureStateLog(t, func() {
+		_, err := state.NewStore(dir)
+		require.NoError(t, err)
+	})
 	assert.Contains(t, logged, "legacy lineup-member-id upgrade for c1",
 		"a lineup file that will not parse must reach the log this pass already writes for its five siblings")
 }
 
 // TestMissingLineupsIsNotReported is the other half: silence is correct for
 // the file simply not being there, so the assertion above cannot pass by
-// logging on every competition.
+// logging on every competition. Captures around state.NewStore for the same
+// reason its sibling above does: that is now where "c1" is first upgraded.
 func TestMissingLineupsIsNotReported(t *testing.T) {
 	dir, s := newLegacyUpgradeFixture(t)
 	legacyUpgradeTeams(t, s, "Tora", "Kaze")
 
-	fresh := freshLegacyUpgradeStore(t, dir)
-	logged := captureStateLog(t, func() { fresh.EnsureLegacyUpgraded("c1") })
+	logged := captureStateLog(t, func() {
+		_, err := state.NewStore(dir)
+		require.NoError(t, err)
+	})
 	assert.NotContains(t, logged, "legacy lineup-member-id upgrade",
 		"no lineups.yaml is the ordinary state, not a repair failure")
 }

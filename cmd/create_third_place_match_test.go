@@ -23,17 +23,17 @@ func TestThirdPlaceMatchFlag_Registration(t *testing.T) {
 	assert.Equal(t, "false", poolsFlag.DefValue)
 	assert.Empty(t, poolsFlag.Shorthand)
 
-	playoffsFlag := newCreatePlayoffCmd().Flags().Lookup("third-place-match")
-	require.NotNil(t, playoffsFlag, "create-playoffs must register --third-place-match")
-	assert.Equal(t, "false", playoffsFlag.DefValue)
-	assert.Empty(t, playoffsFlag.Shorthand)
+	knockoutFlag := newCreateKnockoutCmd().Flags().Lookup("third-place-match")
+	require.NotNil(t, knockoutFlag, "create-knockout must register --third-place-match")
+	assert.Equal(t, "false", knockoutFlag.DefValue)
+	assert.Empty(t, knockoutFlag.Shorthand)
 }
 
-// TestCreatePlayoffs_ThirdPlaceMatchFlag_ProducesBronzeBlock is the red-verify
-// target for bc-3rdp's gap: --third-place-match on create-playoffs must add the
+// TestCreateKnockout_ThirdPlaceMatchFlag_ProducesBronzeBlock is the red-verify
+// target for bc-3rdp's gap: --third-place-match on create-knockout must add the
 // "3rd Place" bronze block, and omitting it must not (today's default,
 // preserved).
-func TestCreatePlayoffs_ThirdPlaceMatchFlag_ProducesBronzeBlock(t *testing.T) {
+func TestCreateKnockout_ThirdPlaceMatchFlag_ProducesBronzeBlock(t *testing.T) {
 	t.Parallel()
 
 	const roster = "Alice,Dojo1\nBob,Dojo2\nCharlie,Dojo3\nDave,Dojo4\n"
@@ -45,7 +45,7 @@ func TestCreatePlayoffs_ThirdPlaceMatchFlag_ProducesBronzeBlock(t *testing.T) {
 		require.NoError(t, os.WriteFile(input, []byte(roster), 0o600))
 		output := filepath.Join(dir, "out.xlsx")
 
-		cmd := newCreatePlayoffCmd()
+		cmd := newCreateKnockoutCmd()
 		args := append([]string{"--file", input, "--output", output, "--determined", "--courts", "1"}, extraArgs...)
 		cmd.SetArgs(args)
 		cmd.SilenceUsage = true
@@ -74,7 +74,7 @@ func TestCreatePlayoffs_ThirdPlaceMatchFlag_ProducesBronzeBlock(t *testing.T) {
 	})
 }
 
-// TestCreatePools_ThirdPlaceMatchFlag_ProducesBronzeBlock mirrors the playoffs
+// TestCreatePools_ThirdPlaceMatchFlag_ProducesBronzeBlock mirrors the knockout
 // case above for create-pools.
 func TestCreatePools_ThirdPlaceMatchFlag_ProducesBronzeBlock(t *testing.T) {
 	t.Parallel()

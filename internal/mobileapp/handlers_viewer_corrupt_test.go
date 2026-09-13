@@ -578,7 +578,7 @@ func TestViewerAggregateAndDetail_CorruptPoolsCSVAgree(t *testing.T) {
 	corrupt := []byte("a,b\na,\"bad\nquote")
 	for _, comp := range []*state.Competition{
 		{ID: "pooled", Name: "Pooled", Status: state.CompStatusPools, Format: state.CompFormatMixed, Kind: "individual", Courts: []string{"A"}},
-		{ID: "knockout", Name: "Knockout", Status: state.CompStatusPlayoffs, Format: state.CompFormatPlayoffs, Kind: "individual", Courts: []string{"A"}},
+		{ID: "knockout", Name: "Knockout", Status: state.CompStatusKnockout, Format: state.CompFormatKnockout, Kind: "individual", Courts: []string{"A"}},
 	} {
 		require.Empty(t, comp.NumberPrefix, "the fixture is the no-prefix shape on purpose")
 		require.NoError(t, store.SaveCompetition(comp))

@@ -912,8 +912,8 @@ describe('phaseLabel: league suppresses the round-robin round number', () => {
     const saved = window.bracketRoundLabel;
     window.bracketRoundLabel = undefined; // simulate bracket.jsx not loaded
     try {
-      expect(phaseLabel({ id: 'm-r1-0', round: 0 }, true, 0, 3, 'playoffs')).toBe('0');
-      expect(phaseLabel({ id: 'm-r1-0' }, true, 0, 3, 'playoffs')).toBe('');
+      expect(phaseLabel({ id: 'm-r1-0', round: 0 }, true, 0, 3, 'knockout')).toBe('0');
+      expect(phaseLabel({ id: 'm-r1-0' }, true, 0, 3, 'knockout')).toBe('');
     } finally {
       window.bracketRoundLabel = saved;
     }

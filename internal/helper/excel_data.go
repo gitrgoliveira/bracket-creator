@@ -133,14 +133,14 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 	return poolCoords, playerCoords
 }
 
-// AddPlayerDataToSheet is the playoffs-only (no pools) counterpart of
-// AddPoolDataToSheet, used by a pure-playoffs draw's Data sheet.
+// AddPlayerDataToSheet is the knockout-only (no pools) counterpart of
+// AddPoolDataToSheet, used by a pure-knockout draw's Data sheet.
 //
 // Column A (bc-pnum A11, relabelled by bc-pnum review) is headed "Entry
 // order", 1-based: CreatePlayers (tournament.go) stamps each entrant's
 // PoolPosition 0-based (len(players) BEFORE the append), a value pool
 // distribution overwrites 1-based for every pooled competition but nothing
-// ever touches for a playoffs-only one, so this sheet showed row 3 (the
+// ever touches for a knockout-only one, so this sheet showed row 3 (the
 // first entrant) as "0" beside a "Player Number" column already reading
 // "K1" -- two different counting conventions on the same row.
 //
@@ -149,7 +149,7 @@ func AddPoolDataToSheet(f *excelize.File, pools []Pool, sanitize bool, titlePref
 // time), regardless of what order the `players` slice is in when this
 // function runs -- reordering the slice changes ROW order, never what a
 // given row's column A says about that specific player. bc-pnum ruling 2
-// moved the CLI's own call site (cmd/create-playoffs.go) to AFTER
+// moved the CLI's own call site (cmd/create-knockout.go) to AFTER
 // StandardSeeding, so ROWS are now in bracket order (matching the "Player
 // Number" column, which the same reorder feeds), while column A still
 // names each row's original entry number, no longer running 1, 2, 3...
@@ -194,7 +194,7 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 // A8): the ONE writer of the Data sheet for that shared pipeline,
 // so a caller never has to run AddPoolDataToSheet and then separately
 // AddPlayerDataToSheet on the same workbook to cover the one shape
-// (playoffs-only, no pools.csv) that needs the latter. namesToPrintPlayers
+// (knockout-only, no pools.csv) that needs the latter. namesToPrintPlayers
 // takes priority when non-empty (the blank-template export's numbered
 // roster, see Engine.NumberedParticipantsFor); pools is used otherwise,
 // including the ordinary "no pools drawn yet" case, which AddPoolDataToSheet
@@ -202,10 +202,10 @@ func AddPlayerDataToSheet(f *excelize.File, players []Player, sanitize bool, tit
 //
 // Before this existed, the blank-template export called AddPoolDataToSheet
 // unconditionally (writing only headers when pools was empty) and THEN
-// called AddPlayerDataToSheet a second time for the playoffs-only case,
+// called AddPlayerDataToSheet a second time for the knockout-only case,
 // after RenderCompetitionWorkbook had already returned -- two writers of one
 // sheet, which is why "Data added to spreadsheet" printed twice for exactly
-// that shape. cmd/create-pools.go and cmd/create-playoffs.go call
+// that shape. cmd/create-pools.go and cmd/create-knockout.go call
 // AddPoolDataToSheet/AddPlayerDataToSheet directly and are unaffected: this
 // wrapper exists only for the shared engine/export pipeline's step 1.
 func AddDataToSheetForExport(f *excelize.File, pools []Pool, namesToPrintPlayers []Player, sanitize bool, titlePrefix string) (map[string]cellCoord, map[string]playerCellCoord) {

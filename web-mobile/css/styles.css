@@ -3875,10 +3875,12 @@ button.pool-match-row {
 
 .seed-row {
   display: grid;
-  /* handle | rank | name+dojo | move buttons | seed input. minmax(0, 1fr)
-     for the text track: a bare 1fr floors at min-content and the name never
-     ellipsises, it pushes the controls out of the row instead. */
-  grid-template-columns: 20px 36px minmax(0, 1fr) auto 64px;
+  /* handle | name+dojo | move buttons | seed input. The seed rank shows
+     ONCE, in the input (operator ruling bc-prow: the old "#N" badge on the
+     left repeated it). minmax(0, 1fr) for the text track: a bare 1fr floors
+     at min-content and the name never ellipsises, it pushes the controls out
+     of the row instead. */
+  grid-template-columns: 20px minmax(0, 1fr) auto 64px;
   gap: 8px;
   align-items: center;
   padding: 4px 10px;
@@ -3908,14 +3910,6 @@ button.pool-match-row {
   padding: 0 8px;
   margin-left: -8px;
   flex-shrink: 0;
-}
-
-.seed-row__rank {
-  font-size: 12px;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-weight: 700;
-  text-align: center;
 }
 
 .seed-row__name {

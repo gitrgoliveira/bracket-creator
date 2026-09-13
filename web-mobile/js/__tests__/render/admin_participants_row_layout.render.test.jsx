@@ -76,7 +76,7 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
 
   it('lays a row out as name unit then dojo + id unit inside one line', async () => {
     const { container } = await mountParticipants(makeParticipantsCompetition({
-      players: [{ id: 'abcdef1234567890', name: 'Alice', dojo: 'Dojo Alice', number: 'K1', source: 'manual' }],
+      players: [{ id: 'abcdef1234567890', name: 'Alice', dojo: 'Dojo Alice', number: 'K1', source: 'manual', seed: 2 }],
     }));
 
     const row = container.querySelector('.seed-row');
@@ -94,6 +94,11 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
     // Operator ruling (bc-prow, reversing bc-pnum 1e): the participant id is
     // not shown on the row, not even truncated.
     expect(row.textContent).not.toContain('abcdef12');
+
+    // The seed rank shows once, in the input (operator ruling): no "#N" badge.
+    expect(row.querySelector('.seed-row__rank')).toBeNull();
+    expect(row.textContent).not.toContain('#2');
+    expect(row.querySelector('input.seed-row__input').value).toBe('2');
 
     const actions = row.querySelector('.seed-row__actions');
     expect(actions.querySelector('button[aria-label="Move up"]')).toBeTruthy();

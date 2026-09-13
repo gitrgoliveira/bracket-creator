@@ -1045,7 +1045,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
                     <span className="seed-row__handle" title={isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
-                    <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
                     <div className="seed-row__main">
                       <div className="seed-row__line">
                         <div className="seed-row__who">

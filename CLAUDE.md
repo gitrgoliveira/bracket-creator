@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Git / Worktree Rules
 
 - **Edit only inside the correct worktree, never the main checkout.** This repo uses a git worktree per PR, under `.claude/worktrees/`. Before the first edit or git operation, confirm the checkout with `git rev-parse --show-toplevel` and the branch with `git branch --show-current`. Edits landing in the wrong worktree (or the `main` checkout) force costly patch-and-revert recovery.
+- The number of tokens used to edit files is best minimized, all else being equal. Therefore, when it will not affect the end result, try to surgically edit a file rather than rewrite the entire thing.
 - **Never `cd` inside a Bash command to reach a repo.** Address the worktree explicitly (`git -C <abs-path>`, `make -C <abs-path>`) or run from its root. A `cd` in a chain has sent git to the wrong checkout and left the shell there for later calls.
 
 ## Workflow Rules
@@ -16,7 +17,7 @@ When asked to *plan*, *verify*, or *record a plan on a bead*: do NOT write code.
 ## Governance
 
 Before implementing features or making architectural decisions, read the project constitution:
-**`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with. The constitution is tracked in git. Feature plans under `specs/<n>-.../` are gitignored (only `specs/openapi.yaml` and `specs/*/screenshots/` are tracked), so a worktree or fresh clone will not have the plan the Speckit block near the end of this file points to.
+**`.specify/memory/constitution.md`**: defines the core principles (YAGNI, DRY, TDD, DDD, evidence-based decisions, bracket integrity, and live-tournament constraints) that all changes must comply with. The constitution is tracked in git. Feature plans under `specs/<n>-.../` are gitignored (only `specs/openapi.yaml` and `specs/*/screenshots/` are tracked), so a worktree or fresh clone has no plan file.
 
 ## Project Overview
 
@@ -188,7 +189,7 @@ The verdict travels IN the ippons, atomically with the scoreline it rests on: ve
 
 Every forward replacement of a `SubResults` slice must still call `engine.preserveSubHantei(stored, incoming)` first. It carries a stored daihyosen outcome (winner plus the marked scoreline) onto a scoreline-silent row: the copied prior ippons carry the verdict themselves and no flag is raised. It is deliberately narrow in two directions: it PATCHES an existing position -1 row but never RE-APPENDS a dropped one (`DELETE /daihyosen` removes that row on purpose through this same path), and it refuses any `Decision` outside validateSubBout's allow-list because it runs AFTER validation and its output is never re-checked.
 
-The bracket writes call it via `preserveDaihyosenOutcome` inside **`applyBracketMatchResult`**, the one per-match bracket write shared by `recordBracketMatchResult` and the bronze (3rd-place) fallback. `recordBracketMatchResult` has been one body since bc-twin: it takes an `h state.StoreTx` handle, which `*state.Store` satisfies, so the same dispatch serves the tx and non-tx doors. Those were three hand-copied bodies whose resyncs are recorded in the source (the bronze copy had to be retrofitted with the mp-y3nk LWW guard the round copies already had); all are now `UpdateBracket` dispatch around the shared `applyBracketResultIn`.
+The bracket writes call it via `preserveDaihyosenOutcome` inside **`applyBracketMatchResult`**, the one per-match bracket write shared by `recordBracketMatchResult` and the bronze (3rd-place) fallback. `recordBracketMatchResult` is one body taking an `h state.StoreTx` handle, which `*state.Store` satisfies, so the same `UpdateBracket` dispatch around the shared `applyBracketResultIn` serves the tx and non-tx doors. Do not split it into per-door copies: hand-copied bodies here drifted (the bronze copy missed the LWW guard the round copies had).
 
 Pool writes get it from **`applyPoolWrite` (engine/scoring.go), the single owner of what a stored pool match contributes to an incoming one**. It replaced a block hand-copied into each write closure, after those copies drifted twice in the direction that hurts: the preserve reached three of the writers and missed the live `/score` path, and the `CorrectionReason` inherit reached only the Tx twin, so a team quick-score after a kachinuki reopen blanked the operator's audit justification. It also performs the whole-struct `*stored = *result` overwrite itself, so the overwrite is unreachable without the merge; a new field that must survive it goes there and nowhere else. Note the scope: that covers ENGINE-side preservation, while server-owned flags a client must not be able to clear (`ReopenPending`) are re-stamped at the HTTP boundary in `handlers_match.go` instead.
 
@@ -200,7 +201,7 @@ Both primitives take a `matchWritePolicy`: `matchWriteForward` for a client payl
 
 The ONE field it does NOT project is `ModifiedAt`, and the reason is narrower than it looks. `applyMatchWrite` returns true for `matchWriteRestore` BEFORE reading any stamp, so a restore can never lose the LWW comparison and the omission cannot be what makes the rollback apply. What it decides is the stamp LEFT behind by the whole-struct overwrite: omitting it zeroes the stored stamp, so the next write takes `ApplyByTimestamp`'s unstamped bypass rather than being fenced against the restored result's real time. The pool snapshot differs (`lookupExistingResult` copies the stored `MatchResult`, restoring the true prior stamp), so this is a branch asymmetry, not a property of restore; completing the projection is a behavioural change, not a tidy-up. All three are pinned by mutation in `TestBracketRollbackRestoresTheScore`. `domain.FormatScore` was deleted with the strings; `domain.ParseScore` remains solely as the legacy fold's decoder, pinned parse-direction-only by `TestParseScore_PinnedLegacyBytes` because old files hold those bytes forever.
 
-**The policy must reach BOTH branches.** A match id resolves to a pool or a bracket match at run time and the caller cannot know which, so `writeToPoolOrBracket` threads it through the `errMatchNotFound` fall-through as well. `writeToPoolOrBracket` is ONE body since bc-twin: the store handle `h state.StoreTx` (which `*state.Store` satisfies) is how a caller says whether the per-comp lock is already held, and the non-tx entry points `RecordMatchResult`/`RecordMatchResultWithIneligibility` are now `WithTransaction` shims. It used to stop at the pool branch, and the bracket half was compensated for by a caller-side `normalizePriorForRollback` that pre-mangled the snapshot's nils into explicit clears: one function enumerating another's nil-preserve fields, so a fourth such field would have silently broken rollback. The policy differences are pinned by mutation in `pool_write_merge_test.go`, `sub_hantei_preserve_test.go` (`TestBracketRollbackDoesNotReapplyTheWrite`) and the pair `TestRollback_BracketSubResults_Cleared`/`_ClearedTx`. The Tx one exists because a mutation of the tx rollback's policy once survived the whole suite while a comment claimed that path was covered. Since bc-twin they no longer cover two implementations: `RecordMatchResultWithIneligibility` is a `WithTransaction` shim over the Tx method, so both drive the SAME rollback body and the pair now pins the two entry points, not twin parity.
+**The policy must reach BOTH branches.** A match id resolves to a pool or a bracket match at run time and the caller cannot know which, so `writeToPoolOrBracket` threads it through the `errMatchNotFound` fall-through as well. `writeToPoolOrBracket` is ONE body: the store handle `h state.StoreTx` (which `*state.Store` satisfies) is how a caller says whether the per-comp lock is already held, and the non-tx entry points `RecordMatchResult`/`RecordMatchResultWithIneligibility` are `WithTransaction` shims. Never compensate for one branch in a caller (e.g. by pre-converting the snapshot's nils into explicit clears): that makes one function enumerate another's nil-preserve fields, and the next such field silently breaks rollback. The policy differences are pinned by mutation in `pool_write_merge_test.go`, `sub_hantei_preserve_test.go` (`TestBracketRollbackDoesNotReapplyTheWrite`) and the pair `TestRollback_BracketSubResults_Cleared`/`_ClearedTx`, which pins both entry points into the one rollback body.
 
 #### Editors adopt the server's verdict
 
@@ -259,7 +260,7 @@ Production-hardening defaults applied in the `mobile-app` command. Constants liv
 | `MaxHeaderBytes` | 1 MB | (none) | Header-bomb defense |
 | Body cap (admin JSON) | 1 MB | `DefaultMaxBodyBytes` const | `c.BindJSON` payloads are tiny in practice; cap is enforced by `MaxBodyBytes` middleware (returns 413) |
 | Body cap (`/tournament/import`) | 64 MB | `MaxImportBodyBytes` const | Matches `ParseMultipartForm` already in the handler |
-| SSE subscribers | 5000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation (~4–10 KB resident per client); raised from 1000 → 5000 by mp-9afd for large-scale events (1000+ viewers); real hardware load test still required |
+| SSE subscribers | 5000 | `SSE_MAX_CLIENTS` env var | Bounds fan-out cost + per-client goroutine/channel allocation (~4–10 KB resident per client); sized for large-scale events (1000+ viewers); real hardware load test still required |
 | Graceful shutdown | 30s | `httpShutdownTimeout` const | `Hub.Close` is wired via `srv.RegisterOnShutdown` so SSE goroutines exit before the deadline |
 
 **`safeGo` convention.** Any goroutine spawned inside a request handler MUST use the `safeGo` helper in [internal/mobileapp/safego.go](internal/mobileapp/safego.go). Gin's Recovery middleware only catches panics on the request goroutine; a panic in a spawned goroutine crashes the entire process. The helper guarantees `wg.Done()` on panic and captures the recovered value into a shared `atomic.Pointer[recoveredPanic]` so the handler can return a single HTTP 500 without leaking internals. Pattern:
@@ -286,7 +287,7 @@ In-progress migrations and tech debt to keep in mind (re-derive package sizes wi
 - **`helper/` mixes concerns**: tree algorithms, CSV parsing, Excel rendering, seeding, utilities. The `helper/{bracket,csv,seeding}/` subpackages are an in-progress extraction; `helper/` proper has not shrunk yet.
 - **`excel/` has minimal direct test coverage** (roughly 0.3x source) despite Excel being the primary CLI deliverable; most Excel coverage lives in `helper/*_test.go`.
 - **`domain/` adoption is partial**: much business logic still uses `helper.Player` directly rather than domain types; the migration is incomplete.
-- **No top-level interfaces** for `state.Store` or `engine.Engine`: interface adoption is incremental via `mobileapp/deps.go`. Exception carved out by bc-twin: the engine's match-write primitives take `state.StoreTx` as a store handle (`*state.Store` satisfies it), which is what deleted the hand-copied tx/non-tx twin bodies; other engine-to-state and helper-to-engine calls still use concrete types. The decision flow and its eligibility helpers followed in a second pass, so `lookupMatchSides`, `checkConcurrentIneligibility` and `hasDownstreamMatchStarted` each exist ONCE taking the handle (the eligibility restore on a rescore is keyed on the competitor-status record's own `MatchID`, never on a re-derived identity), `RecordDecisionTx` is the shared body, and `RecordDecision` is a `WithTransaction` shim like `RecordMatchResultWithIneligibility`. No hand-copied tx/non-tx twin bodies remain in the engine; extend the handle pattern, don't re-twin.
+- **No top-level interfaces** for `state.Store` or `engine.Engine`: interface adoption is incremental via `mobileapp/deps.go`. One exception: the engine's match-write and decision primitives take `state.StoreTx` as a store handle (`*state.Store` satisfies it), so `writeToPoolOrBracket`, `recordBracketMatchResult`, `RecordDecisionTx`, `lookupMatchSides`, `checkConcurrentIneligibility` and `hasDownstreamMatchStarted` each exist ONCE, with `RecordMatchResultWithIneligibility` and `RecordDecision` as `WithTransaction` shims (the eligibility restore on a rescore is keyed on the competitor-status record's own `MatchID`, never on a re-derived identity). Other engine-to-state and helper-to-engine calls still use concrete types. Extend the handle pattern; never add tx/non-tx twin bodies.
 
 ## Testing Conventions
 
@@ -387,7 +388,7 @@ When rebasing or resolving conflicts, watch for these recurring breakages:
 
 - **Search ALL call sites, including test files, before removing code or parameters.** Run `grep -r` (or `grep -rn 'SYMBOL' . --include='*.go' --include='*.jsx'`) to find every reference, not just production code. A removal that compiles can still leave stale test references or skip-test code pointing at dead paths.
 - **Verify that guards and defensive code are intentional before removing them.** If a reviewer flags a removal, assume the guard was intentional unless you can prove otherwise from git blame or comments. Aggressive removal of guards (e.g. `sourceCompID` checks, `defer os.RemoveAll`) has had to be reverted.
-- **Boy Scout rule: leave code better than you found it, even outside the diff.** When a review or task surfaces a worthwhile adjacent fix (a literal duplicated in sibling files, a comment contradicting the code, a swallowed error in a handler you touched), apply it rather than skipping it as "outside the reviewed diff". Precedent: the shared singleflight response tail was hoisted and the ZIP-magic literal deduplicated across untouched test files precisely because a review flagged them. Two limits keep this from scope creep: don't apply adjacent fixes that change intended behavior (surface those as findings for a decision), and don't let a small PR grow into a refactor: fix what you touched or verified, file the rest.
+- **Boy Scout rule: leave code better than you found it, even outside the diff.** When a review or task surfaces a worthwhile adjacent fix (a literal duplicated in sibling files, a comment contradicting the code, a swallowed error in a handler you touched), apply it rather than skipping it as "outside the reviewed diff". Precedent: the shared singleflight response tail was hoisted and the ZIP-magic literal deduplicated across untouched test files precisely because a review flagged them. Two limits keep this from scope creep: don't apply adjacent fixes that change intended behavior (surface those as findings for a decision), and don't let a small PR grow into a refactor: fix what you touched or verified, and raise the rest with the user rather than filing a follow-up bead unasked.
 
 ## Debugging Principles
 
@@ -402,14 +403,7 @@ Do not use `pkill`, broad `kill`, or force-push. Long-running processes get thei
 
 All changes must be validated with `make go/test` and inspection of the generated example files from `make examples`. Pay attention to page breaks and seeding.
 
-<!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan:
-`specs/003-tournament-gap-closure/plan.md`
-<!-- SPECKIT END -->
-
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -431,30 +425,37 @@ bd close <id>         # Complete work if the PR is merged
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
+## Agent Context Profiles
+
+The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
+
+- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+- **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
+- **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
+
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+This protocol applies when ending a Beads implementation workflow. It is subordinate to explicit user, repository, and orchestrator instructions.
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File issues for remaining work** - Create beads for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **Handle git/sync by active profile**:
    ```bash
+   # Conservative/minimal/default: report status and proposed commands; wait for approval.
+   git status
+
+   # Team-maintainer opt-in only, unless current instructions forbid it:
    git pull --rebase
    git push
-   git status  # MUST show "up to date with origin"
+   git status
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+5. **Hand off** - Summarize changes, validation, issue status, and any blocked sync/commit/push step
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+**Critical rules:**
+- Explicit user or orchestrator instructions override this Beads block.
+- Do not commit or push without clear authority from the active profile or the current user request.
+- If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
 <!-- Everything below is repo-specific and deliberately OUTSIDE the BEADS INTEGRATION
@@ -463,7 +464,11 @@ bd close <id>         # Complete work if the PR is merged
 
 ## Beads: this repo's setup (overrides the generic notes above)
 
-### Push the beads DB at session end
+### Session completion here
+
+The generic Session Completion steps above are narrowed in two places. Step 1: raise remaining work with the user and file a follow-up bead only once they agree. Step 3: a bead stays `in_progress` until its PR merges (see PR Workflow), so "close finished work" means merged work.
+
+### Sync the beads DB
 
 `git push` does NOT sync beads. **There is no auto-push**: `bd create/update/close` only touch the local Dolt DB, so an issue change exists solely on this disk until you run:
 
@@ -472,7 +477,7 @@ bd dolt push     # sync issue changes to the private remote
 bd dolt pull     # pick up changes made on another machine
 ```
 
-Treat this as an extra mandatory step in the Session Completion workflow above, alongside `git push`. `sync.auto-push` is accepted by bd 1.1.0 but silently ignored, so never rely on it.
+So when you hand off after changing beads, include `bd dolt push` in the sync you run or propose, exactly as you would a `git push`. `sync.auto-push` is accepted by bd but silently ignored, so nothing syncs on its own.
 
 ### Two memory stores, not one
 

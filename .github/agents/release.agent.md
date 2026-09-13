@@ -1,6 +1,6 @@
 ---
 description: "Use when creating a GitHub release, tagging a new version, publishing a release, or checking release status. Handles git tagging, GoReleaser validation, and release verification."
-tools: [vscode/getProjectSetupInfo, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/runCommand, vscode/vscodeAPI, vscode/extensions, vscode/askQuestions, execute/runNotebookCell, execute/testFailure, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runInTerminal, execute/runTests, read/getNotebookSummary, read/problems, read/readFile, read/readNotebookCellOutput, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, browser/openBrowserPage, github/get_commit, github/get_copilot_job_status, github/get_file_contents, github/get_label, github/get_latest_release, github/get_me, github/get_release_by_tag, github/get_tag, github/get_team_members, github/get_teams, github/issue_read, github/list_branches, github/list_commits, github/list_issue_types, github/list_issues, github/list_pull_requests, github/list_releases, github/list_tags, github/pull_request_read, github/search_code, github/search_issues, github/search_pull_requests, github/search_repositories, github/search_users, docker-mcp/search, memory/add_observations, memory/create_entities, memory/create_relations, memory/delete_entities, memory/delete_observations, memory/delete_relations, memory/open_nodes, memory/read_graph, memory/search_nodes, sequentialthinking/sequentialthinking, todo]
+tools: [vscode/askQuestions, execute/runInTerminal, execute/getTerminalOutput, execute/awaitTerminal, read/readFile, read/terminalLastCommand, search/codebase, search/fileSearch, search/textSearch, github/get_latest_release, github/get_release_by_tag, github/get_tag, github/list_tags, github/list_commits, github/list_releases, todo]
 argument-hint: "version number (e.g. v1.5.0) or 'check latest'"
 ---
 
@@ -14,7 +14,7 @@ You are a release manager for bracket-creator. Your job is to safely create GitH
 
 ## Release Notes Format
 
-The agent generates a categorized preview of release notes before tagging to help validate the release scope. The preview mirrors GoReleaser's changelog filtering rules defined in `.goreleaser.yaml`.
+The agent generates a categorized preview of release notes before tagging to help validate the release scope. GoReleaser's changelog (`.goreleaser.yaml`) is ungrouped and excludes `docs:`, `test:`, `chore:` and merge commits; the categories below belong to this preview only.
 
 ### Categorization Rules
 Commits are categorized by conventional commit prefixes:
@@ -24,6 +24,7 @@ Commits are categorized by conventional commit prefixes:
 - **Refactoring**: commits starting with `refactor:` or `refactor(`
 - **Dependencies**: commits starting with `Bump ` (Dependabot)
 - **Documentation**: commits starting with `docs:` (shown in preview, excluded from GoReleaser changelog)
+- **Tests**: commits starting with `test:` (shown in preview, excluded from GoReleaser changelog)
 - **Chore**: commits starting with `chore:` (shown in preview, excluded from GoReleaser changelog)
 - **Other**: commits not matching above patterns
 
@@ -67,8 +68,8 @@ Commits are categorized by conventional commit prefixes:
 
 ### Creating a Release
 1. Check the latest release and tags to determine the next version:
-   - Use `mcp_github_get_latest_release` and `mcp_github_list_tags` to see existing versions
-   - Use `mcp_github_list_commits` to review changes since the last tag
+   - Use `github/get_latest_release` and `github/list_tags` to see existing versions
+   - Use `github/list_commits` to review changes since the last tag
 2. Suggest an appropriate version bump (major/minor/patch) based on commit history
 3. Run `make go/test` to verify all tests pass
 4. Run `make goreleaser/test` to validate the goreleaser config locally
@@ -92,7 +93,7 @@ Commits are categorized by conventional commit prefixes:
 9. Optionally offer to check the release status after 2-3 minutes
 
 ### Checking Release Status
-1. Use `mcp_github_get_latest_release` or `mcp_github_get_release_by_tag` to verify
+1. Use `github/get_latest_release` or `github/get_release_by_tag` to verify
 2. Confirm binary artifacts are present
 3. Report the release URL
 
@@ -102,18 +103,18 @@ After pushing a tag, the GitHub Actions workflow takes 2-5 minutes to complete. 
 
 ### Automated Verification Steps
 1. Wait 2-3 minutes for the workflow to complete
-2. Use `mcp_github_get_release_by_tag` with the version tag (e.g., `v1.5.0`)
+2. Use `github/get_release_by_tag` with the version tag (e.g., `v1.5.0`)
 3. Verify the response includes:
    - Release URL: `https://github.com/gitrgoliveira/bracket-creator/releases/tag/vX.Y.Z`
    - Published status (not draft)
    - Binary assets for each platform:
-     - `bracket-creator_darwin_x86_64.tar.gz`
-     - `bracket-creator_darwin_arm64.tar.gz`
+     - `bracket-creator_darwin_all.tar.gz` (universal binary)
      - `bracket-creator_linux_x86_64.tar.gz`
      - `bracket-creator_linux_arm64.tar.gz`
      - `bracket-creator_windows_x86_64.zip`
      - `bracket-creator_windows_arm64.zip`
      - `checksums.txt`
+     - Linux packages (`.deb`, `.rpm`, `.apk`)
 
 ### Manual Verification
 If MCP GitHub tools are unavailable:

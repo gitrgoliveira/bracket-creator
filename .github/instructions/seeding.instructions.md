@@ -13,13 +13,12 @@ applyTo: "internal/helper/seed*.go"
 ## Validation Rules (from `internal/domain/seed.go`)
 - Seed ranks must be **positive integers**
 - Seed ranks must be **unique**: duplicate ranks are rejected
-- Names must **exactly match** participant names (**case-sensitive**)
+- Names are title-cased (`cases.Title`, `NoLower`), then resolved by id, else by exact (name, dojo), via `domain.RosterIndex.LookupSeed`
 - Empty seed rank = unseeded (placed in remaining pool)
 
 ## Edge Cases to Handle
-- More seeds than bracket positions → extra seeds become unseeded
-- Seed rank higher than player count → placed at nearest valid position
-- All players unseeded → original order preserved (no bracket reordering)
+- Seed rank beyond the bracket's seed positions → keeps its seed and takes the free slot furthest from the already-placed seeds (`StandardSeeding`)
+- No seeds → roster order fills the slots, then `delayDojoMeetings` may swap unseeded slots to delay dojo-mate meetings
 - Single seeded player → placed at position 1
 
 ## When Modifying

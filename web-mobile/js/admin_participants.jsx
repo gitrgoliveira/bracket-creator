@@ -810,7 +810,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-          Draw generated: the roster order and seeds are locked. Discard the draw (from the competition header) to change them. A competitor's details can still be edited with the pencil; check-in continues at the registration desk.
+          Draw generated: the roster order and seeds are locked. Discard the draw (from the competition header) to change them. A competitor’s details can still be changed with the Edit button; check-in continues at the registration desk.
         </div>
       )}
       {isStarted && (
@@ -1111,7 +1111,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Not applied yet</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
               {/* An empty box must not be applicable: Apply replaces the roster,
                   so applying nothing would wipe it. */}
@@ -1186,7 +1186,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             rows={14}
             placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? "Akira Tanaka - Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
-          <div className="field__hint" style={{ marginTop: 6 }}>"Apply changes" saves this list as the roster and clears the box. Applying over an existing roster replaces it; names already on the roster keep their id and seed (case-insensitive match).</div>
+          <div className="field__hint" style={{ marginTop: 6 }}>“Apply changes” saves this list as the roster and clears the box. Applying over an existing roster replaces it; names already on the roster keep their id and seed (case-insensitive match).</div>
           {lines.length > 0 && (() => {
             const previewLimit = showAllPreview ? lines.length : 10;
             const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);
@@ -1225,7 +1225,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               disabled rules as the top button. */}
           {lines.length > 0 && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
-              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
+              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Not applied yet</span>}
               <button className="btn btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           )}

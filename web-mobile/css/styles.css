@@ -3896,8 +3896,8 @@ button.pool-match-row {
 }
 
 .seed-row.has-seed {
-  background: #fffbeb;
-  border-color: #fde68a;
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
 }
 
 .seed-row__handle {
@@ -3963,27 +3963,24 @@ button.pool-match-row {
   text-overflow: ellipsis;
 }
 
-/* Move up/down: on a fine pointer a borderless stacked pair, 40px tall, so
-   the buttons no longer set the row height; the edit pencil (setup only)
-   sits beside the pair, not under it. On touch every button lies in one row
-   at the 44px target (mp-nubo, DESIGN.md s6); a 2x22px stack inside one
-   44px column would be two sub-target buttons. */
-.seed-row__actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
+/* Move up/down and edit: one row of borderless buttons at the 36px floor
+   DESIGN.md s6 sets for shared surfaces (44px on touch, mp-nubo), so the
+   row is 36px of control rather than the 68-104px stacked column it used to
+   be. Borderless because the border is what made the old pair read as
+   heavy; the hover lifts to --surface, which is visible against the row's
+   own --line-2 hover (the same colour would cancel out). */
+.seed-row__actions,
 .seed-row__move {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 
 .seed-row__actions .btn--icon-sm {
-  min-width: 24px;
-  min-height: 20px;
-  padding: 0 4px;
-  font-size: 12px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 13px;
   border-color: transparent;
   background: transparent;
   color: var(--ink-3);
@@ -3991,15 +3988,11 @@ button.pool-match-row {
 
 .seed-row__actions .btn--icon-sm:hover:not(:disabled) {
   color: var(--ink);
-  background: var(--line-2);
+  background: var(--surface);
+  border-color: var(--line);
 }
 
 @media (pointer: coarse) {
-  .seed-row__actions,
-  .seed-row__move {
-    flex-direction: row;
-    gap: 4px;
-  }
   .seed-row__actions .btn--icon-sm {
     min-width: 44px;
     min-height: 44px;

@@ -194,7 +194,7 @@ A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables 
 
 ### Breakpoints
 
-Five breakpoint-related media queries exist; match them rather than inventing new ones. (A sixth `@media (prefers-reduced-motion: reduce)` block handles accessibility: see above.)
+Six breakpoint-related media queries exist; match them rather than inventing new ones. (A seventh `@media (prefers-reduced-motion: reduce)` block handles accessibility: see above.)
 
 | Query | Trigger |
 |---|---|
@@ -203,6 +203,7 @@ Five breakpoint-related media queries exist; match them rather than inventing ne
 | `@media (max-width: 480px)` | Small phone: viewer-specific refinements |
 | `@media (min-width: 768px)` | Viewer tablet: widen `.viewer__shell` to 768px, relax `.viewer__body` padding |
 | `@media (min-width: 1024px)` | Viewer desktop: widen `.viewer__shell` to 1024px, widen `.viewer__body` padding, 2-col `.vsched` grid |
+| `@media (max-width: 1139px)` | Participants page only: stack the Participant list card under the Ordering & seeding card. Derived, not device-tied: two columns need ~838px of page content, which is 838 + 64 page padding + 200 rail + 24 gap + 14 row gap = 1140px of viewport, so iPad Air landscape (1180) keeps two columns and portrait (820) stacks |
 
 ### Z-index
 
@@ -400,7 +401,7 @@ Admin-only cross-competition check-in surface ([admin_registration_desk.jsx](web
 - `.rd-chip`: a person's other-competition entries; checked chips use the `--ok` family.
 - `.rd-walkup` (inline add, setup-only) and the edit modal reuse the standard field/modal vocabulary.
 
-**Colour:** checked-in = `--ok` family (matches the seeding panel's check-in green); the active rail item and search focus use `--accent`; partial presence uses `--warn-strong`. No red (Aka/danger) appears here.
+**Colour:** checked-in = `--ok` family (this desk is the only check-in surface; the participants page's Ordering & seeding rows carry no check-in state); the active rail item and search focus use `--accent`; partial presence uses `--warn-strong`. No red (Aka/danger) appears here. The desk lists only competitions whose Check-in tracking setting is on.
 
 ## 5. Patterns
 
@@ -417,7 +418,7 @@ Admin-only cross-competition check-in surface ([admin_registration_desk.jsx](web
 
 ### Admin workspace
 
-`.workspace` is `grid-template-columns: 240px 1fr` (sidebar + main). Sidebar is `.side-nav` with sticky positioning. Under 720px the grid collapses to a single column and the sidebar becomes a horizontal scroller.
+`.workspace` is `grid-template-columns: 200px minmax(0, 1fr)` (sidebar + main; the rail's widest content, the "Other competitions" header, needs ~175px). Sidebar is `.side-nav` with sticky positioning. Under 720px the grid collapses to a single column and the sidebar becomes a horizontal scroller.
 
 ### Viewer shell
 

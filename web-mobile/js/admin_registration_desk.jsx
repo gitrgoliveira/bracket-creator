@@ -925,7 +925,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
             <div className="icon" aria-hidden="true">🥋</div>
             <h3>No competition has check-in tracking on</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 440, margin: "0 auto", lineHeight: 1.5 }}>
-              Turn on <strong>Check-in tracking</strong> in a competition's Settings (or when creating it) and the registration desk gathers its roster here for check-in.
+              Turn on <strong>Check-in tracking</strong> in a competition’s Settings (or when creating it) and the registration desk gathers its roster here for check-in.
             </div>
           </div>
         ) : (

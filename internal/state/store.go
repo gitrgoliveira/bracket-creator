@@ -108,6 +108,13 @@ func NewStore(folder string) (*Store, error) {
 		return nil, err
 	}
 
+	// Runs AFTER init() has released s.mu (ListCompetitions, which this calls,
+	// takes its own RLock; calling it while init still held the write lock
+	// would deadlock the non-reentrant mutex). See sweepLegacyUpgrades'
+	// own doc comment (legacy_upgrade.go) for why a failure here never
+	// prevents NewStore from succeeding.
+	s.sweepLegacyUpgrades()
+
 	return s, nil
 }
 

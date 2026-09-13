@@ -3,6 +3,8 @@ package state_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -80,10 +82,14 @@ func TestLegacySeedDojoUpgradeOnRead(t *testing.T) {
 // playoff_match_duration key all at once).
 //
 // The fold happens IN MEMORY inside parseCompetitionFile, the single funnel
-// every competition read goes through -- there is no separate upgrade pass
-// to warm up, and no per-competition write lock is involved. See
-// TestLoadCompetitionDoesNotRewriteConfigOnDisk for the other half of the
-// contract: this call leaves config.md itself untouched.
+// every competition read goes through, and needs no per-competition write
+// lock of its own. These assertions hold regardless of whether NewStore's
+// startup sweep (sweepLegacyUpgrades, legacy_upgrade.go) has already
+// converged this file on disk by the time LoadCompetition runs here: either
+// way the returned struct is folded. See
+// TestLegacyUpgradeSweepConvergesConfigOnDisk for that write-side half of the
+// contract, and TestLoadCompetitionDoesNotRewriteConfigOnDisk for the
+// narrower claim that LoadCompetition ITSELF never writes.
 func TestLoadCompetitionFoldsLegacyPlayoffsFormat(t *testing.T) {
 	dir := t.TempDir()
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
@@ -109,17 +115,27 @@ func TestLoadCompetitionFoldsLegacyPlayoffsFormat(t *testing.T) {
 	assert.Equal(t, []string{"D"}, comp.Courts)
 }
 
-// TestLoadCompetitionDoesNotRewriteConfigOnDisk pins the core property of the
-// replacement design: unlike the deleted write-on-read migration
-// (upgradeCompetitionFormatLocked), a load NEVER touches config.md. The
-// format/status fold is purely an in-memory transform of the parsed struct;
-// the on-disk bytes still read "playoffs" until something actually SAVES the
-// competition (TestSaveConvergesLegacyConfigOnDisk covers that half).
+// TestLoadCompetitionDoesNotRewriteConfigOnDisk pins that LoadCompetition
+// ITSELF never writes to config.md: the format/status/duration fold it
+// returns is purely an in-memory transform of the parsed struct.
+// LoadCompetition is deliberately not one of EnsureLegacyUpgraded's six
+// callers (legacy_upgrade.go's own doc comment enumerates them), so calling
+// it can never trigger the write-side convergence pass.
+//
+// The competition directory is created and populated AFTER this test's own
+// Store is already open, specifically so NewStore's startup sweep (which
+// also converges config.md -- see TestLegacyUpgradeSweepConvergesConfigOnDisk
+// -- and would otherwise convert this exact fixture before LoadCompetition
+// ever ran) cannot be what's being observed here. That would still leave
+// config.md byte-stable across the LoadCompetition call, but for the wrong
+// reason: it would prove nothing about LoadCompetition itself.
 func TestLoadCompetitionDoesNotRewriteConfigOnDisk(t *testing.T) {
 	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
+
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
-
 	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	configPath := filepath.Join(compDir, "config.md")
@@ -127,31 +143,35 @@ func TestLoadCompetitionDoesNotRewriteConfigOnDisk(t *testing.T) {
 	before, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 
-	s, err := state.NewStore(dir)
-	require.NoError(t, err)
 	_, err = s.LoadCompetition("bracket-court-d")
 	require.NoError(t, err)
 
 	after, err := os.ReadFile(configPath)
 	require.NoError(t, err)
-	assert.Equal(t, before, after, "a load must never rewrite config.md")
+	assert.Equal(t, before, after, "LoadCompetition itself must never rewrite config.md")
 }
 
 // TestSaveConvergesLegacyConfigOnDisk covers the other half: the on-disk file
 // converges onto the canonical values once something actually saves the
 // competition. SaveCompetition re-serialises whatever LoadCompetition handed
 // back, which is already folded, so no retired key or value survives.
+//
+// Like TestLoadCompetitionDoesNotRewriteConfigOnDisk, the competition
+// directory is populated AFTER this test's Store is already open, so it is
+// genuinely SaveCompetition proving this, and not NewStore's startup sweep
+// (TestLegacyUpgradeSweepConvergesConfigOnDisk) having already converged the
+// file before LoadCompetition/SaveCompetition ever ran.
 func TestSaveConvergesLegacyConfigOnDisk(t *testing.T) {
 	dir := t.TempDir()
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
+
 	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
 	require.NoError(t, os.MkdirAll(compDir, 0o700))
-
 	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
 
-	s, err := state.NewStore(dir)
-	require.NoError(t, err)
 	comp, err := s.LoadCompetition("bracket-court-d")
 	require.NoError(t, err)
 	require.NoError(t, s.SaveCompetition(comp))
@@ -329,11 +349,225 @@ func TestLegacyPlayoffMatchDurationSecondsFoldsOntoKnockoutKey(t *testing.T) {
 	assert.Equal(t, 180, comp.KnockoutMatchDurationSeconds,
 		"the pre-rename seconds key must fold onto the renamed field, not silently vanish")
 
-	// On-disk convergence only happens once something actually saves the
-	// record (see TestLoadCompetitionDoesNotRewriteConfigOnDisk).
+	// On-disk convergence happens once something saves the record -- either
+	// explicitly, as here, or via NewStore's startup sweep, which may have
+	// already converged this exact file before NewStore even returned above
+	// (see TestLegacyUpgradeSweepConvergesConfigOnDisk). Either way the
+	// assertions below hold.
 	require.NoError(t, s.SaveCompetition(comp))
 	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 180")
 	assert.NotContains(t, string(raw), "playoff_match_duration_seconds")
+}
+
+// TestLegacyUpgradeSweepConvergesConfigOnDisk pins the write-side half of the
+// bc-terminology commit 1 migration: NewStore's startup sweep
+// (sweepLegacyUpgrades, legacy_upgrade.go) converges a legacy config.md on
+// disk without anything ever explicitly calling LoadCompetition or
+// SaveCompetition -- opening the store is enough. Uses the same real,
+// unmodified fixture as TestLoadCompetitionFoldsLegacyPlayoffsFormat.
+func TestLegacyUpgradeSweepConvergesConfigOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "competitions", "bracket-court-d")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), fixture, 0o600))
+
+	_, err = state.NewStore(dir) // the startup sweep runs synchronously, inside this call
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "format: knockout")
+	assert.Contains(t, string(raw), "status: knockout")
+	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 300")
+	assert.NotContains(t, string(raw), "playoffs")
+	assert.NotContains(t, string(raw), "playoff_match_duration")
+}
+
+// TestLegacyUpgradeSweepSkipsMismatchedCompetitionID is BUG 1's regression
+// test against the startup-sweep path specifically.
+// (TestLoadCompetitionWithMismatchedIDDoesNotCorruptAnotherCompetition pins
+// the same guard against a direct LoadCompetition call, which never wrote
+// anything at all even before this migration existed -- that test cannot
+// tell a correct guard apart from "nothing ever writes", since both leave
+// the files alone.) ListCompetitions surfaces BOTH directories below, so
+// the sweep actually attempts to converge "mismatched" too; the guard
+// inside upgradeCompetitionFormatLocked must refuse to save because the
+// loaded id: ("victim") does not match the directory it was read from
+// ("mismatched"), rather than saving into competitions/victim/config.md
+// under the wrong lock and destroying it.
+func TestLegacyUpgradeSweepSkipsMismatchedCompetitionID(t *testing.T) {
+	dir := t.TempDir()
+
+	// The real "victim" competition: its own id: matches its directory name,
+	// and it is already fully canonical (nothing for the sweep to converge).
+	victimDir := filepath.Join(dir, "competitions", "victim")
+	require.NoError(t, os.MkdirAll(victimDir, 0o700))
+	victimConfig := "---\n" +
+		"id: victim\n" +
+		"name: Victim Competition\n" +
+		"kind: individual\n" +
+		"format: mixed\n" +
+		"status: pools\n" +
+		"---\n"
+	victimPath := filepath.Join(victimDir, "config.md")
+	require.NoError(t, os.WriteFile(victimPath, []byte(victimConfig), 0o600))
+	victimBefore, err := os.ReadFile(victimPath)
+	require.NoError(t, err)
+
+	// The "mismatched" competition: it lives in its own directory, carries
+	// retired format/status values (so the sweep DOES attempt to converge
+	// it), but its id: front-matter field names the VICTIM directory instead.
+	mismatchedDir := filepath.Join(dir, "competitions", "mismatched")
+	require.NoError(t, os.MkdirAll(mismatchedDir, 0o700))
+	mismatchedConfig := "---\n" +
+		"id: victim\n" +
+		"name: Mismatched Competition\n" +
+		"kind: individual\n" +
+		"format: playoffs\n" +
+		"status: playoffs\n" +
+		"---\n"
+	mismatchedPath := filepath.Join(mismatchedDir, "config.md")
+	require.NoError(t, os.WriteFile(mismatchedPath, []byte(mismatchedConfig), 0o600))
+	mismatchedBefore, err := os.ReadFile(mismatchedPath)
+	require.NoError(t, err)
+
+	_, err = state.NewStore(dir) // runs the startup sweep over both directories
+	require.NoError(t, err)
+
+	victimAfter, err := os.ReadFile(victimPath)
+	require.NoError(t, err)
+	assert.Equal(t, victimBefore, victimAfter, "the victim competition's file must be byte-unchanged")
+
+	mismatchedAfter, err := os.ReadFile(mismatchedPath)
+	require.NoError(t, err)
+	assert.Equal(t, mismatchedBefore, mismatchedAfter,
+		"the mismatched file itself is also left unconverted: the guard skips the save entirely rather than writing it back under its own directory")
+
+	entries, err := os.ReadDir(filepath.Join(dir, "competitions"))
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	assert.ElementsMatch(t, []string{"victim", "mismatched"}, names, "no new directory must be created for the foreign id")
+}
+
+// TestLegacyUpgradeSweepSkipsBlankCompetitionID is BUG 2's regression test
+// against the startup-sweep path: a config.md with no id: field must still
+// load normally after the sweep has run over it, rather than becoming
+// permanently unreadable. The sweep must skip saving it (comp.ID == "" can
+// never equal the non-empty directory name -- the same guard bug 1 uses),
+// so saveCompetitionLocked's ValidateCompetitionID("") is never reached from
+// this path.
+func TestLegacyUpgradeSweepSkipsBlankCompetitionID(t *testing.T) {
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "competitions", "no-id-comp")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	legacy := "---\n" +
+		"name: No ID Competition\n" +
+		"kind: individual\n" +
+		"format: playoffs\n" +
+		"status: playoffs\n" +
+		"---\n"
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
+
+	s, err := state.NewStore(dir) // must succeed even though this file has no id:
+	require.NoError(t, err)
+
+	comp, err := s.LoadCompetition("no-id-comp")
+	require.NoError(t, err, "a config.md with no id: must still load after the sweep has run over it")
+	require.NotNil(t, comp)
+	assert.Equal(t, state.CompFormatKnockout, comp.Format)
+	assert.Equal(t, state.CompStatusKnockout, comp.Status)
+	assert.Equal(t, "", comp.ID, "the file carries no id:, and the sweep must not invent or validate one")
+}
+
+// TestLegacyUpgradeSweepKnockoutSecondsWinOverGlobalMinutes is BUG 3's
+// regression test against the startup-sweep path: a config.md carrying the
+// retired per-phase seconds key (playoff_match_duration_seconds: 150)
+// ALONGSIDE the global whole-minute fallback (match_duration: 3, which would
+// round up to 180) must converge to the precise 150s value, never the
+// coarser 180s one. The deleted migration's bug 3 re-derived the duration
+// itself and checked its own zero-guard AFTER ApplyCompetitionDefaults had
+// already back-filled from the whole-minute key; this migration does no
+// duration arithmetic of its own at all (see upgradeCompetitionFormatLocked's
+// doc comment), so there is no guard-ordering mistake left to make.
+func TestLegacyUpgradeSweepKnockoutSecondsWinOverGlobalMinutes(t *testing.T) {
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "competitions", "global-minutes-comp")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+	legacy := "---\n" +
+		"id: global-minutes-comp\n" +
+		"name: Global Minutes Comp\n" +
+		"kind: individual\n" +
+		"format: knockout\n" +
+		"status: setup\n" +
+		"courts:\n" +
+		"    - A\n" +
+		"match_duration: 3\n" +
+		"playoff_match_duration_seconds: 150\n" +
+		"---\n"
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
+
+	s, err := state.NewStore(dir)
+	require.NoError(t, err)
+
+	comp, err := s.LoadCompetition("global-minutes-comp")
+	require.NoError(t, err)
+	require.NotNil(t, comp)
+	assert.Equal(t, 150, comp.KnockoutMatchDurationSeconds,
+		"the retired per-phase seconds key must win over the global whole-minute fallback, which would round up to 180")
+
+	raw, err := os.ReadFile(filepath.Join(compDir, "config.md"))
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "knockout_match_duration_seconds: 150")
+	assert.NotContains(t, string(raw), "playoff_match_duration_seconds")
+	assert.NotContains(t, string(raw), "match_duration: 3")
+}
+
+// TestLegacyUpgradeSweepFailureIsolatedPerCompetition: when the on-disk
+// convergence write fails for one competition (its directory is read-only),
+// NewStore must still succeed, and a subsequent LoadCompetition for that
+// same competition must still return the folded values -- the in-memory
+// safety net in parseCompetitionFile does not depend on the write ever
+// landing. This is the "best-effort, never a safety mechanism" property the
+// whole migration rests on.
+func TestLegacyUpgradeSweepFailureIsolatedPerCompetition(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod 0500 isn't enforced on Windows the same way")
+	}
+	if os.Getuid() == 0 {
+		t.Skip("Skipping permission test: root bypasses file permission restrictions")
+	}
+
+	dir := t.TempDir()
+	compDir := filepath.Join(dir, "competitions", "locked-comp")
+	require.NoError(t, os.MkdirAll(compDir, 0o700))
+
+	fixture, err := os.ReadFile(filepath.Join("testdata", "legacy_playoffs_config.md"))
+	require.NoError(t, err)
+	// The fixture's own id: is "bracket-court-d"; give this copy an id:
+	// matching ITS OWN directory instead, so bug 1's guard cannot be what
+	// blocks the write -- this test needs the write to fail for a
+	// PERMISSION reason, not because the migration correctly declined an
+	// unrelated mismatched id.
+	legacy := strings.Replace(string(fixture), "id: bracket-court-d", "id: locked-comp", 1)
+	require.NoError(t, os.WriteFile(filepath.Join(compDir, "config.md"), []byte(legacy), 0o600))
+
+	require.NoError(t, os.Chmod(compDir, 0500))
+	defer func() { _ = os.Chmod(compDir, 0700) }() // let t.TempDir() clean up
+
+	s, err := state.NewStore(dir)
+	require.NoError(t, err, "one broken competition directory must not stop NewStore from succeeding")
+
+	comp, err := s.LoadCompetition("locked-comp")
+	require.NoError(t, err, "a load must still succeed and fold in memory even though the on-disk convergence write failed")
+	require.NotNil(t, comp)
+	assert.Equal(t, state.CompFormatKnockout, comp.Format)
+	assert.Equal(t, state.CompStatusKnockout, comp.Status)
+	assert.Equal(t, 300, comp.KnockoutMatchDurationSeconds)
 }

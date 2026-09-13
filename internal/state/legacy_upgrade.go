@@ -170,6 +170,27 @@ import (
 //     retirement already skips it) so an id here has no observable effect
 //     either way.
 //
+//   - config.md's retired format/status literal ("playoffs") and duration
+//     keys (playoff_match_duration, playoff_match_duration_seconds) convert
+//     on WRITE, via upgradeCompetitionFormatLocked below (bc-terminology
+//     commit 1 follow-up), called from EnsureLegacyUpgraded like every step
+//     above AND from a one-time startup sweep (sweepLegacyUpgrades, called
+//     from NewStore) so the whole folder converges without waiting for each
+//     competition to be individually read. Unlike every upgrade above, this
+//     one resolves nothing against the roster -- parseCompetitionFile
+//     (competition.go) already folds every retired value in memory on EVERY
+//     read, unconditionally, so this is a best-effort convenience that lets
+//     the on-disk bytes catch up, never a correctness requirement. It
+//     refuses to write when the loaded record's own id: does not match the
+//     directory it was loaded from -- the guard a deleted, buggier version
+//     of this migration lacked, which let it save a converted competition's
+//     bytes into a DIFFERENT competition's directory, under that OTHER
+//     competition's lock, because saveCompetitionLocked paths off the
+//     record's own id: rather than the directory it was read from. A blank
+//     or missing id: is simply "" failing to match a non-empty directory
+//     name, so it is caught by that same guard rather than needing one of
+//     its own.
+//
 // EnsureLegacyUpgraded runs BEFORE loadParticipants/LoadPools/LoadPoolMatches/
 // LoadBracket take their read lock, once per competition per process: the conversion
 // needs the per-comp WRITE lock, and writing from under the reader's RLock
@@ -187,10 +208,15 @@ import (
 // NEXT read after that save retries the repair with a roster that can now
 // resolve it, without requiring a restart.
 //
-// ONLY the five PUBLIC, caller-does-not-already-hold-the-lock entry points
-// (loadParticipants, Store.LoadPools, Store.LoadPoolMatches, Store.LoadBracket,
-// and ParticipantsFingerprint below, which calls it directly rather than
-// through one of the other four) call this. The *Locked siblings
+// ONLY the five PUBLIC, caller-does-not-already-hold-the-lock entry points on
+// the READ path (loadParticipants, Store.LoadPools, Store.LoadPoolMatches,
+// Store.LoadBracket, and ParticipantsFingerprint below, which calls it
+// directly rather than through one of the other four), PLUS ONE caller on the
+// startup path (sweepLegacyUpgrades below, called once from NewStore, which
+// loops every id ListCompetitions finds so the whole data folder converges
+// without waiting for each competition's files to be individually read) call
+// this. All six are safe for the identical reason: none of them already hold
+// compID's per-comp lock at the point they call in. The *Locked siblings
 // (loadPoolsLocked, LoadPoolMatchesLocked, loadBracketLocked) and every
 // storeTx method (including storeTx.LoadBracket) are called by something
 // that ALREADY holds the per-comp lock (typically WithTransaction), so
@@ -212,6 +238,15 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	defer mu.Unlock()
 	if _, done := s.legacyUpgraded.Load(compID); done {
 		return // lost the race to a concurrent reader's upgrade
+	}
+	// config.md's retired format/status/duration shapes convert independently
+	// of the participant roster the steps below share: it touches a different
+	// file and needs no lookup against anything. Best-effort, log-and-continue,
+	// exactly like every step below -- parseCompetitionFile's in-memory fold
+	// (competition.go) is what actually guarantees a correct read regardless
+	// of whether this succeeds.
+	if err := s.upgradeCompetitionFormatLocked(compID); err != nil {
+		log.Printf("state: legacy competition-format upgrade for %s: %v", compID, err)
 	}
 	// One roster load shared by every step below: built
 	// LAZILY on first actual use, so a competition needing no repair at all
@@ -254,6 +289,142 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
 	}
 	s.legacyUpgraded.Store(compID, struct{}{})
+}
+
+// upgradeCompetitionFormatLocked converges compID's config.md onto the
+// canonical bc-terminology values (the retired "playoffs" format/status
+// literal, and the matching retired duration keys) by loading and re-saving
+// it. Caller holds compID's per-competition write lock.
+//
+// This is NOT a safety mechanism: parseCompetitionFile (competition.go)
+// already folds every retired format/status/duration shape in memory on
+// EVERY read, unconditionally, regardless of whether this function ever
+// runs or runs and fails. This is a best-effort WRITE-side convergence pass
+// only, so an operator's config.md eventually stops saying "playoffs"
+// instead of saying so forever.
+//
+// A prior attempt at this exact migration shipped three data-loss bugs and
+// was deleted; the guards below are the fix for each, not incidental
+// caution -- do not remove or "simplify" any of them.
+//
+//   - BUG 1 (wrong-competition write): the prior code loaded by compID (the
+//     directory) but saved via saveCompetitionLocked, which builds its path
+//     from c.ID (the "id:" front-matter field) and documents that the
+//     CALLER must already hold THAT id's lock. A directory whose id:
+//     disagrees with its own directory name -- an operator copying
+//     competitions/foo to competitions/foo-backup, say -- got its converted
+//     bytes written INTO the other competition's directory, outside that
+//     competition's lock, destroying it. Guarded below by refusing to save
+//     whenever comp.ID != compID. Do not "fix" a mismatch by assigning
+//     comp.ID = compID instead: that silently rewrites the record's
+//     identity, and nothing here can tell whether the directory name or the
+//     id: field is the mistake. Skipping is correct either way: the
+//     in-memory fold still serves this competition correctly on every read,
+//     so nothing is lost by declining to converge its on-disk bytes.
+//
+//   - BUG 2 (blank id: made a competition permanently unreadable):
+//     saveCompetitionLocked's first line is ValidateCompetitionID(c.ID),
+//     which rejects "". The prior code let that error propagate out of the
+//     migration and, from there, out of every subsequent load, so a
+//     config.md with no id: (or a blank one) -- which loaded fine before
+//     this migration existed -- became unloadable forever. The bug-1 guard
+//     above already covers this: comp.ID == "" can never equal a non-empty
+//     compID (every id ListCompetitions/EnsureLegacyUpgraded hands in is a
+//     real directory name), so a blank id: is skipped for the same reason a
+//     mismatched one is, and saveCompetitionLocked's validation is never
+//     reached with an empty ID from this function.
+//
+//   - BUG 3 (duration guard ran too late): the prior code re-derived
+//     KnockoutMatchDurationSeconds itself, checking == 0 AFTER
+//     ApplyCompetitionDefaults had already back-filled it from a
+//     whole-minute key, so a file carrying both the precise retired seconds
+//     key and a whole-minute key resolved to the coarser, rounded value, and
+//     the rewrite then deleted the precise value permanently. Fixed
+//     structurally, not here: this function does no duration arithmetic of
+//     its own. loadCompetitionLocked already runs the fold, in the right
+//     order (the retired seconds key beats the whole-minute keys -- see
+//     ApplyCompetitionDefaults), before this function ever sees the struct,
+//     and saveCompetitionLocked normalizes again (idempotently) on the way
+//     out. Reintroducing any duration handling here would risk the exact
+//     same ordering mistake; don't.
+//
+// Reuses loadCompetitionLocked/saveCompetitionLocked rather than a bespoke
+// duration recovery (the deleted attempt's bug 3, not coming back): this is
+// deliberately just "load, guard, save", with no duration arithmetic of its
+// own anywhere in this function.
+//
+// It DOES pre-check the raw bytes for a retired token before paying for that
+// load+save, and this is NOT the deleted attempt's "second front-matter
+// read" returning: it is a plain byte scan, never a YAML unmarshal, and it
+// exists for a reason a pure "load, guard, save" cannot avoid on its own.
+// saveCompetitionChangedLocked's existing no-op guard only compares the
+// reserialized bytes against what's on disk, and that catches more than
+// "this file carried a retired shape": a config.md written by an OLDER
+// release, missing some field a LATER release added without an omitempty
+// tag, reserializes with that field now spelled out at its zero value --
+// a real byte difference, and a real write, for a competition with nothing
+// retired in it at all. A fleet's worth of already-canonical competitions
+// would each take that spurious write on every single process start. The
+// byte scan below keeps this function's effect scoped to files that
+// actually need converging, at the cost of one extra cheap read only on
+// the files that do.
+func (s *Store) upgradeCompetitionFormatLocked(compID string) error {
+	path := s.compPath(compID, "config.md")
+	raw, err := os.ReadFile(path) // #nosec G304; path built by compPath, which enforces containment under the competitions dir
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // no config.md on disk for this id; nothing to converge
+		}
+		return err
+	}
+	text := string(raw)
+	if !strings.Contains(text, "playoffs") && !strings.Contains(text, "playoff_match_duration") {
+		return nil // already canonical; see the doc comment above for why this matters
+	}
+
+	comp, err := s.loadCompetitionLocked(compID)
+	if err != nil {
+		return err
+	}
+	if comp == nil {
+		return nil // config.md vanished between the scan above and this load
+	}
+	if comp.ID != compID {
+		// BUG 1 / BUG 2 guard: saveCompetitionLocked paths and locks off
+		// comp.ID, not compID (the directory this call was handed). Writing
+		// here -- for a mismatched id: OR a blank one -- would either land in
+		// a different competition's directory outside that competition's
+		// lock, or fail ValidateCompetitionID outright. Skip; the in-memory
+		// fold keeps serving this competition correctly regardless.
+		log.Printf("state: legacy competition-format upgrade for %s: config.md id %q does not match its directory; left unconverted", compID, comp.ID)
+		return nil
+	}
+	return s.saveCompetitionLocked(comp, s.directWrite)
+}
+
+// sweepLegacyUpgrades runs EnsureLegacyUpgraded for every competition
+// ListCompetitions finds, so the whole data folder converges once at startup
+// rather than waiting for each competition's participants/pools/pool-matches/
+// bracket/config to be individually read. Called from NewStore AFTER
+// s.init() has released s.mu: ListCompetitions takes its own RLock, and
+// calling it while init still held s.mu's write lock would deadlock the
+// non-reentrant mutex.
+//
+// Best-effort at both levels it touches. EnsureLegacyUpgraded already logs
+// and continues per upgrade step for a single competition; a failure to even
+// LIST the competitions directory (unusual -- init() just created it) is
+// logged here and swallowed rather than returned, so neither a single broken
+// competition nor a transient listing failure can stop NewStore from
+// succeeding and starting mobile-app or print.
+func (s *Store) sweepLegacyUpgrades() {
+	ids, err := s.ListCompetitions()
+	if err != nil {
+		log.Printf("state: startup legacy-upgrade sweep: could not list competitions: %v", err)
+		return
+	}
+	for _, id := range ids {
+		s.EnsureLegacyUpgraded(id)
+	}
 }
 
 // legacyUpgradeRoster lazily loads and indexes compID's participants.csv for

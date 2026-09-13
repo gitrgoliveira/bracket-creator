@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Git / Worktree Rules
 
 - **Edit only inside the correct worktree, never the main checkout.** This repo uses a git worktree per PR, under `.claude/worktrees/`. Before the first edit or git operation, confirm the checkout with `git rev-parse --show-toplevel` and the branch with `git branch --show-current`. Edits landing in the wrong worktree (or the `main` checkout) force costly patch-and-revert recovery.
+- The number of tokens used to edit files is best minimized, all else being equal. Therefore, when it will not affect the end result, try to surgically edit a file rather than rewrite the entire thing.
 - **Never `cd` inside a Bash command to reach a repo.** Address the worktree explicitly (`git -C <abs-path>`, `make -C <abs-path>`) or run from its root. A `cd` in a chain has sent git to the wrong checkout and left the shell there for later calls.
 
 ## Workflow Rules

@@ -368,6 +368,108 @@ func TestLineupPUT_InvalidJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestLineupPUT_MemberIDsRoundTrip (bc-tmid pass 3): a PUT body carrying
+// both "positions" and "memberIds" persists both, and the response (and a
+// subsequent GET) return the same memberIds keyed by the same positions.
+func TestLineupPUT_MemberIDsRoundTrip(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	body, _ := json.Marshal(map[string]any{
+		"positions": map[string]string{
+			"senpo": "Sato",
+			"jiho":  "Ito",
+		},
+		"memberIds": map[string]string{
+			"senpo": "member-sato",
+			"jiho":  "member-ito",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var putResp domain.TeamLineup
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &putResp))
+	assert.Equal(t, "member-sato", putResp.MemberIDs[domain.PosSenpo], "PUT response carries memberIds")
+	assert.Equal(t, "member-ito", putResp.MemberIDs[domain.PosJiho])
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/competitions/c1/teams/teamA/lineups/1", nil)
+	getW := httptest.NewRecorder()
+	r.ServeHTTP(getW, getReq)
+	require.Equal(t, http.StatusOK, getW.Code)
+	var getResp domain.TeamLineup
+	require.NoError(t, json.Unmarshal(getW.Body.Bytes(), &getResp))
+	assert.Equal(t, "member-sato", getResp.MemberIDs[domain.PosSenpo], "GET returns the persisted memberIds")
+	assert.Equal(t, "member-ito", getResp.MemberIDs[domain.PosJiho])
+	assert.Equal(t, "Sato", getResp.Positions[domain.PosSenpo], "the name half is unaffected")
+}
+
+// TestLineupPUT_MemberIDsOmitted_BehavesAsBefore (bc-tmid pass 3): a PUT
+// body that never mentions "memberIds" at all (an older client) must persist
+// and round-trip exactly as it did before this field existed: MemberIDs
+// stays empty/absent, never invented, and the write is not rejected.
+func TestLineupPUT_MemberIDsOmitted_BehavesAsBefore(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	body, _ := json.Marshal(map[string]any{
+		"positions": map[string]string{
+			"senpo": "Sato",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	assert.NotContains(t, w.Body.String(), "memberIds",
+		"omitempty must drop the field entirely for a client that never sent it")
+
+	var putResp domain.TeamLineup
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &putResp))
+	assert.Empty(t, putResp.MemberIDs)
+	assert.Equal(t, "Sato", putResp.Positions[domain.PosSenpo])
+}
+
+// TestLineupPUT_MemberIDsInvalidPositionKey (bc-tmid pass 3): an illegal
+// position key inside "memberIds" (not a valid FIK name for a 5-person
+// team) is refused with 400, exactly like an illegal "positions" key,
+// because both walk through the same ValidatePositions check.
+func TestLineupPUT_MemberIDsInvalidPositionKey(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	body, _ := json.Marshal(map[string]any{
+		"positions": map[string]string{
+			"senpo": "Sato",
+		},
+		"memberIds": map[string]string{
+			"chudan": "member-x",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/lineups/1",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
 // TestPublicLineupGET_FallbackBest: the scoring modal is the client-side
 // twin of AMENDMENT 1. Operators typically save one round-0 lineup for
 // the whole day, but a knockout final asks for its own round index (1+),

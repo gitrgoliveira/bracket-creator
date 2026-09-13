@@ -147,11 +147,24 @@ func TestRosterPutStillAcceptsAHalfTypedSeeding(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code,
 		"refusing here would make it impossible to type a 4th seed before a 1st: %s", w.Body.String())
 
+	// The roster this PUT just wrote mints Dave a fresh id; SaveSeeds stamps
+	// it onto the seed row from that same roster, so the expected row is
+	// built from what was actually persisted rather than a literal guess.
+	players, err := store.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	var daveID string
+	for _, p := range players {
+		if p.Name == "Dave" {
+			daveID = p.ID
+		}
+	}
+	require.NotEmpty(t, daveID, "the roster PUT must have minted Dave an id")
+
 	stored, err := store.LoadSeedsRaw("c1")
 	require.NoError(t, err)
-	assert.Equal(t, []domain.SeedAssignment{{Name: "Dave", Dojo: "E", SeedRank: 4}}, stored,
+	assert.Equal(t, []domain.SeedAssignment{{ID: daveID, Name: "Dave", Dojo: "E", SeedRank: 4}}, stored,
 		"the typed rank must persist WITH the dojo half of its identity "+
-			"(domain.SeedKey), or the console shows 0 seeded and cannot warn")
+			"(domain.SeedKey) and the id SaveSeeds stamps, or the console shows 0 seeded and cannot warn")
 }
 
 // A rank assigned to nobody is not a seeding.
@@ -200,10 +213,11 @@ func TestPutSeedsRefusesARankForSomeoneNotOnTheRoster(t *testing.T) {
 		assert.Len(t, stored, 2, "the guard must not refuse an ordinary seeding")
 	})
 
-	t.Run("no roster yet is not every name being a ghost", func(t *testing.T) {
-		// Seeds saved before participants are written have nothing to
-		// contradict them, so the roster check stays out of the way and the
-		// draw's own validation remains the backstop.
+	t.Run("no roster at all is refused, not treated as an empty seeding", func(t *testing.T) {
+		// A competitor list must exist to define seeds (operator ruling):
+		// a non-empty seeding with no participants to attach it to is
+		// refused, not silently accepted on the theory that the draw's
+		// own validation is a sufficient backstop.
 		r, store, _, _, _ := setupTestRouter(t)
 		require.NoError(t, store.SaveCompetition(&state.Competition{
 			ID: "empty", Name: "Empty", Format: state.CompFormatMixed, PoolSize: 3, PoolWinners: 2,
@@ -215,6 +229,10 @@ func TestPutSeedsRefusesARankForSomeoneNotOnTheRoster(t *testing.T) {
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		r.ServeHTTP(w, req)
-		assert.Equal(t, http.StatusOK, w.Code, "an empty roster must not turn every seed into a ghost: %s", w.Body.String())
+		assert.Equal(t, http.StatusBadRequest, w.Code, "a seeding needs a roster to attach to: %s", w.Body.String())
+
+		stored, err := store.LoadSeedsRaw("empty")
+		require.NoError(t, err)
+		assert.Empty(t, stored, "a refused seeding must not reach seeds.csv")
 	})
 }

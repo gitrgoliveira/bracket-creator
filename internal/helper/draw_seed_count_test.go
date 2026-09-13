@@ -33,7 +33,7 @@ func seededDrawPoolsN(t *testing.T, numPools, numCourts, numSeeds int) []Pool {
 	for i := 1; i <= numSeeds; i++ {
 		roster[i-1].Seed = i
 	}
-	seeded := PoolSeeding(roster, numPools, numCourts)
+	seeded := referencePoolSeeding(roster, numPools, numCourts)
 	pools, err := CreatePools(seeded, drawGoldenPoolSize, true)
 	require.NoError(t, err)
 	require.Len(t, pools, numPools)

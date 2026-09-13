@@ -6,16 +6,16 @@ Starts the tournament management server (Preact UI + REST/SSE backend). Used **o
 bracket-creator mobile-app [flags]
 ```
 
-See the [Tournament app guide](../organisers/run-tournament.md) for a full walkthrough of the UI.
+Refer to the [Tournament app guide](../organisers/run-tournament.md) for a full walkthrough of the UI.
 
 ## Flags
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--folder` | `-f` | `.` | Folder containing `tournament.md` and `competitions/`. Created on first save. |
+| `--folder` | `-f` | `.` | Folder containing `tournament.md` and `competitions/`. Created at startup if it does not exist. |
 | `--port` | `-p` | `8080` (or `$PORT`) | Port to listen on |
 | `--bind` | `-b` | `localhost` (or `$BIND_ADDRESS`) | Address to bind to. Use `0.0.0.0` to reach the server from other devices on the LAN. |
-| `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked authentication mode. Requires `TOURNAMENT_PASSWORD_HASH`. See [Authentication](#authentication). |
+| `--lock-password` | (none) | unset (or `$LOCK_PASSWORD=true`) | Switch to locked mode. Requires `TOURNAMENT_PASSWORD_HASH`. Refer to [Authentication](#authentication). |
 
 ## Environment variables
 
@@ -34,29 +34,32 @@ The server has two authentication modes for the admin console; viewer routes are
 
 The admin password is stored plaintext in `tournament-data/tournament.md` and compared by exact-string match. Set the password during the in-app **Create tournament** flow, or edit `tournament.md` directly.
 
-- `POST /api/tournament/reset` is enabled and unauthenticated; browse to `http://<host>/reset` from any device on the same network to set a new password if you've forgotten the current one.
+- `POST /api/tournament/reset` is enabled and unauthenticated. If you've forgotten the current password, browse to `http://<host>/reset` from any device on the same network to set a new one.
 - `GET /api/auth-config` returns `{"mode": "file", "resetEnabled": true}`.
 
 ### Locked mode (`--lock-password`)
 
 The on-disk password is ignored. Authentication compares the `X-Tournament-Password` header against a bcrypt hash from the `TOURNAMENT_PASSWORD_HASH` environment variable.
 
-```bash
-# Generate the hash (pipe the secret; bare invocation waits for stdin with no
-# prompt or echo-off, so always use printf/pipe to avoid shell history leakage)
-printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
+Generate the hash, piping the secret in rather than typing it (refer to [hash-password](hash-password.md) for the input rules):
 
-# Start the server
+```bash
+printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password
+```
+
+Start the server with the hash:
+
+```bash
 TOURNAMENT_PASSWORD_HASH='$2a$10$...' \
   bracket-creator mobile-app --lock-password -f ./tournament-data
 ```
 
-- `POST /api/tournament/reset` returns 404. The `/reset` SPA route still serves the embedded page but renders an "operator-disabled" message instead of the form, and the AuthModal hides the "Forgot password?" link.
+- `POST /api/tournament/reset` returns 404. The `/reset` SPA route still serves the embedded page, but renders an "operator-disabled" message instead of the form. The AuthModal also hides the "Forgot password?" link.
 - `GET /api/auth-config` returns `{"mode": "locked", "resetEnabled": false}`.
 - The server **refuses to start** if the env var is empty or malformed (fail-closed; no silent fallback to file mode).
 - Rotation requires restarting with a new hash. The hash is read once at startup.
 
-**Recommended for any deployment reachable over the internet.** The plaintext-in-file pattern of file mode is intended for trusted-network use only.
+Recommended for any deployment reachable over the internet. The plaintext-in-file pattern of file mode is intended for trusted-network use only.
 
 #### Operational caveats
 
@@ -70,22 +73,25 @@ A competition's pool and knockout settings are stored in its `competitions/<id>/
 
 | `config.md` key | JSON API key | Values | Default | Description |
 |---|---|---|---|---|
-| `extra_qualifiers` | `extraQualifiers` | `""`, `"larger-pools"`, `"fill-bracket"` | `""` (standard) | How many finishers each pool sends to the knockout. Only meaningful for a Mixed competition with a minimum-players-per-pool size; requires `pool_winners: 1` (`poolWinners: 1` in JSON) for either non-default value. See [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool). When updating a competition through the API, leaving the JSON key out keeps whatever is already stored; send the key with an empty string to set a competition back to standard. |
+| `extra_qualifiers` | `extraQualifiers` | `""`, `"larger-pools"`, `"fill-bracket"` | `""` (standard) | How many finishers each pool sends to the knockout. Only meaningful for a Mixed competition with a minimum-players-per-pool size; requires `pool_winners: 1` (`poolWinners: 1` in JSON) for either non-default value. Refer to [How many qualify from each pool](../organisers/knockout-draw.md#how-many-qualify-from-each-pool). When updating a competition through the API, leaving the JSON key out keeps whatever is already stored; send the key with an empty string to set a competition back to standard. |
 
 ## Examples
 
+Local LAN, file mode, default port:
+
 ```bash
-# Local LAN: file mode, default port
 bracket-creator mobile-app -f ./tournament-data
+```
 
-# Bind to all interfaces, custom port
+Bind to all interfaces on a custom port:
+
+```bash
 bracket-creator mobile-app -f ./tournament-data -b 0.0.0.0 -p 8082
+```
 
-# Locked mode for a public deployment.
-# Note: `hash-password` reads ONE line from stdin without prompting or
-# disabling terminal echo; pipe the password in from a secrets manager
-# or a here-doc rather than typing it directly, so it never lands in
-# shell history or the terminal scrollback.
+Locked mode for a public deployment, with the hash generated as shown under [Locked mode](#locked-mode-lock-password):
+
+```bash
 HASH=$(printf '%s' "$MY_ADMIN_SECRET" | bracket-creator hash-password)
 TOURNAMENT_PASSWORD_HASH="$HASH" \
   bracket-creator mobile-app --lock-password -f /var/lib/bracket-creator -b 0.0.0.0

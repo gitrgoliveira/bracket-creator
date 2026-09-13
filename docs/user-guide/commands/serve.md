@@ -10,20 +10,27 @@ bracket-creator serve [flags]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--port` | `-p` | `8080` | Port to listen on |
-| `--bind` | `-b` | `localhost` | Address to bind to |
+| `--port` | `-p` | `8080` (or `$PORT`) | Port to listen on |
+| `--bind` | `-b` | `localhost` (or `$BIND_ADDRESS`) | Address to bind to |
 
 ## Usage
 
+Start with the defaults. The UI is at `http://localhost:8080`:
+
 ```bash
-# Default: available at http://localhost:8080
 bracket-creator serve
+```
 
-# Different port
+Use a different port:
+
+```bash
 bracket-creator serve -p 8081
+```
 
-# Accessible from other machines on the network
+Make it reachable from other machines on the network:
+
+```bash
 bracket-creator serve -b 0.0.0.0
 ```
 
-See the [Legacy Web UI guide](../organisers/web-ui.md) for a walkthrough of the interface.
+Refer to the [Legacy Web UI guide](../organisers/web-ui.md) for a walkthrough of the interface.

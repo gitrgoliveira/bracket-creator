@@ -115,13 +115,19 @@ type stubLeagueTiebreakEngine struct {
 	generateErr   error
 	autoOutcome   engine.AutoCompleteOutcome
 	autoErr       error
+
+	// receivedTeamIDs captures the tiedTeamIDs argument GenerateLeagueTiebreakMatches
+	// was last called with, so a test can assert the handler forwarded
+	// req.TeamIDs through (bc-idfx) rather than silently dropping it.
+	receivedTeamIDs []string
 }
 
 func (e *stubLeagueTiebreakEngine) LeagueTiebreakCandidates(string) ([]engine.TiedGroup, error) {
 	return e.candidates, e.candidatesErr
 }
 
-func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *stubLeagueTiebreakEngine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error) {
+	e.receivedTeamIDs = tiedTeamIDs
 	return e.generated, e.generateErr
 }
 
@@ -168,6 +174,22 @@ func makeTiedGroup(teamA, teamB string, minPos, maxPos int) engine.TiedGroup {
 	}
 }
 
+// makeTiedGroupWithIDs builds a TiedGroup for two teams carrying participant
+// ids. Selection is id-only (operator ruling bc-pnum): a candidate group can
+// only be matched by a request's teamIds against each team's Player.ID, so
+// any test exercising that match (rather than just reading candidates back)
+// needs a group built with this helper instead of the id-less makeTiedGroup.
+func makeTiedGroupWithIDs(teamA, idA, teamB, idB string, minPos, maxPos int) engine.TiedGroup {
+	return engine.TiedGroup{
+		Teams: []state.PlayerStanding{
+			{Player: domain.Player{ID: idA, Name: teamA}},
+			{Player: domain.Player{ID: idB, Name: teamB}},
+		},
+		MinPosition: minPos,
+		MaxPosition: maxPos,
+	}
+}
+
 // ---------------------------------------------------------------------------
 // GET /competitions/:id/league-tiebreak/candidates
 // ---------------------------------------------------------------------------
@@ -191,6 +213,49 @@ func TestLeagueTiebreakCandidates_Happy(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, cands, 1)
 	assert.Equal(t, false, body["finalized"])
+}
+
+// TestLeagueTiebreakCandidates_TeamsCarryIdentity is the bc-idfx finding 11
+// regression: the "teams" array (id/name/dojo per team, mirroring what
+// GET /chusen-candidates already emits) must be present alongside the
+// legacy "teamNames" array, so a namesake-holding group's members can be
+// told apart on the wire.
+func TestLeagueTiebreakCandidates_TeamsCarryIdentity(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-team-x-a", Name: "Team X", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-team-x-b", Name: "Team X", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body struct {
+		Candidates []struct {
+			TeamNames []string `json:"teamNames"`
+			Teams     []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+				Dojo string `json:"dojo"`
+			} `json:"teams"`
+		} `json:"candidates"`
+	}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
+	require.Len(t, body.Candidates, 1)
+	require.Len(t, body.Candidates[0].Teams, 2, "teams must carry both namesake-holding entries")
+	gotIDs := []string{body.Candidates[0].Teams[0].ID, body.Candidates[0].Teams[1].ID}
+	assert.ElementsMatch(t, []string{"id-team-x-a", "id-team-x-b"}, gotIDs)
+	gotDojos := []string{body.Candidates[0].Teams[0].Dojo, body.Candidates[0].Teams[1].Dojo}
+	assert.ElementsMatch(t, []string{"Dojo A", "Dojo B"}, gotDojos, "dojo must disambiguate what teamNames alone cannot")
 }
 
 func TestLeagueTiebreakCandidates_Empty(t *testing.T) {
@@ -233,6 +298,26 @@ func TestLeagueTiebreakCandidates_EngineError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
+// TestLeagueTiebreakCandidates_CorruptOverrides is bc-pnum gap 3:
+// LeagueTiebreakCandidates calls CalculatePoolStandings, which loads
+// overrides.json. Before this fix a wrapped state.ErrCorruptOverrides fell
+// through to this handler's generic 500 branch alongside every other engine
+// error; the fix maps it to the same terminal 422 corrupt_overrides every
+// other LoadOverrides-reaching endpoint answers with, via the shared
+// respondIfCorruptOverrides helper (errors.go).
+func TestLeagueTiebreakCandidates_CorruptOverrides(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{candidatesErr: fmt.Errorf("compute standings: %w", state.ErrCorruptOverrides)}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	req := httptest.NewRequest("GET", "/api/competitions/comp-1/league-tiebreak/candidates", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+}
+
 func TestLeagueTiebreakCandidates_Finalized(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{candidates: nil}
 	comp := makeTeamLeagueComp(state.CompStatusPools)
@@ -256,7 +341,7 @@ func TestLeagueTiebreakCandidates_Finalized(t *testing.T) {
 
 func TestLeagueTiebreakPost_Happy(t *testing.T) {
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	generated := []state.MatchResult{
 		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
@@ -272,7 +357,12 @@ func TestLeagueTiebreakPost_Happy(t *testing.T) {
 	hub := &recordingBroadcaster{}
 	r := leagueTiebreakRouter(eng, store, hub)
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	// teamIds is required (operator ruling bc-pnum); teamNames is bound but
+	// no longer read for selection.
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -287,16 +377,113 @@ func TestLeagueTiebreakPost_Happy(t *testing.T) {
 	assert.GreaterOrEqual(t, len(hub.events), 2)
 }
 
+// TestLeagueTiebreakPost_TeamIDsSelectsNamesakeGroupAndForwards is the
+// bc-idfx finding 11 regression: a request naming a namesake-holding group
+// by teamIds (not resolvable by teamNames alone, since both teams share the
+// name "Team X") must match the candidate group by id and forward teamIds
+// through to GenerateLeagueTiebreakMatches unchanged.
+func TestLeagueTiebreakPost_TeamIDsSelectsNamesakeGroupAndForwards(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-team-x-a", Name: "Team X", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-team-x-b", Name: "Team X", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	generated := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team X", SideAID: "id-team-x-a", SideB: "Team X", SideBID: "id-team-x-b"},
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates, generated: generated}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools), matches: nil}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	assert.ElementsMatch(t, []string{"id-team-x-a", "id-team-x-b"}, eng.receivedTeamIDs,
+		"the handler must forward teamIds to GenerateLeagueTiebreakMatches, not silently drop it")
+}
+
+// TestLeagueTiebreakPost_MismatchedTeamIDsLength used to pin a dedicated
+// 1:1 length check between teamIds and teamNames. That check no longer
+// exists (operator ruling bc-pnum: teamNames is display-only and is never
+// compared against teamIds). This still 400s, but now via the "teamIds
+// must contain at least two teams" floor: the single id supplied here is
+// below that floor regardless of how many teamNames accompany it.
+func TestLeagueTiebreakPost_MismatchedTeamIDsLength(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLeagueTiebreakPost_BlankTeamIDsEntryRejected pins the second-Opus-pass
+// item 4 fix: dedupedStringSet has no opinion on what the strings ARE, so a
+// single "" entry in teamIds deduped cleanly and was passed straight through
+// to the group-match check as if it were a real participant id. Every
+// id-less DH row (SideAID/SideBID both "") would then match that "" entry on
+// BOTH sides, group membership for a request that supplied no real id at
+// all. Rejected outright before it ever reaches dedupedStringSet.
+func TestLeagueTiebreakPost_BlankTeamIDsEntryRejected(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"", "id-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "teamIds entries must be non-empty")
+}
+
+// TestLeagueTiebreakPost_InvalidSelection was previously driven by a
+// teamNames-only body naming teams not in any candidate group. Under the
+// id-only contract (operator ruling bc-pnum) a teamNames-only body 400s
+// earlier, on the "teamIds must contain at least two teams" floor, and
+// never reaches the candidate-group match at all; that floor case is
+// already covered by TestLeagueTiebreakPost_TooFewTeams. Converted to
+// supply a well-formed teamIds set that still matches no candidate group,
+// so this test continues to exercise the "does not match any consequential
+// tied group" rejection itself.
 func TestLeagueTiebreakPost_InvalidSelection(t *testing.T) {
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	eng := &stubLeagueTiebreakEngine{candidates: candidates}
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	// Request for teams not in any candidate group.
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team X", "Team Y"}})
+	// Request for teamIds not present in any candidate group.
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team Y"},
+		TeamIDs:   []string{"id-x", "id-y"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -321,10 +508,10 @@ func TestLeagueTiebreakPost_TooFewTeams(t *testing.T) {
 
 func TestLeagueTiebreakPost_AlreadyExists(t *testing.T) {
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	existing := []state.MatchResult{
-		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
+		{ID: "Pool A-DH-0", SideA: "Team A", SideAID: "id-a", SideB: "Team B", SideBID: "id-b"},
 	}
 	eng := &stubLeagueTiebreakEngine{candidates: candidates}
 	store := &stubLeagueTiebreakStore{
@@ -333,7 +520,10 @@ func TestLeagueTiebreakPost_AlreadyExists(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -345,7 +535,7 @@ func TestLeagueTiebreakPost_AlreadyExists(t *testing.T) {
 func TestLeagueTiebreakPost_LoadMatchesError(t *testing.T) {
 	// When LoadPoolMatches fails, the handler must return 500.
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	eng := &stubLeagueTiebreakEngine{candidates: candidates}
 	store := &stubLeagueTiebreakStore{
@@ -354,7 +544,10 @@ func TestLeagueTiebreakPost_LoadMatchesError(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -367,7 +560,7 @@ func TestLeagueTiebreakPost_EngineValidationError(t *testing.T) {
 	// GenerateLeagueTiebreakMatches can return a ValidationError when the
 	// competition is not a team-league type. The handler must map that to 400.
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	eng := &stubLeagueTiebreakEngine{
 		candidates:  candidates,
@@ -379,7 +572,10 @@ func TestLeagueTiebreakPost_EngineValidationError(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -407,7 +603,7 @@ func TestLeagueTiebreakPost_BadBody(t *testing.T) {
 
 func TestLeagueTiebreakDelete_Happy(t *testing.T) {
 	existing := []state.MatchResult{
-		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-DH-0", SideA: "Team A", SideAID: "id-a", SideB: "Team B", SideBID: "id-b", Status: state.MatchStatusScheduled},
 	}
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{
@@ -417,7 +613,10 @@ func TestLeagueTiebreakDelete_Happy(t *testing.T) {
 	hub := &recordingBroadcaster{}
 	r := leagueTiebreakRouter(eng, store, hub)
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -438,7 +637,10 @@ func TestLeagueTiebreakDelete_NotFound(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -450,9 +652,9 @@ func TestLeagueTiebreakDelete_NotFound(t *testing.T) {
 func TestLeagueTiebreakDelete_ScoredMatch(t *testing.T) {
 	existing := []state.MatchResult{
 		{
-			ID:     "Pool A-DH-0",
-			SideA:  "Team A",
-			SideB:  "Team B",
+			ID:    "Pool A-DH-0",
+			SideA: "Team A", SideAID: "id-a",
+			SideB: "Team B", SideBID: "id-b",
 			Winner: "Team A",
 			Status: state.MatchStatusCompleted,
 		},
@@ -464,7 +666,10 @@ func TestLeagueTiebreakDelete_ScoredMatch(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -485,6 +690,124 @@ func TestLeagueTiebreakDelete_TooFewTeams(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// TestLeagueTiebreakDelete_TeamIDsRemovesNamesakeGroup pins the bc-idfx
+// review's item 9 fix: a namesake tie-breaker group (two "Team X" from
+// different dojos) can only ever be CREATED via teamIds -- POST's own
+// teamNames-only path collapses the duplicate name and is rejected -- and
+// generatePoolDaihyosenMatches stamps SideAID/SideBID on the DH row it
+// writes for exactly that reason. Before the fix, DELETE had no teamIds
+// counterpart at all: a name-only delete request also collapses the
+// duplicate name in dedupedStringSet and is rejected before ever reaching the
+// group match, so such a group could be created but never removed.
+func TestLeagueTiebreakDelete_TeamIDsRemovesNamesakeGroup(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:    "Pool A-DH-0",
+			SideA: "Team X", SideAID: "id-team-x-a",
+			SideB: "Team X", SideBID: "id-team-x-b",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-b"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&resp))
+	assert.Equal(t, float64(1), resp["deleted"])
+	assert.Empty(t, store.matches, "the namesake group's DH row must actually be removed")
+}
+
+// TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs
+// originally pinned a teamNames-only delete of a namesake group: names
+// can't disambiguate the pair, so the request was rejected, but the error
+// message had to point the operator at teamIds. Under the id-only contract
+// (operator ruling bc-pnum) a teamNames-only body no longer reaches any
+// duplicate check at all -- it 400s earlier on "teamIds must contain at
+// least two teams", which names the field but says nothing about
+// duplicates. Converted to send a DUPLICATE teamIds entry instead (the only
+// remaining way to reach the "teamIds contains duplicate entries" message),
+// keeping the namesake-group fixture and the "nothing removed" assertion so
+// this still exercises the DELETE call site's own parseTiebreakSelection use.
+func TestLeagueTiebreakDelete_NamesakeGroup_DuplicateNamesPointsAtTeamIDs(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:    "Pool A-DH-0",
+			SideA: "Team X", SideAID: "id-team-x-a",
+			SideB: "Team X", SideBID: "id-team-x-b",
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team X", "Team X"},
+		TeamIDs:   []string{"id-team-x-a", "id-team-x-a"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "duplicate")
+	assert.Contains(t, w.Body.String(), "teamIds", "the message must point the operator at the disambiguating field")
+	assert.Len(t, store.matches, 1, "the rejected request must not remove anything")
+}
+
+// TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected pins the second-Opus-pass
+// item 4 fix. Before it, a blank teamIds entry deduped to "" and matched
+// BOTH sides of every id-less DH row -- reproduced here with TWO id-less
+// DH rows from entirely UNRELATED groups (Team C/Team D and Team E/Team F);
+// a request naming neither group, but carrying one blank teamIds entry,
+// used to delete both of them (200 {"deleted":2}) instead of being rejected.
+func TestLeagueTiebreakDelete_BlankTeamIDsEntryRejected(t *testing.T) {
+	existing := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team C", SideB: "Team D", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-DH-1", SideA: "Team E", SideB: "Team F", Status: state.MatchStatusScheduled},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	// Neither "Alice" nor "Bob" names any real group; the blank teamIds
+	// entry is what the pre-fix code silently matched every id-less row on.
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Alice", "Bob"},
+		TeamIDs:   []string{"", "id-bob"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "teamIds entries must be non-empty")
+	assert.Len(t, store.matches, 2, "neither unrelated group's bout may be removed")
 }
 
 // ---------------------------------------------------------------------------
@@ -640,7 +963,10 @@ func TestLeagueTiebreakPost_CandidatesNotFound(t *testing.T) {
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -649,10 +975,35 @@ func TestLeagueTiebreakPost_CandidatesNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// TestLeagueTiebreakPost_CandidatesCorruptOverrides is the POST-validation
+// sibling of TestLeagueTiebreakCandidates_CorruptOverrides: this handler also
+// calls LeagueTiebreakCandidates (to validate the selection before
+// generating), reaching the identical LoadOverrides call. Same fix, same
+// mapping.
+func TestLeagueTiebreakPost_CandidatesCorruptOverrides(t *testing.T) {
+	eng := &stubLeagueTiebreakEngine{
+		candidatesErr: fmt.Errorf("compute standings: %w", state.ErrCorruptOverrides),
+	}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "corrupt_overrides")
+}
+
 // POST, GenerateLeagueTiebreakMatches returns *engine.NotFoundError (404).
 func TestLeagueTiebreakPost_GenerateNotFound(t *testing.T) {
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	eng := &stubLeagueTiebreakEngine{
 		candidates:  candidates,
@@ -664,7 +1015,10 @@ func TestLeagueTiebreakPost_GenerateNotFound(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -676,7 +1030,7 @@ func TestLeagueTiebreakPost_GenerateNotFound(t *testing.T) {
 // POST, GenerateLeagueTiebreakMatches returns a generic error (500).
 func TestLeagueTiebreakPost_GenerateInternalError(t *testing.T) {
 	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
+		makeTiedGroupWithIDs("Team A", "id-a", "Team B", "id-b", 1, 2),
 	}
 	eng := &stubLeagueTiebreakEngine{
 		candidates:  candidates,
@@ -688,7 +1042,10 @@ func TestLeagueTiebreakPost_GenerateInternalError(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -706,7 +1063,10 @@ func TestLeagueTiebreakDelete_LoadMatchesError(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -718,7 +1078,7 @@ func TestLeagueTiebreakDelete_LoadMatchesError(t *testing.T) {
 // DELETE, SavePoolMatches returns an error after removal (500).
 func TestLeagueTiebreakDelete_SaveError(t *testing.T) {
 	existing := []state.MatchResult{
-		{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusScheduled},
+		{ID: "Pool A-DH-0", SideA: "Team A", SideAID: "id-a", SideB: "Team B", SideBID: "id-b", Status: state.MatchStatusScheduled},
 	}
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{
@@ -728,7 +1088,10 @@ func TestLeagueTiebreakDelete_SaveError(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -934,22 +1297,24 @@ func (b *recordingBroadcaster) Broadcast(t EventType, _ any) {
 // Tri-review fixes: duplicate names, partial-group, running-match guards
 // ---------------------------------------------------------------------------
 
-// TestLeagueTiebreakPost_DuplicateNames covers the candidacy-gate bypass: a
-// duplicated team name must be rejected up front, not silently deduped into a
-// smaller group that matches a larger candidate group.
+// TestLeagueTiebreakPost_DuplicateNames used to cover a candidacy-gate
+// bypass reachable through a duplicated team NAME: {A,A,B} (len 3) could
+// match a 3-team candidate group under a raw-length comparison. Under the
+// id-only contract (operator ruling bc-pnum) selection is teamIds-only, and
+// parseTiebreakSelection's dedupedStringSet check runs on teamIds BEFORE
+// the handler ever loads candidates, so the equivalent bypass is now a
+// duplicated team ID, and it is rejected outright rather than silently
+// deduped -- there is no candidates/store setup left to construct the
+// original bypass shape with, since the request never reaches that code.
 func TestLeagueTiebreakPost_DuplicateNames(t *testing.T) {
-	candidates := []engine.TiedGroup{
-		makeTiedGroup("Team A", "Team B", 1, 2),
-	}
-	// Add a third team so {A,A,B} (len 3) would have matched a 3-team group
-	// under the old raw-len comparison.
-	candidates[0].Teams = append(candidates[0].Teams, state.PlayerStanding{Player: domain.Player{Name: "Team C", Dojo: "Dojo Team C"}})
-	candidates[0].MaxPosition = 3
-	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-a", "id-b"},
+	})
 	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -959,13 +1324,18 @@ func TestLeagueTiebreakPost_DuplicateNames(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "duplicate")
 }
 
-// TestLeagueTiebreakDelete_DuplicateNames, DELETE must reject duplicates too.
+// TestLeagueTiebreakDelete_DuplicateNames, DELETE must reject duplicate
+// teamIds too (teamNames is display-only and is never checked for
+// duplicates under the id-only contract, operator ruling bc-pnum).
 func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools)}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team A"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team A"},
+		TeamIDs:   []string{"id-a", "id-a"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -973,6 +1343,90 @@ func TestLeagueTiebreakDelete_DuplicateNames(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "duplicate")
+}
+
+// TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowNotRemovable is the
+// converted twin of the deleted
+// TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowStillRemovable, which
+// pinned inGroup's pre-bc-pnum row-level id-or-name fallback:
+// generatePoolDaihyosenMatches only began stamping SideAID/SideBID on
+// 2026-08-29, so a DH row written before that carries blank ids, and the
+// fallback let a teamIds-based DELETE still find such a row by matching its
+// names. The operator ruling bc-pnum removed that fallback entirely --
+// inGroup is now purely `ids[m.SideAID], ids[m.SideBID]` -- so a row with no
+// id on a side is never a member of any group on that side, full stop. This
+// pins the new, OPPOSITE behaviour: the legacy id-less row is invisible to
+// a teamIds-based DELETE, so the request finds no rows in the group at all
+// (404 no_tiebreak_matches) and the row survives untouched.
+func TestLeagueTiebreakDelete_TeamIDs_LegacyIDlessRowNotRemovable(t *testing.T) {
+	existing := []state.MatchResult{
+		{
+			ID:     "Pool A-DH-0",
+			SideA:  "Team Alpha", // no SideAID: legacy row
+			SideB:  "Team Beta",  // no SideBID: legacy row
+			Status: state.MatchStatusScheduled,
+		},
+	}
+	eng := &stubLeagueTiebreakEngine{}
+	store := &stubLeagueTiebreakStore{
+		comp:    makeTeamLeagueComp(state.CompStatusPools),
+		matches: existing,
+	}
+	hub := &recordingBroadcaster{}
+	r := leagueTiebreakRouter(eng, store, hub)
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team Alpha", "Team Beta"},
+		TeamIDs:   []string{"id-alpha", "id-beta"},
+	})
+	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equalf(t, http.StatusNotFound, w.Code, "body: %s", w.Body.String())
+	assert.Contains(t, w.Body.String(), "no_tiebreak_matches")
+	assert.Len(t, store.matches, 1, "the legacy id-less row must survive untouched, it was never in the selected group")
+}
+
+// TestLeagueTiebreakPost_TeamIDs_LegacyIDlessRowDoesNotBlockRegeneration is
+// POST's converted twin of the DELETE test above (originally
+// TestLeagueTiebreakPost_TeamIDs_LegacyIDlessRowBlocksRegeneration, which
+// pinned the row-level id-or-name fallback counting this row towards
+// pairsExist and refusing regeneration 409). Under the id-only inGroup
+// (operator ruling bc-pnum), the legacy id-less row is invisible to the
+// id-based pairsExist count -- neither side matches any real id -- so the
+// "already exists" guard never fires and the request proceeds to generate
+// a second, redundant set of tie-breaker matches (masked here, as before,
+// by the stub's zero-value GenerateLeagueTiebreakMatches returning no
+// matches and no error).
+func TestLeagueTiebreakPost_TeamIDs_LegacyIDlessRowDoesNotBlockRegeneration(t *testing.T) {
+	candidates := []engine.TiedGroup{
+		{
+			Teams: []state.PlayerStanding{
+				{Player: domain.Player{ID: "id-alpha", Name: "Team Alpha", Dojo: "Dojo A"}},
+				{Player: domain.Player{ID: "id-beta", Name: "Team Beta", Dojo: "Dojo B"}},
+			},
+			MinPosition: 1, MaxPosition: 2,
+		},
+	}
+	existing := []state.MatchResult{
+		{ID: "Pool A-DH-0", SideA: "Team Alpha", SideB: "Team Beta"}, // legacy row, no ids
+	}
+	eng := &stubLeagueTiebreakEngine{candidates: candidates}
+	store := &stubLeagueTiebreakStore{comp: makeTeamLeagueComp(state.CompStatusPools), matches: existing}
+	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
+
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team Alpha", "Team Beta"},
+		TeamIDs:   []string{"id-alpha", "id-beta"},
+	})
+	req := httptest.NewRequest("POST", "/api/competitions/comp-1/league-tiebreak", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equalf(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
 }
 
 // TestLeagueTiebreakDelete_PartialGroup, naming only part of a tie-breaker group
@@ -984,15 +1438,18 @@ func TestLeagueTiebreakDelete_PartialGroup(t *testing.T) {
 	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 		matches: []state.MatchResult{
-			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B"},
-			{ID: "Pool A-DH-1", SideA: "Team A", SideB: "Team C"},
-			{ID: "Pool A-DH-2", SideA: "Team B", SideB: "Team C"},
+			{ID: "Pool A-DH-0", SideA: "Team A", SideAID: "id-a", SideB: "Team B", SideBID: "id-b"},
+			{ID: "Pool A-DH-1", SideA: "Team A", SideAID: "id-a", SideB: "Team C", SideBID: "id-c"},
+			{ID: "Pool A-DH-2", SideA: "Team B", SideAID: "id-b", SideB: "Team C", SideBID: "id-c"},
 		},
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
 	// Request only {A,B}: the A-C and B-C matches each have one side in the set.
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -1009,12 +1466,15 @@ func TestLeagueTiebreakDelete_RunningMatch(t *testing.T) {
 	store := &stubLeagueTiebreakStore{
 		comp: makeTeamLeagueComp(state.CompStatusPools),
 		matches: []state.MatchResult{
-			{ID: "Pool A-DH-0", SideA: "Team A", SideB: "Team B", Status: state.MatchStatusRunning},
+			{ID: "Pool A-DH-0", SideA: "Team A", SideAID: "id-a", SideB: "Team B", SideBID: "id-b", Status: state.MatchStatusRunning},
 		},
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -1026,6 +1486,9 @@ func TestLeagueTiebreakDelete_RunningMatch(t *testing.T) {
 // TestLeagueTiebreakDelete_RejectsNonTeamLeague pins the Copilot fix: the
 // league-only DELETE must refuse a non-league (e.g. mixed) competition so an
 // operator can't delete a mixed team comp's auto-injected DH matches through it.
+// The notTeamLeague guard fires right after LoadCompetition, before the DH
+// rows are ever inspected, so the fixture's ids don't need to line up with
+// anything; teamIds just needs to pass parseTiebreakSelection's floor.
 func TestLeagueTiebreakDelete_RejectsNonTeamLeague(t *testing.T) {
 	eng := &stubLeagueTiebreakEngine{}
 	mixed := makeTeamLeagueComp(state.CompStatusPools)
@@ -1038,7 +1501,10 @@ func TestLeagueTiebreakDelete_RejectsNonTeamLeague(t *testing.T) {
 	}
 	r := leagueTiebreakRouter(eng, store, stubBroadcaster{})
 
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 	req := httptest.NewRequest("DELETE", "/api/competitions/comp-1/league-tiebreak", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -1051,9 +1517,14 @@ func TestLeagueTiebreakDelete_RejectsNonTeamLeague(t *testing.T) {
 
 // TestLeagueTiebreakPost_RejectsNonTeamLeague pins the POST guard added in the
 // same Copilot fix round: POST /league-tiebreak must refuse competitions that are
-// not team-leagues, returning 400 without injecting any matches.
+// not team-leagues, returning 400 without injecting any matches. Like the
+// DELETE test above, the notTeamLeague guard fires before candidates are
+// ever loaded, so teamIds just needs to pass parseTiebreakSelection's floor.
 func TestLeagueTiebreakPost_RejectsNonTeamLeague(t *testing.T) {
-	body := jsonBody(leagueTiebreakRequest{TeamNames: []string{"Team A", "Team B"}})
+	body := jsonBody(leagueTiebreakRequest{
+		TeamNames: []string{"Team A", "Team B"},
+		TeamIDs:   []string{"id-a", "id-b"},
+	})
 
 	t.Run("non-league format (mixed)", func(t *testing.T) {
 		eng := &stubLeagueTiebreakEngine{}

@@ -6,7 +6,7 @@ Renders bracket Excel workbooks into grouped, print-ready **PDFs** (competitor t
 bracket-creator print --type <type> (--input <dir> | --tournament-data <dir>) [flags]
 ```
 
-This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine; use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine (see [When to use the CLI](#when-to-use-the-cli)).
+This is the command-line counterpart of the tournament app's **Export PDFs** button. Both share the same rendering engine. Use the CLI when you want PDFs without running the server, or when you want to generate them on a separate, LibreOffice-equipped machine. Refer to [When to use the CLI](#when-to-use-the-cli).
 
 ## Input modes
 
@@ -27,13 +27,12 @@ Provide **exactly one**:
       competition on the day, use the live standings view in the tournament
       app instead.
     - A competition whose stored bracket no longer matches its current
-      settings (for example, its qualifier count was changed after the
-      bracket was built) cannot be rendered until the draw is regenerated or
-      the settings are restored.
+      settings cannot be rendered until the draw is regenerated or
+      the settings are restored. That happens, for example, when the qualifier count was changed after the
+      bracket was built.
 
     Each skipped competition is named in a warning on the console. Every
-    other competition still prints as usual. By default the command still
-    exits successfully even if every competition was skipped; pass
+    other competition still prints as usual. By default the command still exits successfully, even if every competition was skipped. Pass
     `--fail-on-skip-all` to make a scripted run detect that case.
 
 ## Types
@@ -51,25 +50,32 @@ Provide **exactly one**:
 
 ## Other flags
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--output` | `-o` | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
-| `--output-dir` | | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
-| `--team-file` | | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable; defaults to any filename containing `team`. |
-| `--fail-on-skip-all` | | Exit with a non-zero status if every competition was skipped, so a scripted run can detect that no booklet was produced. Off by default; see [Some competitions can be left out of the booklet](#input-modes). |
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | (none) | Output PDF path for a single `--type`. Mutually exclusive with `--output-dir`. |
+| `--output-dir` | | (none) | Output directory. Required for `--type=all`; for a single `--type`, give this or `--output`. |
+| `--team-file` | | any filename containing `team` | An `.xlsx` basename to treat as a team workbook (excluded from tags). Repeatable. |
+| `--fail-on-skip-all` | | off | Exit with a non-zero status if every competition was skipped, so a scripted run can detect that no booklet was produced. Refer to [Some competitions can be left out of the booklet](#input-modes). |
 
-An output target is always required: for a single `--type`, provide exactly one of `--output` or `--output-dir`; `--type=all` requires `--output-dir` (and rejects `--output`).
+An output target is always required. For a single `--type`, provide exactly one of `--output` or `--output-dir`. `--type=all` requires `--output-dir` and rejects `--output`.
 
 ## Usage
 
+Generate every PDF group from a folder of bracket workbooks:
+
 ```bash
-# Generate every PDF group from a folder of bracket workbooks
 bracket-creator print --type=all --input=./xlsx/ --output-dir=./pdfs
+```
 
-# Generate everything from a tournament-data directory
+Generate everything from a tournament-data directory:
+
+```bash
 bracket-creator print --type=all --tournament-data=tournament-data/ --output-dir=./pdfs
+```
 
-# Competitor tags only, to a single file
+Competitor tags only, to a single file:
+
+```bash
 bracket-creator print --type=tags --input=./xlsx/ -o ./tags.pdf
 ```
 

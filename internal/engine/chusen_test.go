@@ -9,6 +9,7 @@ import (
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 // TestChusenCandidates_CycleNeedsChusen: three teams tied on every criterion play
@@ -21,13 +22,20 @@ func TestChusenCandidates_CycleNeedsChusen(t *testing.T) {
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)
 
+	// Checked as an UNORDERED pair, not by assuming a fixed side: the
+	// pre-DH tied group's order (and so which side of each pairing lands
+	// in SideA) is itself sorted by Player.ID when Points tie
+	// (computeStandingsFrom's deterministic tiebreak), and ids are
+	// bctest.StampPlayerID's UUID-v4-shaped hash -- unrelated to name
+	// order.
 	scoreInjectedDH(t, eng, store, compID, func(sideA, sideB string) string {
+		pair := map[string]bool{sideA: true, sideB: true}
 		switch {
-		case sideA == "Alpha" && sideB == "Beta":
+		case pair["Alpha"] && pair["Beta"]:
 			return "Alpha"
-		case sideA == "Alpha" && sideB == "Gamma":
+		case pair["Alpha"] && pair["Gamma"]:
 			return "Gamma" // Gamma > Alpha
-		case sideA == "Beta" && sideB == "Gamma":
+		case pair["Beta"] && pair["Gamma"]:
 			return "Beta"
 		}
 		return sideA
@@ -70,22 +78,32 @@ func TestChusenCandidates_ResolvedByOverride(t *testing.T) {
 	eng, store := setupTeamPoolComp(t, compID, true)
 	_, err := eng.InjectPoolDaihyosenMatches(compID)
 	require.NoError(t, err)
+	// Checked as an UNORDERED pair; see TestChusenCandidates_CycleNeedsChusen's
+	// identical comment for why a fixed sideA/sideB orientation cannot be
+	// assumed.
 	scoreInjectedDH(t, eng, store, compID, func(sideA, sideB string) string {
+		pair := map[string]bool{sideA: true, sideB: true}
 		switch {
-		case sideA == "Alpha" && sideB == "Beta":
+		case pair["Alpha"] && pair["Beta"]:
 			return "Alpha"
-		case sideA == "Alpha" && sideB == "Gamma":
+		case pair["Alpha"] && pair["Gamma"]:
 			return "Gamma"
-		case sideA == "Beta" && sideB == "Gamma":
+		case pair["Beta"] && pair["Gamma"]:
 			return "Beta"
 		}
 		return sideA
 	})
-	require.NoError(t, store.SaveOverrides(compID, &state.Overrides{
-		PoolRanks: map[string]map[string]int{
-			"Pool A": {"Alpha": 1, "Beta": 2, "Gamma": 3},
-		},
-	}))
+	// Recorded via SaveRankOverride (the real operator path, identity-keyed:
+	// helper.CompetitorKey(id, "", "")), not a raw bare-name literal --
+	// PoolRanks lookup is id-only per lookupPoolRankOverride, never a legacy
+	// bare-name key (operator ruling bc-pnum; see
+	// TestCalculatePoolStandings_Override_LegacyBareNameKeyIsUnresolvable in
+	// pool_rank_override_test.go for a bare-name override going the other,
+	// unresolvable way). setupTeamPoolComp's roster carries "Dojo <Name>"
+	// dojos, so the ids match bctest.StampPlayerID's derivation exactly.
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Alpha", "Dojo Alpha"), 1))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Beta", "Dojo Beta"), 2))
+	require.NoError(t, store.SaveRankOverride(compID, "Pool A", bctest.StampPlayerID("Gamma", "Dojo Gamma"), 3))
 	eng.standingsCache.Delete(compID)
 	eng.standingsFlight.Delete(compID)
 

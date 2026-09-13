@@ -269,7 +269,7 @@ func PlayoffLeavesFromBracket(bracket *state.Bracket) []string {
 }
 
 // PlayoffFinalsFromParticipants seeds the competition's participants exactly as
-// generatePlayoffs does (ApplySeeds → optional numbering → StandardSeeding),
+// generatePlayoffs does (ApplySeeds → StandardSeeding),
 // returning the seeded names to feed the elimination-tree skeleton. This is the
 // PRE-START fallback only: once a bracket exists, PlayoffLeavesFromBracket is used
 // instead because it cannot desync from the frozen bracket. Since there is no
@@ -288,9 +288,29 @@ func PlayoffFinalsFromParticipants(store *state.Store, comp *state.Competition) 
 			fmt.Printf("export: warning: apply seeds for playoffs skeleton: %v\n", aerr)
 		}
 	}
-	if comp.NumberPrefix != "" {
-		helper.AssignPlayerNumbers(players, comp.NumberPrefix, 1)
-	}
+	// No AssignPlayerNumbers call here (bc-pnum review, F11): players is
+	// local to this function (freshly loaded above, never returned or shared
+	// with a caller), and only p.Name is read into the returned names slice
+	// below. Setting Number on it would be pure waste -- traced end to end,
+	// nothing downstream of this function's return value can ever see it.
+	//
+	// bc-drwx item 13 (noted, not changed): this re-runs the full
+	// StandardSeeding pass -- including delayDojoMeetings -- on every
+	// pre-draw export (an operator can preview/re-export the PDF skeleton
+	// repeatedly before the competition officially starts), with no
+	// caching of the result. That repeated cost is acceptable now that
+	// delayDojoMeetings' single-dojo/few-cross-dojo-partner case is an
+	// O(N) early-out and its general case is O(N^2 log N) per generation
+	// rather than O(N^4) (bc-drwx item 2) -- see delayDojoMeetings' own
+	// "Performance note" for the current measured cost of both together
+	// with dojoKey's spelling-insensitive matching (item 3): a prior
+	// version of THIS note claimed the algorithm had stopped being the
+	// bottleneck on the strength of item 2 alone, which was briefly false
+	// once item 3 landed dojoKey calls inside that same selection loop
+	// (25x-200x, bc-drwx review fix) and is true again now that those
+	// calls are hoisted -- caching is not needed to close repeated
+	// re-export cost, but that conclusion depends on BOTH fixes, not item
+	// 2 in isolation.
 	seeded := helper.StandardSeeding(players)
 	names := make([]string, len(seeded))
 	for i, p := range seeded {

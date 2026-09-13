@@ -134,6 +134,50 @@ func BenchmarkStandardSeeding_256_2x128(b *testing.B) {
 	}
 }
 
+// benchSingleDojoRoster builds a roster where EVERY entrant shares one dojo
+// (or the roster the CLI's legacy no-dojo-column parser used to default
+// every blank dojo to "NA" -- the same shape from delayDojoMeetings' own
+// point of view, since it only ever sees the string).
+func benchSingleDojoRoster(n int) []Player {
+	out := make([]Player, n)
+	for i := range out {
+		out[i] = Player{Name: fmt.Sprintf("P%04d", i), Dojo: "OneDojo"}
+	}
+	return out
+}
+
+// BenchmarkStandardSeeding_SingleDojo_64/128/256 are bc-drwx item 2's own
+// worst case: with only ONE dojo in the whole roster, no cross-dojo swap
+// partner can EVER exist (dojoSwapGain's candidate filter rejects same-dojo
+// targets unconditionally), so the pre-fix delayDojoMeetings paid O(N^4) --
+// C(N,2) same-dojo pairs, excluded one at a time, each exclusion re-paying a
+// fresh O(N^2) worst-pair rescan -- to discover, the slow way, that the
+// whole climb was a no-op from the start. See delayDojoMeetings' own doc
+// comment for the early-out this measures and the before/after numbers.
+func BenchmarkStandardSeeding_SingleDojo_64(b *testing.B) {
+	roster := benchSingleDojoRoster(64)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		StandardSeeding(roster)
+	}
+}
+
+func BenchmarkStandardSeeding_SingleDojo_128(b *testing.B) {
+	roster := benchSingleDojoRoster(128)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		StandardSeeding(roster)
+	}
+}
+
+func BenchmarkStandardSeeding_SingleDojo_256(b *testing.B) {
+	roster := benchSingleDojoRoster(256)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		StandardSeeding(roster)
+	}
+}
+
 // The BuildPoolPhaseTreeAware benchmarks below measure improveDojoMeetings
 // (P2 caching) and earliestDojoMeeting (P3 occupied-pool collection) at
 // poolSize=4 -- 256 players/64 pools is the wave-2 measurement's own
@@ -194,6 +238,26 @@ func BenchmarkBuildPoolPhaseTreeAware_256_16x16_Clustered(b *testing.B) {
 
 func BenchmarkBuildPoolPhaseTreeAware_256_16x16_Interleaved(b *testing.B) {
 	roster := benchInterleavedDojoRoster(16, 16)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, _, err := BuildPoolPhaseTreeAware(roster, 4, false, 4, 2); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkBuildPoolPhaseTreeAware_256_SingleDojo (bc-pnum review): every
+// entrant shares ONE dojo, the shape benchSingleDojoRoster already builds
+// for the StandardSeeding_SingleDojo_* benchmarks above, run here through
+// the full tree-aware distributor instead of just delayDojoMeetings. A
+// single-dojo roster is already at the descent's own brute-force ceiling
+// (TestTreeAwareGateScorecard's 180/180 sweep), so improveDojoMeetings'
+// exchange pass is a no-op here -- this benchmark exists to cover the
+// descent's OWN cost (assignUnseededByDojoTree/dojoNode), which none of the
+// multi-dojo shapes above isolate, not to exercise the exchange pass this
+// bead's own int-id rewrite targeted.
+func BenchmarkBuildPoolPhaseTreeAware_256_SingleDojo(b *testing.B) {
+	roster := benchSingleDojoRoster(256)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, _, err := BuildPoolPhaseTreeAware(roster, 4, false, 4, 2); err != nil {

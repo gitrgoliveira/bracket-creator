@@ -116,7 +116,7 @@ function RegistrationForm({ compId, onBack }) {
           setErr("Registration is closed for this competition.");
         } else {
           // Duplicate name: use the friendly message from the server verbatim.
-          setErr(msg || "A participant with this name is already registered.");
+          setErr(msg || "A participant with this name and dojo is already registered.");
         }
       } else {
         setErr(data.error || "Registration failed. Please try again.");

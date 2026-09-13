@@ -5,7 +5,7 @@ import { beforeAll } from 'vitest';
 // Shared mount harness for the AdminParticipants render tests (PR #416
 // finding 14), mirroring settings_mount_harness.jsx's shape: a builder for
 // the competition fixture (each test's own differences layered on top via
-// overrides) plus a mount helper, so admin_participants_ids.render.test.jsx
+// overrides) plus a mount helper, so admin_participants_row_layout.render.test.jsx
 // and admin_participants_number_badge.render.test.jsx stop each carrying an
 // almost-byte-identical copy of both.
 

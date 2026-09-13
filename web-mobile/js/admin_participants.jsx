@@ -5,7 +5,7 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
-import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
+import { NO_ID_HINT } from './data_integrity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -268,7 +268,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const rosterFormat = c.kind === "team" ? "Team name, Dojo"
     : c.engi ? (withZekken ? "Name 1 - Name 2, Zekken 1 - Zekken 2, Dojo[, Dan]" : "Name 1 - Name 2, Dojo[, Dan]")
       : withZekken ? "Name, Zekken, Dojo[, Dan]" : "Name, Dojo[, Dan grade]";
-  const [showOnlyUnchecked, setShowOnlyUnchecked] = useStateA(false);
   const [replaceTarget, setReplaceTarget] = useStateA(null);
   const [showAddForm, setShowAddForm] = useStateA(false);
   const [addName, setAddName] = useStateA("");
@@ -325,16 +324,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       setText(generateText(c.players || []));
     }
   }, [c.players, c.withZekkenName]);
-
-  // If check-in tracking is turned off while "Show unchecked" is active, the
-  // toggle button hides (it's gated on c.checkInEnabled) and the operator
-  // would be stuck with a filtered list and no visible way to reset it.
-  // Reset the filter so the full roster reappears.
-  useEffectA(() => {
-    if (!c.checkInEnabled && showOnlyUnchecked) {
-      setShowOnlyUnchecked(false);
-    }
-  }, [c.checkInEnabled, showOnlyUnchecked]);
 
   const handleSeedFile = (file) => {
     if (!file) return;
@@ -467,25 +456,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const q = trimmedSearch.toLowerCase();
     let out = players;
     if (sourceFilter) out = out.filter(p => p.source === sourceFilter);
-    if (showOnlyUnchecked) out = out.filter(p => !p.checkedIn);
     if (q) out = out.filter(p => playerSearchTargets.get(window.checkinPid(p))?.includes(q));
     return out;
-  }, [players, sourceFilter, showOnlyUnchecked, trimmedSearch, playerSearchTargets]);
-  const dojoFirstRowSet = useMemoA(() => {
-    const seen = new Set();
-    const first = new Set();
-    visiblePlayers.forEach((p) => {
-      if (!seen.has(p.dojo)) { seen.add(p.dojo); first.add(window.checkinPid(p)); }
-    });
-    return first;
-  }, [visiblePlayers]);
-  const dojoUncheckedCount = useMemoA(() => {
-    const counts = new Map();
-    players.forEach(p => {
-      if (!p.checkedIn) counts.set(p.dojo, (counts.get(p.dojo) || 0) + 1);
-    });
-    return counts;
-  }, [players]);
+  }, [players, sourceFilter, trimmedSearch, playerSearchTargets]);
   // THE predicate for "is this seeding fit to draw with", shared with the
   // header's "Cannot start" block and the dashboard card
   // (competitionSeedingBlocker, admin_helpers.jsx). Three surfaces describe the
@@ -585,48 +558,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       return;
     }
     if (mountedRef.current) showToast("Unseeded list shuffled");
-  };
-
-  const toggleCheckIn = async (pid, checkedIn) => {
-    try {
-      await window.API.toggleCheckIn(c.id, pid, checkedIn, password);
-      // State refresh is handled by the SSE participants_updated event,
-      // which admin.jsx's REFRESHABLE_EVENTS subscriber picks up and
-      // uses to call fetchCompetitionDetails. No onUpdate() call needed.
-    } catch (err) {
-      console.error("AdminParticipants: toggleCheckIn failed", err);
-      showToast(err.message, "error");
-    }
-  };
-
-  const bulkCheckInDojo = async (dojo) => {
-    const targets = (c.players || []).filter(p => p.dojo === dojo && !p.checkedIn);
-    if (targets.length === 0) return;
-
-    if (!(await window.confirmDialog({ message: `Mark all ${targets.length} participants from ${dojo} as checked-in?`, confirmLabel: "Check in all" }))) return;
-
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinApiPid(p), true, password)));
-    const failed = results.filter(r => r.status === "rejected").length;
-    const succeeded = results.length - failed;
-    if (failed > 0) {
-      console.error("AdminParticipants: bulkCheckInDojo partial failure", results.filter(r => r.status === "rejected").map(r => r.reason));
-      showToast(`${succeeded}/${results.length} checked in from ${dojo} (${failed} failed)`, "error");
-    } else {
-      showToast(`Checked in ${succeeded} participants from ${dojo}`);
-    }
-  };
-
-  const bulkCheckInAll = async () => {
-    const targets = (c.players || []).filter(p => !p.checkedIn);
-    if (targets.length === 0) { showToast("All participants already checked in"); return; }
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinApiPid(p), true, password)));
-    const failed = results.filter(r => r.status === "rejected").length;
-    const succeeded = results.length - failed;
-    if (failed > 0) {
-      showToast(`${succeeded}/${results.length} checked in (${failed} failed)`, "error");
-    } else {
-      showToast(`All ${succeeded} participants checked in`);
-    }
   };
 
   const handleAddParticipant = async () => {
@@ -870,7 +801,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     <>
       {isDrawReady && (
         <div className="alert alert--warn" style={{ marginBottom: 12 }}>
-          Draw generated: the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in stays available.
+          Draw generated: the roster and seeds are locked. Discard the draw (from the competition header) to change them. Check-in continues at the registration desk.
         </div>
       )}
       {isStarted && (
@@ -907,29 +838,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           </button>
         </div>
       )}
-      <div className="row" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
+      <div className="row row--participants" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
         {!emptyRoster && (
         <div className="card">
           <div className="card__head">
             <div>
-              <div className="card__title">{c.checkInEnabled ? "Check-in & Seeding" : "Seeding"}</div>
-              <div className="card__sub">
-                {c.checkInEnabled && `${players.filter(p => p.checkedIn).length} / ${players.length} checked in · `}{seededRanks(players).length} seeded
-              </div>
+              {/* Check-in is not on this page: the registration desk owns it
+                  (operator ruling, bc-prow). This card orders and seeds. */}
+              <div className="card__title">Ordering & seeding</div>
+              <div className="card__sub">{seededRanks(players).length} seeded</div>
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              {/* Attendance cluster: only present when check-in tracking is on. */}
-              {c.checkInEnabled && (
-                <button className={`btn btn--sm ${showOnlyUnchecked ? "btn--primary" : ""}`} type="button" aria-pressed={showOnlyUnchecked} onClick={() => setShowOnlyUnchecked(!showOnlyUnchecked)}>
-                  {showOnlyUnchecked ? "Show all" : "Show unchecked"}
-                </button>
-              )}
-              {c.checkInEnabled && (
-                <button className="btn btn--sm" type="button" onClick={bulkCheckInAll} disabled={players.length === 0} title="Mark all as checked in">Check in all</button>
-              )}
-              {/* Divider between the attendance and seeding clusters. */}
-              {c.checkInEnabled && <span aria-hidden="true" style={{ width: 1, alignSelf: "stretch", background: "var(--line)", margin: "0 2px" }} />}
-              {/* Seeding cluster. draw-ready lock: seed mutations disabled until the draw is discarded. */}
+              {/* draw-ready lock: seed mutations disabled until the draw is discarded. */}
               <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to shuffle seeds" : "Shuffle unseeded players"}>Shuffle unseeded</button>
               <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to import seeds" : players.length === 0 ? "Add participants first" : undefined}>Import seeds (CSV)</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
@@ -1078,15 +998,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               {/* When a source filter is active, reorder controls would operate on */}
               {/* full-list indices but rows are filtered: so they'd swap with hidden */}
               {/* neighbours. Disable reordering until the filter is cleared. */}
-              {(sourceFilter || showOnlyUnchecked || trimmedSearch) && (
+              {(sourceFilter || trimmedSearch) && (
                 <div className="field__hint" style={{ padding: "0 16px 8px" }}>
                   {visiblePlayers.length < players.length && `Showing ${visiblePlayers.length} of ${players.length}. `}
                   Reordering disabled while a filter is active. Clear all filters to drag rows or use the arrows.
                 </div>
               )}
-              {visiblePlayers.length === 0 && (trimmedSearch || sourceFilter || showOnlyUnchecked) && (
+              {visiblePlayers.length === 0 && (trimmedSearch || sourceFilter) && (
                 <div className="empty" style={{ padding: "16px 24px" }}>
-                  {(sourceFilter || showOnlyUnchecked)
+                  {sourceFilter
                     ? "No participants match current filters."
                     : `No match for "${trimmedSearch}".`}
                 </div>
@@ -1095,11 +1015,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 const i = players.indexOf(p);
                 // draw-ready lock: reordering (and all seed mutations) disabled until the draw is discarded.
                 // Filter-active check is kept separate so both reasons can coexist.
-                const reorderDisabled = !!sourceFilter || showOnlyUnchecked || !!trimmedSearch || isDrawReady;
+                const reorderDisabled = !!sourceFilter || !!trimmedSearch || isDrawReady;
                 return (
                   <div
                     key={window.checkinPid(p)}
-                    className={`seed-row ${p.seed ? "has-seed" : ""} ${p.checkedIn ? "is-checked-in" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
+                    className={`seed-row ${p.seed ? "has-seed" : ""} ${dragOverIdx === i ? "seed-row--drop-target" : ""}`}
                     draggable={!reorderDisabled}
                     onDragStart={() => { if (reorderDisabled) return; dragIdxRef.current = i; }}
                     onDragOver={(e) => { if (reorderDisabled) return; e.preventDefault(); setDragOverIdx(i); }}
@@ -1113,86 +1033,37 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       dragIdxRef.current = null;
                       setDragOverIdx(null);
                     }}
-                    style={{
-                      cursor: reorderDisabled ? "default" : "grab",
-                      gridTemplateColumns: c.checkInEnabled ? undefined : "20px 36px 1fr 32px 64px",
-                    }}
+                    style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
-                    {c.checkInEnabled && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 4 }}>
-                        <input
-                          type="checkbox"
-                          checked={p.checkedIn}
-                          disabled={!p.id}
-                          onChange={(e) => toggleCheckIn(window.checkinApiPid(p), e.target.checked)}
-                          style={{ width: 18, height: 18, cursor: p.id ? "pointer" : "not-allowed" }}
-                          // bc-pnum: a hover title alone is
-                          // unreachable on a tablet or by keyboard/screen-reader, so
-                          // the disabled reason rides in the aria-label too; the
-                          // title stays for the mouse-hover case.
-                          aria-label={`${p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}${p.id ? "" : `. ${NO_ID_HINT}`}`}
-                          title={p.id ? undefined : NO_ID_HINT}
-                        />
-                      </div>
-                    )}
                     <span className="seed-row__handle" title={isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
                     <span className="seed-row__rank">{p.seed ? `#${p.seed}` : ""}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-                        <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
-                          {p.number ? (
-                            <span className="num-prefix">{p.number}</span>
-                          ) : null}
-                          {p.name}
+                    <div className="seed-row__main">
+                      <div className="seed-row__line">
+                        <div className="seed-row__who">
+                          <div className="seed-row__name" title={p.name}>
+                            {p.number ? (
+                              <span className="num-prefix">{p.number}</span>
+                            ) : null}
+                            {p.name}
+                          </div>
+                          {p.source && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.source}</span>}
                         </div>
-                        {p.source && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.source}</span>}
-                      </div>
-                      <div className="seed-row__dojo">
-                        {p.dojo}
-                        {/* bc-pnum ruling 1e: the roster PUT re-serialises the saved
-                            roster, so p.id is the server-minted UUID once the roster
-                            has been applied at least once. Shown WHOLE when it is 12
-                            characters or fewer (a short slug id, e.g. "ids-cup-p1":
-                            truncating to 8 would show "ids-cup-" for every row in a
-                            roster sharing that prefix, telling the operator nothing),
-                            otherwise the first 8 characters (a UUID). The full id is
-                            always on hover regardless of which form is shown, in the
-                            same muted weight as the dojo line beside it so the row
-                            stays compact and the number/name columns never shift. A
-                            row with no id (not yet applied, or a load failure) shows
-                            nothing in this slot -- 1b's data-issues banner is what
-                            names an id-less row, not this per-row display. */}
-                        {p.id && (
-                          <span className="seed-row__id" title={p.id}> · {p.id.length <= 12 ? p.id : p.id.slice(0, 8)}</span>
-                        )}
-                        {/* bc-pnum: the check-in checkbox
-                            above is disabled for this row (rendered only when
-                            checkInEnabled), but a hover title alone is unreachable
-                            on a tablet or by keyboard -- show the same reason
-                            inline, in the id slot's spot (empty anyway when there
-                            is no id), matching how both modals already render this
-                            hint. Distinct from the 1e ruling above, which is about
-                            the id STRING display, not the disabled-control reason. */}
-                        {!p.id && c.checkInEnabled && (
-                          <NoIdHint prefix=" · " />
-                        )}
-                        {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
-                          <button type="button"
-                            className="btn--link"
-                            style={{ marginLeft: 8, fontSize: 10, padding: 0 }}
-                            onClick={() => bulkCheckInDojo(p.dojo)}
-                          >
-                            Mark all from {p.dojo}
-                          </button>
-                        )}
+                        {/* No participant id here (operator ruling, bc-prow,
+                            reversing bc-pnum 1e): the id is plumbing, and an
+                            id-less row is named by the data-issues banner. */}
+                        <div className="seed-row__where">
+                          <span className="seed-row__dojo">{p.dojo}</span>
+                        </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
-                      <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                    <div className="seed-row__actions">
+                      <div className="seed-row__move">
+                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i - 1)} disabled={i === 0 || reorderDisabled} aria-label="Move up">↑</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" onClick={() => moveSeedRow(i, i + 1)} disabled={i === players.length - 1 || reorderDisabled} aria-label="Move down">↓</button>
+                      </div>
                       {/* draw-ready lock: edit is setup-only; editing participants requires discarding the draw first */}
                       {isSetup && (
-                        <button type="button" className="btn btn--sm btn--icon-sm" style={{ fontSize: 11 }} title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
+                        <button type="button" className="btn btn--sm btn--icon-sm" title={`Edit ${p.name}`} onClick={() => { setReplaceTarget(p); setReplaceName(p.name); setReplaceDojo(p.dojo); setReplaceDanGrade(p.danGrade || ""); setReplaceZekken(withZekken ? (p.displayName || "") : ""); }} aria-label={`Edit ${p.name}`}>✎</button>
                       )}
                     </div>
                      <window.StableInput

@@ -177,7 +177,7 @@ Both notices are advisory, not blocking: the competition keeps running, and noth
 
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
-The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:
+The **Ordering & seeding** panel shows the working roster, one competitor per row: the competitor number once a draw exists, the name and the dojo. From here you can:
 
 - Drag rows to assign seeds, or type a rank number directly.
 - Click **Shuffle unseeded** to randomise unranked positions.
@@ -193,7 +193,7 @@ Click the pencil icon on any row to open the edit modal for that competitor. You
 
 ### Check-in workflow
 
-Enable check-in in **Settings** for the competition. When enabled, each row in the seeding panel gains a check-in checkbox. A **Show unchecked / Show all** toggle filters the list, and **Check in all** marks every participant at once.
+Enable **Check-in tracking** in **Settings** for the competition. Competitors are checked in at the [Registration desk](#registration-desk), which works across every competition; the Ordering & seeding panel carries no check-in controls.
 
 The check-in rule is opt-in: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants join the draw and unchecked participants are excluded (their seeds are dropped). If nobody is checked in, everyone is included.
 

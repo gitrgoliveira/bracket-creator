@@ -493,7 +493,7 @@ export const HINT_ENGI = "Flag-count scoring for Engi-Kyogi pairs. Enter each pa
 export const LABEL_NAGINATA = "Naginata competition";
 export const HINT_NAGINATA = "Adds the Sune (S) ippon button to the score editor. Use for Naginata divisions.";
 export const LABEL_CHECK_IN = "Check-in tracking";
-export const HINT_CHECK_IN = "Show check-in column and counter. Disable for competitions that don't need attendance tracking.";
+export const HINT_CHECK_IN = "Check competitors in at the registration desk. Once anyone is checked in, only checked-in competitors enter the draw. Disable for competitions that don't need attendance tracking.";
 export const LABEL_NUMBER_PREFIX = "Player number prefix";
 // bc-pnum F12: one hint shared by the create form and the settings form, so
 // it has to describe what a BLANK field does in both places, which differ:

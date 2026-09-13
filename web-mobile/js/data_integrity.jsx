@@ -61,9 +61,9 @@ export const NO_ID_HINT = "No id on file. Save the roster once and the ids are a
 // NoIdHint: the inline warning span naming an id-less row. `text` defaults
 // to NO_ID_HINT; admin_pools.jsx passes NO_ID_POOL_HINT instead, since a
 // pool-draw row's remedy (regenerate the draw) differs from a roster save.
-// `prefix` (e.g. " · ") lives INSIDE the span, matching the sibling
-// .seed-row__id's own leading separator: admin_participants.jsx's roster row
-// renders this right after the dojo line and needs the same visual joint.
+// `prefix` (e.g. " · ") lives INSIDE the span so a host that renders it
+// right after other inline text (a dojo, a name) gets the visual joint
+// without wrapping the separator in its own element.
 export function NoIdHint({ text = NO_ID_HINT, prefix = "" }) {
   return <span className="noid-hint" title={text}>{prefix}{text}</span>;
 }

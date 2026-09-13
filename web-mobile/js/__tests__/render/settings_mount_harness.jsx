@@ -59,6 +59,14 @@ function defaultStubbedGlobals() {
       fetchDrawWarnings: vi.fn().mockResolvedValue([]),
       // saveNow runs a post-save clash check before navigating away.
       getScheduleClashes: vi.fn().mockResolvedValue([]),
+      // bc-pnum: the Squad members section mounts for any team-kind fixture
+      // and fetches on its own effect regardless of what a given test is
+      // about, the same reason estimateCompetitionSchedule is a shared
+      // default above rather than a per-file override.
+      fetchSquads: vi.fn().mockResolvedValue({}),
+      addTeamMember: vi.fn(),
+      renameTeamMember: vi.fn(),
+      clearTeamMember: vi.fn(),
     },
   };
 }
@@ -96,6 +104,43 @@ export function installSettingsHarness(overrides = {}) {
   // Returned so a test can assert against the very mocks that were installed
   // (e.g. expect(stubs.API.getScheduleClashes).toHaveBeenCalled()).
   return stubs;
+}
+
+// makeSettingsCompetition builds the competition fixture the settings render
+// tests mount against (PR #416 finding 14): numberprefix_reprint_hint,
+// qualifier_settings_save, pool_settings_error_gate and settings_review_round
+// each carried a byte-near-identical version of this object, differing only
+// in the fields their own scenario cares about (format, poolSize/poolWinners,
+// extraQualifiers, players, ...). Each test file now passes only ITS OWN
+// differences as `overrides`, the same "shared base, per-caller overrides"
+// shape mountSettings' own stubs already use above.
+export function makeSettingsCompetition(overrides = {}) {
+  return {
+    id: 'c1',
+    name: 'Autumn Cup',
+    status: 'setup',
+    format: 'playoffs',
+    kind: 'individual',
+    teamSize: 0,
+    teamMatchType: 'fixed',
+    poolSize: 0,
+    poolSizeMode: 'min',
+    poolWinners: 0,
+    extraQualifiers: '',
+    players: [],
+    courts: ['A'],
+    startTime: '09:00',
+    date: '',
+    fightingSpiritAwards: [],
+    swissCurrentRound: 0,
+    swissRounds: 0,
+    withZekkenName: false,
+    engi: false,
+    roundRobin: true,
+    poolFormat: 'full',
+    numberPrefix: 'K',
+    ...overrides,
+  };
 }
 
 // Mounts AdminCompetition on its settings tab for `comp` and returns whatever

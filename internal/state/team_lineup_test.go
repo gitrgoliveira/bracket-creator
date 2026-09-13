@@ -69,6 +69,60 @@ func TestLineupRoundTrip(t *testing.T) {
 	assert.Equal(t, "p5", persisted.Positions[domain.PosTaisho])
 }
 
+// TestLineupMemberIDsRoundTrip pins the id half of a lineup (bc-tmid pass
+// 2): MemberIDs survives Set/Load exactly like Positions, a partial lineup
+// (some positions have a member id, some don't yet) persists unchanged,
+// and a legacy-shaped lineup with NO MemberIDs at all still round-trips
+// (the map decodes back to nil/empty, never invented).
+func TestLineupMemberIDsRoundTrip(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+
+	const compID = "team-comp-memberids"
+	require.NoError(t, store.SaveCompetition(&Competition{ID: compID}))
+
+	lineup := domain.TeamLineup{
+		TeamID: "team-alpha",
+		Round:  0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:  "Sato",
+			domain.PosJiho:   "Tanaka", // deliberately left unrepaired below
+			domain.PosTaisho: "Ito",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PosSenpo:  "id-sato",
+			domain.PosTaisho: "id-ito",
+		},
+	}
+	require.NoError(t, store.SetTeamLineup(compID, lineup, 5))
+
+	got, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	key := teamLineupKey("team-alpha", 0)
+	persisted, ok := got[key]
+	require.True(t, ok)
+	assert.Equal(t, "id-sato", persisted.MemberIDs[domain.PosSenpo])
+	assert.Equal(t, "id-ito", persisted.MemberIDs[domain.PosTaisho])
+	assert.Empty(t, persisted.MemberIDs[domain.PosJiho], "Tanaka's slot stays unrepaired, exactly as saved")
+
+	// A legacy-shaped lineup with no MemberIDs entry at all still round-trips.
+	legacy := domain.TeamLineup{
+		TeamID:    "team-beta",
+		Round:     0,
+		Positions: map[domain.Position]string{domain.PosSenpo: "Legacy"},
+	}
+	require.NoError(t, store.SetTeamLineup(compID, legacy, 5))
+	got2, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	betaKey := teamLineupKey("team-beta", 0)
+	assert.Empty(t, got2[betaKey].MemberIDs, "a lineup that never had ids must not gain an invented map")
+
+	raw, err := os.ReadFile(store.compPath(compID, teamLineupFilename))
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "memberIds: {}",
+		"omitempty must keep the legacy-shaped entry free of an empty map on disk")
+}
+
 // TestLineupSetValidatesShape proves that SetTeamLineup rejects INVALID
 // position keys, a lineup with an unrecognised position must never reach
 // disk. Under the new partial-lineup contract, a lineup that has only valid

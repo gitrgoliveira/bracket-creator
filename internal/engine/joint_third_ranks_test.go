@@ -6,6 +6,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -141,11 +142,9 @@ func setupIndividualLeagueThirdTie(t *testing.T, compID string, twoThird bool) (
 		Courts:               []string{"A"},
 		LeagueTwoThirdPlaces: twoThird,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "Pool A", Players: []helper.Player{
-			{Name: "A", Dojo: "Dojo A"}, {Name: "B", Dojo: "Dojo B"}, {Name: "C", Dojo: "Dojo C"}, {Name: "D", Dojo: "Dojo D"},
-		}},
-	}))
+	players := []helper.Player{
+		{Name: "A", Dojo: "Dojo A"}, {Name: "B", Dojo: "Dojo B"}, {Name: "C", Dojo: "Dojo C"}, {Name: "D", Dojo: "Dojo D"},
+	}
 	winBy := func(id, a, b, winner string) state.MatchResult {
 		return state.MatchResult{ID: id, SideA: a, SideB: b, Winner: winner,
 			IpponsA: []string{"M"}, Status: state.MatchStatusCompleted, Court: "A"}
@@ -160,6 +159,14 @@ func setupIndividualLeagueThirdTie(t *testing.T, compID string, twoThird bool) (
 		{ID: "Pool A-5", SideA: "C", SideB: "D", Decision: string(domain.DecisionHikiwake),
 			Status: state.MatchStatusCompleted, Court: "A"},
 	}
+	// Standings resolve a match side by SideAID/SideBID only (operator ruling
+	// bc-pnum): stamp the roster and matches before saving, or every result
+	// reads as a false (unattributed) tie and the whole pool -- not just C/D
+	// -- shows up tied.
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "Pool A", Players: players},
+	}))
 	require.NoError(t, store.SavePoolMatches(compID, matches))
 	return eng, store
 }
@@ -176,6 +183,14 @@ func scoreIndividualTB(t *testing.T, store *state.Store, compID, winner string) 
 		if IsTiebreakerMatchID(all[i].ID) && all[i].Winner == "" {
 			all[i].Status = state.MatchStatusCompleted
 			all[i].Winner = winner
+			// WinnerID too: resolveWinnerSide resolves the winner by id only
+			// (operator ruling bc-pnum).
+			switch winner {
+			case all[i].SideA:
+				all[i].WinnerID = all[i].SideAID
+			case all[i].SideB:
+				all[i].WinnerID = all[i].SideBID
+			}
 			all[i].IpponsA = []string{"M"}
 			found = true
 		}

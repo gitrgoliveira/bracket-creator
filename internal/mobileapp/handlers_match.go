@@ -341,9 +341,11 @@ func hanteiAttributionNeedsBackfill(req *state.MatchResult) bool {
 // genuine sideA/sideB or sideAID/sideBID mismatch is still caught downstream
 // (by reconcileSides, or by stripInvalidHantei) exactly as before; this
 // cannot weaken those guards, only let attribution see what they were always
-// going to fill in anyway. A bracket match's stored ids are always ""
-// (BracketMatch persists no ids at all), so the id half is a no-op there and
-// the name-fallback path for bracket hantei is unchanged.
+// going to fill in anyway. A bracket match's stored ids are "" only when its
+// own row is unstamped (a bye, an unresolved feeder, or an unrepaired legacy
+// row); since bc-brid a stamped row's real ids backfill here too, exactly
+// like a pool match, and only the unstamped residue still falls back to the
+// name path for bracket hantei.
 //
 // Store-read failure and the one deliberate behaviour change from the merge:
 // the two twins had DIFFERENT store-error policies before this merge — the
@@ -363,7 +365,24 @@ func hanteiAttributionNeedsBackfill(req *state.MatchResult) bool {
 // extra case (a sides-only miss) where previously only the ids twin would
 // have logged. Do not "restore" the silent variant for that case.
 func backfillMatchIdentityForHantei(store CompetitionStore, compID, matchID string, req *state.MatchResult) {
-	if !hanteiAttributionNeedsBackfill(req) {
+	// bc-pnum ruling 1d: also runs whenever the payload names a WinnerID.
+	// validateWinnerIDMatchesSide now rejects a WinnerID naming neither side
+	// as soon as AT LEAST ONE side id is known (domain.WinnerIDAcceptable's
+	// only exemption is BOTH ids unknown together; the old broader "only
+	// when both side ids are already on the wire" tolerance is gone), so it
+	// needs the real stored ids to check against -- the SPA sends winnerId
+	// alone (api_serializers.jsx), never sideAId/sideBId, so without this the
+	// wire payload would otherwise carry no side ids at all and every
+	// ordinary completed-match write would fail that check. Narrowed to the
+	// two id fields specifically (PR #416 finding 7), not sideA/sideB too:
+	// once both ids are already on the wire, validateWinnerIDMatchesSide has
+	// everything it needs without a store round-trip, and the engine's own
+	// gate inside the transaction remains the authoritative check either
+	// way. Only a WRITE THAT NAMES A WINNER pays the extra read at all (a
+	// "running"/in-progress update carries no WinnerID), so the hot
+	// in-progress-score path stays free of it, matching the original
+	// hantei-only rationale below for that path specifically.
+	if !hanteiAttributionNeedsBackfill(req) && (req.WinnerID == "" || (req.SideAID != "" && req.SideBID != "")) {
 		return
 	}
 	if req.SideA != "" && req.SideB != "" && req.SideAID != "" && req.SideBID != "" {
@@ -591,8 +610,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				return nil
 			}); err != nil {
 				bulkErr := scoreError{MatchID: results[i].ID, Error: err.Error()}
-				if errors.Is(err, engine.ErrMatchSuperseded) {
+				switch {
+				case errors.Is(err, engine.ErrMatchSuperseded):
 					bulkErr.Reason = "superseded"
+				case errors.Is(err, state.ErrCorruptOverrides):
+					// mp-e2k1's mixed-pool guard reaches computeStandingsFrom,
+					// which loads overrides.json -- reachable per-entry here the
+					// same way it is on the single-match write endpoints. This
+					// endpoint never fails the whole request (always 200, partial
+					// success), so there is no terminal-422 status to give this
+					// entry the way respondIfCorruptOverrides does elsewhere;
+					// the Reason still lets an importer tell this apart from an
+					// arbitrary rejection and route the operator to
+					// DELETE .../overrides rather than retrying the same bytes.
+					bulkErr.Reason = "corrupt_overrides"
 				}
 				errs = append(errs, bulkErr)
 				continue
@@ -2011,7 +2042,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			}
 		}
 
-		isWithdrawal := domain.IsKikenDecisionStr(result.Decision) || result.Decision == "fusenpai"
+		isWithdrawal := domain.IsWithdrawalDecisionStr(result.Decision)
 
 		// isCorrection: a completed -> completed overwrite (the operator is
 		// fixing an already-finished result, e.g. via the shiaijo console's or
@@ -2285,9 +2316,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// with no winner; resolve via daihyosen first") surfaced as a 500,
 			// which the client write-queue treats as transient and retries
 			// (mp-q8c6 poisoned-queue pattern) instead of showing the message.
-			var engValErr *engine.ValidationError
-			if errors.As(engErr, &engValErr) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": engValErr.Error()})
+			// A corrupt overrides.json (computeStandingsFrom, reached here via
+			// the mp-e2k1 mixed-pool guard) is the other case
+			// respondIfEngineWriteError maps, to the same terminal 422 the
+			// decision/daihyosen/league-tiebreak/chusen-candidates handlers use;
+			// DELETE .../overrides (handlers_competition.go) is the repair door.
+			if respondIfEngineWriteError(c, engErr) {
 				return
 			}
 			internalError(c, engErr)

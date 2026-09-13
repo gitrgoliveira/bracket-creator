@@ -54,8 +54,9 @@ func buildMultiDojoRoster(numPools, poolSize, nDojos, dojoGroupSize, nSeeds int)
 
 func maxOfDojo(pools []Pool, dojo string) int {
 	m := 0
+	keys := make(dojoKeyCache)
 	for _, p := range pools {
-		if k := countDojoInPool(p, dojo); k > m {
+		if k := countDojoInPool(p, dojo, keys); k > m {
 			m = k
 		}
 	}

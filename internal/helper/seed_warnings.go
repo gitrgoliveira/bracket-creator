@@ -61,9 +61,25 @@ func SeedPlacementWarnings(draw *KnockoutDraw, pools []Pool) []string {
 			len(pools), Plural(len(pools)), len(seeds), Plural(len(seeds)),
 			Plural(len(placed)), RankList(ranksOf(placed))))
 	}
-	if len(placed) > maxSeedRanks {
-		placed = placed[:maxSeedRanks]
+	// Scope the halves/quarters/shiaijo checks below to ranks D6 actually
+	// places with a half/quarter structure (rank <= maxSeedRanks): a
+	// VALUE filter, not a COUNT truncation. placed is sorted by rank
+	// ascending (seedPools), so a gapped seed set (e.g. ranks {1,2,3,5},
+	// rank 4 never assigned) used to keep whichever seed happened to be
+	// the maxSeedRanks-th ELEMENT of the slice -- rank 5 here -- purely
+	// because nothing occupied position 4 first. A wrapped seed beyond
+	// D6's structure has no half/quarter home to begin with (it is only
+	// ever reported via the shared-pool "ignored" branch above, when it
+	// collided with another seed's pool), so counting it against halves/
+	// quarters produced a spurious violation for a wrapped seed that
+	// landed cleanly in its own pool.
+	inStructure := make([]seedPool, 0, len(placed))
+	for _, s := range placed {
+		if s.rank <= maxSeedRanks {
+			inStructure = append(inStructure, s)
+		}
 	}
+	placed = inStructure
 
 	// A seed's position in the draw is its pool's WINNER, which is the
 	// qualifier D6 spreads: "seeded pools MUST be distinct, and their

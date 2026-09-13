@@ -36,5 +36,11 @@
     "unicorn/prefer-string-starts-ends-with": "error",
     "unicorn/no-array-reverse": "error"
   },
-  "ignorePatterns": ["node_modules/**", "dist/**", "vendor/**"]
+  "ignorePatterns": ["node_modules/**", "dist/**", "vendor/**"],
+  "overrides": [
+    {
+      "files": ["**/docs/assets/javascripts/**"],
+      "rules": { "react/no-this-in-sfc": "off" }
+    }
+  ]
 }

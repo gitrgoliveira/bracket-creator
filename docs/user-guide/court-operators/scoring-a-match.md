@@ -1,45 +1,47 @@
 # Score a match
 
-The court console at `/admin/shiaijo/<court>` (linked from the dashboard under **Shiaijo operator views**) is your primary surface for running bouts at a single court. It shows that court's current and upcoming matches with their match numbers, keeps the scoring flow chained to the same court throughout the session, and prompts you to switch to whichever competition needs the court next.
+The court console at `/admin/shiaijo/<court>` (linked from the dashboard under **Shiaijo operator views**) is your primary surface for running bouts at a single court. It shows that court's current and upcoming matches with their match numbers, and keeps the scoring flow chained to the same court throughout the session. It also prompts you to switch to whichever competition needs the court next.
 
 ## Enter scores
 
-Open a match from the Upcoming list to start scoring it; the score editor opens inline within the court console. For outcomes that are not decided on points (withdrawals, no-shows, draws, and representative bouts), see [Record match decisions](recording-decisions.md).
+Open a match from the Upcoming list to start scoring it; the score editor opens inline within the court console. For outcomes that are not decided on points (withdrawals, no-shows, draws, and representative bouts), refer to [Record match decisions](recording-decisions.md).
 
 ![The score editor: Shiro on the left and Aka on the right, each with ippon buttons (men, kote, do, tsuki), a Mark draw control, foul counters, and an overtime toggle.](../../screenshots/mobile-score-editor.png)
 
 !!! tip
-    In self-run events, competitors or table helpers can record their own scores without the admin password. See the [Competitor self-run guide](../competitors/self-run.md) and [Operating modes and access control](../organisers/operating-modes.md) for how that works.
+    In self-run events, competitors or table helpers can record their own scores without the admin password. Refer to the [Competitor self-run guide](../competitors/self-run.md) and [Operating modes and access control](../organisers/operating-modes.md) for how that works.
 
-On a laptop you can score without the mouse. When scoring an individual match or a kachinuki bout, press **M**, **K**, **D**, **T**, or **H** to award that strike to Shiro (White), or hold **Shift** with the same key to award it to Aka (Red). **Left** and **Right** move to the previous or next match on the court, and **Esc** closes the editor. On a tablet, use the on-screen buttons.
+On a laptop you can score without the mouse. When scoring an individual match or a kachinuki bout, press **M**, **K**, **D**, **T**, or **H** to award that strike to Shiro (White). Hold **Shift** with the same key to award it to Aka (Red). **Left** and **Right** move to the previous or next match on the court, and **Esc** closes the editor. On a tablet, use the on-screen buttons.
 
 ## Send a match back to the queue
 
 If you start the wrong bout, use **Send back to queue** on the running match. The action clears any partial score, removes the match from the active view, and returns it to the Upcoming list so the correct match can start.
 
 !!! note
-    Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To fix a result that has already been recorded, use **Correct** on the match in the Completed list (see [Correct a completed result](#correct-a-completed-result)).
+    Send back to queue only works on a running, unfinished match. A completed, scored match is not affected. To fix a result that has already been recorded, use **Correct** on the match in the Completed list (refer to [Correct a completed result](#correct-a-completed-result)).
 
 ## Correct a completed result
 
-Once a match is scored it moves to the **Completed** list on the court console, and each row carries a **Correct** button. You do not have to leave the console to fix a mistake: Correct opens the finished match back in the score editor, even while the next match is already running on the same court.
+Once a match is scored it moves to the **Completed** list on the court console, and each row carries a **Correct** button. You do not have to leave the console to fix a mistake. Correct opens the finished match back in the score editor, even while the next match is already running on the same court.
 
 ![The court console Completed list showing a finished match with its result and a Correct button.](../../screenshots/console-correct-completed.png)
 
 What Correct offers depends on the format:
 
 - For most matches, the editor reopens with the recorded scores ready to edit. Adjust the ippons, fouls, or winner, then use **Save correction**. A short reason is required so the change stays traceable.
-- For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. Reopen is immediate: one tap returns the encounter to running with its bout log intact, so you can carry on or fix a bout. A reason is still kept with the result, but you are asked for it when you end the match again rather than on the way back in, so correcting a mistake never costs you more than a tap.
+- For a kachinuki team encounter, the editor shows the recorded bouts with a **Reopen match** button. Reopen is immediate: one tap returns the encounter to running with its bout log intact, so you can carry on or fix a bout. A reason is still kept with the result, but the app asks for it when you end the match again, not on the way back in. Correcting a mistake never costs you more than a tap.
 
-    You are asked for that reason however you end it. If the encounter finishes with a withdrawal or a no-show instead of a scored bout, the kiken or fusenpai panel asks for the reason in the same way, and the **Record** button stays unavailable until you give one.
+    You are asked for that reason however you end it. If the encounter finishes with a withdrawal or a no-show instead of a scored bout, the kiken or fusenpai panel asks for the reason in the same way. The **Record** button stays unavailable until you give one.
 
     ![The Fusenpai panel on a reopened encounter: a side picker, a required reason box prompting "Why is this match being ended again?", a note that the match was reopened so ending it again needs a reason, and a Record button held back until the reason is filled in.](../../screenshots/decision-reason-after-reopen.png)
 
-![Ending a reopened encounter: the editor asks for a reason, with "Ended by mistake" already selected and a note box beside it](../../screenshots/kachinuki-reopen-reason.png)
+    Ending it on a scored bout asks in the same dialog, with **Ended by mistake** offered as the first reason:
 
-Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers you two ways forward: leave it running, or clear its score, send it back to the queue and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.
+    ![Ending a reopened encounter: the editor asks for a reason, with "Ended by mistake" already selected and a note box beside it](../../screenshots/kachinuki-reopen-reason.png)
 
-If the correction changes who won a knockout match, the later rounds update to follow the new winner. When you are done, use **Back to court** to return to the live match.
+Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers two ways forward. Leave it running, or clear its score, send it back to the queue, and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.
+
+If the correction changes who won a knockout match, the later rounds update to follow the new winner. If a later round has already been played, the app does not yet block the correction. That match keeps its recorded result under the new competitor's name, so the new pairing must fight, and its result must be entered, before the bracket is right again. When you are done, use **Back to court** to return to the live match.
 
 ## Matches waiting on earlier results
 
@@ -62,12 +64,22 @@ At a large event, the bouts feeding a final can run on other courts, and their r
 
 The court console keeps working if it loses its connection to the server. You can finish scoring the bout in progress, and use **Run now** to resolve and start the next match, all while offline. Everything you enter is saved on the device and sent when the connection returns.
 
-If two courts recorded different results for the same match while one was offline, the more recent change wins when they reconcile. The court whose result lost is told: a "Not saved" notice appears on the score editor and as an alert, explaining that a newer result is already recorded. When you see it, check what is recorded before re-entering anything. Do not simply re-enter your result, because a fresh entry counts as the newest change and would overwrite the result that won.
+If two courts recorded different results for the same match while one was offline, the more recent change wins when they reconcile. The court whose result lost is told: a "Not saved" notice appears on the score editor and as an alert, explaining that a newer result is already recorded. When you see it, check what is recorded before re-entering anything. Do not re-enter your result, because a fresh entry counts as the newest change and would overwrite the result that won.
 
-This applies to a correction as well. A correction you save while offline is held on the device like any other result, so it can reach the server long after you wrote it. If someone has changed that match in the meantime, your correction is refused rather than applied on top, and you get the same "Not saved" notice. Look at the current result first: it may already be right, and if it is not, correcting it again from what is now recorded is the safe way to fix it.
+This applies to a correction as well. A correction you save while offline is held on the device like any other result, so it can reach the server long after you wrote it. If someone has changed that match in the meantime, your correction is refused rather than applied on top, and you get the same "Not saved" notice. Look at the current result first, since it may already be right. If it is not, correct it again from what is now recorded.
 
 ## Team matches and kachinuki
 
-Kachinuki team encounters are scored one bout at a time. Score the current bout, then use **Record bout** to keep going (the winner stays on and the next pairing is added) or **End match** to finish on the last scored bout. You decide when the encounter is over, so end it when a team is out of fighters or when the other team's Taisho has been beaten. On a tied bout you also decide what the tie means, according to the [kachinuki mode](../organisers/team-tournaments.md#kachinuki-modes) in force: **Record bout** retires both fighters, **Encho** keeps the same pair fighting when the pairing must produce a result (available in any stage; under the taisho rule a Taisho who draws stays on, and **Record bout** pairs them with the next opponent automatically), and **End match** records a drawn encounter in pools or leagues. In a knockout a tied last bout cannot end the match, so continue with Record bout or Encho. If you finish too early, open the completed match and use **Reopen match** to carry on. Reopening takes a single tap; you are asked for a reason when you end the match again. The bouts you have already fought stay on screen as read-only rows above the current bout, so the encounter reads like a regular team sheet and you can check the winner-stays-on order at a glance, and **× Remove this bout** takes back an unscored pairing the app added by mistake without ending the encounter. To fix a bout you have already recorded, tap its row: it reopens in place with the scoring controls, and if your change flips who won, the app flags the later bouts for you to check. See [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter) for the full flow.
+Kachinuki team encounters are scored one bout at a time. Score the current bout, then use **Record bout** to keep going (the winner stays on and the next pairing is added) or **End match** to finish on the last scored bout. You decide when the encounter is over, so end it when a team is out of fighters or when the other team's Taisho has been beaten.
+
+On a tied bout you also decide what the tie means, according to the [kachinuki mode](../organisers/team-tournaments.md#kachinuki-modes) in force:
+
+- **Record bout** retires both fighters. Under the taisho rule a Taisho who draws stays on, and **Record bout** pairs them with the next opponent automatically.
+- **Encho** keeps the same pair fighting when the pairing must produce a result. It is available in any stage.
+- **End match** records a drawn encounter in pools or leagues. In a knockout a tied last bout cannot end the match, so continue with **Record bout** or **Encho**.
+
+If you finish too early, open the completed match and use **Reopen match** to carry on. Reopening takes a single tap; you are asked for a reason when you end the match again. The bouts you have already fought stay on screen as read-only rows above the current bout. The encounter reads like a regular team sheet, and you can check the winner-stays-on order at a glance. **× Remove this bout** takes back an unscored pairing the app added by mistake without ending the encounter.
+
+To fix a bout you have already recorded, tap its row: it reopens in place with the scoring controls. If your change flips who won, the app flags the later bouts for you to check. Refer to [Scoring a kachinuki encounter](../organisers/team-tournaments.md#scoring-a-kachinuki-encounter) for the full flow.
 
 ![The kachinuki score editor: the winner-stays banner, the bouts already fought shown as read-only rows above the current bout (which carries the ippon buttons for each side), the × Remove this bout undo, and the Record bout and End match footer actions.](../../screenshots/kachinuki-scoring-buttons.png)

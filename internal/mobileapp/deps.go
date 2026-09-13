@@ -176,6 +176,19 @@ type TeamLineupStore interface {
 	DeleteTeamLineupForMatch(compID, teamID, matchID string) error
 }
 
+// SquadStore is the consumer-boundary view of state.Store used by
+// handlers_squad.go (bc-tmid pass 1, clearing added bc-pnum): a team's
+// squad, the people on it, each with a stable id and a display index
+// (domain.TeamMember), kept in its own per-competition file rather than in
+// Player.Metadata. Mirrors the LoadSquads / AddTeamMember /
+// RenameTeamMember / ClearTeamMemberName methods on *state.Store.
+type SquadStore interface {
+	LoadSquads(compID string) (map[string][]domain.TeamMember, error)
+	AddTeamMember(compID, teamID, name string) (domain.TeamMember, error)
+	RenameTeamMember(compID, teamID, memberID, newName string) error
+	ClearTeamMemberName(compID, teamID, memberID string) error
+}
+
 // Broadcaster is the consumer-boundary view of *Hub used by handlers
 // that fire SSE events on successful mutations. Defined as an interface
 // so handler tests can supply a recording stub instead of running a

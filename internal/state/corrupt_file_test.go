@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -108,4 +109,30 @@ func TestLoadPoolMatchesReportsWhereTheRowStructureBroke(t *testing.T) {
 	assert.Equal(t, "pool-matches.csv", cf.File)
 	assert.Positive(t, cf.Line)
 	assert.NotEmpty(t, cf.Detail)
+}
+
+// TestCorruptJSONWithSentinel_UnlocatableFaultStillCarriesTheSentinel pins the
+// half of the contract no real overrides.json can reach today. corruptJSON
+// only builds a located *CorruptFileError for a *json.SyntaxError or a
+// *json.UnmarshalTypeError, and those are the only two a json.Unmarshal into a
+// plain struct produces, so the un-located return is unreachable through
+// loadOverridesLocked. It is still the branch that keeps the whole point of
+// this helper true -- the caller's sentinel is ALWAYS carried, so
+// respondIfCorruptOverrides' terminal 422 cannot silently degrade to a 500 --
+// and it is exactly the branch a later change to corruptJSON's classification
+// would start using. Pinned directly rather than left to a coverage gap: an
+// unexercised guard is one a refactor deletes without noticing.
+func TestCorruptJSONWithSentinel_UnlocatableFaultStillCarriesTheSentinel(t *testing.T) {
+	sentinel := errors.New("overrides.json is corrupt")
+	// Neither a syntax nor an unmarshal-type error, so corruptJSON declines to
+	// locate it and hands back the raw error.
+	raw := errors.New("boom")
+
+	err := corruptJSONWithSentinel(sentinel, "overrides.json", []byte("{}"), raw)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel, "the caller's sentinel must survive even when the fault cannot be located")
+	assert.ErrorIs(t, err, raw, "the underlying parse error must stay reachable for errors.As")
+	_, located := AsCorruptFile(err)
+	assert.False(t, located, "an unlocatable fault must NOT claim to be a located CorruptFileError")
 }

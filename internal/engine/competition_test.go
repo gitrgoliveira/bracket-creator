@@ -610,6 +610,26 @@ func setupDrawReadyPlayoffs(t *testing.T, names []string) (*Engine, *state.Store
 	return eng, store, compID
 }
 
+// participantID looks up the (store-minted) UUID for a participant by name,
+// for tests driving ReplaceParticipantInDraw's id-aware matching directly
+// (bc-idfx): SaveParticipants mints a real id for every id-less row on
+// write, so by the time GenerateDraw has run, every pools.csv/pool-matches.csv
+// row DOES carry an id, and the id-carrying match (matchesParticipant, and
+// the inlined id check in ReplaceParticipantInDraw's applySide) requires the
+// real pid to match, not "".
+func participantID(t *testing.T, store *state.Store, compID, name string) string {
+	t.Helper()
+	players, err := store.LoadParticipants(compID, false)
+	require.NoError(t, err)
+	for _, p := range players {
+		if p.Name == name {
+			return p.ID
+		}
+	}
+	t.Fatalf("participant %q not found in %s", name, compID)
+	return ""
+}
+
 // findPlayerInPools returns true when name appears in any pool.
 func findPlayerInPools(pools []helper.Pool, name string) bool {
 	for _, p := range pools {
@@ -646,7 +666,7 @@ func TestReplaceParticipantInDraw_PoolsHappyPath(t *testing.T) {
 
 	// Use derived displayNames (SanitizeName) to match how the handler calls
 	// this in non-zekken competitions, exercises the displayName cascade branch.
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
+	warnings, err := eng.ReplaceParticipantInDraw(compID, participantID(t, store, compID, "Alice"), "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 
 	// Dojo unchanged, no conflict expected.
@@ -685,7 +705,7 @@ func TestReplaceParticipantInDraw_PlayoffsBracket(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, findNameInBracket(bracketBefore, "Alice"), "Alice must be in bracket before swap")
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
+	warnings, err := eng.ReplaceParticipantInDraw(compID, participantID(t, store, compID, "Alice"), "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
@@ -723,7 +743,7 @@ func TestReplaceParticipantInDraw_NaginataBronzeMatch(t *testing.T) {
 		return nil
 	}))
 
-	_, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
+	_, err := eng.ReplaceParticipantInDraw(compID, participantID(t, store, compID, "Alice"), "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 
 	b, err := store.LoadBracket(compID)
@@ -784,7 +804,7 @@ func TestReplaceParticipantInDraw_DojoConflict(t *testing.T) {
 
 	// Swap Charlie (DojoY) → Grace (DojoX); use derived displayNames to exercise the
 	// displayName cascade branch as in production non-zekken calls.
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Charlie", "DojoY", helper.SanitizeName("Charlie"), "Grace", "DojoX", helper.SanitizeName("Grace"))
+	warnings, err := eng.ReplaceParticipantInDraw(compID, participantID(t, store, compID, "Charlie"), "Charlie", "DojoY", helper.SanitizeName("Charlie"), "Grace", "DojoX", helper.SanitizeName("Grace"))
 	require.NoError(t, err)
 
 	if aliceOrBobInSamePool {
@@ -814,7 +834,7 @@ func TestReplaceParticipantInDraw_SeedsUntouched(t *testing.T) {
 		{Name: "Alice", SeedRank: 1},
 	}))
 
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
+	warnings, err := eng.ReplaceParticipantInDraw(compID, participantID(t, store, compID, "Alice"), "Alice", "Dojo0", helper.SanitizeName("Alice"), "Alicia", "Dojo0", helper.SanitizeName("Alicia"))
 	require.NoError(t, err)
 	assert.Empty(t, warnings, "no seed warnings, seed rename is handled by UpdateParticipant")
 
@@ -834,7 +854,7 @@ func TestReplaceParticipantInDraw_WrongState(t *testing.T) {
 	require.NoError(t, eng.StartCompetition(compID))
 
 	// Competition is now in pools state, not draw-ready.
-	_, err := eng.ReplaceParticipantInDraw(compID, "Alice", "DojoA", "", "Alicia", "DojoA", "")
+	_, err := eng.ReplaceParticipantInDraw(compID, "", "Alice", "DojoA", "", "Alicia", "DojoA", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not in draw-ready state")
 }
@@ -847,7 +867,7 @@ func TestReplaceParticipantInDraw_ParticipantNotInDraw(t *testing.T) {
 	// A participant not in the draw (e.g. excluded by check-in filtering) should
 	// return a warning, not an error, so the persisted participants.csv update is
 	// not treated as a failure.
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Nonexistent", "DojoX", "", "Someone", "DojoX", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "", "Nonexistent", "DojoX", "", "Someone", "DojoX", "")
 	require.NoError(t, err)
 	require.Len(t, warnings, 1)
 	assert.Contains(t, warnings[0], "not found in draw artifacts")
@@ -862,7 +882,7 @@ func TestReplaceParticipantInDraw_NoopWhenUnchanged(t *testing.T) {
 	require.NoError(t, err)
 
 	// Same name, same dojo, same displayName → no-op.
-	warnings, err := eng.ReplaceParticipantInDraw(compID, "Alice", "Dojo0", "", "Alice", "Dojo0", "")
+	warnings, err := eng.ReplaceParticipantInDraw(compID, "", "Alice", "Dojo0", "", "Alice", "Dojo0", "")
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 

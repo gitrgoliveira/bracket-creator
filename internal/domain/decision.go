@@ -117,6 +117,21 @@ func IsDefaultWinDecisionStr(s string) bool {
 	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai) || s == string(DecisionFusensho)
 }
 
+// IsWithdrawalDecisionStr reports whether the decision is a WITHDRAWAL: any
+// kiken variant, or fusenpai (a no-show). Deliberately narrower than
+// IsDefaultWinDecisionStr, which additionally includes fusensho -- a
+// PER-BOUT default win awarded within a team encounter on someone ELSE's
+// withdrawal, not a withdrawal of the bout it is recorded on.
+//
+// The expression `!IsKikenDecisionStr(d) && d != string(DecisionFusenpai)`
+// (or its positive mirror, `IsKikenDecisionStr(d) || d == string(DecisionFusenpai)`)
+// used to be hand-rolled at seven call sites across four files, one of
+// which had already drifted to a bare "fusenpai" string literal instead of
+// the DecisionFusenpai constant. One predicate, used at all seven.
+func IsWithdrawalDecisionStr(s string) bool {
+	return IsKikenDecisionStr(s) || s == string(DecisionFusenpai)
+}
+
 // DefaultWinIppon is the FIK maru "○" (U+25CB) recorded for each point a
 // default win awards without a technique. Exported so consumers can filter
 // it out of a struck-ippon count (e.g. engine.struckIppons, which must tell

@@ -144,6 +144,8 @@
   /* BCDA-FIXTURE-END */
 
   var PLAY_MS = 1700;
+  var PLAY_TITLE = "Place the competitors one after another";
+  var PAUSE_TITLE = "Pause the walk-through";
 
   // ---------------------------------------------------------------- helpers
 
@@ -510,6 +512,16 @@
 
   // ------------------------------------------------------------ rendering
 
+  // Widget is a plain ES5 constructor (invoked with `new`, methods hung off
+  // Widget.prototype below), not a Preact/React component -- this whole file
+  // is vanilla DOM-manipulating JS with no React/Preact runtime in scope
+  // (see the file header). oxlint's react plugin still flags `this` inside
+  // any PascalCase-named function as a stateless-functional-component
+  // mistake, which is the correct rule for actual React/Preact SFCs but a
+  // false positive here: `this` is exactly right for a constructor's
+  // per-instance state. The exemption lives in web-mobile/.oxlintrc.json's
+  // `overrides` (scoped to docs/assets/javascripts/**), not an inline
+  // disable/enable block here -- see that file for the rationale.
   function Widget(host) {
     this.host = host;
     this.presetIdx = 0;
@@ -549,7 +561,7 @@
       self.pause();
       self.goto(self.step - 1);
     });
-    this.playBtn = this.control(bar, "Play", "Place the competitors one after another", function () {
+    this.playBtn = this.control(bar, "Play", PLAY_TITLE, function () {
       if (self.timer) {
         self.pause();
       } else {
@@ -724,6 +736,7 @@
     var self = this;
     if (this.step >= this.result.steps.length) this.goto(0);
     this.playBtn.textContent = "Pause";
+    this.playBtn.title = PAUSE_TITLE;
     this.timer = window.setInterval(function () {
       if (self.step >= self.result.steps.length) {
         self.pause();
@@ -738,7 +751,10 @@
       window.clearInterval(this.timer);
       this.timer = null;
     }
-    if (this.playBtn) this.playBtn.textContent = "Play";
+    if (this.playBtn) {
+      this.playBtn.textContent = "Play";
+      this.playBtn.title = PLAY_TITLE;
+    }
   };
 
   // goto renders the draw after n competitors have been placed. n === 0 is

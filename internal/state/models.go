@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -739,6 +740,16 @@ func (c Competition) EffectivePoolWinners() int {
 	return 2
 }
 
+// EffectiveNumberPrefix returns NumberPrefix trimmed of surrounding
+// whitespace, the ONE fold every reader of the field compares/composes
+// under (PR #416 finding 2): a stored prefix is always assigned already
+// trimmed, but a boundary that only trims on WRITE leaves every reader
+// exposed to a record written before that boundary existed, or edited by
+// hand. Readers route through this rather than comp.NumberPrefix directly.
+func (c Competition) EffectiveNumberPrefix() string {
+	return strings.TrimSpace(c.NumberPrefix)
+}
+
 // Competition.ExtraQualifiers values (bc-qual). Only meaningful under
 // minimum-players-per-pool sizing (PoolSizeMode != "max"); see
 // ValidateExtraQualifiers.
@@ -867,15 +878,21 @@ func ValidateExtraQualifiers(value, poolSizeMode string, poolWinners int) error 
 // at all).
 func (c Competition) QualifiersForPool(pool helper.Pool) int {
 	base := c.EffectivePoolWinners()
-	// PoolSize <= 0 means there is no minimum to be over: without a baseline
-	// the oversized test would mark EVERY pool oversized, so degrade to the
-	// uniform count instead. Unreachable for a started competition (the
-	// engine rejects starting with an unset PoolSize) but cheap to make safe
-	// against drifted or hand-edited config.md data.
-	if c.ExtraQualifiers == ExtraQualifiersLargerPools && c.PoolSize > 0 && len(pool.Players) > c.PoolSize {
-		return base + 1
+	if c.ExtraQualifiers != ExtraQualifiersLargerPools {
+		return base
 	}
-	return base
+	// helper.QualifiersForOversizedPool (bc-drwx item 13) owns the
+	// "oversized pool sends one extra qualifier" rule itself, shared with
+	// extraQualifierOverridesFromSizes (internal/helper/
+	// pool_distribution_tree_aware.go), which used to be a second,
+	// independent implementation of the identical arithmetic. PoolSize <= 0
+	// means there is no minimum to be over -- without a baseline the
+	// oversized test would mark EVERY pool oversized, so
+	// QualifiersForOversizedPool degrades to the uniform count instead.
+	// Unreachable for a started competition (the engine rejects starting
+	// with an unset PoolSize) but cheap to make safe against drifted or
+	// hand-edited config.md data.
+	return helper.QualifiersForOversizedPool(len(pool.Players), c.PoolSize, base)
 }
 
 // MatchWinnerRanksNeeded returns the highest per-pool qualifier rank the
@@ -929,6 +946,31 @@ const (
 	CompStatusComplete  CompetitionStatus = "completed"
 	CompStatusInvalid   CompetitionStatus = "invalid"
 )
+
+// CanStart reports whether StartCompetition accepts a competition in status:
+// setup (and the legacy empty status) take the one-click draw-then-run path,
+// draw-ready only flips status over an already-generated draw. It is the ONE
+// statement of that precondition: engine.StartCompetition gates on it, and so
+// does the mobileapp start handler's pre-flight (ensureNumberPrefix), which
+// must act on exactly the statuses the engine will then accept and on no
+// other.
+//
+// Lives here rather than in internal/engine because internal/state sits
+// BELOW internal/engine in the layering (state persists, engine drives), and
+// a squad write (Store.ClearTeamMemberName) needs this same precondition to
+// refuse clearing a member's name once the competition has started -- a
+// state-package function cannot import engine without an upward/circular
+// dependency.
+func CanStart(status CompetitionStatus) bool {
+	return status == CompStatusDrawReady || CanGenerateDraw(status)
+}
+
+// CanGenerateDraw reports whether GenerateDraw accepts a competition in
+// status: only setup (and the legacy empty status). Shared with the mobileapp
+// generate-draw pre-flight for the same reason as CanStart.
+func CanGenerateDraw(status CompetitionStatus) bool {
+	return status == CompStatusSetup || status == ""
+}
 
 type MatchStatus string
 
@@ -1069,6 +1111,48 @@ type SubMatchResult struct {
 	// uniformly).
 	DecidedByHantei *bool          `json:"decidedByHantei,omitempty" yaml:"decided_by_hantei,omitempty"`
 	Encho           *EnchoMetadata `json:"encho,omitempty"           yaml:"encho,omitempty"`
+	// SideAMemberID/SideBMemberID/WinnerMemberID carry the squad MEMBER id
+	// (domain.TeamMember.ID, bc-tmid pass 2) for each side and the winner
+	// of this bout, mirroring MatchResult's SideAID/SideBID/WinnerID triple
+	// for the TEAM participants one level up. SideA/SideB/Winner above stay
+	// bare fighter NAMES, written and read exactly as before; these three
+	// fields are the id half, added BESIDE them. A record that carries an
+	// id field is resolved BY ID ONLY (operator ruling bc-pnum): kachinuki
+	// retirement (engine.RetiredPlayersFromBoutLog / IsMemberRetired) keys
+	// on the member id whenever a fighter's slot carries one, falling back
+	// to the NAME only for a row a repair has not yet reached -- which is
+	// what closes the rename defect this pass exists for (renaming a
+	// member mid-match no longer re-queues someone who already fought and
+	// lost, because the id, unlike the name, does not change under them).
+	// omitempty keeps a file written before these fields existed, and every
+	// reader of one, fully compatible; a legacy row is repaired on load
+	// (state.upgradePoolMatchSideIDsLocked / upgradeBracketSideIDsLocked,
+	// extended in the same pass that already resolves the match-level
+	// triple) against the two teams' own squads.
+	//
+	// WinnerMemberID HAS TWO PRODUCERS AND YOU SHOULD KNOW WHICH ONE FILLED
+	// A GIVEN ROW. The score editor stamps it from the SIDE the operator
+	// picked, so it is a record of who they said won. ResolveMemberWinnerID
+	// derives it from the row's NAMES for a row that arrived without one,
+	// and deliberately refuses when both sides hold the same name.
+	//
+	// That refusal is why the editor has to be the producer. A derived
+	// value is present exactly where the names already agree, and absent
+	// exactly where an id would have settled the question, so a consumer
+	// reading a derived-only value can never change an outcome. A change
+	// that read it "to fix same-name attribution" was written, gated green,
+	// and reverted for precisely that reason (bc-pnum) before the editor
+	// began stamping it.
+	//
+	// Consumers read it through domain.SubBoutAttribution /
+	// AttributeWinnerSide rather than by hand; grep WinnerMemberID for the
+	// current set, because naming them here is what makes a comment rot.
+	// A row where two opposing fighters share a display name and no id was
+	// ever recorded counts for NEITHER side: see state.SubBoutWinnerSide
+	// for why refusing beats the aka-first coin flip it replaced.
+	SideAMemberID  string `json:"sideAMemberId,omitempty" yaml:"side_a_member_id,omitempty"`
+	SideBMemberID  string `json:"sideBMemberId,omitempty" yaml:"side_b_member_id,omitempty"`
+	WinnerMemberID string `json:"winnerMemberId,omitempty" yaml:"winner_member_id,omitempty"`
 }
 
 // HanteiDecided reports whether a hantei verdict stands on this sub-bout:
@@ -1078,22 +1162,103 @@ func (s *SubMatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(s.IpponsA) || domain.ContainsHantei(s.IpponsB)
 }
 
+// Attribution reads this row's six identity fields into the shape every
+// "which side won" owner takes (domain.AttributeWinnerSide, and
+// domain.SubBoutAttribution for the sub-bout rule). It exists so that no
+// caller hand-builds the literal: all six fields are the same type, and the
+// struct is what stops a transposed pair from silently marking the wrong
+// competitor.
+func (s *SubMatchResult) Attribution() domain.WinnerAttribution {
+	return domain.WinnerAttribution{
+		Winner: s.Winner, SideA: s.SideA, SideB: s.SideB,
+		WinnerID: s.WinnerMemberID, SideAID: s.SideAMemberID, SideBID: s.SideBMemberID,
+	}
+}
+
+// MissingMemberID reports whether s has a side or winner NAMED but not
+// member-id-stamped: SideA/SideB non-empty with SideAMemberID/
+// SideBMemberID empty, or Winner non-empty with WinnerMemberID empty. The
+// sub-bout twin of MatchResult.MissingSideOrWinnerID, used by the
+// legacy-upgrade repair's "does this row still need work" scan (bc-tmid
+// pass 2).
+func (s *SubMatchResult) MissingMemberID() bool {
+	return (s.SideA != "" && s.SideAMemberID == "") ||
+		(s.SideB != "" && s.SideBMemberID == "") ||
+		(s.Winner != "" && s.WinnerMemberID == "")
+}
+
+// ResolveMemberWinnerID derives WinnerMemberID from s's OWN already-resolved
+// side member ids (SideAMemberID/SideBMemberID) and its Winner NAME, routed
+// through domain.AttributeWinnerSide -- the same "which side won" owner the
+// match-level SideAID/SideBID/WinnerID triple already routes through
+// (state/legacy_upgrade.go's pool-matches/bracket.json upgrades). WinnerID
+// is deliberately left empty in the WinnerAttribution literal: nothing here
+// carries a separately-submitted "chosen winner id" to compare against, only
+// the two side ids and the winner's own recorded name, so the call always
+// takes AttributeWinnerSide's NAME-comparison branch; this function's whole
+// contribution is picking the side's member id once that branch names one.
+//
+// No-op (returns false) when WinnerMemberID is already set, Winner is
+// empty, or the two sides can't be told apart by name (SideA == SideB, or a
+// name matching neither) -- the same residue every id-repair in this
+// package accepts rather than guesses at. Reused by the live kachinuki
+// merge (engine.mergeKachinukiSubResults) so the rule has exactly one
+// owner between the legacy-load path and the live-write path.
+func (s *SubMatchResult) ResolveMemberWinnerID() bool {
+	if s.WinnerMemberID != "" || s.Winner == "" {
+		return false
+	}
+	// A row where BOTH sides hold the SAME non-empty name can never be told
+	// apart by name alone (two competitors may legally share a display
+	// name), the same guard upgradePoolMatchSideIDsLocked/
+	// upgradeBracketSideIDsLocked apply before deriving the match-level
+	// WinnerID (legacy_upgrade.go). Skipping derivation here is the only
+	// safe choice: AttributeWinnerSide's own name path would otherwise
+	// default to side A regardless of which one actually won (its
+	// documented aka-first convention -- correct for a genuinely
+	// unattributable winner, wrong here, where the ambiguity is in the
+	// SIDES, not the winner).
+	if s.SideA != "" && s.SideA == s.SideB {
+		return false
+	}
+	switch domain.AttributeWinnerSide(domain.WinnerAttribution{Winner: s.Winner, SideA: s.SideA, SideB: s.SideB}) {
+	case domain.MatchSideA:
+		if s.SideAMemberID != "" {
+			s.WinnerMemberID = s.SideAMemberID
+			return true
+		}
+	case domain.MatchSideB:
+		if s.SideBMemberID != "" {
+			s.WinnerMemberID = s.SideBMemberID
+			return true
+		}
+	}
+	return false
+}
+
 type MatchResult struct {
 	ID     string `json:"id"`
 	SideA  string `json:"sideA"` // Player/Team Name
 	SideB  string `json:"sideB"`
 	Winner string `json:"winner"`
 	// SideAID/SideBID/WinnerID carry the participant UUID for each side and
-	// the winner when available. Sides are stored by name everywhere else,
-	// but a name is not unique within a competition; two participants from
-	// different dojos may share a name (CheckDuplicateEntriesByNameDojo only
-	// rejects same-name AND same-dojo). These ids let consumers (e.g. the
-	// league matrix) cross-reference a match cell to the right row/column
-	// player AND tell apart the winner when two identical-name players meet.
-	// Purely additive metadata: all Go scoring/standings logic still keys on
-	// name, and these stay empty for legacy data, so behavior is unchanged
-	// when ids are absent. omitempty + append-only CSV columns keep old
-	// files/readers fully compatible.
+	// the winner when available. Sides are stored by NAME too (SideA/SideB
+	// above), but a name is not unique within a competition; two
+	// participants from different dojos may share a name
+	// (CheckDuplicateEntriesByNameDojo only rejects same-name AND
+	// same-dojo). A record that carries an id field is resolved BY ID ONLY
+	// (operator ruling bc-pnum): every standings/tie-break/eligibility/
+	// export/league-matrix consumer resolves a side or winner through these
+	// three fields, never through SideA/SideB/Winner directly, and an empty
+	// id resolves to NOTHING rather than falling back to the name -- a
+	// legacy row missing them (written before this field existed) is
+	// repaired automatically at load time when its side names resolve
+	// unambiguously against the roster (state.upgradePoolMatchSideIDsLocked);
+	// a row that repair could not resolve is not counted in standings until
+	// it is re-entered (see engine.PoolMatchesMissingSideIDsMessage, the
+	// operator-facing notice for exactly this residue). omitempty +
+	// append-only CSV columns keep old files/readers fully compatible on
+	// read; they no longer keep old BEHAVIOR compatible, which is the point.
 	SideAID  string `json:"sideAId,omitempty"`
 	SideBID  string `json:"sideBId,omitempty"`
 	WinnerID string `json:"winnerId,omitempty"`
@@ -1246,6 +1411,34 @@ func (m *MatchResult) HanteiDecided() bool {
 	return domain.ContainsHantei(m.IpponsA) || domain.ContainsHantei(m.IpponsB)
 }
 
+// CarriesSideIDs reports whether m is a record with a per-side id field
+// stamped (SideAID or SideBID non-empty), resolved BY ID ONLY (operator
+// ruling bc-pnum). Both the pool class and, since bc-brid, a repaired/freshly
+// stamped bracket class carry these; a record with neither (an UNREPAIRED
+// legacy bracket row, or a pool row from a competition drawn before ids were
+// minted, so a MatchResult projected from one, e.g. bracketMatchAsResult,
+// leaves both empty) is the one legitimate case a caller may fall back to
+// comparing SideA/SideB by name instead: comparing two empty-string ids would
+// look like a match but proves nothing.
+func (m *MatchResult) CarriesSideIDs() bool {
+	return m.SideAID != "" || m.SideBID != ""
+}
+
+// MissingSideOrWinnerID reports whether m has a side or winner named but not
+// id-stamped: SideA/SideB non-empty with SideAID/SideBID empty, or Winner
+// non-empty (a non-draw result) with WinnerID empty. Promoted here (bc-pnum
+// review) as the ONE owner of "does this row still need an id fixed",
+// shared by the load-time legacy repair's own "does this row need work"
+// scan (state.upgradePoolMatchSideIDsLocked) and
+// engine.PoolMatchesMissingSideIDsMessage's "is this row still a problem"
+// notice -- previously hand-duplicated in both places and kept in sync only
+// by a comment.
+func (m *MatchResult) MissingSideOrWinnerID() bool {
+	return (m.SideA != "" && m.SideAID == "") ||
+		(m.SideB != "" && m.SideBID == "") ||
+		(m.Winner != "" && m.WinnerID == "")
+}
+
 // EnchoMetadata records overtime / sudden-death periods played in a
 // match. Read/persisted only in Slice 1; the score endpoint accepts it
 // but does not yet act on it. Slice 3 (T076) will wire it into the
@@ -1341,6 +1534,31 @@ type BracketMatch struct {
 	Status      MatchStatus `json:"status"`
 	Court       string      `json:"court"`
 	ScheduledAt string      `json:"scheduledAt"`
+	// SideAID/SideBID/WinnerID carry the participant UUID for each side and
+	// the winner when available, MatchResult's SideAID/SideBID/WinnerID twin
+	// (bc-brid). A bracket match used to persist names only, so two
+	// competitors sharing a display name from different dojos (legal:
+	// CheckDuplicateEntriesByNameDojo only rejects same-name AND same-dojo)
+	// could not be told apart once seated in the same knockout -- the
+	// simultaneity gate, a bracket kiken's ineligibility target, a
+	// participant rename, and MatchSidesByID all degraded to a first-match
+	// name guess. Stamped by every bracket writer (buildBracketFromDraw's
+	// round 0 from Bracket.DrawOrder, ResolveQualifiedPools' pool-finisher
+	// resolver, propagateBracketWinner's advancement + bronze feed, and
+	// applyBracketMatchResult's winner-id resolution) IFF the side is a
+	// resolved competitor: a bye (empty), a "Winner of ..." feeder, and an
+	// unresolved "Pool A-1st" placeholder carry none
+	// (helper.IsReservedParticipantName already stops a real person taking
+	// those strings as a display name). omitempty keeps a bracket.json
+	// written before this field existed, and every reader of one, fully
+	// compatible: state.EnsureLegacyUpgraded repairs a legacy row's ids on
+	// load (DrawOrder positionally for a standalone knockout, else a unique
+	// roster name match), and every identity-critical reader keeps its
+	// pre-existing name path as the fallback for a row repair could not
+	// resolve.
+	SideAID  string `json:"sideAId,omitempty"`
+	SideBID  string `json:"sideBId,omitempty"`
+	WinnerID string `json:"winnerId,omitempty"`
 	// Additional fields from design
 	//
 	// ScoreA/ScoreB are LEGACY READ-ONLY channels (see legacy_hantei.go): a
@@ -1474,6 +1692,19 @@ type Bracket struct {
 	// its ID is always "m-bronze", and its sides are filled from the two
 	// semifinal losers by propagateBracketWinner.
 	ThirdPlaceMatch *BracketMatch `json:"thirdPlaceMatch,omitempty"`
+	// DrawOrder holds participant ids in bracket-position order, top of the
+	// tree to the bottom (shiaijo A's block first), byes skipped: a number
+	// belongs to a position in the draw, and index+1 is that position's
+	// counter. Stamped ONLY by a standalone knockout draw (generatePlayoffs,
+	// bracket.go), from the order helper.StandardSeeding returns; a mixed
+	// (Pools + Knockout) competition's bracket never carries it, since its
+	// competitors are already numbered pool by pool at the pool draw
+	// (helper.NumberPools) and this field would be a second, redundant
+	// numbering of the same roster. engine.NumberKnockoutParticipants is the
+	// one reader (bc-pnum ruling 2): a legacy bracket.json written before
+	// this field existed has no draw order and yields NO numbers, by design;
+	// there is no name-based fallback.
+	DrawOrder []string `json:"drawOrder,omitempty"`
 }
 
 type Announcement struct {

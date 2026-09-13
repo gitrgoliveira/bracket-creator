@@ -49,7 +49,7 @@ func newCreatePlayoffCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&o.teamMatches, "team-matches", "t", 0, "create team matches with x players per team (default 0)")
 	cmd.Flags().IntVarP(&o.courts, "courts", "c", 2, "number of Shiaijo (courts) to distribute tree pages across: 1, 2, 4, 8 or 16 (default 2)")
 	cmd.Flags().StringVarP(&o.titlePrefix, "title-prefix", "", "", "title prefix for the tournament (default \"\")")
-	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", "Assign consecutive numbers with this letter prefix (e.g. 'K' produces K1, K2, ...)")
+	cmd.Flags().StringVarP(&o.numberPrefix, "number-prefix", "n", "", numberPrefixFlagHelp)
 	cmd.Flags().BoolVarP(&o.thirdPlaceMatch, "third-place-match", "", false, "Play a 3rd-place (bronze) match after the semifinals, deciding a single 3rd place. Kendo's default is two joint 3rd places with no bronze match; set this to decide a single 3rd instead (default false)")
 
 	if err := cmd.MarkPersistentFlagRequired("file"); err != nil {
@@ -140,14 +140,30 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 		fmt.Println("Using Zekken names")
 	}
 
-	if o.numberPrefix != "" {
-		helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
+	// resolveNumberPrefix (bc-pnum A10, cmd/shared.go) is the ONE derivation
+	// shared with create-pools: trims an explicit value, derives from
+	// --title-prefix when omitted, and refuses one over the length cap
+	// rather than accepting it verbatim.
+	o.numberPrefix, err = resolveNumberPrefix(o.numberPrefix, o.titlePrefix)
+	if err != nil {
+		return err
 	}
 
-	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
-
-	// Reorder players based on seeds for standard bracket distribution
+	// Reorder players into bracket-slot order BEFORE numbering (bc-pnum
+	// ruling 2): a number belongs to a position in the draw, so it must be
+	// composed from the SEEDED order, not the roster's entry order.
+	// AddPlayerDataToSheet's own doc comment describes the OLD ordering
+	// (seed after writing the Data sheet, entry order in column A, bracket
+	// order nowhere) -- this reorders both the numbering and the Data
+	// sheet/Names-to-Print writes onto the seeded slice, so every sheet that
+	// reads player.Number lists competitors in that same number (bracket)
+	// order top to bottom. playerCoords is therefore computed AFTER the
+	// reorder too, so its cell references point at the rows this actually
+	// wrote.
 	players = helper.StandardSeeding(players)
+	helper.AssignPlayerNumbers(players, o.numberPrefix, 1)
+
+	playerCoords := helper.AddPlayerDataToSheet(f, players, o.withZekkenName, o.titlePrefix)
 
 	// gather all player names
 	var names []string
@@ -201,7 +217,7 @@ func (o *playoffOptions) createPlayoffs(entries []string) error {
 
 	// Convert all players for match-winner processing
 	matchWinners = helper.ConvertPlayersToWinners(players, o.withZekkenName, playerCoords)
-	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords)
+	helper.CreateNamesToPrint(f, players, o.withZekkenName, courtNames, playerCoords, o.numberPrefix)
 
 	printEliminationWithBronze(f, matchWinners, eliminationMatchRounds, o.teamMatches, plan, o.engi, o.thirdPlaceMatch)
 	helper.FillEstimations(f, 0, 0, int64(o.teamMatches), int64(len(names)-1), o.courts)

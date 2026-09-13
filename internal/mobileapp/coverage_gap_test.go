@@ -358,6 +358,7 @@ func TestTryAutoCompletePools_Outcomes(t *testing.T) {
 		{"TiebreakInjected", engine.AutoCompleteTiebreakInjected},
 		{"KnockoutStarted", engine.AutoCompleteKnockoutStarted},
 		{"PoolsResolved", engine.AutoCompletePoolsResolved},
+		{"Started", engine.AutoCompleteStarted},
 		{"NoChange", engine.AutoCompleteNoChange},
 	}
 	for _, tc := range cases {

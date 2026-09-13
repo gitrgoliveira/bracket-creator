@@ -211,6 +211,8 @@ You can still toggle individual check-in status during `draw-ready`, but roster 
 
 When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
 
+A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk.
+
 <!-- Raw HTML is copied verbatim by MkDocs (only markdown image paths get
      rewritten), so this src must be relative to the BUILT page URL
      (/user-guide/organisers/run-tournament/): three levels up, not two. -->

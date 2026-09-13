@@ -441,6 +441,12 @@ func tryAutoCompletePools(c *gin.Context, eng ScoringEngine, hub Broadcaster, co
 		// competition.
 		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": compID})
 		hub.Broadcast(EventScheduleUpdated, nil)
+	case engine.AutoCompleteStarted:
+		// A draw-ready competition received its first result (e.g. scored from
+		// the shiaijo operator view) and was started by it: same event as
+		// POST .../start so every surface reloads the now-running competition.
+		hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": compID})
+		hub.Broadcast(EventScheduleUpdated, nil)
 	case engine.AutoCompletePoolsResolved:
 		// Some (not all) pools were seeded into the knockout, and/or tiebreakers
 		// were injected. The bracket/schedule changed and newly-playable knockout

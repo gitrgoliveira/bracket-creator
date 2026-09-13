@@ -65,6 +65,14 @@ const (
 	// Callers should broadcast both EventMatchUpdated (reload standings) and
 	// EventScheduleUpdated (so the UI shows the "awaiting tie-breaker" banner).
 	AutoCompleteAwaitingLeagueTiebreak AutoCompleteOutcome = 5
+	// AutoCompleteStarted means the competition was still draw-ready when a
+	// result reached it, so it was started on the spot (draw-ready →
+	// CompStatusPools or CompStatusKnockout by format, exactly what
+	// StartCompetition does) and nothing else changed. Operator ruling
+	// (bc-prow): the shiaijo operator view lists a draw-ready competition's
+	// matches, and scoring one of them IS the start. Callers should broadcast
+	// EventCompetitionStarted and EventScheduleUpdated.
+	AutoCompleteStarted AutoCompleteOutcome = 6
 )
 
 // MaybeAutoCompletePools advances a competition past its pool phase after a pool
@@ -87,13 +95,48 @@ const (
 //     Knockout matches become scoreable per-match as their feeder pools finish,
 //     there is no wait for the whole pool phase.
 //
-// The function is a no-op for any other format or status.
+// The function is a no-op for any other format or status, with one
+// exception that runs FIRST: a competition still in CompStatusDrawReady is
+// started (the same transition StartCompetition performs), because every
+// caller reaches here right after a result was recorded and a result IS the
+// start (operator ruling bc-prow). When nothing else follows, the outcome is
+// AutoCompleteStarted; when the same result also completed a pool, that
+// richer outcome is returned instead (its broadcasts make clients reload the
+// competition, status included).
 //
 // Atomic: the league status flip runs inside state.Store.UpdateCompetitionChanged.
 // The mixed path delegates to advanceMixedPools, which takes its own per-comp
 // locks; that is safe because MaybeAutoCompletePools is NOT inside an open
 // transform at that point.
 func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, error) {
+	started, err := e.autoStartOnFirstResult(compID)
+	if err != nil {
+		return AutoCompleteNoChange, err
+	}
+	outcome, err := e.maybeAutoCompletePoolsRunning(compID)
+	if err != nil {
+		return outcome, err
+	}
+	if started && outcome == AutoCompleteNoChange {
+		return AutoCompleteStarted, nil
+	}
+	return outcome, nil
+}
+
+// autoStartOnFirstResult moves a draw-ready competition to its running status
+// and reports whether it did. Any other status is left alone.
+func (e *Engine) autoStartOnFirstResult(compID string) (bool, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil || comp == nil || comp.Status != state.CompStatusDrawReady {
+		return false, err
+	}
+	if err := e.transitionDrawToRunning(compID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (e *Engine) maybeAutoCompletePoolsRunning(compID string) (AutoCompleteOutcome, error) {
 	// Determine whether this is a team competition for tie-injection routing.
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {

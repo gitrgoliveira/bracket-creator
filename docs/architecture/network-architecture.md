@@ -8,7 +8,7 @@ client-side resilience that keeps it working on flaky venue Wi-Fi.
 
 ## 1. Edge topology
 
-The app speaks **plain HTTP**; a TLS-terminating reverse proxy (**Caddy**, automatic
+The app speaks **plain HTTP**. A TLS-terminating reverse proxy (**Caddy**, automatic
 Let's Encrypt) sits in front and streams SSE through unbuffered.
 
 ```mermaid
@@ -37,8 +37,7 @@ flowchart LR
 | 8080 | app (internal) | plain HTTP; **never published directly** (Caddy proxies it) |
 | 22 | host (optional) | SSH (restrict to your IP) |
 
-> **Proxy must stream, not buffer.** SSE is a long-lived response; the Caddyfiles deliberately
-> avoid `flush_interval` / response-buffering directives, which would break the real-time event stream.
+> **Proxy must stream, not buffer.** SSE is a long-lived response. The Caddyfiles deliberately avoid `flush_interval` and response-buffering directives, because those would break the real-time event stream.
 > (In production HTTPS comes from the proxy, so browser secure-context features work even though
 > the app itself serves plain HTTP.)
 
@@ -97,17 +96,14 @@ sequenceDiagram
   server restart that reset `seq`). The client resets its `lastSeq` and full-refetches. Emitted
   **without** an `id:` line when head seq is 0 so it can't force `Last-Event-ID` to "0".
 - **Observable heartbeat**: a real `{"type":"heartbeat","nowMs":<unix ms>}` frame (no `id:`)
-  every 15s, so the client can tell "quiet" from "dead". `nowMs` is the server clock at send
-  time and is a tripwire for a client whose own clock has drifted, never a source to set the
-  clock from: a one-way push carries no round trip to correct against, so a delayed frame
-  would drag the client's clock backwards. A client that sees a large divergence relearns the
+  every 15s, so the client can tell "quiet" from "dead". `nowMs` is the server clock at send time. It is a tripwire for a client whose own clock has drifted, not a source to set the clock from. A one-way push carries no round trip to correct against, so a delayed frame would drag the client's clock backwards. A client that sees a large divergence relearns the
   offset from the time endpoint instead.
 - **Per-client buffered channel**; a stalled client that can't drain is dropped (non-blocking
   send). Subscriber cap `SSE_MAX_CLIENTS` (default 5000).
 
 ## 4. Client resilience on flaky Wi-Fi
 
-The client treats the link as unreliable by default; the following flows show how.
+The client treats the link as unreliable by default. The following flows show how.
 
 Only a confirmed write ever empties the queue. A write that cannot be confirmed is never
 dropped in silence: it is either kept and retried, parked until the operator can fix the
@@ -188,5 +184,5 @@ flowchart TD
 ## 7. Scale limit = egress
 
 Because every real-time update is fanned out to **every** connected viewer, **network egress is the
-practical ceiling**, not CPU/RAM. See [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
-for per-tier audience guidance (for example, GCP free tier compared with Oracle for 1000+ viewers).
+practical ceiling**, not CPU/RAM. Refer to [Infrastructure architecture](infrastructure-architecture.md#5-capacity-scaling)
+for per-tier audience guidance (for example, GCP free tier compared with Oracle for large events).

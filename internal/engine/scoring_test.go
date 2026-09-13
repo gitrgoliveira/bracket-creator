@@ -14,6 +14,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
+	bctest "github.com/gitrgoliveira/bracket-creator/internal/test/idstamp"
 )
 
 func TestScoring_OverrideBracketWinner(t *testing.T) {
@@ -144,16 +145,19 @@ func TestScoreSummary_Individual(t *testing.T) {
 
 	compID := "ind-summary"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Ind", TeamSize: 0}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "Alice", Dojo: "Dojo Alice"}, {Name: "Bob", Dojo: "Dojo Bob"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "Alice", SideB: "Bob",
 			Winner: "Alice", IpponsA: []string{"M", "K"}, IpponsB: []string{"D"},
 			Status: state.MatchStatusCompleted,
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -180,10 +184,8 @@ func TestScoreSummary_Team(t *testing.T) {
 
 	compID := "team-summary"
 	require.NoError(t, store.SaveCompetition(&state.Competition{ID: compID, Name: "Team", TeamSize: 3}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
 			Winner: "TeamA", Status: state.MatchStatusCompleted,
@@ -193,7 +195,12 @@ func TestScoreSummary_Team(t *testing.T) {
 				{Position: 3, Winner: "TeamB"},
 			},
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -223,10 +230,8 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 		ID: compID, Name: "Team", TeamSize: 3,
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
 			Winner: "", Decision: "hikiwake",
@@ -237,7 +242,12 @@ func TestTeamStandings_EmptySubSidesDrawNotFalseWin(t *testing.T) {
 				{Position: 3, Winner: ""},
 			},
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -282,10 +292,8 @@ func TestTeamStandings_PlaceholderIpponsDontInflatePoints(t *testing.T) {
 		ID: compID, Name: "Team", TeamSize: 2,
 		Format: state.CompFormatLeague, Status: state.CompStatusPools,
 	}))
-	require.NoError(t, store.SavePools(compID, []helper.Pool{
-		{PoolName: "PoolA", Players: []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}},
-	}))
-	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+	players := []helper.Player{{Name: "TeamA", Dojo: "Dojo TeamA"}, {Name: "TeamB", Dojo: "Dojo TeamB"}}
+	matches := []state.MatchResult{
 		{
 			ID: "PoolA-1", SideA: "TeamA", SideB: "TeamB",
 			Winner: "TeamA", Status: state.MatchStatusCompleted,
@@ -297,7 +305,12 @@ func TestTeamStandings_PlaceholderIpponsDontInflatePoints(t *testing.T) {
 				{Position: 2, Winner: "TeamB", IpponsA: []string{"•", "•"}, IpponsB: []string{"K"}},
 			},
 		},
+	}
+	bctest.StampIDs(players, matches)
+	require.NoError(t, store.SavePools(compID, []helper.Pool{
+		{PoolName: "PoolA", Players: players},
 	}))
+	require.NoError(t, store.SavePoolMatches(compID, matches))
 
 	standings, err := eng.CalculatePoolStandings(compID)
 	require.NoError(t, err)
@@ -1749,6 +1762,7 @@ func TestBackfillMatchIdentity(t *testing.T) {
 		name       string
 		result     state.MatchResult
 		wantWinner string
+		wantErr    bool
 	}{
 		{
 			name:       "WinnerSide A hint wins over everything",
@@ -1791,9 +1805,18 @@ func TestBackfillMatchIdentity(t *testing.T) {
 			wantWinner: idA,
 		},
 		{
-			name:       "explicit WinnerID preserved (early return, no inference)",
-			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "explicit-id", IpponsA: []string{"M", "K"}},
-			wantWinner: "explicit-id",
+			name:       "explicit WinnerID matching a side preserved (early return, no inference)",
+			result:     state.MatchResult{Winner: "Tanaka Kenji", WinnerID: idA, IpponsA: []string{"M", "K"}},
+			wantWinner: idA,
+		},
+		{
+			// bc-idfx: a client-supplied WinnerID that names NEITHER side is
+			// invalid data (it used to be persisted verbatim by the old
+			// unconditional early return and counted for nobody in
+			// standings). Rejected once the row's own ids are known.
+			name:    "explicit WinnerID matching neither side is rejected",
+			result:  state.MatchResult{Winner: "Tanaka Kenji", WinnerID: "not-a-side-id", IpponsA: []string{"M", "K"}},
+			wantErr: true,
 		},
 		{
 			name:       "draw (empty Winner) leaves WinnerID empty",
@@ -1808,8 +1831,13 @@ func TestBackfillMatchIdentity(t *testing.T) {
 			// `stored` carries the generation-time ids; `result` (the incoming
 			// score) starts without them, mirrors the real write path.
 			stored := &state.MatchResult{SideAID: idA, SideBID: idB}
-			backfillMatchIdentity(&result, stored)
+			err := backfillMatchIdentity(&result, stored, matchWriteForward)
 
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
 			assert.Equal(t, tc.wantWinner, result.WinnerID, "WinnerID")
 			// Side ids are always backfilled from `stored` (runs before the
 			// WinnerID early-return), even in the explicit-WinnerID case.
@@ -1819,6 +1847,117 @@ func TestBackfillMatchIdentity(t *testing.T) {
 	}
 }
 
+// TestBackfillMatchIdentity_OneSideIDKnown was PR #416 finding 6's repro: a
+// partially-stamped pool row (only SideB has a real participant id, reachable
+// via the mixed-id participants.csv format, TestStore_ParticipantsCSV_MixedIDs,
+// and pools.go stamping SideAID only from a Player.ID that exists). The SPA
+// used to invent an id from the winning side's NAME when that side had none
+// (api_serializers.jsx buildPlayerMap: `id: norm.id || norm.name`) and send
+// it as winnerId; since the invented id could never match the one real
+// stamped id, an OR-gated check once rejected every such score outright.
+//
+// bc-pnum ruling 1c closed the underlying gap this tolerated: the draw itself
+// now refuses to run over a roster with an id-less row
+// (helper.ValidateNoMissingParticipantIDs), so a partially-stamped pool row
+// like this one can no longer be produced by a real draw, and the SPA no
+// longer invents an id at all (it sends winnerId only when the server
+// supplied that side's real id, api_serializers.jsx). The DROP-rather-than-
+// reject tolerance this test used to pin (bc-pnum ruling 1d) is gone: a
+// WinnerID naming neither side is rejected unconditionally now, one side id
+// known or not, so a stale/rogue client that still invents one gets a 400
+// instead of a silently dropped verdict.
+func TestBackfillMatchIdentity_OneSideIDKnown(t *testing.T) {
+	const idB = "22222222-2222-4222-8222-222222222222"
+
+	// stored carries the generation-time ids: SideA (Bob) was never stamped
+	// (legacy/mixed-id roster), SideB (Alice) has a real id.
+	stored := &state.MatchResult{SideAID: "", SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "Bob", // invented from the id-less side's own name
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.Error(t, err, "a winnerId naming neither side is rejected even when only one side id is known")
+	assert.Equal(t, "", result.SideAID, "SideAID stays empty; stored never had one to backfill")
+	assert.Equal(t, idB, result.SideBID, "SideBID backfilled from stored")
+}
+
+// TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide covers the
+// companion path: when the one known side id DOES match winnerId, the write
+// must still succeed as a normal, unambiguous attribution (no dropping, no
+// rejection) -- only an UNRECOGNIZED winnerId is special-cased.
+func TestBackfillMatchIdentity_OneSideIDKnown_WinnerIDMatchesKnownSide(t *testing.T) {
+	const idB = "22222222-2222-4222-8222-222222222222"
+
+	stored := &state.MatchResult{SideAID: "", SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Alice",
+		WinnerID: idB, // correctly names the one known side
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.NoError(t, err)
+	assert.Equal(t, idB, result.WinnerID, "a winnerId matching the one known side is trusted outright")
+}
+
+// TestBackfillMatchIdentity_BothSideIDsUnknown_WinnerIDAccepted is the
+// legacy-competition case: a pool row drawn before ids were minted (bc-pnum
+// ruling 1c predates the roster) has BOTH SideAID and SideBID empty on
+// `stored` -- ids are minted going forward, never backfilled onto existing
+// rows. A forward write carrying a winnerId (e.g. replayed from an offline
+// queue by a pre-upgrade SPA bundle, whose serializer used to send winnerId
+// unconditionally) cannot be rejected as "names neither side": with neither
+// side id known there is no known pairing for it to have missed, so the
+// claim is unsound and the write must be accepted.
+func TestBackfillMatchIdentity_BothSideIDsUnknown_WinnerIDAccepted(t *testing.T) {
+	stored := &state.MatchResult{SideAID: "", SideBID: ""}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "some-client-invented-id",
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.NoError(t, err, "a winnerId cannot be rejected as unattributable when neither side id is known")
+	assert.Equal(t, "some-client-invented-id", result.WinnerID, "the write is accepted as-is, not rewritten")
+	assert.Equal(t, "", result.SideAID, "SideAID stays empty; stored never had one to backfill")
+	assert.Equal(t, "", result.SideBID, "SideBID stays empty; stored never had one to backfill")
+}
+
+// TestBackfillMatchIdentity_BothSideIDsKnown_WinnerIDMatchingNeither_StillRejected
+// is the companion boundary case: once BOTH side ids are actually known, a
+// winnerId matching neither of them is exactly the invalid-data case bc-idfx
+// exists to catch, and must still be rejected.
+//
+// This only pins the check against widening into an ALWAYS-ACCEPT
+// exemption: with both ids known here, an any-side-unknown mutant (the
+// both-unknown guard loosened to `sideAID == "" || sideBID == ""`) would
+// still correctly reject this case too, since neither id is empty, so it
+// passes unchanged even under that widening and cannot catch it. It is
+// TestBackfillMatchIdentity_OneSideIDKnown (one id known, the other not)
+// that actually pins the any-side-unknown boundary -- that is the shape
+// where "any unknown" wrongly accepts but the real both-unknown exemption
+// correctly keeps rejecting. Do not delete that test believing this one
+// covers it.
+func TestBackfillMatchIdentity_BothSideIDsKnown_WinnerIDMatchingNeither_StillRejected(t *testing.T) {
+	const (
+		idA = "11111111-1111-4111-8111-111111111111"
+		idB = "22222222-2222-4222-8222-222222222222"
+	)
+	stored := &state.MatchResult{SideAID: idA, SideBID: idB}
+	result := state.MatchResult{
+		SideA: "Bob", SideB: "Alice",
+		Winner:   "Bob",
+		WinnerID: "not-a-side-id",
+	}
+
+	err := backfillMatchIdentity(&result, stored, matchWriteForward)
+	require.Error(t, err, "a winnerId naming neither side must still be rejected once both side ids are known")
+}
+
 // TestBackfillMatchIdentity_RepPlayers pins the daihyosen rep-player preserve-
 // on-empty rule (mp-62vr): a score write that omits the rep players must NOT
 // wipe a previously-recorded pick, but an explicit value always overrides.
@@ -1826,7 +1965,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("empty result preserves stored rep players", func(t *testing.T) {
 		result := state.MatchResult{} // a re-score that only re-sends the ippons
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		backfillMatchIdentity(&result, stored)
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Sato Ren", result.RepPlayerA, "preserved on empty")
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "preserved on empty")
 	})
@@ -1834,7 +1973,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("explicit rep players override stored", func(t *testing.T) {
 		result := state.MatchResult{RepPlayerA: "Ito Kenji", RepPlayerB: "Mori Aki"}
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		backfillMatchIdentity(&result, stored)
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA, "operator change wins")
 		assert.Equal(t, "Mori Aki", result.RepPlayerB, "operator change wins")
 	})
@@ -1842,7 +1981,7 @@ func TestBackfillMatchIdentity_RepPlayers(t *testing.T) {
 	t.Run("one side set, other preserved", func(t *testing.T) {
 		result := state.MatchResult{RepPlayerA: "Ito Kenji"} // only Aka changed
 		stored := &state.MatchResult{RepPlayerA: "Sato Ren", RepPlayerB: "Yamada Taro"}
-		backfillMatchIdentity(&result, stored)
+		require.NoError(t, backfillMatchIdentity(&result, stored, matchWriteForward))
 		assert.Equal(t, "Ito Kenji", result.RepPlayerA)
 		assert.Equal(t, "Yamada Taro", result.RepPlayerB, "untouched side preserved")
 	})
@@ -2464,5 +2603,67 @@ func TestHansokuAwardFollowsTheSlotRule(t *testing.T) {
 		}))
 		assert.Equal(t, []string{"M", "H"}, loadIpponsA(t, store, compID),
 			"an H the operator struck is theirs; the fold must never remove it")
+	})
+}
+
+// TestAccrueTeamSubResults_SameNameBout pins that the STANDINGS attribute a
+// sub-bout the same way the wire summary does. They are one rule with two
+// readers: the IV a spectator sees on the bracket row and the IV the team
+// tie-break ranks by. Before bc-pnum this function compared names, so a bout
+// between two fighters sharing a display name was credited to side A by case
+// order while state.TeamResultFrom credited the member id, and the pool table
+// ranked the opposite team from the one the board showed.
+func TestAccrueTeamSubResults_SameNameBout(t *testing.T) {
+	accrue := func(sub state.SubMatchResult) (state.PlayerStanding, state.PlayerStanding) {
+		var sA, sB state.PlayerStanding
+		accrueTeamSubResults(&sA, &sB, state.MatchResult{
+			SideA: "Tora", SideB: "Kaze", SubResults: []state.SubMatchResult{sub},
+		})
+		return sA, sB
+	}
+
+	t.Run("the member ids decide, and the summary agrees", func(t *testing.T) {
+		sub := state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-shiro",
+			IpponsB: []string{"M"},
+		}
+		sA, sB := accrue(sub)
+		assert.Equal(t, 1, sB.IndividualWins, "shiro's member id won the bout")
+		assert.Equal(t, 0, sA.IndividualWins)
+		assert.Equal(t, 1, sA.IndividualLosses)
+
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		require.NotNil(t, line)
+		assert.Equal(t, sB.IndividualWins, line.ShiroIV, "standings and summary must not disagree")
+		assert.Equal(t, sA.IndividualWins, line.AkaIV)
+	})
+
+	t.Run("no ids: neither side is credited, and the summary agrees", func(t *testing.T) {
+		sub := state.SubMatchResult{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			IpponsB: []string{"M"},
+		}
+		sA, sB := accrue(sub)
+		assert.Equal(t, 0, sA.IndividualWins, "aka-first on a same-name bout is the coin flip this removes")
+		assert.Equal(t, 0, sB.IndividualWins)
+		assert.Equal(t, 0, sA.IndividualDraws, "a bout with a winner is not a draw just because nobody could be credited")
+
+		line := state.TeamResultFrom([]state.SubMatchResult{sub}, "Tora", "Kaze")
+		require.NotNil(t, line)
+		assert.Equal(t, 0, line.ShiroIV)
+		assert.Equal(t, 0, line.AkaIV)
+	})
+
+	t.Run("distinct names are unchanged, and a winnerless bout is still a draw", func(t *testing.T) {
+		sA, sB := accrue(state.SubMatchResult{
+			Position: 1, SideA: "Sato", SideB: "Ito", Winner: "Ito", IpponsB: []string{"M"},
+		})
+		assert.Equal(t, 1, sB.IndividualWins)
+		assert.Equal(t, 1, sA.IndividualLosses)
+
+		dA, dB := accrue(state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Ito"})
+		assert.Equal(t, 1, dA.IndividualDraws)
+		assert.Equal(t, 1, dB.IndividualDraws)
 	})
 }

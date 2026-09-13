@@ -5,6 +5,7 @@
 // (integer > 0), shared with the overview stat, the seeding blocker and the
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
+import { NO_ID_HINT, NoIdHint } from './data_integrity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -258,7 +259,7 @@ function participantFormError({ name, dojo, engi }) {
   return null;
 }
 
-function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection, onBack }) {
+function AdminParticipants({ c, tournament: _tournament, onUpdate, password, showToast, onSection }) {
   // Zekken-column flag. Engi pairs store both member names combined in the
   // name field ("Name 1 - Name 2"), so engi does not alter the roster layout.
   const withZekken = !!c.withZekkenName;
@@ -456,27 +457,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // panel fill the width: adding names is the only task at this point.
   const emptyRoster = players.length === 0;
 
-  // Provisional competitor numbers for the pre-draw check-in list (mp-1tk).
-  // The draw assigns the final, pool-interleaved numbers (player.number);
-  // before that there is none. We surface a stable registration-order number
-  // (numberPrefix + position in c.players) so operators can call competitors
-  // by number during check-in. Keyed off the unfiltered roster so the number
-  // doesn't jump when the list is searched/sorted. Rendered as provisional
-  // (muted, dotted) since the final numbers may differ after the draw.
-  const provisionalNumberById = useMemoA(() => {
-    // Null-prototype object: keys are user-controlled (window.checkinPid(p)), so
-    // a participant named "__proto__" or "constructor" against a plain `{}` map
-    // could pollute the prototype chain or return inherited values on lookup.
-    // `Object.create(null)` removes both risks and keeps the `map[key]` /
-    // `map[key] = …` ergonomics. (Copilot mp-1tk follow-up.)
-    const map = Object.create(null);
-    if (c.numberPrefix) {
-      (c.players || []).forEach((p, i) => {
-        map[window.checkinPid(p)] = `${c.numberPrefix}${i + 1}`;
-      });
-    }
-    return map;
-  }, [c.players, c.numberPrefix]);
   const allSources = useMemoA(() => [...new Set(players.map(p => p.source).filter(Boolean))], [players]);
   const playerSearchTargets = useMemoA(() => {
     const map = new Map();
@@ -625,7 +605,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
 
     if (!(await window.confirmDialog({ message: `Mark all ${targets.length} participants from ${dojo} as checked-in?`, confirmLabel: "Check in all" }))) return;
 
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinPid(p), true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinApiPid(p), true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -639,7 +619,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const bulkCheckInAll = async () => {
     const targets = (c.players || []).filter(p => !p.checkedIn);
     if (targets.length === 0) { showToast("All participants already checked in"); return; }
-    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinPid(p), true, password)));
+    const results = await Promise.allSettled(targets.map(p => window.API.toggleCheckIn(c.id, window.checkinApiPid(p), true, password)));
     const failed = results.filter(r => r.status === "rejected").length;
     const succeeded = results.length - failed;
     if (failed > 0) {
@@ -689,7 +669,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     // Capture the old name before the await so the success toast is accurate
     // even if replaceTarget has changed by the time the response arrives.
     const oldName = replaceTarget.name;
-    const targetPid = window.checkinPid(replaceTarget);
+    const targetPid = window.checkinApiPid(replaceTarget);
     const targetSource = replaceTarget.source || "";
     const admin = await window.promptAdminPassword();
     if (admin === null) return;
@@ -824,10 +804,17 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       setImportSummary(null);
       const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
       setNearDupPending(hasWarnings ? { pairs: warnings } : null);
-      // Return to the dashboard after a clean apply so the operator lands back
-      // on the competition list. When the save surfaced near-duplicate warnings,
-      // stay put so they can review the banner before navigating away.
-      if (!hasWarnings && onBack) onBack();
+      // Navigate to the next action after a clean apply, rather than back to
+      // the dashboard (operator ruling): a competition still in setup goes to
+      // the Overview checklist (it names the next step: seeds and settings,
+      // then generate the draw); a started competition goes to Scoring (the
+      // same destination as this page's own "Go to Scoring" CTA). When the
+      // save surfaced near-duplicate warnings, stay put so they can review
+      // the banner before navigating away.
+      if (!hasWarnings && onSection) {
+        if (isSetup) onSection("overview");
+        else if (isStarted) onSection("scores");
+      }
     } catch (err) {
       // PUT failure path. updateCompetition already showed an error
       // toast for the user; log here so the dev console has the stack
@@ -1065,10 +1052,18 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div className="field__label">Dan grade</div>
                     <input className="input" value={replaceDanGrade} onChange={e => setReplaceDanGrade(e.target.value)} placeholder="Optional" />
                   </div>
-                  <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
+                  {replaceTarget.id ? (
+                    <div className="field__hint">ID, seed, and check-in state are preserved. Seed rankings are updated to match the new name automatically.</div>
+                  ) : (
+                    // bc-pnum: PUT .../participants/ with an empty id segment
+                    // matches no route at all (checkinApiPid returns "" for
+                    // this row); block the write client-side rather than
+                    // toasting the resulting generic failure.
+                    <div className="field__hint">{NO_ID_HINT}</div>
+                  )}
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button type="button" className="btn" onClick={() => setReplaceTarget(null)}>Cancel</button>
-                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim()} onClick={handleReplaceParticipant}>
+                    <button type="button" className="btn btn--primary" disabled={replaceLoading || !replaceName.trim() || !replaceDojo.trim() || !replaceTarget.id} title={replaceTarget.id ? undefined : NO_ID_HINT} onClick={handleReplaceParticipant}>
                       {replaceLoading ? "Saving…" : "Save"}
                     </button>
                   </div>
@@ -1128,9 +1123,15 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <input
                           type="checkbox"
                           checked={p.checkedIn}
-                          onChange={(e) => toggleCheckIn(window.checkinPid(p), e.target.checked)}
-                          style={{ width: 18, height: 18, cursor: "pointer" }}
-                          aria-label={p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}
+                          disabled={!p.id}
+                          onChange={(e) => toggleCheckIn(window.checkinApiPid(p), e.target.checked)}
+                          style={{ width: 18, height: 18, cursor: p.id ? "pointer" : "not-allowed" }}
+                          // bc-pnum: a hover title alone is
+                          // unreachable on a tablet or by keyboard/screen-reader, so
+                          // the disabled reason rides in the aria-label too; the
+                          // title stays for the mouse-hover case.
+                          aria-label={`${p.checkedIn ? `Undo check-in for ${p.name}` : `Mark ${p.name} as checked-in`}${p.id ? "" : `. ${NO_ID_HINT}`}`}
+                          title={p.id ? undefined : NO_ID_HINT}
                         />
                       </div>
                     )}
@@ -1141,8 +1142,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         <div className="seed-row__name" title={p.name} style={{ minWidth: 0 }}>
                           {p.number ? (
                             <span className="num-prefix">{p.number}</span>
-                          ) : provisionalNumberById[window.checkinPid(p)] ? (
-                            <span className="num-prefix num-prefix--provisional" title="Provisional number: the final competitor number is assigned when the draw runs">{provisionalNumberById[window.checkinPid(p)]}</span>
                           ) : null}
                           {p.name}
                         </div>
@@ -1150,6 +1149,33 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                       </div>
                       <div className="seed-row__dojo">
                         {p.dojo}
+                        {/* bc-pnum ruling 1e: the roster PUT re-serialises the saved
+                            roster, so p.id is the server-minted UUID once the roster
+                            has been applied at least once. Shown WHOLE when it is 12
+                            characters or fewer (a short slug id, e.g. "ids-cup-p1":
+                            truncating to 8 would show "ids-cup-" for every row in a
+                            roster sharing that prefix, telling the operator nothing),
+                            otherwise the first 8 characters (a UUID). The full id is
+                            always on hover regardless of which form is shown, in the
+                            same muted weight as the dojo line beside it so the row
+                            stays compact and the number/name columns never shift. A
+                            row with no id (not yet applied, or a load failure) shows
+                            nothing in this slot -- 1b's data-issues banner is what
+                            names an id-less row, not this per-row display. */}
+                        {p.id && (
+                          <span className="seed-row__id" title={p.id}> · {p.id.length <= 12 ? p.id : p.id.slice(0, 8)}</span>
+                        )}
+                        {/* bc-pnum: the check-in checkbox
+                            above is disabled for this row (rendered only when
+                            checkInEnabled), but a hover title alone is unreachable
+                            on a tablet or by keyboard -- show the same reason
+                            inline, in the id slot's spot (empty anyway when there
+                            is no id), matching how both modals already render this
+                            hint. Distinct from the 1e ruling above, which is about
+                            the id STRING display, not the disabled-control reason. */}
+                        {!p.id && c.checkInEnabled && (
+                          <NoIdHint prefix=" · " />
+                        )}
                         {c.checkInEnabled && dojoFirstRowSet.has(window.checkinPid(p)) && (dojoUncheckedCount.get(p.dojo) || 0) > 0 && (
                           <button type="button"
                             className="btn--link"

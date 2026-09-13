@@ -3,6 +3,7 @@ package mobileapp
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"slices"
@@ -15,6 +16,46 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
+
+// tournamentResponse is the wire shape for POST/PUT /api/tournament
+// (bc-pnum ruling 3). state.Tournament itself carries no Competitions
+// field: competitions are a separate on-disk collection under
+// tournament-data/competitions/, not tournament.md front matter, so it has
+// no place in that struct. The embedded pointer promotes every Tournament
+// field to the JSON top level (the same technique the roster-PUT response
+// uses, handlers_competition.go's `struct { *state.Competition; Warnings
+// []... }`), so the wire shape is a flat tournament object with
+// "competitions" as a sibling key, exactly what a bare state.Tournament
+// response looked like except for that one added key.
+type tournamentResponse struct {
+	*state.Tournament
+	Competitions []*state.Competition `json:"competitions"`
+}
+
+// buildTournamentResponse wraps t with its competitions list. Every handler
+// that returns a tournament object to the SPA builds its response through
+// this rather than returning t bare, closing the gap app.jsx's
+// CreateTournament flow hit: its onCreated used to hand the raw POST
+// response straight to setTournament with "competitions" absent from the
+// JSON entirely (Go omits a struct with no such field, it does not even
+// serialise as null), crashing every render path that reads
+// tournament.competitions.length before the next full load() reconciled it
+// via app.jsx's OWN separate GET /api/viewer/competitions fetch.
+//
+// A listing failure degrades to an empty list rather than failing the
+// whole response: the tournament write itself already landed by the time
+// this runs (both callers build the response AFTER a successful save), and
+// the SPA re-derives the authoritative list on its next load() regardless
+// -- failing the create/update outright over a secondary listing read
+// would be a worse outcome than serving a temporarily-empty list.
+func buildTournamentResponse(t *state.Tournament, store *state.Store) tournamentResponse {
+	comps, err := loadAllCompetitions(store)
+	if err != nil {
+		log.Printf("mobileapp: buildTournamentResponse: loadAllCompetitions: %v", err)
+		comps = []*state.Competition{}
+	}
+	return tournamentResponse{Tournament: t, Competitions: comps}
+}
 
 // validateDateDMY validates that `date` is either empty or a syntactically
 // AND semantically valid day in DD-MM-YYYY format. Uses Go's time-parsing
@@ -872,10 +913,10 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if locked {
 			publicT := t
 			publicT.Password = ""
-			c.JSON(http.StatusOK, publicT)
+			c.JSON(http.StatusOK, buildTournamentResponse(&publicT, store))
 			return
 		}
-		c.JSON(http.StatusOK, t)
+		c.JSON(http.StatusOK, buildTournamentResponse(&t, store))
 	})
 
 	r.POST("/tournament", func(c *gin.Context) {
@@ -1146,9 +1187,9 @@ func RegisterTournamentHandlers(r *gin.RouterGroup, store *state.Store, hub *Hub
 		if verifier != nil && verifier.RedactStoredPassword() {
 			publicT := t
 			publicT.Password = ""
-			c.JSON(http.StatusCreated, publicT)
+			c.JSON(http.StatusCreated, buildTournamentResponse(&publicT, store))
 			return
 		}
-		c.JSON(http.StatusCreated, t)
+		c.JSON(http.StatusCreated, buildTournamentResponse(&t, store))
 	})
 }

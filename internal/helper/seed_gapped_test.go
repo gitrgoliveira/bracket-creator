@@ -76,7 +76,7 @@ func TestPoolSeedingSpreadsSurvivingHighRanks(t *testing.T) {
 			require.LessOrEqual(t, len(tc.ranks), tc.numPools,
 				"the fixture must have a pool available for every seed, or there is no R2 promise to keep")
 
-			pools := seedsByPool(PoolSeeding(players, tc.numPools, tc.courts), tc.numPools)
+			pools := seedsByPool(referencePoolSeeding(players, tc.numPools, tc.courts), tc.numPools)
 
 			placed := 0
 			for pool, ranks := range pools {

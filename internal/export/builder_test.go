@@ -136,12 +136,15 @@ func TestBuildResultsWorkbook_PoolScoresLiteral(t *testing.T) {
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
+			SideAID:  "Alice",
 			SideB:    "Bob",
+			SideBID:  "Bob",
 			IpponsA:  []string{"M"},
 			IpponsB:  []string{},
 			Decision: "fought",
 			Status:   state.MatchStatusCompleted,
 			Winner:   "Alice",
+			WinnerID: "Alice",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
@@ -189,12 +192,15 @@ func TestBuildResultsWorkbook_StandingsLiteral_NoFormulaCollapse(t *testing.T) {
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
+			SideAID:  "Alice",
 			SideB:    "Bob",
+			SideBID:  "Bob",
 			IpponsA:  []string{"M", "K"},
 			IpponsB:  []string{},
 			Decision: "fought",
 			Status:   state.MatchStatusCompleted,
 			Winner:   "Alice",
+			WinnerID: "Alice",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
@@ -256,13 +262,16 @@ func TestBuildResultsWorkbook_ResultMarksInScoreCells(t *testing.T) {
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
+			SideAID:  "Alice",
 			SideB:    "Bob",
+			SideBID:  "Bob",
 			IpponsA:  []string{"M", domain.HanteiMark},
 			IpponsB:  []string{},
 			Decision: "kiken-voluntary",
 			Encho:    &state.EnchoMetadata{PeriodCount: 1},
 			Status:   state.MatchStatusCompleted,
 			Winner:   "Alice",
+			WinnerID: "Alice",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
@@ -474,7 +483,9 @@ func TestBuildResultsWorkbook_DrawMatch(t *testing.T) {
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
+			SideAID:  "Alice",
 			SideB:    "Bob",
+			SideBID:  "Bob",
 			IpponsA:  []string{},
 			IpponsB:  []string{},
 			Decision: state.DecisionDraw,
@@ -527,7 +538,9 @@ func TestBuildResultsWorkbook_DrawExcludesEnchoMark(t *testing.T) {
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
+			SideAID:  "Alice",
 			SideB:    "Bob",
+			SideBID:  "Bob",
 			IpponsA:  []string{},
 			IpponsB:  []string{},
 			Decision: state.DecisionDraw,
@@ -628,35 +641,42 @@ func TestBuildBracketMatchIndex(t *testing.T) {
 	assert.NotContains(t, idx, 0)
 }
 
-func TestStandingMap(t *testing.T) {
+// TestStandingMap_IDlessStandingsNeverResolve is the converted twin of the
+// deleted TestStandingMap, which pinned standingMap keying id-less legacy
+// standings by bare name ("Legacy state without UUIDs: keyed by name"). The
+// bc-pnum operator ruling ("a record that carries an id field is resolved by
+// id only; an empty id resolves to NOTHING") removed that fallback:
+// standingMap now skips inserting any standing whose Player.ID is empty, so
+// there is no key at all for a legacy no-UUID standing to be looked up
+// under -- not "Alice", not anything else.
+func TestStandingMap_IDlessStandingsNeverResolve(t *testing.T) {
 	t.Parallel()
-	// Legacy state without UUIDs: keyed by name.
 	standings := []state.PlayerStanding{
 		{Player: domain.Player{Name: "Alice", Dojo: "Dojo Alice"}, Rank: 1},
 		{Player: domain.Player{Name: "Bob", Dojo: "Dojo Bob"}, Rank: 2},
 	}
 	m := standingMap(standings)
-	assert.Len(t, m, 2)
-	assert.Equal(t, 1, m["Alice"].Rank)
-	assert.Equal(t, 2, m["Bob"].Rank)
+	assert.Empty(t, m, "id-less standings must not be inserted under any key")
 }
 
 // TestStandingMap_SameNameKeyedByID is the regression test for standingMap
 // collapsing same-name participants: two "Sam"s in different dojos must remain
-// distinct standings entries because the map keys by participant UUID.
+// distinct standings entries because the map keys by participant UUID. A
+// row without an id (operator ruling bc-pnum) resolves to nothing: it is
+// never inserted, never a name fallback.
 func TestStandingMap_SameNameKeyedByID(t *testing.T) {
 	t.Parallel()
 	standings := []state.PlayerStanding{
 		{Player: domain.Player{ID: "id-1", Name: "Sam", Dojo: "North"}, Rank: 1},
 		{Player: domain.Player{ID: "id-2", Name: "Sam", Dojo: "South"}, Rank: 4},
+		{Player: domain.Player{Name: "Legacy", Dojo: "Dojo Legacy"}, Rank: 3},
 	}
 	m := standingMap(standings)
-	assert.Len(t, m, 2, "same-name players with distinct IDs must not collapse")
+	assert.Len(t, m, 2, "same-name players with distinct IDs must not collapse, and the id-less row must not be inserted")
 	assert.Equal(t, 1, m["id-1"].Rank)
 	assert.Equal(t, 4, m["id-2"].Rank)
-	// standingKey prefers ID, falls back to name.
-	assert.Equal(t, "id-1", standingKey(helper.Player{ID: "id-1", Name: "Sam", Dojo: "Dojo Sam"}))
-	assert.Equal(t, "Legacy", standingKey(helper.Player{Name: "Legacy", Dojo: "Dojo Legacy"}))
+	_, ok := m[""]
+	assert.False(t, ok, "an id-less row must never be inserted under a \"\" key")
 }
 
 // TestAttachPoolMatches_SkipsUnresolvableSide is the regression test for the nil
@@ -800,12 +820,15 @@ func TestBuildResultsWorkbook_TwoCourts(t *testing.T) {
 		{
 			ID:       "Pool C-0",
 			SideA:    "Eve",
+			SideAID:  "Eve",
 			SideB:    "Frank",
+			SideBID:  "Frank",
 			IpponsA:  []string{"M"},
 			IpponsB:  []string{},
 			Decision: "fought",
 			Status:   state.MatchStatusCompleted,
 			Winner:   "Eve",
+			WinnerID: "Eve",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
@@ -943,7 +966,7 @@ func TestBuildResultsWorkbook_MultiCourtStandingsColumns(t *testing.T) {
 
 	// Score ONLY Pool C (court B): Eve wins, so Eve's standings W = 1.
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool C-0", SideA: "Eve", SideB: "Frank", IpponsA: []string{"M"}, Decision: "fought", Status: state.MatchStatusCompleted, Winner: "Eve"},
+		{ID: "Pool C-0", SideA: "Eve", SideAID: "Eve", SideB: "Frank", SideBID: "Frank", IpponsA: []string{"M"}, Decision: "fought", Status: state.MatchStatusCompleted, Winner: "Eve", WinnerID: "Eve"},
 	}))
 
 	data, err := BuildResultsWorkbook(store, eng, compID)
@@ -1159,9 +1182,9 @@ func TestBuildResultsWorkbook_GridFromResultsWithoutPoolMatches(t *testing.T) {
 
 	// Round-robin results, keyed "Pool A-<idx>" as the engine persists them.
 	results := []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Ann", SideB: "Bea", Winner: "Ann", IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool A-1", SideA: "Ann", SideB: "Cody", Winner: "Ann", IpponsA: []string{"D"}, Status: state.MatchStatusCompleted},
-		{ID: "Pool A-2", SideA: "Bea", SideB: "Cody", Winner: "Cody", IpponsB: []string{"M"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-0", SideA: "Ann", SideAID: "Ann", SideB: "Bea", SideBID: "Bea", Winner: "Ann", WinnerID: "Ann", IpponsA: []string{"M", "K"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-1", SideA: "Ann", SideAID: "Ann", SideB: "Cody", SideBID: "Cody", Winner: "Ann", WinnerID: "Ann", IpponsA: []string{"D"}, Status: state.MatchStatusCompleted},
+		{ID: "Pool A-2", SideA: "Bea", SideAID: "Bea", SideB: "Cody", SideBID: "Cody", Winner: "Cody", WinnerID: "Cody", IpponsB: []string{"M"}, Status: state.MatchStatusCompleted},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
 
@@ -1215,7 +1238,7 @@ func TestBuildResultsWorkbook_OverlaidCellsAreLiteral(t *testing.T) {
 	pools := makePools()
 	require.NoError(t, store.SavePools(compID, pools))
 	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
-		{ID: "Pool A-0", SideA: "Alice", SideB: "Bob", Winner: "Alice", IpponsA: []string{"M", "K"}, Decision: "fought", Status: state.MatchStatusCompleted},
+		{ID: "Pool A-0", SideA: "Alice", SideAID: "Alice", SideB: "Bob", SideBID: "Bob", Winner: "Alice", WinnerID: "Alice", IpponsA: []string{"M", "K"}, Decision: "fought", Status: state.MatchStatusCompleted},
 	}))
 
 	data, err := BuildResultsWorkbook(store, eng, compID)
@@ -2189,8 +2212,8 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 	// Red A beats Blue A on individual victories (2-1); Red B beats Blue B (2-1).
 	results := []state.MatchResult{
 		{
-			ID: "Pool A-0", SideA: "Red A", SideB: "Blue A",
-			Status: state.MatchStatusCompleted, Winner: "Red A",
+			ID: "Pool A-0", SideA: "Red A", SideAID: "Red A", SideB: "Blue A", SideBID: "Blue A",
+			Status: state.MatchStatusCompleted, Winner: "Red A", WinnerID: "Red A",
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "Red A", SideB: "Blue A", IpponsA: []string{"M", "K"}, Winner: "Red A"},
 				{Position: 2, SideA: "Red A", SideB: "Blue A", IpponsB: []string{"M"}, Winner: "Blue A"},
@@ -2198,8 +2221,8 @@ func TestBuildResultsWorkbook_TeamResults(t *testing.T) {
 			},
 		},
 		{
-			ID: "Pool B-0", SideA: "Red B", SideB: "Blue B",
-			Status: state.MatchStatusCompleted, Winner: "Red B",
+			ID: "Pool B-0", SideA: "Red B", SideAID: "Red B", SideB: "Blue B", SideBID: "Blue B",
+			Status: state.MatchStatusCompleted, Winner: "Red B", WinnerID: "Red B",
 			SubResults: []state.SubMatchResult{
 				{Position: 1, SideA: "Red B", SideB: "Blue B", IpponsA: []string{"M"}, Winner: "Red B"},
 				{Position: 2, SideA: "Red B", SideB: "Blue B", IpponsA: []string{"K"}, Winner: "Red B"},
@@ -2506,10 +2529,15 @@ func TestAttachPoolMatches_PrefersSideIDs(t *testing.T) {
 	assert.NotSame(t, m.SideA, m.SideB, "same-name sides must resolve to distinct players")
 }
 
-// TestAttachPoolMatches_FallsBackToName verifies the resolver still works when
-// legacy results carry no side UUIDs (pre-UUID data): resolution falls back to
-// the display name.
-func TestAttachPoolMatches_FallsBackToName(t *testing.T) {
+// TestAttachPoolMatches_IDlessSidesAreUnresolvable is the converted twin of
+// the deleted TestAttachPoolMatches_FallsBackToName, which pinned resolution
+// falling back to the display name when legacy results carried no side
+// UUIDs. The bc-pnum operator ruling ("a record that carries an id field is
+// resolved by id only; an empty id resolves to NOTHING") removed that
+// fallback: a result row with no SideAID/SideBID at all now resolves to no
+// Player on either side and the match is skipped entirely, exactly like the
+// single-sided case already pinned by TestAttachPoolMatches_SkipsUnresolvableSide.
+func TestAttachPoolMatches_IDlessSidesAreUnresolvable(t *testing.T) {
 	t.Parallel()
 
 	pools := []helper.Pool{{
@@ -2523,14 +2551,10 @@ func TestAttachPoolMatches_FallsBackToName(t *testing.T) {
 		{ID: "Pool A-0", SideA: "Ann", SideB: "Bea"}, // no SideAID/SideBID
 	}
 
-	attachPoolMatches(pools, results)
+	ordinals := attachPoolMatches(pools, results)
 
-	require.Len(t, pools[0].Matches, 1)
-	m := pools[0].Matches[0]
-	require.NotNil(t, m.SideA)
-	require.NotNil(t, m.SideB)
-	assert.Equal(t, "Ann", m.SideA.Name)
-	assert.Equal(t, "Bea", m.SideB.Name)
+	assert.Empty(t, pools[0].Matches, "an id-less row must resolve to no Player on either side and be skipped")
+	assert.Empty(t, ordinals["Pool A"], "a skipped match contributes no ordinal")
 }
 
 // ------------------------------------------------------------
@@ -2753,12 +2777,15 @@ func TestBuildResultsWorkbook_EngiNonEngiPoolScoreUnchanged(t *testing.T) {
 		{
 			ID:       "Pool A-0",
 			SideA:    "Alice",
+			SideAID:  "Alice",
 			SideB:    "Bob",
+			SideBID:  "Bob",
 			IpponsA:  []string{"M"},
 			IpponsB:  []string{},
 			Decision: "fought",
 			Status:   state.MatchStatusCompleted,
 			Winner:   "Alice",
+			WinnerID: "Alice",
 		},
 	}
 	require.NoError(t, store.SavePoolMatches(compID, results))
@@ -4082,4 +4109,62 @@ func TestBuildResultsWorkbook_ClampedShiaijoBands(t *testing.T) {
 		"Pool C's ippon must land in the shiaijo B band (column %d), the shiaijo the app runs it on", scoreCol(1)+1)
 	assert.Falsef(t, columnContains(rows, scoreCol(2), "T"),
 		"Pool C's ippon must NOT land in a shiaijo C band (column %d): the draw has only two shiaijo", scoreCol(2)+1)
+}
+
+// A bracket row's marks are attributed by the row's own side ids, not by the
+// aka-first name convention. The subject is a pairing both of whose sides show
+// the SAME display name, which is legal (two competitors from different dojos),
+// and which no name comparison can separate: "winner == SideA" and
+// "winner == SideB" are both true, so the name tier answers side A every time.
+//
+// The control is the same encounter with distinct names and the winner on the
+// same side. Asserting the two land in the SAME physical cells is what makes
+// this a property rather than a transcription of today's output: the sheet's
+// left/right mapping is whatever it is, and the same-name row must follow it
+// exactly as its distinguishable twin does.
+func TestBuildResultsWorkbook_BracketMarksFollowTheSideIDs(t *testing.T) {
+	t.Parallel()
+	dir, store, eng, compID := testSetup(t)
+	defer os.RemoveAll(dir)
+
+	setCompFormat(t, store, compID, state.CompFormatMixed)
+	require.NoError(t, store.SavePools(compID, makePools()))
+	require.NoError(t, store.SavePoolMatches(compID, nil))
+
+	// Side B wins by the opponent's withdrawal in both matches.
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{{
+			{
+				ID: "B1", MatchNumber: 1, Status: state.MatchStatusCompleted,
+				SideA: "Alice", SideAID: "id-alice",
+				SideB: "Charlie", SideBID: "id-charlie",
+				Winner: "Charlie", WinnerID: "id-charlie",
+				Decision: string(domain.DecisionKikenVoluntary),
+			},
+			{
+				ID: "B2", MatchNumber: 2, Status: state.MatchStatusCompleted,
+				SideA: "Yamada", SideAID: "id-yamada-tokyo",
+				SideB: "Yamada", SideBID: "id-yamada-osaka",
+				Winner: "Yamada", WinnerID: "id-yamada-osaka",
+				Decision: string(domain.DecisionKikenVoluntary),
+			},
+		}},
+	}))
+
+	data, err := BuildResultsWorkbook(store, eng, compID)
+	require.NoError(t, err)
+	f, err := excelize.OpenReader(bytes.NewReader(data))
+	require.NoError(t, err)
+	defer f.Close()
+	rows, err := f.GetRows(helper.SheetEliminationMatches)
+	require.NoError(t, err)
+
+	ctlLeft, ctlRight := bracketVictoryCells(t, rows, "Round 1 - Match 1")
+	subLeft, subRight := bracketVictoryCells(t, rows, "Round 1 - Match 2")
+
+	require.NotEqual(t, ctlLeft, ctlRight, "the control must distinguish the two sides at all")
+	assert.Equal(t, ctlLeft, subLeft,
+		"the same-name pairing's LOSING cell must sit where its distinguishable twin's does")
+	assert.Equal(t, ctlRight, subRight,
+		"the same-name pairing's WINNING cell must sit where its distinguishable twin's does")
 }

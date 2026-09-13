@@ -3923,6 +3923,28 @@ button.pool-match-row {
   color: var(--ink-3);
 }
 
+/* bc-pnum ruling 1e: the short participant id shown beside the dojo line
+   after a roster save. Same muted weight as .seed-row__dojo (it is
+   secondary data, not identity the operator reads at a glance), monospace
+   because it is a hex fragment, not prose. */
+.seed-row__id {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+
+/* The one visual for NoIdHint (data_integrity.jsx): an id-less row's
+   disabled-control reason, surfaced inline rather than only as a hover
+   title (unreachable on a tablet or by keyboard). Prose, not an id, so no
+   font-mono. No font-size here: each host (admin_participants.jsx's seed
+   row, admin_registration_desk.jsx's rd row, admin_pools.jsx's pool draw)
+   sets its own, matching its surrounding text; only the warn colour/weight
+   is the shared part of this look. */
+.noid-hint {
+  color: var(--warn-ink);
+  font-weight: 500;
+}
+
 .vlist-item__icon {
   width: 36px;
   height: 36px;
@@ -6000,14 +6022,6 @@ button.pool-match-row {
   flex-shrink: 0;
 }
 
-/* Provisional (pre-draw) competitor number, muted + dotted underline so it
-   reads as "not final yet" versus the solid accent of an assigned number. */
-.num-prefix--provisional {
-  color: var(--ink-3);
-  font-weight: 600;
-  border-bottom: 1px dotted var(--ink-4);
-}
-
 /* Schedule / TW-match compact badges (A/S) */
 .tw-match__badge {
   display: inline-flex;
@@ -6330,10 +6344,14 @@ button.pool-match-row {
 
 /* ---------- Import results rows (.import-result) ----------
    One competition per row: a head line carrying the name and the
-   imported/not-imported tag, and, when the server refused it, the reason as
-   ordinary body text on its own line beneath.
+   imported/not-imported tag, and, beneath it, either of two server-sent
+   messages as ordinary body text on its own line: the reason when the
+   server refused the row outright (.import-result__error, danger ink) or a
+   non-blocking warning about the row it DID import (.import-result__warning,
+   e.g. a reassigned number prefix -- warn ink). Same shape, different ink,
+   so the two share every declaration except color.
 
-   The reason used to render inside .tag-badge--warn, which is 10px, uppercase
+   The text used to render inside .tag-badge--warn, which is 10px, uppercase
    and letter-spaced: correct for a one- or two-word tag, and unreadable for
    the shiaijo-count sentence, which is over 200 characters. It also sat inside
    the flex head, so at tablet width it wrapped to three shouted lines. Full
@@ -6349,13 +6367,21 @@ button.pool-match-row {
   align-items: center;
 }
 
-.import-result__error {
+.import-result__error,
+.import-result__warning {
   margin-top: 4px;
   font-size: 13px;
   line-height: 1.45;
-  color: var(--danger-ink);
   text-transform: none;
   letter-spacing: normal;
+}
+
+.import-result__error {
+  color: var(--danger-ink);
+}
+
+.import-result__warning {
+  color: var(--warn-ink);
 }
 
 .alert {
@@ -6851,6 +6877,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .league-matrix__cell--win { background: rgba(22, 163, 74, 0.08); }
 .league-matrix__cell--loss { background: rgba(220, 38, 38, 0.06); }
 .league-matrix__cell--draw { background: rgba(0, 0, 0, 0.04); }
+/* A completed, non-draw match whose winner attributes to neither row nor
+   column (sameCompetitor refused a mixed pair, or the match has no
+   resolvable winner at all): the pending/empty look, not a loss tint --
+   this cell claims nothing. */
+.league-matrix__cell--unattributed { background: var(--bg-2); color: var(--ink-3); }
 .league-matrix__cell[role="button"] { cursor: pointer; }
 .league-matrix__cell[role="button"]:hover { filter: brightness(0.92); }
 .league-matrix__cell[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

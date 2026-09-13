@@ -53,7 +53,10 @@ describe('applyPatch', () => {
     const prev = makeState();
     const next = applyPatch(prev, { data: { result: { id: "p1", winner: "Alice", status: "completed" } } });
     expect(next).not.toBe(prev);
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    // bc-pnum: resolveSide no longer invents an id from
+    // the name for a side absent from the (empty, here) player map -- id
+    // stays "" rather than "Alice".
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
     expect(next.poolMatches[0].status).toBe("completed");
     // p2 is the only remaining scheduled match on court B, so it gets
     // queuePosition: 1 via the post-patch recompute (FR-025).
@@ -70,8 +73,8 @@ describe('applyPatch', () => {
         ],
       },
     });
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
-    expect(next.poolMatches[1].winner).toEqual({ id: "Bob", name: "Bob" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
+    expect(next.poolMatches[1].winner).toEqual({ id: "", name: "Bob" });
   });
 
   it('lets results take precedence over result when both present', () => {
@@ -82,7 +85,7 @@ describe('applyPatch', () => {
         results: [{ id: "p1", winner: "FromArray" }],
       },
     });
-    expect(next.poolMatches[0].winner).toEqual({ id: "FromArray", name: "FromArray" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "FromArray" });
   });
 
   it('merges ipponsA/B straight through on bracket-round matches, no scoreA/B synthesis', () => {
@@ -95,7 +98,7 @@ describe('applyPatch', () => {
         result: { id: "b1", winner: "Alice", ipponsA: ["M", "K"], ipponsB: ["D"], status: "completed" },
       },
     });
-    expect(next.bracket.rounds[0][0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.bracket.rounds[0][0].winner).toEqual({ id: "", name: "Alice" });
     expect(next.bracket.rounds[0][0].ipponsA).toEqual(["M", "K"]);
     expect(next.bracket.rounds[0][0].ipponsB).toEqual(["D"]);
     expect(next.bracket.rounds[0][0].scoreA).toBeUndefined();
@@ -111,7 +114,7 @@ describe('applyPatch', () => {
     });
     expect(next.poolMatches[0].court).toBe("A");
     expect(next.poolMatches[0].scheduledAt).toBe("09:30");
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
   });
 
   it('does not mutate prev when changes apply', () => {
@@ -217,8 +220,10 @@ describe('applyPatch', () => {
       data: { result: { id: "p1", winner: "Alice" } },
     });
     // winner string is normalised into {id,name} by normalizeMatch (Swiss SSE
-    // path: applies to all pool patches now, not just Swiss).
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    // path: applies to all pool patches now, not just Swiss). id stays ""
+    // (no player map entry for "Alice" here): resolveSide no longer invents
+    // one from the name.
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
     // sibling untouched: same reference
     expect(next.poolMatches[1]).toBe(prev.poolMatches[1]);
   });
@@ -240,9 +245,12 @@ describe('applyPatch', () => {
         }
       }
     });
-    expect(next.poolMatches[0].sideA).toEqual({ id: "Alice", name: "Alice" });
-    expect(next.poolMatches[0].sideB).toEqual({ id: "Bob", name: "Bob" });
-    expect(next.poolMatches[0].winner).toEqual({ id: "Alice", name: "Alice" });
+    // sideA/sideB/winner are freshly re-resolved from the patch's raw name
+    // strings against an empty player map: id "" for all three (the prior
+    // fixture's invented {id:"Alice",...} on prev is overwritten, not read).
+    expect(next.poolMatches[0].sideA).toEqual({ id: "", name: "Alice" });
+    expect(next.poolMatches[0].sideB).toEqual({ id: "", name: "Bob" });
+    expect(next.poolMatches[0].winner).toEqual({ id: "", name: "Alice" });
   });
 
   it('does not recompute queue positions for a no-op patch on a non-scheduled match', () => {

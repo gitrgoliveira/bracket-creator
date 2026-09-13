@@ -7,6 +7,9 @@ import {
   bracketRecoveryKind,
   bracketResetPrompt,
   bracketResetToast,
+  missingIDsIssues,
+  isAdvisoryIssue,
+  isLoudIssue,
   BRACKET_RECOVERY_REBUILD,
   BRACKET_RECOVERY_DISCARD,
   BRACKET_RECOVERY_NONE,
@@ -53,6 +56,58 @@ describe('dataIssueText: a line an operator can act on', () => {
   it('is empty for nothing', () => {
     expect(dataIssueText(null)).toBe('');
     expect(dataIssueText({})).toBe('');
+  });
+});
+
+describe('missingIDsIssues: picking every ADVISORY entry out of dataIssues', () => {
+  it('finds the one entry whose kind is missing-ids', () => {
+    const corrupt = { file: 'bracket.json', line: 1, column: 1, detail: 'bad' };
+    const missing = { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file.' };
+    expect(missingIDsIssues([corrupt, missing])).toEqual([missing]);
+  });
+
+  // Operator ruling bc-pnum: participants.csv, pools.csv and pool-matches.csv
+  // are checked and reported independently, so all three can be present at
+  // once; a single-entry picker would silently drop two of them.
+  it('finds every missing-ids entry, not just the first', () => {
+    const participants = { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file.' };
+    const pools = { kind: 'missing-ids', file: 'pools.csv', detail: '2 competitors: no id in the pool draw.' };
+    const poolMatches = { kind: 'missing-ids', file: 'pool-matches.csv', detail: '1 match(es): a side or winner has no id.' };
+    expect(missingIDsIssues([participants, pools, poolMatches])).toEqual([participants, pools, poolMatches]);
+  });
+
+  it('is empty when there is no such entry, or no list at all', () => {
+    expect(missingIDsIssues([{ file: 'bracket.json', line: 1, column: 1, detail: 'bad' }])).toEqual([]);
+    expect(missingIDsIssues([])).toEqual([]);
+    expect(missingIDsIssues(null)).toEqual([]);
+    expect(missingIDsIssues(undefined)).toEqual([]);
+  });
+});
+
+describe('isAdvisoryIssue / isLoudIssue: partitioning a dataIssues entry by kind', () => {
+  it('an explicit kind:missing-ids entry is advisory, never loud', () => {
+    const missing = { kind: 'missing-ids', file: 'participants.csv', detail: 'Dave: no id on file.' };
+    expect(isAdvisoryIssue(missing)).toBe(true);
+    expect(isLoudIssue(missing)).toBe(false);
+  });
+
+  it('an explicit kind:corrupt-file entry is loud, never advisory', () => {
+    const corrupt = { kind: 'corrupt-file', file: 'bracket.json', line: 1, column: 1, detail: 'bad' };
+    expect(isAdvisoryIssue(corrupt)).toBe(false);
+    expect(isLoudIssue(corrupt)).toBe(true);
+  });
+
+  it('an entry with no kind at all (an older server payload) reads as loud', () => {
+    const noKind = { file: 'bracket.json', line: 1, column: 1, detail: 'bad' };
+    expect(isAdvisoryIssue(noKind)).toBe(false);
+    expect(isLoudIssue(noKind)).toBe(true);
+  });
+
+  it('is false for nothing', () => {
+    expect(isAdvisoryIssue(null)).toBe(false);
+    expect(isAdvisoryIssue(undefined)).toBe(false);
+    expect(isLoudIssue(null)).toBe(false);
+    expect(isLoudIssue(undefined)).toBe(false);
   });
 });
 

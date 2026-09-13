@@ -315,8 +315,17 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   // shape a re-inlined literal leaves behind.
   //
   // Two constants are exempt on BOTH screens (durationField wraps them, so
-  // each screen names them once, at the helper call) and one is exempt on
-  // create only:
+  // each screen names them once, at the helper call), one is exempt on
+  // settings only, and one is exempt on create only:
+  //
+  //   HINT_NUMBER_PREFIX (settings only, PR #416 finding 13): the create
+  //   form has no stored value to compare against, so it renders the
+  //   constant directly. The settings screen's hint additionally grows a
+  //   reprint warning once a draw exists and the pending value differs from
+  //   what's saved, a rule numberPrefixHint (competition_shape.jsx) now
+  //   owns; settings calls that function instead of naming the constant
+  //   itself, the same "one home, named once, at the helper call" shape as
+  //   the duration fields below.
   //
   //   HINT_KIND_ONLY_INDIVIDUAL is the stand-in hint the SETTINGS screen
   //   shows in place of the Zekken / Engi hints when the competition is a
@@ -332,6 +341,7 @@ describe('competition CREATE vs SETTINGS: copy has a single home (bc-symm Phase 
   const RENDER_EXEMPT = {
     LABEL_POOL_DURATION: new Set(['setup', 'settings']),
     HINT_POOL_DURATION: new Set(['setup', 'settings']),
+    HINT_NUMBER_PREFIX: new Set(['settings']),
     HINT_KIND_ONLY_INDIVIDUAL: new Set(['setup']),
   };
   for (const name of Object.keys(COPY)) {

@@ -35,7 +35,7 @@ func (s *Store) LoadCompetitorStatus(compID string) (map[string]domain.Competito
 
 func (s *Store) loadCompetitorStatusLocked(compID string) (map[string]domain.CompetitorStatus, error) {
 	path := s.compPath(compID, competitorStatusFilename)
-	data, err := os.ReadFile(path) // #nosec G304; compPath cleans the path.
+	data, err := os.ReadFile(path) // #nosec G304; compPath enforces containment under the competitions dir.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]domain.CompetitorStatus{}, nil

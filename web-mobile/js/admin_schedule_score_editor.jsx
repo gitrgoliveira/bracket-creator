@@ -5,6 +5,7 @@ import { writeDidNotLand } from './write_result.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
+import { sameCompetitor } from './competitor_identity.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -100,7 +101,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
 
   const tournament = t || (c ? { competitions: [c] } : { competitions: [] });
   const allMatches = useMemoA(
-    () => tournament.competitions.flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
+    () => (tournament.competitions || []).flatMap((cc) => window.compMatches(cc)).filter(hasBothSides),
     [tournament]
   );
   // Resolved against allMatches, NOT the filtered list: a match that completes
@@ -146,7 +147,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         {!restrictToCompId && (
           <select className="input" style={{ width: "auto", minWidth: 160 }} value={compFilter} onChange={(e) => setCompFilter(e.target.value)}>
             <option value="all">All competitions</option>
-            {tournament.competitions.map((cc) => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
+            {(tournament.competitions || []).map((cc) => <option key={cc.id} value={cc.id}>{cc.name}</option>)}
           </select>
         )}
         <div className="seg">
@@ -175,8 +176,11 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           </div>
         )}
         {filtered.map((m) => {
-          const aWin = m.winner && m.sideA && m.winner.id === m.sideA.id;
-          const bWin = m.winner && m.sideB && m.winner.id === m.sideB.id;
+          // bc-pnum: sameCompetitor, never a bare `winner.id === side.id`
+          // (see bracket.jsx's MatchCard for why the naked equality lights
+          // both sides once both are id-less).
+          const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
+          const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
           const isCorrection = m.status === "completed" && m.score?.corrected;
           // Outstanding single hansoku → red ▲ next to the offending side (same
           // mark as the scoresheet). hansoku may live on the match or under
@@ -263,7 +267,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
         // window.enrichPoolMatchWithComp is assigned by admin_pools.jsx at module
         // evaluation time, before this component renders.
         const enrichedOpenMatch = (window.isSupplementaryBout && window.isSupplementaryBout(openMatch.id) && window.enrichPoolMatchWithComp)
-          ? window.enrichPoolMatchWithComp(openMatch, tournament.competitions.find(cc => cc.id === openMatch.compId))
+          ? window.enrichPoolMatchWithComp(openMatch, (tournament.competitions || []).find(cc => cc.id === openMatch.compId))
           : openMatch;
         // Chained nav (Prev/Next/Finish+Start Next/←/→) must stay on the same
         // shiaijo. Operators run matches per-court; jumping courts mid-flow

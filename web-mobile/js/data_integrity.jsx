@@ -16,7 +16,20 @@
 //          refused, and the competition is stuck until it is repaired or moved
 //          aside. Per competition, via `dataIssues` on the aggregate.
 //
-// One module because the two share an audience and a voice, and because the
+//   ADVISORY  the file loads fine and nothing is blocked, but a data-
+//          completeness gap needs the operator's attention: a row with no
+//          stable id in participants.csv, pools.csv, or a side/winner with
+//          no id in pool-matches.csv (operator ruling bc-pnum -- every
+//          on-disk record that carries an id field is now resolved by id
+//          only, so a row missing one is silently unresolvable rather than
+//          broken). Reported the same way as LOUD, on the same
+//          `dataIssues` list, distinguished by a "kind" field
+//          ("missing-ids") so the console renders accurate copy instead of
+//          the LOUD banner's "a file could not be read" and "every write is
+//          refused" claims, neither of which is true here. Up to THREE such
+//          entries can appear at once, one per affected file.
+//
+// One module because the three share an audience and a voice, and because the
 // three surfaces that show them (the pool match list, the pool standings, the
 // competition overview) must not each invent their own wording for the same
 // state -- the way to keep a display rule consistent here is to give it one
@@ -37,6 +50,31 @@
 // encounter, so it tells a screen-reader user less than silence does. The
 // competition banner below is the one exception and keeps `role="alert"`: it
 // appears to say scoring is blocked, which is worth interrupting for.
+
+// NO_ID_HINT: the one operator-facing sentence for "this row has no id" (the
+// ADVISORY class described above). Exact remedy sentence
+// internal/helper/participant_ids.go MissingParticipantIDsMessage uses (and
+// MissingParticipantIDsNotice below renders verbatim), so an operator seeing
+// any of these surfaces reads the same words.
+export const NO_ID_HINT = "No id on file. Save the roster once and the ids are assigned.";
+
+// NoIdHint: the inline warning span naming an id-less row. `text` defaults
+// to NO_ID_HINT; admin_pools.jsx passes NO_ID_POOL_HINT instead, since a
+// pool-draw row's remedy (regenerate the draw) differs from a roster save.
+// `prefix` (e.g. " · ") lives INSIDE the span, matching the sibling
+// .seed-row__id's own leading separator: admin_participants.jsx's roster row
+// renders this right after the dojo line and needs the same visual joint.
+export function NoIdHint({ text = NO_ID_HINT, prefix = "" }) {
+  return <span className="noid-hint" title={text}>{prefix}{text}</span>;
+}
+
+// NO_ID_POOL_HINT: the pool-draw counterpart to NO_ID_HINT. A competitor
+// missing an id in pools.csv can't be fixed by re-saving the roster (the
+// draw already happened): the remedy is to regenerate the draw while it is
+// still draw-ready, matching the server's own pools.csv notice. "Competitor"
+// not "team": the chusen banner this also serves runs in individual
+// competitions too, where a pool member is a person, not a team.
+export const NO_ID_POOL_HINT = "A competitor here has no id in the pool draw. See the notice on the Overview.";
 
 // matchDataUnreadable: the ONE test for "this match lost its bouts to a cell
 // that would not parse". Everything else asks this rather than reading the
@@ -202,89 +240,152 @@ export function bracketResetToast(quarantinedAs, rebuilt) {
       + `has no knockout stage.`;
 }
 
+// isAdvisoryIssue / isLoudIssue partition a dataIssues entry by its "kind"
+// field (PR #416 finding 10), rather than by comparing object identity
+// against the entries missingIDsIssues (plural, below) already picked out.
+// An entry with NO "kind" at all -- an older server payload, from before
+// PR #416 finding 9 started stamping "corrupt-file" explicitly -- reads as
+// LOUD here, matching the server's own documented default for that case.
+export function isAdvisoryIssue(i) {
+  return !!(i && i.kind === "missing-ids");
+}
+export function isLoudIssue(i) {
+  return !!i && !isAdvisoryIssue(i);
+}
+
+// missingIDsIssues picks every ADVISORY entry (kind "missing-ids") out of a
+// dataIssues list. The server can now emit up to THREE (operator ruling
+// bc-pnum: participants.csv, pools.csv and pool-matches.csv each carry an id
+// field a side is resolved from, and each is checked and reported
+// independently, through the one composer missingIDsIssue in
+// handlers_viewer.go), each folding its own affected rows into one detail
+// sentence. Renamed from the singular
+// missingIDsIssue (which picked at most one entry via .find): keeping only
+// the first would silently drop the other two notices whenever more than
+// one file has an issue at once.
+export function missingIDsIssues(issues) {
+  return (issues || []).filter(isAdvisoryIssue);
+}
+
+// MissingParticipantIDsNotice: the ADVISORY-class notice, rendered as ONE
+// LINE PER ENTRY (operator ruling bc-pnum: participants.csv, pools.csv and
+// pool-matches.csv are independent files that can each carry id-less/
+// unresolvable rows at the same time, so an operator fixing one must still
+// see the other two rather than have them silently hidden by a
+// single-entry picker). Deliberately NOT role="alert" -- the LOUD banner
+// reserves that interrupt for "scoring is blocked", and this is neither
+// loud nor blocking: the roster/draw/pool-matches loaded, the competition
+// runs, only a re-save / draw regeneration / re-entry is needed. Each line
+// is the server's own sentence for that file, rendered verbatim rather
+// than re-composed client-side.
+export function MissingParticipantIDsNotice({ issues }) {
+  const list = issues || [];
+  if (list.length === 0) return null;
+  return (
+    <>
+      {list.map((issue) => (
+        <div key={issue.file} className="alert alert--warn data-issue data-issue--missing-ids" role="status">
+          <span aria-hidden="true">⚠</span>
+          <span>{issue.detail}</span>
+        </div>
+      ))}
+    </>
+  );
+}
+
 // DataIssueBanner: the competition-level notice for the LOUD class, where a
-// whole file will not parse and every write to it is refused.
+// whole file will not parse and every write to it is refused. Also renders
+// the ADVISORY missing-ids notices (see MissingParticipantIDsNotice) when the
+// list carries any -- one line per affected file, up to three -- as separate
+// notices, since the two classes say materially different things and must
+// not share one alert's wording.
 //
 // It states the consequences in the banner rather than hiding them behind the
 // confirm dialog, because they are what the operator is choosing between and
 // the dialog is a last gate, not a briefing.
 export function DataIssueBanner({ issues, competition, onReset, resetting }) {
-  const list = issues || [];
-  if (list.length === 0) return null;
+  const all = issues || [];
+  const missingIDs = missingIDsIssues(all);
+  const list = all.filter(isLoudIssue);
   const bracket = bracketIssue(list);
   // Only ask the format question when the bracket is the broken file: a corrupt
   // pool-matches.csv has no reset, whatever the format.
   const kind = bracket ? bracketRecoveryKind(competition) : BRACKET_RECOVERY_NONE;
 
   return (
-    <div className="alert alert--error data-issue data-issue--banner" role="alert">
-      <span aria-hidden="true">⚠</span>
-      <div>
-        <strong>A file for this competition could not be read.</strong>
-        <ul className="data-issue__list">
-          {list.map((i) => (
-            <li key={i.file}><code>{dataIssueText(i)}</code></li>
-          ))}
-        </ul>
-        <p>
-          Scoring is blocked for whatever that file holds. Nothing has been
-          overwritten: every write to a file that will not parse is refused, so
-          it is still exactly as it was last saved.
-        </p>
-        <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
-          position above, and reload this page. Everything recorded in it comes back,
-          results included. This is the option that loses nothing.</p>
-        {bracket && kind === BRACKET_RECOVERY_NONE ? (
-          <p>
-            There is no reset for this competition: its bracket was drawn
-            directly, so this file is the only record of who was drawn against
-            whom. Rebuilding it would produce a different set of pairings rather
-            than restoring these, and it would then disagree with the bracket you
-            have printed. Repair the file.
-          </p>
-        ) : null}
-        {kind === BRACKET_RECOVERY_DISCARD ? (
-          <>
+    <>
+      {list.length > 0 ? (
+        <div className="alert alert--error data-issue data-issue--banner" role="alert">
+          <span aria-hidden="true">⚠</span>
+          <div>
+            <strong>A file for this competition could not be read.</strong>
+            <ul className="data-issue__list">
+              {list.map((i) => (
+                <li key={i.file}><code>{dataIssueText(i)}</code></li>
+              ))}
+            </ul>
             <p>
-              <strong>Or move the file aside</strong>, if it cannot be repaired. This
-              competition has no knockout stage, so this file is left over and unused:
+              Scoring is blocked for whatever that file holds. Nothing has been
+              overwritten: every write to a file that will not parse is refused, so
+              it is still exactly as it was last saved.
             </p>
-            <ul className="data-issue__list">
-              <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
-              <li>Nothing is rebuilt, because there is no knockout stage to rebuild.</li>
-              <li>Participants, standings and every result you have recorded are untouched.</li>
-            </ul>
-          </>
-        ) : null}
-        {kind === BRACKET_RECOVERY_REBUILD ? (
-          <>
-            <p><strong>Or reset the knockout stage</strong>, if the file cannot be repaired:</p>
-            <ul className="data-issue__list">
-              <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
-              <li>Pools, participants and pool results are untouched.</li>
-              <li>Every knockout bout already fought must be re-entered from the score sheets.</li>
-              <li>
-                Check the rebuilt pairings against your printed bracket. The tree is
-                rebuilt with the current draw algorithm, and the original one was
-                inside the file that will not parse.
-              </li>
-            </ul>
-          </>
-        ) : null}
-        {/* One button for both recoverable kinds: they run the same endpoint and
-            differ only in what it will find to do, so the label follows the kind
-            rather than each branch growing its own copy of the control. */}
-        {kind !== BRACKET_RECOVERY_NONE ? (
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={onReset}
-            disabled={!!resetting}
-          >
-            {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
-          </button>
-        ) : null}
-      </div>
-    </div>
+            <p><strong>Repair it, and this clears on its own.</strong> Open the file, fix the
+              position above, and reload this page. Everything recorded in it comes back,
+              results included. This is the option that loses nothing.</p>
+            {bracket && kind === BRACKET_RECOVERY_NONE ? (
+              <p>
+                There is no reset for this competition: its bracket was drawn
+                directly, so this file is the only record of who was drawn against
+                whom. Rebuilding it would produce a different set of pairings rather
+                than restoring these, and it would then disagree with the bracket you
+                have printed. Repair the file.
+              </p>
+            ) : null}
+            {kind === BRACKET_RECOVERY_DISCARD ? (
+              <>
+                <p>
+                  <strong>Or move the file aside</strong>, if it cannot be repaired. This
+                  competition has no knockout stage, so this file is left over and unused:
+                </p>
+                <ul className="data-issue__list">
+                  <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
+                  <li>Nothing is rebuilt, because there is no knockout stage to rebuild.</li>
+                  <li>Participants, standings and every result you have recorded are untouched.</li>
+                </ul>
+              </>
+            ) : null}
+            {kind === BRACKET_RECOVERY_REBUILD ? (
+              <>
+                <p><strong>Or reset the knockout stage</strong>, if the file cannot be repaired:</p>
+                <ul className="data-issue__list">
+                  <li>The unreadable file is kept, renamed aside. It is never deleted.</li>
+                  <li>Pools, participants and pool results are untouched.</li>
+                  <li>Every knockout bout already fought must be re-entered from the score sheets.</li>
+                  <li>
+                    Check the rebuilt pairings against your printed bracket. The tree is
+                    rebuilt with the current draw algorithm, and the original one was
+                    inside the file that will not parse.
+                  </li>
+                </ul>
+              </>
+            ) : null}
+            {/* One button for both recoverable kinds: they run the same endpoint and
+                differ only in what it will find to do, so the label follows the kind
+                rather than each branch growing its own copy of the control. */}
+            {kind !== BRACKET_RECOVERY_NONE ? (
+              <button
+                type="button"
+                className="btn btn--danger"
+                onClick={onReset}
+                disabled={!!resetting}
+              >
+                {resetting ? bracketResetPrompt(kind).busyLabel : bracketResetPrompt(kind).buttonLabel}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <MissingParticipantIDsNotice issues={missingIDs} />
+    </>
   );
 }

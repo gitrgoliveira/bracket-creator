@@ -1,9 +1,6 @@
 package engine
 
 import (
-	"sort"
-	"strings"
-
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
@@ -170,11 +167,22 @@ func (e *Engine) LeagueTiebreakCandidates(compID string) ([]TiedGroup, error) {
 // it has validated the selection against LeagueTiebreakCandidates (this function
 // does NOT re-validate consequentiality, the handler is the gate).
 //
+// tiedTeamIDs is REQUIRED (operator ruling bc-pnum): group membership is
+// resolved by participant id only, which is unambiguous even when two tied
+// teams share a display name -- a namesake collision is reachable through
+// the documented checkNewTeamNameCollisions restore hole (an unreadable
+// config.md disables the uniqueness check for that write, logged and
+// allowed through), so name-based selection could not always disambiguate,
+// and there is no name-based fallback path. Idempotency dedup against
+// existing DH rows is done downstream by generatePoolDaihyosenMatches,
+// which resolves existing rows against tiedGroup (the resolved standings
+// entries), not against the raw id request parameters.
+//
 // The matches use the "Pool X-DH-N" ID format so they are recognized by the
 // existing IsPoolDaihyosenMatchID predicate and routed to the DH score editor.
 // Idempotent: pairs that already exist in the store are skipped. For league
 // competitions it operates on the single league pool.
-func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []string) ([]state.MatchResult, error) {
+func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamIDs []string) ([]state.MatchResult, error) {
 	comp, err := e.store.LoadCompetition(compID)
 	if err != nil {
 		return nil, err
@@ -185,67 +193,50 @@ func (e *Engine) GenerateLeagueTiebreakMatches(compID string, tiedTeamNames []st
 	if comp.Format != state.CompFormatLeague || comp.TeamSize == 0 {
 		return nil, validationErrorf("GenerateLeagueTiebreakMatches is only valid for team-league competitions")
 	}
+	if len(tiedTeamIDs) < 2 {
+		return nil, validationErrorf("GenerateLeagueTiebreakMatches requires teamIds (at least two) for competition %s", compID)
+	}
 
 	standings, err := e.CalculatePoolStandings(compID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Resolve the standings for the requested team names. The HTTP handler is the
-	// consequentiality gate, but this method must still defend itself when called
-	// directly: reject duplicate names and any name that doesn't resolve to a
-	// standing, so it can never build a partial/garbled group (e.g. [A,B,X] with
-	// X missing would otherwise silently generate a 2-team round-robin).
-	nameSet := make(map[string]bool, len(tiedTeamNames))
-	for _, n := range tiedTeamNames {
-		if nameSet[n] {
-			return nil, validationErrorf("duplicate team %q in tie-break request for competition %s", n, compID)
-		}
-		nameSet[n] = true
-	}
-
-	// Locate the pool and build the group. matchCount tracks how many
-	// standings entries matched each requested name, so a mismatch between
-	// len(tiedGroup) and len(nameSet) below can be diagnosed precisely
-	// rather than reported as one generic "not found": a requested name
-	// matching ZERO entries is genuinely missing, but a name matching TWO OR
-	// MORE (a namesake collision -- team names must be unique by rule, but
-	// checkNewTeamNameCollisions has documented enforcement holes) WAS
-	// found, just ambiguously. Reporting "not found" for that case sends the
-	// operator hunting for a team that was actually on the sheet, twice.
 	var poolName string
 	var tiedGroup []state.PlayerStanding
-	matchCount := make(map[string]int, len(nameSet))
+
+	// ID-only selection (operator ruling bc-pnum): unambiguous by
+	// construction (a participant id names exactly one competitor), so no
+	// ambiguity diagnostic is needed -- a missing id is simply "not found".
+	idSet := make(map[string]bool, len(tiedTeamIDs))
+	for _, id := range tiedTeamIDs {
+		if id == "" {
+			return nil, validationErrorf("teamIds entries must be non-empty for competition %s", compID)
+		}
+		if idSet[id] {
+			return nil, validationErrorf("duplicate team id %q in tie-break request for competition %s", id, compID)
+		}
+		idSet[id] = true
+	}
 	for pn, ps := range standings {
-		poolName = pn
 		for _, s := range ps {
-			if nameSet[s.Player.Name] {
+			if idSet[s.Player.ID] {
+				poolName = pn
 				tiedGroup = append(tiedGroup, s)
-				matchCount[s.Player.Name]++
 			}
 		}
 	}
-	if len(tiedGroup) != len(nameSet) {
-		var ambiguous []string
-		for n := range nameSet {
-			if matchCount[n] > 1 {
-				ambiguous = append(ambiguous, n)
-			}
-		}
-		if len(ambiguous) > 0 {
-			sort.Strings(ambiguous)
-			return nil, validationErrorf("team name(s) %s match more than one standings entry (a namesake across dojos); name-based tie-break selection cannot disambiguate them for competition %s", strings.Join(ambiguous, ", "), compID)
-		}
-		return nil, validationErrorf("one or more requested teams not found in standings for competition %s", compID)
+	if len(tiedGroup) != len(idSet) {
+		return nil, validationErrorf("one or more requested team ids not found in standings for competition %s", compID)
 	}
-	if len(tiedGroup) < 2 {
-		return nil, validationErrorf("a tie-break group needs at least two teams (competition %s)", compID)
-	}
+	// No separate len(tiedGroup) < 2 check: idSet has at least the two
+	// non-empty, deduplicated entries the loop above already enforced, and
+	// the match just above pins len(tiedGroup) == len(idSet).
 
 	// Determine the court from existing matches. existingRows are handed to
 	// generatePoolDaihyosenMatches raw (not reduced to a bare-name dedup map
 	// here): it resolves each row's sides against tiedGroup itself via
-	// newGroupKeyResolver, the same identity-keyed contract
+	// groupMemberIDs, the same identity-keyed contract
 	// InjectPoolDaihyosenMatches uses, so a namesake-involving existing bout
 	// cannot suppress a distinct pair on this operator-triggered path either.
 	allMatches, err := e.store.LoadPoolMatches(compID)

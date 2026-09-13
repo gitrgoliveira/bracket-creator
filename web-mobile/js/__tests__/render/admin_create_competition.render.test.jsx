@@ -36,6 +36,10 @@ const STUBBED_GLOBALS = {
   addMinutes: (t) => t,
   API: {
     estimateCompetitionSchedule: vi.fn().mockResolvedValue(null),
+    // bc-pnum: the number-prefix pre-fill effect fires on mount as the name
+    // field changes (starting blank). Resolving "" keeps it a no-op for
+    // every fixture here, none of which is about numbering.
+    getNumberPrefixDefault: vi.fn().mockResolvedValue({ numberPrefix: '' }),
   },
 };
 
@@ -310,6 +314,177 @@ describe('AdminCreateCompetition server-error surfacing (bc-draw R9 gap 2)', () 
 
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(errorBanner(container)).toBeNull();
+  });
+});
+
+// bc-pnum F5(c): the create form pre-fills the number-prefix field from the
+// server's own derivation (GET number-prefix-default) as the operator types
+// the name, but must never clobber a value the operator typed themselves.
+// numberPrefixTouchedRef is the latch: once the field's onChange fires, the
+// pre-fill effect returns immediately on every later re-run (a name/kind
+// change included), so it never fetches again at all, let alone applies a
+// result -- stronger than "fetches but discards the answer".
+describe('AdminCreateCompetition number-prefix pre-fill latch (bc-pnum F5c)', () => {
+  const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');
+  const nameField = (container) => {
+    const label = Array.from(container.querySelectorAll('.field__label')).find((l) => l.textContent.trim() === 'Display name');
+    return label.parentElement.querySelector('input');
+  };
+
+  it('pre-fills the server-derived prefix on mount', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'I' });
+    try {
+      const { container } = await mountForm();
+      await waitFor(() => expect(prefixInput(container).value).toBe('I'));
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+
+  it('debounces the prefix fetch: one call per pause in typing, not one per keystroke', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    const getNumberPrefixDefault = vi.fn(() => Promise.resolve({ numberPrefix: 'I' }));
+    window.API.getNumberPrefixDefault = getNumberPrefixDefault;
+    try {
+      // Mount on real timers (the harness awaits real async work), let the
+      // mount's own debounced fetch land, THEN switch to fake timers so the
+      // keystrokes below are driven deterministically.
+      const { container } = await mountForm();
+      await act(async () => {
+        await new Promise((resolve) => { setTimeout(resolve, 400); });
+      });
+      const afterMount = getNumberPrefixDefault.mock.calls.length;
+      expect(afterMount).toBe(1);
+
+      vi.useFakeTimers();
+      try {
+        for (const value of ['S', 'Sp', 'Spr', 'Spri', 'Sprin']) {
+          await act(async () => { fireEvent.change(nameField(container), { target: { value } }); });
+          await act(async () => { vi.advanceTimersByTime(50); });
+        }
+        // Five keystrokes 50 ms apart: still inside one 250 ms window, so no
+        // fetch has fired yet. The revert this pins is dropping the
+        // setTimeout and fetching on every effect run (six calls here).
+        expect(getNumberPrefixDefault.mock.calls.length).toBe(afterMount);
+        await act(async () => { vi.advanceTimersByTime(300); });
+        expect(getNumberPrefixDefault.mock.calls.length).toBe(afterMount + 1);
+        expect(getNumberPrefixDefault.mock.calls[afterMount][0]).toBe('Sprin');
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+
+  it('a typed prefix survives a later name change', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    // Returns a DIFFERENT value once the name becomes "Spring Open", so a
+    // clobber would be observable: if the latch didn't hold, the field would
+    // flip from the operator's "Z" to the server's "S".
+    const getNumberPrefixDefault = vi.fn((name) => Promise.resolve({
+      numberPrefix: name === 'Spring Open' ? 'S' : 'I',
+    }));
+    window.API.getNumberPrefixDefault = getNumberPrefixDefault;
+    try {
+      const { container } = await mountForm();
+      await waitFor(() => expect(prefixInput(container).value).toBe('I'));
+
+      await act(async () => {
+        fireEvent.change(prefixInput(container), { target: { value: 'Z' } });
+      });
+      expect(prefixInput(container).value).toBe('Z');
+
+      const callsBeforeRename = getNumberPrefixDefault.mock.calls.length;
+      await act(async () => {
+        fireEvent.change(nameField(container), { target: { value: 'Spring Open' } });
+      });
+      // Real timers: wait past the 250ms debounce window so a would-be fetch
+      // has had every chance to fire before asserting it didn't. A bare
+      // synchronous assertion right after the change would pass even if the
+      // latch were broken, simply because the debounce hadn't elapsed yet.
+      await act(async () => {
+        await new Promise((resolve) => { setTimeout(resolve, 400); });
+      });
+
+      // The latch suppresses the fetch entirely once touched (the effect
+      // returns before ever creating the debounce timer), not merely its
+      // result: no new call, for any name, since the operator typed "Z".
+      expect(getNumberPrefixDefault.mock.calls.length).toBe(callsBeforeRename);
+      expect(prefixInput(container).value).toBe('Z');
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+});
+
+// bc-pnum: an owner review thread on this form found the create form's
+// prefix field passing the raw keystroke straight through
+// (setNumberPrefix(raw)) while the settings form (admin_competition_
+// settings.jsx) already cuts on every keystroke via
+// onChange={(raw) => update("numberPrefix", cutNumberPrefix(raw))}. The two
+// forms must behave the same (create/settings parity): before this fix, a
+// four-character paste or fast-typed value sat in the create form's field
+// uncut, and only the submit-time truncation (bc-pnum A6, below) ever cut it
+// back down -- so the operator briefly saw a value the field itself would
+// never let them keep typing on the settings screen.
+describe('AdminCreateCompetition number-prefix keystroke parity with settings', () => {
+  const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');
+
+  it('cuts a pasted/typed value to 3 characters in the field itself, not just at submit', async () => {
+    const { container } = await mountForm();
+    await act(async () => {
+      fireEvent.change(prefixInput(container), { target: { value: 'ABCD' } });
+    });
+    expect(prefixInput(container).value).toBe('ABC');
+  });
+});
+
+// bc-pnum A6: the field is a server-derived PREVIEW until the operator
+// actually types into it. Submitting it untouched used to send it as a REAL
+// value: the pre-fill effect's deps ([name, kind, password]) never re-run
+// when tournament.competitions moves, so a prefix claimed meanwhile by
+// another device or an import sat stale in the preview and was refused 400
+// at submit time over a field the operator never touched, whereas "" is
+// derived server-side inside WithCompetitionRenameLock (the same lock the
+// preview's own derivation reads under).
+describe('AdminCreateCompetition number-prefix payload (bc-pnum A6)', () => {
+  const prefixInput = (container) => container.querySelector('input[placeholder="e.g. A"]');
+
+  it('sends "" when the pre-filled prefix is submitted untouched', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'K' });
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    try {
+      const { container } = await mountForm({ onCreate });
+      await waitFor(() => expect(prefixInput(container).value).toBe('K'));
+
+      await act(async () => { fireEvent.click(submitButton(container)); });
+
+      expect(onCreate).toHaveBeenCalledTimes(1);
+      expect(onCreate.mock.calls[0][0].numberPrefix).toBe('');
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
+  });
+
+  it('sends the typed value once the operator touches the field', async () => {
+    const original = window.API.getNumberPrefixDefault;
+    window.API.getNumberPrefixDefault = vi.fn().mockResolvedValue({ numberPrefix: 'K' });
+    const onCreate = vi.fn().mockResolvedValue({ id: 'c1' });
+    try {
+      const { container } = await mountForm({ onCreate });
+      await waitFor(() => expect(prefixInput(container).value).toBe('K'));
+
+      await act(async () => { fireEvent.change(prefixInput(container), { target: { value: 'Z' } }); });
+      await act(async () => { fireEvent.click(submitButton(container)); });
+
+      expect(onCreate).toHaveBeenCalledTimes(1);
+      expect(onCreate.mock.calls[0][0].numberPrefix).toBe('Z');
+    } finally {
+      window.API.getNumberPrefixDefault = original;
+    }
   });
 });
 

@@ -12,10 +12,11 @@ import (
 
 // writeLegacyRoster writes a genuine legacy (UUID-less) participants.csv to a
 // fresh competition directory. SaveParticipants can't be used here because
-// marshalParticipantsCSV mints a UUID for every empty ID; which is exactly the
-// migration that masks the bug. Writing the file directly reproduces a roster
-// that was never re-saved through the app, so loadParticipantsNoLock returns
-// players with empty IDs (the pre-condition for the check-in resolution bug).
+// marshalParticipantsCSV mints a UUID for every empty ID; which is exactly
+// the migration that makes this shape hard to reach through the normal save
+// path. Writing the file directly reproduces a roster that was never
+// re-saved through the app, so loadParticipantsNoLock returns players with
+// empty IDs.
 func writeLegacyRoster(t *testing.T, store *Store, compID, csv string) {
 	t.Helper()
 	require.NoError(t, store.SaveCompetition(&Competition{ID: compID, Name: compID, Kind: "individual"}))
@@ -24,54 +25,41 @@ func writeLegacyRoster(t *testing.T, store *Store, compID, csv string) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "participants.csv"), []byte(csv), 0600))
 }
 
-// TestCheckIn_LegacyUUIDlessRoster pins mp-8bjq: check-in must resolve
-// participants on a legacy roster whose participants.csv has no UUID column, by
-// falling back to the composite "name|dojo" pid the client sends for ID-less
-// rows. Without the fallback both the single and bulk paths 404 / NotFound.
-func TestCheckIn_LegacyUUIDlessRoster(t *testing.T) {
-	t.Run("single check-in resolves by name|dojo and persists", func(t *testing.T) {
+// TestCheckIn_LegacyUUIDlessRoster_CompositePidNoLongerResolves converts
+// mp-8bjq's original pin (check-in resolves a legacy roster's ID-less rows
+// via a composite "name|dojo" pid fallback). The operator ruling bc-pnum
+// removed that fallback entirely: a participant is a record that carries an
+// id field, so it is addressed BY ID ONLY. A composite "name|dojo" string is
+// not an id -- it never resolves, on either the single or bulk check-in
+// path, even for the exact legacy roster shape (no UUID column at all) the
+// fallback used to exist for. The remedy is the same one
+// ErrMissingParticipantIDsInDraw already documents for the draw pre-flight:
+// save the roster once and ids are minted (marshalParticipantsCSV), then
+// check-in addresses the row by that real id.
+func TestCheckIn_LegacyUUIDlessRoster_CompositePidNoLongerResolves(t *testing.T) {
+	t.Run("single check-in by name|dojo is not found, not misattributed", func(t *testing.T) {
 		store, err := NewStore(t.TempDir())
 		require.NoError(t, err)
 		compID := "legacy-single"
 		writeLegacyRoster(t, store, compID, "Alice,DojoA\nBob,DojoB\n")
 
-		updated, err := store.UpdateParticipant(compID, "Alice|DojoA", false, func(p *domain.Player) error {
+		_, err = store.UpdateParticipant(compID, "Alice|DojoA", false, func(p *domain.Player) error {
 			p.CheckedIn = true
 			return nil
 		})
-		require.NoError(t, err)
-		require.NotNil(t, updated)
-		assert.Equal(t, "Alice", updated.Name)
-		assert.True(t, updated.CheckedIn)
+		assert.ErrorIs(t, err, ErrParticipantNotFound,
+			"a composite name|dojo pid is not an id and must not resolve, even against the exact legacy row it used to name")
 
-		// Persisted: reload and confirm Alice is checked in, Bob is not.
+		// Nothing was checked in: the refusal must not silently touch a
+		// different row either.
 		loaded, err := store.LoadParticipants(compID, false)
 		require.NoError(t, err)
-		byName := map[string]bool{}
 		for _, p := range loaded {
-			byName[p.Name] = p.CheckedIn
+			assert.False(t, p.CheckedIn, "%s must remain unchecked", p.Name)
 		}
-		assert.True(t, byName["Alice"], "Alice must be checked in")
-		assert.False(t, byName["Bob"], "Bob must remain unchecked")
 	})
 
-	t.Run("single check-in is whitespace-tolerant around the delimiter", func(t *testing.T) {
-		store, err := NewStore(t.TempDir())
-		require.NoError(t, err)
-		compID := "legacy-ws"
-		writeLegacyRoster(t, store, compID, "Alice,DojoA\n")
-
-		// Client could send raw fields with surrounding spaces; the server
-		// splits before normalizing, so " Alice | DojoA " still resolves.
-		updated, err := store.UpdateParticipant(compID, " Alice | DojoA ", false, func(p *domain.Player) error {
-			p.CheckedIn = true
-			return nil
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "Alice", updated.Name)
-	})
-
-	t.Run("bulk check-in resolves by name|dojo", func(t *testing.T) {
+	t.Run("bulk check-in by name|dojo reports every entry NotFound", func(t *testing.T) {
 		store, err := NewStore(t.TempDir())
 		require.NoError(t, err)
 		compID := "legacy-bulk"
@@ -79,33 +67,30 @@ func TestCheckIn_LegacyUUIDlessRoster(t *testing.T) {
 
 		result, err := store.BulkCheckIn(compID, []string{"Alice|DojoA", "Bob|DojoB"})
 		require.NoError(t, err)
-		assert.Equal(t, 2, result.CheckedIn)
-		assert.Empty(t, result.NotFound)
+		assert.Equal(t, 0, result.CheckedIn)
+		assert.ElementsMatch(t, []string{"Alice|DojoA", "Bob|DojoB"}, result.NotFound)
 	})
 
-	t.Run("same name at different dojos resolves to the correct row", func(t *testing.T) {
+	t.Run("same-name-different-dojo pid still resolves to nothing, never the wrong row", func(t *testing.T) {
 		store, err := NewStore(t.TempDir())
 		require.NoError(t, err)
 		compID := "legacy-collision"
 		writeLegacyRoster(t, store, compID, "John Smith,Wakaba\nJohn Smith,Tora\n")
 
-		updated, err := store.UpdateParticipant(compID, "John Smith|Tora", false, func(p *domain.Player) error {
+		_, err = store.UpdateParticipant(compID, "John Smith|Tora", false, func(p *domain.Player) error {
 			p.CheckedIn = true
 			return nil
 		})
-		require.NoError(t, err)
-		assert.Equal(t, "Tora", updated.Dojo, "must check in the Tora John Smith, not Wakaba")
+		assert.ErrorIs(t, err, ErrParticipantNotFound)
 
 		loaded, err := store.LoadParticipants(compID, false)
 		require.NoError(t, err)
 		for _, p := range loaded {
-			if p.Dojo == "Wakaba" {
-				assert.False(t, p.CheckedIn, "the Wakaba John Smith must remain unchecked")
-			}
+			assert.False(t, p.CheckedIn, "%s at %s must remain unchecked", p.Name, p.Dojo)
 		}
 	})
 
-	t.Run("unknown name|dojo reports NotFound, not an error", func(t *testing.T) {
+	t.Run("unknown name|dojo still reports NotFound, not an error", func(t *testing.T) {
 		store, err := NewStore(t.TempDir())
 		require.NoError(t, err)
 		compID := "legacy-unknown"
@@ -124,9 +109,13 @@ func TestCheckIn_LegacyUUIDlessRoster(t *testing.T) {
 	})
 }
 
-// TestResolveParticipantIndex unit-tests the resolver directly across the UUID
-// and legacy fallback branches, including the rule that UUID rows are only
-// addressable by their id (never by a name|dojo composite).
+// TestResolveParticipantIndex unit-tests the resolver directly. ID-only
+// (operator ruling bc-pnum): a stable UUID is the ONLY thing resolveParticipantIndex
+// matches. This converts the pre-bc-pnum pin (which asserted a "legacy
+// name|dojo" composite pid DID resolve an ID-less row, mp-8bjq) to assert
+// the opposite: that composite shape never resolves anything, ID-less rows
+// included -- there is no fallback left at all, not even for the exact
+// legacy shape the fallback used to exist for.
 func TestResolveParticipantIndex(t *testing.T) {
 	const uuid = "a1b2c3d4-0000-4000-8000-000000000001"
 	players := []domain.Player{
@@ -143,10 +132,9 @@ func TestResolveParticipantIndex(t *testing.T) {
 	}{
 		{"empty pid", "", -1},
 		{"uuid match", uuid, 0},
-		{"legacy name|dojo", "Alice|DojoA", 1},
-		{"legacy normalizes case + diacritics", "alice|dojoa", 1},
-		{"collision picks correct dojo", "John Smith|Tora", 3},
-		{"uuid row not addressable by name", "Uuidy|DojoU", -1},
+		{"a name|dojo composite for an ID-less row no longer resolves", "Alice|DojoA", -1},
+		{"a name|dojo composite for a same-name-different-dojo pair no longer resolves", "John Smith|Tora", -1},
+		{"uuid row was never addressable by name and still isn't", "Uuidy|DojoU", -1},
 		{"unknown", "Nobody|Nowhere", -1},
 	}
 	for _, tc := range tests {

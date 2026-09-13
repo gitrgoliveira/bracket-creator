@@ -1,6 +1,6 @@
 # Take part in a self-run tournament
 
-A self-run tournament lets competitors and table helpers run and score their own matches with no admin password; the organiser turns this on when creating the tournament. For the full rules of self-run and officiated modes, see [Operating modes](../organisers/operating-modes.md).
+A self-run tournament lets competitors and table helpers run and score their own matches with no admin password. The organiser turns this on when creating the tournament. For the full rules of self-run and officiated modes, refer to [Operating modes](../organisers/operating-modes.md).
 
 The steps on this page apply only to a self-run tournament. In an officiated tournament, an operator carries out these actions for you.
 
@@ -14,7 +14,9 @@ When the tournament is self-run, a public self-registration page is open for ind
 </figure>
 
 !!! note
-    Self-registration is not available for team competitions; the organiser adds the team roster directly. It also closes once the draw is generated. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
+    Self-registration is not available for team competitions; the organiser adds the team roster directly. In an officiated tournament, the registration page is not available at all, and the organiser adds you to the competition directly.
+
+If the form says someone with your name is already registered, your name and dojo are already on the list and you are done. A namesake from another dojo registers normally. If you are a different person with the same name at the same dojo, ask the organiser to add you.
 
 ## Check in on the day
 
@@ -24,11 +26,11 @@ If the competition uses check-in, mark yourself present before the organiser gen
 
 You can record your match result directly from the public viewer, without the admin password. A result you enter is tagged as self-reported; a result entered by an operator is tagged as admin.
 
-Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as editing the roster. For a full list of outcomes and what they mean, see [Recording decisions](../court-operators/recording-decisions.md).
+Only everyday match outcomes are available to self-reporters. Decisions that require an official ruling remain with the operator, and so do destructive actions such as editing the roster. For a full list of outcomes and what they mean, refer to [Recording decisions](../court-operators/recording-decisions.md).
 
 ## Follow your matches and standings
 
-To track your progress, view the draw, and see standings, see [Following a tournament](../spectators/following.md).
+To track your progress, view the draw, and see standings, refer to [Following a tournament](../spectators/following.md).
 
 <figure class="bc-fig" markdown="span">
   ![The public home on a phone: the tournament header, a watchlist, the schedule, and a competition card with a Register for this competition button.](../../screenshots/selfrun-viewer-home.png){ .bc-phone }

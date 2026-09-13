@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+	"github.com/gitrgoliveira/bracket-creator/internal/helper"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	bctest "github.com/gitrgoliveira/bracket-creator/internal/test"
 	"github.com/stretchr/testify/assert"
@@ -393,6 +394,42 @@ func TestValidateMaxLen(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateMaxLen("field", tt.val, tt.max)
+			if tt.wantField == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, tt.wantField, verr.Field)
+		})
+	}
+}
+
+// TestValidateCompetitionLengths_NumberPrefixRunesNotBytes pins the same
+// rune-count behaviour TestValidateMaxRunes used to pin directly against the
+// (now deleted) validateMaxRunes: validateCompetitionLengths must measure
+// numberPrefix in RUNES via helper.ValidateNumberPrefix (PR #416 finding 4),
+// not bytes, so a multi-byte-but-few-character string like "ÖÖ" (2 runes, 4
+// bytes) passes even though it exceeds 3 BYTES. helper's own
+// TestValidateNumberPrefix pins the primitive itself; this pins that the
+// mobileapp boundary still calls into it with the numberPrefix field name.
+func TestValidateCompetitionLengths_NumberPrefixRunesNotBytes(t *testing.T) {
+	tests := []struct {
+		name      string
+		val       string
+		wantField string
+	}{
+		{name: "empty: ok", val: ""},
+		{name: "ASCII exactly at cap: ok", val: "ABC"},
+		{name: "ASCII one over cap: rejected", val: "ABCD", wantField: "numberPrefix"},
+		{name: "2-rune, 4-byte value under the 3-rune cap: ok (the  fix)", val: "ÖÖ"},
+		{name: "3-rune, 6-byte value exactly at cap: ok", val: "ÖÖÖ"},
+		{name: "4-rune value over cap: rejected even though runes, not bytes, are counted", val: "ÖÖÖÖ", wantField: "numberPrefix"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCompetitionLengths(&state.Competition{Name: "OK", NumberPrefix: tt.val})
 			if tt.wantField == "" {
 				assert.NoError(t, err)
 				return
@@ -947,7 +984,11 @@ func TestValidateHanteiMarkPlacement_IDsOverrideNames(t *testing.T) {
 		require.Error(t, err)
 		var verr *ValidationError
 		require.True(t, errors.As(err, &verr))
-		assert.Contains(t, verr.Message, "hantei mark belongs in the winner's ippon list")
+		// bc-idfx: validateWinnerIDMatchesSide now catches this shape FIRST,
+		// with a more direct diagnosis than the downstream hantei-placement
+		// check used to give (the winnerId is itself invalid data, not just
+		// a misplaced mark) -- same rejected request, sharper message.
+		assert.Contains(t, verr.Message, "must equal sideAId or sideBId")
 	})
 }
 
@@ -1838,4 +1879,107 @@ func TestIpponEntriesMustBeSingleCharacters(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "daihyosen representative bout")
 	})
+}
+
+// TestMaxLenCompetitionNumberPrefixMatchesHelper pins F12 (bc-pnum review):
+// helper.DefaultNumberPrefix's own length cap (helper.MaxNumberPrefixLen)
+// must never propose a value MaxLenCompetitionNumberPrefix (this package's
+// length validator, validateMaxLen("numberPrefix", ...)) would then reject --
+// helper cannot import mobileapp to share one constant, so the two are
+// documented as matching (assignDefaultNumberPrefix's doc comment,
+// helper.MaxNumberPrefixLen's doc comment) rather than defined once. A
+// constant-equality assertion is what keeps a future edit to either one from
+// silently drifting the pair apart.
+func TestMaxLenCompetitionNumberPrefixMatchesHelper(t *testing.T) {
+	assert.Equal(t, helper.MaxNumberPrefixLen, MaxLenCompetitionNumberPrefix,
+		"helper.MaxNumberPrefixLen and mobileapp.MaxLenCompetitionNumberPrefix must stay in lockstep: a derived prefix must never exceed the length this package's own validator enforces")
+}
+
+// TestValidateWinnerIDMatchesSide_KnownSidesRejectsUnattributableWinner pins
+// the boundary copy of the bc-pnum ruling 1d check directly (bc-pnum review
+// finding B): validateWinnerIDMatchesSide now delegates to the shared
+// domain.WinnerIDAcceptable rather than hand-deriving its own
+// bothSideIDsUnknown local, and this package previously had no unit test
+// exercising the function at all -- only integration coverage through the
+// HTTP handler. With both side ids KNOWN, a winnerId matching neither must
+// still be rejected.
+func TestValidateWinnerIDMatchesSide_KnownSidesRejectsUnattributableWinner(t *testing.T) {
+	err := validateWinnerIDMatchesSide("charlie-id", "alice-id", "bob-id")
+	require.Error(t, err, "a winnerId naming neither known side must be rejected")
+	var verr *ValidationError
+	require.True(t, errors.As(err, &verr))
+	assert.Equal(t, "winnerId", verr.Field)
+}
+
+// TestValidateWinnerIDMatchesSide_BothSidesUnknownAccepts is the accepted
+// twin: when NEITHER side id is known (a legacy pool row drawn before ids
+// were minted, or every bracket match at this HTTP boundary --
+// domain.WinnerIDAcceptable's doc comment), there is no known pairing for
+// winnerId to have missed, so the write is accepted rather than rejected
+// against data this check cannot evaluate.
+func TestValidateWinnerIDMatchesSide_BothSidesUnknownAccepts(t *testing.T) {
+	err := validateWinnerIDMatchesSide("charlie-id", "", "")
+	assert.NoError(t, err, "a winnerId cannot be checked against two unknown side ids, so it must be accepted")
+}
+
+// TestBulkScore_WithdrawalMustNameTheWinner pins the gap requireWinnerForDecision's
+// own comment always named but never covered: the rule lived on
+// validateWithOptions' kiken/fusenpai branch, and the BULK path
+// (validateBulkScoreLengths, the only validation POST .../matches/bulk-score
+// runs) never reached it. A batch entry recording a withdrawal that names
+// nobody was stored at 200 while the engine's losingSide failed to resolve
+// the withdrawer and both write paths logged and swallowed that failure, so
+// no CompetitorStatus was written and the competitor who withdrew stayed
+// eligible for a later match.
+//
+// Scoped to the withdrawal decisions on purpose: an ordinary result may
+// legitimately omit Winner (a draw, or a running write the operator has not
+// finished), and only kiken/fusenpai carry the eligibility side effect that
+// needs a surviving side named.
+func TestBulkScore_WithdrawalMustNameTheWinner(t *testing.T) {
+	for _, decision := range []string{"kiken-voluntary", "kiken-injury", "fusenpai"} {
+		t.Run(decision+"/no winner is rejected", func(t *testing.T) {
+			r := &state.MatchResult{
+				SideA: "Alice", SideB: "Bob",
+				Decision: decision,
+				IpponsA:  []string{"\u25cb", "\u25cb"},
+			}
+			err := validateBulkScoreLengths(r, false)
+			require.Error(t, err, "a withdrawal naming no surviving side must not be accepted")
+			var verr *ValidationError
+			require.True(t, errors.As(err, &verr))
+			assert.Equal(t, "winner", verr.Field)
+		})
+		t.Run(decision+"/named winner is accepted", func(t *testing.T) {
+			r := &state.MatchResult{
+				SideA: "Alice", SideB: "Bob", Winner: "Alice",
+				Decision: decision,
+				IpponsA:  []string{"\u25cb", "\u25cb"},
+			}
+			assert.NoError(t, validateBulkScoreLengths(r, false),
+				"naming the surviving side is all this rule asks for")
+		})
+	}
+
+	t.Run("an ordinary result may still omit the winner", func(t *testing.T) {
+		r := &state.MatchResult{SideA: "Alice", SideB: "Bob", Decision: "hikiwake"}
+		assert.NoError(t, validateBulkScoreLengths(r, false),
+			"only a withdrawal carries the eligibility side effect this rule protects")
+	})
+}
+
+// TestSeedsOffRoster_IDFirstResolutionSurvivesStaleName pins seedsOffRoster's
+// side of the id-first-then-(name, dojo) resolution order (domain.RosterIndex.
+// LookupSeed): a row carrying an id must resolve by that id alone, even when
+// its own Name/Dojo have drifted stale, rather than being reported as a ghost.
+func TestSeedsOffRoster_IDFirstResolutionSurvivesStaleName(t *testing.T) {
+	players := []domain.Player{
+		{ID: "alice-id", Name: "Alice Renamed", Dojo: "New Dojo"},
+	}
+	assignments := []domain.SeedAssignment{
+		{ID: "alice-id", Name: "Alice Old Name", Dojo: "Old Dojo", SeedRank: 1},
+	}
+
+	err := seedsOffRoster(players, assignments, "REMEDY")
+	assert.NoError(t, err, "the id must resolve the row even though its stored Name/Dojo are stale")
 }

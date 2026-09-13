@@ -33,7 +33,7 @@ func seededDraw(t *testing.T, numPools, numSeeds, numCourts int) ([]Pool, *Knock
 	counted := PoolCount(len(players), 4, false)
 	require.Equal(t, numPools, counted)
 
-	players = PoolSeeding(players, counted, numCourts)
+	players = referencePoolSeeding(players, counted, numCourts)
 	pools, err := CreatePools(players, 4, false)
 	require.NoError(t, err)
 	pools = ReorderPoolsForCourts(pools, numCourts)
@@ -163,6 +163,75 @@ func TestSeedPlacementWarningsReportsSharedShiaijoOnlyWhenAvoidable(t *testing.T
 		assert.NotContains(t, w, "own shiaijo",
 			"4 seeds on 2 shiaijo share shiaijo by design, not by relaxation")
 	}
+}
+
+// gappedSeededDraw is seededDraw's sibling for a NON-contiguous seed set:
+// each rank in ranks (any positive ints, need not be 1..len(ranks)) is
+// assigned to one of the first len(ranks) players, in order. Distinct dojos
+// throughout, same as seededDraw.
+func gappedSeededDraw(t *testing.T, numPools int, ranks []int, numCourts int) ([]Pool, *KnockoutDraw) {
+	t.Helper()
+	players := make([]Player, 0, numPools*4)
+	for i := 0; i < numPools*4; i++ {
+		p := Player{Name: fmt.Sprintf("P%03d", i+1), Dojo: fmt.Sprintf("Dojo %03d", i+1)}
+		if i < len(ranks) {
+			p.Seed = ranks[i]
+		}
+		players = append(players, p)
+	}
+	counted := PoolCount(len(players), 4, false)
+	require.Equal(t, numPools, counted)
+
+	players = referencePoolSeeding(players, counted, numCourts)
+	pools, err := CreatePools(players, 4, false)
+	require.NoError(t, err)
+	pools = ReorderPoolsForCourts(pools, numCourts)
+
+	courts := EffectiveDrawCourts(len(pools), numCourts)
+	draw := BuildKnockoutDraw(pools, 2, courts)
+	require.NotNil(t, draw)
+	return pools, draw
+}
+
+// TestSeedPlacementWarningsWrappedSeedInSeedFreePoolIsSilent pins bc-pnum
+// ruling 2b. Ranks {1, 2, 3, 5} over 4 pools, four distinct dojos (rank 4 is
+// never assigned, so seed 5 WRAPS): 2a's fix lands wrapped seed 5 in the
+// one genuinely seed-free pool (no dojo-mate conflict either, since every
+// dojo here is distinct), so it never shares a pool with another seed and
+// never trips the "ignored" warning.
+//
+// Before the 2b fix this still produced a SPURIOUS "Seeds could not be
+// split into halves" warning: seedPools sorts placed seeds by rank
+// ascending, so with only 4 seeds placed at all, rank 5 was the 4th
+// ELEMENT of that slice, and the old COUNT-based truncation
+// (`placed[:maxSeedRanks]`) kept it even though, at rank 5, it has no
+// genuine half/quarter home in D6's structure to begin with -- that
+// structure is only ever reported via the shared-pool "ignored" branch,
+// which does not apply here since nothing shares a pool.
+func TestSeedPlacementWarningsWrappedSeedInSeedFreePoolIsSilent(t *testing.T) {
+	for _, numCourts := range []int{1, 2, 4} {
+		t.Run(fmt.Sprintf("numCourts=%d", numCourts), func(t *testing.T) {
+			pools, draw := gappedSeededDraw(t, 4, []int{1, 2, 3, 5}, numCourts)
+			warnings := SeedPlacementWarnings(draw, pools)
+			assert.Empty(t, warnings,
+				"a wrapped seed placed in a genuinely seed-free pool must not trip the halves/quarters/shiaijo checks: %v", warnings)
+		})
+	}
+}
+
+// TestSeedPlacementWarningsSharedPoolStillWarns is the companion control: a
+// wrapped seed that genuinely CANNOT avoid sharing a pool (every pool
+// already holds a dojo-mate) still produces the "ignored" warning -- 2b only
+// removes the spurious halves/quarters warning for the seed-free case, it
+// does not silence the shared-pool case the rule exists to report.
+func TestSeedPlacementWarningsSharedPoolStillWarns(t *testing.T) {
+	// 2 pools, ranks {1, 2, 3}: rank 3 wraps and, with only 2 pools and both
+	// already seeded, must share one of them.
+	pools, draw := gappedSeededDraw(t, 2, []int{1, 2, 3}, 1)
+	warnings := SeedPlacementWarnings(draw, pools)
+	require.NotEmpty(t, warnings, "seed 3 cannot avoid sharing a pool with 1 or 2 pools available")
+	assert.Contains(t, warnings[0], "ignored")
+	assert.Contains(t, warnings[0], "two seeds must never share a pool")
 }
 
 func TestRankList(t *testing.T) {

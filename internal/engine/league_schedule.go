@@ -11,8 +11,20 @@ import (
 // spreading every player's matches so they never fight two slots in a row.
 // Returns the input matches with Court set, plus a parallel slice giving the
 // slot index of each returned match (result[i] is in slot slots[i]). Players
-// are identified by SideA/SideB (names). courts is the ordered court-label
-// list; an empty list is treated as a single unnamed court.
+// are identified by SideAID/SideBID (participant ids, operator ruling
+// bc-pnum), not by name: a league is a single pool holding every competitor,
+// and two competitors can share a display name across dojos
+// (CheckDuplicateEntriesByNameDojo), so a name-keyed rest guarantee would
+// wrongly treat two different people as the same "player" (or wrongly credit
+// one's rest to the other). Every match this function receives is generated
+// by the pool-creation pipeline (pools.go), which stamps SideAID/SideBID from
+// the drawn roster and refuses to run over an id-less roster in the first
+// place (helper.ValidateNoMissingParticipantIDs), so the ids are always
+// present in practice; a match with no id for a side is simply never
+// attributed to the same "player" bucket as any other id-less match, which
+// only matters for hand-built fixtures that predate the draw. courts is the
+// ordered court-label list; an empty list is treated as a single unnamed
+// court.
 //
 // Guarantees (see mp-sjaz):
 //   - G1 (no simultaneity): within any single slot, no player appears in two matches.
@@ -55,8 +67,8 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 		copy(sorted, remaining)
 		sort.SliceStable(sorted, func(i, j int) bool {
 			mi, mj := sorted[i], sorted[j]
-			lsi := min(getLastSlot(mi.SideA), getLastSlot(mi.SideB))
-			lsj := min(getLastSlot(mj.SideA), getLastSlot(mj.SideB))
+			lsi := min(getLastSlot(mi.SideAID), getLastSlot(mi.SideBID))
+			lsj := min(getLastSlot(mj.SideAID), getLastSlot(mj.SideBID))
 			if lsi != lsj {
 				return lsi < lsj
 			}
@@ -68,6 +80,15 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 
 		var slotMatches []state.MatchResult
 		used := make(map[string]bool)
+		// used[""] is shared by every id-less side (a hand-built fixture that
+		// predates the draw, see this function's own doc comment): the FIRST
+		// id-less match placed in a slot sets used[""]=true, which then blocks
+		// a SECOND, unrelated id-less match from joining the same slot even
+		// though they share no real player. This fails CLOSED (denies a
+		// legitimate simultaneous pairing) rather than open (which would risk
+		// actually colliding two matches that DO share a player), so it is
+		// the safe direction for data this function was never meant to see in
+		// practice -- production matches always carry ids.
 
 		// Fill this slot with matches whose players did NOT fight in slot-1
 		// (hard G2) and are not already placed in this slot (G1). Preferring
@@ -81,7 +102,7 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 			if len(slotMatches) == numCourts {
 				break
 			}
-			a, b := cand.SideA, cand.SideB
+			a, b := cand.SideAID, cand.SideBID
 			if used[a] || used[b] {
 				continue // G1 violation
 			}
@@ -98,8 +119,8 @@ func scheduleLeagueSlots(matches []state.MatchResult, courts []string) (ordered 
 		for i, m := range slotMatches {
 			m.Court = courts[i]
 			placed[m.ID] = true
-			lastSlot[m.SideA] = slot
-			lastSlot[m.SideB] = slot
+			lastSlot[m.SideAID] = slot
+			lastSlot[m.SideBID] = slot
 			ordered = append(ordered, m)
 			slots = append(slots, slot)
 		}

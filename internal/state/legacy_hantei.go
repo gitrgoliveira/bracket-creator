@@ -66,18 +66,31 @@ import "github.com/gitrgoliveira/bracket-creator/internal/domain"
 //
 // att carries the participant ids for an attribution, so this signature does
 // not grow three more bare strings that are easy to transpose at a call
-// site — the zero domain.WinnerAttribution{} means "this record has no ids"
-// (SubMatchResult and BracketMatch both persist names only).
+// site — the zero domain.WinnerAttribution{} means "no ids to attribute by
+// here": unconditionally for SubMatchResult (lineup names only, no id
+// fields exist at all), and for BracketMatch only on a bye, an unresolved
+// feeder, or an unrepaired legacy row (bc-brid: BracketMatch now carries
+// SideAID/SideBID/WinnerID and passes them whenever the side resolves).
 func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ipponsB []string) ([]string, []string) {
 	if !flagged {
 		return domain.StripHantei(ipponsA), domain.StripHantei(ipponsB)
 	}
 	// Attribution goes through the one owner, domain.AttributeWinnerSide, so a
 	// legacy flag lands on the same side every other surface would choose:
-	// by participant id when the caller has all three (a same-name pair is
-	// only separable that way), else by name with the sideA-first fallback.
-	// Callers without ids (sub-bouts, bracket matches) pass the zero value and
-	// take the name path, which is byte-identical to the pre-id behaviour.
+	// by id when the caller has all three (a same-name pair is only separable
+	// that way), else by name with the sideA-first fallback. Each caller
+	// supplies the ids ITS record carries: MatchResult and BracketMatch pass
+	// participant ids, and pass "" only for a row of theirs that carries none
+	// (a bye, an unresolved feeder, an unrepaired legacy row); SubMatchResult
+	// passes MEMBER ids through domain.SubBoutAttribution, which additionally
+	// drops a display name both fighters share, because two fighters on
+	// opposing teams may legally hold one.
+	//
+	// A flag that cannot be attributed is dropped by the default arm below, and
+	// the flag itself is cleared either way: it is a legacy read-only channel
+	// whose whole purpose is to become the mark. The bout still records its
+	// WINNER, so what an unattributable row loses is the marker saying the
+	// referees decided it, not the result.
 	switch domain.AttributeWinnerSide(att) {
 	case domain.MatchSideA:
 		return domain.AppendHantei(ipponsA), ipponsB
@@ -89,13 +102,23 @@ func foldLegacyHantei(flagged bool, att domain.WinnerAttribution, ipponsA, ippon
 }
 
 // normalizeLegacyHantei folds a legacy sub-bout flag into the mark.
+//
+// The attribution comes from the SUB-BOUT owner, not from a hand-built literal:
+// a bout's two sides are FIGHTERS, and two fighters on opposing teams may
+// legally share a display name, where two teams may not. domain.SubBoutAttribution
+// drops a shared name for that reason, so this fold now places the mark by the
+// row's member ids where it has them and places NO mark where the name is the
+// only thing left and it names both sides. That is the same rule every live
+// surface applies to a sub-bout, and it replaces the aka-first tie the bare
+// name attribution took here -- a deliberate convention at match level, a coin
+// flip on a bout.
 func (s *SubMatchResult) normalizeLegacyHantei() {
 	if s.DecidedByHantei == nil {
 		return
 	}
 	flagged := *s.DecidedByHantei
 	s.DecidedByHantei = nil
-	s.IpponsA, s.IpponsB = foldLegacyHantei(flagged, domain.WinnerAttribution{Winner: s.Winner, SideA: s.SideA, SideB: s.SideB}, s.IpponsA, s.IpponsB)
+	s.IpponsA, s.IpponsB = foldLegacyHantei(flagged, domain.SubBoutAttribution(s.Attribution()), s.IpponsA, s.IpponsB)
 }
 
 // NormalizeLegacyHantei folds legacy flags into the mark, match-level and
@@ -144,7 +167,10 @@ func (b *BracketMatch) NormalizeLegacy() {
 	// duplicate that rule at a second enforcement point.
 	if b.DecidedByHantei {
 		b.DecidedByHantei = false
-		att := domain.WinnerAttribution{Winner: b.Winner, SideA: b.SideA, SideB: b.SideB}
+		att := domain.WinnerAttribution{
+			WinnerID: b.WinnerID, SideAID: b.SideAID, SideBID: b.SideBID,
+			Winner: b.Winner, SideA: b.SideA, SideB: b.SideB,
+		}
 		b.IpponsA, b.IpponsB = foldLegacyHantei(true, att, b.IpponsA, b.IpponsB)
 	}
 	for i := range b.SubResults {

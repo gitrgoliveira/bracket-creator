@@ -50,7 +50,7 @@ flowchart LR
     root --> mn["man / version"]
 ```
 
-Each command is an options struct with a `run()` method (`cmd/*.go`); `create-pools` and
+Each command is an options struct with a `run()` method (`cmd/*.go`). `create-pools` and
 `create-knockout` share `cmd/shared.go`. `main.go` embeds the web assets and calls
 `cmd.ExecuteWithResources(res)`.
 
@@ -87,9 +87,10 @@ flowchart TD
     helper --> domain
     helper --> excel
     cmd --> pdf
+    mobileapp --> pdf
 ```
 
-**Dual domain model (in transition).** `internal/helper` is where the real algorithms are implemented.
+**Dual domain model (in transition).** `internal/helper` implements the real algorithms.
 Its types carry Excel coordinates (`sheetName`, `cell`) tightly coupled to output generation.
 `internal/domain` holds clean models being phased in gradually. Don't confuse the two.
 
@@ -162,7 +163,7 @@ sequenceDiagram
 
 Core invariant: **persist then broadcast**. A write is durable
 (`fsync` + atomic rename, WAL for multi-file changes) before the 200 and before any SSE
-fan-out. Scoring is ACID; a legitimate operator change is never dropped.
+fan-out. Scoring is ACID. A legitimate operator change is never dropped.
 
 ## 6. Bracket generation (engine → helper)
 
@@ -170,7 +171,7 @@ fan-out. Scoring is ACID; a legitimate operator change is never dropped.
 flowchart LR
     start["POST /api/competitions/:id/start"] --> eng["engine.StartCompetition"]
     eng --> mode{"format?"}
-    mode -->|pools + knockout| pools["helper: greedy pools<br/>(dojo-conflict avoidance)<br/>court-aware seeding"]
+    mode -->|pools + knockout| pools["helper: tree-aware pool descent<br/>(BuildPoolPhaseTreeAwareWithMode)<br/>seeds first, then dojo counts per node<br/>fill-bracket uses its own builder"]
     mode -->|knockout only| tree["helper/tree.go<br/>binary tree (max 16/tree)<br/>StandardSeeding"]
     pools --> store[("state.Store")]
     tree --> store
@@ -196,13 +197,11 @@ flowchart TB
     end
 ```
 
-The operator console is a tablet/desktop surface; the viewer is mobile-first. The client's
-**offline write queue, SSE resume, and reconnect resilience** are depicted in
-[Network architecture](network-architecture.md).
+The operator console is a tablet/desktop surface; the viewer is mobile-first. Refer to [Network architecture](network-architecture.md) for the client's **offline write queue, SSE resume, and reconnect resilience**.
 
 ## Key design rules
 
-See [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md) for the full visual design system.
+Refer to [`DESIGN.md`](https://github.com/gitrgoliveira/bracket-creator/blob/main/DESIGN.md) for the full visual design system.
 
 - **Persist before broadcast**; scoring is ACID; never drop a legitimate operator change.
 - **Use layout/sheet constants** (`internal/helper/constants.go`), never string literals.

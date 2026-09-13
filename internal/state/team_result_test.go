@@ -188,3 +188,89 @@ func TestBracketMatchMarshalJSON_TeamResult(t *testing.T) {
 		assert.Len(t, back.SubResults, 1)
 	})
 }
+
+// TestTeamResultFrom_SameNameBout pins the operator ruling that a sub-bout
+// between two fighters sharing a display name is attributed by MEMBER ID
+// only. Before bc-pnum the name comparison's case order handed every such
+// bout to Aka, which is a coin flip written into the standings: the two
+// fighters are on opposing teams and sharing a name is legal.
+func TestTeamResultFrom_SameNameBout(t *testing.T) {
+	t.Run("ids decide it, including against the aka-first order", func(t *testing.T) {
+		// Both fighters are called "Yamada"; the SHIRO one (side B) won.
+		// Only the ids say so, and they must be believed.
+		subs := []SubMatchResult{{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-shiro",
+			IpponsB: []string{"M", "K"},
+		}}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, 1, got.ShiroIV, "the member id names shiro as the winner")
+		assert.Equal(t, 0, got.AkaIV, "aka must not take it on name order")
+	})
+
+	t.Run("ids decide it for aka too", func(t *testing.T) {
+		subs := []SubMatchResult{{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			SideAMemberID: "m-aka", SideBMemberID: "m-shiro", WinnerMemberID: "m-aka",
+			IpponsA: []string{"M", "K"},
+		}}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, 1, got.AkaIV)
+		assert.Equal(t, 0, got.ShiroIV)
+	})
+
+	t.Run("no ids: neither side, never a guess", func(t *testing.T) {
+		// The pre-bc-pnum behaviour gave this to Aka. Nothing stored can say
+		// who won, so the honest answer is that nobody is credited. PW still
+		// counts: the points were struck whoever struck them.
+		subs := []SubMatchResult{{
+			Position: 1, SideA: "Yamada", SideB: "Yamada", Winner: "Yamada",
+			IpponsA: []string{"M"}, IpponsB: []string{"M", "K"},
+		}}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, 0, got.AkaIV, "aka-first on a same-name bout is the coin flip this removes")
+		assert.Equal(t, 0, got.ShiroIV)
+		assert.Equal(t, 1, got.AkaPW)
+		assert.Equal(t, 2, got.ShiroPW)
+	})
+
+	t.Run("a winner id matching neither side falls through to the names", func(t *testing.T) {
+		// Drifted data: the id names nobody on this row. The names CAN tell
+		// these two apart, so they answer, exactly as before.
+		subs := []SubMatchResult{{
+			Position: 1, SideA: "Sato", SideB: "Ito", Winner: "Ito",
+			SideAMemberID: "m-a", SideBMemberID: "m-b", WinnerMemberID: "m-gone",
+			IpponsB: []string{"M"},
+		}}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, 1, got.ShiroIV)
+		assert.Equal(t, 0, got.AkaIV)
+	})
+
+	t.Run("distinct names with no ids are unchanged", func(t *testing.T) {
+		subs := []SubMatchResult{{
+			Position: 1, SideA: "Sato", SideB: "Ito", Winner: "Sato",
+			IpponsA: []string{"M"},
+		}}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, 1, got.AkaIV)
+		assert.Equal(t, 0, got.ShiroIV)
+	})
+
+	t.Run("the quick-score synth path still resolves by team name", func(t *testing.T) {
+		// Rows naming the TEAMS, not two fighters: team names are unique by
+		// rule, so this tier is untouched by the same-name guard.
+		subs := []SubMatchResult{{
+			Position: 0, SideA: "TeamA", SideB: "TeamB", Winner: "TeamB",
+			IpponsB: []string{"M"},
+		}}
+		got := TeamResultFrom(subs, "TeamA", "TeamB")
+		require.NotNil(t, got)
+		assert.Equal(t, 1, got.ShiroIV)
+	})
+}

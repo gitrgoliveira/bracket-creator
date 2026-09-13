@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -128,6 +129,205 @@ func TestMaybeAutoCompletePools_NonPoolsFormat(t *testing.T) {
 	comp, err := store.LoadCompetition(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.CompStatusKnockout, comp.Status)
+}
+
+// recordRunningResult writes a running result on one real match of a drawn
+// competition, so the competition holds the RECORDED result
+// MaybeAutoCompletePools' start gate demands. Bracket byes are skipped: the
+// draw resolves those to completed before anybody has fought, and they are
+// exactly what the gate must not mistake for a result.
+func recordRunningResult(t *testing.T, eng *Engine, store *state.Store, compID string, pool bool) {
+	t.Helper()
+	if pool {
+		matches, err := store.LoadPoolMatches(compID)
+		require.NoError(t, err)
+		require.NotEmpty(t, matches, "drawn competition must have pool matches")
+		m := matches[0]
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, &state.MatchResult{
+			SideA: m.SideA, SideB: m.SideB, Status: state.MatchStatusRunning,
+		}))
+		return
+	}
+	bracket, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, bracket.Rounds, "drawn competition must have a bracket")
+	for _, m := range bracket.Rounds[0] {
+		if m.SideA == "" || m.SideB == "" {
+			continue
+		}
+		require.NoError(t, eng.RecordMatchResult(compID, m.ID, &state.MatchResult{
+			SideA: m.SideA, SideB: m.SideB, Status: state.MatchStatusRunning,
+		}))
+		return
+	}
+	t.Fatal("no round-0 match with two named sides to score")
+}
+
+// TestMaybeAutoCompletePools_StartsDrawReady pins the bc-prow ruling: a
+// RECORDED result reaching a draw-ready competition starts it, to the running
+// status StartCompetition would pick for the format, and reports
+// AutoCompleteStarted so the handler broadcasts competition_started. A
+// draw-ready competition nobody has scored yet is left alone: both editors
+// undo a result by writing the match back to "scheduled", and an undo is not
+// a start.
+func TestMaybeAutoCompletePools_StartsDrawReady(t *testing.T) {
+	cases := []struct {
+		name        string
+		format      string
+		poolSize    int
+		pool        bool // score a pool match rather than a bracket match
+		record      bool // record a result before the call
+		wantOutcome AutoCompleteOutcome
+		wantStatus  state.CompetitionStatus
+	}{
+		{"no result yet leaves draw-ready", state.CompFormatKnockout, 0, false, false, AutoCompleteNoChange, state.CompStatusDrawReady},
+		{"knockout goes to knockout", state.CompFormatKnockout, 0, false, true, AutoCompleteStarted, state.CompStatusKnockout},
+		{"mixed goes to pools", state.CompFormatMixed, 3, true, true, AutoCompleteStarted, state.CompStatusPools},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			eng, store, _ := setupTestEngine(t)
+			compID := "auto-start-" + strings.ReplaceAll(tc.name, " ", "-")
+			// A real draw, so the mixed path has the pools it insists on, and
+			// so the knockout case carries the byes a 6-of-8 draw resolves at
+			// generation time.
+			createTestCompetition(t, store, compID, tc.format, tc.poolSize)
+			saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave", "Eve", "Frank"})
+			require.NoError(t, eng.GenerateDraw(compID))
+			comp, err := store.LoadCompetition(compID)
+			require.NoError(t, err)
+			require.Equal(t, state.CompStatusDrawReady, comp.Status)
+
+			if tc.record {
+				recordRunningResult(t, eng, store, compID, tc.pool)
+			}
+
+			outcome, err := eng.MaybeAutoCompletePools(compID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOutcome, outcome)
+
+			comp, err = store.LoadCompetition(compID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantStatus, comp.Status)
+
+			if !tc.record {
+				return
+			}
+			// Idempotent: the next result on the now-running competition is a
+			// plain no-change, not a second start.
+			outcome, err = eng.MaybeAutoCompletePools(compID)
+			require.NoError(t, err)
+			assert.Equal(t, AutoCompleteNoChange, outcome)
+		})
+	}
+}
+
+// TestMaybeAutoCompletePools_ConcurrentCallersAllDoTheirPoolWork pins the
+// bc-prow race: several courts scoring a draw-ready competition at the same
+// moment all reach the auto-start, exactly one performs it, and the ones that
+// lose must still carry on to the pool phase work their own result deserves.
+// With a strict transform the losers came back with a validation error before
+// the pool check ever ran, so the competition never completed.
+func TestMaybeAutoCompletePools_ConcurrentCallersAllDoTheirPoolWork(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "auto-start-race"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Race",
+		Format: state.CompFormatLeague,
+		Status: state.CompStatusDrawReady,
+		Courts: []string{"A"},
+	}))
+	// A finished round-robin with four distinct records (3/2/1/0 wins), so
+	// nothing is tied and the only thing left to do is complete.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{ID: "P1-0", SideA: "Alice", SideB: "Bob", Status: state.MatchStatusCompleted, Winner: "Alice"},
+		{ID: "P1-1", SideA: "Alice", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Alice"},
+		{ID: "P1-2", SideA: "Alice", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Alice"},
+		{ID: "P1-3", SideA: "Bob", SideB: "Charlie", Status: state.MatchStatusCompleted, Winner: "Bob"},
+		{ID: "P1-4", SideA: "Bob", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Bob"},
+		{ID: "P1-5", SideA: "Charlie", SideB: "Dave", Status: state.MatchStatusCompleted, Winner: "Charlie"},
+	}))
+
+	const callers = 4
+	var wg sync.WaitGroup
+	errs := make([]error, callers)
+	release := make(chan struct{})
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-release
+			_, errs[i] = eng.MaybeAutoCompletePools(compID)
+		}(i)
+	}
+	close(release)
+	wg.Wait()
+
+	for i, err := range errs {
+		assert.NoError(t, err, "caller %d must not fail for having lost the start race", i)
+	}
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusComplete, comp.Status,
+		"the league must still complete: every caller ran the pool check after the start")
+}
+
+// TestStartIfDrawReady_LostRaceIsNotAnError pins the tolerant transform: a
+// competition that has already been started (by the desk's POST .../start, or
+// by another court's score write reaching MaybeAutoCompletePools first) leaves
+// startIfDrawReady reporting "not started" with no error and no write, and
+// MaybeAutoCompletePools goes on to do that result's pool work rather than
+// bailing out. The strict twin (transitionDrawToRunning) still errors, which
+// is why StartCompetition can keep using it.
+func TestStartIfDrawReady_LostRaceIsNotAnError(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "start-if-draw-ready"
+	createTestCompetition(t, store, compID, state.CompFormatKnockout, 0)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	require.Equal(t, state.CompStatusKnockout, comp.Status)
+
+	started, err := eng.startIfDrawReady(compID)
+	require.NoError(t, err, "a competition someone else already started is not an error")
+	assert.False(t, started)
+
+	comp, err = store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusKnockout, comp.Status, "status must be untouched")
+
+	// The strict twin still reports it, so the two are not interchangeable.
+	assert.Error(t, eng.transitionDrawToRunning(compID))
+
+	// And the whole auto-complete path over that competition is error-free.
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteNoChange, outcome)
+}
+
+// TestMaybeAutoCompletePools_LeavesSetupAlone: only draw-ready is started; a
+// setup competition (no draw) is not a thing a result can reach, and the
+// auto-start must not invent one.
+func TestMaybeAutoCompletePools_LeavesSetupAlone(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "auto-start-setup"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:     compID,
+		Name:   "Still in setup",
+		Format: state.CompFormatKnockout,
+		Status: state.CompStatusSetup,
+		Courts: []string{"A"},
+	}))
+
+	outcome, err := eng.MaybeAutoCompletePools(compID)
+	require.NoError(t, err)
+	assert.Equal(t, AutoCompleteNoChange, outcome)
+
+	comp, err := store.LoadCompetition(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.CompStatusSetup, comp.Status)
 }
 
 // TestMaybeAutoCompletePools_AlreadyComplete verifies idempotency:

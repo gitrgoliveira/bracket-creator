@@ -588,6 +588,13 @@ func RegisterLeagueTiebreakHandlers(r *gin.RouterGroup, eng LeagueTiebreakEngine
 			case engine.AutoCompleteTransitioned:
 				hub.Broadcast(EventCompetitionCompleted, gin.H{"competitionId": id})
 				hub.Broadcast(EventScheduleUpdated, nil)
+			case engine.AutoCompleteStarted:
+				// A still-draw-ready competition holding a recorded result was
+				// started by this call (bc-prow). Same events as
+				// tryAutoCompletePools' own branch, so every surface reloads
+				// the now-running competition.
+				hub.Broadcast(EventCompetitionStarted, gin.H{"competitionId": id})
+				hub.Broadcast(EventScheduleUpdated, nil)
 			case engine.AutoCompleteNoChange:
 				// Not all matches complete yet, finalize flag is set but
 				// the competition cannot transition until all matches finish.

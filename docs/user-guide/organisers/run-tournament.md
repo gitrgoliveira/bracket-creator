@@ -79,7 +79,7 @@ Click **Announce** from the dashboard to broadcast a short message to every view
 
 ## Registration desk
 
-Open **Registration desk** from the dashboard to access the cross-competition check-in surface for the welcome table. This view lists every competitor across all competitions so a registration helper can mark participants present as they arrive. It complements the per-competition check-in described in [Set up a competition](#set-up-a-competition).
+Open **Registration desk** from the dashboard to access the check-in surface for the welcome table. Check-in exists only for competitions with **Check-in tracking** turned on in their Settings, and this desk is the one place to do it: it lists every competitor across those competitions so a registration helper can mark participants present as they arrive. A competition with the setting off does not appear here, and its Ordering & seeding panel carries no check-in controls either. Refer to the [Check-in workflow](#check-in-workflow).
 
 ## Set up a competition
 
@@ -164,9 +164,9 @@ The **Participant list** panel (labelled **Team list** for team competitions) co
 - Without display name: `Name, Dojo[, Dan grade]`
 - With display name (zekken): `Name, Zekken display name, Dojo[, Dan grade]`
 
-Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list.
+Click **Paste clipboard** to read a tab-separated selection from the clipboard and convert it automatically. Click **Apply changes** to save the list; the box clears once the list is saved. The box is for a new or replacement list, not a copy of the saved roster: applying while a roster already exists asks you to confirm, because the new list replaces the current one (anyone not in the new list is removed, and names already on the roster keep their id and seed).
 
-Applying the list gives every competitor a participant id, shown beside the row in the working roster (hover it for the full value). Competitor numbers come later: every competition numbers its competitors when the draw is generated, pool by pool for a pooled competition or down the bracket for a knockout-only one, and nothing is shown before that. Refer to [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app whose list has no ids shows a notice on its **Overview** naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
+Applying the list gives every competitor a participant id. The id is not shown on the row; the **Overview** names any competitor still without one. Competitor numbers come later: every competition numbers its competitors when the draw is generated, pool by pool for a pooled competition or down the bracket for a knockout-only one, and nothing is shown before that. Refer to [Competitor numbers](pool-draw.md#competitor-numbers). A competition saved by an earlier version of the app whose list has no ids shows a notice on its **Overview** naming the competitors: apply the list once to assign them. The draw does not run until every competitor has an id.
 
 Two more notices can appear on the **Overview** for the same reason, once a competition has drawn. The app tries to repair these automatically, behind the scenes, the next time it reads the competition's data. Saving the participant list again lets it try once more. It matches a pool member to a participant by name and dojo together, or by name alone when the row records no dojo and only one competitor has that name. It matches a match side by name alone, because a match row only records a name. A notice remains only for a row it could not match this way:
 
@@ -177,7 +177,7 @@ Both notices are advisory, not blocking: the competition keeps running, and noth
 
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
-The **Check-in & Seeding** panel (labelled **Seeding** when check-in is disabled) shows the working roster. From here you can:
+The **Ordering & seeding** panel shows the working roster, one competitor per row: the competitor number once a draw exists, the name and the dojo. Before the draw the rows are in roster order, which you can change; once the draw has numbered the competitors the rows are listed in number order, with anyone the draw left out at the end. From here you can:
 
 - Drag rows to assign seeds, or type a rank number directly.
 - Click **Shuffle unseeded** to randomise unranked positions.
@@ -189,11 +189,11 @@ Ranks must run from 1 with none missing. You can enter them in any order, and ea
 
 #### Editing a single competitor
 
-Click the pencil icon on any row to open the edit modal for that competitor. You can change the name, dojo, dan grade, and display name during setup. Once the draw is generated, the pencil icon is disabled; discard the draw to re-enable editing.
+Click the pencil icon on any row to open the edit modal for that competitor. You can change the name, dojo, dan grade, and display name during setup and while the draw is pending; a change made after the draw is generated is carried into the draw (pools and bracket) for you. Once the competition has started the pencil is no longer shown.
 
 ### Check-in workflow
 
-Enable check-in in **Settings** for the competition. When enabled, each row in the seeding panel gains a check-in checkbox. A **Show unchecked / Show all** toggle filters the list, and **Check in all** marks every participant at once.
+Enable **Check-in tracking** in **Settings** for the competition. Competitors are checked in at the [Registration desk](#registration-desk), which works across every competition; the Ordering & seeding panel carries no check-in controls.
 
 The check-in rule is opt-in: when you click **Generate draw**, if at least one participant is checked in, only checked-in participants join the draw and unchecked participants are excluded (their seeds are dropped). If nobody is checked in, everyone is included.
 
@@ -210,6 +210,8 @@ If a seeding rule could not be honoured, a banner above the preview reads **Seed
 You can still toggle individual check-in status during `draw-ready`, but roster edits (add, remove, reorder) are locked.
 
 When the preview looks correct, click **Start competition** to move to match play. To make roster changes instead, click **Discard draw** to delete the draft and return to setup.
+
+A draw-ready competition is already listed on the shiai-jo operator views, since its matches exist. Scoring one of those matches starts the competition on the spot, exactly as **Start competition** would, so a court that begins play never has to wait for the desk.
 
 <!-- Raw HTML is copied verbatim by MkDocs (only markdown image paths get
      rewritten), so this src must be relative to the BUILT page URL

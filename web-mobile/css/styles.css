@@ -3733,8 +3733,10 @@ button.pool-match-row {
      and .bracket-canvas was left the ~590px remainder while the whole admin
      page scrolled sideways. Pinning the minimum to 0 lets the track take the
      space that is actually available and leaves inner scroll containers
-     (.bracket-canvas has overflow:auto) to scroll their own overflow. */
-  grid-template-columns: 240px minmax(0, 1fr);
+     (.bracket-canvas has overflow:auto) to scroll their own overflow.
+     200px: the rail's widest content is the "Other competitions" header at
+     ~175px including its paddings; 240 was 65px of nothing on every page. */
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -3855,23 +3857,49 @@ button.pool-match-row {
   overflow-y: auto;
 }
 
+/* Participants page: the ordering card is used all day, the paste box once,
+   so above the breakpoint the ordering card takes the wider column. Two
+   columns need ~838px of page content (a one-line roster row beside the
+   list card), which is 838 + 64 page padding + 200 rail + 24 gap + 14 row
+   gap = 1140px of viewport; below that the list card stacks. iPad Air
+   landscape (1180) keeps two columns, portrait (820) stacks. */
+.row--participants {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+}
+
+/* No roster yet: the ordering card is not rendered and the list card
+   takes the whole row. */
+.row--participants.row--participants-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 1139px) {
+  .row--participants {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The paste box holds a list that is not yet the roster. */
+.unapplied-note {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+}
+
 .seed-row {
   display: grid;
-  grid-template-columns: 24px 20px 36px 1fr 32px 64px;
+  /* handle | name+dojo | move buttons | seed input. The seed rank shows
+     ONCE, in the input (operator ruling bc-prow: the old "#N" badge on the
+     left repeated it). minmax(0, 1fr) for the text track: a bare 1fr floors
+     at min-content and the name never ellipsises, it pushes the controls out
+     of the row instead. */
+  grid-template-columns: 20px minmax(0, 1fr) auto 64px;
   gap: 8px;
   align-items: center;
-  padding: 7px 10px;
+  padding: 4px 10px;
   border-radius: 6px;
   border: 1px solid transparent;
-}
-
-.seed-row.is-checked-in {
-  background: var(--ok-soft); /* Very light green */
-  border-color: var(--ok-border);
-}
-
-.seed-row.is-checked-in .seed-row__name {
-  color: var(--ink-2);
 }
 
 .seed-row:hover {
@@ -3884,12 +3912,8 @@ button.pool-match-row {
 }
 
 .seed-row.has-seed {
-  background: #fffbeb;
-  border-color: #fde68a;
-}
-
-.seed-row.has-seed.is-checked-in {
-  background: linear-gradient(90deg, #fffbeb 0%, var(--ok-soft) 100%);
+  background: var(--warn-soft);
+  border-color: var(--warn-border);
 }
 
 .seed-row__handle {
@@ -3901,14 +3925,6 @@ button.pool-match-row {
   margin-left: -8px;
 }
 
-.seed-row__rank {
-  font-size: 12px;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-weight: 700;
-  text-align: center;
-}
-
 .seed-row__name {
   font-size: 13.5px;
   font-weight: 500;
@@ -3918,19 +3934,81 @@ button.pool-match-row {
   text-overflow: ellipsis;
 }
 
+/* The row's text is two UNITS, name (with number badge and source tag) and
+   dojo, that sit on one line where they fit and wrap as whole units
+   where they do not (the 1180 iPad-landscape two-column case). Wrapping
+   word by word, or hiding the name behind the badge, is what this replaces. */
+.seed-row__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+}
+
+.seed-row__who {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.seed-row__who .tag-badge {
+  flex-shrink: 0;
+}
+
 .seed-row__dojo {
   font-size: 11px;
   color: var(--ink-3);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* bc-pnum ruling 1e: the short participant id shown beside the dojo line
-   after a roster save. Same muted weight as .seed-row__dojo (it is
-   secondary data, not identity the operator reads at a glance), monospace
-   because it is a hex fragment, not prose. */
-.seed-row__id {
-  font-size: 11px;
+/* Move up/down and edit: one row of borderless buttons at the 36px floor
+   DESIGN.md s6 sets for shared surfaces (44px on touch, mp-nubo), so the
+   row is 36px of control rather than the 68-104px stacked column it used to
+   be. Borderless because the border is what made the old pair read as
+   heavy; the hover lifts to --surface, which is visible against the row's
+   own --line-2 hover (the same colour would cancel out). */
+.seed-row__actions,
+.seed-row__move {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.seed-row__actions .btn--icon-sm {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 8px;
+  font-size: 13px;
+  border-color: transparent;
+  background: transparent;
   color: var(--ink-3);
-  font-family: var(--font-mono);
+}
+
+.seed-row__actions .btn--icon-sm:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--line);
+}
+
+@media (pointer: coarse) {
+  /* The 44px looks like a repeat of the shared .btn--icon-sm coarse rule and
+     is not: the desktop 36px above is a two-class selector, so it outranks
+     that one-class rule whatever the media query, and dropping these two
+     declarations silently leaves this button at 36px on touch. The border
+     comes back here because the row's buttons are borderless on a fine
+     pointer (hover reveals them) and there is no hover to reveal them on
+     touch. */
+  .seed-row__actions .btn--icon-sm {
+    min-width: 44px;
+    min-height: 44px;
+    border-color: var(--line);
+  }
 }
 
 /* The one visual for NoIdHint (data_integrity.jsx): an id-less row's
@@ -6547,14 +6625,6 @@ button.pool-match-row {
 /* Gate entrance animation for users who prefer reduced motion. */
 @media (prefers-reduced-motion: reduce) {
   .league-tiebreak { animation: none; }
-}
-
-.seed-row__handle {
-  color: var(--ink-4);
-  font-size: 16px;
-  cursor: grab;
-  user-select: none;
-  flex-shrink: 0;
 }
 
 .tag-badge {
@@ -9202,11 +9272,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ===========================================================================
    Registration desk (mp-25bk), cross-competition check-in surface.
    Prefix: rd-. Reuses the .workspace shell, .badge, .tag-badge, .input, .select,
-   .btn, .empty, .spinner vocabulary. "Checked-in = green" matches the existing
-   seeding panel (.seed-row.is-checked-in); navy --accent is reserved for the
-   active rail selection and the search focus, per DESIGN.md Principle 3.
-   Component-local check-in greens mirror the literals already used by
-   .seed-row.is-checked-in (an established carve-out for this exact concept).
+   .btn, .empty, .spinner vocabulary. "Checked-in = green" (the --ok-* tokens);
+   navy --accent is reserved for the active rail selection and the search
+   focus, per DESIGN.md Principle 3. This desk is the ONLY check-in surface:
+   the participants page's seeding rows used to carry a checkbox and the same
+   green (.seed-row.is-checked-in), removed by bc-prow.
    =========================================================================== */
 
 .rd-workspace {

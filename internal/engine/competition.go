@@ -65,6 +65,16 @@ const (
 	// Callers should broadcast both EventMatchUpdated (reload standings) and
 	// EventScheduleUpdated (so the UI shows the "awaiting tie-breaker" banner).
 	AutoCompleteAwaitingLeagueTiebreak AutoCompleteOutcome = 5
+	// AutoCompleteStarted means the competition was still draw-ready when a
+	// RECORDED result (a match left running or completed) reached it, so it
+	// was started on the spot (draw-ready → CompStatusPools or
+	// CompStatusKnockout by format, exactly what StartCompetition does) and
+	// nothing else changed. Operator ruling (bc-prow): the shiaijo operator
+	// view lists a draw-ready competition's matches, and scoring one of them
+	// IS the start. A write that CLEARS a result (status back to scheduled)
+	// is not a start, see MaybeAutoCompletePools' result gate. Callers should
+	// broadcast EventCompetitionStarted and EventScheduleUpdated.
+	AutoCompleteStarted AutoCompleteOutcome = 6
 )
 
 // MaybeAutoCompletePools advances a competition past its pool phase after a pool
@@ -87,19 +97,138 @@ const (
 //     Knockout matches become scoreable per-match as their feeder pools finish,
 //     there is no wait for the whole pool phase.
 //
-// The function is a no-op for any other format or status.
+// The function is a no-op for any other format or status, with one
+// exception that runs FIRST: a competition still in CompStatusDrawReady is
+// started (the same transition StartCompetition performs), because every
+// caller reaches here right after a match write and a RESULT is the start
+// (operator ruling bc-prow). When nothing else follows, the outcome is
+// AutoCompleteStarted; when the same result also completed a pool, that
+// richer outcome is returned instead (its broadcasts make clients reload the
+// competition, status included).
+//
+// Result gate: not every write is a result. Both score editors undo a result
+// by writing it back as status "scheduled", and an undo must not start the
+// competition, so the draw-ready branch starts only when some match of the
+// competition actually HOLDS a result (running or completed; see
+// hasRecordedResult, which discounts the byes a knockout draw resolves at
+// generation time). No result means the competition is left draw-ready.
+//
+// Losing the start race is NOT an error: two courts scoring a draw-ready
+// competition at the same moment both reach here, and the one whose
+// transform finds the status already moved simply reports "not started" and
+// goes on to the pool check below with the rest of ITS result's work intact
+// (pool completion, knockout seeding, tiebreak injection).
 //
 // Atomic: the league status flip runs inside state.Store.UpdateCompetitionChanged.
 // The mixed path delegates to advanceMixedPools, which takes its own per-comp
 // locks; that is safe because MaybeAutoCompletePools is NOT inside an open
 // transform at that point.
 func (e *Engine) MaybeAutoCompletePools(compID string) (AutoCompleteOutcome, error) {
-	// Determine whether this is a team competition for tie-injection routing.
-	comp, err := e.store.LoadCompetition(compID)
+	started, comp, err := e.autoStartOnFirstResult(compID)
 	if err != nil {
 		return AutoCompleteNoChange, err
 	}
+	outcome, err := e.maybeAutoCompletePoolsRunning(compID, comp)
+	if err != nil {
+		return outcome, err
+	}
+	if started && outcome == AutoCompleteNoChange {
+		return AutoCompleteStarted, nil
+	}
+	return outcome, nil
+}
 
+// autoStartOnFirstResult moves a draw-ready competition holding a recorded
+// result to its running status. Any other status, and a draw-ready
+// competition nobody has scored yet, is left alone.
+//
+// Returns (started, comp, err), where started reports whether THIS call
+// performed the transition and comp is the competition the pool check should
+// work from: the pre-check's own read when nothing was attempted (no write
+// happened, so that read is still current and the caller is spared a second
+// one), and a fresh read when the draw-ready branch ran, whether this call
+// won the start or lost it to a concurrent one.
+func (e *Engine) autoStartOnFirstResult(compID string) (bool, *state.Competition, error) {
+	comp, err := e.store.LoadCompetition(compID)
+	if err != nil {
+		return false, nil, err
+	}
+	if comp == nil || comp.Status != state.CompStatusDrawReady {
+		return false, comp, nil
+	}
+
+	// The result gate. This extra read is NOT on the hot path: it only runs
+	// while the competition is still draw-ready, i.e. at most until the first
+	// result starts it, and never again for the rest of the competition.
+	hasResult, err := e.hasRecordedResult(compID)
+	if err != nil {
+		return false, nil, err
+	}
+	if !hasResult {
+		return false, comp, nil
+	}
+
+	started, err := e.startIfDrawReady(compID)
+	if err != nil {
+		return false, nil, err
+	}
+	comp, err = e.store.LoadCompetition(compID)
+	if err != nil {
+		return false, nil, err
+	}
+	return started, comp, nil
+}
+
+// hasRecordedResult reports whether any match of the competition carries a
+// result: a pool match or a bracket match left running or completed.
+//
+// A bracket match with an EMPTY side does not count. Those are the byes a
+// knockout draw resolves at generation time (buildBracketFromDraw marks a
+// walkover, a dead ""-vs-"" slot and a latent bye completed before anybody
+// has fought), so counting them would let an undo start a competition whose
+// draw happens to contain a bye. A fought match always names both sides.
+func (e *Engine) hasRecordedResult(compID string) (bool, error) {
+	recorded := func(s state.MatchStatus) bool {
+		return s == state.MatchStatusRunning || s == state.MatchStatusCompleted
+	}
+
+	matches, err := e.store.LoadPoolMatches(compID)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range matches {
+		if recorded(m.Status) {
+			return true, nil
+		}
+	}
+
+	bracket, err := e.store.LoadBracket(compID)
+	if err != nil {
+		return false, err
+	}
+	if bracket == nil {
+		return false, nil
+	}
+	bracketResult := func(m state.BracketMatch) bool {
+		return recorded(m.Status) && m.SideA != "" && m.SideB != ""
+	}
+	for _, round := range bracket.Rounds {
+		for _, m := range round {
+			if bracketResult(m) {
+				return true, nil
+			}
+		}
+	}
+	if bracket.ThirdPlaceMatch != nil && bracketResult(*bracket.ThirdPlaceMatch) {
+		return true, nil
+	}
+	return false, nil
+}
+
+// maybeAutoCompletePoolsRunning is MaybeAutoCompletePools' pool-phase half.
+// comp is the caller's already-loaded competition (possibly nil when no such
+// competition exists), so the two halves share one read.
+func (e *Engine) maybeAutoCompletePoolsRunning(compID string, comp *state.Competition) (AutoCompleteOutcome, error) {
 	// MIXED (Pools + Knockout): resolve incrementally, pool finishers drop into
 	// their knockout slots the moment each pool completes, with NO wait for the
 	// rest of the pool phase. Short-circuit BEFORE the comp-wide "all pools done"
@@ -489,6 +618,16 @@ func (e *Engine) GenerateDraw(id string) error {
 // write new artifacts, commit draw-ready, and then our deferred deletes
 // would erase the freshly generated files, leaving draw-ready with no
 // artifacts.
+//
+// Accepted window (bc-prow): since a score write can also flip draw-ready →
+// running (MaybeAutoCompletePools' auto-start), a competition started between
+// our deletes and our status CAS ends up running with no draw files. The CAS
+// then fails and reports it, so nothing is silently corrupted, but the files
+// are already gone. This is the SAME window a concurrent POST .../start has
+// always had, it needs the operator to discard and score at the very same
+// moment, and the repair is to generate the draw again. It is accepted as-is:
+// do NOT reorder the deletes to "fix" it, that trades this window for the
+// worse one above (a fresh draw erased by a late delete).
 func (e *Engine) DiscardDraw(id string) error {
 	// Pre-check: verify draw-ready status before touching the filesystem.
 	// This prevents deleting artifacts from a running competition when the
@@ -528,8 +667,29 @@ func (e *Engine) DiscardDraw(id string) error {
 	return err
 }
 
+// runningStatusFor is the one owner of "which running status does a started
+// competition of this format take": the pool-phase formats open in
+// CompStatusPools, everything else goes straight to the knockout. Shared by
+// the two starters (transitionDrawToRunning and startIfDrawReady) so the
+// explicit POST .../start and the auto-start on a first result can never
+// disagree about where a format lands.
+func runningStatusFor(format string) state.CompetitionStatus {
+	switch format {
+	case state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
+		return state.CompStatusPools
+	default:
+		return state.CompStatusKnockout
+	}
+}
+
 // transitionDrawToRunning atomically moves a draw-ready competition to
 // the appropriate running status (Pools or Knockout) based on its format.
+//
+// Strict twin of startIfDrawReady: a current status other than draw-ready is
+// an ERROR here, because the caller (StartCompetition) is serving an explicit
+// operator request that the state moved out from under, which is worth
+// reporting. Do not soften it; use startIfDrawReady for a caller whose work
+// must continue regardless.
 func (e *Engine) transitionDrawToRunning(id string) error {
 	_, err := e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
 		if current == nil {
@@ -538,15 +698,30 @@ func (e *Engine) transitionDrawToRunning(id string) error {
 		if current.Status != state.CompStatusDrawReady {
 			return nil, validationErrorf("competition %s not in draw-ready state (status: %s); concurrent modification?", id, current.Status)
 		}
-		switch current.Format {
-		case state.CompFormatMixed, state.CompFormatLeague, state.CompFormatSwiss:
-			current.Status = state.CompStatusPools
-		default:
-			current.Status = state.CompStatusKnockout
-		}
+		current.Status = runningStatusFor(current.Format)
 		return current, nil
 	})
 	return err
+}
+
+// startIfDrawReady is the tolerant twin of transitionDrawToRunning, used by
+// the auto-start on a first result. It performs the same transition and
+// reports whether THIS call did it; a competition that is no longer
+// draw-ready returns (false, nil) with nothing written, because a start the
+// desk or another court's score write already performed is a race this caller
+// merely lost, not a failure of the result it was called for. A missing
+// competition is still an error: there is nothing to score.
+func (e *Engine) startIfDrawReady(id string) (bool, error) {
+	return e.store.UpdateCompetitionChanged(id, func(current *state.Competition) (*state.Competition, error) {
+		if current == nil {
+			return nil, notFoundErrorf("competition %s not found (deleted during start)", id)
+		}
+		if current.Status != state.CompStatusDrawReady {
+			return nil, nil
+		}
+		current.Status = runningStatusFor(current.Format)
+		return current, nil
+	})
 }
 
 // filterCheckedIn applies the mp-w7x check-in filter with opt-in semantics:

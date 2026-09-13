@@ -15,7 +15,11 @@
 // Backend facts this relies on (see internal/mobileapp/handlers_participants.go):
 //   - check-in (PUT/DELETE/bulk) is NOT status-gated and NOT gated on
 //     checkInEnabled: anyone can be checked in for any competition at any time
-//     (latecomers included).
+//     (latecomers included). The desk itself is scoped to competitions whose
+//     "Check-in tracking" setting is on (rdCheckInComps, operator ruling
+//     bc-prow: check-in exists only under that setting and this desk is its
+//     only UI), so a competition with the setting off never appears in the
+//     rail, the all-competitions roster, or an "also in" chip.
 //   - walk-up add (POST single) needs the elevated password and only works
 //     while a competition is in "setup" status.
 //
@@ -136,6 +140,18 @@ function rdPlayerTag(comp, p) {
   if (comp && comp.kind === "team") return { kind: "team", value: p.name };
   if (p.number) return { kind: "number", value: p.number };
   return { kind: "pending", value: null };
+}
+
+// The desk works over competitions with "Check-in tracking" on and nothing
+// else (operator ruling bc-prow). Applied ONCE, where the page derives `comps`
+// from the unfiltered `allComps` it stores, so the rail, the all-competitions
+// roster, the people index behind the "also in" chips and the walk-up target
+// all see the same scoped list. Filtering at the two set sites instead cost
+// the page the count it needs to tell "no competitions at all" from "none with
+// check-in tracking on", which are different empty states with different
+// remedies.
+function rdCheckInComps(list) {
+  return (list || []).filter((c) => c && c.checkInEnabled);
 }
 
 // Build the cross-competition people index from the competitions array.
@@ -583,15 +599,22 @@ function RdEditModal({ comp, player, password, showToast, onSaved, onClose }) {
 // Page.
 // ---------------------------------------------------------------------------
 function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, onUpdate, onLogout, onViewerMode }) {
-  // `comps` is the desk's own authoritative copy, seeded once from the parent
-  // and thereafter mutated only via setLocal (optimistic) and refresh() (server
-  // truth). We deliberately do NOT re-seed from the tournament prop: app.jsx
-  // runs its own SSE-driven setTournament independently of this desk, so a
-  // prop-sync effect would clobber an in-flight optimistic check-in with
-  // possibly-stale parent data. The desk's own SSE subscription (below) keeps
-  // it fresh; tRef tracks the latest tournament only so refresh()'s onUpdate
-  // merge starts from the newest snapshot.
-  const [comps, setComps] = useStateRD(() => tournament.competitions || []);
+  // `allComps` is the desk's own authoritative copy of EVERY competition,
+  // seeded once from the parent and thereafter mutated only via setLocal
+  // (optimistic) and refresh() (server truth). We deliberately do NOT re-seed
+  // from the tournament prop: app.jsx runs its own SSE-driven setTournament
+  // independently of this desk, so a prop-sync effect would clobber an
+  // in-flight optimistic check-in with possibly-stale parent data. The desk's
+  // own SSE subscription (below) keeps it fresh; tRef tracks the latest
+  // tournament only so refresh()'s onUpdate merge starts from the newest
+  // snapshot.
+  //
+  // It is stored UNFILTERED and scoped once into `comps` below: everything the
+  // desk renders works off `comps`, while `allComps.length` is what tells the
+  // two empty states apart (no competitions yet vs none with check-in tracking
+  // on).
+  const [allComps, setAllComps] = useStateRD(() => tournament.competitions || []);
+  const comps = useMemoRD(() => rdCheckInComps(allComps), [allComps]);
   const tRef = useRefRD(tournament);
   useEffectRD(() => { tRef.current = tournament; }, [tournament]);
   // Number of check-in writes in flight. While > 0 the SSE-driven refresh
@@ -619,13 +642,23 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // Reset competition-scoped UI when switching rail entries.
   useEffectRD(() => { setWalkUpOpen(false); setDojoFilter("all"); setHandoff(null); setEditTarget(null); }, [selected]);
 
+  // A selected competition can leave `comps` underneath the operator: another
+  // admin turns its "Check-in tracking" off (or deletes it) and the next
+  // refresh drops it from the scoped list. The rail then has no item for
+  // `selected`, and the roster, the headline and the walk-up button all read
+  // an absent competition as "nothing here". Fall back to "All competitions",
+  // which is the view the rail is already showing as unselected.
+  useEffectRD(() => {
+    if (selected !== "all" && !comps.some((c) => c.id === selected)) setSelected("all");
+  }, [comps, selected]);
+
   // Refresh from the server and reconcile both local + parent state.
   const refresh = useCallbackRD(async () => {
     try {
       const fresh = await window.API.fetchCompetitions();
       onUpdate({ ...tRef.current, competitions: fresh });
       if (!mountedRef.current) return;
-      setComps(fresh);
+      setAllComps(fresh || []);
     } catch (e) {
       console.warn("Registration desk refresh failed", e);
     }
@@ -671,7 +704,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // without it an id-less write (which the server will refuse anyway)
   // would optimistically flip ALL id-less rows in this competition at once.
   const setLocal = (compId, pid, val) => {
-    setComps((cs) => cs.map((c) => c.id !== compId ? c : {
+    setAllComps((cs) => cs.map((c) => c.id !== compId ? c : {
       ...c,
       players: (c.players || []).map((p) => (pid && rdApiPid(p) === pid) ? { ...p, checkedIn: val } : p),
     }));
@@ -894,6 +927,10 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
 
   const canWalkUp = selectedComp && (selectedComp.status === "setup" || !selectedComp.status);
   const allChecked = headline.total > 0 && headline.present === headline.total;
+  // Two different empty states with two different remedies: a tournament with
+  // no competitions at all needs one created, while a tournament whose
+  // competitions all have check-in tracking off needs the setting turned on.
+  const noCompsAtAll = allComps.length === 0;
   const noComps = comps.length === 0;
 
   return (
@@ -904,16 +941,18 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Registration desk</h1>
-            <div className="page-head__sub">Check competitors in as they arrive, across every competition.</div>
+            <div className="page-head__sub">Check competitors in as they arrive, across every competition with check-in tracking on.</div>
           </div>
         </div>
 
         {noComps ? (
           <div className="empty" style={{ padding: "48px 24px" }}>
             <div className="icon" aria-hidden="true">🥋</div>
-            <h3>No competitions yet</h3>
+            <h3>{noCompsAtAll ? "No competitions yet" : "No competition has check-in tracking on"}</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 440, margin: "0 auto", lineHeight: 1.5 }}>
-              Add a competition and its participants first, then the registration desk will gather every roster here for check-in.
+              {noCompsAtAll
+                ? "Add a competition and its participants first, then the registration desk will gather every roster here for check-in."
+                : <>Turn on <strong>Check-in tracking</strong> in a competition’s Settings (or when creating it) and the registration desk gathers its roster here for check-in.</>}
             </div>
           </div>
         ) : (

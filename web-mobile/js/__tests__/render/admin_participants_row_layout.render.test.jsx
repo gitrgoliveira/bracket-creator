@@ -58,9 +58,32 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
 
     const started = await mountParticipants(makeParticipantsCompetition({
       status: 'pools',
-      players: [{ id: 'p-1', name: 'Alice', dojo: 'D', number: 'K1' }],
+      players: [
+        { id: 'p-1', name: 'Alice', dojo: 'D', number: 'K2' },
+        { id: 'p-2', name: 'Bob', dojo: 'D', number: 'K1' },
+      ],
     }));
     expect(started.container.querySelector('button[aria-label="Edit Alice"]')).toBeNull();
+    // Started: the list is in number order, so roster-index moves and seed
+    // edits are locked (a move would act on a row other than the one shown).
+    const rows = [...started.container.querySelectorAll('.seed-row')];
+    expect(rows.map((r) => r.querySelector('.seed-row__name').textContent)).toEqual(['K1Bob', 'K2Alice']);
+    for (const r of rows) {
+      expect(r.querySelector('button[aria-label="Move up"]').disabled).toBe(true);
+      expect(r.querySelector('button[aria-label="Move down"]').disabled).toBe(true);
+      expect(r.querySelector('input.seed-row__input').disabled).toBe(true);
+    }
+    // The card-level seed actions follow the same lock, with a title that
+    // says so. The roster itself stays editable after the start (bc-pnum
+    // ruling 1, pinned by admin_participants_apply_navigation.render.test.jsx).
+    for (const label of ['Shuffle unseeded', 'Import seeds (CSV)', 'Clear seeds']) {
+      const btn = [...started.container.querySelectorAll('button')].find((b) => b.textContent === label);
+      expect(btn, label).toBeTruthy();
+      expect(btn.disabled, label).toBe(true);
+      expect(btn.getAttribute('title'), label).toContain('competition has started');
+    }
+    const paste = [...started.container.querySelectorAll('button')].find((b) => b.textContent === 'Paste clipboard');
+    expect(paste.disabled).toBe(false);
   });
 
   it('keeps roster order before the draw, when no competitor has a number', async () => {
@@ -80,17 +103,23 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
     }));
 
     const row = container.querySelector('.seed-row');
-    const line = row.querySelector('.seed-row__main > .seed-row__line');
+    const line = row.querySelector(':scope > .seed-row__line');
     expect(line).toBeTruthy();
-    expect([...line.children].map((el) => el.className)).toEqual(['seed-row__who', 'seed-row__where']);
+    expect([...line.children].map((el) => el.className)).toEqual(['seed-row__who', 'seed-row__dojo']);
+    // The drag glyph is decorative (the move buttons are the keyboard path);
+    // the seed input is the only carrier of the rank so it needs a name.
+    expect(row.querySelector('.seed-row__handle').getAttribute('aria-hidden')).toBe('true');
+    expect(row.querySelector('input.seed-row__input').getAttribute('aria-label')).toBe('Seed rank for Alice');
 
     const who = line.querySelector('.seed-row__who');
     expect(who.querySelector('.seed-row__name .num-prefix').textContent).toBe('K1');
     expect(who.querySelector('.seed-row__name').textContent).toBe('K1Alice');
     expect(who.querySelector('.tag-badge').textContent).toBe('manual');
 
-    const where = line.querySelector('.seed-row__where');
-    expect(where.textContent).toBe('Dojo Alice');
+    const dojo = line.querySelector('.seed-row__dojo');
+    expect(dojo.textContent).toBe('Dojo Alice');
+    // The dojo ellipsises and is what tells two same-named competitors apart.
+    expect(dojo.getAttribute('title')).toBe('Dojo Alice');
     // Operator ruling (bc-prow, reversing bc-pnum 1e): the participant id is
     // not shown on the row, not even truncated.
     expect(row.textContent).not.toContain('abcdef12');

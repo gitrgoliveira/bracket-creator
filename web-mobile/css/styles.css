@@ -3865,12 +3865,26 @@ button.pool-match-row {
    landscape (1180) keeps two columns, portrait (820) stacks. */
 .row--participants {
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  align-items: start;
+}
+
+/* No roster yet: the ordering card is not rendered and the list card
+   takes the whole row. */
+.row--participants.row--participants-single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (max-width: 1139px) {
   .row--participants {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* The paste box holds a list that is not yet the roster. */
+.unapplied-note {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
 }
 
 .seed-row {
@@ -3909,7 +3923,6 @@ button.pool-match-row {
   cursor: grab;
   padding: 0 8px;
   margin-left: -8px;
-  flex-shrink: 0;
 }
 
 .seed-row__name {
@@ -3921,19 +3934,10 @@ button.pool-match-row {
   text-overflow: ellipsis;
 }
 
-.seed-row__dojo {
-  font-size: 11px;
-  color: var(--ink-3);
-}
-
 /* The row's text is two UNITS, name (with number badge and source tag) and
    dojo, that sit on one line where they fit and wrap as whole units
    where they do not (the 1180 iPad-landscape two-column case). Wrapping
    word by word, or hiding the name behind the badge, is what this replaces. */
-.seed-row__main {
-  min-width: 0;
-}
-
 .seed-row__line {
   display: flex;
   flex-wrap: wrap;
@@ -3950,7 +3954,13 @@ button.pool-match-row {
   max-width: 100%;
 }
 
-.seed-row__where {
+.seed-row__who .tag-badge {
+  flex-shrink: 0;
+}
+
+.seed-row__dojo {
+  font-size: 11px;
+  color: var(--ink-3);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;

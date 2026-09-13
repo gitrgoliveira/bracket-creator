@@ -805,6 +805,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const isSetup = !c.status || c.status === "setup";
   const isDrawReady = c.status === "draw-ready";
   const isStarted = !isSetup && !isDrawReady;
+  // Seeds and the roster ORDER are locked while the draw exists (discard it
+  // first) and for good once the competition has started, when the list is
+  // shown in competitor-number order and a seed no longer means anything.
+  // The roster itself stays editable after the start (bc-pnum ruling 1: a
+  // clean Apply on a started competition goes to Scoring), so the paste box
+  // and CSV import only lock in draw-ready.
+  const seedsLocked = isDrawReady || isStarted;
+  const seedsLockedTitle = (action) => (isStarted ? "The competition has started; the order and seeds are fixed" : `Discard the draw to ${action}`);
 
   return (
     <>
@@ -847,7 +855,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           </button>
         </div>
       )}
-      <div className="row row--participants" style={{ alignItems: "start", ...(emptyRoster ? { gridTemplateColumns: "1fr" } : {}) }}>
+      <div className={`row row--participants${emptyRoster ? " row--participants-single" : ""}`}>
         {!emptyRoster && (
         <div className="card">
           <div className="card__head">
@@ -859,11 +867,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
               {/* draw-ready lock: seed mutations disabled until the draw is discarded. */}
-              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to shuffle seeds" : "Shuffle unseeded players"}>Shuffle unseeded</button>
-              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || isDrawReady} title={isDrawReady ? "Discard the draw to import seeds" : players.length === 0 ? "Add participants first" : undefined}>Import seeds (CSV)</button>
+              <button className="btn btn--sm" type="button" onClick={shuffleUnseeded} disabled={players.length === 0 || seedsLocked} title={seedsLocked ? seedsLockedTitle("shuffle seeds") : "Shuffle unseeded players"}>Shuffle unseeded</button>
+              <button className="btn btn--sm" type="button" onClick={() => seedFileRef.current?.click()} disabled={players.length === 0 || seedsLocked} title={seedsLocked ? seedsLockedTitle("import seeds") : players.length === 0 ? "Add participants first" : undefined}>Import seeds (CSV)</button>
               <input ref={seedFileRef} type="file" accept=".csv,.txt,text/csv,text/plain" style={{ display: "none" }} onChange={(e) => handleSeedFile(e.target.files[0])} />
               {/* Lone destructive action: ghost-danger, set apart from the constructive seeding buttons. */}
-              <button className="btn btn--sm btn--ghost btn--danger" type="button" onClick={clearAllSeeds} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to clear seeds" : "Remove all seed ranks"}>Clear seeds</button>
+              <button className="btn btn--sm btn--ghost btn--danger" type="button" onClick={clearAllSeeds} disabled={seedsLocked} title={seedsLocked ? seedsLockedTitle("clear seeds") : "Remove all seed ranks"}>Clear seeds</button>
             </div>
           </div>
           <div className="card__body" style={{ paddingTop: 0, paddingBottom: 8 }}>
@@ -1024,7 +1032,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                 const i = players.indexOf(p);
                 // draw-ready lock: reordering (and all seed mutations) disabled until the draw is discarded.
                 // Filter-active check is kept separate so both reasons can coexist.
-                const reorderDisabled = !!sourceFilter || !!trimmedSearch || isDrawReady;
+                // Also locked once the competition has started: the list is
+                // then in competitor-number order, so a roster-index move would
+                // act on a row other than the one shown, and re-rank live seeds.
+                const reorderDisabled = !!sourceFilter || !!trimmedSearch || isDrawReady || isStarted;
                 return (
                   <div
                     key={window.checkinPid(p)}
@@ -1044,25 +1055,23 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     }}
                     style={{ cursor: reorderDisabled ? "default" : "grab" }}
                   >
-                    <span className="seed-row__handle" title={isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
-                    <div className="seed-row__main">
-                      <div className="seed-row__line">
-                        <div className="seed-row__who">
-                          <div className="seed-row__name" title={p.name}>
-                            {p.number ? (
-                              <span className="num-prefix">{p.number}</span>
-                            ) : null}
-                            {p.name}
-                          </div>
-                          {p.source && <span className="tag-badge" style={{ flexShrink: 0 }}>{p.source}</span>}
+                    <span className="seed-row__handle" aria-hidden="true" title={isStarted ? "The order is fixed once the competition has started" : isDrawReady ? "Discard the draw to reorder" : reorderDisabled ? "Clear filters/search to reorder" : "Drag to reorder"}>⠿</span>
+                    <div className="seed-row__line">
+                      <div className="seed-row__who">
+                        <div className="seed-row__name" title={p.name}>
+                          {p.number ? (
+                            <span className="num-prefix">{p.number}</span>
+                          ) : null}
+                          {p.name}
                         </div>
-                        {/* No participant id here (operator ruling, bc-prow,
-                            reversing bc-pnum 1e): the id is plumbing, and an
-                            id-less row is named by the data-issues banner. */}
-                        <div className="seed-row__where">
-                          <span className="seed-row__dojo">{p.dojo}</span>
-                        </div>
+                        {p.source && <span className="tag-badge">{p.source}</span>}
                       </div>
+                      {/* No participant id here (operator ruling, bc-prow,
+                          reversing bc-pnum 1e): the id is plumbing, and an
+                          id-less row is named by the data-issues banner. The
+                          dojo carries a title because it ellipsises and it is
+                          what tells two same-named competitors apart. */}
+                      <span className="seed-row__dojo" title={p.dojo}>{p.dojo}</span>
                     </div>
                     <div className="seed-row__actions">
                       <div className="seed-row__move">
@@ -1082,10 +1091,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                         className="seed-row__input"
                         type="number"
                         placeholder="-"
+                        aria-label={`Seed rank for ${p.name}`}
                         value={p.seed || ""}
                         onChange={(val) => updateSeed(i, val)}
                         autoSelect={false}
-                        disabled={isDrawReady}
+                        disabled={isDrawReady || isStarted}
                       />
                   </div>
                 );
@@ -1110,7 +1120,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
             {/* draw-ready lock: roster mutations (paste, apply, CSV import) disabled until the draw is discarded */}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Not applied yet</span>}
+              {rosterDirty && !isDrawReady && <span className="unapplied-note">● Not applied yet</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
               {/* An empty box must not be applicable: Apply replaces the roster,
                   so applying nothing would wipe it. */}
@@ -1224,7 +1234,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
               disabled rules as the top button. */}
           {lines.length > 0 && (
             <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12 }}>
-              {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Not applied yet</span>}
+              {rosterDirty && !isDrawReady && <span className="unapplied-note">● Not applied yet</span>}
               <button className="btn btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
             </div>
           )}

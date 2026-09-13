@@ -12,7 +12,7 @@ bracket-creator create-playoffs [flags]
 |------|-------|---------|-------------|
 | `--file` | `-f` | (none) | CSV file with participants **(required)** |
 | `--output` | `-o` | (none) | Output `.xlsx` path **(required)** |
-| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across. Must be 1, 2, 4, 8 or 16, see [Shiai-jo count](#shiai-jo-count) |
+| `--courts` | `-c` | `2` | Number of shiai-jo (courts) to split the tree across. Must be 1, 2, 4, 8 or 16; refer to [Shiai-jo count](#shiai-jo-count) |
 | `--team-matches` | `-t` | `0` | Players per team (0 = individual tournament) |
 | `--with-zekken-name` | `-z` | `false` | Use second CSV column as zekken display name |
 | `--seeds` | (none) | (none) | CSV file with seed rankings |
@@ -48,19 +48,19 @@ bracket-creator create-playoffs \
 
 ## Shiai-jo count
 
-`--courts` takes **1, 2, 4, 8 or 16**. The tree is split into one block per shiai-jo and those blocks merge in pairs, so the count has to halve cleanly all the way down. Any other value stops the command with an error naming the counts to use instead, and the error always offers 1.
+`--courts` takes **1, 2, 4, 8 or 16**. The tree is split into one block per shiai-jo. Those blocks merge in pairs, so the count has to halve cleanly all the way down. Any other value stops the command with an error naming the counts to use instead, and the error always offers 1.
 
-Being even is not enough on its own. With `-c 6` the six blocks pair off into three, and three cannot pair off again, so one of them would reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
+Being even is not enough on its own. With `-c 6` the six blocks pair off into three, but three cannot pair off again. One of them would then reach the final having fought a round fewer than the other two. `-c 6` and `-c 10` are therefore refused, just as `-c 3`, `-c 5` and `-c 7` are.
 
-A single shiai-jo is always allowed: `-c 1` prints the whole bracket as one shiai-jo's pages. A playoffs bracket has no pool finishers to cross between shiai-jo, so it is seeded first and then cut into shiai-jo blocks; the partner-shiai-jo crossing described for [create-pools](create-pools.md#shiai-jo-count) does not apply here. 16 is the highest, and it is also the most shiai-jo a tournament can have, which puts 32 out of reach.
+A single shiai-jo is always allowed: `-c 1` prints the whole bracket as one shiai-jo's pages. A playoffs bracket has no pool finishers to cross between shiai-jo. It is seeded first, then cut into shiai-jo blocks, so the partner-shiai-jo crossing described for [create-pools](create-pools.md#shiai-jo-count) does not apply here. 16 is the highest. It is also the most shiai-jo a tournament can have, so 32 is out of reach.
 
-This is a per-tournament-file rule, not a rule about your venue. A hall with three shiai-jo generates one file for two shiai-jo and another for one, and runs both at the same time. See [create-pools](create-pools.md#shiai-jo-count) for the same rule on the pools command, and [How many shiai-jo a competition can use](../organisers/knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
+This is a per-tournament-file rule, not a rule about your venue. A hall with three shiai-jo generates one file for two shiai-jo and another for one, and runs both at the same time. Refer to [create-pools](create-pools.md#shiai-jo-count) for the same rule on the pools command, and [How many shiai-jo a competition can use](../organisers/knockout-draw.md#how-many-shiai-jo-a-competition-can-use) for the full explanation.
 
 ## Seeding
 
-Works the same as `create-pools`; top seeds are placed on opposite sides of the bracket so they can only meet in the final. See the [input format](../organisers/input-format.md#seeds-file) for the seeds CSV layout.
+Works the same as `create-pools`; top seeds are placed on opposite sides of the bracket so they can only meet in the final. Refer to the [input format](../organisers/input-format.md#seeds-file) for the seeds CSV layout.
 
-Competitor numbers follow that seeded bracket order, not the order participants were listed in the input file: the top seed is numbered first, and every other competitor's number follows their position in the bracket, top to bottom. The Data and Names to Print sheets list competitors in that same order.
+Competitor numbers follow that seeded bracket order, not the order participants were listed in the input file. The top seed is numbered first, and every other competitor's number follows their position in the bracket, top to bottom. The Data and Names to Print sheets list competitors in that same order.
 
 ## Output sheets
 

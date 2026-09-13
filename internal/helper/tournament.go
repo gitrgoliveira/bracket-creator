@@ -76,7 +76,11 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 		}
 		records = append(records, fields)
 	}
-	return CreatePlayersFromRecords(records, withZekkenName, true)
+	// Strict on both counts: the CLI, the legacy web UI's parse endpoint and
+	// archive import build a roster fresh from raw text and reject a blank
+	// dojo or a blank name; see createPlayersFromRecords for why the roster
+	// loader does not.
+	return createPlayersFromRecords(records, withZekkenName, true, true)
 }
 
 // CreatePlayersFromRecords builds players from pre-parsed CSV records
@@ -114,24 +118,43 @@ func CreatePlayers(entries []string, withZekkenName bool) ([]Player, error) {
 //     the draw-time refusal, not a load-time one, is what fires) and
 //     TestCheckIn_BlankDojoElsewhereInRoster_Returns400.
 func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDojo bool) ([]Player, error) {
+	// Never requires a name: the roster loader in internal/state calls this
+	// directly and stays tolerant of a blank name on purpose, so a
+	// hand-edited participants.csv can still be loaded and repaired (the same
+	// courtesy requireDojo=false gives a blank dojo).
+	return createPlayersFromRecords(records, withZekkenName, requireDojo, false)
+}
+
+// rowError formats a validation error for row i (0-based) of a CSV import as
+// "entry N: missing <field> in <row>". The row is quoted because callers may
+// have shuffled or dropped blank lines before this runs, so the entry number
+// alone does not identify a line in the file.
+func rowError(i int, line []string, field string) string {
+	return fmt.Sprintf("entry %d: missing %s in %q", i+1, field, strings.Join(line, ","))
+}
+
+// createPlayersFromRecords is the shared body behind CreatePlayers (strict:
+// requireDojo and requireName both true) and CreatePlayersFromRecords
+// (requireDojo as the caller says, requireName always false). A blank name
+// is refused the same way a blank dojo is: a competitor is identified by
+// (name, dojo), so a nameless row is unidentifiable to every consumer that
+// has no participant id to fall back on.
+func createPlayersFromRecords(records [][]string, withZekkenName, requireDojo, requireName bool) ([]Player, error) {
 	players := make([]Player, 0, len(records))
 	var errors []string
 	seenNames := make(map[string]int)
 	c := cases.Title(language.Und, cases.NoLower)
 
 	for i, line := range records {
-		allEmpty := true
-		for _, f := range line {
-			if strings.TrimSpace(f) != "" {
-				allEmpty = false
-				break
-			}
-		}
-		if allEmpty {
+		if IsBlankRecord(line) {
 			continue
 		}
 		for j := range line {
 			line[j] = strings.TrimSpace(line[j])
+		}
+		if requireName && line[0] == "" {
+			errors = append(errors, rowError(i, line, "name"))
+			continue
 		}
 
 		player := Player{
@@ -148,12 +171,12 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDo
 				player.DisplayName = SanitizeName(line[0])
 				player.Dojo = line[1]
 				if requireDojo && player.Dojo == "" {
-					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					errors = append(errors, rowError(i, line, "dojo"))
 					continue
 				}
 			} else {
 				if requireDojo && line[2] == "" {
-					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					errors = append(errors, rowError(i, line, "dojo"))
 					continue
 				}
 				player.DisplayName = line[1]
@@ -197,7 +220,7 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDo
 			// COLUMN at all (len(line) < 2) used to default to the literal
 			// "NA" while an EMPTY dojo COLUMN (line[1] == "") was left
 			// BLANK -- so a legacy, one-column roster (no comma anywhere)
-			// sailed straight past ValidateNoBlankDojo, since "NA" reads as
+			// sailed straight past ValidateNoBlankIdentity, since "NA" reads as
 			// a real, non-blank dojo, and drew as one giant "NA" dojo
 			// instead of being refused the way "Name," (an EXPLICIT blank)
 			// already was. Both spellings of "no dojo here" now yield the
@@ -208,13 +231,13 @@ func CreatePlayersFromRecords(records [][]string, withZekkenName bool, requireDo
 			// identically instead of only one of them.
 			if len(line) < 2 {
 				if requireDojo {
-					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					errors = append(errors, rowError(i, line, "dojo"))
 					continue
 				}
 			} else {
 				player.Dojo = line[1]
 				if requireDojo && player.Dojo == "" {
-					errors = append(errors, fmt.Sprintf("entry %d: missing dojo", i+1))
+					errors = append(errors, rowError(i, line, "dojo"))
 					continue
 				}
 			}

@@ -956,7 +956,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// seeds keep their ranks; sparse ranks are handled by the seeding pass.
 	seeds = dropSeedAssignments(fullRoster, seeds, excludedByCheckIn)
 
-	// Blank-dojo pre-flight (bc-drwx item 8). helper.ValidateNoBlankDojo used
+	// Blank-dojo pre-flight (bc-drwx item 8). helper.ValidateNoBlankIdentity used
 	// to be reachable only through the pool distributor (generatePools ->
 	// BuildPoolPhaseTreeAware*), so a standalone playoffs or Swiss
 	// competition over a legacy blank-dojo roster drew silently: neither
@@ -967,7 +967,7 @@ func (e *Engine) runDrawPipeline(id string) error {
 	// call to the same function (buildPoolPhaseTreeAwareCore) becomes the
 	// assert its doc comment always claimed it was for every caller that
 	// reaches it through here.
-	if err := helper.ValidateNoBlankDojo(players); err != nil {
+	if err := helper.ValidateNoBlankIdentity(players); err != nil {
 		return validationErrorf("competition %s cannot generate a draw: %s", id, err.Error())
 	}
 

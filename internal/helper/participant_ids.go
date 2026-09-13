@@ -148,7 +148,7 @@ func PoolsMissingParticipantIDsMessage(pools []Pool) string {
 // 1c: refuses to draw while any player in players has an empty id. Returns
 // nil when every row already has one.
 //
-// Mirrors ValidateNoBlankDojo's shape and calling convention (both are
+// Mirrors ValidateNoBlankIdentity's shape and calling convention (both are
 // roster pre-flights the engine's runDrawPipeline runs ahead of the format
 // switch, so every format -- pools, playoffs, league, Swiss -- is covered by
 // one check rather than by the pool distributor alone). Unlike blank dojo,

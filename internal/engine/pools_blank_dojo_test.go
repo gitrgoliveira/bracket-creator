@@ -83,7 +83,7 @@ func writeBlankDojoRosterCSV(t *testing.T, dir, compID string) {
 // exercises for mixed drew SILENTLY instead of refusing -- neither
 // generatePlayoffs (helper.StandardSeeding has no dojo opinion) nor
 // GenerateSwissRound goes anywhere near the distributor. runDrawPipeline's
-// own pre-flight (helper.ValidateNoBlankDojo, called once ahead of the
+// own pre-flight (helper.ValidateNoBlankIdentity, called once ahead of the
 // format switch) now covers every format.
 func TestGenerateDraw_RefusesBlankDojoRoster_Playoffs(t *testing.T) {
 	eng, store, dir := setupTestEngine(t)
@@ -149,7 +149,7 @@ func TestGenerateDraw_RefusesBlankDojoRoster_Swiss(t *testing.T) {
 // dojo column to the literal string "NA" while leaving an EXPLICIT blank
 // column ("Name,") as "". That asymmetry meant a legacy, one-column roster
 // (the shape a very old export, or a hand-typed name-only list, produces)
-// sailed straight past ValidateNoBlankDojo -- "NA" is non-blank -- and drew
+// sailed straight past ValidateNoBlankIdentity -- "NA" is non-blank -- and drew
 // as one giant "NA" dojo, spreading every competitor as if they shared a
 // single real dojo, while the exact same missing-dojo intent spelled with a
 // trailing comma was correctly refused. The fix makes a missing column
@@ -194,4 +194,40 @@ func TestGenerateDraw_RefusesOneColumnLegacyRoster(t *testing.T) {
 	pools, perr := store.LoadPools(compID)
 	require.NoError(t, perr)
 	assert.Empty(t, pools, "nothing may be persisted for a refused draw")
+}
+
+// TestGenerateDraw_RefusesBlankNameRoster mirrors
+// TestGenerateDraw_RefusesBlankDojoRoster for the analogous blank-name
+// check: a competition whose participants.csv holds a blank-name row must
+// have its draw refused as a *engine.ValidationError (-> HTTP 400 at the
+// generate-draw handler), naming the offending row by position, since the
+// name itself is what is blank. Written DIRECTLY to participants.csv for the
+// same reason writeBlankDojoRosterCSV is: the write floor (state.ErrBlankName)
+// cannot protect a file that predates it or was hand-edited, and loading
+// stays tolerant on purpose so the operator can repair the row.
+func TestGenerateDraw_RefusesBlankNameRoster(t *testing.T) {
+	eng, store, dir := setupTestEngine(t)
+	compID := "blank-name-roster"
+
+	createTestCompetition(t, store, compID, state.CompFormatMixed, 4, func(c *state.Competition) {
+		c.Courts = []string{"A"}
+	})
+	writeRawParticipantsCSV(t, dir, compID, "Alice,DojoA\n"+
+		",DojoD\n"+
+		"Carol,DojoC\n"+
+		"Dave,DojoA\n"+
+		"Bob,DojoB\n"+
+		"Erin,DojoB\n"+
+		"Frank,DojoC\n"+
+		"Grace,DojoA\n")
+
+	err := eng.GenerateDraw(compID)
+	require.Error(t, err, "a blank-name roster must be refused, not silently drawn")
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve, "must surface as a *engine.ValidationError (-> HTTP 400 at POST /competitions/:id/generate-draw)")
+	assert.Contains(t, ve.Error(), "row 2", "the error must name the offending row by position, since the name itself is blank")
+
+	comp, lerr := store.LoadCompetition(compID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.CompStatusSetup, comp.Status, "a rejected draw must not transition the competition")
 }

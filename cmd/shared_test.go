@@ -60,6 +60,51 @@ func TestProcessEntries_DuplicateError(t *testing.T) {
 	assert.Contains(t, err.Error(), "duplicate participant entries found")
 }
 
+func TestProcessEntries_BlankName(t *testing.T) {
+	tests := []struct {
+		name        string
+		entries     []string
+		errContains string
+	}{
+		{
+			name:        "blank name is rejected",
+			entries:     []string{"John Doe, Dojo A", ", Dojo B"},
+			errContains: "entry 2: missing name",
+		},
+		{
+			name:    "normal list still passes",
+			entries: []string{"John Doe, Dojo A", "Jane Smith, Dojo B"},
+		},
+		{
+			// bc-pnum made the dojo column required on this path too
+			// (CreatePlayersFromRecords requireDojo=true), so a name-only
+			// entry is refused, not read as a placeholder dojo.
+			name:        "name-only entry is rejected for its missing dojo",
+			entries:     []string{"Bob Brown"},
+			errContains: "entry 1: missing dojo",
+		},
+		{
+			// A whitespace-only entry is dropped as a blank line before
+			// validation ever sees it, not reported as a missing name.
+			name:    "whitespace-only entry is skipped",
+			entries: []string{"John Doe, Dojo A", "   "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			players, err := processEntries(tt.entries, true, false)
+			if tt.errContains != "" {
+				require.Error(t, err)
+				assert.Nil(t, players)
+				assert.Contains(t, err.Error(), tt.errContains)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 // TestResolveNumberPrefix pins bc-pnum A10: the ONE derivation shared by
 // create-pools and create-playoffs, which used to each carry a byte-identical
 // unvalidated copy -- an explicit --number-prefix was used verbatim, so

@@ -1652,3 +1652,30 @@ func TestCheckIn_BlankDojoElsewhereInRoster_Returns400(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "Charlie")
 	})
 }
+
+// TestCheckIn_BlankNameElsewhereInRoster_Returns400 mirrors
+// TestCheckIn_BlankDojoElsewhereInRoster_Returns400 for the analogous
+// ErrBlankName floor: a pre-existing blank-name row belonging to a DIFFERENT
+// participant must turn a check-in of an otherwise-fine participant into a
+// 400 naming the offending row, not an opaque 500.
+func TestCheckIn_BlankNameElsewhereInRoster_Returns400(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	compID := "checkin-blank-name-put"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "Checkin Blank Name PUT", Status: state.CompStatusSetup,
+	}))
+	// Alice is a perfectly fine row; the second row carries a blank name.
+	// Both carry a real id so Alice remains addressable under id-only
+	// resolution (bc-pnum), exactly as the blank-dojo sibling does.
+	aliceID, blankID := helper.NewUUID4(), helper.NewUUID4()
+	writeLegacyRosterCSV(t, tempDir, compID, aliceID+",Alice,DojoA\n"+blankID+",,DojoC\n")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/participants/"+aliceID+"/checkin", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"a pre-existing blank-name row elsewhere in the roster must 400, not 500")
+	assert.Contains(t, w.Body.String(), "DojoC",
+		"the error must name the offending row by its dojo, since the name itself is blank")
+}

@@ -22,9 +22,9 @@ docker run -p 8080:8080 -v "$PWD/tournament-data:/tournament-data" \
 
 The app is available at `http://localhost:8080`.
 
-The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder: if the folder does not exist, Docker creates it owned by root, and if you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
+The container runs as a non-root user (UID 65534). On Linux hosts, create the folder and make it writable by that UID before the first run: `mkdir -p tournament-data && sudo chown 65534 tournament-data`. Without the `chown`, the container cannot write to the folder. If the folder does not exist, Docker creates it owned by root. If you created it with `mkdir`, it is owned by your login user, which is a different UID. Docker Desktop on macOS and Windows handles the permissions automatically.
 
-See the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
+Refer to the [hosting guide](hosting.md) for production deployments, and [operating modes](../organisers/operating-modes.md) for access control.
 
 ### Docker from source
 
@@ -57,7 +57,7 @@ brew trust gitrgoliveira/tap
 brew install bracket-creator
 ```
 
-`brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source, so it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
+`brew trust` marks the tap as trusted, which Homebrew requires before installing from a third-party tap. Update later with `brew upgrade bracket-creator`. The formula (in the [gitrgoliveira/homebrew-tap](https://github.com/gitrgoliveira/homebrew-tap) repository) builds from source. Building it needs a C toolchain (the Xcode Command Line Tools on macOS or `build-essential` on Linux) and network access for Go module downloads.
 
 The single binary bundles every subcommand, including `bracket-creator serve` (web UI) and `bracket-creator mobile-app` (tournament app).
 
@@ -83,11 +83,11 @@ Each release attaches `.deb`, `.rpm`, and `.apk` packages for amd64/x86_64 and a
     apk add --allow-untrusted ./bracket-creator_*_$(apk --print-arch).apk
     ```
 
-    The package is not signed with an Alpine key, hence `--allow-untrusted`.
+    The package is not signed with an Alpine key, so it needs `--allow-untrusted`.
 
 The packages install the binary to `/usr/bin`, plus the man page and bash/zsh/fish shell completions.
 
-There is no hosted `apt`/`dnf`/`apk` repository, so these installs do not receive automatic upgrades; see [Upgrading](#upgrading).
+There is no hosted `apt`/`dnf`/`apk` repository, so these installs do not receive automatic upgrades; refer to [Upgrading](#upgrading).
 
 ## Pre-compiled binaries
 
@@ -108,7 +108,7 @@ rm -f ${TAR_FILE}
 go install github.com/gitrgoliveira/bracket-creator@latest
 ```
 
-`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands, but the embedded web assets are not part of the Go module, so those web UIs render blank. The Excel-generating CLI commands work normally. Use Docker, Homebrew, or a release binary if you need the web UI.
+`go install` compiles from source rather than downloading a prebuilt binary. It builds the full binary, including the `serve` and `mobile-app` subcommands. The `serve` web UI works, because its assets are committed to the module. The `mobile-app` web UI renders blank, because its compiled JavaScript bundle and vendored runtime are build artifacts that are not checked in. The server says so at startup: a log line containing `front-end bundle is missing` means the binary was built without the bundle or its vendored runtime, not that the network is at fault. The Excel-generating CLI commands work normally. Use Docker, Homebrew, or a release binary if you need the tournament app.
 
 ## Build from source
 

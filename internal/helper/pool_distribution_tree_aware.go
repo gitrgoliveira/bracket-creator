@@ -339,15 +339,32 @@ func BuildPoolPhaseFillBracketTreeAware(players []Player, minSize int, numCourts
 // the DRAW itself refuses, at this one shared pre-flight.
 var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must have a dojo")
 
-// ValidateNoBlankDojo is the one pre-flight check shared by
+// ErrBlankNameInDraw is the sentinel identifying a draw refused because the
+// roster contains at least one player with an empty Name. Match it with
+// errors.Is; the returned error names the offending row by POSITION rather
+// than by name (the name is what's blank), and, like ErrBlankDojoInDraw, is
+// a distinct sentinel from state.ErrBlankName (internal/state/participants.go)
+// rather than sharing its value -- see ErrBlankDojoInDraw's doc comment for
+// the shared rationale (why draw vs. load are treated differently, and why a
+// distinct sentinel per package).
+var ErrBlankNameInDraw = errors.New("cannot draw pools: every competitor must have a name")
+
+// ValidateNoBlankIdentity is the one pre-flight check shared by
 // BuildPoolPhaseTreeAware, BuildPoolPhaseTreeAwareWithMode and
 // BuildPoolPhaseFillBracketTreeAware (all three funnel through
 // buildPoolPhaseTreeAwareCore, so this is called exactly once per draw
 // attempt regardless of which entry point the caller used). Returns nil
-// when every player has a non-blank Dojo. Trims before comparing (matching
-// state.ErrBlankDojo's own write-floor check, saveParticipantsNoLock) so a
-// future in-memory producer that hands this a whitespace-only Dojo without
-// going through that floor first cannot slip "   " past this guard too.
+// when every player has a non-blank Name and Dojo. Trims before comparing
+// (matching state.ErrBlankName/state.ErrBlankDojo's own write-floor checks,
+// saveParticipantsNoLock) so a future in-memory producer that hands this a
+// whitespace-only field without going through that floor first cannot slip
+// "   " past this guard too.
+//
+// Walks the roster once: the name check runs first for each row and returns
+// at once with ErrBlankNameInDraw (a blank name has no name to report, so
+// identifying every offending row by name, the way the dojo check does, is
+// not available here); dojo blanks are collected and reported together as
+// ErrBlankDojoInDraw once the walk completes.
 //
 // Exported (bc-drwx item 8) so internal/engine's runDrawPipeline can call it
 // as ONE roster pre-flight covering every competition format, not just the
@@ -361,9 +378,12 @@ var ErrBlankDojoInDraw = errors.New("cannot draw pools: every competitor must ha
 // directly, bypassing the engine's own pre-flight entirely) -- but for the
 // engine's own callers it is now the ASSERT this doc always claimed it was,
 // never the operator-facing refusal: that already fired one layer up.
-func ValidateNoBlankDojo(players []Player) error {
+func ValidateNoBlankIdentity(players []Player) error {
 	var names []string
-	for _, p := range players {
+	for idx, p := range players {
+		if strings.TrimSpace(p.Name) == "" {
+			return fmt.Errorf("%w: row %d", ErrBlankNameInDraw, idx+1)
+		}
 		if strings.TrimSpace(p.Dojo) == "" {
 			names = append(names, p.Name)
 		}
@@ -385,7 +405,7 @@ var ErrDuplicateTeamMemberInDraw = errors.New("cannot draw: a team lists the sam
 
 // ValidateNoDuplicateTeamMembers is the roster pre-flight covering every
 // competition format runDrawPipeline can generate (playoffs, Swiss, pools) --
-// engine.StartCompetition calls it beside ValidateNoBlankDojo, ahead of the
+// engine.StartCompetition calls it beside ValidateNoBlankIdentity, ahead of the
 // format switch, so no format-specific path has to carry its own copy of
 // this check.
 //
@@ -439,7 +459,7 @@ func ValidateNoDuplicateTeamMembers(players []Player, isTeam bool) error {
 // exercised before this was added), distributes the unseeded in one pass
 // against the mode's own knockout skeleton, and reorders for courts.
 func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes []int, numCourts int, poolWinners int, mode qualifierMode) ([]Pool, int, error) {
-	// FIX 1 (bc-dojo-least-conflicted-pool): refuse a blank-dojo roster up
+	// FIX 1 (bc-dojo-least-conflicted-pool): refuse a blank-name or blank-dojo roster up
 	// front, before any seed/pool arithmetic runs, rather than let one
 	// silently corrupt the tree-aware capacity accounting below. See
 	// ErrBlankDojoInDraw's own doc comment for the two mechanisms this closes.
@@ -447,7 +467,7 @@ func buildPoolPhaseTreeAwareCore(players []Player, numPools int, baseTargetSizes
 	// own runDrawPipeline pre-flight (bc-drwx item 8) for every caller that
 	// reaches this through the engine; still the real, operator-facing
 	// refusal for a caller (CLI, test) that reaches this function directly.
-	if err := ValidateNoBlankDojo(players); err != nil {
+	if err := ValidateNoBlankIdentity(players); err != nil {
 		return nil, 0, err
 	}
 
@@ -705,7 +725,7 @@ func earliestPairing(a, b []int) int {
 // accumulate into one footprint entry rather than two half-sized ones.
 //
 // No blank-dojo guard (bc-drwx item 11): every caller of this function is
-// reached only after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo
+// reached only after buildPoolPhaseTreeAwareCore's ValidateNoBlankIdentity
 // pre-flight has already refused the whole roster if any player's Dojo is
 // blank, so a blank entry here is unreachable, not merely rare.
 func dojoFootprintOptimum(pools []Pool, extra []Player, numPools int, ids dojoIDCache) func(id int) int {
@@ -1802,7 +1822,7 @@ func leastConflictedPoolByID(pools []Pool, targetSizes []int, id int, counts [][
 // (seed.go).
 //
 // No `dojo == ""` guard (bc-drwx item 11): every caller is reached only
-// after buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has
+// after buildPoolPhaseTreeAwareCore's ValidateNoBlankIdentity pre-flight has
 // already refused a roster with any blank dojo, so a blank dojo here is
 // unreachable -- see ErrBlankDojoInDraw's own doc comment.
 func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, id int, qualifierSlots [][]int, counts [][]int, dojoPoolIndicesBuf *[]int) int {
@@ -1867,7 +1887,7 @@ func pickDojoTreeAwarePool(pools []Pool, targetSizes []int, root *dojoNode, id i
 // -- around the seed-occupancy recording loop, the per-player cap check,
 // and the live-placement recordDojoOccupancy call -- one per p.Dojo/pl.Dojo
 // read below). Every caller is reached only after
-// buildPoolPhaseTreeAwareCore's ValidateNoBlankDojo pre-flight has already
+// buildPoolPhaseTreeAwareCore's ValidateNoBlankIdentity pre-flight has already
 // refused a roster with any blank dojo, so a blank dojo anywhere in `pools`
 // or `unseeded` is unreachable -- see ErrBlankDojoInDraw's own doc comment.
 //

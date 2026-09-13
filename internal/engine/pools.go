@@ -132,8 +132,9 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 			// generate-draw handler), matching the fill-bracket branch
 			// above. Two of the three errors this call can return are
 			// operator-actionable roster/config problems: formation
-			// (poolTargetSizes) and the blank-dojo pre-flight
-			// (helper.ErrBlankDojoInDraw, bc-dojo-least-conflicted-pool FIX 1).
+			// (poolTargetSizes) and the blank-name/blank-dojo pre-flight
+			// (helper.ErrBlankNameInDraw / helper.ErrBlankDojoInDraw,
+			// bc-dojo-least-conflicted-pool FIX 1).
 			//
 			// The third is NOT, and this comment used to say it was. The
 			// "no pool has room" placement guard (assignUnseededByDojoTree)

@@ -17,14 +17,13 @@ You are an Excel generation specialist for the bracket-creator project. Your exp
 - `internal/helper/excel_styles.go`: Cell formatting and styles
 - `internal/helper/tree.go`: Binary tree construction for brackets
 - `internal/excel/client.go`: Excel file lifecycle (open/save)
-- `internal/excel/sheet_manager.go`: Sheet operations
-- `internal/excel/styles.go`: Style management
+- `internal/excel/template.go`: From-scratch workbook construction (`NewFileFromScratch`)
 
 ## Constraints
-- DO NOT modify domain types in `internal/domain`: they are clean models without Excel coupling
+- DO NOT add Excel coordinates or `excelize` imports to `internal/domain` types: they are clean models without Excel coupling
 - DO NOT break formula references between sheets: always verify cross-sheet links
 - DO NOT change cell coordinate patterns without updating all dependent formulas
-- ONLY make changes that maintain the dual-column pool layout (odd pools left, even pools right)
+- ONLY make changes that keep the 8-columns-per-court layout, with pools contiguous within their shiaijo (`PoolsByCourt`)
 
 ## Approach
 1. Read the relevant helper/excel files to understand current cell layout
@@ -35,7 +34,7 @@ You are an Excel generation specialist for the bracket-creator project. Your exp
 
 ## Important Context
 - Helper types (Player, Pool, Match) carry `sheetName` and `cell` fields for formula linking
-- `PrintPoolMatches` uses a dual-column layout: odd-indexed pools on the left (col 1), even on the right (col 9)
+- `PrintPoolMatches` lays pools out by court via `PoolsByCourt`: 8 columns per court, pools contiguous within their shiaijo
 - `PrintLeafNodes` in excel_tree.go writes knockout bracket formulas
 - Tree nodes link to pool winners via Excel formulas like `='Pool Matches'!D5`
 - `MatchWinner` tracks which cell holds each match result for downstream formula references

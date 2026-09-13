@@ -29,7 +29,7 @@ Before implementing features or making architectural decisions, read the project
     3. If tied: draw in pools, play-off in elimination matches.
 - **Team Elimination Labels:** In team elimination match summaries, "V" is labeled as **"IV"** (Individual Victories) and "P" as **"PW"** (Points Won).
 - **Match Colors:** On tree/knockout brackets, the player on the top is Red (Aka) and the bottom is White (Shiro).
-- **Tie-marking Rule:** A match is only considered a tie (hikiwake) if an **'X'** is entered in the "vs" column. This column is unlocked on all sheets.
+- **Tie-marking Rule:** A match is a tie (hikiwake) when **'X'** (or 'x') is entered in the "vs" column, or when both sides' totals are equal and at least one score cell is filled (`internal/helper/excel.go`). The "vs" column is unlocked on all sheets.
 - **Automated Pool Ranking:** Pool standings are calculated using weighted composite formulas in Excel/Google Sheets. The "Rank" column in the Results table is the source of truth for the "Ranking" section, which uses reactive `INDEX/MATCH` lookups. Operators can manually override rankings by typing over the formula in the "Rank" column.
 
 ## Developer Workflow
@@ -39,7 +39,7 @@ Before implementing features or making architectural decisions, read the project
 - **Run Web UI:** `make run` (starts on `localhost:8080`). Use `PORT=8081 make run` to override.
 
 ## Common Pitfalls
-- **Case Sensitivity:** Seeding names must match the participant list *exactly*.
+- **Seed name matching:** Seed names are title-cased (`cases.Title`, `NoLower`) and then resolved by participant id, else by exact (name, dojo), via `domain.RosterIndex.LookupSeed`. Accents and non-initial capitals must still match.
 - **Team Matches:** `team-matches=0` is the default for individual tournaments.
 - **Shiaijo (Courts):** `--courts` defaults to 2. It controls both pool distribution and tree labeling.
 - **The docs walk-through is pinned to the draw:** `docs/assets/javascripts/pool-draw-animation.js` replays the pool descent in JS and carries its example rosters' drawn pools as a fixture in the same file, which `TestPoolDrawDocWalkthroughMatchesTheDraw` re-runs through the real distributor. Change the draw and that test goes red pointing at a docs file; update the fixture and re-check the JS in a browser.

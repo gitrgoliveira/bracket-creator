@@ -29,6 +29,33 @@ describe('AdminParticipants ordering card (bc-prow)', () => {
     expect(queryByText('Check-in & Seeding')).toBeNull();
   });
 
+  it('lists competitors in number order once the draw has numbered them, unnumbered last', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition({
+      status: 'draw-ready',
+      players: [
+        { id: 'p-9', name: 'Nine', dojo: 'D', number: 'K9' },
+        { id: 'p-x', name: 'Left out', dojo: 'D' },
+        { id: 'p-10', name: 'Ten', dojo: 'D', number: 'K10' },
+        { id: 'p-1', name: 'One', dojo: 'D', number: 'K1' },
+      ],
+    }));
+
+    const names = [...container.querySelectorAll('.seed-row__name')].map((n) => n.textContent.replace(/^K\d+/, ''));
+    // Integer order, not string order ("K10" would sort before "K9" as text).
+    expect(names).toEqual(['One', 'Nine', 'Ten', 'Left out']);
+  });
+
+  it('keeps roster order before the draw, when no competitor has a number', async () => {
+    const { container } = await mountParticipants(makeParticipantsCompetition({
+      players: [
+        { id: 'p-2', name: 'Second', dojo: 'D' },
+        { id: 'p-1', name: 'First', dojo: 'D' },
+      ],
+    }));
+
+    expect([...container.querySelectorAll('.seed-row__name')].map((n) => n.textContent)).toEqual(['Second', 'First']);
+  });
+
   it('lays a row out as name unit then dojo + id unit inside one line', async () => {
     const { container } = await mountParticipants(makeParticipantsCompetition({
       players: [{ id: 'abcdef1234567890', name: 'Alice', dojo: 'Dojo Alice', number: 'K1', source: 'manual' }],

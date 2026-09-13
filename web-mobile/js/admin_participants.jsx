@@ -443,6 +443,14 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     let out = players;
     if (sourceFilter) out = out.filter(p => p.source === sourceFilter);
     if (q) out = out.filter(p => playerSearchTargets.get(window.checkinPid(p))?.includes(q));
+    // Once the draw has numbered the competitors the list reads in number
+    // order (operator ruling, bc-prow); a competitor the draw left out (no
+    // number) sorts after the numbered ones, in roster order. Numbers are
+    // prefix + integer ("K12"), so compare the integer, not the string.
+    if (out.some(p => p.number)) {
+      const key = (p) => { const m = /(\d+)$/.exec(p.number || ""); return m ? Number(m[1]) : Infinity; };
+      out = [...out].sort((a, b) => key(a) - key(b));
+    }
     return out;
   }, [players, sourceFilter, trimmedSearch, playerSearchTargets]);
   // THE predicate for "is this seeding fit to draw with", shared with the

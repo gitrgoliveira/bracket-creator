@@ -177,7 +177,7 @@ Both notices are advisory, not blocking: the competition keeps running, and noth
 
 ![Participant setup panels](../../screenshots/mobile-participant-setup.png)
 
-The **Ordering & seeding** panel shows the working roster, one competitor per row: the competitor number once a draw exists, the name and the dojo. From here you can:
+The **Ordering & seeding** panel shows the working roster, one competitor per row: the competitor number once a draw exists, the name and the dojo. Before the draw the rows are in roster order, which you can change; once the draw has numbered the competitors the rows are listed in number order, with anyone the draw left out at the end. From here you can:
 
 - Drag rows to assign seeds, or type a rank number directly.
 - Click **Shuffle unseeded** to randomise unranked positions.

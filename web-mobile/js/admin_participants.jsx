@@ -287,13 +287,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [showAllPreview, setShowAllPreview] = useStateA(false);
   const [seedImportResult, setSeedImportResult] = useStateA(null);
   const [importSummary, setImportSummary] = useStateA(null);
-  // Initialise from the SAME generator that rosterDirty diffs against
-  // (generateRosterText), not the old inline 3-col-only-when-displayName
-  // logic. Otherwise a zekken competition whose players lack a displayName
-  // starts with "Name, Dojo" while rosterDirty computes "Name, LASTNAME,
-  // Dojo" → a false "Unsaved changes" flash on mount before the
-  // c.players/withZekkenName effect re-syncs text.
-  const [text, setText] = useStateA(() => generateRosterText(c.players || [], withZekken));
+  // The paste box is an INPUT for a new or replacement list, not a mirror of
+  // the saved roster (operator ruling, bc-prow): it starts empty, clears
+  // after a successful Apply, and Apply over an existing roster asks before
+  // replacing it. The saved roster is shown by the Ordering & seeding card.
+  const [text, setText] = useStateA("");
   const [dragOver, setDragOver] = useStateA(false);
   const fileRef = useRefA(null);
   const seedFileRef = useRefA(null);
@@ -305,7 +303,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   // React 18 but still a real teardown-race signal.
   const mountedRef = useRefA(true);
   useEffectA(() => () => { mountedRef.current = false; }, []);
-  const textFocusRef = useRefA(false);
 
   const generateText = (playersList) => generateRosterText(playersList, withZekken);
 
@@ -318,12 +315,6 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
     const sample = window.makeCompetitors(count, c.kind, c.id, 0);
     setText(generateText(sample));
   };
-
-  useEffectA(() => {
-    if (!textFocusRef.current) {
-      setText(generateText(c.players || []));
-    }
-  }, [c.players, c.withZekkenName]);
 
   const handleSeedFile = (file) => {
     if (!file) return;
@@ -432,14 +423,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
   const [searchQuery, setSearchQuery] = useStateA("");
   const trimmedSearch = useMemoA(() => searchQuery.trim(), [searchQuery]);
   const lines = useMemoA(() => text.split("\n").filter((l) => l.trim()), [text]);
-  // Unsaved-roster detection: the textarea has edits not yet committed via
-  // "Apply changes". Compare against the saved roster's canonical rendering,
-  // ignoring blank-line / trailing-whitespace noise so re-typing the same
-  // roster doesn't read as dirty. Mirrors the Settings unsaved indicator.
-  const rosterDirty = useMemoA(() => {
-    const norm = (s) => s.split("\n").map((l) => l.trim()).filter(Boolean).join("\n");
-    return norm(text) !== norm(generateText(c.players || []));
-  }, [text, c.players, c.withZekkenName]);
+  // Anything in the box is a list not yet applied (the box never mirrors the
+  // saved roster), so the unsaved indicator is simply "the box has lines".
+  const rosterDirty = lines.length > 0;
   const players = useMemoA(() => c.players || [], [c.players]);
   // First-run: with no participants yet there is nothing to seed or check in,
   // so the seeding panel is premature. Collapse it and let the roster-input
@@ -700,6 +686,20 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       return;
     }
 
+    // Apply REPLACES the roster: anyone not in the box is dropped. With the
+    // box no longer mirroring the saved list, a second Apply is always an
+    // overwrite of a list the operator cannot see in the box, so ask first.
+    if (players.length > 0) {
+      const label = c.kind === "team" ? "teams" : "participants";
+      const ok = await window.confirmDialog({
+        title: "Replace the current list?",
+        message: `This replaces the current ${players.length} ${label} with the ${np.length} in the box. Anyone not in the new list is removed; names already on the list keep their id and seed.`,
+        confirmLabel: "Replace list",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+
     await doSave(np, added, updatedCount);
   };
 
@@ -733,6 +733,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
       }
       showToast(msg);
       setImportSummary(null);
+      setText("");
       const hasWarnings = Array.isArray(warnings) && warnings.length > 0;
       setNearDupPending(hasWarnings ? { pairs: warnings } : null);
       // Navigate to the next action after a clean apply, rather than back to
@@ -1100,7 +1101,9 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               {rosterDirty && !isDrawReady && <span style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 600 }}>● Unsaved changes</span>}
               <button className="btn btn--sm" type="button" onClick={pasteFromExcel} disabled={isDrawReady} title={isDrawReady ? "Discard the draw to edit participants" : "Reads clipboard and converts tab-separated values (e.g. from Excel) to CSV"}>Paste clipboard</button>
-              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady} title={isDrawReady ? "Discard the draw to apply roster changes" : undefined}>Apply changes</button>
+              {/* An empty box must not be applicable: Apply replaces the roster,
+                  so applying nothing would wipe it. */}
+              <button className="btn btn--sm btn--primary" type="button" onClick={apply} disabled={!!seedProblem || isDrawReady || lines.length === 0} title={isDrawReady ? "Discard the draw to apply roster changes" : lines.length === 0 ? "Paste or import a list first" : undefined}>Apply changes</button>
             </div>
           </div>
 
@@ -1124,10 +1127,11 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
             </div>
           </div>
 
-          {/* Sample roster: only offered while the box is empty so it can't
-              clobber an in-progress list. Fills the textarea for review; the
+          {/* Sample roster: only offered while there is no roster and the box
+              is empty, so it can't clobber an in-progress list or read "No
+              list yet" over a saved one. Fills the textarea for review; the
               operator still clicks "Apply changes" to save. */}
-          {!isDrawReady && lines.length === 0 && (
+          {!isDrawReady && emptyRoster && lines.length === 0 && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
               <span className="field__hint" style={{ margin: 0 }}>
                 No list yet? Fill with a sample {c.kind === "team" ? "team " : ""}roster:
@@ -1167,12 +1171,10 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
           <LinedTextarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onFocus={() => { textFocusRef.current = true; }}
-            onBlur={() => { textFocusRef.current = false; }}
             rows={14}
             placeholder={c.kind === "team" ? "Tora A, Tora Dojo London" : c.engi ? "Akira Tanaka - Yuki Tanaka, Gyokusen" : c.withZekkenName ? "Akira Tanaka, TANAKA, Gyokusen" : "Akira Tanaka, Gyokusen"}
           />
-          <div className="field__hint" style={{ marginTop: 6 }}>Click "Apply" to save the participant list. Existing seeds are preserved by name match (case-insensitive), so you can reorder rows freely.</div>
+          <div className="field__hint" style={{ marginTop: 6 }}>"Apply changes" saves this list as the roster and clears the box. Applying over an existing roster replaces it; names already on the roster keep their id and seed (case-insensitive match).</div>
           {lines.length > 0 && (() => {
             const previewLimit = showAllPreview ? lines.length : 10;
             const preview = window.parseParticipantLines(lines.slice(0, previewLimit), withZekken);

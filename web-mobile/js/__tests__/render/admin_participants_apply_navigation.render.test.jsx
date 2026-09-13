@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent } from '@testing-library/react';
 import { installParticipantsHarness, makeParticipantsCompetition, mountParticipants } from './admin_participants_mount_harness.jsx';
 
@@ -11,19 +11,40 @@ import { installParticipantsHarness, makeParticipantsCompetition, mountParticipa
 // this page's own "Go to Scoring" CTA. When the save surfaces near-dup
 // warnings, the operator stays put to review the banner.
 //
+// Since bc-prow the box starts empty and an Apply over an existing roster
+// asks for confirmation first, so each case types a list and accepts the
+// replace dialog (admin_participants_apply_replaces.render.test.jsx pins the
+// dialog itself).
+//
 // Mounted for REAL (not stubbed), same setup as the sibling
 // admin_participants_*.render.test.jsx files. The shared harness lives in
 // admin_participants_mount_harness.jsx.
 
 installParticipantsHarness();
 
-function clickApply(container) {
+const ROSTER = 'Alice, Dojo Alice\nBob, Dojo Bob';
+
+async function typeAndApply(container) {
+  const box = container.querySelector('textarea');
+  expect(box).toBeTruthy();
+  await act(async () => { fireEvent.change(box, { target: { value: ROSTER } }); });
   const btn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === 'Apply changes');
   expect(btn).toBeTruthy();
-  return act(async () => { fireEvent.click(btn); });
+  await act(async () => { fireEvent.click(btn); });
 }
 
 describe('AdminParticipants Apply navigation (bc-pnum operator ruling 1)', () => {
+  let savedConfirm;
+
+  beforeEach(() => {
+    savedConfirm = window.confirmDialog;
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    window.confirmDialog = savedConfirm;
+  });
+
   it('a clean Apply on a setup competition navigates to Overview, not the dashboard', async () => {
     const onSection = vi.fn();
     const onUpdate = vi.fn(async () => []); // no near-dup warnings
@@ -32,7 +53,7 @@ describe('AdminParticipants Apply navigation (bc-pnum operator ruling 1)', () =>
       { onUpdate, onSection },
     );
 
-    await clickApply(container);
+    await typeAndApply(container);
 
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onSection).toHaveBeenCalledWith('overview');
@@ -46,7 +67,7 @@ describe('AdminParticipants Apply navigation (bc-pnum operator ruling 1)', () =>
       { onUpdate, onSection },
     );
 
-    await clickApply(container);
+    await typeAndApply(container);
 
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onSection).toHaveBeenCalledWith('scores');
@@ -60,7 +81,7 @@ describe('AdminParticipants Apply navigation (bc-pnum operator ruling 1)', () =>
       { onUpdate, onSection },
     );
 
-    await clickApply(container);
+    await typeAndApply(container);
 
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onSection).not.toHaveBeenCalled();

@@ -14,8 +14,8 @@ description: 'Write and maintain Go tests for bracket-creator. Use when creating
 ## Test File Setup
 
 ### Package Naming
-- **Domain/internal packages**: Use `_test` suffix for black-box testing (e.g., `package domain_test`)
-- **cmd packages**: Use same package name (e.g., `package cmd`) for access to unexported options structs
+- **`internal/domain`**: Use the `_test` suffix for black-box testing (`package domain_test`)
+- **`internal/helper` and `cmd`**: Use the same package name (`package helper`, `package cmd`) for access to unexported identifiers
 
 ### Imports
 ```go

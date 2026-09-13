@@ -1,7 +1,13 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.3.0 → 1.3.1 (PATCH: terminology wording only)
+Version change: 1.3.1 → 1.3.2 (PATCH: path fix only)
+Modified principles: N/A (no principle text changed)
+Governance: the AI-agent runtime guidance pointer named `.agents/skills/`,
+  which does not exist; skill files live in `.github/skills/`.
+Templates requiring updates: N/A
+
+Prior change (1.3.0 → 1.3.1, PATCH: terminology wording only):
 Modified principles: N/A (no principle text changed)
 Terminology: "playoffs" → "knockout" in Principle I (the CLI verb, now
   `create-knockout`) and Principle VI ("knockout brackets"). The European
@@ -294,6 +300,6 @@ Complexity violations MUST be documented in the plan's Complexity Tracking
 table before the PR is opened.
 
 For AI-agent runtime guidance, refer to `.specify/` templates and skill
-files in `.agents/skills/`.
+files in `.github/skills/`.
 
-**Version**: 1.3.1 | **Ratified**: 2026-03-02 | **Last Amended**: 2026-09-02
+**Version**: 1.3.2 | **Ratified**: 2026-03-02 | **Last Amended**: 2026-09-13

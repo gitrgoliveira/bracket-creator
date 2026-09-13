@@ -13,20 +13,20 @@ A Go CLI tool for generating kendo tournament brackets with pool stages and knoc
 - Business logic is tightly coupled to Excel generation
 - Players, pools, matches carry Excel sheet references for formula outputs
 - Binary tree structures (`internal/helper/tree.go`) build knockout brackets recursively
-- `excel.Client` manages file lifecycle, `excel.SheetManager` handles sheet operations
+- `excel.Client` manages file lifecycle; `excel.NewFileFromScratch` builds the workbook from code
 
 ### Key Packages
 - `cmd/`: Cobra commands with options structs (each has a `run()` method)
 - `internal/domain`: Domain models (Player, Pool, Tournament, Match, Seed)
 - `internal/service`: Business logic orchestration
 - `internal/helper`: **Core logic**: CSV parsing, pool/match generation, tree building, Excel rendering
-- `internal/excel`: Excel file management (Client, SheetManager, StyleManager)
-- `internal/resources`: Embedded files (web UI, Excel templates) injected via `ExecuteWithResources()`
+- `internal/excel`: Excel file lifecycle (`Client`) and from-scratch workbook construction (`NewFileFromScratch`)
+- `internal/resources`: Embedded web assets (`web/`, `web-mobile/`) injected via `ExecuteWithResources()`
 
 ### Seeding System
 - `StandardSeeding()` positions seeded players using `generateBracketOrder()`
 - `ApplySeeds()` handles collisions by **swapping seed values**, not failing
-- Seed validation: case-sensitive exact name matching with uniqueness checks
+- Seed validation: names are title-cased, then resolved by id or exact (name, dojo) via `domain.RosterIndex.LookupSeed`; ranks must be unique
 
 ## Build and Test
 
@@ -72,7 +72,7 @@ make docker/run
 ## Testing Conventions
 
 ### Test Organization
-- **Package naming**: Use `_test` suffix for external tests of domain/internal (e.g., `package domain_test`); same package for cmd tests (e.g., `package cmd`)
+- **Package naming**: `_test` suffix for `internal/domain` (`package domain_test`); same package for `internal/helper` and `cmd` (`package helper`, `package cmd`)
 - **Co-location**: Test files alongside source files (`*_test.go`)
 
 ### Test Patterns
@@ -109,7 +109,7 @@ make docker/run
 - The tree structure (`Node` in tree.go) drives knockout bracket layout
 
 ### Seeding Edge Cases
-- Seed assignments must exactly match participant names (case-sensitive)
+- Seed names are title-cased, then matched by id or exact (name, dojo); accents and non-initial capitals must match
 - Duplicate seed ranks are rejected
 - Empty seed ranks place participants in unseeded pool
 

@@ -35,7 +35,7 @@ Before implementing features or making architectural decisions, read the project
 
 ### Seeding Logic
 - **Knockout (`StandardSeeding`)**: Uses a power-of-2 bracket distribution (e.g., seeds 1 and 2 on opposite halves). Includes displaced seed placement using a furthest-distance heuristic for out-of-range seeds.
-- **Pools (`PoolSeeding`)**: Distributes seeds across pools using an "extremes and middle" balanced priority distribution (e.g., for 12 pools: Pool 1, Pool 12, Pool 6, Pool 7), with cyclic priority for additional seeds.
+- **Pools (tree-aware)**: `placeSeedIndices`, called from `buildPoolPhaseTreeAwareCore`, places seeds so the top seeds land in different halves and quarters of the knockout tree.
 
 ### Pool Scoring Rules
 Rankings within pools are determined by the following criteria:
@@ -70,7 +70,7 @@ Individual encounters between teams are decided by:
 3. If still tied, the match is a draw in pool play, or proceeds to a play-off in elimination rounds.
 
 ### Tie-marking Rule
-A match (individual or sub-match) is ONLY considered a tie if the operator enters an **'X'** (or 'x') in the "vs" column between the players. Equal scores without an 'X' are NOT treated as ties. The "vs" column is unlocked on all sheets to facilitate this.
+A match (individual or sub-match) is a tie when the operator enters **'X'** (or 'x') in the "vs" column, or when both sides' totals are equal and at least one score cell in the row is filled. The "vs" column is unlocked on all sheets.
 
 ### Match Colors
 On tree and knockout brackets, the player/team on the top of the bracket is always assigned the color **Red (Aka)** and the player/team on the bottom is assigned **White (Shiro)**.
@@ -125,7 +125,7 @@ On tree and knockout brackets, the player/team on the top of the bracket is alwa
 
 ## PR Workflow
 
-- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section: `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes mp-xxxx` bead reference.
+- **Build the PR body from the repo template.** When creating a PR, populate the description from `.github/pull_request_template.md` and fill every section: `gh pr create --body-file <filled-template>` (the bare `gh pr create` / `--fill` does NOT apply the template). Set the `Closes bc-xxxx` bead reference (`mp-xxxx` for older beads).
 - **Embed screenshots via the `pr-assets` side branch, not gists** (`gh gist create` rejects binary files). Push the PNG to the `pr-assets` branch (which never merges to main) by PIPING the base64 in — it must never pass through argv, or any shot over ~96 KiB dies with `Argument list too long` (Linux caps a single argument at 128 KiB, and base64 inflates by 4/3):
   ```bash
   base64 < shot.png | tr -d '\n' \
@@ -133,7 +133,7 @@ On tree and knockout brackets, the player/team on the top of the bracket is alwa
     | gh api --method PUT /repos/gitrgoliveira/bracket-creator/contents/pr-assets/<pr>/shot.png \
         --input - --jq '.content.path'
   ```
-  Then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)` and `curl` that raw URL back to confirm it resolves, rather than trusting the 201. If no browser captured a shot, state what wasn't captured plus a textual geometry/DOM attestation: never silently skip the section.
+  Then embed `![](https://raw.githubusercontent.com/gitrgoliveira/bracket-creator/pr-assets/pr-assets/<pr>/shot.png)` and `curl` that raw URL back to confirm it resolves, rather than trusting the 201. A real browser screenshot is required for any UI change; there is no textual, DOM, or geometry substitute.
 - **Test plan is a gate, not a formality.** Before requesting review on a PR, check off EVERY item in the PR description's test plan. Do not mark a PR ready while any checkbox is unverified. Manual/browser steps are not optional: execute them, then check them.
 - **Keep the issue (bead) `in_progress` until the PR actually merges.** A green review is not a merge. Only close the issue after the merge lands, with a reason referencing the merge commit/PR.
 - **After a merge, run full cleanup**: close the issue → fast-forward `main` → remove the worktree → delete the local and remote branch → prune.

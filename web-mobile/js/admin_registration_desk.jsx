@@ -15,7 +15,11 @@
 // Backend facts this relies on (see internal/mobileapp/handlers_participants.go):
 //   - check-in (PUT/DELETE/bulk) is NOT status-gated and NOT gated on
 //     checkInEnabled: anyone can be checked in for any competition at any time
-//     (latecomers included).
+//     (latecomers included). The desk itself is scoped to competitions whose
+//     "Check-in tracking" setting is on (rdCheckInComps, operator ruling
+//     bc-prow: check-in exists only under that setting and this desk is its
+//     only UI), so a competition with the setting off never appears in the
+//     rail, the all-competitions roster, or an "also in" chip.
 //   - walk-up add (POST single) needs the elevated password and only works
 //     while a competition is in "setup" status.
 //
@@ -141,6 +145,14 @@ function rdPlayerTag(comp, p) {
 // Build the cross-competition people index from the competitions array.
 // Map<personKey, { key, name, dojo, displayName, entries: [{comp, player}] }>
 // entries preserve competition order.
+// The desk works over competitions with "Check-in tracking" on and nothing
+// else (operator ruling bc-prow). Applied at both places `comps` is set, so
+// the rail, the all-competitions roster, the people index behind the "also
+// in" chips and the walk-up target all see the same scoped list.
+function rdCheckInComps(list) {
+  return (list || []).filter((c) => c && c.checkInEnabled);
+}
+
 function rdBuildPeopleIndex(comps) {
   const index = new Map();
   (comps || []).forEach((comp) => {
@@ -591,7 +603,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
   // possibly-stale parent data. The desk's own SSE subscription (below) keeps
   // it fresh; tRef tracks the latest tournament only so refresh()'s onUpdate
   // merge starts from the newest snapshot.
-  const [comps, setComps] = useStateRD(() => tournament.competitions || []);
+  const [comps, setComps] = useStateRD(() => rdCheckInComps(tournament.competitions));
   const tRef = useRefRD(tournament);
   useEffectRD(() => { tRef.current = tournament; }, [tournament]);
   // Number of check-in writes in flight. While > 0 the SSE-driven refresh
@@ -625,7 +637,7 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
       const fresh = await window.API.fetchCompetitions();
       onUpdate({ ...tRef.current, competitions: fresh });
       if (!mountedRef.current) return;
-      setComps(fresh);
+      setComps(rdCheckInComps(fresh));
     } catch (e) {
       console.warn("Registration desk refresh failed", e);
     }
@@ -904,16 +916,16 @@ function AdminRegistrationDeskPage({ tournament, onBack, password, showToast, on
         <div className="page-head">
           <div>
             <h1 className="page-head__title">Registration desk</h1>
-            <div className="page-head__sub">Check competitors in as they arrive, across every competition.</div>
+            <div className="page-head__sub">Check competitors in as they arrive, across every competition with check-in tracking on.</div>
           </div>
         </div>
 
         {noComps ? (
           <div className="empty" style={{ padding: "48px 24px" }}>
             <div className="icon" aria-hidden="true">🥋</div>
-            <h3>No competitions yet</h3>
+            <h3>No competition has check-in tracking on</h3>
             <div style={{ fontSize: 13, color: "var(--ink-2)", maxWidth: 440, margin: "0 auto", lineHeight: 1.5 }}>
-              Add a competition and its participants first, then the registration desk will gather every roster here for check-in.
+              Turn on <strong>Check-in tracking</strong> in a competition's Settings (or when creating it) and the registration desk gathers its roster here for check-in.
             </div>
           </div>
         ) : (

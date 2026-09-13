@@ -105,7 +105,53 @@ describe('AdminRegistrationDeskPage render-smoke', () => {
 
   it('mounts the empty (no competitions) state', async () => {
     const { getByText, unmount } = await mount(makeTournament({ competitions: [] }));
-    expect(getByText('No competitions yet')).toBeTruthy();
+    expect(getByText('No competition has check-in tracking on')).toBeTruthy();
+    unmount();
+  });
+});
+
+// bc-prow operator ruling: check-in exists only for competitions with the
+// "Check-in tracking" setting on, and this desk is its only UI. A competition
+// with the setting off must not be offered anywhere on the desk: not in the
+// rail, not in the all-competitions roster, and not as an "also in" chip on
+// a person who is also entered in a tracked competition.
+describe('AdminRegistrationDeskPage scopes to competitions with check-in tracking on (bc-prow)', () => {
+  it('leaves an untracked competition out of the rail, the roster and the "also in" chips', async () => {
+    const tournament = makeTournament({
+      competitions: [
+        {
+          id: 'men', name: "Men's Individual", kind: 'individual', status: 'draw-ready', checkInEnabled: true,
+          players: [{ id: 'p-men', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+        },
+        {
+          id: 'kata', name: 'Kata Individual', kind: 'individual', status: 'draw-ready', checkInEnabled: false,
+          players: [
+            { id: 'p-kata', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false },
+            { id: 'p-only', name: 'Only In Kata', dojo: 'Mumeishi', checkedIn: false },
+          ],
+        },
+      ],
+    });
+    const { container, queryByText, getAllByText, unmount } = await mount(tournament);
+
+    // The tracked competition's name appears in the rail and as the row's tag.
+    expect(getAllByText("Men's Individual").length).toBeGreaterThan(0);
+    expect(queryByText('Kata Individual')).toBeNull();
+    expect(queryByText('Only In Kata')).toBeNull();
+    expect(container.querySelectorAll('.rd-row').length).toBe(1);
+    unmount();
+  });
+
+  it('shows the empty state when every competition has check-in tracking off', async () => {
+    const tournament = makeTournament({
+      competitions: [{
+        id: 'kata', name: 'Kata Individual', kind: 'individual', status: 'setup', checkInEnabled: false,
+        players: [{ id: 'p-kata', name: 'Kenji Sato', dojo: 'Mumeishi', checkedIn: false }],
+      }],
+    });
+    const { getByText, queryByText, unmount } = await mount(tournament);
+    expect(getByText('No competition has check-in tracking on')).toBeTruthy();
+    expect(queryByText('Kata Individual')).toBeNull();
     unmount();
   });
 });

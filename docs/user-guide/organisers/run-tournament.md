@@ -79,7 +79,7 @@ Click **Announce** from the dashboard to broadcast a short message to every view
 
 ## Registration desk
 
-Open **Registration desk** from the dashboard to access the cross-competition check-in surface for the welcome table. This view lists every competitor across all competitions so a registration helper can mark participants present as they arrive. It complements the per-competition check-in described in [Set up a competition](#set-up-a-competition).
+Open **Registration desk** from the dashboard to access the check-in surface for the welcome table. Check-in exists only for competitions with **Check-in tracking** turned on in their Settings, and this desk is the one place to do it: it lists every competitor across those competitions so a registration helper can mark participants present as they arrive. A competition with the setting off does not appear here, and its Ordering & seeding panel carries no check-in controls either. Refer to the [Check-in workflow](#check-in-workflow).
 
 ## Set up a competition
 

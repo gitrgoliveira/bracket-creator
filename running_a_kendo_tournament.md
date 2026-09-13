@@ -133,7 +133,7 @@ Competitors typically present both their primary and backup shinai for sign-off.
 - Want to review results of completed matches, both their own participants and others.
 
 ### Audience
-- Want an at-a-glance overview of all shiaijo: who is currently fighting, where, and the live score.
+- Want an at-a-glance overview of all shiaijo: who is currently fighting, where, and the current score.
 
 ### Outside Screen
 - A shared display visible from outside shows the progress across all shiaijo: the current match and the next 2 upcoming matches on each court.
@@ -538,7 +538,7 @@ Seen in large individual tournaments. Competitors are paired each round based on
 
 ## Video Streaming
 
-Tournaments with a live video stream need to overlay player names and the current score on the broadcast. The streaming software pulls this information from the app in real time. The receiving system could be OBS (Open Broadcaster Software), vMix, or any other streaming platform that supports external data sources.
+Tournaments streaming video need to overlay player names and the current score on the broadcast. The streaming software pulls this information from the app in real time. The receiving system could be OBS (Open Broadcaster Software), vMix, or any other streaming platform that supports external data sources.
 
 ## References
 

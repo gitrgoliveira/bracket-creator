@@ -39,7 +39,7 @@ The Flag Decision Method (*Hata-keishiki* / 旗形式) is the standard adjudicat
 
 * **Referee Cohort:** The referee panel can consist of **1, 3, or 5 referees** (typically 5 in major championships, comprising one *Shushin* / Head Referee and four *Fukushin* / Sub-Referees).
 * **Procedure:** 
-  1. Two pairs—one wearing red ribbons (*Aka*) and the other white (*Shiro*)—enter the court and bow.
+  1. Two pairs, one wearing red ribbons (*Aka*) and the other white (*Shiro*), enter the court and bow.
   2. On the Shushin's whistle, both pairs perform the designated forms simultaneously.
   3. After completing the forms and marching off the court, the Shushin blows a whistle.
   4. The referees raise either a red or white flag to indicate their choice of the superior pair/color.

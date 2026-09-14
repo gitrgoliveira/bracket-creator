@@ -361,28 +361,26 @@ describe('findNextPoolOnCourt', () => {
     { id: 'Pool B-1', court: 'A', sideA: 'Philippe',sideB: 'Frank', status: 'scheduled', scheduledAt: '09:20' },
     { id: 'Pool B-2', court: 'A', sideA: 'Dave',    sideB: 'Frank', status: 'scheduled', scheduledAt: '09:25' },
   ] };
-  it('returns the next pool on this court with its roster (first-seen order)', () => {
+  it('returns the next pool on this court with its bouts as Shiro/Aka pairs in run order', () => {
     const res = findNextPoolOnCourt(comp, 'Pool A', 'A');
     expect(res).not.toBeNull();
     expect(res.name).toBe('Pool B');
-    // Each name carries its STARTING colour (first bout, scheduled order).
-    // Order is Shiro-first within each match to match the left-dark/right-red
-    // convention on the match board:
-    // B-0 Dave(sideB→shiro) then Philippe(sideA→aka); B-1 …Frank(sideB→shiro).
-    expect(res.players).toEqual([
-      { name: 'Dave', side: 'shiro' },
-      { name: 'Philippe', side: 'aka' },
-      { name: 'Frank', side: 'shiro' },
+    // The strip shows WHICH BOUTS come next, as a group (operator ruling
+    // 2026-09-14, bc-dnst), not a roster: each entry is one match, sideB as
+    // Shiro (left, dark) and sideA as Aka (right, red), in run order.
+    expect(res.bouts).toEqual([
+      { id: 'Pool B-0', shiro: 'Dave', aka: 'Philippe' },
+      { id: 'Pool B-1', shiro: 'Frank', aka: 'Philippe' },
+      { id: 'Pool B-2', shiro: 'Frank', aka: 'Dave' },
     ]);
   });
   it('returns null when there is no next pool on this court', () => {
     expect(findNextPoolOnCourt(comp, 'Pool B', 'A')).toBeNull();
   });
-  it('colours the roster by NUMERIC match order in an untimed pool (not lexicographic id)', () => {
+  it('orders the bouts by NUMERIC match order in an untimed pool (not lexicographic id)', () => {
     // No scheduledAt / queuePosition. Lexicographic id sort puts "Pool B-10"
-    // before "Pool B-2", which would mis-attribute the starting colour. The
-    // numeric tiebreak keeps B-2 first → "EarlyShiro" is seen first as Shiro
-    // (sideB-first ordering so Shiro appears before Aka within each match).
+    // before "Pool B-2", which would list the bouts out of run order. The
+    // numeric tiebreak keeps B-2 first.
     const c = { poolMatches: [
       { id: 'Pool A-0',  court: 'A', sideA: 'X',    sideB: 'Y',          status: 'running' },
       { id: 'Pool B-10', court: 'A', sideA: 'Late', sideB: 'LateShiro',  status: 'scheduled' },
@@ -390,7 +388,8 @@ describe('findNextPoolOnCourt', () => {
     ] };
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
-    expect(res.players[0]).toEqual({ name: 'EarlyShiro', side: 'shiro' });
+    expect(res.bouts.map(b => b.id)).toEqual(['Pool B-2', 'Pool B-10']);
+    expect(res.bouts[0]).toEqual({ id: 'Pool B-2', shiro: 'EarlyShiro', aka: 'Early' });
   });
   it('ignores pools on other courts', () => {
     const c2 = { poolMatches: [
@@ -419,11 +418,10 @@ describe('findNextPoolOnCourt', () => {
     ] };
     expect(findNextPoolOnCourt(c3, 'Pool A', 'A').name).toBe('Pool B');
   });
-  it('roster honours number prefix + zekken displayName via sideLabel, number leading on both sides', () => {
-    // Object sides with number + displayName; withZekkenName true: the roster
-    // must match the rest of the TV surface. The roster is a FLAT list, not a
-    // Shiro/Aka pairing, so the outer-side rule (bc-dnst) does not apply and
-    // the number leads every name whatever the colour.
+  it('bout labels honour the outer-side number + zekken displayName via sideLabel', () => {
+    // Object sides with number + displayName; withZekkenName true: the bouts
+    // must read like the rows above them, Shiro's number BEFORE the name and
+    // Aka's AFTER it (operator ruling 2026-09-14, bc-dnst).
     const c = { withZekkenName: true, poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', scheduledAt: '09:00' },
       { id: 'Pool B-0', court: 'A', status: 'scheduled', scheduledAt: '09:30',
@@ -431,15 +429,11 @@ describe('findNextPoolOnCourt', () => {
         sideB: { name: 'Suzuki', displayName: 'Sho', number: 'K2' } },
     ] };
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
-    expect(res.players).toEqual([
-      { name: 'K2 Sho', side: 'shiro' },
-      { name: 'K1 Ryu', side: 'aka' },
-    ]);
+    expect(res.bouts).toEqual([{ id: 'Pool B-0', shiro: 'K2 Sho', aka: 'Ryu K1' }]);
   });
-  it('roster lists a competitor once even when they are Shiro in one bout and Aka in the next', () => {
-    // Regression: a side-dependent label ("E3 ADAMS" as Shiro, "ADAMS E3" as
-    // Aka) defeated the label dedupe and the TV Up Next roster named the same
-    // person twice. Seen in the browser on PR #428.
+  it('lists every bout of the pool, so a competitor appears in each of their bouts', () => {
+    // A bout list is not a roster: Adams fights twice, so Adams is named twice,
+    // once on each side, exactly as the bouts will be fought.
     const adams = { name: 'Adams', number: 'E3' };
     const green = { name: 'Green', number: 'E4' };
     const clark = { name: 'Clark', number: 'E1' };
@@ -449,7 +443,10 @@ describe('findNextPoolOnCourt', () => {
       { id: 'Pool B-1', court: 'A', status: 'scheduled', scheduledAt: '09:40', sideA: clark, sideB: adams },
     ] };
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
-    expect(res.players.map(p => p.name)).toEqual(['E4 Green', 'E3 Adams', 'E1 Clark']);
+    expect(res.bouts).toEqual([
+      { id: 'Pool B-0', shiro: 'E4 Green', aka: 'Adams E3' },
+      { id: 'Pool B-1', shiro: 'E3 Adams', aka: 'Clark E1' },
+    ]);
   });
   it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
     const team = { kind: 'team', poolMatches: [
@@ -459,10 +456,9 @@ describe('findNextPoolOnCourt', () => {
     ] };
     const res = findNextPoolOnCourt(team, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
-    expect(res.players).toEqual([
-      { name: 'Team Delta', side: 'shiro' },
-      { name: 'Team Gamma', side: 'aka' },
-      { name: 'Team Epsilon', side: 'shiro' },
+    expect(res.bouts).toEqual([
+      { id: 'Pool B-0', shiro: 'Team Delta', aka: 'Team Gamma' },
+      { id: 'Pool B-1', shiro: 'Team Epsilon', aka: 'Team Gamma' },
     ]);
   });
   it('excludes a pool already started on ANOTHER court (matches can move courts)', () => {
@@ -614,15 +610,17 @@ describe('TvIndividualBoard', () => {
   });
 
   it('body container sets --msb-scale based on row count (text adapts to available room)', () => {
-    // Few rows → big text (scale toward the 2.4 cap); many rows → smaller text
-    // (scale toward the 0.85 floor). The CSS .msb--tv rules read this variable.
+    // Few rows → bigger text (scale toward the 1.5 cap, lowered from 2.4 on
+    // operator feedback that a 3-bout pool read as too large); many rows →
+    // smaller text (scale toward the 0.85 floor). The CSS .msb--tv rules read
+    // this variable.
     const fewRows = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'A', sideB: 'B', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
     ] };
     const promotedFew = { competition: fewRows, match: fewRows.poolMatches[0], isBracket: false };
     const strFew = JSON.stringify(TvIndividualBoard({ ...base, promoted: promotedFew }));
-    // 1 row → scale = clamp(0.85, 7/1, 2.4) = 2.4
-    expect(strFew).toContain('"--msb-scale":2.4');
+    // 1 row → scale = clamp(0.85, 7/1, 1.5) = 1.5
+    expect(strFew).toContain('"--msb-scale":1.5');
 
     // Build a full pool with many matches so the row count grows.
     const many = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
@@ -661,7 +659,7 @@ describe('TvIndividualBoard', () => {
     expect(scores.some(s => s.props.match.status === 'running')).toBe(true);
   });
 
-  it('renders the "UP NEXT" pool strip with name + roster when another pool follows on this court', () => {
+  it('renders the "UP NEXT" pool strip with the pool name and its bouts as pairs when another pool follows on this court', () => {
     const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, format: 'mixed', poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol',  status: 'running',   scheduledAt: '09:00' },
       { id: 'Pool A-1', court: 'B', sideA: 'Eduardo', sideB: 'Erin',   status: 'scheduled', scheduledAt: '09:05' },
@@ -678,8 +676,14 @@ describe('TvIndividualBoard', () => {
     expect(str).toContain('Philippe');
     expect(str).toContain('Dave');
     expect(str).toContain('Frank');
-    // Each roster name is wrapped in a span coloured by its starting side:
-    // Philippe is sideA (Aka) in B-0 → red; Dave/Frank are sideB → dark #111.
+    // One pair per bout of the next pool, in run order (3 bouts here).
+    expect(str.split('"tvd-next-bout"').length - 1).toBe(3);
+    expect(str).toContain('3 bouts');
+    // Each name is wrapped in a span coloured by its side IN THAT BOUT: Philippe
+    // is sideA (Aka) in B-0 and B-1 → red both times; Frank is sideB (Shiro) in
+    // B-1 and B-2 → dark both times; Dave is Shiro in B-0 and Aka in B-2, so
+    // he is named twice with a different colour each time, as the bouts will
+    // be fought.
     const nameSpans = [];
     const kidsOf = n => (n.children != null ? n.children : n.props?.children);
     (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
@@ -689,12 +693,12 @@ describe('TvIndividualBoard', () => {
         if (['Philippe','Dave','Frank'].includes(text)) nameSpans.push({ text, color: n.props?.style?.color });
       }
       [].concat(kidsOf(n) || []).forEach(walk); })(tree);
-    const byName = Object.fromEntries(nameSpans.map(s => [s.text, s.color]));
-    expect(byName['Philippe']).toBe('var(--red, #b91c1c)');
-    expect(byName['Dave']).toBe('#111');
-    expect(byName['Frank']).toBe('#111');
-    // The roster container must be a wrappable flex row so long rosters
-    // wrap to a second line rather than clipping or ellipsizing.
+    const coloursOf = (name) => nameSpans.filter(s => s.text === name).map(s => s.color);
+    expect(coloursOf('Philippe')).toEqual(['var(--red, #b91c1c)', 'var(--red, #b91c1c)']);
+    expect(coloursOf('Frank')).toEqual(['#111', '#111']);
+    expect(coloursOf('Dave')).toEqual(['#111', 'var(--red, #b91c1c)']);
+    // The bouts container must be a wrappable flex row so a big pool's bouts
+    // wrap to further lines rather than clipping or ellipsizing.
     const kidsOf2 = n => (n.children != null ? n.children : n.props?.children);
     const rosterDiv = (function find(n){ if(!n||typeof n!=='object') return null; if(Array.isArray(n)){for(const k of n){const r=find(k); if(r) return r;} return null;}
       if(n.type==='div' && n.props?.style?.flexWrap==='wrap') return n;

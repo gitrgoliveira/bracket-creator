@@ -35,7 +35,7 @@ The app provides three display URLs:
 - `/display?court=all` shows every court at once, for a lobby or overview screen.
 - Add `&overlay=true` to a single-court URL (for example, `/display?court=A&overlay=true`) for a transparent variant you key into a video stream as a browser source (for example, OBS or vMix), so online viewers see competitor names and the current score over the video.
 
-![Single-court scoreboard for shiai-jo A: the current match with Shiro on the left and Aka in red on the right, and the next match below.](../../screenshots/display-scoreboard.png)
+![Single-court scoreboard for shiai-jo A: the current pool's bouts with the running one highlighted, Shiro on the left and Aka in red on the right, and the next pool's bouts listed below.](../../screenshots/display-scoreboard.png)
 
 ### Connection status
 

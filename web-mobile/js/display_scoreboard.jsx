@@ -235,15 +235,16 @@ function gatherIndividualGroup(promoted, court) {
 }
 
 // findNextPoolOnCourt: for the per-court pool-phase board, the next POOL that
-// will play on this court after the current one finishes, plus its roster (so
-// the spectator can decide whether to stay). Looks across the SAME competition
-// (court routing is per-comp). Returns { name, players } or null.
+// will play on this court after the current one finishes, plus its bouts as
+// Shiro/Aka pairs in run order (so the spectator knows which bouts are coming
+// and can decide whether to stay). Looks across the SAME competition (court
+// routing is per-comp). Returns { name, bouts: [{ id, shiro, aka }] } or null.
 //
 // The pool with the lowest queue position (then earliest scheduledAt, then
-// pool name) plays next: matching findUpcomingOnCourt. Roster = union of
-// sideA/sideB across ALL of that pool's matches in the comp (not just on this
-// court): a pool's roster is fixed, the courts list is just routing. For team
-// competitions, sides carry team names so the roster surfaces team names.
+// pool name) plays next: matching findUpcomingOnCourt. Bouts = ALL of that
+// pool's matches in the comp (not just on this court): a pool's bouts are
+// fixed, the courts list is just routing. For team competitions, sides carry
+// team names so the pairs surface team names.
 function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (!competition || !competition.poolMatches) return null;
     const onCourt = competition.poolMatches.filter(m => (m.court || "") === court);
@@ -278,30 +279,20 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     if (future.length === 0) return null;
     const nextName = future
         .sort(([na, a], [nb, b]) => (a.qp - b.qp) || a.ts.localeCompare(b.ts) || na.localeCompare(nb))[0][0];
-    // Roster with each player's STARTING colour. Pool colour is per-match, so a
-    // player's "starting colour" is the colour they'll have in their EARLIEST
-    // bout of this pool: sideA = Aka (red), sideB = Shiro (dark). Walk the pool's
-    // matches in run order and colour each name on its first appearance.
-    const poolMatches = competition.poolMatches
-        .filter(m => poolNameOf(m.id) === nextName)
-        .sort(compareByRunOrder);
-    // Use sideLabel (number + zekken displayName) so the roster matches every
-    // other TV surface, and dedupe on that display label. The roster is a FLAT
-    // list, not a Shiro/Aka pairing, so it has no outer side and the number
-    // leads every name: a competitor who is Shiro in one bout and Aka in the
-    // next is one person and must be listed once, which a side-dependent
-    // label would break (verified: "E3 ADAMS" and "ADAMS E3" both appeared).
+    // The pool's bouts in run order, as Shiro/Aka pairs: that IS what comes
+    // next on this court, so the strip shows the group of bouts rather than a
+    // roster of names (operator ruling 2026-09-14, bc-dnst: a roster coloured
+    // by each name's first side did not say which bouts were coming). All of
+    // the pool's matches in the comp, not just this court's: a pool's bouts
+    // are fixed, the courts list is just routing. Labels go through sideLabel
+    // (number on the outer side + zekken displayName) like every other TV
+    // surface; a side still to be resolved reads "TBD".
     const zekken = !!competition.withZekkenName;
-    const seen = new Set();
-    const players = [];
-    for (const m of poolMatches) {
-        for (const [sideRaw, side] of [[m.sideB, "shiro"], [m.sideA, "aka"]]) {
-            if (!sideRaw) continue;
-            const name = sideLabel(sideRaw, zekken);
-            if (name && name !== "TBD" && !seen.has(name)) { seen.add(name); players.push({ name, side }); }
-        }
-    }
-    return { name: nextName, players };
+    const bouts = competition.poolMatches
+        .filter(m => poolNameOf(m.id) === nextName)
+        .sort(compareByRunOrder)
+        .map(m => ({ id: m.id, shiro: sideLabel(m.sideB, zekken, "shiro"), aka: sideLabel(m.sideA, zekken, "aka") }));
+    return { name: nextName, bouts };
 }
 
 // At variant=tv each row is roughly 6vh tall and the body has ~80vh of room,
@@ -364,13 +355,13 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
         ? findNextPoolOnCourt(promoted.competition, currentPoolName, court)
         : null;
     // Text scale adapts to how much vertical room each row gets: fewer rows →
-    // bigger glyphs to fill the screen (~7 rows ≈ 1×, a 4-match pool ≈ 1.75×, a
-    // single bracket match ≈ 2.0×); a packed group shrinks to a 0.85 floor.
-    // Bracket is capped at 2.0 (vs 2.4 for pools/league): a lone bracket bout
-    // would otherwise scale to 2.4 and the wide ippon slots push the player
-    // names into truncation. Pools stay at the 7-row reference so a 4-match
-    // pool board keeps names intact rather than over-scaling them.
-    const maxScale = promoted.isBracket ? 2.0 : 2.4;
+    // bigger glyphs (~7 rows ≈ 1×, a 4-match pool ≈ 1.5×); a packed group
+    // shrinks to a 0.85 floor. Capped at 1.5 on every board (operator ruling
+    // 2026-09-14, bc-dnst: at the old 2.4 / 2.0 caps a 3-bout pool rendered
+    // 7vh names that read as too large and truncated to "M. SAN…"); the rows
+    // are still distributed down the panel, they just no longer inflate to
+    // fill it.
+    const maxScale = 1.5;
     const rowScale = Math.min(maxScale, Math.max(0.85, 7 / Math.max(1, rows.length)));
     return (
         <div className="tvd tvd--white" data-testid="tv-display-root" style={{
@@ -454,22 +445,28 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                 )}
             </div>
 
-            {/* Next pool on this court: name + roster (or team names for
-                team competitions). Tells the spectator what's coming after
-                the current pool finishes here. */}
+            {/* Next pool on this court: its name and its bouts as Shiro vs Aka
+                pairs in run order (team names for team competitions). Tells
+                the spectator which bouts are coming, as a group, after the
+                current pool finishes here. */}
             {nextPool && (
                 <div data-testid="tvd-next-pool" style={{ borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
-                    {/* Row 1: label + pool name */}
+                    {/* Row 1: label + pool name + bout count */}
                     <div style={{ display: "flex", alignItems: "baseline", gap: "1.5vw", marginBottom: "0.8vh" }}>
                         <span style={{ fontSize: "1.6vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700, flexShrink: 0 }}>UP NEXT</span>
                         <span style={{ fontSize: "2.6vh", color: "#111", fontWeight: 700 }}>{nextPool.name}</span>
+                        <span style={{ fontSize: "1.8vh", color: "var(--ink-3)" }}>{`${nextPool.bouts.length} ${nextPool.bouts.length === 1 ? "bout" : "bouts"}`}</span>
                     </div>
-                    {/* Row 2: roster with starting-colour coding, wrappable */}
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4vh 1.2vw" }}>
-                        {nextPool.players.map((p) => (
-                            /* Starting colour: Aka (red) if they're sideA in
-                               their first bout, Shiro (dark) if sideB. */
-                            <span key={p.name} style={{ fontSize: "3.8vh", fontWeight: 700, color: p.side === "aka" ? "var(--red, #b91c1c)" : "#111" }}>{p.name}</span>
+                    {/* Row 2: the bouts, each an unbreakable Shiro vs Aka pair,
+                        wrapping as a group. Same left-dark / right-red reading
+                        as the rows above. */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6vh 3vw" }}>
+                        {nextPool.bouts.map((b) => (
+                            <span key={b.id} data-testid="tvd-next-bout" style={{ fontSize: "2.8vh", fontWeight: 700, whiteSpace: "nowrap" }}>
+                                <span style={{ color: "#111" }}>{b.shiro}</span>
+                                <span style={{ color: "var(--ink-3)", fontWeight: 600, fontSize: "2vh", padding: "0 0.8vw" }}>vs</span>
+                                <span style={{ color: "var(--red, #b91c1c)" }}>{b.aka}</span>
+                            </span>
                         ))}
                     </div>
                 </div>

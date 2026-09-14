@@ -7965,6 +7965,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .editor-modal--compact .decision-controls .btn {
   min-height: max(32px, var(--tap-floor));
 }
+.editor-modal--compact .foul-counter__btn {
+  min-width: var(--tap-floor);
+  min-height: var(--tap-floor);
+}
+.editor-modal--compact .encho-pill {
+  min-height: max(24px, var(--tap-floor));
+}
+/* The number chip beside a header name reads at a fixed size on both boards
+   (the team header's 13px name would otherwise shrink it below legibility). */
+.sb-match .sb-name .num-prefix {
+  font-size: 10px;
+}
 
 /* --- Compact mode: footer ---------------------------------------------- */
 .editor-modal--compact .editor-modal__foot--nav .score-nav {
@@ -9041,11 +9053,35 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* Up Next, elevated call-to-court card */
 .shiaijo-upnext__card {
   border: 1px solid var(--accent-soft);
-  border-radius: 12px;
+  border-radius: var(--r);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 12px;
+}
+/* Inside the queue's own frame the cards flatten to rows (one containment
+   layer): the resting border and shadow go, the called-state ring stays. */
+.shiaijo__queue .shiaijo-upnext__card {
+  border-color: transparent;
+  box-shadow: none;
+  padding: 12px 0;
+}
+.shiaijo__queue .shiaijo-upnext__card.is-called {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  padding: 12px 14px;
+}
+.shiaijo__queue .shiaijo-qrow {
+  border: 0;
+  border-bottom: 1px solid var(--line-2);
+  border-radius: 0;
+  padding: 10px 0;
+}
+.shiaijo__queue .shiaijo-qrow:last-child { border-bottom: 0; }
+.shiaijo-queue__empty {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--ink-3);
 }
 .shiaijo-upnext__card.is-called {
   border-color: var(--accent);

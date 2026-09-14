@@ -2494,8 +2494,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
 
   // left = SHIRO (White), right = AKA (Red)
   const teamSides = [
-    { key: "b", name: m.sideB?.name || m.sideB, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },
-    { key: "a", name: m.sideA?.name || m.sideA, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
+    { key: "b", name: m.sideB?.name || m.sideB, number: m.sideB?.number, label: "SHIRO (White)", color: "shiro", iv: ivB, pw: pwB },
+    { key: "a", name: m.sideA?.name || m.sideA, number: m.sideA?.number, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
   ];
 
   // Compute whether each team's 5-person lineup is incomplete (any position
@@ -2556,7 +2556,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 <div className={`sb-side sb-side--${s.color}`}>
                   {/* SHIRO/AKA pill, matching the individual + Engi editors. */}
                   <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
-                  <div className="sb-name">{s.name}</div>
+                  {/* Team number on the OUTER side of the name, as on the bout rows. */}
+                  <div className="sb-name">
+                    {s.color === "shiro" && s.number ? <span className="num-prefix">{s.number}</span> : null}
+                    {s.name}
+                    {s.color === "aka" && s.number ? <span className="num-prefix num-prefix--after">{s.number}</span> : null}
+                  </div>
                 </div>
                 {idx === 0 && (
                   <div className="sb-center">

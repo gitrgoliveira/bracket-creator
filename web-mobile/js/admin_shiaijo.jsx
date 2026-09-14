@@ -1222,6 +1222,9 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <span>Queue</span>
                                 <span className="shiaijo-queue__head-action"><span aria-hidden="true">◂</span> Hide</span>
                             </button>
+                            {filteredScheduled.length === 0 && filteredPending.length === 0 && filteredCompleted.length === 0 && (
+                                <p className="shiaijo-queue__empty">Nothing else queued on this court.</p>
+                            )}
                             {upNext && (
                                 <div className="shiaijo-upnext">
                                     <div className="section-title">Up next</div>

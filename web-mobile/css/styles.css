@@ -7395,11 +7395,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   opacity: 0.92;
 }
 
-/* Tooltip body, always in the DOM (role="tooltip" for screen readers),
-   hidden visually by default. Visibility flips on hover, focus, or the
-   tap-toggled open state. Positioned below the term; width capped so
-   wrapping stays readable on mobile. */
+/* Tooltip body, always in the DOM (role="tooltip"), hidden by default and
+   shown on hover, focus, or the tap-toggled open state. Positioned below the
+   term; width capped so wrapping stays readable on mobile.
+   Hidden means display:none, not visibility:hidden: an invisible box that is
+   still laid out extends the scrollable area of the nearest scroll
+   container, so the 220px tooltips beside the last decision buttons drew a
+   horizontal scrollbar across the 560px individual score overlay (bc-dnst).
+   Neither state is exposed to assistive tech until shown, so nothing is
+   lost; only the 100ms fade-in went with it. */
 .tw-tooltip {
+  display: none;
   position: absolute;
   top: 100%;
   left: 0;
@@ -7425,17 +7431,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      the max-width instead of wrapping. */
   white-space: normal;
   cursor: default;
-  visibility: hidden;
-  opacity: 0;
-  transition: opacity 100ms ease-in;
-  pointer-events: none;
 }
 .tw-term:hover > .tw-tooltip,
 .tw-term:focus-within > .tw-tooltip,
 .tw-tooltip--open {
-  visibility: visible;
-  opacity: 1;
-  pointer-events: auto;
+  display: block;
 }
 
 .tw-tooltip__kanji {
@@ -7927,6 +7927,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+/* The last two "?" hints sit in the right half of the 560px overlay, where a
+   left-anchored 220px tooltip runs past the body and scrolls it sideways for
+   as long as it is open; those two open leftwards instead. */
+.decision-controls--stacked .decision-btn-group:nth-last-child(-n+2) .tw-tooltip {
+  left: auto;
+  right: 0;
 }
 
 /* ？ icon that carries the glossary tooltip for a decision button. */

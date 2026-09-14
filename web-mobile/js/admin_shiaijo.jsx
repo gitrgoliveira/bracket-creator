@@ -34,6 +34,8 @@ const ScoreEditorModal = window.ScoreEditorModal;
 const CourtPicker = window.CourtPicker;
 const BracketTree = window.BracketTree;
 const Icon = window.Icon;
+
+const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
 const Modal = window.Modal;
 const hasBothSides = window.hasBothSides;
 
@@ -551,6 +553,15 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [startingKey, setStartingKey] = useStateSh(null);
     const [startError, setStartError] = useStateSh("");
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // The whole queue column folds away so the scorer can take the full width;
+    // the choice is per device, like the operator's other console preferences.
+    const [queueOpen, setQueueOpen] = useStateSh(() => {
+        try { return localStorage.getItem(QUEUE_OPEN_KEY) !== "0"; } catch (_) { return true; }
+    });
+    const toggleQueue = () => setQueueOpen((open) => {
+        try { localStorage.setItem(QUEUE_OPEN_KEY, open ? "0" : "1"); } catch (_) { /* private mode */ }
+        return !open;
+    });
     // Completed list stays expanded (it's the operator's running record), but a
     // full-day court accumulates many bouts that would bury the live queue on
     // mobile. Show the most recent COMPLETED_PREVIEW by default; the rest fold
@@ -1143,7 +1154,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             </select>
                                         </div>
                                     )}
-                                    <div className="page-head__sub shiaijo-officiating__sub">Officiating</div>
                                 </div>
                             </div>
                         );
@@ -1182,9 +1192,36 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 )}
 
                 {courtKnown && (allMatches.length > 0 || pendingPlaceholder.length > 0) && (
-                    <div className="shiaijo">
+                    <div className={`shiaijo${queueOpen ? "" : " shiaijo--queue-collapsed"}`}>
                         {/* ── Queue (left) ───────────────────────────── */}
-                        <div className="shiaijo__queue">
+                        {/* Accordion: folded, the column becomes a narrow rail in the
+                            same place that reopens it, so the queue is never out of
+                            reach while the scorer takes the width. */}
+                        {!queueOpen && (
+                            <button
+                                type="button"
+                                className="shiaijo-queue-rail"
+                                onClick={toggleQueue}
+                                aria-expanded={false}
+                                aria-controls="shiaijo-queue"
+                                data-testid="shiaijo-queue-show"
+                            >
+                                <span className="shiaijo-queue-rail__label">Show queue</span>
+                                <span className="shiaijo-queue-rail__chevron" aria-hidden="true">▸</span>
+                            </button>
+                        )}
+                        <div className="shiaijo__queue" id="shiaijo-queue">
+                            <button
+                                type="button"
+                                className="shiaijo-queue__head"
+                                onClick={toggleQueue}
+                                aria-expanded={true}
+                                aria-controls="shiaijo-queue"
+                                data-testid="shiaijo-queue-hide"
+                            >
+                                <span>Queue</span>
+                                <span className="shiaijo-queue__head-action"><span aria-hidden="true">◂</span> Hide</span>
+                            </button>
                             {upNext && (
                                 <div className="shiaijo-upnext">
                                     <div className="section-title">Up next</div>
@@ -1707,7 +1744,7 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                 <span className="shiaijo-qrow__vs">vs</span>
                 <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{aName}</span>
+                    <span className="shiaijo-qrow__name">{aName}{m.sideA?.number ? <span className="num-prefix num-prefix--after">{m.sideA.number}</span> : null}</span>
                 </div>
             </div>
             {/* Completed result on its own centred line BELOW the names: the
@@ -1792,8 +1829,8 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--aka">AKA</span>
                 <div className="name">
-                    {m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}
                     {m.sideA?.name}
+                    {m.sideA?.number ? <span className="num-prefix num-prefix--after">{m.sideA.number}</span> : null}
                 </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
             </div>

@@ -802,9 +802,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                         {s.name}
                         {s.color === "aka" && s.number ? <span className="num-prefix num-prefix--after">{s.number}</span> : null}
                       </div>
-                      <div className="sb-slots">
-                        {slotButtons(s)}
-                      </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
                           <button key={cc} className={`ipt-btn ${cc === "H" ? "ipt-btn--h" : ""}`} onClick={() => addPt(s.key, cc)} disabled={boutDecided || decidedByHantei}>{cc}</button>
@@ -825,10 +822,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                             draw toggle below (seeded from the persisted decision
                             via initialIsDrawToggled), encho via the "· (E)
                             Overtime ×N" eyebrow + EnchoControl pill, daihyosen via
-                            the DH eyebrow badge. Don't "restore" X/(E)/(DH) here. */}
-                        {!isDrawToggled && (
-                          <div className="sb-vs">VS</div>
-                        )}
+                            the DH eyebrow badge. Don't "restore" X/(E)/(DH) here.
+                            The scored ippon sit HERE, flanking the VS, as on the
+                            team bout rows (operator ruling): Shiro's pair on the
+                            left, Aka's on the right, each filling outside-in. */}
+                        <div className="sb-center__marks">
+                          <div className="sb-slots sb-slots--shiro">{slotButtons(sides[0])}</div>
+                          <div className={`sb-vs${isDrawToggled ? " sb-vs--quiet" : ""}`} aria-hidden={isDrawToggled}>VS</div>
+                          <div className="sb-slots sb-slots--aka">{slotButtons(sides[1])}</div>
+                        </div>
                         <button
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
                           data-testid="scoring-modal-mark-draw"

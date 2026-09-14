@@ -5136,7 +5136,10 @@ button.pool-match-row {
    documentation of what that fallback renders — do not let a silent
    outer-edge layout back in. */
 .sb-match:has(.sb-slots) {
-  grid-template-rows: 1fr auto auto auto auto 1fr;
+  /* The centre carries both slot groups around the VS, so it is sized by its
+     content instead of the fixed 140px separator column. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-rows: 1fr auto auto auto 1fr;
 }
 .sb-match:has(.sb-slots) > .sb-side {
   display: grid;
@@ -5145,17 +5148,10 @@ button.pool-match-row {
 }
 .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 2; }
 .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 3; align-self: end; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-slots { grid-row: 4; }
-.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 5; }
+.sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 4; }
 .sb-match:has(.sb-slots) > .sb-center { grid-row: 1 / -1; }
 .sb-match:has(.sb-slots) > .sb-side--shiro > .sb-side__badge { justify-self: end; }
 .sb-match:has(.sb-slots) > .sb-side--aka > .sb-side__badge { justify-self: start; }
-/* Slots hug the INSIDE (against the centre vs) via justify-self on the hug-
-   content group; the existing flex-direction (row / row-reverse) still controls
-   the outside-to-inside fill, so each side's first ippon stays on its name side
-   and fills toward the centre — the fixed FIK rule is untouched. */
-.sb-match:has(.sb-slots) > .sb-side--shiro > .sb-slots { justify-self: end; }
-.sb-match:has(.sb-slots) > .sb-side--aka > .sb-slots { justify-self: start; }
 
 /* the side label (".sb-dojo" historically held it) becomes the identity chip,
    one statement of the side, colour-coded, like the inline editor's chip */
@@ -5186,9 +5182,17 @@ button.pool-match-row {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 16px 10px;
   position: relative;
 }
+/* The two slot groups flank the VS in the centre column, as on the team bout
+   rows: [shiro pair] VS [aka pair]. */
+.sb-center__marks {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sb-vs--quiet { visibility: hidden; }
 
 .sb-slots {
   display: flex;
@@ -5198,27 +5202,16 @@ button.pool-match-row {
 
 /* Ippon fill order is fixed OUTSIDE-TO-INSIDE: pts[0] (the first point scored)
    takes the slot FARTHEST from the centre vs, and later points fill inward
-   toward it.
-
-   State it against the CENTRE, never against the name. On the FIK plate the
-   name sits at the board's outer edge, so "outer slot" and "slot nearest the
-   name" coincide; on THIS board they do not. Both names are pinned inward
-   (.sb-side--shiro{text-align:right} / .sb-side--aka{text-align:left}), so the
-   slot nearest the name is pts[1], and reading the rule off the name inverts
-   it.
-
-   Shiro (left column) packs its slots to the left (outer) by default; Aka
-   (right column) must mirror it, pack to the right and render pts[0] at the
-   outer (right) edge. The slot group as a whole also hugs the centre vs (the
-   .sb-slots justify-self rules above), unconditionally now that the subgrid
-   gate is gone; this declaration owns only the WITHIN-group fill order.
-   It is the third expression of the aka mirror — the other two are
-   sideSlotOrder in result_slot.jsx (see its note) — and is kept in CSS because
-   this surface renders its cells in DOM order and flips them in the layout
-   layer. Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the
-   mark order to the Taisho round of Table 2 (p.16). See
-   running_a_kendo_tournament.md → Individual Match Scoreboard. */
-.sb-side--aka .sb-slots {
+   toward it. Shiro's group (left of the VS) renders in DOM order, so pts[0]
+   is its outer (left) cell; Aka's group (right of the VS) must mirror it and
+   render pts[0] at the outer (right) edge. This declaration owns only the
+   WITHIN-group fill order. It is the third expression of the aka mirror, the
+   other two being sideSlotOrder in result_slot.jsx (see its note), and is
+   kept in CSS because this surface renders its cells in DOM order and flips
+   them in the layout layer. Fixed by FIK Table 1 (p.15), Yuko-datotsu row,
+   which pins the mark order to the Taisho round of Table 2 (p.16). See
+   running_a_kendo_tournament.md, Individual Match Scoreboard. */
+.sb-slots--aka {
   flex-direction: row-reverse;
 }
 
@@ -5243,13 +5236,13 @@ button.pool-match-row {
   box-shadow: 0 4px 12px rgba(0,0,0,0.1);
 }
 
-.sb-side--aka .sb-slot--filled {
+.sb-slots--aka .sb-slot--filled {
   background: var(--red);
   border-color: var(--red);
   color: white;
 }
 
-.sb-side--shiro .sb-slot--filled {
+.sb-slots--shiro .sb-slot--filled {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-fg);
@@ -7680,6 +7673,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   grid-template-columns: 1fr 120px 1fr;
   border-radius: 12px;
 }
+.editor-modal--compact .sb-match:has(.sb-slots) {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
 .editor-modal--compact .sb-side {
   padding: 12px 16px;
 }
@@ -8969,6 +8965,62 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .shiaijo__queue { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+/* Queue folded (accordion): the column shrinks to a rail that reopens it and
+   the scorer takes the rest of the width. */
+.shiaijo--queue-collapsed { grid-template-columns: 44px 1fr; }
+.shiaijo--queue-collapsed .shiaijo__queue { display: none; }
+/* Open, the column reads as the container the rail folds into: a framed card
+   whose header bar is the collapse control. */
+.shiaijo__queue {
+  padding: 0 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.shiaijo-queue__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 -12px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.shiaijo-queue__head-action { font-weight: 600; letter-spacing: 0.02em; text-transform: none; }
+.shiaijo-queue-rail {
+  align-self: stretch;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 14px 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+.shiaijo-queue-rail:hover { background: var(--bg-2); }
+.shiaijo-queue-rail__label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 
 /* Shiro/Aka badges run 7px across the console; bump them on the operator
    console so they stay legible at arm's length in a bright hall (critique
@@ -9230,7 +9282,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Page title doubles as the court switcher: the H1 shows a chevron and a
    transparent native <select> overlays it (native picker + a11y, no duplicate
-   control). Only rendered when there is more than one court. */
+   control). Only rendered when there is more than one court. The title sits
+   in a bordered, raised box so it reads as the picker it is (operator: the
+   court and competition switchers were not obvious, and they are what a
+   console changes most); the competition switcher shares the treatment. */
 .shiaijo-title-select {
   position: relative;
   display: inline-block;
@@ -9238,8 +9293,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .shiaijo-title-select .page-head__title {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 6px 8px 6px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   cursor: pointer;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.shiaijo-title-select:hover .page-head__title {
+  border-color: var(--accent);
+  box-shadow: 0 2px 8px rgba(29, 53, 87, 0.18);
 }
 .shiaijo-title-select__chevron {
   display: inline-flex;
@@ -9279,9 +9344,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Competition selector in page-head (AC3), mirrors the Shiaijo title on the
    right edge: the competition name gets the full display-title treatment (same
-   size/font as "Shiaijo A") plus the navy chevron chip, with an "Officiating"
-   caption beneath it. (The left title's own sub-caption it used to line up with
-   was dropped in bc-dnst; the two blocks now centre on the title row.) */
+   size/font as "Shiaijo A") plus the navy chevron chip. No caption: the picker
+   box says what it is. */
 .shiaijo-officiating {
   text-align: right;
 }
@@ -9289,9 +9353,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    tying it to the navy chevron chip while keeping the identical title scale. */
 .shiaijo-officiating__name {
   color: var(--accent);
-}
-.shiaijo-officiating__sub {
-  text-align: right;
 }
 .shiaijo-title-select--right {
   text-align: right;
@@ -9340,6 +9401,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   .shiaijo { grid-template-columns: 1fr; }
   /* Stack layout for tablet portrait mode (queue below scoring). */
   .shiaijo__queue { order: 1; }
+  /* The folded rail becomes a full-width bar below the scorer. */
+  .shiaijo--queue-collapsed { grid-template-columns: 1fr; }
+  .shiaijo-queue-rail { order: 1; min-height: 0; flex-direction: row; }
+  .shiaijo-queue-rail__label { writing-mode: horizontal-tb; transform: none; }
 }
 
 /* ---------- Loading Spinner ---------- */

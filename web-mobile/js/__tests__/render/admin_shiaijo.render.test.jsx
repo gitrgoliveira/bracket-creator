@@ -183,6 +183,35 @@ describe('AdminShiaijoPage render-smoke', () => {
     }
   });
 
+  it('the queue column folds behind the page-head toggle and the choice persists per device', async () => {
+    const upNextMatch = {
+      id: 'm1', compId: 'c1', status: 'scheduled',
+      phase: 'pool', poolName: 'Pool 1', court: 'A',
+      sideA: { id: 'p1', name: 'Yamada', number: 'I1' },
+      sideB: { id: 'p2', name: 'Tanaka', number: 'I2' },
+    };
+    window.tournamentMatches = () => [upNextMatch];
+    window.filterMatchesByCourt = (matches) => matches;
+    localStorage.removeItem('bc_shiaijo_queue_open');
+    let utils;
+    await act(async () => { utils = renderPage(makeMinimalTournament()); });
+    const grid = () => utils.container.querySelector('.shiaijo');
+    expect(grid().classList.contains('shiaijo--queue-collapsed')).toBe(false);
+    // Aka's number sits AFTER the name (outer side), Shiro's before it.
+    const names = [...utils.container.querySelectorAll('.shiaijo-sides__side .name')].map(n => n.textContent);
+    expect(names).toEqual(['I2Tanaka', 'YamadaI1']);
+    expect(utils.queryByTestId('shiaijo-queue-show')).toBeNull();
+    await act(async () => { utils.getByTestId('shiaijo-queue-hide').click(); });
+    expect(grid().classList.contains('shiaijo--queue-collapsed')).toBe(true);
+    // Folded, a rail stands in the column's place and is the way back.
+    expect(utils.getByTestId('shiaijo-queue-show').textContent).toContain('Show queue');
+    expect(localStorage.getItem('bc_shiaijo_queue_open')).toBe('0');
+    await act(async () => { utils.getByTestId('shiaijo-queue-show').click(); });
+    expect(grid().classList.contains('shiaijo--queue-collapsed')).toBe(false);
+    expect(utils.queryByTestId('shiaijo-queue-show')).toBeNull();
+    expect(localStorage.getItem('bc_shiaijo_queue_open')).toBe('1');
+  });
+
   // mp-y3nk Phase 3: "Run now" on a pending final opens the resolve-feeders
   // modal; recording each feeder's winner calls overrideBracketWinner (which
   // server-side propagates to resolve the final) and then refetches the court.

@@ -219,7 +219,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
+                    <div className="name">{m.sideA?.name}{m.sideA?.number ? <span className="num-prefix num-prefix--after">{m.sideA.number}</span> : null}</div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>

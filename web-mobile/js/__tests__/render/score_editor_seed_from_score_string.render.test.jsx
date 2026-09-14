@@ -95,7 +95,7 @@ function knockoutMatch(overrides = {}) {
 
 // Empty slots render "·" (a middle dot placeholder), filled ones the letter.
 function slotsOf(container, color) {
-  return Array.from(container.querySelectorAll(`.sb-side--${color} .sb-slot`))
+  return Array.from(container.querySelectorAll(`.sb-slots--${color} .sb-slot`))
     .map((b) => b.textContent);
 }
 

@@ -3,17 +3,22 @@
 // Shiro is always the left column, so its number sits BEFORE the name; Aka is
 // always the right column, so its number sits AFTER it. The two chips then
 // frame the pairing from the outside, [K1 Tanaka] vs [Yamada K2], the way the
-// team bout rows already read. `side` is optional: a sideless list (e.g. a
-// standings table with one name per row, no Shiro/Aka pairing) omits it, and
-// the number renders before the name, same as Shiro.
+// team bout rows already read. That outer-side pairing only applies where the
+// two sides sit LEFT/RIGHT. `side` is optional, and every caller whose sides
+// do not sit left/right omits it: a sideless list (e.g. a standings table
+// with one name per row), and a surface whose two sides STACK vertically
+// instead (the bracket card, the admin and public schedule rows), where
+// omitting `side` makes the number sit before the name on both, so the
+// numbers align in one column. Either way the number renders before the
+// name, same as Shiro.
 //
 // This is a leaf with no imports and no window.* dependency, so every
 // Shiro/Aka layout that shows a numbered side ES-imports it directly instead
 // of restating the before/after ternary pair inline, per this repo's rule
 // that a display contract lives in one primitive. withNumber in
 // match_scoreboard.jsx is the plain-string twin of this rule, for the string
-// contexts (the TV board, the OBS lower third, the viewer match card, the
-// public schedule list); keep the two in step.
+// contexts (the TV board, the OBS lower third, the viewer match card); keep
+// the two in step.
 //
 // The wrapper span (.numbered-name) is layout-transparent (display: contents)
 // by default, so it never affects a host's flex/grid layout. The name text is

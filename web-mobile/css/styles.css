@@ -6048,7 +6048,10 @@ button.pool-match-row {
    single consolidated block above is now the only source. mp-gmcg.) */
 
 /* ---------- Aka/Shiro color badges ---------- */
-/* Used in brackets, pool match rows, schedule items, score editor */
+/* Used by viewer_watchlist.jsx only: that card has no side tint, so it names
+   the side in text. The bracket card carries the side via its leading colour
+   bar and tint alone and names no side in text (operator ruling 2026-09-14,
+   bc-dnst). */
 .bc-color-badge {
   display: inline-flex;
   align-items: center;

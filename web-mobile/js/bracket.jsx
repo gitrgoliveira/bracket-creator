@@ -440,11 +440,9 @@ function teamIVPWScore(m) {
 }
 
 const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD, isEngi, slotLabel, feederId }) => {
-  const isAka = side === "a";
   if (!player || isTBD) {
     return (
       <div className={`bc-side bc-side--empty bc-side--${side}`}>
-        <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
         <span className="bc-name bc-name--tbd">{isTBD ? "TBD" : "-"}</span>
       </div>
     );
@@ -458,14 +456,16 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
   // Engi pair: split the combined name so member 2 stacks under member 1
   // instead of truncating on narrow bracket cards.
   const [m1, m2] = isEngi && window.engiPairParts ? window.engiPairParts(shownName) : [shownName, ""];
+  // The bracket card stacks its two sides vertically (no left/right pairing),
+  // so the side is carried by the leading colour bar and tint alone (DESIGN.md
+  // §4): the card names no side in text, and the number sits before the name
+  // on both sides (operator ruling 2026-09-14, bc-dnst).
   return (
     <div className={`bc-side bc-side--${side} ${isWinner ? "bc-side--winner" : ""}`}>
-      <span className={`bc-color-badge bc-color-badge--${isAka ? "aka" : "shiro"}`}>{isAka ? "AKA" : "SHIRO"}</span>
-
       <div className="bc-name-wrap">
         <span className="bc-name">
           {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
-          <NumberedName side={isAka ? "aka" : "shiro"} name={m1} number={player.number} />
+          <NumberedName name={m1} number={player.number} />
         </span>
         {m2 ? <span className="bc-name">{m2}</span> : null}
         {/* Reserve the dojo line on every side when dojos are shown: a real

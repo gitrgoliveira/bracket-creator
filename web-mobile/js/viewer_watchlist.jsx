@@ -142,8 +142,9 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   const subject = isOnSideA ? nextMatch.sideA : nextMatch.sideB;
   const opponent = isOnSideA ? nextMatch.sideB : nextMatch.sideA;
   const subjectName = (subject && subject.name) || entityLabel || "";
-  // Full-text Aka/Shiro badge (bc-color-badge), consistent with bracket.jsx;
-  // the compact 14×14 variant would clip "AKA"/"SHIRO".
+  // Full-text Aka/Shiro badge (bc-color-badge): this watchlist card has no
+  // side tint of its own, so it names the side in text; the compact 14×14
+  // variant would clip "AKA"/"SHIRO".
   const myBadgeClass = isOnSideA ? "bc-color-badge--aka" : "bc-color-badge--shiro";
   const myBadgeLabel = isOnSideA ? "AKA" : "SHIRO";
   const oppBadgeClass = isOnSideA ? "bc-color-badge--shiro" : "bc-color-badge--aka";

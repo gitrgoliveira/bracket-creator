@@ -78,11 +78,11 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
-          <NumberedName side="shiro" name={m.sideB?.name || "TBD"} number={m.sideB?.number} />
+          <NumberedName name={m.sideB?.name || "TBD"} number={m.sideB?.number} />
         </div>
         <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--aka">A</span>
-          <NumberedName side="aka" name={m.sideA?.name || "TBD"} number={m.sideA?.number} />
+          <NumberedName name={m.sideA?.name || "TBD"} number={m.sideA?.number} />
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>

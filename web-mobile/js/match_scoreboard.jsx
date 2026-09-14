@@ -491,14 +491,17 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
 // withNumber: the plain-STRING twin of NumberedName (numbered_name.jsx), for
 // surfaces that build a string rather than JSX: the TV board, the streaming
-// (OBS) overlay, the viewer match card and the public schedule list, called
-// directly here and via `sideLabel` in display_helpers.jsx. It renders the
-// SAME outer-side rule (operator ruling 2026-09-14, bc-dnst): Shiro's number
-// sits BEFORE the name, Aka's AFTER it, so `color` ("shiro" | "aka") is
-// required wherever a number can appear. Falls back to the bare name when no
-// number is set, so competitions without `numberPrefix` render identically to
-// before. Honours the zekken `displayName` when `withZekkenName` is true.
-// Keep this in step with NumberedName; the two must not drift apart.
+// (OBS) overlay, and the viewer match card, called directly here and via
+// `sideLabel` in display_helpers.jsx. Where the two sides sit LEFT/RIGHT it
+// renders the outer-side rule (operator ruling 2026-09-14, bc-dnst): Shiro's
+// number sits BEFORE the name, Aka's AFTER it, so `color` ("shiro" | "aka")
+// is required there wherever a number can appear. A caller whose sides STACK
+// vertically instead (the admin and public schedule rows) passes no `color`,
+// so the number sits before the name on both, aligning in one column. Falls
+// back to the bare name when no number is set, so competitions without
+// `numberPrefix` render identically to before. Honours the zekken
+// `displayName` when `withZekkenName` is true. Keep this in step with
+// NumberedName; the two must not drift apart.
 export function withNumber(side, withZekkenName, color) {
   if (!side) return "TBD";
   if (typeof side === "string") return side;

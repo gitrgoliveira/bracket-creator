@@ -9,8 +9,9 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { NumberedName } from './numbered_name.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
@@ -521,10 +522,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // raw and filtered agree here and the mark lands in a genuinely free cell.
     const htSlot = hanteiSlot(
       decidedByHantei && hanteiTied(aPts, bPts) && recordedHtKey === s.key, s.pts);
-    return [0, 1].map((i) => {
+    // sideSlotOrder: the same visual mirror the read-only scoreboard and the
+    // team editor apply, so DOM order is visual order and no CSS mirror is
+    // needed here any more (result_slot.jsx owns the rule).
+    return sideSlotOrder(s.color).map((i) => {
       const isHt = htSlot === i;
       return (
-        <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
+        <button
+          key={i}
+          className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`}
+          onClick={() => removePt(s.key, i)}
+          disabled={decidedByHantei}
+          title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
+          aria-label={`${s.color === "shiro" ? "Shiro" : "Aka"} slot ${i + 1}: ${isHt ? "Ht" : (s.pts[i] ? `remove ${s.pts[i]}` : "empty")}`}
+        >
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>
       );
@@ -795,12 +806,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           side badge so both editors label the side the same way
                           (impeccable re-critique symmetry). */}
                       <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
-                      {/* Competitor number on the OUTER side of the name, as on the
-                          team bout rows: Shiro's before it, Aka's after it. */}
+                      {/* Competitor number chip: owned by numbered_name.jsx
+                          (the outer-side rule lives there). */}
                       <div className="sb-name">
-                        {s.color === "shiro" && s.number ? <span className="num-prefix">{s.number}</span> : null}
-                        {s.name}
-                        {s.color === "aka" && s.number ? <span className="num-prefix num-prefix--after">{s.number}</span> : null}
+                        <NumberedName side={s.color} name={s.name} number={s.number} />
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
@@ -982,7 +991,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                       Fusenpai
                     </button>
-                    <GlossaryHintAS name="fusenpai" align="end" />
+                    <GlossaryHintAS name="fusenpai" />
                   </div>
                   {/* Per-bout fusensho is a sub-match concept: implemented inside
                       TeamScoreEditorModal. This placeholder explains the affordance
@@ -991,7 +1000,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
                       Fusensho (team only)
                     </button>
-                    <GlossaryHintAS name="fusensho" align="end" />
+                    <GlossaryHintAS name="fusensho" />
                   </div>
                 </div>
               )}
@@ -1156,8 +1165,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // nextMatch (queue drives navigation) so the foot's prev/next render as
   // empty spans; Cancel/Close still call onClose to deselect.
   // bc-dnst: the inline panel takes the same compact density as the overlay.
-  // The shiaijo console is the surface operators actually score on, so it must
-  // not be the one surface that misses the density pass.
+  // Two hosts mount variant="inline": the shiaijo console (admin_shiaijo.jsx)
+  // and the Competition > Bracket running-match panel
+  // (admin_competition_bracket.jsx). Both are surfaces operators actually
+  // score on, so neither may miss the density pass.
   if (variant === "inline") {
     return <div className="scoring-panel editor-modal--compact" aria-label={dialogLabel}>{inner}</div>;
   }

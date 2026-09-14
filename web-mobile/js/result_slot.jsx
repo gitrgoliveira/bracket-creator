@@ -124,18 +124,19 @@ export function resultSlot(cells) {
 // It lives beside resultSlot because they are one contract seen from two
 // angles: resultSlot says WHICH slot a mark takes, this says WHERE that slot
 // appears. Splitting them is how a mark ends up logically outer and visually
-// inner. All THREE JS pair-builders derive from here: the read-only scoreboard
-// (slotCells), the team editor's live slots (ptSlots), and its read-only
-// done-bout rows (renderReadOnlyBout) — previously spelled `cells.toReversed()`
-// and `[1, 0]` twice. An earlier version of this comment said "both", having
-// missed the third; a `grep -n "\[1, 0\]"` in web-mobile/js is the check.
-//
-// A THIRD expression of this rule exists and is deliberately left alone: the
-// individual score editor mirrors its Aka slots in CSS (`flex-direction:
-// row-reverse`, styles.css). That surface renders its cells in DOM order and
-// flips them in the layout layer, so there is no index to derive; converting it
-// would be a visual refactor of an operator-critical surface for no behavioural
-// gain. If you change the direction here, change that declaration too.
+// inner. All FOUR JS pair-builders derive from here: the read-only scoreboard
+// (slotCells), the team editor's live slots (ptSlots), its read-only
+// done-bout rows (renderReadOnlyBout), and the individual editor's live slots
+// (slotButtons, admin_scoring_individual.jsx), previously spelled
+// `cells.toReversed()` and `[1, 0]` three times, the individual editor's own
+// copy expressed instead as a CSS `flex-direction: row-reverse` mirror
+// (styles.css) rather than an index. That CSS mirror is gone: slotButtons now
+// maps sideSlotOrder like every other consumer, so this function is the rule's
+// only owner and there is no second expression of it to keep in sync. An
+// earlier version of this comment said "both", having missed the team
+// editor's done-bout rows; a `grep -n "\[1, 0\]"` in web-mobile/js is the
+// check (it should find only this file's own array literal and the test that
+// pins it, a hit anywhere else means a new copy has appeared).
 export function sideSlotOrder(side) {
   return side === "aka" ? [1, 0] : [0, 1];
 }

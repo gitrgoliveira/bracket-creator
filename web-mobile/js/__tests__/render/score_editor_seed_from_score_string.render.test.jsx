@@ -94,9 +94,15 @@ function knockoutMatch(overrides = {}) {
 }
 
 // Empty slots render "·" (a middle dot placeholder), filled ones the letter.
+// DOM order is VISUAL order (sideSlotOrder, result_slot.jsx): slot 0 is
+// always a side's OUTER (name-side) cell, so Aka renders its pair reversed
+// ([1,0]) in the DOM to keep slot 0 nearest its name on the right. Reverse
+// the queried Aka nodes back to SLOT-INDEX order here so every caller below
+// can keep asserting index-0-first regardless of which side it reads.
 function slotsOf(container, color) {
-  return Array.from(container.querySelectorAll(`.sb-slots--${color} .sb-slot`))
+  const nodes = Array.from(container.querySelectorAll(`.sb-slots--${color} .sb-slot`))
     .map((b) => b.textContent);
+  return color === 'aka' ? nodes.toReversed() : nodes;
 }
 
 // sides[] in admin_scoring_individual.jsx is [b → shiro, a → aka]:

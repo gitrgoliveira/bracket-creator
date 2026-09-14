@@ -234,9 +234,12 @@ function TermAS(props) {
 
 // Lazily loaded from window for the same load-order reason as TermAS above.
 // Falls back to null: the icon is purely decorative; no content to preserve.
-function GlossaryHintAS({ name, align }) {
+// No align prop: the tooltip now self-positions (Term in glossary.jsx
+// measures its room on open and flips leftwards itself), so no call site
+// needs to say where in a wrapping row its hint landed.
+function GlossaryHintAS({ name }) {
   if (typeof window !== 'undefined' && window.GlossaryHint) {
-    return React.createElement(window.GlossaryHint, { name, align });
+    return React.createElement(window.GlossaryHint, { name });
   }
   return null;
 }
@@ -817,17 +820,22 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
   // (T023a) can target each side without depending on the className.
   // `disabled` freezes the `+` button when the bout is already decided:
   // a 2nd-foul auto-award in that state would create an invalid 2-2.
-  // The label names no side: the counter sits inside its side's tinted box
-  // under that side's badge, so a "SHIRO" prefix would be the third mention.
+  // In the individual editor the two counters sit BELOW the board in
+  // .sb-fouls, left = Shiro, right = Aka (the app-wide column convention),
+  // with the Aka box tinted. The visible label names no side (it is
+  // conveyed by position and tint alone, matching the bout rows above), so
+  // "Fouls" stays unprefixed; the aria-labels below carry the side for
+  // assistive tech.
+  const sideName = color === "shiro" ? "Shiro" : "Aka";
   return (
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">Fouls</div>
       <div className="foul-counter__controls">
-        <button type="button" className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--dec" aria-label={`Remove a ${sideName} foul`} onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button type="button" className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement} disabled={disabled}>+</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideName} foul`} onClick={onIncrement} disabled={disabled}>+</button>
       </div>
     </div>
   );

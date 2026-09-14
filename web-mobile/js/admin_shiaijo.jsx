@@ -25,6 +25,9 @@ import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKE
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy.
 import { swissRoundLabel } from './pool_ids.jsx';
+// NumberedName: single owner of the number-chip-on-the-outer-side rule
+// (bc-dnst); see that file's header for why this stays an ES import.
+import { NumberedName } from './numbered_name.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -558,10 +561,33 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [queueOpen, setQueueOpen] = useStateSh(() => {
         try { return localStorage.getItem(QUEUE_OPEN_KEY) !== "0"; } catch (_) { return true; }
     });
-    const toggleQueue = () => setQueueOpen((open) => {
-        try { localStorage.setItem(QUEUE_OPEN_KEY, open ? "0" : "1"); } catch (_) { /* private mode */ }
-        return !open;
-    });
+    // Set only by an operator click in toggleQueue below, never true on mount
+    // or on a server-driven rerender, so the focus effect it gates fires
+    // solely for an explicit toggle.
+    const queueToggledByUser = useRefSh(false);
+    // The two controls that swap places across the fold: the rail button only
+    // exists while collapsed, the header button only exists while expanded.
+    const queueShowBtnRef = useRefSh(null);
+    const queueHideBtnRef = useRefSh(null);
+    const toggleQueue = () => {
+        try { localStorage.setItem(QUEUE_OPEN_KEY, queueOpen ? "0" : "1"); } catch (_) { /* private mode */ }
+        queueToggledByUser.current = true;
+        setQueueOpen((open) => !open);
+    };
+    // Collapsing unmounts the header "Hide" button and mounts the rail "Show
+    // queue" button in its place (and vice versa on expand), so a click or
+    // keyboard toggle would otherwise drop focus to the document body. Move
+    // it to the counterpart control once the DOM has settled, but only for an
+    // operator-driven toggle: this must never steal focus on mount or when
+    // `queueOpen` merely reflects a rerender the operator didn't trigger.
+    useEffectSh(() => {
+        if (!queueToggledByUser.current) return;
+        queueToggledByUser.current = false;
+        const target = queueOpen ? queueHideBtnRef.current : queueShowBtnRef.current;
+        // preventScroll: the counterpart sits where the pressed control was,
+        // already in view, so the focus move must not scroll the page.
+        if (target) target.focus({ preventScroll: true });
+    }, [queueOpen]);
     // Completed list stays expanded (it's the operator's running record), but a
     // full-day court accumulates many bouts that would bury the live queue on
     // mobile. Show the most recent COMPLETED_PREVIEW by default; the rest fold
@@ -1196,10 +1222,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         {/* ── Queue (left) ───────────────────────────── */}
                         {/* Accordion: folded, the column becomes a narrow rail in the
                             same place that reopens it, so the queue is never out of
-                            reach while the scorer takes the width. */}
+                            reach while the scorer takes the width. This rail button
+                            mounts in place of the header "Hide" button below; the
+                            toggleQueue/queueOpen effect above moves focus here after
+                            an operator-driven collapse. */}
                         {!queueOpen && (
                             <button
                                 type="button"
+                                ref={queueShowBtnRef}
                                 className="shiaijo-queue-rail"
                                 onClick={toggleQueue}
                                 aria-expanded={false}
@@ -1211,8 +1241,12 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                             </button>
                         )}
                         <div className="shiaijo__queue" id="shiaijo-queue">
+                            {/* This header button unmounts the rail button above once
+                                expanded; the toggleQueue/queueOpen effect moves focus
+                                here after an operator-driven expand. */}
                             <button
                                 type="button"
+                                ref={queueHideBtnRef}
                                 className="section-title shiaijo-queue__head"
                                 onClick={toggleQueue}
                                 aria-expanded={true}
@@ -1742,12 +1776,12 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
             <div className="shiaijo-qrow__match">
                 <div className="shiaijo-qrow__side" aria-label={`Shiro: ${bName}`}>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                    <span className="shiaijo-qrow__name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{bName}</span>
+                    <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} /></span>
                 </div>
                 <span className="shiaijo-qrow__vs">vs</span>
                 <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <span className="shiaijo-qrow__name">{aName}{m.sideA?.number ? <span className="num-prefix num-prefix--after">{m.sideA.number}</span> : null}</span>
+                    <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} /></span>
                 </div>
             </div>
             {/* Completed result on its own centred line BELOW the names: the
@@ -1823,8 +1857,7 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 <div className="name">
-                    {m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}
-                    {m.sideB?.name}
+                    <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
@@ -1832,8 +1865,7 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--aka">AKA</span>
                 <div className="name">
-                    {m.sideA?.name}
-                    {m.sideA?.number ? <span className="num-prefix num-prefix--after">{m.sideA.number}</span> : null}
+                    <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} />
                 </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
             </div>

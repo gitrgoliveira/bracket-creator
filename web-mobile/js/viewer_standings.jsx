@@ -20,6 +20,9 @@ import { poolNameOf, isSupplementaryBout, isPoolDaihyosenBout, teamMatchTypeFor 
 import { matchDataUnreadable, unreadableMatches, UnreadableBoutsNote, UnreadablePoolNote } from './data_integrity.jsx';
 import { realIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+// NumberedName: single owner of the number-chip-on-the-outer-side rule
+// (bc-dnst); see that file's header for why this stays an ES import.
+import { NumberedName } from './numbered_name.jsx';
 
 const { useState, useMemo } = React;
 const EmptyState = window.EmptyState;
@@ -185,7 +188,9 @@ export function SwissStandingsViewer({ competition, poolMatches, tweaks }) {
                   <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div className="pool__player-name">
-                      {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
+                      {/* No number chip here: Swiss competitors carry no number
+                          (engine.DrawSourceFor returns DrawNone for Swiss, since
+                          there are no draw positions to number from). */}
                       {pMember1}
                     </div>
                     {/* Engi pair: member 2 (from the combined name) stacked below member 1. */}
@@ -405,8 +410,9 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
 export const PoolMatchRow = React.memo(({ m, onClick }) => {
   const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
   const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
-  // Competitor numbers ride on the OUTER side of the name (Shiro's before it,
-  // Aka's after it); the winner comparison below still uses the bare name/id.
+  // Competitor numbers ride on the OUTER side of the name via NumberedName
+  // below (Shiro's before it, Aka's after it); the winner comparison still
+  // uses the bare name/id.
   const aNum = typeof m.sideA === "object" ? (m.sideA?.number || "") : "";
   const bNum = typeof m.sideB === "object" ? (m.sideB?.number || "") : "";
   const aName = aRawName;
@@ -428,7 +434,7 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
   return (
     <Tag className={`pool-match-row${m.status === "running" ? " is-running" : ""}`} {...interactiveProps}>
       <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
-        <span className="pool-match-row__name">{bNum ? <span className="num-prefix">{bNum}</span> : null}{bName}</span>
+        <span className="pool-match-row__name"><NumberedName side="shiro" name={bName} number={bNum} /></span>
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
       </div>
       <span className="pool-match-row__score">
@@ -436,7 +442,7 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
       </span>
       <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
-        <span className="pool-match-row__name">{aName}{aNum ? <span className="num-prefix num-prefix--after">{aNum}</span> : null}</span>
+        <span className="pool-match-row__name"><NumberedName side="aka" name={aName} number={aNum} /></span>
       </div>
     </Tag>
   );
@@ -696,7 +702,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
       <span className="pool-match-numbered-row__num">{num}</span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--shiro">
         <span className="sr-only">Shiro: </span>
-        <span className="pool-match-numbered-row__name">{bNum ? <span className="num-prefix">{bNum}</span> : null}{bName || "-"}</span>
+        <span className="pool-match-numbered-row__name"><NumberedName side="shiro" name={bName || "-"} number={bNum} /></span>
         {shiroWonDH ? <DHBadge /> : null}
         {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
       </div>
@@ -712,7 +718,7 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
             the inside edge (toward the centre score), mirroring the Shiro side
             where the pill follows the name. */}
         {akaWonDH ? <DHBadge /> : null}
-        <span className="pool-match-numbered-row__name">{aName || "-"}{aNum ? <span className="num-prefix num-prefix--after">{aNum}</span> : null}</span>
+        <span className="pool-match-numbered-row__name"><NumberedName side="aka" name={aName || "-"} number={aNum} /></span>
         {aDN ? <span className="pool-match-numbered-row__name">{aDN}</span> : null}
       </div>
     </Tag>

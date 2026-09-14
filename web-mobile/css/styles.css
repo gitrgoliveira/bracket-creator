@@ -5031,6 +5031,13 @@ button.pool-match-row {
      below. Realistic spaced/CJK names already wrap and are unaffected. */
   grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr);
   align-items: stretch;
+  /* The board is a flex item of the modal body's column, and `overflow:
+     hidden` below makes its automatic minimum height 0, so when the body has
+     more content than height the flex algorithm shrinks THIS item first (the
+     bout rows keep overflow visible and cannot shrink): the team header
+     collapsed to its 2px of border and vanished in the compact overlay. A
+     header never shrinks; the body scrolls. */
+  flex-shrink: 0;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -5202,18 +5209,15 @@ button.pool-match-row {
 
 /* Ippon fill order is fixed OUTSIDE-TO-INSIDE: pts[0] (the first point scored)
    takes the slot FARTHEST from the centre vs, and later points fill inward
-   toward it. Shiro's group (left of the VS) renders in DOM order, so pts[0]
-   is its outer (left) cell; Aka's group (right of the VS) must mirror it and
-   render pts[0] at the outer (right) edge. This declaration owns only the
-   WITHIN-group fill order. It is the third expression of the aka mirror, the
-   other two being sideSlotOrder in result_slot.jsx (see its note), and is
-   kept in CSS because this surface renders its cells in DOM order and flips
-   them in the layout layer. Fixed by FIK Table 1 (p.15), Yuko-datotsu row,
-   which pins the mark order to the Taisho round of Table 2 (p.16). See
-   running_a_kendo_tournament.md, Individual Match Scoreboard. */
-.sb-slots--aka {
-  flex-direction: row-reverse;
-}
+   toward it, so Aka's group (right of the VS) is the mirror of Shiro's. That
+   mirror has ONE owner, sideSlotOrder in result_slot.jsx, which slotButtons
+   in admin_scoring_individual.jsx maps exactly as the team editor's ptSlots
+   and the read-only scoreboard do; the DOM order of the buttons IS the
+   visual order, so the keyboard reaches the outer slot first. There is no
+   CSS row-reverse here on purpose (it was a third expression of the rule).
+   Fixed by FIK Table 1 (p.15), Yuko-datotsu row, which pins the mark order
+   to the Taisho round of Table 2 (p.16). See running_a_kendo_tournament.md,
+   Individual Match Scoreboard. */
 
 .sb-slot {
   width: 44px;
@@ -6107,6 +6111,35 @@ button.pool-match-row {
 .num-prefix--after {
   margin-right: 0;
   margin-left: 4px;
+}
+/* NumberedName (numbered_name.jsx) wraps the name text in its own span so a
+   nowrap + ellipsis container can be told to clip the NAME and never the
+   chip: an ellipsised block drops its LAST inline content first, which for
+   Aka is the number. Such a container becomes an inline flex row (inline so
+   the parent's text-align keeps placing it, right-aligned sides included),
+   floors the chip and moves the ellipsis onto the text span. */
+.numbered-name__text { min-width: 0; }
+.shiaijo-qrow__name,
+.shiaijo-sides__side .name,
+.score-edit-row__side .name {
+  display: inline-flex;
+  max-width: 100%;
+  vertical-align: bottom;
+  align-items: baseline;
+  gap: 4px;
+}
+.shiaijo-qrow__name > .numbered-name__text,
+.shiaijo-sides__side .name > .numbered-name__text,
+.score-edit-row__side .name > .numbered-name__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shiaijo-qrow__name > .num-prefix,
+.shiaijo-sides__side .name > .num-prefix,
+.score-edit-row__side .name > .num-prefix {
+  flex: none;
+  margin: 0;
 }
 
 /* Schedule / TW-match compact badges (A/S) */
@@ -7522,13 +7555,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* ======================================================================
    Scoring editor, "Instrument Panel" compact mode.
-   Activated by `.editor-modal--compact`, carried by BOTH hosts: the outer
-   modal div of the overlay and the inline `.scoring-panel` of the shiaijo
-   console (bc-dnst). Compact mode applies to: individual matches (always),
-   team matches with teamSize ≤ 5, and kachinuki team matches (regardless
-   of size, since kachinuki renders the current bout only). Fixed-format
-   team matches with teamSize > 5 keep the roomy legacy layout but get the
-   `.team-bouts-scroll` rule below for independent bout-list scrolling.
+   Activated by `.editor-modal--compact`, carried by every host of the
+   individual and team editor bodies: the outer modal div of the overlay and
+   the inline `.scoring-panel` of both inline hosts, the shiaijo console
+   (admin_shiaijo.jsx) and the Competition > Bracket running-match panel
+   (admin_competition_bracket.jsx) (bc-dnst). Compact mode applies to:
+   individual matches (always), team matches with teamSize ≤ 5, and
+   kachinuki team matches (regardless of size, since kachinuki renders the
+   current bout only). Fixed-format team matches with teamSize > 5 keep the
+   roomy legacy layout but get the `.team-bouts-scroll` rule below for
+   independent bout-list scrolling. The engi (kata) editor body is NOT
+   compact on either host; it has its own density and its own coarse-pointer
+   block (`.engi-counter__btn`).
 
    All compact rules are layered after the duplicate
    .editor-modal--team / .team-sub-match / .team-summary blocks at
@@ -7634,14 +7672,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* --- Compact mode: chrome ------------------------------------------------ */
-/* Tap floor for compact controls: 0 on fine pointers (dense laptop scoring),
-   44px on coarse ones (DESIGN.md 2.4). Every compact rule that shrinks a
-   control clamps with max(<its size>, var(--tap-floor)). */
-.editor-modal--compact {
+/* Tap floor for dense controls, declared once at the root so any rule anywhere
+   can clamp: 0 on fine pointers (dense laptop scoring), 44px on coarse ones
+   (DESIGN.md 2.4). A rule that shrinks a control clamps with
+   max(<its size>, var(--tap-floor)) or floors it with min-height: var(--tap-floor). */
+:root {
   --tap-floor: 0px;
 }
 @media (pointer: coarse) {
-  .editor-modal--compact {
+  :root {
     --tap-floor: 44px;
   }
 }
@@ -7672,11 +7711,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   padding: 4px 0;
 }
 .editor-modal--compact .sb-match {
-  grid-template-columns: 1fr 120px 1fr;
+  /* Columns are owned elsewhere: the individual board by .sb-match:has(.sb-slots)
+     (its centre carries the slot groups), the team header by the
+     .scoring-panel--team / .editor-modal--team rules. Nothing here. */
   border-radius: 12px;
-}
-.editor-modal--compact .sb-match:has(.sb-slots) {
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 }
 .editor-modal--compact .sb-side {
   /* Narrow sides: the centre column now carries both slot groups, so the
@@ -7717,11 +7755,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin: 6px 0;
 }
 .editor-modal--compact .sb-slot {
-  /* 34px keeps the 560px overlay's side columns wide enough for three marks
-     per line beside the centre slot groups; the tap floor still lifts them
-     to 44px on coarse pointers. */
-  width: 34px;
-  height: 34px;
+  /* 36px is DESIGN.md 2.4's fine-pointer floor for a shared-surface control
+     and still leaves the 560px overlay's side columns room for three marks
+     per line beside the centre slot groups; the tap floor lifts the slots to
+     44px on coarse pointers. */
+  width: 36px;
+  height: 36px;
   min-width: var(--tap-floor);
   min-height: var(--tap-floor);
   font-size: 15px;
@@ -7760,7 +7799,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 13px;
 }
 .editor-modal--compact .sb-center {
-  padding: 8px;
+  /* 4px sides: with 36px slots the centre column must stay at or under
+     211px for the 560px overlay's side columns to keep three marks per line
+     (3 × 44px + 2 × 4px gaps inside a 160px side with 8px padding). */
+  padding: 8px 4px;
 }
 .editor-modal--compact .sb-vs {
   font-family: var(--font-mono);
@@ -7950,11 +7992,22 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .glossary-hint .tw-term:focus-visible {
   color: var(--ink-2, #555);
 }
-/* align="end" hints (GlossaryHint) open leftwards, so a hint near its row's
-   right edge keeps its tooltip inside the scroll container. */
-.glossary-hint--end .tw-tooltip {
+/* A term measures its room on open (Term in glossary.jsx) and flips the
+   tooltip to open leftwards when the default left-anchored box would run past
+   its scroll container's right edge, so no call site has to know where in a
+   wrapping row its hint landed. */
+.tw-term--flip .tw-tooltip {
   left: auto;
   right: 0;
+}
+/* Same measurement, vertical half: a box that would need the scroll body to
+   grow (and so bring in a scrollbar, re-wrap the content and slide the term
+   out from under the pointer, which flickers) opens upwards instead. */
+.tw-term--up .tw-tooltip {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 6px;
 }
 
 .editor-modal--compact .decision-controls {
@@ -8983,20 +9036,23 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 20px;
   align-items: start;
 }
-.shiaijo__queue { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
-.shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-/* Queue folded (accordion): the column shrinks to a rail that reopens it and
-   the scorer takes the rest of the width. */
-.shiaijo--queue-collapsed { grid-template-columns: 44px 1fr; }
-.shiaijo--queue-collapsed .shiaijo__queue { display: none; }
-/* Open, the column reads as the container the rail folds into: a framed card
-   whose header bar is the collapse control. */
+/* Open, the queue column reads as the container the rail folds into: a framed
+   card whose header bar is the collapse control. */
 .shiaijo__queue {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
   padding: 0 12px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
 }
+.shiaijo__main { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+/* Queue folded (accordion): the column shrinks to a rail that reopens it and
+   the scorer takes the rest of the width. */
+.shiaijo--queue-collapsed { grid-template-columns: 44px 1fr; }
+.shiaijo--queue-collapsed .shiaijo__queue { display: none; }
 /* Composes .section-title for its type; this rule owns only the bar's layout. */
 .shiaijo-queue__head {
   display: flex;
@@ -9005,6 +9061,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   width: calc(100% + 24px);
   margin: 0 -12px;
   padding: 10px 14px;
+  /* The bar is the fold control, so it takes the coarse-pointer floor like
+     every other console control. */
+  min-height: var(--tap-floor);
   background: var(--bg-2);
   border: 0;
   border-bottom: 1px solid var(--line);
@@ -9066,9 +9125,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   box-shadow: none;
   padding: 12px 0;
 }
+/* The called-state ring itself comes from .shiaijo-upnext__card.is-called
+   below (later in source, same specificity as the flattening rule above);
+   only the padding needs restoring so the ring has an inset. */
 .shiaijo__queue .shiaijo-upnext__card.is-called {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
   padding: 12px 14px;
 }
 .shiaijo__queue .shiaijo-qrow {
@@ -10328,6 +10388,33 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   container-name: editorbody;
 }
 @container editorbody (max-width: 520px) {
+  /* Phone-width best effort (operators score on tablets; a phone must merely
+     stay usable, never drive the tablet layout, which this query cannot
+     reach: the console panel and the 560px overlay are both wider). The
+     individual board's centre carries four 44px slots and cannot shrink, so
+     it takes its own row above the two sides instead of squeezing them to a
+     glyph per line; the sides then share the width. The side's subgrid rows
+     are renumbered for the three rows that remain. */
+  .sb-match:has(.sb-slots) {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+  }
+  .sb-match:has(.sb-slots) > .sb-center { grid-row: 1; grid-column: 1 / -1; }
+  .sb-match:has(.sb-slots) > .sb-side { grid-row: 2 / -1; }
+  .sb-match:has(.sb-slots) > .sb-side--shiro { grid-column: 1; }
+  .sb-match:has(.sb-slots) > .sb-side--aka { grid-column: 2; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-side__badge { grid-row: 1; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-name { grid-row: 2; }
+  .sb-match:has(.sb-slots) > .sb-side > .sb-points-grid { grid-row: 3; }
+  /* The team header's fixed centre and gutter margin exist to align it with
+     the bout rows' columns; those rows stack below, so the header goes back
+     to content-sized columns and full width. */
+  .scoring-panel--team .sb-match,
+  .editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-match {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    margin-left: 0;
+    margin-right: 0;
+  }
   /* Bout row STACKS: Shiro side / centre marks / Aka side, each full width.
      Selectors carry the .team-bouts-scroll prefix to match the specificity
      (0,2,0) of the base .team-bouts-scroll .team-sub-match__row override —

@@ -489,13 +489,20 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 
 // IndividualScore: §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
-// withNumber: prepend the assigned competitor number (e.g. "K1") to the
-// display name when present. Falls back to the bare name when no number is
-// set, so competitions without `numberPrefix` render identically to before.
-// Honours the zekken `displayName` when `withZekkenName` is true, matching
-// `sideLabel` in display.jsx. Used by every individual-match name-rendering
-// site (TV display, streaming overlay, viewer card, schedule list) so the
-// number prefix appears consistently across all spectator surfaces.
+// withNumber: the plain-STRING renderer, prepending the assigned competitor
+// number (e.g. "K1") to the display name when present. Falls back to the
+// bare name when no number is set, so competitions without `numberPrefix`
+// render identically to before. Honours the zekken `displayName` when
+// `withZekkenName` is true, matching `sideLabel` in display.jsx. Used by the
+// TV display, the streaming overlay, the viewer match card and the public
+// schedule list, and it prepends on BOTH sides.
+//
+// The Shiro/Aka JSX layouts (console queue, score editors, standings pool
+// rows) do not call this: they render through NumberedName
+// (numbered_name.jsx), which puts the number on the OUTER side instead
+// (Shiro before the name, Aka after it). Whether that outer-side placement
+// should extend to these string surfaces too is an open operator decision
+// recorded on bc-dnst; do not fold the two together until it is taken.
 export function withNumber(side, withZekkenName) {
   if (!side) return "TBD";
   if (typeof side === "string") return side;

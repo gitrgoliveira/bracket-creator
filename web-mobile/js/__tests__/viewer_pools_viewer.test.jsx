@@ -5,6 +5,14 @@ function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
+  // The reactive test runtime does not itself recurse into function-typed
+  // vnodes (findAll relies on that: it matches DHBadge by identity, e.g.
+  // `n.type === DHBadge`, unexpanded). collectText's job is text, not
+  // identity, so it expands a function component (NumberedName, DHBadge,
+  // the window.Term stub) here to reach the text it renders. Every
+  // component reachable this way is a pure leaf with no hooks, so calling
+  // it outside the runtime's own render/hookIndex bookkeeping is safe.
+  if (typeof node.type === 'function') return collectText(node.type(node.props));
   if (node.children) return collectText(node.children);
   if (node.props?.children) return collectText(node.props.children);
   return '';

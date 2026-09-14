@@ -44,6 +44,7 @@ import { notLandedBanner } from './write_result.jsx';
 // chain (CLAUDE.md § Match Decision Types: the middle rule lives in ONE place).
 import { boutMiddle, winnerSideLR } from './bracket.jsx';
 import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, nameOf, sideSlotOrder, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
+import { NumberedName } from './numbered_name.jsx';
 
 // renderTeamBoutMiddle: the ONE place the editor turns a sub-bout into its
 // centre value, for BOTH the read-only done row and the live entry row. Derives
@@ -1152,8 +1153,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // with a 9-person roster. Larger fixed-format
   // teams keep the roomier layout and use .team-bouts-scroll for
   // independent bout-list scrolling.
-  // bc-dnst: BOTH hosts read this one condition, the overlay and the inline
-  // shiaijo panel, so a team never changes layout by which one it is opened in.
+  // bc-dnst: BOTH inline hosts read this one condition, the shiaijo console
+  // (admin_shiaijo.jsx) and the Competition > Bracket running-match panel
+  // (admin_competition_bracket.jsx), same as the overlay, so a team never
+  // changes layout by which one it is opened in.
   const useCompact = teamSize <= 5 || isKachinuki;
   // T141: daihyosen is knockout-only: pool matches resolve ties via
   // the standings tiebreak, not a representative bout. Format comes
@@ -2556,11 +2559,10 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 <div className={`sb-side sb-side--${s.color}`}>
                   {/* SHIRO/AKA pill, matching the individual + Engi editors. */}
                   <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
-                  {/* Team number on the OUTER side of the name, as on the bout rows. */}
+                  {/* Team number chip: owned by numbered_name.jsx
+                      (the outer-side rule lives there). */}
                   <div className="sb-name">
-                    {s.color === "shiro" && s.number ? <span className="num-prefix">{s.number}</span> : null}
-                    {s.name}
-                    {s.color === "aka" && s.number ? <span className="num-prefix num-prefix--after">{s.number}</span> : null}
+                    <NumberedName side={s.color} name={s.name} number={s.number} />
                   </div>
                 </div>
                 {idx === 0 && (

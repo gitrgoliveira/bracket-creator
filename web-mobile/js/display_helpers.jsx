@@ -27,11 +27,13 @@ function TermD(props) {
 
 // sideLabel: thin delegate to the shared `withNumber` helper from
 // match_scoreboard.jsx so display.jsx and the OBS overlay agree on what to
-// render with no risk of the two implementations drifting. Kept as a named
-// export for the TV/lobby/overlay call sites and for test imports
+// render with no risk of the two implementations drifting. `color` ("shiro" |
+// "aka") is passed straight through so the number lands on the outer side of
+// the name (operator ruling 2026-09-14, bc-dnst). Kept as a named export for
+// the TV/lobby/overlay call sites and for test imports
 // (display_white_board.test.jsx asserts on `sideLabel`).
-function sideLabel(side, withZekkenName) {
-    return withNumber(side, withZekkenName);
+function sideLabel(side, withZekkenName, color) {
+    return withNumber(side, withZekkenName, color);
 }
 
 // Reject a bracket side that is still a placeholder rather than a resolved

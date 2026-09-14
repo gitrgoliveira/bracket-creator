@@ -23,6 +23,11 @@ describe('sideLabel: numberPrefix + zekken', () => {
     expect(sideLabel(null)).toBe('TBD');
     expect(sideLabel(undefined, true)).toBe('TBD');
   });
+  it('places the number on the outer side: Shiro before, Aka after (bc-dnst)', () => {
+    expect(sideLabel({ name: 'Tanaka', number: 'K1' }, false, 'shiro')).toBe('K1 Tanaka');
+    expect(sideLabel({ name: 'Tanaka', number: 'K1' }, false, 'aka')).toBe('Tanaka K1');
+    expect(sideLabel({ name: 'Tanaka Kenji', displayName: 'TANAKA', number: 'K2' }, true, 'aka')).toBe('TANAKA K2');
+  });
 });
 
 describe('overlayPositionLabel: FIK names only for 5-person teams', () => {
@@ -414,9 +419,11 @@ describe('findNextPoolOnCourt', () => {
     ] };
     expect(findNextPoolOnCourt(c3, 'Pool A', 'A').name).toBe('Pool B');
   });
-  it('roster honours number prefix + zekken displayName via sideLabel', () => {
-    // Object sides with number + displayName; withZekkenName true → the roster
-    // must match the rest of the TV surface (e.g. "K1 Ryu", not "Tanaka").
+  it('roster honours number prefix + zekken displayName via sideLabel, number leading on both sides', () => {
+    // Object sides with number + displayName; withZekkenName true: the roster
+    // must match the rest of the TV surface. The roster is a FLAT list, not a
+    // Shiro/Aka pairing, so the outer-side rule (bc-dnst) does not apply and
+    // the number leads every name whatever the colour.
     const c = { withZekkenName: true, poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', scheduledAt: '09:00' },
       { id: 'Pool B-0', court: 'A', status: 'scheduled', scheduledAt: '09:30',
@@ -428,6 +435,21 @@ describe('findNextPoolOnCourt', () => {
       { name: 'K2 Sho', side: 'shiro' },
       { name: 'K1 Ryu', side: 'aka' },
     ]);
+  });
+  it('roster lists a competitor once even when they are Shiro in one bout and Aka in the next', () => {
+    // Regression: a side-dependent label ("E3 ADAMS" as Shiro, "ADAMS E3" as
+    // Aka) defeated the label dedupe and the TV Up Next roster named the same
+    // person twice. Seen in the browser on PR #428.
+    const adams = { name: 'Adams', number: 'E3' };
+    const green = { name: 'Green', number: 'E4' };
+    const clark = { name: 'Clark', number: 'E1' };
+    const c = { poolMatches: [
+      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', scheduledAt: '09:00' },
+      { id: 'Pool B-0', court: 'A', status: 'scheduled', scheduledAt: '09:30', sideA: adams, sideB: green },
+      { id: 'Pool B-1', court: 'A', status: 'scheduled', scheduledAt: '09:40', sideA: clark, sideB: adams },
+    ] };
+    const res = findNextPoolOnCourt(c, 'Pool A', 'A');
+    expect(res.players.map(p => p.name)).toEqual(['E4 Green', 'E3 Adams', 'E1 Clark']);
   });
   it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
     const team = { kind: 'team', poolMatches: [

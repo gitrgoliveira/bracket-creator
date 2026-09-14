@@ -212,12 +212,12 @@ function StreamingOverlay({ court, position, competitions }) {
     const boutIpponsA = currentSub ? (realIppons(currentSub.ipponsA).join('') || '-') : '-';
 
     // Team names (outer flanks of QR in team mode).
-    const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken) : '';
-    const akaTeamName = hasRunning ? sideLabel(running.match.sideA, zekken) : '';
+    const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken, "shiro") : '';
+    const akaTeamName = hasRunning ? sideLabel(running.match.sideA, zekken, "aka") : '';
 
     // Individual match data (non-team).
-    const shiro = hasRunning && !isTeamMatch ? sideLabel(running.match.sideB, zekken) : '';
-    const aka = hasRunning && !isTeamMatch ? sideLabel(running.match.sideA, zekken) : '';
+    const shiro = hasRunning && !isTeamMatch ? sideLabel(running.match.sideB, zekken, "shiro") : '';
+    const aka = hasRunning && !isTeamMatch ? sideLabel(running.match.sideA, zekken, "aka") : '';
     // Pool and bracket matches share one wire shape (ipponsA/ipponsB arrays;
     // scoreA/scoreB strings never appear), so the running score reads
     // straight off the array with no per-kind fallback.

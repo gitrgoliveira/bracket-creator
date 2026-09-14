@@ -282,11 +282,11 @@ export function TWMatch({ m, highlight, onClick }) {
       <div className="tw-match__players">
         <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--shiro">S</span>
-          {withNumber(m.sideB)}
+          {withNumber(m.sideB, undefined, "shiro")}
         </div>
         <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
           <span className="tw-match__badge tw-match__badge--aka">A</span>
-          {withNumber(m.sideA)}
+          {withNumber(m.sideA, undefined, "aka")}
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>

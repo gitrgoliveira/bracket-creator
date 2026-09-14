@@ -489,25 +489,22 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 
 // IndividualScore: §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
-// withNumber: the plain-STRING renderer, prepending the assigned competitor
-// number (e.g. "K1") to the display name when present. Falls back to the
-// bare name when no number is set, so competitions without `numberPrefix`
-// render identically to before. Honours the zekken `displayName` when
-// `withZekkenName` is true, matching `sideLabel` in display.jsx. Used by the
-// TV display, the streaming overlay, the viewer match card and the public
-// schedule list, and it prepends on BOTH sides.
-//
-// The Shiro/Aka JSX layouts (console queue, score editors, standings pool
-// rows) do not call this: they render through NumberedName
-// (numbered_name.jsx), which puts the number on the OUTER side instead
-// (Shiro before the name, Aka after it). Whether that outer-side placement
-// should extend to these string surfaces too is an open operator decision
-// recorded on bc-dnst; do not fold the two together until it is taken.
-export function withNumber(side, withZekkenName) {
+// withNumber: the plain-STRING twin of NumberedName (numbered_name.jsx), for
+// surfaces that build a string rather than JSX: the TV board, the streaming
+// (OBS) overlay, the viewer match card and the public schedule list, called
+// directly here and via `sideLabel` in display_helpers.jsx. It renders the
+// SAME outer-side rule (operator ruling 2026-09-14, bc-dnst): Shiro's number
+// sits BEFORE the name, Aka's AFTER it, so `color` ("shiro" | "aka") is
+// required wherever a number can appear. Falls back to the bare name when no
+// number is set, so competitions without `numberPrefix` render identically to
+// before. Honours the zekken `displayName` when `withZekkenName` is true.
+// Keep this in step with NumberedName; the two must not drift apart.
+export function withNumber(side, withZekkenName, color) {
   if (!side) return "TBD";
   if (typeof side === "string") return side;
   const name = (withZekkenName && side.displayName) ? side.displayName : (side.name || "TBD");
-  return side.number ? `${side.number} ${name}` : name;
+  if (!side.number) return name;
+  return color === "aka" ? `${name} ${side.number}` : `${side.number} ${name}`;
 }
 
 // shiroName / akaName: optional resolved display names, mirroring the props
@@ -560,12 +557,13 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   // row IS a full match, and by the viewer's match card, which has no name row of
   // its own (a competitor's points must never sit under their name).
   // Always display the human NAME (never the id key used for comparison).
-  // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
-  // the competition has a numberPrefix configured; falls back to the bare name.
+  // withNumber places the assigned competitor number on the outer side (e.g.
+  // "K1 Tanaka" for Shiro, "Yamada K2" for Aka) when the competition has a
+  // numberPrefix configured; falls back to the bare name.
   // tri-review #2: pass withZekkenName so zekken-mode comps render the
   // displayName ("K1 TANAKA") instead of the canonical full name.
-  const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName);
-  const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName);
+  const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName, "shiro");
+  const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName, "aka");
   // Name over dojo, the same block the bracket's PlayerLine and the up-next row
   // render. A SECOND LINE UNDER THE NAME only: the ippon slots stay on the
   // name's row, vertically centred against the block, because a competitor's

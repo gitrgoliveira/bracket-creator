@@ -61,8 +61,8 @@ function LinkDot({ linkState }) {
 }
 
 function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, squadA, squadB, teamSize, showDH, queueMatches, zekken }) {
-    const shiroTeam = sideLabel(promoted.match.sideB, zekken);
-    const akaTeam = sideLabel(promoted.match.sideA, zekken);
+    const shiroTeam = sideLabel(promoted.match.sideB, zekken, "shiro");
+    const akaTeam = sideLabel(promoted.match.sideA, zekken, "aka");
     // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
     // the actual fighters are the rep players the operator records. When set,
     // show the rep player as the headline name with the team as a sub-label.
@@ -160,9 +160,9 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
-                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName)}</span>
+                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName, "shiro")}</span>
                         <span style={{ color: "var(--ink-3)", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
-                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName)}</span>
+                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName, "aka")}</span>
                     </span>
                 </div>
             )}
@@ -285,8 +285,12 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     const poolMatches = competition.poolMatches
         .filter(m => poolNameOf(m.id) === nextName)
         .sort(compareByRunOrder);
-    // Use sideLabel (number prefix + zekken displayName) so the roster matches
-    // every other TV surface; dedupe on that display label.
+    // Use sideLabel (number + zekken displayName) so the roster matches every
+    // other TV surface, and dedupe on that display label. The roster is a FLAT
+    // list, not a Shiro/Aka pairing, so it has no outer side and the number
+    // leads every name: a competitor who is Shiro in one bout and Aka in the
+    // next is one person and must be listed once, which a side-dependent
+    // label would break (verified: "E3 ADAMS" and "ADAMS E3" both appeared).
     const zekken = !!competition.withZekkenName;
     const seen = new Set();
     const players = [];
@@ -480,9 +484,9 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
-                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken)}</span>
+                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken, "shiro")}</span>
                         <span style={{ color: "var(--ink-3)", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
-                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken)}</span>
+                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken, "aka")}</span>
                     </span>
                 </div>
             )}

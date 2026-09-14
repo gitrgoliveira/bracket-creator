@@ -8,12 +8,10 @@
 // This is a leaf with no imports and no window.* dependency, so every
 // Shiro/Aka layout that shows a numbered side ES-imports it directly instead
 // of restating the before/after ternary pair inline, per this repo's rule
-// that a display contract lives in one primitive. The plain-text sibling for
-// string contexts (the TV board, the OBS lower third, the schedule list) is
-// withNumber in match_scoreboard.jsx, which still prepends on both sides;
-// whether the outer-side rule extends to those spectator surfaces is an open
-// operator decision recorded on bc-dnst, so do not fold the two together
-// until it is taken.
+// that a display contract lives in one primitive. withNumber in
+// match_scoreboard.jsx is the plain-string twin of this rule, for the string
+// contexts (the TV board, the OBS lower third, the viewer match card, the
+// public schedule list); keep the two in step.
 //
 // The name text is wrapped in its own span (.numbered-name__text) so a
 // nowrap + ellipsis container can be told to clip the NAME and never the chip:

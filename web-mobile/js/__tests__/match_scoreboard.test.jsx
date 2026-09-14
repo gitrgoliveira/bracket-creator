@@ -31,6 +31,12 @@ describe('match_scoreboard: withNumber', () => {
     expect(withNumber(side, true)).toBe('K1 TANAKA');
     expect(withNumber(side, false)).toBe('K1 Tanaka Kenji');
   });
+  it('places the number on the outer side: Shiro before, Aka after (bc-dnst)', () => {
+    expect(withNumber({ name: 'Tanaka', number: 'K1' }, false, 'shiro')).toBe('K1 Tanaka');
+    expect(withNumber({ name: 'Tanaka', number: 'K1' }, false, 'aka')).toBe('Tanaka K1');
+    const side = { name: 'Tanaka Kenji', displayName: 'TANAKA', number: 'K1' };
+    expect(withNumber(side, true, 'aka')).toBe('TANAKA K1');
+  });
 });
 
 describe('match_scoreboard: teamIVPW', () => {
@@ -490,11 +496,13 @@ describe('match_scoreboard components', () => {
     expect(shiroSlots?.props?.className).toContain('msb-slots--win');
   });
 
-  it('IndividualScore prepends the assigned competitor number (numberPrefix) when showNames is set', () => {
-    // mp-13y: when a competition has a numberPrefix configured, the assigned
-    // number (e.g. "K1") is set on match.sideA.number / match.sideB.number by
-    // AssignPlayerNumbers and surfaced via normalizeMatch. The TV pool/round
-    // feed renders names with showNames=true, so each name reads "K1 Tanaka".
+  it('IndividualScore places the assigned competitor number (numberPrefix) on the outer side when showNames is set', () => {
+    // mp-13y / bc-dnst: when a competition has a numberPrefix configured, the
+    // assigned number (e.g. "K1") is set on match.sideA.number /
+    // match.sideB.number by AssignPlayerNumbers and surfaced via
+    // normalizeMatch. The TV pool/round feed renders names with
+    // showNames=true. Shiro's number sits BEFORE the name ("K1 Tanaka"),
+    // Aka's AFTER it ("Suzuki K2") — operator ruling 2026-09-14.
     const match = {
       sideA: { name: 'Suzuki', number: 'K2' },
       sideB: { name: 'Tanaka', number: 'K1' },
@@ -504,7 +512,7 @@ describe('match_scoreboard components', () => {
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
     expect(collectText(shiro)).toBe('K1 Tanaka');
-    expect(collectText(aka)).toBe('K2 Suzuki');
+    expect(collectText(aka)).toBe('Suzuki K2');
   });
 
   it('IndividualScore degrades to the bare name when no number is set (non-numbered competition)', () => {

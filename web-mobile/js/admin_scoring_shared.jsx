@@ -812,14 +812,16 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
 // `setFouls` is kept for the `−` button (simple decrement). After the
 // 2-foul auto-award the awarded H lives in the opponent's pts array, so
 // the counter shows only "outstanding fouls not yet discharged."
-function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
+function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
   // color is "shiro" or "aka": surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.
-  // `disabled` freezes the `+` button when the bout is already decided: 
+  // `disabled` freezes the `+` button when the bout is already decided:
   // a 2nd-foul auto-award in that state would create an invalid 2-2.
+  // The label names no side: the counter sits inside its side's tinted box
+  // under that side's badge, so a "SHIRO" prefix would be the third mention.
   return (
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
-      <div className="foul-counter__label">{label} Fouls</div>
+      <div className="foul-counter__label">Fouls</div>
       <div className="foul-counter__controls">
         <button type="button" className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">

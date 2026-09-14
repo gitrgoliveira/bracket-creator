@@ -541,7 +541,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         setAPts(r.opponentPts);
         markScoringDirty(); // C1
       },
-      color: "shiro", label: "SHIRO (White)",
+      color: "shiro",
     },
     {
       key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls,
@@ -552,7 +552,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         setBPts(r.opponentPts);
         markScoringDirty(); // C1
       },
-      color: "aka", label: "AKA (Red)",
+      color: "aka",
     },
   ];
 
@@ -846,7 +846,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 {sides.map((s) => (
                   <FoulCounter
                     key={s.key}
-                    label={s.label}
                     fouls={s.fouls}
                     setFouls={s.setFouls}
                     onIncrement={s.onIncrement}

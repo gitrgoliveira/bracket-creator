@@ -2819,13 +2819,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   {rowSides.map((rs, rsIdx) => (
                     <React.Fragment key={rs.key}>
                       <div className={`team-sub-match__side team-sub-match__side--${rs.color} ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
-                        {/* Name picker grouped with this side's score controls.
-                            SHIRO chip + a typeable picker (filter the roster as
-                            you type, or write a name) so operators can set the
-                            order live; falls back to a static name when there's
-                            no roster metadata. Lineups are always editable. */}
+                        {/* Name picker grouped with this side's score controls:
+                            a typeable picker (filter the roster as you type, or
+                            write a name) so operators can set the order live;
+                            falls back to a static name when there's no roster
+                            metadata. Lineups are always editable. No side chip
+                            here: the header badge names the side once and the
+                            tinted box carries it down the sheet. */}
                         <div className="tsm-name">
-                          <span className={`se-color-badge se-color-badge--${rs.color}`}>{rs.label}</span>
                           {rs.memberLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`team-sub-match-member-label-${rs.color}`}>{rs.memberLabel}</span>}
                           {(rs.roster && rs.roster.length > 0) || rs.forceInput ? (
                             <LineupNameInput
@@ -2888,7 +2889,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             the opponent's pts array: no derived display. */}
                         <div className="tsm-row-2">
                           <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
-                            <span className="tsm-fouls__label">{rs.label} Fouls</span>
+                            <span className="tsm-fouls__label">Fouls</span>
                             <div className="tsm-fouls__controls">
                               <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
                               <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>

@@ -201,9 +201,10 @@ describe('AdminShiaijoPage render-smoke', () => {
     const sides = [...utils.container.querySelectorAll('.shiaijo-sides__side .name')];
     const names = sides.map(n => n.textContent);
     expect(names).toEqual(['I2Tanaka', 'YamadaI1']);
-    // NumberedName wraps its three children in a .numbered-name span
-    // (layout-transparent by default): .numbered-name__text comes first and
-    // the num-prefix--after chip comes last, for Aka (the second side).
+    // NumberedName wraps the name span and the one chip it renders in a
+    // .numbered-name span (layout-transparent by default): for Aka (the
+    // second side) .numbered-name__text comes first and the
+    // num-prefix--after chip last.
     const chip = sides[1].querySelector('.numbered-name');
     expect(chip.children[0].classList.contains('numbered-name__text')).toBe(true);
     expect(chip.lastElementChild.classList.contains('num-prefix--after')).toBe(true);

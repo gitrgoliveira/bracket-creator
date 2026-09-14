@@ -8037,7 +8037,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    buttons sat at ~20x17px, half DESIGN.md's 36px pragmatic floor for admin
    surfaces, so those two also take a 32px fine-pointer minimum via
    max(32px, var(--tap-floor)). .engi-counter__btn is the single most-tapped
-   control in the Engi flow (every flag increment) and gets the same floor. */
+   control in the Engi flow (every flag increment): it is a fixed 36px box on
+   every pointer, so it takes the bare coarse floor on top of that. */
 .team-bouts-scroll .ipt-btn,
 .team-bouts-scroll .tsm-fouls__btn {
   min-width: max(32px, var(--tap-floor));

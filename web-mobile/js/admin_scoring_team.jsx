@@ -2007,6 +2007,31 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     return member ? squadMemberLabel(teamNumber, member.index) : "";
   };
 
+  // slotLabelFor: the fallback label for a NUMBERED fixed-order position
+  // whose fighter has not resolved to a squad member yet (squadLabelFor
+  // above returns "" in that case). bc-dnst (operator ruling 2026-09-15):
+  // the number belongs to the SQUAD MEMBER, never to the row or the
+  // position -- squad.go seeds a fresh team with one blank member per
+  // position (an id and an index, no name yet) before any lineup exists,
+  // so an unnamed position is really an unnamed MEMBER that already carries
+  // a number. This looks that member up by its index and shows its label; a
+  // name later typed into the position NAMES that same member
+  // (resolveMemberIdsForPositions, admin_lineup.jsx, renames the blank
+  // member rather than minting a new one), so the number stays attached to
+  // the fighter once named. Kachinuki rows are PAIRINGS, not positions:
+  // winner-stays-on means any surviving member can occupy a given row, not
+  // one fixed per-row member, so there is no seeded blank to fall back to
+  // and an empty kachinuki side shows no number until a fighter is chosen.
+  const slotLabelFor = (side, position) => {
+    const squad = side === "a" ? squadA : squadB;
+    const teamNumber = (side === "a" ? m.sideA : m.sideB)?.number || "";
+    // BLANK only, matching the resolver's reuse rule: a named member with
+    // this index is somebody already, possibly fighting at another position,
+    // and a name typed here would mint a new member rather than rename them.
+    const blank = (Array.isArray(squad) ? squad : []).find(mem => mem && mem.index === position && !(mem.name || "").trim());
+    return blank ? squadMemberLabel(teamNumber, position) : "";
+  };
+
   // mp-gmcg: open a past (already-fought) bout for inline correction. Snapshot
   // its current outcome so renderCorrectionWarning can tell if the operator
   // FLIPS who won (which invalidates the later bouts' fighters).
@@ -2673,9 +2698,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // Same lineup→competitor resolution buildPatch uses (DRY).
             const { aName: playerAName, bName: playerBName, aMemberId: playerAMemberId, bMemberId: playerBMemberId } = playerNamesForBout(idx);
             // bc-pnum: the squad member label riding beside each side's name
-            // (squadLabelFor, defined above playerNamesForBout).
-            const playerALabel = squadLabelFor("a", playerAMemberId, playerAName);
-            const playerBLabel = squadLabelFor("b", playerBMemberId, playerBName);
+            // (squadLabelFor, defined above playerNamesForBout). bc-dnst: on
+            // a fixed-order numbered position with no resolved fighter yet,
+            // fall back to the seeded BLANK MEMBER's own label (slotLabelFor)
+            // -- the number belongs to that member, not to the row, so an
+            // unnamed position shows the number of the member a typed name
+            // will attach to. Kachinuki and the daihyosen row have no such
+            // seeded per-row member, so they get no fallback label.
+            const playerALabel = squadLabelFor("a", playerAMemberId, playerAName) || (!isKachinuki && !isDaihyoRow && idx + 1 <= teamSize ? slotLabelFor("a", idx + 1) : "");
+            const playerBLabel = squadLabelFor("b", playerBMemberId, playerBName) || (!isKachinuki && !isDaihyoRow && idx + 1 <= teamSize ? slotLabelFor("b", idx + 1) : "");
 
             // Feature 2 / layout: each player's name select lives WITH that
             // side's score controls (grouped, and aligned down the sheet),
@@ -2725,6 +2756,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // side's foul counter. The auto-award also invalidates the
             // _preFusensho snapshot: once an H lands in the slot the prior
             // pre-fusensho state is stale.
+            // bc-dnst (operator ruling 2026-09-15): every numbered bout
+            // position (not the daihyosen rep bout) shows a typeable name
+            // box even when the team has no roster metadata to offer -- a
+            // fixed-order team registered without members used to fall back
+            // to a static dash there. `lineupSlot` marks that a row IS such
+            // a position, and is added to the render gate below regardless
+            // of roster/forceInput so the box always renders for it.
             const rowSides = [
               {
                 key: "b", pts: s.bPts, fouls: s.bFouls,
@@ -2741,6 +2779,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
                 playerName: playerBName, memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow || freeNameB,
+                lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
                 onSelectName: (isManualRow || freeNameB) ? pickManual("bName") : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
               {
@@ -2754,6 +2793,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
                 playerName: playerAName, memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow || freeNameA,
+                lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
                 onSelectName: (isManualRow || freeNameA) ? pickManual("aName") : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
               },
             ];
@@ -2829,14 +2869,20 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                       <div className={`team-sub-match__side team-sub-match__side--${rs.color} ${rsIdx === 1 ? "team-sub-match__side--right" : ""}`}>
                         {/* Name picker grouped with this side's score controls:
                             a typeable picker (filter the roster as you type, or
-                            write a name) so operators can set the order live;
-                            falls back to a static name when there's no roster
-                            metadata. Lineups are always editable. No side chip
-                            here: the header badge names the side once and the
-                            tinted box carries it down the sheet. */}
+                            write a name) so operators can set the order live.
+                            Lineups are always editable. bc-dnst (operator
+                            ruling 2026-09-15): every numbered position
+                            (rs.lineupSlot) gets this box even with no roster
+                            metadata at all, so a fixed-order team registered
+                            without members can still name its fighters bout by
+                            bout; the static fallback remains only for the
+                            daihyosen row and for a row beyond teamSize that is
+                            not a kachinuki free/manual bout. No side chip here:
+                            the header badge names the side once and the tinted
+                            box carries it down the sheet. */}
                         <div className="tsm-name">
                           {rs.memberLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`team-sub-match-member-label-${rs.color}`}>{rs.memberLabel}</span>}
-                          {(rs.roster && rs.roster.length > 0) || rs.forceInput ? (
+                          {rs.lineupSlot || (rs.roster && rs.roster.length > 0) || rs.forceInput ? (
                             <LineupNameInput
                               value={rs.playerName || ""}
                               roster={rs.roster}

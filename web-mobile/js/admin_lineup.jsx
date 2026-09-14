@@ -158,39 +158,66 @@ function resolveMemberIdForName(squad, name) {
   return list.find(m => normalizeParticipantName(m?.name) === key) || null;
 }
 
+// positionNumberForKey: the 1-based squad-member index a lineup position KEY
+// corresponds to, matching how squad.go seeds a fresh team with one blank
+// member per position ("senpo"->1, "jiho"->2, ..., numeric "3"->3). Used by
+// resolveMemberIdsForPositions below to find the blank member SEEDED for a
+// position, so a typed name can be attached to that member's own number
+// rather than minting a new, number-less one. Returns 0 for anything
+// unrecognised, which never matches a real squad index (indices start at 1),
+// so an unrecognised key safely skips the blank-slot reuse.
+function positionNumberForKey(posKey) {
+  const n = Number(posKey);
+  if (Number.isInteger(n) && n > 0) return n;
+  const idx = POS_LABELS_5.findIndex(p => p.key === posKey);
+  return idx >= 0 ? idx + 1 : 0;
+}
+
 // resolveMemberIdsForPositions resolves a WHOLE positions map (posKey →
-// name) to its memberIds counterpart against an already-loaded `squad`,
-// MINTING a new member for any name with no match. That much IS the
-// operator's ruling for this bead: typing a new name into a lineup slot
-// creates the member and its id in that one step, the same as this file's own
-// "+ Add new member…" picker option (commitAdd above). Shared by BOTH
-// match-scoped lineup writers (admin_schedule_lineup.jsx's free-text panel
-// and admin_scoring_team.jsx's inline in-modal picker) so the resolve/mint
-// contract lives once.
+// name) to its memberIds counterpart against an already-loaded `squad`.
+// Shared by BOTH match-scoped lineup writers (admin_schedule_lineup.jsx's
+// free-text panel and admin_scoring_team.jsx's inline in-modal picker) so
+// the resolve/attach contract lives once.
+//
+// bc-dnst (operator ruling 2026-09-15): the number shown on a bout row
+// belongs to the SQUAD MEMBER, never to the row or the position, because
+// team order can change between team matches -- picking a different member
+// into a position moves THAT member's number onto the row. A fresh team's
+// seeded blank slots are members that already carry a number and no name
+// (squad.go), so a name typed into an unnamed fixed-order position FILLS
+// that position's blank seeded member: this function renames the blank
+// member at the matching index (positionNumberForKey) via
+// window.API.renameTeamMember, keeping its id and its number, so the name
+// stays attached to the number it was shown with. Minting a brand new
+// member is only the FALLBACK for a squad with no blank member at that
+// index (e.g. a reserve position beyond TeamSize) -- the same one-step
+// create this file's own "+ Add new member…" picker option uses
+// (commitAdd above).
 //
 // Sequential, not parallel: two positions typed with the SAME new name
-// must mint it only once -- the second lookup then finds the first mint's
-// member in the growing local squad copy instead of racing a duplicate add
-// the server would refuse anyway.
+// must mint (or rename onto) it only once -- the second lookup then finds
+// the first write's member in the growing local squad copy instead of
+// racing a duplicate add the server would refuse anyway.
 //
-// A mint failure (offline venue wifi, a typed name that normalises onto an
-// existing member, a team no longer on the roster, a stale password) NEVER
-// blocks the write: the operator ruling for THIS bead is the write half of
-// the question, and it stays exactly as it was -- that position's id is
-// simply omitted from the result, the lineup write still proceeds with
-// whatever ids resolved, and the load-time legacy-upgrade repair
-// (EnsureLegacyUpgraded) fills the rest in once a participants.csv write
-// re-arms it. What changed (bc-cse gap closure) is the WARN half: a failure
-// is no longer discarded, it is reported in `failures` so a caller can tell
-// the operator -- via memberIdentityWarning below -- without ever refusing
-// or retrying the save on its own account.
+// A rename/mint failure (offline venue wifi, a typed name that normalises
+// onto an existing member, a team no longer on the roster, a stale
+// password) NEVER blocks the write: the operator ruling for this bead is
+// the write half of the question, and it stays exactly as it was -- that
+// position's id is simply omitted from the result, the lineup write still
+// proceeds with whatever ids resolved, and the load-time legacy-upgrade
+// repair (EnsureLegacyUpgraded) fills the rest in once a participants.csv
+// write re-arms it. The WARN half (bc-cse gap closure): a failure is
+// reported in `failures` so a caller can tell the operator -- via
+// memberIdentityWarning below -- without ever refusing or retrying the
+// save on its own account.
 //
 // Returns { memberIds, squad, failures }: `squad` is handed back (possibly
-// extended by a mint) so the caller can cache it without a second fetch.
-// `failures` is `[{ position, name, reason }]`, one entry per position whose
-// mint failed; `reason` is the server's own message (API.addTeamMember
-// throws with err.error from the response body) -- never a raw Error object
-// or a stack. This function never throws.
+// extended by a mint, or with a member renamed) so the caller can cache it
+// without a second fetch. `failures` is `[{ position, name, reason }]`, one
+// entry per position whose rename/mint failed; `reason` is the server's own
+// message (API.renameTeamMember/addTeamMember throw with err.error from the
+// response body) -- never a raw Error object or a stack. This function
+// never throws.
 async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password) {
   let currentSquad = Array.isArray(squad) ? squad : [];
   const memberIds = {};
@@ -201,6 +228,20 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
     const existing = resolveMemberIdForName(currentSquad, name);
     if (existing) {
       memberIds[posKey] = existing.id;
+      continue;
+    }
+    const slotNumber = positionNumberForKey(posKey);
+    const blankMember = slotNumber
+      ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim())
+      : null;
+    if (blankMember) {
+      try {
+        await window.API.renameTeamMember(compId, teamId, blankMember.id, name, password);
+        currentSquad = currentSquad.map(mem => (mem === blankMember ? { ...mem, name } : mem));
+        memberIds[posKey] = blankMember.id;
+      } catch (e) {
+        failures.push({ position: posKey, name, reason: (e && e.message) || "" });
+      }
       continue;
     }
     try {

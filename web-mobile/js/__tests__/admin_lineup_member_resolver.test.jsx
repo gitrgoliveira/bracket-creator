@@ -137,6 +137,81 @@ describe('resolveMemberIdsForPositions', () => {
     expect(memberIds).toEqual({});
     expect(addTeamMember).not.toHaveBeenCalled();
   });
+
+  // bc-dnst (operator ruling 2026-09-15): the number on a bout row belongs to
+  // the SQUAD MEMBER, not the row. A fresh team is seeded with one blank
+  // member per position (an id + index, no name yet), so a name typed into
+  // an unnamed position must FILL that member's blank slot (rename, keeping
+  // its id and its number) rather than minting a fresh, number-less member.
+  const BLANK_SQUAD = [
+    { id: 'm1', index: 1, name: '' },
+    { id: 'm2', index: 2, name: '' },
+  ];
+
+  it('bc-dnst: a name typed into a named position (senpo) renames the blank member seeded at its index, never mints', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    global.window.API = { addTeamMember, renameTeamMember };
+    const { memberIds, squad } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw'
+    );
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm1', 'Sato', 'pw');
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ senpo: 'm1' });
+    expect(squad.find(m => m.id === 'm1').name).toBe('Sato');
+  });
+
+  it('bc-dnst: a numeric position key ("2") renames the blank member seeded at that index', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    global.window.API = { addTeamMember, renameTeamMember };
+    const { memberIds, squad } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { '2': 'Ito' }, BLANK_SQUAD, 'pw'
+    );
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm2', 'Ito', 'pw');
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ '2': 'm2' });
+    expect(squad.find(m => m.id === 'm2').name).toBe('Ito');
+  });
+
+  it('bc-dnst: no blank member at that index falls back to minting, exactly as before', async () => {
+    const minted = { id: 'mem-new', index: 1, name: 'Sato' };
+    const addTeamMember = vi.fn().mockResolvedValue(minted);
+    const renameTeamMember = vi.fn();
+    global.window.API = { addTeamMember, renameTeamMember };
+    const squad = [{ id: 'm1', index: 1, name: 'Ito' }]; // already named: not a blank slot
+    const { memberIds } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, squad, 'pw'
+    );
+    expect(renameTeamMember).not.toHaveBeenCalled();
+    expect(addTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'Sato', 'pw');
+    expect(memberIds).toEqual({ senpo: 'mem-new' });
+  });
+
+  it('bc-dnst: a name already on the squad resolves without renaming or minting', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn();
+    global.window.API = { addTeamMember, renameTeamMember };
+    const squad = [{ id: 'm1', index: 1, name: 'Sato' }];
+    const { memberIds } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, squad, 'pw'
+    );
+    expect(renameTeamMember).not.toHaveBeenCalled();
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ senpo: 'm1' });
+  });
+
+  it('bc-dnst: a rename failure is reported in `failures`, leaving the position unresolved', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockRejectedValue(new Error('offline'));
+    global.window.API = { addTeamMember, renameTeamMember };
+    const { memberIds, failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw'
+    );
+    expect(memberIds.senpo).toBeUndefined();
+    expect(failures).toEqual([{ position: 'senpo', name: 'Sato', reason: 'offline' }]);
+    expect(addTeamMember).not.toHaveBeenCalled();
+  });
 });
 
 // bc-cse gap closure: memberIdentityWarning is the ONE composer all three

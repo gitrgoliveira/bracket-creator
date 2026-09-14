@@ -19,8 +19,8 @@
 // calls belong to the browser-review children named in the comments.
 
 import React from 'react';
-import { render, act, fireEvent, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
@@ -504,5 +504,52 @@ describe('TeamScoreEditorModal compact density is ONE condition on both hosts (b
     const modal = container.querySelector('.editor-modal--team');
     expect(modal).not.toBeNull();
     expect(modal.classList.contains('editor-modal--compact')).toBe(cell.compact);
+  });
+});
+
+describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still gets a name box (bc-dnst)', () => {
+  // Operator ruling 2026-09-15: a fixed-order team registered without
+  // members used to show a static dash and no number on every bout row
+  // (rosterForSide returns [] here, via the AdminLineupHelpers.rosterFor
+  // stub, exactly like a team with no team.metadata roster). Every numbered
+  // position must now still offer a typeable name box, labelled with the
+  // number of the blank squad member seeded for that position.
+  afterEach(() => { delete window.API.fetchSquads; });
+
+  it('every numbered row renders a name input on both sides, labelled with each blank member\'s own number', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': blankSquad('b'),
+    });
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
+    });
+
+    const rows = container.querySelectorAll('.team-sub-match');
+    expect(rows.length).toBe(5);
+
+    // Every row, both sides: a typeable name box (LineupNameInput), not the
+    // old static dash.
+    const inputs = container.querySelectorAll('input[aria-label$=" player"]');
+    expect(inputs.length).toBe(10);
+    expect(container.querySelectorAll('.tsm-name__static--empty').length).toBe(0);
+
+    // SHIRO = sideB = Team B (T2); AKA = sideA = Team A (T1), matching this
+    // file's side convention.
+    const shiroLabels = [...container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]')]
+      .map(n => n.textContent);
+    const akaLabels = [...container.querySelectorAll('[data-testid="team-sub-match-member-label-aka"]')]
+      .map(n => n.textContent);
+    expect(shiroLabels).toEqual(['T2.1', 'T2.2', 'T2.3', 'T2.4', 'T2.5']);
+    expect(akaLabels).toEqual(['T1.1', 'T1.2', 'T1.3', 'T1.4', 'T1.5']);
   });
 });

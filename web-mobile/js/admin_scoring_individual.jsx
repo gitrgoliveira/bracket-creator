@@ -533,7 +533,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
   const sides = [
     {
-      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls,
+      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, number: m.sideB?.number, pts: bPts, fouls: bFouls,
       setFouls: (v) => { setBFouls(v); markScoringDirty(); }, // C1
       onIncrement: () => {
         const r = applyFoulIncrement(bFouls, aPts, bPts);
@@ -544,7 +544,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
       color: "shiro",
     },
     {
-      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls,
+      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, number: m.sideA?.number, pts: aPts, fouls: aFouls,
       setFouls: (v) => { setAFouls(v); markScoringDirty(); }, // C1
       onIncrement: () => {
         const r = applyFoulIncrement(aFouls, bPts, aPts);
@@ -795,7 +795,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           side badge so both editors label the side the same way
                           (impeccable re-critique symmetry). */}
                       <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
-                      <div className="sb-name">{s.name}</div>
+                      {/* Competitor number on the OUTER side of the name, as on the
+                          team bout rows: Shiro's before it, Aka's after it. */}
+                      <div className="sb-name">
+                        {s.color === "shiro" && s.number ? <span className="num-prefix">{s.number}</span> : null}
+                        {s.name}
+                        {s.color === "aka" && s.number ? <span className="num-prefix num-prefix--after">{s.number}</span> : null}
+                      </div>
                       <div className="sb-slots">
                         {slotButtons(s)}
                       </div>
@@ -974,7 +980,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     <button data-testid="scoring-modal-fusenpai-button" type="button" className="btn btn--sm" onClick={() => { setDecisionErr(""); setDecisionPromptKind("fusenpai"); }} disabled={submitting || decisionSubmitting}>
                       Fusenpai
                     </button>
-                    <GlossaryHintAS name="fusenpai" />
+                    <GlossaryHintAS name="fusenpai" align="end" />
                   </div>
                   {/* Per-bout fusensho is a sub-match concept: implemented inside
                       TeamScoreEditorModal. This placeholder explains the affordance
@@ -983,7 +989,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                     <button type="button" className="btn btn--sm" disabled title="Fusensho is recorded per-bout inside the team-match editor">
                       Fusensho (team only)
                     </button>
-                    <GlossaryHintAS name="fusensho" />
+                    <GlossaryHintAS name="fusensho" align="end" />
                   </div>
                 </div>
               )}

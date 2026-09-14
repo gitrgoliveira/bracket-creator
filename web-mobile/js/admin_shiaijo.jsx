@@ -1072,11 +1072,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} hideRunningStrip />
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: onBack }, { label: `Shiaijo ${court}` }]} />
-                <div className="page-head page-head--shiaijo">
-                    {/* bc-dnst: title, court switcher and Refresh on ONE row, and
-                        no subtitle: this is the court's working surface and every
-                        pixel above the scorer pushes the live bout down the page. */}
-                    <div className="shiaijo-head__title-row">
+                <div className="page-head page-head--oneline">
+                    {/* Title, court switcher and Refresh on ONE row, no subtitle:
+                        this is the court's working surface and every pixel above
+                        the scorer pushes the live bout down the page. */}
+                    <div className="page-head__title-row">
                         {courts.length > 1 && courtKnown ? (
                             // The page title doubles as the court switcher: clicking it
                             // opens a native court picker (transparent <select> overlay), so

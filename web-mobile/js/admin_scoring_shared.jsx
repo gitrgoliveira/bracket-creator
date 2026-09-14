@@ -234,9 +234,9 @@ function TermAS(props) {
 
 // Lazily loaded from window for the same load-order reason as TermAS above.
 // Falls back to null: the icon is purely decorative; no content to preserve.
-function GlossaryHintAS({ name }) {
+function GlossaryHintAS({ name, align }) {
   if (typeof window !== 'undefined' && window.GlossaryHint) {
-    return React.createElement(window.GlossaryHint, { name });
+    return React.createElement(window.GlossaryHint, { name, align });
   }
   return null;
 }

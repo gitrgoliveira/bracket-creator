@@ -262,11 +262,12 @@ function capitalise(s) {
 // GlossaryHint: a standalone ？ icon that carries the glossary tooltip
 // for a given term. Renders as a sibling next to a button so the tooltip
 // is accessible without wrapping (and potentially blocking) the button's
-// click target.
-function GlossaryHint({ name }) {
+// click target. align="end" opens the tooltip leftwards, for a hint that
+// sits near its container's right edge.
+function GlossaryHint({ name, align }) {
   return React.createElement(
     'span',
-    { className: 'glossary-hint' },
+    { className: align === 'end' ? 'glossary-hint glossary-hint--end' : 'glossary-hint' },
     React.createElement(Term, { name }, '？'),
   );
 }

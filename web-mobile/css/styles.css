@@ -5951,10 +5951,19 @@ button.pool-match-row {
   letter-spacing: 0.02em;
   color: var(--ink-3);
 }
-.scoring-panel--team .sb-match {
+/* Team header aligned to the bout rows, the one owner of that alignment for
+   both hosts (inline in either mode, overlay in compact): the centre column is
+   the rows' 160px centre plus the two 8px column gaps either side of it
+   (.team-bouts-scroll .team-sub-match__row), and the left margin is a row's
+   8px padding + 34px number gutter + 8px gap, so the team names sit over the
+   SHIRO / score / AKA columns down the sheet. The compact selector carries the
+   specificity to beat the generic .editor-modal--compact .sb-match centre.
+   Verified in-browser at 1180x820. */
+.scoring-panel--team .sb-match,
+.editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-match {
   grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
-  margin-left: 46px;
-  margin-right: 10px;
+  margin-left: 50px;
+  margin-right: 8px;
 }
 
 .team-sub-match__pts {
@@ -6098,6 +6107,11 @@ button.pool-match-row {
   border-radius: 4px;
   margin-right: 4px;
   flex-shrink: 0;
+}
+/* The chip on the far side of its name (Aka's number sits AFTER the name). */
+.num-prefix--after {
+  margin-right: 0;
+  margin-left: 4px;
 }
 
 /* Schedule / TW-match compact badges (A/S) */
@@ -7397,13 +7411,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Tooltip body, always in the DOM (role="tooltip"), hidden by default and
    shown on hover, focus, or the tap-toggled open state. Positioned below the
-   term; width capped so wrapping stays readable on mobile.
-   Hidden means display:none, not visibility:hidden: an invisible box that is
-   still laid out extends the scrollable area of the nearest scroll
-   container, so the 220px tooltips beside the last decision buttons drew a
-   horizontal scrollbar across the 560px individual score overlay (bc-dnst).
-   Neither state is exposed to assistive tech until shown, so nothing is
-   lost; only the 100ms fade-in went with it. */
+   term; width capped so wrapping stays readable on mobile. Hidden is
+   display:none, not visibility:hidden: a laid-out invisible box still extends
+   its scroll container (it drew a scrollbar across the 560px score overlay);
+   the fade-in went with it. */
 .tw-tooltip {
   display: none;
   position: absolute;
@@ -7628,6 +7639,17 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 
 /* --- Compact mode: chrome ------------------------------------------------ */
+/* Tap floor for compact controls: 0 on fine pointers (dense laptop scoring),
+   44px on coarse ones (DESIGN.md 2.4). Every compact rule that shrinks a
+   control clamps with max(<its size>, var(--tap-floor)). */
+.editor-modal--compact {
+  --tap-floor: 0px;
+}
+@media (pointer: coarse) {
+  .editor-modal--compact {
+    --tap-floor: 44px;
+  }
+}
 .editor-modal--compact .editor-modal__head {
   padding: 8px 14px;
   display: flex;
@@ -7696,6 +7718,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .editor-modal--compact .sb-slot {
   width: 38px;
   height: 38px;
+  min-width: var(--tap-floor);
+  min-height: var(--tap-floor);
   font-size: 16px;
   border-radius: 6px;
   transition: background-color 120ms var(--ease-out),
@@ -7726,7 +7750,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   justify-content: stretch;
 }
 .editor-modal--compact .sb-points-grid .ipt-btn {
-  min-height: 34px;
+  min-height: max(34px, var(--tap-floor));
+  min-width: var(--tap-floor);
   padding: 6px 8px;
   font-size: 13px;
 }
@@ -7743,7 +7768,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .editor-modal--compact .sb-draw-toggle {
   padding: 6px 10px;
   font-size: 12px;
-  min-height: 32px;
+  min-height: max(32px, var(--tap-floor));
 }
 .editor-modal--compact .sb-hansoku-section {
   padding: 8px 12px;
@@ -7769,41 +7794,28 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   /* Same width as the base .editor-modal--team, canonical layout applies to both. */
   width: min(760px, 96vw);
 }
-/* Scope to the team editors only, the individual editor keeps the base
-   .sb-match rule's 140px centre column. Without this scoping the team override
-   would win the cascade and resize the individual board's VS column.
-   The centre column is the bout rows' 160px centre plus the two 8px column
-   gaps either side of it (.team-bouts-scroll .team-sub-match__row), and the
-   left margin is a bout row's own 8px padding + 34px number gutter + 8px gap,
-   so the team names sit exactly over the SHIRO / score / AKA columns of every
-   bout down the sheet. Values verified in-browser at 1180x820. */
-.editor-modal--compact.editor-modal--team .sb-match,
-.editor-modal--compact.scoring-panel--team .sb-match {
-  grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
-  margin-left: 50px;
-  margin-right: 8px;
+/* Team editors only, on either host; the individual board keeps the base
+   140px centre, and the column alignment itself is owned by the
+   .scoring-panel--team rule above. */
+.editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-match {
   margin-bottom: 4px !important;
   box-shadow: none;
   border-radius: 8px;
 }
-.editor-modal--compact.editor-modal--team .sb-side,
-.editor-modal--compact.scoring-panel--team .sb-side {
+.editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-side {
   padding: 6px 12px;
 }
-.editor-modal--compact.editor-modal--team .sb-name,
-.editor-modal--compact.scoring-panel--team .sb-name {
+.editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-name {
   font-size: 13px;
   font-weight: 700;
   margin-bottom: 0;
   line-height: 1.2;
 }
-.editor-modal--compact.editor-modal--team .sb-dojo,
-.editor-modal--compact.scoring-panel--team .sb-dojo {
+.editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-dojo {
   font-size: 9px;
   line-height: 1.2;
 }
-.editor-modal--compact.editor-modal--team .sb-vs,
-.editor-modal--compact.scoring-panel--team .sb-vs {
+.editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-vs {
   font-size: 12px;
   letter-spacing: 0.2em;
 }
@@ -7836,17 +7848,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .editor-modal--compact .team-bouts-scroll .team-sub-match__btns {
   display: contents;
 }
-.editor-modal--compact .team-bouts-scroll .tsm-row-2 {
-  display: flex;
-  justify-content: center;
-}
 .editor-modal--compact .team-bouts-scroll .tsm-fouls {
   margin-top: 0;
   flex-wrap: nowrap;
 }
-.editor-modal--compact .team-bouts-scroll .team-sub-match {
-  padding: 4px 8px;
-}
+.editor-modal--compact .team-bouts-scroll .team-sub-match,
 .editor-modal--compact .team-bouts-scroll .team-sub-match__side--aka,
 .editor-modal--compact .team-bouts-scroll .team-sub-match__side--shiro {
   padding: 4px 8px;
@@ -7928,13 +7934,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 8px;
 }
-/* The last two "?" hints sit in the right half of the 560px overlay, where a
-   left-anchored 220px tooltip runs past the body and scrolls it sideways for
-   as long as it is open; those two open leftwards instead. */
-.decision-controls--stacked .decision-btn-group:nth-last-child(-n+2) .tw-tooltip {
-  left: auto;
-  right: 0;
-}
 
 /* ？ icon that carries the glossary tooltip for a decision button. */
 .glossary-hint .tw-term {
@@ -7947,6 +7946,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .glossary-hint .tw-term:focus-visible {
   color: var(--ink-2, #555);
 }
+/* align="end" hints (GlossaryHint) open leftwards, so a hint near its row's
+   right edge keeps its tooltip inside the scroll container. */
+.glossary-hint--end .tw-tooltip {
+  left: auto;
+  right: 0;
+}
 
 .editor-modal--compact .decision-controls {
   margin-top: 8px !important;
@@ -7954,36 +7959,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   flex-wrap: wrap;
 }
 .editor-modal--compact .decision-controls .btn {
-  min-height: 32px;
+  min-height: max(32px, var(--tap-floor));
 }
 
 /* --- Compact mode: footer ---------------------------------------------- */
 .editor-modal--compact .editor-modal__foot--nav .score-nav {
   gap: 6px;
-}
-
-/* --- Touch-target floor for compact ippon buttons --------------------- *
-   The compact rule above (.editor-modal--compact .sb-points-grid .ipt-btn)
-   sets a 34px min-height for fine pointers (laptop scoring). On the tablets
-   operators actually score on, those out-specified the generic
-   `@media (pointer: coarse) .ipt-btn { min-height: 44px }` rule and shrank
-   the most-tapped control below the DESIGN.md §6 ≥44px coarse-pointer floor.
-   Restore the floor at equal-or-greater specificity, placed AFTER the compact
-   blocks so source order also favours it. Fine pointers keep the dense 34px.
-   (Team sub-match button floor is now handled by .team-bouts-scroll context.)
-   The same applies to the other compact-shrunk controls: the point slots
-   (buttons, 38px in compact), the draw toggle and the decision buttons (32px),
-   all of which reach the tablet now that the inline panel is compact too. */
-@media (pointer: coarse) {
-  .editor-modal--compact .sb-points-grid .ipt-btn,
-  .editor-modal--compact .sb-slot {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  .editor-modal--compact .sb-draw-toggle,
-  .editor-modal--compact .decision-controls .btn {
-    min-height: 44px;
-  }
 }
 
 /* --- Touch-target floor for the inline operator console and team modal --- *
@@ -8008,18 +7989,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
     min-width: 44px;
     min-height: 44px;
   }
-  .team-bouts-scroll .team-sub-match__center .editor-side__pt {
+  /* Only the live bout's slots are buttons; a fought bout renders spans and
+     its whole row is the tap target (it opens the bout for correction). */
+  .team-bouts-scroll .team-sub-match__center button.editor-side__pt {
     min-height: 44px;
   }
-  /* bc-dnst: on a FOUGHT bout those slots are display spans, not controls, so
-     the floor belongs to the row, which is itself the tap target (it opens the
-     bout for correction). Each read-only row is 10px shorter for it, and a
-     kachinuki encounter shows one per bout fought. */
   .team-bouts-scroll .team-sub-match--readonly {
     min-height: 44px;
-  }
-  .team-bouts-scroll .team-sub-match--readonly .team-sub-match__center .editor-side__pt {
-    min-height: 0;
   }
   .team-bouts-scroll .lineup-name__clear {
     min-width: 44px;
@@ -9238,14 +9214,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-color: var(--line);
 }
 
-/* bc-dnst: the court page's head is one line: title (the court switcher) and
-   Refresh side by side, no subtitle. Scoped to .page-head--shiaijo so every
-   other admin page keeps the stacked head. */
-.page-head--shiaijo {
+/* One-line page head: the title (here the court switcher) and its actions
+   side by side, no subtitle. A variant, so every other admin page keeps the
+   stacked head. */
+.page-head--oneline {
   align-items: center;
   margin-bottom: 12px;
 }
-.shiaijo-head__title-row {
+.page-head__title-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;

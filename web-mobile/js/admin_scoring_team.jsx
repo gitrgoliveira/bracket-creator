@@ -2843,20 +2843,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               : <span className="tsm-name__static tsm-name__static--empty">-</span>
                           )}
                         </div>
-                        {/* Row 1: the ippon mark buttons and, riding the same
-                            wrap, the per-bout Fusensho button. In compact mode
-                            the wrapper is a real flex row whose items are the
-                            marks themselves (.team-sub-match__btns goes
-                            display:contents), so Fusensho joins the trailing
-                            marks on the wrapped line instead of claiming a line
-                            of its own (the wrap point shifts with naginata's
-                            extra S mark); in roomy mode the wrapper is
-                            display:contents and the side stacks name, marks,
-                            Fusensho, fouls.
-                            T096/FR-031: per-bout Fusensho awards the bout 2-0 to
-                            this side. Re-clicking the active side undoes the
-                            fusensho; manual pts/fouls edits while active clear
-                            the flag and discard the snapshot. */}
+                        {/* Row 1: the ippon mark buttons and the per-bout
+                            Fusensho button (layout: the .tsm-row-1 compact rules
+                            in styles.css). T096/FR-031: Fusensho awards the bout
+                            2-0 to this side. Re-clicking the active side undoes
+                            it; manual pts/fouls edits while active clear the flag
+                            and discard the snapshot. */}
                         <div className="tsm-row-1">
                           {/* Buttons only: the scored ippon letters show in the
                               centre column (between the two competitors), like an
@@ -3655,10 +3647,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     </>
   );
 
-  // bc-dnst: both hosts read the ONE useCompact condition, so a >5 fixed-order
-  // team keeps the roomy layout inline exactly as it does in the overlay.
   if (variant === "inline") {
-    return <div className={`scoring-panel scoring-panel--team ${useCompact ? "editor-modal--compact" : ""}`} aria-label={dialogLabel}>{inner}</div>;
+    return <div className={`scoring-panel scoring-panel--team${useCompact ? " editor-modal--compact" : ""}`} aria-label={dialogLabel}>{inner}</div>;
   }
 
   return (

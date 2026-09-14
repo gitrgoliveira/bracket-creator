@@ -5190,7 +5190,7 @@ button.pool-match-row {
 .sb-center__marks {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 .sb-vs--quiet { visibility: hidden; }
 
@@ -6090,6 +6090,8 @@ button.pool-match-row {
    Deliberately neutral (not red/navy) so it doesn't read as Aka/Shiro/running-match state
    (mp-938b colour law). */
 .num-prefix {
+  display: inline-block;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 0.64em;
   font-weight: 700;
@@ -7677,7 +7679,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
 }
 .editor-modal--compact .sb-side {
-  padding: 12px 16px;
+  /* Narrow sides: the centre column now carries both slot groups, so the
+     560px overlay leaves each side ~160px; a long name and three 44px marks
+     per line need every pixel of it. */
+  padding: 12px 8px;
 }
 .editor-modal--compact .sb-side--aka,
 .editor-modal--compact .sb-side--shiro {
@@ -7712,11 +7717,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin: 6px 0;
 }
 .editor-modal--compact .sb-slot {
-  width: 38px;
-  height: 38px;
+  /* 34px keeps the 560px overlay's side columns wide enough for three marks
+     per line beside the centre slot groups; the tap floor still lifts them
+     to 44px on coarse pointers. */
+  width: 34px;
+  height: 34px;
   min-width: var(--tap-floor);
   min-height: var(--tap-floor);
-  font-size: 16px;
+  font-size: 15px;
   border-radius: 6px;
   transition: background-color 120ms var(--ease-out),
               border-color 120ms var(--ease-out),
@@ -7734,7 +7742,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    instead of the 2 + 2 + 1 stack. auto-fit keeps it container-driven: a
    narrower column simply fits fewer per line. */
 .editor-modal--compact .sb-points-grid {
-  gap: 6px;
+  gap: 4px;
   grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
 }
 /* auto-fit can only count tracks against a definite width, and the side's own
@@ -7890,7 +7898,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .kachinuki-bout-actions__error {
   width: 100%;
-  color: var(--danger, #c00);
+  color: var(--danger);
 }
 
 /* --- Compact mode: team summary + decision controls --------------------- */
@@ -8977,22 +8985,19 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
 }
+/* Composes .section-title for its type; this rule owns only the bar's layout. */
 .shiaijo-queue__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  width: calc(100% + 24px);
   margin: 0 -12px;
   padding: 10px 14px;
   background: var(--bg-2);
   border: 0;
   border-bottom: 1px solid var(--line);
   border-radius: var(--r-lg) var(--r-lg) 0 0;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-2);
+  font-family: inherit;
   cursor: pointer;
 }
 .shiaijo-queue__head-action { font-weight: 600; letter-spacing: 0.02em; text-transform: none; }
@@ -9295,16 +9300,14 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 10px;
   padding: 6px 8px 6px 14px;
-  border: 1.5px solid var(--line);
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
   background: var(--surface);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition: border-color 150ms var(--ease-out);
 }
 .shiaijo-title-select:hover .page-head__title {
   border-color: var(--accent);
-  box-shadow: 0 2px 8px rgba(29, 53, 87, 0.18);
 }
 .shiaijo-title-select__chevron {
   display: inline-flex;

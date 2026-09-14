@@ -1213,7 +1213,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         <div className="shiaijo__queue" id="shiaijo-queue">
                             <button
                                 type="button"
-                                className="shiaijo-queue__head"
+                                className="section-title shiaijo-queue__head"
                                 onClick={toggleQueue}
                                 aria-expanded={true}
                                 aria-controls="shiaijo-queue"

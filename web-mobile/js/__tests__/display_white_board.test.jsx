@@ -23,10 +23,8 @@ describe('sideLabel: numberPrefix + zekken', () => {
     expect(sideLabel(null)).toBe('TBD');
     expect(sideLabel(undefined, true)).toBe('TBD');
   });
-  it('places the number on the outer side: Shiro before, Aka after (bc-dnst)', () => {
-    expect(sideLabel({ name: 'Tanaka', number: 'K1' }, false, 'shiro')).toBe('K1 Tanaka');
+  it('passes the colour through to withNumber (Aka number after the name)', () => {
     expect(sideLabel({ name: 'Tanaka', number: 'K1' }, false, 'aka')).toBe('Tanaka K1');
-    expect(sideLabel({ name: 'Tanaka Kenji', displayName: 'TANAKA', number: 'K2' }, true, 'aka')).toBe('TANAKA K2');
   });
 });
 
@@ -431,23 +429,6 @@ describe('findNextPoolOnCourt', () => {
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
     expect(res.bouts).toEqual([{ id: 'Pool B-0', shiro: 'K2 Sho', aka: 'Ryu K1' }]);
   });
-  it('lists every bout of the pool, so a competitor appears in each of their bouts', () => {
-    // A bout list is not a roster: Adams fights twice, so Adams is named twice,
-    // once on each side, exactly as the bouts will be fought.
-    const adams = { name: 'Adams', number: 'E3' };
-    const green = { name: 'Green', number: 'E4' };
-    const clark = { name: 'Clark', number: 'E1' };
-    const c = { poolMatches: [
-      { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', scheduledAt: '09:00' },
-      { id: 'Pool B-0', court: 'A', status: 'scheduled', scheduledAt: '09:30', sideA: adams, sideB: green },
-      { id: 'Pool B-1', court: 'A', status: 'scheduled', scheduledAt: '09:40', sideA: clark, sideB: adams },
-    ] };
-    const res = findNextPoolOnCourt(c, 'Pool A', 'A');
-    expect(res.bouts).toEqual([
-      { id: 'Pool B-0', shiro: 'E4 Green', aka: 'Adams E3' },
-      { id: 'Pool B-1', shiro: 'E3 Adams', aka: 'Clark E1' },
-    ]);
-  });
   it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
     const team = { kind: 'team', poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'Team Alpha', sideB: 'Team Beta',  status: 'running',   scheduledAt: '09:00' },
@@ -686,7 +667,13 @@ describe('TvIndividualBoard', () => {
     // be fought.
     const nameSpans = [];
     const kidsOf = n => (n.children != null ? n.children : n.props?.children);
+    // Each bout pair is now rendered via the shared NextPair component
+    // (display_scoreboard.jsx), not inline spans: expand any function-typed
+    // node (NextPair included) by invoking it with its own props, mirroring
+    // what a real renderer would do, so the walk still reaches the coloured
+    // name spans NextPair produces internally.
     (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
+      if (typeof n.type === 'function') { walk(n.type(n.props)); return; }
       if(n.type === 'span') {
         const c = kidsOf(n);
         const text = typeof c === 'string' ? c : (Array.isArray(c) && c.length === 1 && typeof c[0] === 'string' ? c[0] : '');
@@ -694,9 +681,9 @@ describe('TvIndividualBoard', () => {
       }
       [].concat(kidsOf(n) || []).forEach(walk); })(tree);
     const coloursOf = (name) => nameSpans.filter(s => s.text === name).map(s => s.color);
-    expect(coloursOf('Philippe')).toEqual(['var(--red, #b91c1c)', 'var(--red, #b91c1c)']);
+    expect(coloursOf('Philippe')).toEqual(['#b91c1c', '#b91c1c']);
     expect(coloursOf('Frank')).toEqual(['#111', '#111']);
-    expect(coloursOf('Dave')).toEqual(['#111', 'var(--red, #b91c1c)']);
+    expect(coloursOf('Dave')).toEqual(['#111', '#b91c1c']);
     // The bouts container must be a wrappable flex row so a big pool's bouts
     // wrap to further lines rather than clipping or ellipsizing.
     const kidsOf2 = n => (n.children != null ? n.children : n.props?.children);

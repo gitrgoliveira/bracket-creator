@@ -9,6 +9,19 @@ import { realIppons } from './result_slot.jsx';
 
 const { useMemo: useMD } = React;
 
+// The Shiro-vs-Aka name pair the NEXT line and the UP NEXT bout list share:
+// Shiro dark on the left, Aka in the board's red on the right, "vs" between.
+// Layout (size, weight, wrapping) is the caller's, via the outer span's props.
+function NextPair({ shiro, aka, ...rest }) {
+    return (
+        <span {...rest}>
+            <span style={{ color: "#111" }}>{shiro}</span>
+            <span style={{ color: "var(--ink-3)", fontWeight: 600, fontSize: "2vh", padding: "0 1vw" }}>vs</span>
+            <span style={{ color: "#b91c1c" }}>{aka}</span>
+        </span>
+    );
+}
+
 // emptyStateHeadline: headline text for the TvDisplay empty state, by sub-state.
 // The third case ("No match in progress") is a defensive fallback that is
 // UNREACHABLE under the current promote logic: countCourtMatches and
@@ -159,11 +172,11 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
             {next && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
-                    <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
-                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName, "shiro")}</span>
-                        <span style={{ color: "var(--ink-3)", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
-                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName, "aka")}</span>
-                    </span>
+                    <NextPair
+                        shiro={sideLabel(next.sideB, next._comp?.withZekkenName, "shiro")}
+                        aka={sideLabel(next.sideA, next._comp?.withZekkenName, "aka")}
+                        style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh", fontWeight: 600 }}
+                    />
                 </div>
             )}
         </div>
@@ -462,11 +475,13 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                         as the rows above. */}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6vh 3vw" }}>
                         {nextPool.bouts.map((b) => (
-                            <span key={b.id} data-testid="tvd-next-bout" style={{ fontSize: "2.8vh", fontWeight: 700, whiteSpace: "nowrap" }}>
-                                <span style={{ color: "#111" }}>{b.shiro}</span>
-                                <span style={{ color: "var(--ink-3)", fontWeight: 600, fontSize: "2vh", padding: "0 0.8vw" }}>vs</span>
-                                <span style={{ color: "var(--red, #b91c1c)" }}>{b.aka}</span>
-                            </span>
+                            <NextPair
+                                key={b.id}
+                                shiro={b.shiro}
+                                aka={b.aka}
+                                data-testid="tvd-next-bout"
+                                style={{ fontSize: "2.8vh", fontWeight: 700, whiteSpace: "nowrap" }}
+                            />
                         ))}
                     </div>
                 </div>
@@ -480,11 +495,11 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
             {next && !nextPool && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
-                    <span style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh" }}>
-                        <span style={{ color: "#111", fontWeight: 600 }}>{sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken, "shiro")}</span>
-                        <span style={{ color: "var(--ink-3)", fontSize: "2vh", padding: "0 1vw" }}>vs</span>
-                        <span style={{ color: "#b91c1c", fontWeight: 600 }}>{sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken, "aka")}</span>
-                    </span>
+                    <NextPair
+                        shiro={sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken, "shiro")}
+                        aka={sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken, "aka")}
+                        style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh", fontWeight: 600 }}
+                    />
                 </div>
             )}
         </div>

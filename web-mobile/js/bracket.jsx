@@ -15,6 +15,7 @@ const { useRef, useLayoutEffect: useLayoutEffectBC, useState: useStateBC, useEff
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { realIppons } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { NumberedName } from './numbered_name.jsx';
 
 // TermBC: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter.
@@ -464,8 +465,7 @@ const PlayerLine = React.memo(({ player, isWinner, side, showDojo, score, isTBD,
       <div className="bc-name-wrap">
         <span className="bc-name">
           {isWinner ? <span className="bc-winner-tick" aria-label="Winner" title="Winner">✓</span> : null}
-          {player.number ? <span className="num-prefix">{player.number}</span> : null}
-          {m1}
+          <NumberedName side={isAka ? "aka" : "shiro"} name={m1} number={player.number} />
         </span>
         {m2 ? <span className="bc-name">{m2}</span> : null}
         {/* Reserve the dojo line on every side when dojos are shown: a real

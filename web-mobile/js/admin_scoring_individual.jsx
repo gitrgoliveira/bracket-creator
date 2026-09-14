@@ -39,6 +39,7 @@ import {
   ReasonPrompt,
   CORRECTION_PRESETS,
   useAdoptFromServer,
+  sideName,
 } from './admin_scoring_shared.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
@@ -534,7 +535,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           onClick={() => removePt(s.key, i)}
           disabled={decidedByHantei}
           title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
-          aria-label={`${s.color === "shiro" ? "Shiro" : "Aka"} slot ${i + 1}: ${isHt ? "Ht" : (s.pts[i] ? `remove ${s.pts[i]}` : "empty")}`}
+          aria-label={`${sideName(s.color)} slot ${i + 1}: ${isHt ? "Ht" : (s.pts[i] ? `remove ${s.pts[i]}` : "empty")}`}
         >
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>
@@ -805,7 +806,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       {/* Explicit SHIRO/AKA pill, matching the Engi editor's
                           side badge so both editors label the side the same way
                           (impeccable re-critique symmetry). */}
-                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
+                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideName(s.color)}</div>
                       {/* Competitor number chip: owned by numbered_name.jsx
                           (the outer-side rule lives there). */}
                       <div className="sb-name">

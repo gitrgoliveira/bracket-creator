@@ -574,10 +574,13 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
         queueToggledByUser.current = true;
         setQueueOpen((open) => !open);
     };
-    // Collapsing unmounts the header "Hide" button and mounts the rail "Show
-    // queue" button in its place (and vice versa on expand), so a click or
-    // keyboard toggle would otherwise drop focus to the document body. Move
-    // it to the counterpart control once the DOM has settled, but only for an
+    // Collapsing hides the header "Hide" button (it stays mounted; its
+    // .shiaijo__queue parent is hidden via .shiaijo--queue-collapsed) and
+    // mounts the rail "Show queue" button in its place (and vice versa on
+    // expand: the rail unmounts and the header button becomes visible
+    // again), so a click or keyboard toggle would otherwise drop focus to
+    // the document body either way, hidden or unmounted. Move it to the
+    // counterpart control once the DOM has settled, but only for an
     // operator-driven toggle: this must never steal focus on mount or when
     // `queueOpen` merely reflects a rerender the operator didn't trigger.
     useEffectSh(() => {
@@ -1223,9 +1226,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         {/* Accordion: folded, the column becomes a narrow rail in the
                             same place that reopens it, so the queue is never out of
                             reach while the scorer takes the width. This rail button
-                            mounts in place of the header "Hide" button below; the
-                            toggleQueue/queueOpen effect above moves focus here after
-                            an operator-driven collapse. */}
+                            mounts while the header "Hide" button below stays mounted
+                            but hidden (its .shiaijo__queue parent goes display: none
+                            via .shiaijo--queue-collapsed); the toggleQueue/queueOpen
+                            effect above moves focus here after an operator-driven
+                            collapse. */}
                         {!queueOpen && (
                             <button
                                 type="button"
@@ -1237,13 +1242,14 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 data-testid="shiaijo-queue-show"
                             >
                                 <span className="shiaijo-queue-rail__label">Show queue</span>
-                                <span className="shiaijo-queue-rail__chevron" aria-hidden="true">▸</span>
+                                <span aria-hidden="true">▸</span>
                             </button>
                         )}
                         <div className="shiaijo__queue" id="shiaijo-queue">
-                            {/* This header button unmounts the rail button above once
-                                expanded; the toggleQueue/queueOpen effect moves focus
-                                here after an operator-driven expand. */}
+                            {/* This header button stays mounted throughout; only hidden
+                                while collapsed (the queue's display: none). Expanding
+                                unmounts the rail button above; the toggleQueue/queueOpen
+                                effect moves focus here after an operator-driven expand. */}
                             <button
                                 type="button"
                                 ref={queueHideBtnRef}
@@ -1776,12 +1782,12 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
             <div className="shiaijo-qrow__match">
                 <div className="shiaijo-qrow__side" aria-label={`Shiro: ${bName}`}>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                    <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} /></span>
+                    <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
                 </div>
                 <span className="shiaijo-qrow__vs">vs</span>
                 <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} /></span>
+                    <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
                 </div>
             </div>
             {/* Completed result on its own centred line BELOW the names: the
@@ -1857,7 +1863,7 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 <div className="name">
-                    <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} />
+                    <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
@@ -1865,7 +1871,7 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--aka">AKA</span>
                 <div className="name">
-                    <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} />
+                    <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />
                 </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
             </div>

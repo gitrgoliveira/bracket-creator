@@ -206,7 +206,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name"><NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} /></div>
+                    <div className="name"><NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip /></div>
                     <div className="dojo">{m.sideB?.dojo}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
@@ -222,7 +222,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name"><NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} /></div>
+                    <div className="name"><NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip /></div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>

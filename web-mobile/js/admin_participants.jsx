@@ -6,6 +6,7 @@
 // settings preview so this card's count cannot disagree with them.
 import { seededRanks } from './admin_helpers.jsx';
 import { NO_ID_HINT } from './data_integrity.jsx';
+import { NumberedName } from './numbered_name.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -1111,10 +1112,7 @@ function AdminParticipants({ c, tournament: _tournament, onUpdate, password, sho
                     <div className="seed-row__line">
                       <div className="seed-row__who">
                         <div className="seed-row__name" title={p.name}>
-                          {p.number ? (
-                            <span className="num-prefix">{p.number}</span>
-                          ) : null}
-                          {p.name}
+                          <NumberedName name={p.name} number={p.number} />
                         </div>
                         {p.source && <span className="tag-badge">{p.source}</span>}
                       </div>

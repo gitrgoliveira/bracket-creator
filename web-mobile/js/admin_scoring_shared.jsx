@@ -809,6 +809,12 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   );
 }
 
+// sideName: the human-readable side name for a "shiro"/"aka" colour key, for
+// the header badges and aria-labels of both editors.
+function sideName(color) {
+  return color === "shiro" ? "Shiro" : "Aka";
+}
+
 // Reusable foul counter: independent +/- buttons per side with clear labeling.
 // The `+` button delegates to `onIncrement` which applies the
 // applyFoulIncrement rule (auto-award H + reset at the 2-foul boundary);
@@ -826,16 +832,15 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
   // conveyed by position and tint alone, matching the bout rows above), so
   // "Fouls" stays unprefixed; the aria-labels below carry the side for
   // assistive tech.
-  const sideName = color === "shiro" ? "Shiro" : "Aka";
   return (
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">Fouls</div>
       <div className="foul-counter__controls">
-        <button type="button" className="foul-counter__btn foul-counter__btn--dec" aria-label={`Remove a ${sideName} foul`} onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--dec" aria-label={`Remove a ${sideName(color)} foul`} onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideName} foul`} onClick={onIncrement} disabled={disabled}>+</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideName(color)} foul`} onClick={onIncrement} disabled={disabled}>+</button>
       </div>
     </div>
   );
@@ -1123,6 +1128,7 @@ function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty 
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
   MAX_IPPONS_PER_SIDE,
+  sideName,
   isBoutDecided,
   getIpponButtons,
   getValidPointKeys,

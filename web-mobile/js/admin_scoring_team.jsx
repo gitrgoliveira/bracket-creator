@@ -30,6 +30,7 @@ import {
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
   useAdoptFromServer,
+  sideName,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -2558,7 +2559,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
                   {/* SHIRO/AKA pill, matching the individual + Engi editors. */}
-                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
+                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideName(s.color)}</div>
                   {/* Team number chip: owned by numbered_name.jsx
                       (the outer-side rule lives there). */}
                   <div className="sb-name">
@@ -2881,19 +2882,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                             </button>
                           </div>
                         </div>
-                        {/* Row 2: the independent foul stepper. The `+` button
+                        {/* The independent foul stepper. The `+` button
                             calls onIncrement which applies the FIK 2-foul rule
                             via applyFoulIncrement (auto-award H to opponent,
                             reset counter to 0). The discharged H is physically in
                             the opponent's pts array: no derived display. */}
-                        <div className="tsm-row-2">
-                          <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
-                            <span className="tsm-fouls__label">Fouls</span>
-                            <div className="tsm-fouls__controls">
-                              <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
-                              <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
-                              <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
-                            </div>
+                        <div className="tsm-fouls" data-testid={`scoring-modal-hansoku-${rs.color}`}>
+                          <span className="tsm-fouls__label">Fouls</span>
+                          <div className="tsm-fouls__controls">
+                            <button className="tsm-fouls__btn" aria-label={`Remove a ${rs.label} foul`} onClick={() => rs.setFouls(nextFoulOnDecrement(rs.fouls))} disabled={rs.fouls === 0}>−</button>
+                            <span className={`tsm-fouls__count ${rs.fouls >= 1 ? "tsm-fouls__count--warn" : ""}`}>{rs.fouls}</span>
+                            <button className="tsm-fouls__btn" aria-label={`Add a ${rs.label} foul`} onClick={rs.onIncrement} disabled={subBoutDecided}>+</button>
                           </div>
                         </div>
                       </div>

@@ -326,8 +326,7 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
                   </td>
                   <td>
                     <div className="pool__player-name">
-                      {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                      {s.player?.name || ""}
+                      <NumberedName name={s.player?.name || ""} number={s.player?.number} />
                       {isDHWinner ? <DHBadge /> : null}
                     </div>
                     {tweaks?.showDojo ? <div className="pool__dojo-name">{s.player?.dojo || ""}</div> : null}
@@ -413,10 +412,8 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
   // Competitor numbers ride on the OUTER side of the name via NumberedName
   // below (Shiro's before it, Aka's after it); the winner comparison still
   // uses the bare name/id.
-  const aNum = typeof m.sideA === "object" ? (m.sideA?.number || "") : "";
-  const bNum = typeof m.sideB === "object" ? (m.sideB?.number || "") : "";
-  const aName = aRawName;
-  const bName = bRawName;
+  const aNum = m.sideA?.number || "";
+  const bNum = m.sideB?.number || "";
   // sameCompetitor (competitor_identity.jsx): id decides whenever the
   // winner carries one, name only when neither side does. A name-only
   // compare would light BOTH sides when two competitors share a display
@@ -434,7 +431,7 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
   return (
     <Tag className={`pool-match-row${m.status === "running" ? " is-running" : ""}`} {...interactiveProps}>
       <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
-        <span className="pool-match-row__name"><NumberedName side="shiro" name={bName} number={bNum} /></span>
+        <span className="pool-match-row__name"><NumberedName side="shiro" name={bRawName} number={bNum} clip /></span>
         <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
       </div>
       <span className="pool-match-row__score">
@@ -442,7 +439,7 @@ export const PoolMatchRow = React.memo(({ m, onClick }) => {
       </span>
       <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
         <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
-        <span className="pool-match-row__name"><NumberedName side="aka" name={aName} number={aNum} /></span>
+        <span className="pool-match-row__name"><NumberedName side="aka" name={aRawName} number={aNum} clip /></span>
       </div>
     </Tag>
   );
@@ -674,8 +671,8 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
   // Aka's after it.
   const aFull = typeof m.sideA === "object" ? (m.sideA?.name || "TBD") : m.sideA;
   const bFull = typeof m.sideB === "object" ? (m.sideB?.name || "TBD") : m.sideB;
-  const aNum = typeof m.sideA === "object" ? (m.sideA?.number || "") : "";
-  const bNum = typeof m.sideB === "object" ? (m.sideB?.number || "") : "";
+  const aNum = m.sideA?.number || "";
+  const bNum = m.sideB?.number || "";
   // Engi pair: the name holds both members combined ("Name 1 - Name 2");
   // split so member 2 stacks under member 1 (the number chip stays on line 1).
   const [aName, aDN] = isEngi && window.engiPairParts ? window.engiPairParts(aFull) : [aFull, ""];
@@ -901,8 +898,7 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                       </td>
                       <td>
                         <div className="pool__player-name">
-                          {p.number ? <span className="num-prefix">{p.number}</span> : null}
-                          {pMember1}
+                          <NumberedName name={pMember1} number={p.number} />
                           {isTeam && dhWinnerNames.has(p.name) && (
                             <DHBadge />
                           )}

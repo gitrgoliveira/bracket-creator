@@ -201,27 +201,29 @@ describe('AdminShiaijoPage render-smoke', () => {
     const sides = [...utils.container.querySelectorAll('.shiaijo-sides__side .name')];
     const names = sides.map(n => n.textContent);
     expect(names).toEqual(['I2Tanaka', 'YamadaI1']);
-    // The chip itself is a NumberedName-rendered span placed AFTER the
-    // .numbered-name__text span for Aka (the second side), not woven into the
-    // text node the way a raw ternary pair would allow.
-    const akaSide = sides[1];
-    expect(akaSide.children[0].classList.contains('numbered-name__text')).toBe(true);
-    expect(akaSide.lastElementChild.classList.contains('num-prefix--after')).toBe(true);
+    // NumberedName wraps its three children in a .numbered-name span
+    // (layout-transparent by default): .numbered-name__text comes first and
+    // the num-prefix--after chip comes last, for Aka (the second side).
+    const chip = sides[1].querySelector('.numbered-name');
+    expect(chip.children[0].classList.contains('numbered-name__text')).toBe(true);
+    expect(chip.lastElementChild.classList.contains('num-prefix--after')).toBe(true);
     expect(utils.queryByTestId('shiaijo-queue-show')).toBeNull();
     await act(async () => { utils.getByTestId('shiaijo-queue-hide').click(); });
     expect(grid().classList.contains('shiaijo--queue-collapsed')).toBe(true);
     // Folded, a rail stands in the column's place and is the way back.
     expect(utils.getByTestId('shiaijo-queue-show').textContent).toContain('Show queue');
     expect(localStorage.getItem('bc_shiaijo_queue_open')).toBe('0');
-    // Collapsing unmounts the header "Hide" button that had focus, so the
-    // operator's keyboard focus must land on its replacement, the rail.
+    // Collapsing hides the header "Hide" button that had focus (it stays
+    // mounted; its .shiaijo__queue parent goes display: none) while the
+    // rail mounts in its place, so focus must land on that new rail button.
     expect(document.activeElement).toBe(utils.getByTestId('shiaijo-queue-show'));
     await act(async () => { utils.getByTestId('shiaijo-queue-show').click(); });
     expect(grid().classList.contains('shiaijo--queue-collapsed')).toBe(false);
     expect(utils.queryByTestId('shiaijo-queue-show')).toBeNull();
     expect(localStorage.getItem('bc_shiaijo_queue_open')).toBe('1');
     // Expanding unmounts the rail that had focus, so it must land back on the
-    // header "Hide" button.
+    // header "Hide" button, which becomes visible again (it was hidden, not
+    // unmounted, while collapsed).
     expect(document.activeElement).toBe(utils.getByTestId('shiaijo-queue-hide'));
   });
 

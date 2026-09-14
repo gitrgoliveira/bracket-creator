@@ -5112,36 +5112,21 @@ button.pool-match-row {
   overflow-wrap: anywhere;
 }
 
-/* Option D (harden): on the INDIVIDUAL scoring board only — scoped with
+/* Option D (harden): on the INDIVIDUAL scoring board only, scoped with
    :has(.sb-slots) so the team header (.sb-match/.sb-side carrying just a
-   badge + name, no slots) is untouched — lay each side out as a SUBGRID that
+   badge + name, no slots) is untouched, lay each side out as a SUBGRID that
    shares the parent's rows. The name row then sizes to the TALLER of the two
-   names, so both sides' score slots begin on the same line with NO truncation,
-   and the pills align. The 1fr spacer rows top and bottom keep the block
-   vertically centred; the name sits at the bottom of its (possibly taller)
-   row so it hugs its scores. Grid items stretch by default, so the pill is
-   pinned back to a hug-content chip mirrored inward. */
-/* UNGATED. This used to sit behind @supports (grid-template-rows: subgrid) so
-   an older engine fell back to the base .sb-side flex column — which was the
-   ONE path in the app where the ippon slots did not hug the centre, i.e. the
-   only surface that could still render the pre-FIK outer-edge layout.
+   names, so both sides' point buttons begin on the same line with NO
+   truncation, and the pills align. The 1fr spacer rows top and bottom keep
+   the block vertically centred; the name sits at the bottom of its (possibly
+   taller) row so it hugs its scores. Grid items stretch by default, so the
+   pill is pinned back to a hug-content chip mirrored inward.
 
-   The app targets recent Chrome and Safari (operator ruling), and subgrid
-   shipped in Chrome 117 / Safari 16, so every supported browser takes this
-   branch. Keeping the gate meant keeping a second, WRONG layout alive for
-   browsers we do not support, and it could only be discovered by someone
-   running one.
-
-   Stated precisely, because the first version of this note overclaimed: on a
-   SUPPORTED browser the FIK inner-column layout is now unconditional. On a
-   pre-subgrid engine the rules below still apply `display: grid` and land the
-   grid-row 2..5 assignments on IMPLICIT rows, so that case goes from
-   "coherent but wrong" to "misaligned". That is the intended trade — such a
-   browser is out of support — not an accident.
-
-   If a future target ever predates subgrid, restore the gate AND the
-   documentation of what that fallback renders — do not let a silent
-   outer-edge layout back in. */
+   UNGATED because the app targets recent Chrome and Safari (operator
+   ruling), and subgrid shipped in Chrome 117 / Safari 16. On a pre-subgrid
+   engine the rules below still apply `display: grid` and land the grid-row
+   2..4 assignments on IMPLICIT rows, so that case misaligns; an accepted
+   trade for a browser that is out of support. */
 .sb-match:has(.sb-slots) {
   /* The centre carries both slot groups around the VS, so it is sized by its
      content instead of the fixed 140px separator column. */
@@ -5953,9 +5938,10 @@ button.pool-match-row {
    the rows' 160px centre plus the two 8px column gaps either side of it
    (.team-bouts-scroll .team-sub-match__row), and the left margin is a row's
    8px padding + 34px number gutter + 8px gap, so the team names sit over the
-   SHIRO / score / AKA columns down the sheet. The compact selector carries the
-   specificity to beat the generic .editor-modal--compact .sb-match centre.
-   Verified in-browser at 1180x820. */
+   SHIRO / score / AKA columns down the sheet. The second selector adds the
+   compact OVERLAY host, which carries no .scoring-panel--team class; the
+   container-query override further down relies on the same higher
+   specificity. Verified in-browser at 1180x820. */
 .scoring-panel--team .sb-match,
 .editor-modal--compact:is(.editor-modal--team, .scoring-panel--team) .sb-match {
   grid-template-columns: minmax(0, 1fr) 176px minmax(0, 1fr);
@@ -6031,8 +6017,9 @@ button.pool-match-row {
   padding: 2px 0 4px;
   font-style: italic;
 }
-/* Only the AKA (right) static name aligns toward its right-hand badge; the
-   SHIRO (left) name keeps the default left alignment with its own badge. */
+/* Only the AKA (right) static name aligns right, so both names sit on the
+   outer edge of the bout row; the SHIRO (left) name keeps the default left
+   alignment. */
 .team-sub-match__side--right .tsm-name__static { text-align: right; }
 .tsm-name__static--empty { color: var(--ink-3); font-weight: 500; }
 
@@ -6112,32 +6099,28 @@ button.pool-match-row {
   margin-right: 0;
   margin-left: 4px;
 }
-/* NumberedName (numbered_name.jsx) wraps the name text in its own span so a
-   nowrap + ellipsis container can be told to clip the NAME and never the
-   chip: an ellipsised block drops its LAST inline content first, which for
-   Aka is the number. Such a container becomes an inline flex row (inline so
-   the parent's text-align keeps placing it, right-aligned sides included),
-   floors the chip and moves the ellipsis onto the text span. */
-.numbered-name__text { min-width: 0; }
-.shiaijo-qrow__name,
-.shiaijo-sides__side .name,
-.score-edit-row__side .name {
+/* NumberedName (numbered_name.jsx) wraps name + chip in .numbered-name, which
+   is layout-transparent (display: contents) so a host sees exactly the inline
+   run it would see without the wrapper. A host that ellipsises names passes
+   `clip`: the wrapper becomes an inline flex row (inline so the host's
+   text-align keeps placing it, right-aligned sides included), the chip is
+   floored and the ellipsis moves onto the NAME span, because an ellipsised
+   block drops its LAST inline content first, which for Aka is the number.
+   No host is named here; a new clipping host passes `clip` and gets these. */
+.numbered-name { display: contents; }
+.numbered-name--clip {
   display: inline-flex;
   max-width: 100%;
-  vertical-align: bottom;
   align-items: baseline;
   gap: 4px;
 }
-.shiaijo-qrow__name > .numbered-name__text,
-.shiaijo-sides__side .name > .numbered-name__text,
-.score-edit-row__side .name > .numbered-name__text {
+.numbered-name--clip > .numbered-name__text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.shiaijo-qrow__name > .num-prefix,
-.shiaijo-sides__side .name > .num-prefix,
-.score-edit-row__side .name > .num-prefix {
+.numbered-name--clip > .num-prefix {
   flex: none;
   margin: 0;
 }
@@ -7868,10 +7851,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* --- Compact mode: team-sub-match layout (canonical layout via
    .team-bouts-scroll applies to both the inline panel and the modal) --- */
-/* In roomy (non-compact) mode the tsm-row-* divs are layout-invisible and the
+/* In roomy (non-compact) mode the tsm-row-1 div is layout-invisible and the
    side stacks its children in DOM order: name, marks, Fusensho, fouls. */
-.tsm-row-1,
-.tsm-row-2 {
+.tsm-row-1 {
   display: contents;
 }
 
@@ -8036,65 +8018,46 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 6px;
 }
 
-/* --- Touch-target floor for the inline operator console and team modal --- *
+/* --- Touch-target floor for the inline operator console, team modal and the
+   Engi flag counters --------------------------------------------------- *
    The shiaijo console is the surface operators actually score on, on a
    tablet, so every in-bout control takes the DESIGN.md §6 ≥44px coarse-pointer
-   floor. Scoped to .team-bouts-scroll so BOTH the inline .scoring-panel and the
-   .editor-modal team modal inherit it. The marks sit in a flex-wrap row (the
-   .team-sub-match__btns box in roomy mode, .tsm-row-1 with the Fusensho button
-   riding along in compact mode), so at full 44px width they wrap to two lines
-   when a side column is tight (≈147px on a 1024 landscape iPad) and stay on
-   one when there's room, container-driven, no viewport query.
-   The centre score slots can't take 44px WIDTH (the centre column is a fixed
-   160px shared by both sides' 2 slots + the result; 4×34 already overflows),
-   so they keep their fitting 26px width and take the full 44px height,
-   vertical room is free, which roughly doubles the tap area. */
-@media (pointer: coarse) {
-  .team-bouts-scroll .ipt-btn {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  .team-bouts-scroll .tsm-fouls__btn {
-    min-width: 44px;
-    min-height: 44px;
-  }
-  /* Only the live bout's slots are buttons; a fought bout renders spans and
-     its whole row is the tap target (it opens the bout for correction). */
-  .team-bouts-scroll .team-sub-match__center button.editor-side__pt {
-    min-height: 44px;
-  }
-  .team-bouts-scroll .team-sub-match--readonly {
-    min-height: 44px;
-  }
-  .team-bouts-scroll .lineup-name__clear {
-    min-width: 44px;
-    min-height: 44px;
-  }
+   floor, expressed as --tap-floor (44px on a coarse pointer, 0 otherwise,
+   declared at :root). Scoped to .team-bouts-scroll so BOTH the inline
+   .scoring-panel and the .editor-modal team modal inherit it. The marks sit
+   in a flex-wrap row (the .team-sub-match__btns box in roomy mode, .tsm-row-1
+   with the Fusensho button riding along in compact mode), so at full 44px
+   width they wrap to two lines when a side column is tight (≈147px on a 1024
+   landscape iPad) and stay on one when there's room, container-driven, no
+   viewport query. The centre score slots can't take 44px WIDTH (the centre
+   column is a fixed 160px shared by both sides' 2 slots + the result; 4×34
+   already overflows), so they keep their fitting 26px width and take the
+   full 44px height, vertical room is free, which roughly doubles the tap
+   area. mp-gmcg (critique P2): on a fine pointer the editor's ippon + foul
+   buttons sat at ~20x17px, half DESIGN.md's 36px pragmatic floor for admin
+   surfaces, so those two also take a 32px fine-pointer minimum via
+   max(32px, var(--tap-floor)). .engi-counter__btn is the single most-tapped
+   control in the Engi flow (every flag increment) and gets the same floor. */
+.team-bouts-scroll .ipt-btn,
+.team-bouts-scroll .tsm-fouls__btn {
+  min-width: max(32px, var(--tap-floor));
+  min-height: max(32px, var(--tap-floor));
 }
-
-/* mp-gmcg (critique P2): mouse/laptop operators too. On a fine pointer the
-   editor's ippon + foul buttons sat at ~20x17px, half DESIGN.md's 36px
-   pragmatic floor for admin surfaces. Coarse pointers get 44px above; give
-   fine pointers a 32px min so a precise-but-small click target isn't a
-   frustration on a trackpad. */
-@media (pointer: fine) {
-  .team-bouts-scroll .ipt-btn,
-  .team-bouts-scroll .tsm-fouls__btn {
-    min-width: 32px;
-    min-height: 32px;
-  }
+/* Only the live bout's slots are buttons; a fought bout renders spans and
+   its whole row is the tap target (it opens the bout for correction). */
+.team-bouts-scroll .team-sub-match__center button.editor-side__pt {
+  min-height: var(--tap-floor);
 }
-
-/* --- Touch-target floor for the Engi flag counters --------------------- *
-   .engi-counter__btn is the single most-tapped control in the Engi flow
-   (every flag increment) and had no coarse-pointer override at all: it sat
-   at a flat 32px on every device, including the tablets operators actually
-   score on. Bring it up to the same ≥44px floor as .ipt-btn. */
-@media (pointer: coarse) {
-  .engi-counter__btn {
-    min-width: 44px;
-    min-height: 44px;
-  }
+.team-bouts-scroll .team-sub-match--readonly {
+  min-height: var(--tap-floor);
+}
+.team-bouts-scroll .lineup-name__clear {
+  min-width: var(--tap-floor);
+  min-height: var(--tap-floor);
+}
+.engi-counter__btn {
+  min-width: var(--tap-floor);
+  min-height: var(--tap-floor);
 }
 
 /* --- Keyboard focus ring for ippon buttons ---------------------------- *

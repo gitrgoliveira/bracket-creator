@@ -111,6 +111,52 @@ function Term({ name, children, nested }) {
   const tooltipId = useStableId('tw-tip');
   const [open, setOpen] = useStateT(false);
   const wrapperRef = useRefT(null);
+  const tooltipRef = useRefT(null);
+  // flip / up: does the tooltip's default box (left-anchored, opening
+  // downwards) run past the right or the bottom edge of its nearest
+  // scrolling ancestor. Measured cheaply on demand (pointer-enter, focus, or
+  // just before a click/keydown open) rather than watched continuously: no
+  // ResizeObserver, no global listeners, no layout cost while closed.
+  //
+  // The vertical half is not cosmetic. The tooltip is display:none until
+  // shown, so a downward box near the bottom of a scroll body ADDS height
+  // the moment it appears; the scrollbar that brings in narrows the body,
+  // content above re-wraps, the term slides out from under the pointer, the
+  // hover ends, the box vanishes, the scrollbar goes, and the term slides
+  // back: a visible flicker loop (seen on the 560px score overlay). Opening
+  // upwards adds no scrollable overflow, so the loop cannot start.
+  const [flip, setFlip] = useStateT(false);
+  const [up, setUp] = useStateT(false);
+  const measureFlip = () => {
+    const tooltipEl = tooltipRef.current;
+    const wrap = wrapperRef.current;
+    if (!tooltipEl || !wrap) return;
+    const wrapperRect = wrap.getBoundingClientRect();
+    // The scrolling container is the nearest ancestor whose computed
+    // overflow isn't 'visible' on either axis; fall back to the viewport when
+    // nothing along the chain clips.
+    let node = wrap.parentElement;
+    let box = { right: document.documentElement.clientWidth, top: 0, bottom: document.documentElement.clientHeight };
+    while (node) {
+      const style = getComputedStyle(node);
+      if ((style.overflowX && style.overflowX !== 'visible') || (style.overflowY && style.overflowY !== 'visible')) {
+        box = node.getBoundingClientRect();
+        break;
+      }
+      node = node.parentElement;
+    }
+    // On pointer-enter the :hover reveal has already applied, so the box is
+    // measurable; on a keyboard path it may still be display:none (height 0),
+    // in which case only the declared width is known.
+    const tipRect = tooltipEl.getBoundingClientRect();
+    const declaredWidth = parseFloat(getComputedStyle(tooltipEl).maxWidth);
+    const width = tipRect.width || (Number.isNaN(declaredWidth) ? 320 : declaredWidth);
+    const height = tipRect.height;
+    setFlip(box.right - wrapperRect.left < width);
+    const needsScrollBelow = height > 0 && wrapperRect.bottom + 6 + height > box.bottom;
+    const fitsAbove = height > 0 && wrapperRect.top - 6 - height >= box.top;
+    setUp(needsScrollBelow && fitsAbove);
+  };
 
   // Tap-outside / Escape dismiss. Mount once per Term lifecycle.
   useEffectT(() => {
@@ -141,7 +187,8 @@ function Term({ name, children, nested }) {
     // Don't propagate the click outside; keeps a Term inside a
     // clickable card (e.g. a match row) from triggering the row click.
     e.stopPropagation();
-    setOpen((v) => !v);
+    if (!open) measureFlip(); // about to open: measure before it renders
+    setOpen(!open);
   };
 
   const handleBlur = (e) => {
@@ -154,24 +201,35 @@ function Term({ name, children, nested }) {
   };
 
   const wrapClass = nested ? 'tw-term tw-term--nested' : 'tw-term';
-  const wrapClassWithOpen = open ? `${wrapClass} tw-term--open` : wrapClass;
+  let wrapClassFull = open ? `${wrapClass} tw-term--open` : wrapClass;
+  if (flip) wrapClassFull += ' tw-term--flip';
+  if (up) wrapClassFull += ' tw-term--up';
 
   return React.createElement(
     'span',
     {
       ref: wrapperRef,
       tabIndex: 0,
-      className: wrapClassWithOpen,
+      className: wrapClassFull,
       'data-testid': 'term-wrapper',
       'aria-describedby': tooltipId,
       onClick: handleClick,
       onBlur: handleBlur,
-      onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v); } },
+      onPointerEnter: measureFlip,
+      onFocus: measureFlip,
+      onKeyDown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (!open) measureFlip();
+          setOpen(!open);
+        }
+      },
     },
     children,
     React.createElement(
       'span',
       {
+        ref: tooltipRef,
         id: tooltipId,
         role: 'tooltip',
         className: open ? 'tw-tooltip tw-tooltip--open' : 'tw-tooltip',
@@ -262,7 +320,9 @@ function capitalise(s) {
 // GlossaryHint: a standalone ？ icon that carries the glossary tooltip
 // for a given term. Renders as a sibling next to a button so the tooltip
 // is accessible without wrapping (and potentially blocking) the button's
-// click target.
+// click target. No alignment prop: the tooltip it wraps (Term, below)
+// measures its own room on open and flips itself leftwards when needed, so
+// no call site has to know where in a wrapping row its hint landed.
 function GlossaryHint({ name }) {
   return React.createElement(
     'span',

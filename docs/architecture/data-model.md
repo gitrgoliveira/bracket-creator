@@ -148,8 +148,8 @@ which of the two it is.
 Each squad member carries a stable id, minted once when the member is added and never
 reused, and a display index. The id is what a lineup position and a bout row record, so a
 member can be renamed without any record losing track of who fought. A squad is seeded with
-one member per position the competition's team size defines, so a team has its shape before
-anyone is named. No member is ever removed, so an index is never freed and no
+one member per position the competition's team size defines, plus two reserve positions, so a
+team has its shape before anyone is named. No member is ever removed, so an index is never freed and no
 renumbering question arises. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
 id, so a bout already fought names the same person whatever the name is changed to. Adding a
 member stays available at any time, including after the start, because a team fields
@@ -402,8 +402,9 @@ classDiagram
     }
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
-        TeamLineup by round
+        TeamLineup by round or match
         position to name and member id
+        a position may hold an id and an empty name
     }
     class squads_yaml["squads.yaml"] {
         <<YAML>>

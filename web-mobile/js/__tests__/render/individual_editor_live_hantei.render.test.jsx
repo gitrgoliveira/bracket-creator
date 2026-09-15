@@ -147,12 +147,13 @@ describe('the editor shows the verdict the server holds', () => {
     ); });
 
     // SHIRO's two cells then AKA's, in DOM order. Yamada (AKA) holds the M and
-    // the Ht, Tanaka (SHIRO) the K — the same result the board shows, which is
-    // the whole point. (DOM order, not reading order: AKA's pair is reversed
-    // visually by CSS, so on screen this reads `[K][ ] vs [Ht][M]`. Confirmed
-    // against the running app, which produces exactly this array.)
+    // the Ht, Tanaka (SHIRO) the K, the same result the board shows, which is
+    // the whole point. (DOM order, not slot-index order: AKA renders its pair
+    // reversed via sideSlotOrder, so slot 1 (Ht) comes before slot 0 (M) in
+    // the DOM, and on screen this reads `[K][ ] vs [Ht][M]`. Confirmed against
+    // the running app, which produces exactly this array.)
     expect([...container.querySelectorAll('.sb-slot')].map(s => s.textContent))
-      .toEqual(['K', '\u00b7', 'M', 'Ht']);
+      .toEqual(['K', '\u00b7', 'Ht', 'M']);
   });
 
   it('keeps UNSAVED operator edits rather than overwriting them', async () => {

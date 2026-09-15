@@ -6,6 +6,9 @@ import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+// NumberedName: single owner of the number-chip-on-the-outer-side rule
+// (bc-dnst); see that file's header for why this stays an ES import.
+import { NumberedName } from './numbered_name.jsx';
 
 const { useState: useStateA, useMemo: useMemoA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -203,7 +206,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />
               <div className="score-edit-row__sides">
                   <div className={`score-edit-row__side ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <div className="name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{m.sideB?.name}</div>
+                    <div className="name"><NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip /></div>
                     <div className="dojo">{m.sideB?.dojo}</div>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                   </div>
@@ -219,7 +222,7 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                   </div>
                   <div className={`score-edit-row__side ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <div className="name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{m.sideA?.name}</div>
+                    <div className="name"><NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip /></div>
                     <div className="dojo">{m.sideA?.dojo}</div>
                   </div>
               </div>

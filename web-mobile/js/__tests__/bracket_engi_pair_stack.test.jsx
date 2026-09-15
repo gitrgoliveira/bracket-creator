@@ -8,6 +8,12 @@ function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
+  // NumberedName is a plain (hookless) function component: the mock React
+  // runtime's createElement never invokes it, so expand it explicitly to
+  // reach the name text it wraps. Matched by name, not identity: bracket.jsx
+  // is re-imported per test via vi.resetModules(), so a statically imported
+  // reference here would never === the freshly loaded one.
+  if (typeof node.type === 'function' && node.type.name === 'NumberedName') return collectText(node.type(node.props));
   if (node.children) return collectText(node.children);
   if (node.props?.children) return collectText(node.props.children);
   return '';

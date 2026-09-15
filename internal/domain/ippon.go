@@ -222,13 +222,20 @@ func SubBoutAttribution(att WinnerAttribution) WinnerAttribution {
 }
 
 func AttributeWinnerSide(a WinnerAttribution) MatchSide {
-	if a.WinnerID != "" && a.SideAID != "" && a.SideBID != "" {
-		switch a.WinnerID {
-		case a.SideAID:
+	// Ids first. A winner id equal to a side's id names that side outright,
+	// even when the OTHER side carries no id (bc-dnst: a fighter fielded by
+	// squad number has an id and no name, and its opponent may be a typed
+	// substitute with a name and no id; the names then cannot answer for
+	// the id-only side, but its id can). Only when BOTH sides carry ids
+	// and the winner id matches neither is the row unattributable by id
+	// AND by name: the ids were the better evidence and they disagree.
+	if a.WinnerID != "" {
+		switch {
+		case a.SideAID != "" && a.WinnerID == a.SideAID:
 			return MatchSideA
-		case a.SideBID:
+		case a.SideBID != "" && a.WinnerID == a.SideBID:
 			return MatchSideB
-		default:
+		case a.SideAID != "" && a.SideBID != "":
 			return MatchSideNone
 		}
 	}

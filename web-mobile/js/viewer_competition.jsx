@@ -8,6 +8,7 @@ import { WinnerBadge, SwissStandingsViewer, PoolsViewer, LeagueStandingsViewer, 
 import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
+import { NumberedName } from './numbered_name.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -339,8 +340,7 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
               const number = pRecord?.number || "";
               return (
                 <span key={k} className="pmf__chip">
-                  {number && <span className="num-prefix">{number}</span>}
-                  {name}
+                  <NumberedName name={name} number={number} />
                   <button type="button" onClick={() => { setWatchlist(prev => prev.filter((e) => entryKey(e) !== k)); if (primaryKey === k) setPrimaryKey(""); }} aria-label={`Remove ${name}`}>×</button>
                 </span>
               );
@@ -589,8 +589,7 @@ export function ViewerOverview({ c, myPlayer, myUpcoming, currentMatch, runningM
                   <td className={`pool-standings__draw-pos${s.isOverridden ? " pool-standings__draw-pos--override" : ""}`}>{s.rank || i + 1}{s.isOverridden ? "*" : ""}</td>
                   <td>
                     <div className="pool__player-name">
-                      {s.player?.number ? <span className="num-prefix">{s.player.number}</span> : null}
-                      {sMember1}
+                      <NumberedName name={sMember1} number={s.player?.number} />
                       {/* DH badge for any daihyosen winner, matching PoolsViewer.
                           The backend already gates daihyosen bouts to ties that
                           affect advancement (tieAffectsAdvancement), so the badge

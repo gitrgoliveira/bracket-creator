@@ -19,8 +19,8 @@
 // calls belong to the browser-review children named in the comments.
 
 import React from 'react';
-import { render, act, fireEvent, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
@@ -479,5 +479,245 @@ describe('TeamScoreEditorModal kachinuki bout navigation', () => {
     });
     const nums = [...container.querySelectorAll('.team-sub-match__pos-num')].map(n => n.textContent);
     expect(nums).toEqual(['1', '2']);
+  });
+});
+
+describe('TeamScoreEditorModal compact density is ONE condition on both hosts (bc-dnst)', () => {
+  // The overlay and the inline shiaijo panel must never disagree on density:
+  // teamSize <= 5 or kachinuki is compact, a larger fixed-order team stays roomy.
+  const FP = { format: 'mixed', phase: 'pool', naginata: false };
+  const CELLS = [
+    { teamSize: 5, tmt: 'fixed', compact: true },
+    { teamSize: 5, tmt: 'kachinuki', compact: true },
+    { teamSize: 7, tmt: 'kachinuki', compact: true },
+    { teamSize: 7, tmt: 'fixed', compact: false },
+  ];
+  it.each(CELLS)('inline panel size=$teamSize $tmt -> compact=$compact', async (cell) => {
+    const { container } = await renderCell({ ...FP, ...cell }, {}, { variant: 'inline' });
+    const panel = container.querySelector('.scoring-panel--team');
+    expect(panel).not.toBeNull();
+    expect(container.querySelector('.editor-modal--team')).toBeNull();
+    expect(panel.classList.contains('editor-modal--compact')).toBe(cell.compact);
+  });
+  it.each(CELLS)('overlay modal size=$teamSize $tmt -> compact=$compact', async (cell) => {
+    const { container } = await renderCell({ ...FP, ...cell });
+    const modal = container.querySelector('.editor-modal--team');
+    expect(modal).not.toBeNull();
+    expect(modal.classList.contains('editor-modal--compact')).toBe(cell.compact);
+  });
+});
+
+describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still gets a name box (bc-dnst)', () => {
+  // Operator ruling 2026-09-15: a fixed-order team registered without
+  // members used to show a static dash and no number on every bout row
+  // (rosterForSide returns [] here, via the AdminLineupHelpers.rosterFor
+  // stub, exactly like a team with no team.metadata roster). Every numbered
+  // position must now still offer a typeable name box, labelled with the
+  // number of the blank squad member seeded for that position.
+  afterEach(() => {
+    delete window.API.fetchSquads;
+    delete window.API.fetchMatchLineup;
+  });
+
+  it('every numbered row renders a name input on both sides, labelled with each blank member\'s own number', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': blankSquad('b'),
+    });
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
+    });
+
+    const rows = container.querySelectorAll('.team-sub-match');
+    expect(rows.length).toBe(5);
+
+    // Every row, both sides: a typeable name box (LineupNameInput), not the
+    // old static dash.
+    const inputs = container.querySelectorAll('input[aria-label$=" player"]');
+    expect(inputs.length).toBe(10);
+    expect(container.querySelectorAll('.tsm-name__static--empty').length).toBe(0);
+
+    // SHIRO = sideB = Team B (T2); AKA = sideA = Team A (T1), matching this
+    // file's side convention.
+    const shiroLabels = [...container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]')]
+      .map(n => n.textContent);
+    const akaLabels = [...container.querySelectorAll('[data-testid="team-sub-match-member-label-aka"]')]
+      .map(n => n.textContent);
+    expect(shiroLabels).toEqual(['T2.1', 'T2.2', 'T2.3', 'T2.4', 'T2.5']);
+    expect(akaLabels).toEqual(['T1.1', 'T1.2', 'T1.3', 'T1.4', 'T1.5']);
+  });
+
+  // Operator ruling 2026-09-15 (bc-dnst): team order changes between
+  // matches, so a squad member not currently placed in the lineup (a
+  // reserve, or a fighter a reorder displaced) must still be pickable from
+  // the row's own name box, not just the members already assigned to a
+  // position.
+  it('a squad member with no lineup position is still offered in the name box', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': [...blankSquad('b'), { id: 'b6', index: 6, name: 'Reserve Sato' }],
+    });
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
+    });
+
+    const shiroInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    expect(shiroInput).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.focus(shiroInput);
+      fireEvent.change(shiroInput, { target: { value: 'Res' } });
+    });
+
+    const optionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
+    expect(optionNames).toContain('Reserve Sato');
+  });
+
+  // Operator ruling 2026-09-15 (bc-dnst), slotLabelFor's "placed elsewhere"
+  // guard: an unplaced fixed-order position shows its default seeded
+  // member's number (named or still blank) UNLESS that member has already
+  // been placed at ANOTHER position of this lineup, in which case the
+  // number belongs to that other row and this one shows none -- a number
+  // must never appear twice on the sheet.
+  it('a default member placed at another position shows no number on its own row', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    const squadB = blankSquad('b').map(mem => (
+      mem.index === 2 ? { id: 'b2', index: 2, name: 'Kenji Tanaka' } : mem
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': squadB,
+    });
+    // Kenji Tanaka (member b2, seeded to position 2) is placed at Chuken
+    // (position 3) in the saved Shiro lineup.
+    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_compId, teamId) => (
+      teamId === 'team-B'
+        ? { positions: { chuken: 'Kenji Tanaka' }, memberIds: { chuken: 'b2' } }
+        : null
+    ));
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      // Row 3 (Chuken) resolves Kenji Tanaka via the lineup and carries a
+      // label; row 2, his seeded default position, has none -- so only 4 of
+      // the 5 rows show a Shiro label once the lineup fetch settles.
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(4);
+    });
+
+    const rows = [...container.querySelectorAll('.team-sub-match')];
+    expect(rows.length).toBe(5);
+    const shiroLabels = rows.map(row => {
+      const el = row.querySelector('[data-testid="team-sub-match-member-label-shiro"]');
+      return el ? el.textContent : '';
+    });
+    expect(shiroLabels).toEqual(['T2.1', '', 'T2.2', 'T2.4', 'T2.5']);
+  });
+
+  // withoutPlacedElsewhere (bc-dnst): reuses the SAME fixture as the test
+  // above -- Kenji Tanaka (member b2, seeded to position 2) is placed at
+  // Chuken (position 3) in the saved Shiro lineup -- but asserts the
+  // PICKER LIST itself rather than the label. A fixed-order lineup fields
+  // each fighter once, so Kenji Tanaka must be absent from every OTHER
+  // row's name box (Senpo) while still present on his OWN row (Chuken).
+  it('a member placed at another position is hidden from that other row\'s list but offered on his own row', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    const squadB = blankSquad('b').map(mem => (
+      mem.index === 2 ? { id: 'b2', index: 2, name: 'Kenji Tanaka' } : mem
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': squadB,
+    });
+    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_compId, teamId) => (
+      teamId === 'team-B'
+        ? { positions: { chuken: 'Kenji Tanaka' }, memberIds: { chuken: 'b2' } }
+        : null
+    ));
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(4);
+    });
+
+    const senpoInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    expect(senpoInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(senpoInput); });
+    const senpoOptionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
+    expect(senpoOptionNames).not.toContain('Kenji Tanaka');
+
+    await act(async () => { fireEvent.blur(senpoInput); });
+    const chukenInput = container.querySelector('input[aria-label="Chuken SHIRO player"]');
+    expect(chukenInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(chukenInput); });
+    const chukenOptionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
+    expect(chukenOptionNames).toContain('Kenji Tanaka');
+  });
+
+  // squadFloor (bc-dnst, internal/state/squad.go): a squad is seeded to
+  // team size + 2 reserves, so a 5-person team's floor is 7. The row's
+  // list must offer every one of those 7 numbered slots, blank ones
+  // included, labelled T2.1..T2.7 in order -- not just the 5 the team
+  // fields at once.
+  it('a 7-member squad (5-person team + 2 reserves) offers all 7 numbered entries in order', async () => {
+    const squadB = Array.from({ length: 7 }, (_, i) => ({ id: `b-m${i + 1}`, index: i + 1, name: '' }));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': Array.from({ length: 5 }, (_, i) => ({ id: `a-m${i + 1}`, index: i + 1, name: '' })),
+      'team-B': squadB,
+    });
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
+    });
+
+    const senpoInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    expect(senpoInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(senpoInput); });
+
+    const optionLabels = [...container.querySelectorAll('.pmf__opt-label')].map(n => n.textContent);
+    expect(optionLabels).toEqual(['T2.1', 'T2.2', 'T2.3', 'T2.4', 'T2.5', 'T2.6', 'T2.7']);
+
+    // The Aka side's list carries ITS team's number (a side-letter lookup
+    // once labelled both lists with the Shiro team's number).
+    await act(async () => { fireEvent.blur(senpoInput); });
+    const akaInput = container.querySelector('input[aria-label="Senpo AKA player"]');
+    expect(akaInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(akaInput); });
+    const akaLabels = [...container.querySelectorAll('.pmf__opt-label')].map(n => n.textContent);
+    expect(akaLabels).toEqual(['T1.1', 'T1.2', 'T1.3', 'T1.4', 'T1.5']);
   });
 });

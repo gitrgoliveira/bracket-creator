@@ -218,3 +218,29 @@ func TestSubBoutAttribution(t *testing.T) {
 		assert.Empty(t, att.SideA)
 	})
 }
+
+// TestAttributeWinnerSide_SingleKnownID pins the bc-dnst extension of the id
+// tier: a winner id equal to the ONE side that carries an id names that side
+// even when the other side has no id (a fighter fielded by squad number
+// against a typed substitute), and the names get no say; with both side ids
+// known and neither matching, the row stays unattributable even when a name
+// would have matched.
+func TestAttributeWinnerSide_SingleKnownID(t *testing.T) {
+	oneID := domain.WinnerAttribution{
+		WinnerID: "id-b", SideAID: "", SideBID: "id-b",
+		Winner: "Minami Budokan", SideA: "Yamada", SideB: "",
+	}
+	assert.Equal(t, domain.MatchSideB, domain.AttributeWinnerSide(oneID))
+
+	bothKnownNeither := domain.WinnerAttribution{
+		WinnerID: "id-x", SideAID: "id-a", SideBID: "id-b",
+		Winner: "Sato", SideA: "Sato", SideB: "Tanaka",
+	}
+	assert.Equal(t, domain.MatchSideNone, domain.AttributeWinnerSide(bothKnownNeither))
+
+	oneIDNoMatch := domain.WinnerAttribution{
+		WinnerID: "id-x", SideAID: "id-a", SideBID: "",
+		Winner: "Tanaka", SideA: "Sato", SideB: "Tanaka",
+	}
+	assert.Equal(t, domain.MatchSideB, domain.AttributeWinnerSide(oneIDNoMatch), "with only one side id known and no id match, the names still answer")
+}

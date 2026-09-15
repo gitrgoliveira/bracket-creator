@@ -18,6 +18,86 @@
 
 import { squadMemberLabel } from './squad_member_label.jsx';
 
+// squadRosterEntries: the ONE builder of a lineup picker's list for a team
+// (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
+// .jsx rosterForSide) and the Up Next "Enter lineup" panel
+// (admin_schedule_lineup.jsx): the squad's members first, every one of them
+// in index order as `{id, index, name, label}` objects so a still-blank slot
+// is offered by its number alone (operator ruling 2026-09-15). The LEGACY
+// names (the pre-squad metadata roster, plus whatever
+// `mergeRosterWithAssigned` re-adds for the lineup's own assigned names) are
+// appended ONLY when the squad itself is empty: the fallback exists for
+// exactly two "no squad" cases, a legacy team that predates squads
+// altogether (no id at all) and a squad fetch that failed, and a squad that
+// IS present already lists every member the legacy roster could offer, so
+// mixing the two would only reintroduce the stale pre-rename names
+// resolveBoutSideDisplayName exists to stop showing. Reads
+// mergeRosterWithAssigned off window.AdminLineupHelpers (this module must
+// not import admin_lineup.jsx, see the header) and copes with its absence.
+export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
+  const squadEntries = (Array.isArray(squad) ? squad : [])
+    .slice()
+    .sort((x, y) => (x?.index || 0) - (y?.index || 0))
+    .map(mem => ({
+      id: mem?.id || "",
+      index: mem?.index || 0,
+      name: String(mem?.name || "").trim(),
+      label: squadMemberLabel(teamNumber, mem?.index),
+    }));
+  if (squadEntries.length > 0) return squadEntries;
+  const seen = new Set();
+  const merge = (typeof window !== "undefined" && window.AdminLineupHelpers?.mergeRosterWithAssigned)
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned
+    : (names) => names;
+  const legacyEntries = merge(Array.isArray(legacyNames) ? legacyNames : [], lineup).filter(n => {
+    const key = String(n).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return legacyEntries;
+}
+
+// memberPlacedElsewhere: the ONE predicate behind "a member holds one
+// position per lineup" (bc-dnst): the position key at which `memberIds`
+// already holds `id` other than `posKey`, or "" when it holds it nowhere
+// else. Every lineup writer asks it before writing (the score sheet's
+// buildInlineLineupWrite, the Up Next panel's save, the Lineups page's add
+// path) and rosterWithoutPlacedElsewhere below is the same answer rendered
+// as a list filter, so the offer and the refusal can never disagree; the
+// server's own ErrLineupDuplicateMember stays an unreachable backstop.
+//
+// rosterWithoutPlacedElsewhere: a fixed-order lineup fields each fighter
+// once, so the list offered for `posKey` drops every entry already placed at
+// ANOTHER position of `lineup` (bc-dnst; a click test once caught the list
+// offering a fighter twice and letting him be placed on two rows). An object
+// entry is dropped when its id appears in lineup.memberIds elsewhere, or its
+// name matches a NON-BLANK name elsewhere; a blank-named object entry is
+// compared by id only, since every blank slot shares the same empty name
+// and matching on it would hide every other blank slot the moment one of
+// them is placed. A plain legacy string is compared by name. Shared by the
+// same two pickers as squadRosterEntries.
+export function memberPlacedElsewhere(memberIds, posKey, id) {
+  if (!id) return "";
+  const hit = Object.entries(memberIds || {}).find(([key, other]) => key !== posKey && other === id);
+  return hit ? hit[0] : "";
+}
+
+export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
+  const otherMemberIds = new Set(Object.entries(lineup?.memberIds || {})
+    .filter(([key, id]) => key !== posKey && id)
+    .map(([, id]) => id));
+  const otherNames = new Set(Object.entries(lineup?.positions || {})
+    .filter(([key, name]) => key !== posKey && String(name || "").trim())
+    .map(([, name]) => String(name).trim().toLowerCase()));
+  return roster.filter(entry => {
+    if (typeof entry === "string") return !otherNames.has(entry.trim().toLowerCase());
+    if (entry.id && otherMemberIds.has(entry.id)) return false;
+    if (!entry.name) return true;
+    return !otherNames.has(entry.name.trim().toLowerCase());
+  });
+}
+
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
 // entry exists (404 → null → round lookup). Network errors on either
@@ -201,4 +281,30 @@ export function resolveBoutSideSquadLabel({ isKachinuki, isDaihyosen, existingMe
   const memberId = resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId });
   const member = resolveSquadMember(squad, memberId, name);
   return member ? squadMemberLabel(teamNumber, member.index) : "";
+}
+
+// resolveBoutSideDisplayName: the ONE rule for what name a bout side shows
+// on screen (bc-dnst, operator ruling 2026-09-15). A rename reaches every
+// bout that member has already fought -- the STORED SubMatchResult text
+// (sub.sideA/sub.sideB) stays frozen forever (it is not rewritten, and
+// nothing on the wire changes when a member is renamed), but every render
+// site resolves the member's CURRENT name by id and shows that instead.
+// Resolution is id-only, exactly like resolveSquadMember: a name can never
+// re-attach a bout to a different member than the id it was recorded with.
+//
+// This is DISPLAY-ONLY. Nothing that WRITES a bout (buildPatch's
+// playerNamesForBout, the kachinuki bout log, a lineup PUT) may pass a name
+// through this function; doing so would let a stale render silently rewrite
+// the stored record. Every call site below is a render, never a writer.
+//
+// storedName is returned verbatim (falling back to "" for a nullish/absent
+// value) whenever memberId resolves to nothing, or resolves to a squad
+// member whose own name is still blank (an unnamed seeded slot has nothing
+// newer to show).
+export function resolveBoutSideDisplayName({ squad, memberId, storedName }) {
+  const list = Array.isArray(squad) ? squad : [];
+  const member = memberId ? list.find(mem => mem && mem.id === memberId) : null;
+  const currentName = member ? String(member.name || "").trim() : "";
+  if (currentName) return currentName;
+  return storedName || "";
 }

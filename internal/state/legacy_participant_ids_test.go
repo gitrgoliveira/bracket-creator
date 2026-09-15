@@ -241,7 +241,7 @@ func TestLegacyTeamRosterMintedAndSquadsMigratedInOnePass(t *testing.T) {
 
 	squads, err := fresh.LoadSquads("c1")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"Sato", "Kimura", "Abe"}, squadNames(squads[byName["Tora"]]),
-		"and the squad is migrated under the id the same pass just minted")
-	assert.Equal(t, []string{"Mori", "Oda", "Ito"}, squadNames(squads[byName["Kaze"]]))
+	assert.Equal(t, []string{"Sato", "Kimura", "Abe", "", ""}, squadNames(squads[byName["Tora"]]),
+		"and the squad is migrated under the id the same pass just minted, padded to the floor (TeamSize 3 + 2 reserves)")
+	assert.Equal(t, []string{"Mori", "Oda", "Ito", "", ""}, squadNames(squads[byName["Kaze"]]))
 }

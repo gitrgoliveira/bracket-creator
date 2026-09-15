@@ -17,7 +17,7 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
@@ -31,6 +31,9 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // reasoning applies to any admin panel. `em` sizing (rather than a fixed px)
 // scales with the name it rides beside across variant="card"/"tv".
 const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75, marginRight: "0.35em" };
+// Aka's label sits AFTER the name (the outer side), so its gap is on the
+// other side of it (bc-dnst).
+const SQUAD_MEMBER_LABEL_STYLE_AFTER = { ...SQUAD_MEMBER_LABEL_STYLE, marginRight: 0, marginLeft: "0.35em" };
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -101,6 +104,13 @@ export function useTeamLineups(match, competition, roundIndex) {
     return () => window.removeEventListener("lineup-updated", handler);
   }, [compId]);
 
+  // The squads the passed competition carries, as a value the effect below
+  // can depend on (bc-dnst): a member renamed or named while the board is
+  // up arrives as a fresher competition item with a new squads map, and the
+  // resolved squadA/squadB must follow it, or every bout row keeps showing
+  // the spelling the first run captured. The map is a handful of members
+  // per team, so serialising it per render is cheap.
+  const squadsSig = competition && competition.squads ? JSON.stringify(competition.squads) : "";
   useEB(() => {
     // Clear stale lineups immediately so the previous match's names never leak
     // into the next render (Copilot review: stale lineup state).
@@ -167,7 +177,7 @@ export function useTeamLineups(match, competition, roundIndex) {
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round
     // change on a reused match id must re-run the effect.
-  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion]);
+  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion, squadsSig]);
 
   return { lineupA, lineupB, squadA, squadB };
 }
@@ -413,6 +423,19 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);
   const akaName = resolveSide(sub && sub.sideA, lineupA);
+  // shiroDisplayName/akaDisplayName: the DISPLAYED name only (bc-dnst). A
+  // rename reaches a bout already fought: the stored sub.sideA/sub.sideB
+  // text stays frozen (shiroName/akaName above, unchanged, are what the
+  // label composition below and every other consumer of this row keep
+  // using), but the rendered text swaps in the squad member's CURRENT name
+  // when its id resolves (resolveBoutSideDisplayName, lineup_resolver.jsx).
+  // The lookup runs even when resolveSide fell through to the bare bout
+  // number: a fighter fielded by squad number and named LATER has an empty
+  // stored name and a resolving id, and must show the name once it has
+  // one; when the id resolves to nothing the rule hands the bout number
+  // back untouched.
+  const shiroDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: (sub && sub.sideBMemberId) || "", storedName: shiroName });
+  const akaDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: (sub && sub.sideAMemberId) || "", storedName: akaName });
   // The squad member label rides beside the SAME name resolved above, via the
   // ONE shared composer (resolveBoutSideSquadLabel, lineup_resolver.jsx): the
   // member id comes from the SAME kachinuki/fixed-format tier the name used
@@ -442,12 +465,16 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
       <span className="msb-name">
         {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
-        <span data-testid="sub-shiro-name">{shiroName}</span>
+        <span data-testid="sub-shiro-name">{shiroDisplayName}</span>
       </span>
       {centreMarks(sub, matchSideA, matchSideB)}
+      {/* The member label sits on the OUTER side of the name like the
+          competitor number (operator ruling 2026-09-14, bc-dnst): Shiro's
+          before the name, Aka's after it, so the two labels frame the
+          pairing from the outside as the score sheet's bout rows do. */}
       <span className="msb-name msb-name--aka">
-        {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-a">{akaLabel}</span>}
-        <span data-testid="sub-aka-name">{akaName}</span>
+        <span data-testid="sub-aka-name">{akaDisplayName}</span>
+        {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE_AFTER} data-testid="sub-member-label-a">{akaLabel}</span>}
       </span>
     </div>
   );
@@ -489,18 +516,25 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 
 // IndividualScore: §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
-// withNumber: prepend the assigned competitor number (e.g. "K1") to the
-// display name when present. Falls back to the bare name when no number is
-// set, so competitions without `numberPrefix` render identically to before.
-// Honours the zekken `displayName` when `withZekkenName` is true, matching
-// `sideLabel` in display.jsx. Used by every individual-match name-rendering
-// site (TV display, streaming overlay, viewer card, schedule list) so the
-// number prefix appears consistently across all spectator surfaces.
-export function withNumber(side, withZekkenName) {
+// withNumber: the plain-STRING twin of NumberedName (numbered_name.jsx), for
+// surfaces that build a string rather than JSX: the TV board, the streaming
+// (OBS) overlay, and the viewer match card, called directly here and via
+// `sideLabel` in display_helpers.jsx. Where the two sides sit LEFT/RIGHT it
+// renders the outer-side rule (operator ruling 2026-09-14, bc-dnst): Shiro's
+// number sits BEFORE the name, Aka's AFTER it, so `color` ("shiro" | "aka")
+// is required there wherever a number can appear. A caller whose sides STACK
+// vertically instead (the admin and public schedule rows) passes no `color`,
+// so the number sits before the name on both, aligning in one column. Falls
+// back to the bare name when no number is set, so competitions without
+// `numberPrefix` render identically to before. Honours the zekken
+// `displayName` when `withZekkenName` is true. Keep this in step with
+// NumberedName; the two must not drift apart.
+export function withNumber(side, withZekkenName, color) {
   if (!side) return "TBD";
   if (typeof side === "string") return side;
   const name = (withZekkenName && side.displayName) ? side.displayName : (side.name || "TBD");
-  return side.number ? `${side.number} ${name}` : name;
+  if (!side.number) return name;
+  return color === "aka" ? `${name} ${side.number}` : `${side.number} ${name}`;
 }
 
 // shiroName / akaName: optional resolved display names, mirroring the props
@@ -553,12 +587,13 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   // row IS a full match, and by the viewer's match card, which has no name row of
   // its own (a competitor's points must never sit under their name).
   // Always display the human NAME (never the id key used for comparison).
-  // withNumber prepends the assigned competitor number (e.g. "K1 Tanaka") when
-  // the competition has a numberPrefix configured; falls back to the bare name.
+  // withNumber places the assigned competitor number on the outer side (e.g.
+  // "K1 Tanaka" for Shiro, "Yamada K2" for Aka) when the competition has a
+  // numberPrefix configured; falls back to the bare name.
   // tri-review #2: pass withZekkenName so zekken-mode comps render the
   // displayName ("K1 TANAKA") instead of the canonical full name.
-  const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName);
-  const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName);
+  const shiroDisplay = shiroName ?? withNumber(match.sideB, withZekkenName, "shiro");
+  const akaDisplay = akaName ?? withNumber(match.sideA, withZekkenName, "aka");
   // Name over dojo, the same block the bracket's PlayerLine and the up-next row
   // render. A SECOND LINE UNDER THE NAME only: the ippon slots stay on the
   // name's row, vertically centred against the block, because a competitor's

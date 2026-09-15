@@ -93,11 +93,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // for a mount without bracket.js; production load order rules it out
   // (index.html tags bracket.js before every viewer module).
   const slotName = slotLabel || window.slotDisplayName || ((n) => n);
-  // withNumber prepends the assigned competitor number (e.g. "K1") when the
-  // competition has numberPrefix; team-level sides have no .number so this
-  // degrades to the bare team name.
-  const aName = slotName(withNumber(match.sideA), (match.feeders || [])[0]);
-  const bName = slotName(withNumber(match.sideB), (match.feeders || [])[1]);
+  // withNumber places the assigned competitor number on the outer side (e.g.
+  // "K1 Tanaka" for Shiro, "Yamada K2" for Aka) when the competition has
+  // numberPrefix; team-level sides have no .number so this degrades to the
+  // bare team name. sideA is Aka, sideB is Shiro.
+  const aName = slotName(withNumber(match.sideA, undefined, "aka"), (match.feeders || [])[0]);
+  const bName = slotName(withNumber(match.sideB, undefined, "shiro"), (match.feeders || [])[1]);
   const isRunning = match.status === "running";
   const isDone = match.status === "completed";
 
@@ -226,7 +227,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Shiro:</span>
-          <span className="n">{withNumber(m.sideB)}</span>
+          <span className="n">{withNumber(m.sideB, undefined, "shiro")}</span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {/* No score string (pending, or completed with no recorded cells) →
@@ -252,7 +253,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>
-          <span className="n">{withNumber(m.sideA)}</span>
+          <span className="n">{withNumber(m.sideA, undefined, "aka")}</span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

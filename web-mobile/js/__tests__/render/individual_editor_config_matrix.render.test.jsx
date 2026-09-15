@@ -193,3 +193,35 @@ describe('individual editor selfReport (public self-run surface)', () => {
     expect(screen.queryByTestId('scoring-modal-hantei-row')).not.toBeNull();
   });
 });
+
+describe('individual editor compact density reaches both hosts (bc-dnst)', () => {
+  const CELL = { format: 'mixed', phase: 'pool', naginata: false };
+  it('the inline shiaijo panel carries the compact class', async () => {
+    const { container } = await renderCell(CELL, {}, { variant: 'inline' });
+    const panel = container.querySelector('.scoring-panel');
+    expect(panel).not.toBeNull();
+    expect(container.querySelector('.editor-modal')).toBeNull();
+    expect(panel.classList.contains('editor-modal--compact')).toBe(true);
+  });
+  it('the overlay modal carries the compact class', async () => {
+    const { container } = await renderCell(CELL);
+    const modal = container.querySelector('.editor-modal');
+    expect(modal).not.toBeNull();
+    expect(modal.classList.contains('editor-modal--compact')).toBe(true);
+  });
+
+  // bc-dnst: clearing a mark is a tap on the mark itself, which a tablet
+  // operator has no other way to learn (the mouse tooltip never shows), so
+  // one hint line under the slots says it while any mark is scored, and
+  // only then: an empty board shows nothing.
+  it('shows the clear-a-mark hint only while a mark is scored', async () => {
+    const { container } = await renderCell(CELLS[0]);
+    expect(screen.queryByTestId('scoring-modal-clear-hint')).toBeNull();
+    const menBtn = [...container.querySelectorAll('.ipt-btn')].find(b => b.textContent === 'M');
+    await act(async () => { menBtn.click(); });
+    expect(screen.getByTestId('scoring-modal-clear-hint').textContent).toBe('Tap a scored mark to clear it');
+    const filled = container.querySelector('.sb-slot--filled');
+    await act(async () => { filled.click(); });
+    expect(screen.queryByTestId('scoring-modal-clear-hint')).toBeNull();
+  });
+});

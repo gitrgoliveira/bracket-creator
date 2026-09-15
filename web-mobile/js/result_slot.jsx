@@ -264,10 +264,15 @@ export function subBoutAttribution(sub) {
 }
 
 export function attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB } = {}) {
-  if (winnerId && sideAId && sideBId) {
-    if (winnerId === sideAId) return "a";
-    if (winnerId === sideBId) return "b";
-    return null;
+  // Mirror of domain.AttributeWinnerSide: a winner id equal to a side's id
+  // names that side even when the other side has no id (bc-dnst, a fighter
+  // fielded by number against a typed substitute); with BOTH side ids known
+  // and neither matching, the row is unattributable and names do not get a
+  // say.
+  if (winnerId) {
+    if (sideAId && winnerId === sideAId) return "a";
+    if (sideBId && winnerId === sideBId) return "b";
+    if (sideAId && sideBId) return null;
   }
   if (!winner) return null;
   if (winner === sideA) return "a";

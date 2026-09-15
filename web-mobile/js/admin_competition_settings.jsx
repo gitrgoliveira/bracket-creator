@@ -56,7 +56,7 @@ import { seededRanks } from './admin_helpers.jsx';
 // squadMemberLabel is the ONE place a squad member's visible label
 // ("T10.1") is composed (see that module's header); this screen's Squad
 // members section imports it directly rather than restating the format.
-import { squadMemberLabel } from './squad_member_label.jsx';
+import { squadSlotLabel } from './squad_member_label.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
@@ -177,7 +177,7 @@ function TeamSquadMemberRow({ compId, teamId, member, teamNumber, clearDisabled,
     }
   };
 
-  const label = squadMemberLabel(teamNumber, member.index);
+  const label = squadSlotLabel(teamNumber, member.index);
   const hasName = !!(member.name || "").trim();
 
   return (

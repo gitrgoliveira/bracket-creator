@@ -3654,3 +3654,51 @@ func TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID(t *testing.T) {
 	assert.Equal(t, "id-b2", res.Next.SideBMemberID, "the winner keeps its side and its id")
 	assert.False(t, res.MatchEnded)
 }
+
+// TestAdvanceKachinuki_SameNameNoIDsStillAdvances pins the residue the advance
+// keeps in step with RetiredPlayersFromBoutLog (bc-dnst): two opposing
+// fighters sharing a display name on a row with no member ids cannot be
+// settled by the shared attribution owner, and the retired-set derivation
+// has already retired the loser by name (side A first), so the advance
+// answers the same way rather than leaving a retired fighter with no next
+// pairing.
+func TestAdvanceKachinuki_SameNameNoIDsStillAdvances(t *testing.T) {
+	bout := state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Sato", Winner: "Sato", Decision: "fought"}
+	res := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: bout,
+		SideA:    []kachinukiFighter{{Name: "A-Jiho"}},
+		SideB:    []kachinukiFighter{{Name: "B-Jiho"}},
+	})
+	require.NotNil(t, res.Next, "the same-name row must still produce a pairing")
+	assert.Equal(t, "Sato", res.Next.SideA, "side A's Sato stays on, the aka-first residue")
+	assert.Equal(t, "B-Jiho", res.Next.SideB)
+}
+
+// TestRetiredMemberSet_CountIncludesNamelessFighters pins that the elimination
+// tally counts a fighter retired under an id and an empty name (fielded by
+// squad number before being named, bc-dnst) exactly like a named one.
+func TestRetiredMemberSet_CountIncludesNamelessFighters(t *testing.T) {
+	log := []state.SubMatchResult{
+		{Position: 1, SideA: "", SideAMemberID: "a1", SideB: "", SideBMemberID: "b1", Winner: "Team A", WinnerMemberID: "a1", Decision: "fought"},
+		{Position: 2, SideA: "", SideAMemberID: "a1", SideB: "Tanaka", SideBMemberID: "b2", Winner: "Tanaka", WinnerMemberID: "b2", Decision: "fought"},
+		{Position: 3, SideA: "Legacy", SideB: "Tanaka", SideBMemberID: "b2", Winner: "Tanaka", Decision: "fought"},
+	}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
+	assert.Equal(t, 2, retiredA.Count(), "a1 (nameless, by id) and Legacy (name only)")
+	assert.Equal(t, 1, retiredB.Count(), "b1 (nameless, by id)")
+	assert.Equal(t, 1, len(retiredA.Names), "the name set alone would have missed a1")
+}
+
+// TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody pins that a
+// pending pairing whose side is a fighter fielded by squad number and not yet
+// named (empty name, member id, no outcome) retires nobody: the name fallback
+// used to match the empty Winner against that empty side name and retire the
+// opponent before the bout was fought.
+func TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody(t *testing.T) {
+	log := []state.SubMatchResult{
+		{Position: 4, SideA: "", SideAMemberID: "a3", SideB: "Tanaka", SideBMemberID: "b2"},
+	}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
+	assert.Equal(t, 0, retiredA.Count())
+	assert.Equal(t, 0, retiredB.Count(), "Tanaka must not be retired by a bout nobody has scored")
+}

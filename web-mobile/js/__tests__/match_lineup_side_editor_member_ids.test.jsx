@@ -128,7 +128,10 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     await Promise.resolve();
 
     expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions)
-      .toHaveBeenCalledWith('comp-1', 'uuid-grouped', { 1: 'Sato' }, squadForTeam, 'pw');
+      // The sixth argument is the panel's own memberIds map (bc-dnst): the
+      // resolver attaches a typed name to the member the position already
+      // holds before falling back to the slot seeded for it.
+      .toHaveBeenCalledWith('comp-1', 'uuid-grouped', { 1: 'Sato' }, squadForTeam, 'pw', expect.any(Object));
   });
 
   it('sends the resolved memberIds to putMatchLineup', async () => {
@@ -301,5 +304,104 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     const call = global.window.API.putMatchLineup.mock.calls.at(-1);
     expect(call[3]).toEqual({ 1: 'Fighter 1' });
     expect(call[5]).toEqual({ 1: 'mem-1' });
+  });
+
+  // bc-cse: "Copy from previous match" can carry a source position that has
+  // an id but no name yet (a fighter fielded by number, never typed). The
+  // copy must still write that position (present, with an empty string) and
+  // its id, and must not send it through the resolver at all: an empty name
+  // never enters positionsForResolver, the id already known.
+  it('copying a source position with an id and an empty name writes it directly, skipping the resolver', async () => {
+    const MATCH_PREV = {
+      id: 'match-0', compId: 'comp-1',
+      sideA: { id: 'uuid-grouped', name: 'Grouped Team' }, sideB: { id: 'other', name: 'Other' },
+      status: 'completed',
+    };
+    global.window.API.fetchMatchLineup = vi.fn((_compId, _teamId, matchId) => (
+      matchId === 'match-0'
+        ? Promise.resolve({ positions: { '1': '' }, memberIds: { '1': 'mem-1' } })
+        : Promise.resolve(null)
+    ));
+
+    runtime.mount(MatchLineupSideEditor, {
+      comp: COMP, team: TEAM, match: MATCH, allMatches: [MATCH, MATCH_PREV], password: 'pw', showToast: vi.fn(),
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    let tree = runtime.currentTree();
+
+    const copyBtn = findHosts(tree, 'button').find(b => /Copy from previous match/.test(collectText(b)));
+    expect(copyBtn).toBeTruthy();
+    copyBtn.props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
+    expect(global.window.API.putMatchLineup).toHaveBeenCalled();
+    const call = global.window.API.putMatchLineup.mock.calls.at(-1);
+    // positionsOut(3): the position is PRESENT with an empty string, not
+    // omitted, because its id makes it a real placement (bc-dnst).
+    expect(call[3]).toEqual({ '1': '' });
+    // memberIdsOut(5): the copied id rides along unresolved.
+    expect(call[5]).toEqual({ '1': 'mem-1' });
+  });
+
+  // bc-cse: typing a DIFFERENT name over a previously PICKED entry (its id
+  // already known in the panel's own memberIds) must still resolve that
+  // position through the shared resolver, passing the panel's memberIds
+  // (still holding the picked id) as the sixth argument -- so the resolver
+  // renames the picked member rather than minting a fresh, number-less one.
+  it('typing a different name over a picked entry resolves through the panel\'s memberIds, which still holds the pick', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+    global.window.AdminLineupHelpers.resolveMemberIdsForPositions =
+      vi.fn().mockResolvedValue({ memberIds: { '1': 'mem-1' }, squad: SQUAD_7, failures: [] });
+
+    let tree = await mount();
+    let pickers = findComponents(tree, 'LineupNameInput');
+    // Pick mem-1 (Fighter 1) into position "1" first.
+    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    tree = runtime.currentTree();
+    pickers = findComponents(tree, 'LineupNameInput');
+    // Then type a DIFFERENT name over it, with no entry (a free-typed override).
+    pickers[0].props.onSelect('Yamada');
+    tree = runtime.currentTree();
+
+    saveButton(tree).props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).toHaveBeenCalledWith(
+      'comp-1', 'uuid-grouped', { '1': 'Yamada' }, SQUAD_7, 'pw',
+      expect.objectContaining({ '1': 'mem-1' }),
+    );
+  });
+
+  // bc-cse: clearing a picked entry (the roster's clear affordance: an
+  // empty name, no entry) must remove its id from memberIds AND omit that
+  // position from the write entirely -- it goes back to vacant, not to an
+  // empty-string placement.
+  it('clearing a picked entry removes its id and omits the position from the write', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+
+    let tree = await mount();
+    let pickers = findComponents(tree, 'LineupNameInput');
+    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    tree = runtime.currentTree();
+    pickers = findComponents(tree, 'LineupNameInput');
+    pickers[0].props.onSelect('');
+    tree = runtime.currentTree();
+
+    saveButton(tree).props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
+    expect(global.window.API.putMatchLineup).toHaveBeenCalled();
+    const call = global.window.API.putMatchLineup.mock.calls.at(-1);
+    expect(call[3]).toEqual({});
+    expect(call[5]).toBeUndefined();
   });
 });

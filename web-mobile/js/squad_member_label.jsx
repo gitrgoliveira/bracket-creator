@@ -21,11 +21,27 @@
 // renumbers.
 //
 // Returns "" when the team has no number assigned yet (pre-draw, or a
-// competitor excluded from the draw) -- there is no meaningful label for a
-// member of a team that itself has no number -- and also when the member
+// competitor excluded from the draw) -- a spectator surface shows a bare
+// name then, never an operator's slot handle -- and also when the member
 // has no index (defensive; every real member is minted with one).
 export function squadMemberLabel(teamNumber, memberIndex) {
   if (!teamNumber) return "";
   if (memberIndex === null || memberIndex === undefined || memberIndex === "") return "";
   return `${teamNumber}.${memberIndex}`;
+}
+
+// squadSlotLabel is the OPERATOR's handle for a squad slot on the surfaces
+// used before the draw (the Lineups page, the Settings squad editor), where
+// squadMemberLabel is "" and a blank slot otherwise rendered as an empty
+// option, an empty label column and an aria-label of "Name for " (bc-dnst):
+// the numbered label once the team has a number, else the member's index
+// alone, "Slot 3", the one stable handle a member always has. Owned here,
+// beside the label it falls back from, rather than as a per-surface `||`
+// tail, so every operator surface names a slot the same way; spectator
+// surfaces keep calling squadMemberLabel and stay bare before the draw.
+export function squadSlotLabel(teamNumber, memberIndex) {
+  const numbered = squadMemberLabel(teamNumber, memberIndex);
+  if (numbered) return numbered;
+  if (memberIndex === null || memberIndex === undefined || memberIndex === "") return "";
+  return `Slot ${memberIndex}`;
 }

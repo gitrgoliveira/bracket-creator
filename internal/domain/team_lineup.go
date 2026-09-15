@@ -3,7 +3,6 @@ package domain
 import (
 	"errors"
 	"fmt"
-	"sort"
 	"strconv"
 )
 
@@ -63,7 +62,7 @@ var ErrLineupTeamSizeInvalid = errors.New("team_lineup: teamSize must be positiv
 // ErrLineupDuplicateMember is the sentinel behind every duplicate-member
 // error ValidatePositions returns (bc-dnst); check it with errors.Is rather
 // than the message text. checkDuplicateMembers wraps it under a message
-// that names the member id and the two conflicting positions.
+// that names the two conflicting positions.
 var ErrLineupDuplicateMember = errors.New("member is placed at two positions")
 
 // ValidatePositions checks only that the position KEYS are valid for the team
@@ -95,30 +94,28 @@ func (t TeamLineup) ValidatePositions(teamSize int) error {
 			return fmt.Errorf("team_lineup: position %q not allowed in %d-person team", pos, teamSize)
 		}
 	}
-	return t.checkDuplicateMembers()
+	return t.checkDuplicateMembers(teamSize)
 }
 
 // checkDuplicateMembers rejects a lineup that places the same squad member
 // id at two different positions: a member fights one bout at a time, so a
 // duplicate id is never legal, whether typed via a name that resolved to an
-// already-placed member or picked directly. Positions are walked in sorted
-// order so the reported pair is deterministic rather than depending on map
-// iteration order.
-func (t TeamLineup) checkDuplicateMembers() error {
-	positions := make([]Position, 0, len(t.MemberIDs))
-	for pos := range t.MemberIDs {
-		positions = append(positions, pos)
-	}
-	sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
-
-	seen := make(map[string]Position, len(positions))
-	for _, pos := range positions {
+// already-placed member or picked directly. It walks canonicalPositionOrder
+// (every MemberIDs key is already known to be in it, see ValidatePositions
+// above) so the reported pair is deterministic and in position order without
+// copying or sorting the keys; a lexical sort would have put "10" before
+// "2" on a team larger than nine.
+func (t TeamLineup) checkDuplicateMembers(teamSize int) error {
+	seen := make(map[string]Position, len(t.MemberIDs))
+	for _, pos := range canonicalPositionOrder(teamSize) {
 		id := t.MemberIDs[pos]
 		if id == "" {
 			continue
 		}
 		if prior, ok := seen[id]; ok {
-			return fmt.Errorf("team_lineup: member %q is at both %q and %q: %w", id, prior, pos, ErrLineupDuplicateMember)
+			// Positions only: the message reaches the operator as the 400's
+			// text, and a member id means nothing to them.
+			return fmt.Errorf("team_lineup: the same member is at both %q and %q: %w", prior, pos, ErrLineupDuplicateMember)
 		}
 		seen[id] = pos
 	}

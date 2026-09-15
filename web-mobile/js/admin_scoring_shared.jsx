@@ -864,7 +864,10 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // through onSelect as a second argument (`onSelect(name, entry)`); a plain
 // string match, the "+ Add" row, and a typed-query commit call onSelect
 // with the name alone, exactly as before.
-function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }) {
+// `clearable` (bc-dnst): show the clear button even with an empty value, for a
+// host whose position is occupied by a picked squad slot that has no name yet
+// (the Up Next lineup panel); without it a nameless placement had no way out.
+function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, clearable }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
@@ -973,7 +976,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
             else if (open) { setOpen(false); setQuery(""); }
           }}
         />
-        {value && !disabled && (
+        {(value || clearable) && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"
             onMouseDown={(e) => { e.preventDefault(); commit(""); }}>×</button>
         )}

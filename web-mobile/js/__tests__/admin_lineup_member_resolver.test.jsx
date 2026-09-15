@@ -272,6 +272,20 @@ describe('blankMemberForPosition', () => {
     expect(blankMemberForPosition([], 'senpo', {})).toBeNull();
     expect(blankMemberForPosition(undefined, 'senpo', {})).toBeNull();
   });
+
+  // bc-cse: the seeded blank member at a position's own index is only free
+  // to take that position's name when it is not already fielded ELSEWHERE
+  // in the lineup (renaming it there would name the wrong row's fighter).
+  it('does NOT return the index-seeded blank member when currentIds already holds its id at ANOTHER position', () => {
+    const squad = [{ id: 'm1', index: 1, name: '' }];
+    expect(blankMemberForPosition(squad, 'senpo', { taisho: 'm1' })).toBeNull();
+  });
+
+  it('DOES return the index-seeded blank member when currentIds holds it at THIS SAME position, or nowhere at all', () => {
+    const squad = [{ id: 'm1', index: 1, name: '' }];
+    expect(blankMemberForPosition(squad, 'senpo', { senpo: 'm1' })).toEqual(squad[0]);
+    expect(blankMemberForPosition(squad, 'senpo', {})).toEqual(squad[0]);
+  });
 });
 
 // bc-cse gap closure: memberIdentityWarning is the ONE composer all three

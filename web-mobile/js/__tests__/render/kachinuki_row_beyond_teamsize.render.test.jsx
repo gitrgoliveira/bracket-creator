@@ -57,6 +57,7 @@ afterAll(() => {
 
 const SQUAD_A = [
   { id: 'm-kept', index: 1, name: 'Kept Winner' },
+  { id: 'm-blank', index: 7, name: '' },
   { id: 'm-fresh', index: 9, name: 'Fresh Fighter' },
 ];
 const SQUAD_B = [{ id: 'm-shiro', index: 1, name: 'Shiro One' }];
@@ -76,6 +77,7 @@ beforeEach(() => {
     recordDaihyosen: vi.fn(),
     removeDaihyosen: vi.fn(),
     putMatchLineup,
+    renameTeamMember: vi.fn().mockResolvedValue({ id: 'm-blank', index: 7, name: 'Ito' }),
     recordDecision: vi.fn(),
     fetchSquads: vi.fn().mockResolvedValue({ 'team-A': SQUAD_A, 'team-B': SQUAD_B }),
   };
@@ -154,5 +156,36 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     );
     expect(label, 'expected a member-number label on the AKA side').toBeTruthy();
     expect(label.textContent).toBe('T5.9');
+  });
+
+  // bc-dnst: a name typed over a picked, still-blank member names THAT
+  // member: the row keeps the picked id (its number label stays "T5.7") and
+  // the squad member is renamed through the API, exactly as the fixed-order
+  // path does through the resolver. Without this the typed name dropped the
+  // id and the row fell back to a name lookup a blank member can never win.
+  it('typing a name over a picked blank member keeps its id and renames the member', async () => {
+    await renderEditor();
+    const akaInput = document.querySelector('.team-sub-match__side--aka input');
+    await act(async () => { fireEvent.focus(akaInput); });
+    const blankOption = Array.from(document.querySelectorAll('.team-sub-match__side--aka .pmf__option'))
+      .find((b) => b.textContent.includes('T5.7'));
+    expect(blankOption, 'expected the blank slot T5.7 to be offered').toBeTruthy();
+    await act(async () => { fireEvent.mouseDown(blankOption); });
+    // The current bout's AKA side is the one that renders an input (fought
+    // rows are read-only), so locate it from the input, not the first row.
+    const akaSide = () => document.querySelector('.team-sub-match__side--aka input').closest('.team-sub-match__side--aka');
+    expect(akaSide().textContent).toContain('T5.7');
+
+    const akaInput2 = document.querySelector('.team-sub-match__side--aka input');
+    await act(async () => {
+      fireEvent.focus(akaInput2);
+      fireEvent.change(akaInput2, { target: { value: 'Ito' } });
+      fireEvent.keyDown(akaInput2, { key: 'Enter' });
+    });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(putMatchLineup).not.toHaveBeenCalled();
+    expect(window.API.renameTeamMember.mock.calls).toEqual([['comp1', 'team-A', 'm-blank', 'Ito', 'secret']]);
+    expect(akaSide().textContent).toContain('T5.7');
   });
 });

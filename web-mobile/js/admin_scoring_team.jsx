@@ -169,14 +169,9 @@ export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posK
     }
   }
 
-  if (resolvedId) {
-    const existingIds = lineup?.memberIds || {};
-    const otherPosKey = Object.keys(existingIds).find(
-      (k) => k !== posKey && existingIds[k] === resolvedId,
-    );
-    if (otherPosKey) {
-      return { refused: { position: otherPosKey, name: value || (member && (member.name || member.label)) || "" } };
-    }
+  const otherPosKey = memberPlacedElsewhere(lineup?.memberIds, posKey, resolvedId);
+  if (otherPosKey) {
+    return { refused: { position: otherPosKey, name: value || (member && (member.name || member.label)) || "" } };
   }
 
   const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
@@ -236,7 +231,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -1277,39 +1272,12 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // read directly; a letter comparison labelled both lists with the Shiro
     // team's number (caught by the click test).
     const teamNumber = side?.number || "";
-    const squadList = (Array.isArray(squad) ? squad : [])
-      .slice()
-      .sort((x, y) => (x?.index || 0) - (y?.index || 0));
-    const squadEntries = squadList.map(mem => ({
-      id: mem?.id || "",
-      index: mem?.index || 0,
-      name: String(mem?.name || "").trim(),
-      label: squadMemberLabel(teamNumber, mem?.index),
-    }));
-    const squadNameSet = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
     const legacyNames = window.AdminLineupHelpers?.rosterFor
       ? window.AdminLineupHelpers.rosterFor(teamObj || null)
       : [];
-    const seen = new Set(squadNameSet);
-    const legacyBase = legacyNames.filter(n => {
-      const key = String(n).trim().toLowerCase();
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-    const merged = window.AdminLineupHelpers?.mergeRosterWithAssigned
-      ? window.AdminLineupHelpers.mergeRosterWithAssigned(legacyBase, lineup)
-      : legacyBase;
-    // merged may re-add the position's own currently-assigned name even
-    // when it matches a squad member (mergeRosterWithAssigned's own job,
-    // unaware of the squad); strip those back out so a squad member's name
-    // is never listed twice -- once as its object entry, once as a plain
-    // string.
-    const legacyEntries = merged.filter(n => {
-      const key = String(n).trim().toLowerCase();
-      return key && !squadNameSet.has(key);
-    });
-    return [...squadEntries, ...legacyEntries];
+    // The list itself is built by the shared owner (lineup_resolver.jsx),
+    // the same one the Up Next "Enter lineup" panel uses.
+    return squadRosterEntries({ teamNumber, squad, legacyNames, lineup });
   };
   const teamIdForSide = (side) => {
     const sideKey = sideLookupKey(side);
@@ -2060,8 +2028,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // take the existing-name slot: for that bout they ARE the authoritative
     // per-bout identity, exactly like a server bout-log entry.
     const override = subs[idx] || {};
-    const aName = resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.aName || existing?.sideA, lineupName: pick(lineupA) });
-    const bName = resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: override.bName || existing?.sideB, lineupName: pick(lineupB) });
     // bc-pnum: the squad member id feeding the row's member label
     // (squadMemberLabel, via resolveSquadMember at the render sites).
     // resolveBoutSideMemberId mirrors resolveBoutSideName's own priority so
@@ -2080,20 +2046,33 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // id-less was the last routine way to create such a row.
     const overrideId = (side) => squadMemberIdForUniqueName(side === "a" ? squadA : squadB,
       side === "a" ? override.aName : override.bName);
-    // bc-dnst: `${side}MemberIdOverride` (set by pickManual, admin_scoring_team.jsx
-    // row loop) is the id of a squad member PICKED directly for a row beyond
-    // teamSize, so it must win over the name-uniqueness lookup below: a picked
-    // BLANK squad member has an empty name (a real, deliberate placement, not
-    // "no override"), and squadMemberIdForUniqueName can never resolve an id
-    // from an empty name. Falls back to the name-based lookup for a
-    // free-typed name that happens to match exactly one existing squad member.
-    const aMemberId = (override.aName || override.aMemberIdOverride)
-      ? (override.aMemberIdOverride || overrideId("a"))
-      : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideAMemberId, lineupMemberId: pickMemberId(lineupA) });
-    const bMemberId = (override.bName || override.bMemberIdOverride)
-      ? (override.bMemberIdOverride || overrideId("b"))
-      : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId: existing?.sideBMemberId, lineupMemberId: pickMemberId(lineupB) });
-    return { aName, bName, aMemberId, bMemberId };
+    // bc-dnst: ONE rule for both sides, stated once. A squad member PICKED
+    // directly on a manual or beyond-teamSize row (pickManual stores its id
+    // as `${side}MemberIdOverride`) is that row's identity outright: the
+    // name is the picked member's own, EMPTY for a still-blank slot, and the
+    // id wins over every lookup below. Neither half may fall back: the
+    // name-uniqueness lookup can never resolve an empty name, and taking the
+    // server's stored name would pair the OLD fighter's name with the NEW
+    // fighter's id on the wire. A typed name (no id) resolves through the
+    // name path; an untouched row takes the server's or the lineup's own
+    // identity.
+    const sideIdentity = (key) => {
+      const name = override[`${key}Name`] || "";
+      const pickedId = override[`${key}MemberIdOverride`] || "";
+      if (pickedId) return { name, memberId: pickedId };
+      const lineup = key === "a" ? lineupA : lineupB;
+      const existingName = key === "a" ? existing?.sideA : existing?.sideB;
+      const existingMemberId = key === "a" ? existing?.sideAMemberId : existing?.sideBMemberId;
+      return {
+        name: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: name || existingName, lineupName: pick(lineup) }),
+        memberId: name
+          ? overrideId(key)
+          : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId, lineupMemberId: pickMemberId(lineup) }),
+      };
+    };
+    const a = sideIdentity("a");
+    const b = sideIdentity("b");
+    return { aName: a.name, bName: b.name, aMemberId: a.memberId, bMemberId: b.memberId };
   };
 
   // bc-pnum: the squad member label beside a bout row's fighter name (the
@@ -2849,23 +2828,14 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // -- every blank slot shares the same empty name, so matching
             // on name would hide every other blank slot the moment one of
             // them is placed.
-            const withoutPlacedElsewhere = (roster, lineup) => {
-              if (isKachinuki) return roster;
-              const otherMemberIds = new Set(Object.entries(lineup?.memberIds || {})
-                .filter(([key, id]) => key !== lineupPosKey && id)
-                .map(([, id]) => id));
-              const otherNames = new Set(Object.entries(lineup?.positions || {})
-                .filter(([key, name]) => key !== lineupPosKey && String(name || "").trim())
-                .map(([, name]) => String(name).trim().toLowerCase()));
-              return roster.filter(entry => {
-                if (typeof entry === "string") {
-                  return !otherNames.has(entry.trim().toLowerCase());
-                }
-                if (entry.id && otherMemberIds.has(entry.id)) return false;
-                if (!entry.name) return true;
-                return !otherNames.has(entry.name.trim().toLowerCase());
-              });
-            };
+            // Scoped exactly like the write: a kachinuki row past the first
+            // is a pairing, not a position, and legitimately repeats the
+            // fighter who stayed on, so its list is unfiltered and its pick
+            // never reaches the lineup guard (manualPath below); a row that
+            // DOES write a lineup position gets the filtered list.
+            const withoutPlacedElsewhere = (roster, lineup) => (
+              (isKachinuki && idx > 0) ? roster : rosterWithoutPlacedElsewhere(roster, lineup, lineupPosKey)
+            );
             const rosterB = withoutPlacedElsewhere(rosterForSide(m.sideB, lineupB, squadB), lineupB);
             const rosterA = withoutPlacedElsewhere(rosterForSide(m.sideA, lineupA, squadA), lineupA);
             // member (LineupNameInput's second onSelect argument) is the
@@ -2891,11 +2861,33 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // is what lets the row's member-number label follow a picked
             // blank slot the same way it does for a within-teamSize pick.
             const isManualRow = isKachinuki && !isDaihyoRow && manualBouts.includes(idx + 1);
-            const pickManual = (sideKey, memberIdKey) => (value, member) => updateSub(idx, prev => ({
-              ...prev,
-              [sideKey]: value,
-              [memberIdKey]: (member && member.id) ? member.id : "",
-            }));
+            //
+            // A name TYPED over a picked, still-blank member names that member
+            // (the ruling: the name attaches to the number it was shown with):
+            // the row keeps the id and the squad member is renamed, exactly
+            // as the fixed-order path does through the resolver. A name typed
+            // over a NAMED pick is a substitution and carries no id, as before.
+            const pickManual = (sideKey, memberIdKey, squad, setSquad, teamId) => async (value, member) => {
+              if (member && member.id) {
+                updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
+                return;
+              }
+              const typed = String(value || "").trim();
+              const priorId = s[memberIdKey] || "";
+              const prior = priorId ? (squad || []).find(mm => mm && mm.id === priorId) : null;
+              const renames = !!(prior && !(prior.name || "").trim() && typed);
+              updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
+              if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
+              try {
+                await window.API.renameTeamMember(m.compId, teamId, priorId, typed, password);
+                if (typeof setSquad === "function") {
+                  setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
+                }
+              } catch (_e) {
+                // The row already carries the name and the id; the squad's
+                // own name catches up on its next load.
+              }
+            };
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
             // route gets a free-typed name input riding the sub (like a
             // manual row). This covers the one-sided WALKOVER SLOT the engine
@@ -2912,15 +2904,26 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               && (idx + 1 > teamSize || !(rosterA && rosterA.length));
             const freeNameB = isKachinuki && !isDaihyoRow && !playerBName
               && (idx + 1 > teamSize || !(rosterB && rosterB.length));
-            // bc-dnst: a kachinuki row beyond teamSize has NO valid lineup key
-            // at all (the server only ever accepts "1".."teamSize", or the
-            // five FIK names) -- unlike freeNameA/B above, this must NOT
-            // depend on whether a name already resolved, or a pick made
-            // AFTER the bout log named this row's fighters would still route
-            // through pickPlayer -> a lineup PUT the server 400s on an
-            // invalid position key ("6" on a 5-person team). Every such row
-            // stays on the manual/free path for its whole life.
-            const isBeyondTeamSize = isKachinuki && !isDaihyoRow && idx + 1 > teamSize;
+            // bc-dnst: under kachinuki only the FIRST row is a lineup position
+            // (senpo vs senpo); every later row's fighter follows the results
+            // (kachinukiHidesLineupPosition states the same rule for display),
+            // and a row beyond teamSize has no valid lineup key at all (the
+            // server only accepts "1".."teamSize", or the five FIK names). A
+            // pick on any such row is a correction of THAT BOUT's fighter, so
+            // it rides the sub (pickManual) and never becomes a lineup PUT:
+            // routed by row index it 400'd on "6" for a 5-person team, and
+            // for rows 2..N it rewrote the roster ORDER while the list, which
+            // rightly offers the fighter who stayed on, tripped the one-
+            // position-per-member refusal on a pick the app itself offered.
+            // Must NOT depend on whether a name already resolved, or a pick
+            // made after the bout log named the row would route differently.
+            const kachinukiPastFirst = isKachinuki && !isDaihyoRow && idx > 0;
+            // Whether a side's picker takes the manual path (the pick rides
+            // the sub, no lineup write), computed once per side so the box's
+            // visibility (`forceInput`) and its handler (`onSelectName`) can
+            // never disagree on it.
+            const manualPathB = isManualRow || kachinukiPastFirst || freeNameB;
+            const manualPathA = isManualRow || kachinukiPastFirst || freeNameA;
 
             // Each row: [left side, center score, right side]: left=SHIRO, right=AKA
             // T096/FR-031: manual pts/fouls edits clear the per-bout fusensho
@@ -2955,9 +2958,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // accepts only senpo/… or "1".."N"), so a name pick there would
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
-                playerName: playerBName, memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: isManualRow || isBeyondTeamSize || freeNameB,
+                playerName: playerBName, memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: (isManualRow || isBeyondTeamSize || freeNameB) ? pickManual("bName", "bMemberIdOverride") : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
+                onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
               {
                 key: "a", pts: s.aPts, fouls: s.aFouls,
@@ -2969,9 +2972,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
-                playerName: playerAName, memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: isManualRow || isBeyondTeamSize || freeNameA,
+                playerName: playerAName, memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
-                onSelectName: (isManualRow || isBeyondTeamSize || freeNameA) ? pickManual("aName", "aMemberIdOverride") : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
+                onSelectName: manualPathA ? pickManual("aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
               },
             ];
 

@@ -37,7 +37,8 @@
 // contract instead of each growing their own.
 
 import { idOf, nameOf } from './competitor_identity.jsx';
-import { squadMemberLabel } from './squad_member_label.jsx';
+import { squadSlotLabel } from './squad_member_label.jsx';
+import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
 import { normalizeParticipantName } from './data.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
@@ -188,14 +189,21 @@ function positionNumberForKey(posKey) {
 // from this one the first time either surface's rule changed alone.
 function blankMemberForPosition(squad, posKey, currentIds) {
   const currentSquad = Array.isArray(squad) ? squad : [];
-  const currentMemberId = (currentIds || {})[posKey];
+  const ids = currentIds || {};
+  const currentMemberId = ids[posKey];
   const pickedBlankMember = currentMemberId
     ? currentSquad.find(mem => mem && mem.id === currentMemberId && !(mem.name || "").trim())
     : null;
   if (pickedBlankMember) return pickedBlankMember;
+  // The seeded blank member is only free to take this position's name when
+  // it is not already fielded at ANOTHER position (bc-dnst): renaming a
+  // member the lineup holds elsewhere would name the wrong row's fighter,
+  // and the write that followed would then be refused as a duplicate after
+  // the rename had already landed. With its slot taken, the name mints.
+  const placedElsewhere = (mem) => Object.entries(ids).some(([key, id]) => key !== posKey && id && id === mem.id);
   const slotNumber = positionNumberForKey(posKey);
   return slotNumber
-    ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim()) || null
+    ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim() && !placedElsewhere(mem)) || null
     : null;
 }
 
@@ -341,13 +349,6 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // squadMemberLabel. Not the member's: a squad member has no number of
   // its own, only an index, and the label composes the two together.
   const teamNumber = team?.number || team?.Number || "";
-  // A slot's visible handle on THIS page. squadMemberLabel is "" before the
-  // draw (a competitor number belongs to a draw position, and this page is
-  // mostly used before one exists), and a blank slot has no name to fall
-  // back on, so it would otherwise render as an empty option and a bare
-  // "Rename" row (bc-dnst). The member's index is the one stable handle it
-  // always has, so that is the pre-draw label; once numbered, "T1.3" wins.
-  const slotLabelOf = (m) => squadMemberLabel(teamNumber, m?.index) || `Slot ${m?.index || ""}`.trim();
 
   // Position state mirrors domain.TeamLineup: display names in `values`,
   // squad member ids in `memberIds`, keyed by the SAME position key so a
@@ -491,9 +492,28 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     const posKey = addingPos;
     const name = addingName.trim();
     if (!posKey || !name) { setAddingPos(null); setAddingName(""); return; }
+    // The three outcomes the resolver itself has, in ITS order, so the copy
+    // can never describe a branch the action will not take. First: the name
+    // is an EXISTING member's (same normalisation as the resolver): nothing
+    // is created or renamed, that member is simply selected here, with no
+    // confirmation because nothing permanent happens; unless the lineup
+    // already fields them elsewhere, which is refused where the list would
+    // not have offered them.
+    const existingMember = resolveMemberIdForName(squad, name);
+    if (existingMember) {
+      const elsewhere = memberPlacedElsewhere(memberIds, posKey, existingMember.id);
+      if (elsewhere) {
+        setError(`${existingMember.name} is already at ${lineupPositionLabel(elsewhere)}.`);
+        return;
+      }
+      selectMember(posKey, existingMember);
+      setAddingPos(null);
+      setAddingName("");
+      return;
+    }
     const blankMember = blankMemberForPosition(squad, posKey, memberIds);
     const message = blankMember
-      ? `Name ${slotLabelOf(blankMember)} as "${name}"?`
+      ? `Name ${squadSlotLabel(teamNumber, blankMember.index)} as "${name}"?`
       : `Add "${name}" as a new squad member of ${team?.name || team?.Name || "this team"}? This adds a new position to the squad. Once added, it can be cleared but never removed.`;
     const ok = await window.confirmDialog({
       message,
@@ -679,9 +699,14 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                     <option value="">
                       {name && !memberId ? `Unresolved: ${name}` : "— none —"}
                     </option>
-                    {squadSorted.map(m => (
+                    {/* A member placed at another position is not offered
+                        again (the shared rule, rosterWithoutPlacedElsewhere):
+                        the server refuses one member at two positions, and
+                        that refusal must never be the first the operator
+                        hears of it. */}
+                    {rosterWithoutPlacedElsewhere(squadSorted, { positions: values, memberIds }, p.key).map(m => (
                       <option key={m.id} value={m.id}>
-                        {[slotLabelOf(m), m.name].filter(Boolean).join(" ")}
+                        {[squadSlotLabel(teamNumber, m.index), m.name].filter(Boolean).join(" ")}
                       </option>
                     ))}
                     <option value="__add__">+ Add new member…</option>
@@ -743,7 +768,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                   ) : (
                     <>
                       <span style={{ fontSize: 13, color: "var(--ink-3)", minWidth: 44 }}>
-                        {slotLabelOf(m)}
+                        {squadSlotLabel(teamNumber, m.index)}
                       </span>
                       <span style={{ flex: 1 }}>{m.name}</span>
                       <button type="button" className="btn btn--ghost btn--sm" onClick={() => startRename(m)}>Rename</button>

@@ -155,6 +155,25 @@ describe('attributeWinnerSide (id-first winner attribution)', () => {
     expect(attributeWinnerSide({ winner: '', sideA: 'A', sideB: 'B', winnerId: '', sideAId: 'id-a', sideBId: 'id-b' })).toBeNull();
     expect(attributeWinnerSide()).toBeNull();
   });
+
+  // bc-dnst: a fighter fielded by number against a typed substitute leaves
+  // one side with no id at all; the winner id must still name that side
+  // rather than falling through to a name comparison that would not answer.
+  it('a winner id equal to side B\'s id decides "b" even with an empty sideAId, and names would not answer', () => {
+    const side = attributeWinnerSide({
+      winnerId: 'id-b', sideAId: '', sideBId: 'id-b',
+      winner: 'Tora Dojo', sideA: 'Tora Dojo', sideB: 'Tora Dojo',
+    });
+    expect(side).toBe('b');
+  });
+
+  it('with BOTH side ids present, a winner id matching neither is unattributable even when the winner NAME matches a side', () => {
+    const side = attributeWinnerSide({
+      winnerId: 'id-someone-else', sideAId: 'id-a', sideBId: 'id-b',
+      winner: 'Player A', sideA: 'Player A', sideB: 'Player B',
+    });
+    expect(side).toBeNull();
+  });
 });
 
 describe('placeHtForWinner (delegates side attribution to attributeWinnerSide)', () => {

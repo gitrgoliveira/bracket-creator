@@ -18,6 +18,82 @@
 
 import { squadMemberLabel } from './squad_member_label.jsx';
 
+// squadRosterEntries: the ONE builder of a lineup picker's list for a team
+// (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
+// .jsx rosterForSide) and the Up Next "Enter lineup" panel
+// (admin_schedule_lineup.jsx): the squad's members first, every one of them
+// in index order as `{id, index, name, label}` objects so a still-blank slot
+// is offered by its number alone (operator ruling 2026-09-15), then the
+// LEGACY names (the pre-squad metadata roster, plus whatever
+// `mergeRosterWithAssigned` re-adds for the lineup's own assigned names) as
+// plain strings, de-duplicated case-insensitively against each other and
+// against the squad names in ONE pass so a squad member is never listed
+// twice, once as its object entry and once as a plain string. Reads
+// mergeRosterWithAssigned off window.AdminLineupHelpers (this module must
+// not import admin_lineup.jsx, see the header) and copes with its absence.
+export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
+  const squadEntries = (Array.isArray(squad) ? squad : [])
+    .slice()
+    .sort((x, y) => (x?.index || 0) - (y?.index || 0))
+    .map(mem => ({
+      id: mem?.id || "",
+      index: mem?.index || 0,
+      name: String(mem?.name || "").trim(),
+      label: squadMemberLabel(teamNumber, mem?.index),
+    }));
+  const seen = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
+  const merge = (typeof window !== "undefined" && window.AdminLineupHelpers?.mergeRosterWithAssigned)
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned
+    : (names) => names;
+  const legacyEntries = merge(Array.isArray(legacyNames) ? legacyNames : [], lineup).filter(n => {
+    const key = String(n).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return [...squadEntries, ...legacyEntries];
+}
+
+// memberPlacedElsewhere: the ONE predicate behind "a member holds one
+// position per lineup" (bc-dnst): the position key at which `memberIds`
+// already holds `id` other than `posKey`, or "" when it holds it nowhere
+// else. Every lineup writer asks it before writing (the score sheet's
+// buildInlineLineupWrite, the Up Next panel's save, the Lineups page's add
+// path) and rosterWithoutPlacedElsewhere below is the same answer rendered
+// as a list filter, so the offer and the refusal can never disagree; the
+// server's own ErrLineupDuplicateMember stays an unreachable backstop.
+//
+// rosterWithoutPlacedElsewhere: a fixed-order lineup fields each fighter
+// once, so the list offered for `posKey` drops every entry already placed at
+// ANOTHER position of `lineup` (bc-dnst; a click test once caught the list
+// offering a fighter twice and letting him be placed on two rows). An object
+// entry is dropped when its id appears in lineup.memberIds elsewhere, or its
+// name matches a NON-BLANK name elsewhere; a blank-named object entry is
+// compared by id only, since every blank slot shares the same empty name
+// and matching on it would hide every other blank slot the moment one of
+// them is placed. A plain legacy string is compared by name. Shared by the
+// same two pickers as squadRosterEntries.
+export function memberPlacedElsewhere(memberIds, posKey, id) {
+  if (!id) return "";
+  const hit = Object.entries(memberIds || {}).find(([key, other]) => key !== posKey && other === id);
+  return hit ? hit[0] : "";
+}
+
+export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
+  const otherMemberIds = new Set(Object.entries(lineup?.memberIds || {})
+    .filter(([key, id]) => key !== posKey && id)
+    .map(([, id]) => id));
+  const otherNames = new Set(Object.entries(lineup?.positions || {})
+    .filter(([key, name]) => key !== posKey && String(name || "").trim())
+    .map(([, name]) => String(name).trim().toLowerCase()));
+  return roster.filter(entry => {
+    if (typeof entry === "string") return !otherNames.has(entry.trim().toLowerCase());
+    if (entry.id && otherMemberIds.has(entry.id)) return false;
+    if (!entry.name) return true;
+    return !otherNames.has(entry.name.trim().toLowerCase());
+  });
+}
+
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
 // entry exists (404 → null → round lookup). Network errors on either

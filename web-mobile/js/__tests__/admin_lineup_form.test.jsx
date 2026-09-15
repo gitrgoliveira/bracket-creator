@@ -400,6 +400,78 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(text).toContain('Scores will still record normally');
   });
 
+  // bc-cse: a member selected at one position must not be offered again at
+  // another (rosterWithoutPlacedElsewhere), but stays offered at its own
+  // position (so re-opening that position's picker does not hide the
+  // member it currently holds).
+  it('a member selected at position 1 is not offered again at position 2, but stays offered at position 1 itself', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+
+    const tree2 = runtime.currentTree();
+    expect(collectText(positionSelect(tree2, '1'))).toContain('Sato');
+    expect(collectText(positionSelect(tree2, '2'))).not.toContain('Sato');
+  });
+
+  // bc-cse: the "+ Add new member…" picker option resolves an EXISTING
+  // squad member's name through the same rule commitAdd itself documents --
+  // that member is simply SELECTED, no confirmation and no write happens,
+  // because nothing permanent is being created.
+  it('typing an EXISTING squad member\'s name via "+ Add new member…" selects them without confirming or minting/renaming', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-yamada', index: 3, name: 'Yamada' }] },
+    });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Yamada' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).not.toHaveBeenCalled();
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
+
+    const tree3 = runtime.currentTree();
+    expect(positionSelect(tree3, '1').props.value).toBe('sq-yamada');
+  });
+
+  it('naming an EXISTING squad member already placed at another position sets an "is already at" error and leaves the position untouched', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-yamada', index: 3, name: 'Yamada' }] },
+    });
+    // Place Yamada at position 2 first.
+    positionSelect(tree, '2').props.onChange({ target: { value: 'sq-yamada' } });
+
+    let tree2 = runtime.currentTree();
+    positionSelect(tree2, '1').props.onChange({ target: { value: '__add__' } });
+    tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Yamada' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).not.toHaveBeenCalled();
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
+
+    const tree3 = runtime.currentTree();
+    expect(collectText(tree3)).toContain('is already at');
+    // Position 1 was never assigned Yamada's id: the refusal returns before
+    // selectMember runs, so its add-row stays open rather than switching
+    // back to a select showing a (wrongly) resolved value.
+    expect(positionSelect(tree3, '1')).toBeFalsy();
+    // Position 2 still holds Yamada, unchanged.
+    expect(positionSelect(tree3, '2').props.value).toBe('sq-yamada');
+  });
+
   it('shows no member-identity warning after an ordinary successful save (squad loaded fine)', async () => {
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
       squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },

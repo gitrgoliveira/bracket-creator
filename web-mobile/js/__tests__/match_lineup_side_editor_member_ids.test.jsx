@@ -404,4 +404,47 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     expect(call[3]).toEqual({});
     expect(call[5]).toBeUndefined();
   });
+
+  // bc-dnst (operator decision 2026-09-15): a member's name can be corrected
+  // from this panel through an explicit Rename door under the position, the
+  // same rename the Lineups page offers; typing into the picker over a named
+  // member stays a substitution. A blank pick gets no Rename: it is named by
+  // typing into the box.
+  it('Rename under a named pick renames that member and the next save writes the new name with the same id', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+    global.window.API.renameTeamMember = vi.fn().mockResolvedValue({ id: 'mem-1', index: 1, name: 'Fighter One' });
+
+    let tree = await mount();
+    let pickers = findComponents(tree, 'LineupNameInput');
+    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    pickers = findComponents(runtime.currentTree(), 'LineupNameInput');
+    pickers[1].props.onSelect('', SQUAD_7[4]);
+    tree = runtime.currentTree();
+
+    const renameButtons = findHosts(tree, 'button').filter(b => /^Rename \d player$/.test(b.props?.['aria-label'] || ''));
+    expect(renameButtons.map(b => b.props['aria-label'])).toEqual(['Rename 1 player']);
+
+    renameButtons[0].props.onClick();
+    tree = runtime.currentTree();
+    const input = findHosts(tree, 'input').find(i => i.props?.['aria-label'] === 'Rename 1 player');
+    expect(input).toBeTruthy();
+    expect(input.props.value).toBe('Fighter 1');
+    input.props.onChange({ target: { value: 'Fighter One' } });
+    tree = runtime.currentTree();
+    findHosts(tree, 'button').find(b => /^Save$/.test(collectText(b).trim())).props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'uuid-grouped', 'mem-1', 'Fighter One', 'pw');
+    tree = runtime.currentTree();
+    expect(findComponents(tree, 'LineupNameInput')[0].props.value).toBe('Fighter One');
+
+    saveButton(tree).props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
+    const call = global.window.API.putMatchLineup.mock.calls.at(-1);
+    expect(call[3]).toEqual({ 1: 'Fighter One', 2: '' });
+    expect(call[5]).toEqual({ 1: 'mem-1', 2: 'mem-5' });
+  });
 });

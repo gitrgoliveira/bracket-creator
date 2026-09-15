@@ -119,6 +119,15 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // back to resolving that position's name through the shared resolver, as
   // it always has.
   const [memberIds, setMemberIds] = useStateA({});
+  // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
+  // corrected from this panel as well as from the Lineups page (the score
+  // sheet stays add-only). `renamingKey` is the position whose member is
+  // being renamed; the row swaps its picker for a plain input while it is
+  // set. Typing into the picker itself stays a SUBSTITUTION over a named
+  // member (a different person), so a correction needs this explicit door.
+  const [renamingKey, setRenamingKey] = useStateA(null);
+  const [renamingName, setRenamingName] = useStateA("");
+  const [renameBusy, setRenameBusy] = useStateA(false);
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
@@ -187,6 +196,47 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // rosterWithoutPlacedElsewhere): this panel's lineup-so-far is the local
   // `values` + `memberIds` state, keyed like a lineup's own maps.
   const rosterForPosition = (posKey) => rosterWithoutPlacedElsewhere(suggestions, { positions: values, memberIds }, posKey);
+  // The member a position holds, when it is a squad member with a name: the
+  // only case Rename applies to (a blank slot is named by typing into it).
+  const namedMemberAt = (posKey) => {
+    const id = memberIds[posKey];
+    const mem = id ? squadEntries.find(e => e.id === id) : null;
+    return mem && mem.name ? mem : null;
+  };
+  const startRename = (posKey) => {
+    const mem = namedMemberAt(posKey);
+    if (!mem) return;
+    setRenamingKey(posKey);
+    setRenamingName(mem.name);
+    setError("");
+  };
+  const cancelRename = () => { setRenamingKey(null); setRenamingName(""); };
+  // Mirrors the Lineups page's commitRename: the squad member is renamed
+  // through the API, every position holding that id shows the new name,
+  // and the lineup itself is written on the operator's next Save exactly as
+  // there (the id is the identity; readers resolve the current name by it).
+  const commitRename = async () => {
+    const posKey = renamingKey;
+    const id = memberIds[posKey];
+    const name = renamingName.trim();
+    if (!id || !name) { cancelRename(); return; }
+    setRenameBusy(true);
+    setError("");
+    try {
+      await window.API.renameTeamMember(compId, teamId, id, name, password);
+      setSquad(sq => sq.map(m => (m && m.id === id ? { ...m, name } : m)));
+      setValues(v => {
+        const next = { ...v };
+        Object.keys(memberIds).forEach(key => { if (memberIds[key] === id) next[key] = name; });
+        return next;
+      });
+      cancelRename();
+    } catch (e) {
+      setError(e?.message || "Failed to rename team member");
+    } finally {
+      setRenameBusy(false);
+    }
+  };
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) return;
@@ -461,10 +511,44 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                 rather than beside the box so it adds no width: the box keeps
                 its intrinsic width as flex basis, so a chip beside it grew the
                 column's minimum past the modal and brought in a scrollbar. */}
-            <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12, display: "flex", flexDirection: "column" }}>
+            <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
               {p.label}
               {pickedLabel ? <span className="pmf__opt-label">{pickedLabel}</span> : null}
+              {/* Rename lives in the same fixed column, so it adds no width
+                  to the row (see the chip note above). */}
+              {namedMemberAt(p.key) && renamingKey !== p.key ? (
+                <button type="button" className="btn btn--ghost btn--sm" style={{ padding: "0 2px", fontSize: 11, height: "auto", minHeight: 0 }}
+                  onClick={() => startRename(p.key)} disabled={saving || copying || renameBusy}
+                  aria-label={`Rename ${p.label} player`}>Rename</button>
+              ) : null}
             </span>
+            {renamingKey === p.key ? (
+              /* Input on top, Save and Cancel below: the editor adds height,
+                 never width, so the two-column modal keeps its columns (an
+                 input keeps its intrinsic width as flex basis, and beside
+                 two buttons it pushed the other side out and brought in a
+                 scrollbar). */
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 }}>
+                <input
+                  className="input"
+                  style={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}
+                  value={renamingName}
+                  autoFocus
+                  aria-label={`Rename ${p.label} player`}
+                  onChange={(e) => setRenamingName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+                    if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
+                  }}
+                />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button type="button" className="btn btn--sm" onClick={commitRename} disabled={renameBusy || !renamingName.trim()}>
+                    {renameBusy ? "Saving…" : "Save"}
+                  </button>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={cancelRename} disabled={renameBusy}>Cancel</button>
+                </div>
+              </div>
+            ) : (
             <LineupNameInput
               value={values[p.key] || ""}
               roster={rosterForPosition(p.key)}
@@ -491,6 +575,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                 });
               }}
             />
+            )}
           </label>
         ); })}
         {suggestions.length === 0 && (

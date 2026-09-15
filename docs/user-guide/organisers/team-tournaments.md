@@ -13,8 +13,8 @@ Each team encounter has its own lineup. To carry over the same order from the pr
 ### The squad
 
 A team's people are its squad. A team starts with one position per fighter the
-competition's team size defines, each numbered and waiting for a name. Fill those
-names in from the **Squad members** section of the competition's **Settings**
+competition's team size defines, plus two reserve positions, each numbered and
+waiting for a name. Fill those names in from the **Squad members** section of the competition's **Settings**
 page, or build the squad as you go from the lineup panel. In the panel, pick an existing member
 for a position, or type a new name. The app adds a new name to the squad in the same step, but confirms first, so a
 mistyped name cannot quietly create a person nobody expected.

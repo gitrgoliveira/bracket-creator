@@ -852,6 +852,18 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
 // ADDED as-is via the "+ Add …" row: the lineup stores a free name string,
 // which is what an operator needs when entering a late substitute while bouts
 // are running. The × clears the slot. Keyboard: ↑/↓ move, Enter picks, Esc closes.
+//
+// roster entries are either plain name strings (admin_schedule_lineup.jsx's
+// suggestion list) or squad-member objects `{ id, index, name, label }`
+// (admin_scoring_team.jsx's rosterForSide, bc-dnst: the row's list must show
+// every numbered slot the team can field, blank ones included, so the
+// operator can pick a number and name it). Both shapes are normalised to
+// `{ name, label, isObject }` once up front; isObject is what a plain
+// string entry never gets, so it alone decides whether the dropdown row
+// renders a number chip. Picking an object entry threads the WHOLE entry
+// through onSelect as a second argument (`onSelect(name, entry)`); a plain
+// string match, the "+ Add" row, and a typed-query commit call onSelect
+// with the name alone, exactly as before.
 function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
@@ -862,8 +874,21 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const skipBlurRef = useRefA(false);
   const q = query.trim();
   const ql = q.toLowerCase();
-  const matches = (roster || []).filter(n => !ql || n.toLowerCase().includes(ql)).slice(0, 12);
-  const exact = (roster || []).some(n => n.toLowerCase() === ql);
+  // `raw` keeps the ORIGINAL roster item (unmodified: no isObject marker,
+  // no spread copy) so a caller picking an object entry gets back exactly
+  // what it put into `roster`, never an internal-shape lookalike.
+  const entries = (roster || []).map(r =>
+    typeof r === "string"
+      ? { name: r, label: "", isObject: false, raw: r }
+      : { name: r?.name || "", label: r?.label || "", isObject: true, raw: r }
+  );
+  const matches = entries.filter(e => {
+    if (!ql) return true;
+    const nameHit = (e.name || "").toLowerCase().includes(ql);
+    const labelHit = (e.label || "").toLowerCase().includes(ql);
+    return nameHit || labelHit;
+  }).slice(0, 12);
+  const exact = entries.some(e => (e.name || "").toLowerCase() === ql);
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
@@ -881,7 +906,25 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
     }
   }, open);
 
-  const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
+  // commit's optional second argument is the matched roster entry (when the
+  // commit came from picking one). It is called with ONE argument (never a
+  // trailing explicit `undefined`) for the "+ Add" row, a typed-query
+  // commit, and the clear button -- calling onSelect(name, undefined)
+  // there instead would change every existing single-arg
+  // `onSelect(name)`/`toHaveBeenCalledWith(name)` consumer's call shape
+  // (Vitest's toHaveBeenCalledWith does not ignore a trailing explicit
+  // undefined), so this stays a real arity difference, not a value one.
+  const commit = (name, entry) => {
+    if (entry !== undefined) onSelect(name, entry);
+    else onSelect(name);
+    setOpen(false); setQuery(""); setActive(-1);
+  };
+  // A string-origin entry commits exactly like a plain string always did
+  // (ONE argument); an object entry threads its ORIGINAL raw value back as
+  // onSelect's second argument.
+  const commitEntry = (entry) => (
+    entry.isObject ? commit(entry.name || "", entry.raw) : commit(entry.name)
+  );
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -898,7 +941,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
       // Commit only on an explicit choice: a navigated list row, the add-row,
       // or a typed query. A bare focus + Enter (active === -1, empty query)
       // must NOT overwrite the current slot.
-      if (active >= 0 && active < matches.length) commit(matches[active]);
+      if (active >= 0 && active < matches.length) commitEntry(matches[active]);
       else if (active === matches.length && canAddNew) commit(q);
       else if (q) commit(q);
     } else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
@@ -937,11 +980,18 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
       </div>
       {open && optionCount > 0 && (
         <div className="pmf__dropdown lineup-name__dropdown">
-          {matches.map((n, i) => (
-            <button type="button" key={n}
+          {matches.map((entry, i) => (
+            <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); commit(n); }}>
-              <span className="pmf__opt-name">{n}</span>
+              onMouseDown={(e) => { e.preventDefault(); commitEntry(entry); }}>
+              {entry.isObject ? (
+                <>
+                  <span className="pmf__opt-label">{entry.label}</span>
+                  <span className={`pmf__opt-name${entry.name ? "" : " pmf__opt-name--blank"}`}>{entry.name || "no name yet"}</span>
+                </>
+              ) : (
+                <span className="pmf__opt-name">{entry.name}</span>
+              )}
             </button>
           ))}
           {canAddNew && (

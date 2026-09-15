@@ -16,10 +16,11 @@
 // Squad size is unconstrained and independent of the competition's
 // TeamSize (operator ruling 2026-09-09): real teams carry reserves and
 // replacements, so a squad may be larger than however many fight at once.
-// A squad's FLOOR, however, IS the competition's TeamSize (bc-pnum ruling:
-// "by default teams have x team members, as defined in the competition
-// config, and those positions have their numbers"): upgradeSquadsFromMetadataLocked
-// (legacy_upgrade.go) seeds every team up to TeamSize on load, minting an
+// A squad's FLOOR, however, IS the competition's TeamSize plus two reserve
+// slots (squadFloor; operator ruling 2026-09-15, bc-dnst: the score
+// sheet's name list must offer every number the team can field, so a
+// 5-person team's floor is 7, not 5): upgradeSquadsFromMetadataLocked
+// (legacy_upgrade.go) seeds every team up to that floor on load, minting an
 // id and a 1-based index for each slot with Name left blank unless already
 // known, and pads (never trims) the squad again if TeamSize is later
 // raised.
@@ -53,6 +54,25 @@ import (
 )
 
 const squadsFilename = "squads.yaml"
+
+// SquadReserveSlots is the number of extra numbered slots a squad is
+// seeded with beyond the competition's TeamSize (operator ruling
+// 2026-09-15, bc-dnst): every team lists team size + 2 numbered slots, two
+// reserves, so the score sheet's name list can offer every number the
+// team can field before anyone is named.
+const SquadReserveSlots = 2
+
+// squadFloor returns the minimum number of numbered slots a squad is
+// seeded with for a competition whose TeamSize is teamSize: 0 when
+// teamSize <= 0 (an individual competition has no squad floor at all),
+// else teamSize + SquadReserveSlots. See SquadReserveSlots' doc comment
+// for the ruling behind the +2.
+func squadFloor(teamSize int) int {
+	if teamSize <= 0 {
+		return 0
+	}
+	return teamSize + SquadReserveSlots
+}
 
 // ErrTeamMemberNotFound is returned by RenameTeamMember and
 // ClearTeamMemberName when (teamID, memberID) does not resolve to a stored

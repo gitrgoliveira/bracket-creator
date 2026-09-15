@@ -636,4 +636,88 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
     });
     expect(shiroLabels).toEqual(['T2.1', '', 'T2.2', 'T2.4', 'T2.5']);
   });
+
+  // withoutPlacedElsewhere (bc-dnst): reuses the SAME fixture as the test
+  // above -- Kenji Tanaka (member b2, seeded to position 2) is placed at
+  // Chuken (position 3) in the saved Shiro lineup -- but asserts the
+  // PICKER LIST itself rather than the label. A fixed-order lineup fields
+  // each fighter once, so Kenji Tanaka must be absent from every OTHER
+  // row's name box (Senpo) while still present on his OWN row (Chuken).
+  it('a member placed at another position is hidden from that other row\'s list but offered on his own row', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    const squadB = blankSquad('b').map(mem => (
+      mem.index === 2 ? { id: 'b2', index: 2, name: 'Kenji Tanaka' } : mem
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': squadB,
+    });
+    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_compId, teamId) => (
+      teamId === 'team-B'
+        ? { positions: { chuken: 'Kenji Tanaka' }, memberIds: { chuken: 'b2' } }
+        : null
+    ));
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(4);
+    });
+
+    const senpoInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    expect(senpoInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(senpoInput); });
+    const senpoOptionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
+    expect(senpoOptionNames).not.toContain('Kenji Tanaka');
+
+    await act(async () => { fireEvent.blur(senpoInput); });
+    const chukenInput = container.querySelector('input[aria-label="Chuken SHIRO player"]');
+    expect(chukenInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(chukenInput); });
+    const chukenOptionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
+    expect(chukenOptionNames).toContain('Kenji Tanaka');
+  });
+
+  // squadFloor (bc-dnst, internal/state/squad.go): a squad is seeded to
+  // team size + 2 reserves, so a 5-person team's floor is 7. The row's
+  // list must offer every one of those 7 numbered slots, blank ones
+  // included, labelled T2.1..T2.7 in order -- not just the 5 the team
+  // fields at once.
+  it('a 7-member squad (5-person team + 2 reserves) offers all 7 numbered entries in order', async () => {
+    const squadB = Array.from({ length: 7 }, (_, i) => ({ id: `b-m${i + 1}`, index: i + 1, name: '' }));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': Array.from({ length: 5 }, (_, i) => ({ id: `a-m${i + 1}`, index: i + 1, name: '' })),
+      'team-B': squadB,
+    });
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
+    });
+
+    const senpoInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    expect(senpoInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(senpoInput); });
+
+    const optionLabels = [...container.querySelectorAll('.pmf__opt-label')].map(n => n.textContent);
+    expect(optionLabels).toEqual(['T2.1', 'T2.2', 'T2.3', 'T2.4', 'T2.5', 'T2.6', 'T2.7']);
+
+    // The Aka side's list carries ITS team's number (a side-letter lookup
+    // once labelled both lists with the Shiro team's number).
+    await act(async () => { fireEvent.blur(senpoInput); });
+    const akaInput = container.querySelector('input[aria-label="Senpo AKA player"]');
+    expect(akaInput).not.toBeNull();
+    await act(async () => { fireEvent.focus(akaInput); });
+    const akaLabels = [...container.querySelectorAll('.pmf__opt-label')].map(n => n.textContent);
+    expect(akaLabels).toEqual(['T1.1', 'T1.2', 'T1.3', 'T1.4', 'T1.5']);
+  });
 });

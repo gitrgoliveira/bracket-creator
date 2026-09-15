@@ -741,13 +741,20 @@ func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Contains(t, body.Squads, redID)
-	require.Len(t, body.Squads[redID], 2)
+	// The GET above triggers EnsureLegacyUpgraded, which pads the squad up
+	// to its floor (TeamSize 2 + 2 reserves = 4): the 2 members added above
+	// plus 2 further blank seeded slots.
+	require.Len(t, body.Squads[redID], 4)
 	assert.Equal(t, member.ID, body.Squads[redID][0].ID)
 	assert.Equal(t, 1, body.Squads[redID][0].Index)
 	assert.Equal(t, "Alice", body.Squads[redID][0].Name)
 	assert.Equal(t, 2, body.Squads[redID][1].Index)
 	assert.Equal(t, "", body.Squads[redID][1].Name,
 		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+	assert.Equal(t, 3, body.Squads[redID][2].Index)
+	assert.Equal(t, "", body.Squads[redID][2].Name, "a floor-padded slot must be blank")
+	assert.Equal(t, 4, body.Squads[redID][3].Index)
+	assert.Equal(t, "", body.Squads[redID][3].Name, "a floor-padded slot must be blank")
 }
 
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead
@@ -822,8 +829,8 @@ func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	// The exact CONTENT is deliberately not pinned here: this same request's
 	// own participants read (state.EnsureLegacyUpgraded, triggered inside
-	// LoadParticipantsOpt) may seed squads.yaml up to TeamSize as a side
-	// effect the very first time this team's squad is touched
+	// LoadParticipantsOpt) may seed squads.yaml up to its floor (TeamSize + 2
+	// reserves) as a side effect the very first time this team's squad is touched
 	// (state.upgradeSquadsFromMetadataLocked) -- so "a missing file loads
 	// fine" can legitimately observe either an empty map or the auto-seeded
 	// pad, depending on load order, and BOTH are "not an error". What this
@@ -873,13 +880,20 @@ func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
 	require.Contains(t, comps[0].Squads, redID)
-	require.Len(t, comps[0].Squads[redID], 2)
+	// The GET above triggers EnsureLegacyUpgraded, which pads the squad up
+	// to its floor (TeamSize 2 + 2 reserves = 4): the 2 members added above
+	// plus 2 further blank seeded slots.
+	require.Len(t, comps[0].Squads[redID], 4)
 	assert.Equal(t, member.ID, comps[0].Squads[redID][0].ID)
 	assert.Equal(t, 1, comps[0].Squads[redID][0].Index)
 	assert.Equal(t, "Alice", comps[0].Squads[redID][0].Name)
 	assert.Equal(t, 2, comps[0].Squads[redID][1].Index)
 	assert.Equal(t, "", comps[0].Squads[redID][1].Name,
 		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+	assert.Equal(t, 3, comps[0].Squads[redID][2].Index)
+	assert.Equal(t, "", comps[0].Squads[redID][2].Name, "a floor-padded slot must be blank")
+	assert.Equal(t, 4, comps[0].Squads[redID][3].Index)
+	assert.Equal(t, "", comps[0].Squads[redID][3].Name, "a floor-padded slot must be blank")
 }
 
 // TestViewerAggregate_IndividualCompetitionSkipsSquadsRead mirrors

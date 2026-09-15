@@ -88,36 +88,57 @@ export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
 // buildInlineLineupWrite computes exactly what the inline lineup picker
 // (submitInlineLineup, inside TeamScoreEditorModal below) sends to
 // putMatchLineup: the WHOLE positions map (existing + the one changed
-// position, deleted when `value` is falsy) and its memberIds counterpart,
-// resolved/minted via resolveMemberIdsForPositions (admin_lineup.jsx,
-// reached here via window.AdminLineupHelpers -- see that file's header for
-// why this stays a window lookup rather than an ES import) and merged via
-// mergeLineupIdsForPosition above. A name is only resolved when `value` is
-// truthy: a cleared position has no name to look up, and
-// mergeLineupIdsForPosition's own clear-on-falsy-id branch handles it.
-// Exported (and pulled out of the component) so this exact value-in/
-// body-out contract -- including "a mint failure never blocks the write"
-// -- is pinned directly, without mounting TeamScoreEditorModal, which
-// vitest's hook stubs cannot drive through a full interaction (see
-// tie_button_no_term.test.jsx).
+// position) and its memberIds counterpart, merged via
+// mergeLineupIdsForPosition above. Exported (and pulled out of the
+// component) so this exact value-in/body-out contract -- including "a mint
+// failure never blocks the write" -- is pinned directly, without mounting
+// TeamScoreEditorModal, which vitest's hook stubs cannot drive through a
+// full interaction (see tie_button_no_term.test.jsx).
+//
+// member (bc-dnst) is the squad-member object LineupNameInput hands back
+// when the operator picked one of the row's numbered entries, rather than
+// typing/"+ Add"-ing a free name. When member carries an id, this WRITES
+// BY ID directly -- positions[posKey] = member.name || "" and
+// memberIds[posKey] = member.id -- and never calls the resolver: the
+// picked entry already names its own member, so resolving by name would be
+// redundant at best and wrong at worst (two blank members share the same
+// "" name). This is also why a picked member's position is kept even when
+// its name is empty: picking a blank slot is a real placement (the row
+// shows that member's number and an empty box to type the name into), not
+// a clear. A falsy `value` with NO member is the only thing that clears
+// the position, matching the pre-bc-dnst contract exactly.
+//
+// Without a member, the pre-existing name-resolution path runs: a name is
+// only resolved when `value` is truthy (a cleared position has no name to
+// look up, and mergeLineupIdsForPosition's own clear-on-falsy-id branch
+// handles it), via resolveMemberIdsForPositions (admin_lineup.jsx, reached
+// here via window.AdminLineupHelpers -- see that file's header for why
+// this stays a window lookup rather than an ES import).
 //
 // bc-cse gap closure: also returns `failures` (the resolver's own, or []
-// when the resolver is unavailable/threw) so submitInlineLineup below can
-// warn the operator on a successful save without ever blocking this one.
-export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password) {
+// when the resolver is unavailable/threw, or never invoked because member
+// already answered) so submitInlineLineup below can warn the operator on a
+// successful save without ever blocking this one.
+export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password, member) {
   const existing = lineup?.positions || {};
   const positions = { ...existing };
-  if (value) positions[posKey] = value;
+  const pickedMemberId = member && member.id ? member.id : null;
+  if (pickedMemberId) positions[posKey] = member.name || "";
+  else if (value) positions[posKey] = value;
   else delete positions[posKey];
 
-  let resolvedId = null;
+  let resolvedId = pickedMemberId;
   let nextSquad = Array.isArray(squad) ? squad : [];
   let failures = [];
-  if (value) {
+  if (!pickedMemberId && value) {
     try {
       const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
       if (typeof resolver === "function") {
-        const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password);
+        // currentIds: a name typed into a slot PICKED by number (its
+        // memberId already set on this position) renames that same member
+        // rather than falling back to the position's index default -- see
+        // resolveMemberIdsForPositions' own doc comment.
+        const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password, lineup?.memberIds);
         nextSquad = resolved.squad;
         resolvedId = resolved.memberIds[posKey] || null;
         failures = resolved.failures || [];
@@ -1210,17 +1231,23 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // team.metadata) back into the autocomplete so it reappears for the team's
   // other positions instead of vanishing after a single entry.
   //
-  // bc-dnst: the squad store (squadA/squadB, `{id, index, name}` per member)
-  // is the team's actual roster of record, so its NAMED members come first,
-  // in index order -- that is what lets an operator pick a reserve, or a
-  // fighter a reorder displaced, into a position from this row's name box
-  // (operator ruling 2026-09-15: team order changes between matches, and
-  // picking a different member must move THEIR number onto the row). The
-  // legacy team.metadata list (via AdminLineupHelpers.rosterFor) is kept
-  // only as a fallback for teams that predate the squad store, appended
-  // after and de-duplicated case-insensitively. Either way a pick still
-  // resolves to that member's id through resolveMemberIdsForPositions, so
-  // the row's number follows the member chosen here.
+  // bc-dnst (operator ruling 2026-09-15): the squad store (squadA/squadB,
+  // `{id, index, name}` per member, seeded to team size + 2 reserves,
+  // state.squadFloor) is the team's actual roster of record, so EVERY
+  // member -- blank ones included -- comes first, in index order, as an
+  // OBJECT `{id, index, name, label}` (LineupNameInput's object-entry
+  // shape): the row's list must offer every numbered slot the team can
+  // field, not just the named ones, so a blank slot can be picked by its
+  // number and then named. The legacy team.metadata list (via
+  // AdminLineupHelpers.rosterFor) and the lineup's already-assigned free
+  // names (mergeRosterWithAssigned) are kept only as a plain-string
+  // fallback for a name that matches no squad member -- a team that
+  // predates the squad store, or an operator-added substitute -- appended
+  // after and de-duplicated case-insensitively against the squad names.
+  // Either way a pick still resolves to a member id (an object entry
+  // carries its own; a plain string resolves through
+  // resolveMemberIdsForPositions), so the row's number follows whichever
+  // member is chosen here.
   const rosterForSide = (side, lineup, squad) => {
     const sideKey = sideLookupKey(side);
     // sideLookupKey returns "" (not undefined) for an id-less, name-less
@@ -1235,26 +1262,43 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const pname = p?.name || p?.Name || "";
       return pid === sideKey || pname === sideKey;
     });
-    const squadNames = (Array.isArray(squad) ? squad : [])
+    // `side` is the side OBJECT here (m.sideA / m.sideB), so its number is
+    // read directly; a letter comparison labelled both lists with the Shiro
+    // team's number (caught by the click test).
+    const teamNumber = side?.number || "";
+    const squadList = (Array.isArray(squad) ? squad : [])
       .slice()
-      .sort((x, y) => (x?.index || 0) - (y?.index || 0))
-      .map(m => String(m?.name || "").trim())
-      .filter(Boolean);
+      .sort((x, y) => (x?.index || 0) - (y?.index || 0));
+    const squadEntries = squadList.map(mem => ({
+      id: mem?.id || "",
+      index: mem?.index || 0,
+      name: String(mem?.name || "").trim(),
+      label: squadMemberLabel(teamNumber, mem?.index),
+    }));
+    const squadNameSet = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
     const legacyNames = window.AdminLineupHelpers?.rosterFor
       ? window.AdminLineupHelpers.rosterFor(teamObj || null)
       : [];
-    const seen = new Set(squadNames.map(n => n.toLowerCase()));
-    const base = squadNames.concat(
-      legacyNames.filter(n => {
-        const key = String(n).trim().toLowerCase();
-        if (!key || seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-    );
-    return window.AdminLineupHelpers?.mergeRosterWithAssigned
-      ? window.AdminLineupHelpers.mergeRosterWithAssigned(base, lineup)
-      : base;
+    const seen = new Set(squadNameSet);
+    const legacyBase = legacyNames.filter(n => {
+      const key = String(n).trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const merged = window.AdminLineupHelpers?.mergeRosterWithAssigned
+      ? window.AdminLineupHelpers.mergeRosterWithAssigned(legacyBase, lineup)
+      : legacyBase;
+    // merged may re-add the position's own currently-assigned name even
+    // when it matches a squad member (mergeRosterWithAssigned's own job,
+    // unaware of the squad); strip those back out so a squad member's name
+    // is never listed twice -- once as its object entry, once as a plain
+    // string.
+    const legacyEntries = merged.filter(n => {
+      const key = String(n).trim().toLowerCase();
+      return key && !squadNameSet.has(key);
+    });
+    return [...squadEntries, ...legacyEntries];
   };
   const teamIdForSide = (side) => {
     const sideKey = sideLookupKey(side);
@@ -1300,12 +1344,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // existing lineup + the changed key→value, resolves/mints that position's
   // member id (see buildInlineLineupWrite), then PUTs both. Lineups are
   // always editable; no force/reason needed.
-  const submitInlineLineup = async (teamId, lineup, squad, setSquad, posKey, value) => {
+  //
+  // member is the squad-member object LineupNameInput hands back when the
+  // operator picked one of the row's numbered entries (bc-dnst); it is
+  // undefined for a typed/"+ Add" name, and buildInlineLineupWrite writes
+  // by id rather than resolving by name when it is present.
+  const submitInlineLineup = async (teamId, lineup, squad, setSquad, posKey, value, member) => {
     setInlineLineupSaving(true);
     setEditorWarning("");
     try {
       const { positions: updated, memberIds: updatedIds, squad: nextSquad, failures } =
-        await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password);
+        await buildInlineLineupWrite(m.compId, teamId, lineup, squad, posKey, value, password, member);
       if (typeof setSquad === "function") setSquad(nextSquad);
       const hasMemberIds = Object.keys(updatedIds).length > 0;
       await window.API.putMatchLineup(m.compId, teamId, m.id, updated, password, hasMemberIds ? updatedIds : undefined);
@@ -2753,10 +2802,45 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const lineupPosKey = posKey5 || posKeyN;
             const teamIdB = teamIdForSide(m.sideB); // SHIRO = left
             const teamIdA = teamIdForSide(m.sideA); // AKA = right
-            const rosterB = rosterForSide(m.sideB, lineupB, squadB);
-            const rosterA = rosterForSide(m.sideA, lineupA, squadA);
-            const pickPlayer = (teamId, lineup, squad, setSquad) => (value) => {
-              submitInlineLineup(teamId, lineup, squad, setSquad, lineupPosKey, value);
+            // A fixed-order lineup fields each fighter once, so a member already
+            // placed at ANOTHER position of this side's lineup is not offered
+            // for this row (bc-dnst click test: the list offered a fighter twice
+            // and let him be placed on two rows). Kachinuki rows are pairings,
+            // not positions, and legitimately repeat the fighter who stays on.
+            //
+            // bc-dnst: roster entries are now a mix of squad-member objects
+            // and plain legacy-name strings (rosterForSide above). An entry
+            // is dropped when its id appears in lineup.memberIds at another
+            // position, or its name matches a NON-BLANK name at another
+            // position; a blank-named object entry is compared by id only
+            // -- every blank slot shares the same empty name, so matching
+            // on name would hide every other blank slot the moment one of
+            // them is placed.
+            const withoutPlacedElsewhere = (roster, lineup) => {
+              if (isKachinuki) return roster;
+              const otherMemberIds = new Set(Object.entries(lineup?.memberIds || {})
+                .filter(([key, id]) => key !== lineupPosKey && id)
+                .map(([, id]) => id));
+              const otherNames = new Set(Object.entries(lineup?.positions || {})
+                .filter(([key, name]) => key !== lineupPosKey && String(name || "").trim())
+                .map(([, name]) => String(name).trim().toLowerCase()));
+              return roster.filter(entry => {
+                if (typeof entry === "string") {
+                  return !otherNames.has(entry.trim().toLowerCase());
+                }
+                if (entry.id && otherMemberIds.has(entry.id)) return false;
+                if (!entry.name) return true;
+                return !otherNames.has(entry.name.trim().toLowerCase());
+              });
+            };
+            const rosterB = withoutPlacedElsewhere(rosterForSide(m.sideB, lineupB, squadB), lineupB);
+            const rosterA = withoutPlacedElsewhere(rosterForSide(m.sideA, lineupA, squadA), lineupA);
+            // member (LineupNameInput's second onSelect argument) is the
+            // picked squad-member object when the operator chose one of the
+            // row's numbered entries; it is undefined for a typed/"+ Add"
+            // name, exactly like buildInlineLineupWrite's own optional arg.
+            const pickPlayer = (teamId, lineup, squad, setSquad) => (value, member) => {
+              submitInlineLineup(teamId, lineup, squad, setSquad, lineupPosKey, value, member);
             };
             // mp-gmcg: a manually-added bout has no lineup key (positions
             // beyond teamSize are not valid lineup keys) and no server
@@ -2927,7 +3011,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               color={rs.color}
                               disabled={inlineLineupSaving}
                               ariaLabel={`${posLabel} ${rs.label} player`}
-                              onSelect={(name) => rs.onSelectName(name)}
+                              onSelect={(name, member) => rs.onSelectName(name, member)}
                             />
                           ) : (
                             rs.playerName

@@ -4352,6 +4352,24 @@ button.pool-match-row {
   font-weight: 500;
 }
 
+/* A squad-member option's number chip (e.g. "T2.3"), bc-dnst: a compact
+   monospace muted label mirroring SQUAD_MEMBER_LABEL_STYLE's own
+   declarations (admin_scoring_team.jsx) so the picker's number reads the
+   same as every other squad-member label on the score sheet. */
+.pmf__opt-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  flex-shrink: 0;
+}
+
+/* A picked-but-unnamed squad slot's placeholder text in the dropdown. */
+.pmf__opt-name--blank {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
 .pmf__opt-dojo {
   font-size: 11px;
   color: var(--ink-3);

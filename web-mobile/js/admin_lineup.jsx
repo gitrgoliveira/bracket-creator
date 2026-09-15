@@ -211,6 +211,23 @@ function positionNumberForKey(posKey) {
 // memberIdentityWarning below -- without ever refusing or retrying the
 // save on its own account.
 //
+// currentIds (bc-dnst, optional) is the lineup's OWN memberIds map before
+// this write -- buildInlineLineupWrite (admin_scoring_team.jsx) passes
+// lineup?.memberIds. It covers naming a slot that was PICKED by number
+// rather than typed: an operator who picks a blank squad entry from the
+// row's list (LineupNameInput's object-entry shape) writes that member's
+// id directly, by-id, without ever calling this resolver (see
+// buildInlineLineupWrite's own doc comment) -- so the position already
+// carries that member's id when the operator later TYPES a name into the
+// now-visible empty box. Without currentIds, a typed name would fall back
+// to positionNumberForKey's INDEX default, which is only that position's
+// default member and may not be the member actually picked (a reserve, or
+// a blank slot moved in from elsewhere via the row's list). When
+// currentIds[posKey] names a squad member who is still blank, THAT member
+// is renamed instead, through the exact same rename path as the index
+// default below -- the number stays attached to the member the operator
+// actually chose.
+//
 // Returns { memberIds, squad, failures }: `squad` is handed back (possibly
 // extended by a mint, or with a member renamed) so the caller can cache it
 // without a second fetch. `failures` is `[{ position, name, reason }]`, one
@@ -218,10 +235,11 @@ function positionNumberForKey(posKey) {
 // message (API.renameTeamMember/addTeamMember throw with err.error from the
 // response body) -- never a raw Error object or a stack. This function
 // never throws.
-async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password) {
+async function resolveMemberIdsForPositions(compId, teamId, positions, squad, password, currentIds) {
   let currentSquad = Array.isArray(squad) ? squad : [];
   const memberIds = {};
   const failures = [];
+  const ids = currentIds || {};
   for (const [posKey, rawName] of Object.entries(positions || {})) {
     const name = (rawName || "").trim();
     if (!name) continue;
@@ -230,10 +248,14 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
       memberIds[posKey] = existing.id;
       continue;
     }
-    const slotNumber = positionNumberForKey(posKey);
-    const blankMember = slotNumber
-      ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim())
+    const currentMemberId = ids[posKey];
+    const pickedBlankMember = currentMemberId
+      ? currentSquad.find(mem => mem && mem.id === currentMemberId && !(mem.name || "").trim())
       : null;
+    const slotNumber = positionNumberForKey(posKey);
+    const blankMember = pickedBlankMember || (slotNumber
+      ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim())
+      : null);
     if (blankMember) {
       try {
         await window.API.renameTeamMember(compId, teamId, blankMember.id, name, password);

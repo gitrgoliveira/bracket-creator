@@ -115,6 +115,44 @@ func TestMatchLineupPUT_AlwaysEditable(t *testing.T) {
 	assert.Equal(t, "p1-substitute", saved.Positions[domain.PosSenpo])
 }
 
+// TestMatchLineupPUT_EmptyNameWithMemberIDIsAccepted pins bc-dnst: picking
+// a blank squad slot is a real placement (the row shows that member's
+// number and an empty box to type a name into), so the server must accept
+// a position whose name is "" as long as it carries a memberId, and must
+// read that id back rather than treating the position as vacant.
+// ValidatePositions only checks position KEYS, never values, so this is a
+// pin against a future validator change narrowing that, not a fix to
+// today's behaviour.
+func TestMatchLineupPUT_EmptyNameWithMemberIDIsAccepted(t *testing.T) {
+	r, store, _ := setupLineupTestRouter(t)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "T", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", TeamSize: 5}))
+
+	const blankMemberID = "11111111-1111-4111-8111-111111111111"
+	body, _ := json.Marshal(LineupRequest{
+		Positions: map[domain.Position]string{domain.PosSenpo: ""},
+		MemberIDs: map[domain.Position]string{domain.PosSenpo: blankMemberID},
+	})
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/competitions/c1/teams/teamA/match-lineups/PoolA-0", bytes.NewReader(body))
+	req.Header.Set("X-Tournament-Password", "secret")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var put domain.TeamLineup
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &put))
+	assert.Equal(t, "", put.Positions[domain.PosSenpo], "the picked slot's name stays blank until typed")
+	assert.Equal(t, blankMemberID, put.MemberIDs[domain.PosSenpo], "the picked member's id must be read back")
+
+	lineups, err := store.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	saved, found := findMatchLineup(lineups, "teamA", "PoolA-0")
+	require.True(t, found)
+	assert.Equal(t, "", saved.Positions[domain.PosSenpo])
+	assert.Equal(t, blankMemberID, saved.MemberIDs[domain.PosSenpo])
+}
+
 // TestMatchLineupDELETE_WhileRunning guards that a match-scoped lineup stays
 // deletable while its match is running (lineups are always editable since lock
 // removal), and that the DELETE still requires the admin password.

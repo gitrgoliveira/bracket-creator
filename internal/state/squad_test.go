@@ -16,12 +16,13 @@ import (
 // participant carries, so a squad test needs genuine teams rather than a
 // placeholder string.
 //
-// The competition's TeamSize is 3 and neither team carries any Metadata, so
-// by the time this returns, BOTH teams already carry 3 SEEDED members
-// (indices 1-3, blank names) -- upgradeSquadsFromMetadataLocked runs as
-// part of the SaveParticipants/LoadParticipants calls below (bc-pnum). Any
-// test that calls AddTeamMember on teamA/teamB starting from here must
-// account for those 3 pre-existing slots: a first Add gets index 4, not 1.
+// The competition's TeamSize is 3, so its squad floor is 5 (TeamSize + 2
+// reserves, bc-dnst), and neither team carries any Metadata, so by the
+// time this returns, BOTH teams already carry 5 SEEDED members (indices
+// 1-5, blank names) -- upgradeSquadsFromMetadataLocked runs as part of the
+// SaveParticipants/LoadParticipants calls below (bc-pnum). Any test that
+// calls AddTeamMember on teamA/teamB starting from here must account for
+// those 5 pre-existing slots: a first Add gets index 6, not 1.
 func newSquadTestStore(t *testing.T) (store *Store, compID, teamA, teamB string) {
 	t.Helper()
 	s, id := newTeamMemberTestStore(t, "team", 3, false)
@@ -39,29 +40,30 @@ func newSquadTestStore(t *testing.T) (store *Store, compID, teamA, teamB string)
 
 // --- AddTeamMember / RenameTeamMember ---------------------------------------
 
-// A reserve added beyond the 3 seeded slots (TeamSize 3) gets index 4, a
-// second gets index 5, and both keep their id and index across a rename.
+// A reserve added beyond the 5 seeded slots (TeamSize 3, floor 5) gets
+// index 6, a second gets index 7, and both keep their id and index across
+// a rename.
 func TestSquad_AddMintsIDAndIndex_RenameKeepsBoth(t *testing.T) {
-	s, id, teamA, _ := newSquadTestStore(t) // teamA already carries 3 seeded blank slots (indices 1-3)
+	s, id, teamA, _ := newSquadTestStore(t) // teamA already carries 5 seeded blank slots (indices 1-5)
 
 	m1, err := s.AddTeamMember(id, teamA, "Alice")
 	require.NoError(t, err)
 	assert.NotEmpty(t, m1.ID)
-	assert.Equal(t, 4, m1.Index, "a reserve added beyond the seeded TeamSize slots must continue the index sequence, not restart at 1")
+	assert.Equal(t, 6, m1.Index, "a reserve added beyond the seeded floor slots must continue the index sequence, not restart at 1")
 	assert.Equal(t, "Alice", m1.Name)
 
 	m2, err := s.AddTeamMember(id, teamA, "Bob")
 	require.NoError(t, err)
 	assert.NotEmpty(t, m2.ID)
 	assert.NotEqual(t, m1.ID, m2.ID)
-	assert.Equal(t, 5, m2.Index, "a second reserve must get the next index, not a fresh 1")
+	assert.Equal(t, 7, m2.Index, "a second reserve must get the next index, not a fresh 1")
 
 	require.NoError(t, s.RenameTeamMember(id, teamA, m1.ID, "Alicia"))
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	members := squads[teamA]
-	require.Len(t, members, 5, "3 seeded slots plus the 2 reserves added above")
+	require.Len(t, members, 7, "5 seeded slots plus the 2 reserves added above")
 	byID := map[string]domain.TeamMember{}
 	for _, m := range members {
 		byID[m.ID] = m
@@ -69,9 +71,9 @@ func TestSquad_AddMintsIDAndIndex_RenameKeepsBoth(t *testing.T) {
 	renamed, ok := byID[m1.ID]
 	require.True(t, ok, "the renamed member's id must survive")
 	assert.Equal(t, "Alicia", renamed.Name)
-	assert.Equal(t, 4, renamed.Index, "a rename must not touch the index")
+	assert.Equal(t, 6, renamed.Index, "a rename must not touch the index")
 	assert.Equal(t, "Bob", byID[m2.ID].Name)
-	assert.Equal(t, 5, byID[m2.ID].Index)
+	assert.Equal(t, 7, byID[m2.ID].Index)
 }
 
 // Duplicate names within ONE team are refused on add, including
@@ -147,17 +149,17 @@ func TestSquad_RenameUnknownMemberOrTeam(t *testing.T) {
 // A squad may exceed the competition's TeamSize: reserves and replacements
 // are unconstrained (operator ruling 2026-09-09).
 func TestSquad_SizeMayExceedCompetitionTeamSize(t *testing.T) {
-	s, id, teamA, _ := newSquadTestStore(t) // TeamSize 3: teamA already carries 3 seeded blank slots
+	s, id, teamA, _ := newSquadTestStore(t) // TeamSize 3, floor 5: teamA already carries 5 seeded blank slots
 
-	names := []string{"Alice", "Bob", "Carol", "Dan", "Eve"} // 5 more reserves beyond the 3 seeded slots
+	names := []string{"Alice", "Bob", "Carol", "Dan", "Eve"} // 5 more reserves beyond the 5 seeded slots
 	for _, n := range names {
 		_, err := s.AddTeamMember(id, teamA, n)
-		require.NoError(t, err, "squad size must not be capped by TeamSize")
+		require.NoError(t, err, "squad size must not be capped by the seeded floor")
 	}
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	assert.Len(t, squads[teamA], 8, "the 3 seeded slots plus all 5 reserves must be persisted despite a TeamSize of 3")
+	assert.Len(t, squads[teamA], 10, "the 5 seeded slots plus all 5 added reserves must be persisted despite a TeamSize of 3")
 }
 
 // --- saveSquadsLocked / directory creation ----------------------------------
@@ -205,13 +207,17 @@ func TestSquadMigration_TeamMetadataMigratesOnLoad(t *testing.T) {
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	members := squads[teamID]
-	require.Len(t, members, 3)
+	require.Len(t, members, 5, "3 named members plus 2 blank slots padded up to the floor (TeamSize 3 + 2 reserves)")
 	assert.Equal(t, "Alice", members[0].Name)
 	assert.Equal(t, 1, members[0].Index)
 	assert.Equal(t, "Bob", members[1].Name)
 	assert.Equal(t, 2, members[1].Index)
 	assert.Equal(t, "Carol", members[2].Name)
 	assert.Equal(t, 3, members[2].Index)
+	assert.Equal(t, "", members[3].Name, "the padded slot must be blank")
+	assert.Equal(t, 4, members[3].Index)
+	assert.Equal(t, "", members[4].Name, "the padded slot must be blank")
+	assert.Equal(t, 5, members[4].Index)
 	for _, m := range members {
 		assert.NotEmpty(t, m.ID)
 	}
@@ -235,10 +241,10 @@ func TestSquadMigration_IndividualMetadataNeverFolded(t *testing.T) {
 
 // A team that already has a squad entry is left untouched by a later
 // migration pass: re-running the fold must not duplicate members. The 2
-// named members are padded to TeamSize 3 with 1 blank slot on the FIRST
-// migration (bc-pnum seeding); the second migration pass must neither
-// re-fold Metadata into new members nor pad again, since the squad is
-// already at TeamSize.
+// named members are padded to the floor (TeamSize 3 + 2 reserves = 5) with
+// 3 blank slots on the FIRST migration (bc-pnum seeding); the second
+// migration pass must neither re-fold Metadata into new members nor pad
+// again, since the squad is already at the floor.
 func TestSquadMigration_AlreadyMigratedTeamIsUntouched(t *testing.T) {
 	s, id := newTeamMemberTestStore(t, "team", 3, false)
 	require.NoError(t, s.SaveParticipants(id, []domain.Player{
@@ -254,13 +260,15 @@ func TestSquadMigration_AlreadyMigratedTeamIsUntouched(t *testing.T) {
 	for i, m := range squads[teamID] {
 		firstIDs[i] = m.ID
 	}
-	require.Len(t, firstIDs, 3, "2 named members plus 1 blank slot padded up to TeamSize 3")
-	assert.Equal(t, "", squads[teamID][2].Name, "the padded slot must be blank")
-	assert.Equal(t, 3, squads[teamID][2].Index)
+	require.Len(t, firstIDs, 5, "2 named members plus 3 blank slots padded up to the floor")
+	for i := 2; i < 5; i++ {
+		assert.Equal(t, "", squads[teamID][i].Name, "the padded slot must be blank")
+		assert.Equal(t, i+1, squads[teamID][i].Index)
+	}
 
 	// A second write over the SAME Metadata, and a second load: the fold
-	// must not run again for this team, and the squad -- already at
-	// TeamSize -- must not be padded further.
+	// must not run again for this team, and the squad -- already at the
+	// floor -- must not be padded further.
 	require.NoError(t, s.SaveParticipants(id, []domain.Player{
 		{ID: teamID, Name: "Tora A", Dojo: "Tora Dojo", Metadata: []string{"Alice", "Bob"}, CheckedIn: true},
 	}))
@@ -269,7 +277,7 @@ func TestSquadMigration_AlreadyMigratedTeamIsUntouched(t *testing.T) {
 
 	squads2, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	require.Len(t, squads2[teamID], 3, "an already-migrated team must not be re-folded or padded again once at TeamSize")
+	require.Len(t, squads2[teamID], 5, "an already-migrated team must not be re-folded or padded again once at the floor")
 	for i, m := range squads2[teamID] {
 		assert.Equal(t, firstIDs[i], m.ID, "re-folding must not mint new ids for an already-migrated team")
 	}
@@ -297,10 +305,11 @@ func TestSquadMigration_WritesNothingWhenNothingToMigrate(t *testing.T) {
 }
 
 // A TEAM competition whose row carries no Metadata at all is now SEEDED
-// with TeamSize blank-named members on load (bc-pnum ruling: "by default
-// teams have x team members, as defined in the competition config, and
-// those positions have their numbers"), rather than left with no squad at
-// all -- what this test (formerly
+// with floor (TeamSize + 2 reserves) blank-named members on load (bc-pnum
+// ruling: "by default teams have x team members, as defined in the
+// competition config, and those positions have their numbers", extended to
+// the +2 reserve floor by operator ruling 2026-09-15, bc-dnst), rather than
+// left with no squad at all -- what this test (formerly
 // TestSquadMigration_WritesNothingForTeamWithNoMetadataToMigrate) pinned
 // before that ruling.
 //
@@ -329,7 +338,34 @@ func TestSquadMigration_TeamWithNoMetadataIsSeededToTeamSize(t *testing.T) {
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	members := squads[teamID]
-	require.Len(t, members, 3, "a team with no metadata at all must still be seeded to TeamSize")
+	require.Len(t, members, 5, "a team with no metadata at all must still be seeded to the floor (TeamSize 3 + 2 reserves)")
+	for i, m := range members {
+		assert.NotEmpty(t, m.ID)
+		assert.Equal(t, i+1, m.Index)
+		assert.Equal(t, "", m.Name, "a seeded slot's name must be blank")
+	}
+}
+
+// A 5-person team seeds 7 blank members (TeamSize 5 + 2 reserves), with
+// indexes 1..7 in order, pinning squadFloor's arithmetic directly through
+// the migration rather than through the 3-person fixture every other test
+// in this file uses.
+func TestSquadMigration_FivePersonTeamSeedsSevenBlankSlots(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 5, false)
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{
+		{Name: "Tora A", Dojo: "Tora Dojo"}, // no Metadata at all
+	}))
+
+	stored, err := s.LoadParticipants(id, false)
+	require.NoError(t, err)
+	require.Len(t, stored, 1)
+	teamID := stored[0].ID
+	require.NotEmpty(t, teamID)
+
+	squads, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	members := squads[teamID]
+	require.Len(t, members, 7, "a 5-person team must be seeded to 7 slots (TeamSize 5 + 2 reserves)")
 	for i, m := range members {
 		assert.NotEmpty(t, m.ID)
 		assert.Equal(t, i+1, m.Index)
@@ -370,12 +406,12 @@ func TestSquadMigration_SurvivesMetadataBlankingWriteEvenWhenNeverMigratedBefore
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	members := squads[teamID]
-	require.Len(t, members, 3, "the squad must survive a Metadata-blanking write even though it was never migrated before that write")
+	require.Len(t, members, 5, "the squad must survive a Metadata-blanking write even though it was never migrated before that write, padded to the floor")
 	names := make([]string, len(members))
 	for i, m := range members {
 		names[i] = m.Name
 	}
-	assert.Equal(t, []string{"Alice", "Bob", "Carol"}, names)
+	assert.Equal(t, []string{"Alice", "Bob", "Carol", "", ""}, names)
 
 	// And the blanking write itself succeeded / participants.csv reflects it.
 	stored, err := s.LoadParticipants(id, false)
@@ -418,8 +454,8 @@ func TestSquadMigration_InvalidatesTheSharedLazyCache(t *testing.T) {
 	for _, m := range after[teamID] {
 		names = append(names, m.Name)
 	}
-	assert.Equal(t, []string{"Alice", "Bob", "Carol"}, names,
-		"a repair reading squads after the migration must see what the migration wrote")
+	assert.Equal(t, []string{"Alice", "Bob", "Carol", "", ""}, names,
+		"a repair reading squads after the migration must see what the migration wrote, padded to the floor")
 }
 
 // TestLegacyUpgradeRoster_CompetitionDoesNotLoadTheRoster pins the split
@@ -497,13 +533,13 @@ func TestSquadMigration_ZekkenRosterMigratesTheRightColumns(t *testing.T) {
 	require.NoError(t, err)
 
 	members := squads[teamID]
-	require.Len(t, members, 3, "the zekken layout must yield the same three members as the plain one")
+	require.Len(t, members, 5, "the zekken layout must yield the same three named members as the plain one, padded to the floor")
 
 	names := make([]string, len(members))
 	for i, m := range members {
 		names[i] = m.Name
 	}
-	assert.Equal(t, []string{"Sato", "Tanaka", "Yamada"}, names,
+	assert.Equal(t, []string{"Sato", "Tanaka", "Yamada", "", ""}, names,
 		"a column-shifted read would fold the dojo or the zekken in as a member")
 	assert.NotContains(t, names, "TORA", "the zekken must never be read as a squad member")
 	assert.NotContains(t, names, "Tora Dojo", "the dojo must never be read as a squad member")
@@ -514,7 +550,7 @@ func TestSquadMigration_ZekkenRosterMigratesTheRightColumns(t *testing.T) {
 // could never be cleaned up through the app, so a typo would leave
 // permanent, unreachable data behind.
 func TestSquad_AddRefusesATeamIDNoParticipantCarries(t *testing.T) {
-	s, id, teamA, _ := newSquadTestStore(t) // teamA already carries 3 seeded blank slots (indices 1-3)
+	s, id, teamA, _ := newSquadTestStore(t) // teamA already carries 5 seeded blank slots (indices 1-5)
 
 	_, err := s.AddTeamMember(id, "not-a-real-team", "Alice")
 	require.Error(t, err)
@@ -529,7 +565,7 @@ func TestSquad_AddRefusesATeamIDNoParticipantCarries(t *testing.T) {
 	// And a real team still works, so the guard refuses only what it should.
 	m, err := s.AddTeamMember(id, teamA, "Alice")
 	require.NoError(t, err, "a genuine team must still accept a member")
-	assert.Equal(t, 4, m.Index, "teamA already carries 3 seeded slots (TeamSize 3), so a new reserve continues the sequence")
+	assert.Equal(t, 6, m.Index, "teamA already carries 5 seeded slots (TeamSize 3, floor 5), so a new reserve continues the sequence")
 }
 
 // --- squadDuplicateNameCheck: blanks must never collide -----------------
@@ -554,11 +590,11 @@ func TestSquadDuplicateNameCheck_BlanksNeverCollideWithEachOther(t *testing.T) {
 // Exercised through the public door too: a real name added to a freshly
 // seeded team (3 blank slots) must not be refused as a duplicate of them.
 func TestSquad_BlankSeededMembersAreNeverDuplicatesOfEachOther(t *testing.T) {
-	s, id, teamA, _ := newSquadTestStore(t) // TeamSize 3: 3 blank seeded slots already exist for teamA
+	s, id, teamA, _ := newSquadTestStore(t) // TeamSize 3, floor 5: 5 blank seeded slots already exist for teamA
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	require.Len(t, squads[teamA], 3, "precondition: the team's default state already carries 3 blank-named slots")
+	require.Len(t, squads[teamA], 5, "precondition: the team's default state already carries 5 blank-named slots")
 
 	m, err := s.AddTeamMember(id, teamA, "Dan")
 	require.NoError(t, err, "a real name must never collide with the team's blank seeded slots")
@@ -567,7 +603,7 @@ func TestSquad_BlankSeededMembersAreNeverDuplicatesOfEachOther(t *testing.T) {
 
 // --- Seeding to TeamSize: raise pads, lower never trims ------------------
 
-// Raising TeamSize pads a squad already at its old size with new blank
+// Raising TeamSize pads a squad already at its old floor with new blank
 // slots, keeping the original members' ids untouched. Lowering TeamSize
 // back down must NEVER trim: a bout already fought may refer to a position
 // by its index, and a smaller roster limit does not un-fight it.
@@ -588,8 +624,11 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 
 	squads, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	require.Len(t, squads[teamID], 3, "seeded to the initial TeamSize")
-	firstThreeIDs := []string{squads[teamID][0].ID, squads[teamID][1].ID, squads[teamID][2].ID}
+	require.Len(t, squads[teamID], 5, "seeded to the initial floor (TeamSize 3 + 2 reserves)")
+	firstFiveIDs := []string{
+		squads[teamID][0].ID, squads[teamID][1].ID, squads[teamID][2].ID,
+		squads[teamID][3].ID, squads[teamID][4].ID,
+	}
 
 	comp, err := s.LoadCompetition(id)
 	require.NoError(t, err)
@@ -602,14 +641,14 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 	squadsAfterRaise, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	members := squadsAfterRaise[teamID]
-	require.Len(t, members, 5, "raising TeamSize must pad up to the new size")
-	for i, wantID := range firstThreeIDs {
+	require.Len(t, members, 7, "raising TeamSize must pad up to the new floor (5 + 2 reserves)")
+	for i, wantID := range firstFiveIDs {
 		assert.Equal(t, wantID, members[i].ID, "the original slots must keep their ids")
 	}
-	assert.Equal(t, 4, members[3].Index)
-	assert.Equal(t, 5, members[4].Index)
-	assert.Equal(t, "", members[3].Name)
-	assert.Equal(t, "", members[4].Name)
+	assert.Equal(t, 6, members[5].Index)
+	assert.Equal(t, 7, members[6].Index)
+	assert.Equal(t, "", members[5].Name)
+	assert.Equal(t, "", members[6].Name)
 
 	// Lowering TeamSize back down must NOT trim the squad.
 	comp.TeamSize = 2
@@ -620,7 +659,7 @@ func TestSquadMigration_RaisingTeamSizePadsLoweringDoesNotTrim(t *testing.T) {
 
 	squadsAfterLower, err := s.LoadSquads(id)
 	require.NoError(t, err)
-	assert.Len(t, squadsAfterLower[teamID], 5, "lowering TeamSize must never trim an existing squad")
+	assert.Len(t, squadsAfterLower[teamID], 7, "lowering TeamSize must never trim an existing squad")
 }
 
 // --- ClearTeamMemberName ---------------------------------------------------

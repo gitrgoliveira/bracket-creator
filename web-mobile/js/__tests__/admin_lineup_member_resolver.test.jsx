@@ -212,6 +212,31 @@ describe('resolveMemberIdsForPositions', () => {
     expect(failures).toEqual([{ position: 'senpo', name: 'Sato', reason: 'offline' }]);
     expect(addTeamMember).not.toHaveBeenCalled();
   });
+
+  // bc-dnst (currentIds, the 6th argument): a name typed into a slot that
+  // was PICKED BY NUMBER (its memberId already recorded on this position,
+  // e.g. via LineupNameInput's object-entry roster) must rename THAT
+  // member, even when it is not the position's own index default. m6 here
+  // is a reserve at index 6 -- nothing to do with senpo's own default (m1,
+  // index 1) -- so this pins that currentIds is consulted BEFORE the
+  // index-default fallback, not merely as a tie-break when they agree.
+  it('bc-dnst: currentIds naming a blank member (not the index default) renames THAT member instead', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    global.window.API = { addTeamMember, renameTeamMember };
+    const squad = [
+      { id: 'm1', index: 1, name: '' }, // senpo's own index default: must NOT be touched
+      { id: 'm6', index: 6, name: '' }, // the reserve actually picked into senpo
+    ];
+    const { memberIds, squad: nextSquad } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Picked Name' }, squad, 'pw', { senpo: 'm6' }
+    );
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm6', 'Picked Name', 'pw');
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ senpo: 'm6' });
+    expect(nextSquad.find(m => m.id === 'm6').name).toBe('Picked Name');
+    expect(nextSquad.find(m => m.id === 'm1').name).toBe('');
+  });
 });
 
 // bc-cse gap closure: memberIdentityWarning is the ONE composer all three

@@ -1155,10 +1155,13 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 }
 
 // upgradeSquadsFromMetadataLocked migrates a team's squad OUT of
-// Player.Metadata into squads.yaml (bc-tmid), and SEEDS it up to the
-// competition's TeamSize (bc-pnum ruling: "by default teams have x team
-// members, as defined in the competition config, and those positions have
-// their numbers"). Metadata is the untyped trailing-columns array
+// Player.Metadata into squads.yaml (bc-tmid), and SEEDS it up to
+// squadFloor(comp.TeamSize) -- the competition's TeamSize plus two reserve
+// slots (bc-pnum ruling: "by default teams have x team members, as defined
+// in the competition config, and those positions have their numbers";
+// extended by operator ruling 2026-09-15, bc-dnst, to reserve two further
+// numbered slots beyond TeamSize so the score sheet can offer every number
+// the team can field). Metadata is the untyped trailing-columns array
 // participants.csv shares between two unrelated uses -- a team's ordered
 // member-name list (CreatePlayersFromRecords/marshalParticipantsCSV) and an
 // individual's dan grade at index 0 (buildPlayerMetadata, the SPA) -- so this
@@ -1167,24 +1170,24 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 // already uses); scanning an individual's Metadata as a member list would
 // invent members out of a dan-grade string.
 //
-// Two cases, both keyed on TeamSize rather than "has this team ever been
+// Two cases, both keyed on the floor rather than "has this team ever been
 // migrated":
 //
 //   - No entry at all for the team's id yet: build members from any Metadata
 //     names (indices 1..len(names), preserving the original migration's
-//     shape) and then PAD with blank-named members up to TeamSize, so a team
-//     with fewer named members than TeamSize (including zero) still ends up
-//     with a full set of numbered slots.
+//     shape) and then PAD with blank-named members up to the floor, so a
+//     team with fewer named members than the floor (including zero) still
+//     ends up with a full set of numbered slots.
 //   - An entry already exists (a prior migration, or an operator using
 //     AddTeamMember/RenameTeamMember/ClearTeamMemberName): re-folding
 //     Metadata into it would duplicate members, so the existing members are
-//     left untouched, but if TeamSize has since been RAISED the squad is
-//     padded with new blank slots to match. TeamSize being LOWERED never
-//     trims: a bout already fought refers to a position by its index, and a
-//     smaller roster limit does not un-fight it (existing indices are always
-//     contiguous 1..len(existing), because AddTeamMember only ever mints
-//     max(existing index)+1 and nothing ever removes an entry, so the next
-//     padded index is simply len(existing)+1).
+//     left untouched, but if the floor has since RISEN (TeamSize raised) the
+//     squad is padded with new blank slots to match. The floor falling
+//     never trims: a bout already fought refers to a position by its index,
+//     and a smaller roster limit does not un-fight it (existing indices are
+//     always contiguous 1..len(existing), because AddTeamMember only ever
+//     mints max(existing index)+1 and nothing ever removes an entry, so the
+//     next padded index is simply len(existing)+1).
 //
 // A member's Name is blank unless already known (from Metadata, or already
 // stored) -- operator ruling: "a member with a BLANK name is a normal,
@@ -1588,10 +1591,11 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 		if id == "" {
 			continue // no stable key to migrate under yet; see doc comment above
 		}
+		floor := squadFloor(comp.TeamSize)
 		existing, alreadyMigrated := squads[id]
 		if !alreadyMigrated {
 			names := nonBlankMetadata(p.Metadata)
-			members := make([]domain.TeamMember, 0, max(len(names), comp.TeamSize))
+			members := make([]domain.TeamMember, 0, max(len(names), floor))
 			for i, name := range names {
 				members = append(members, domain.TeamMember{
 					ID:    newParticipantID(),
@@ -1599,7 +1603,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 					Name:  name,
 				})
 			}
-			for i := len(members); i < comp.TeamSize; i++ {
+			for i := len(members); i < floor; i++ {
 				members = append(members, domain.TeamMember{ID: newParticipantID(), Index: i + 1, Name: ""})
 			}
 			if len(members) == 0 {
@@ -1610,11 +1614,11 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 			continue
 		}
 		// Already migrated (or operator-managed): never re-fold Metadata, but
-		// pad up to a since-raised TeamSize. Indices are always contiguous
+		// pad up to a since-raised floor. Indices are always contiguous
 		// 1..len(existing) -- see the doc comment above -- so the next slot's
 		// index is simply len(existing)+1.
-		if len(existing) < comp.TeamSize {
-			for i := len(existing); i < comp.TeamSize; i++ {
+		if len(existing) < floor {
+			for i := len(existing); i < floor; i++ {
 				existing = append(existing, domain.TeamMember{ID: newParticipantID(), Index: i + 1, Name: ""})
 			}
 			squads[id] = existing

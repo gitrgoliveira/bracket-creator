@@ -5154,6 +5154,14 @@ button.vsched-item:not([data-clickable]) {
   gap: 8px;
 }
 .sb-vs--quiet { visibility: hidden; }
+/* The one line that says a scored mark is cleared by tapping it (bc-dnst),
+   shown under the slot groups only while a mark is scored. */
+.sb-hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--ink-3);
+  margin: 2px 0 0;
+}
 
 .sb-slots {
   display: flex;

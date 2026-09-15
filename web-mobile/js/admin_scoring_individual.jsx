@@ -841,6 +841,16 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                           <div className={`sb-vs${isDrawToggled ? " sb-vs--quiet" : ""}`} aria-hidden={isDrawToggled}>VS</div>
                           <div className="sb-slots sb-slots--aka">{slotButtons(sides[1])}</div>
                         </div>
+                        {/* Clearing a mark is a tap on the mark itself, which
+                            nothing else on the board says (a mouse tooltip
+                            never reaches a tablet), so one hint line names it
+                            while any mark is scored (operator decision
+                            2026-09-15, bc-dnst: the cells stay as they are, no
+                            corner badge, no undo). Hidden under hantei, where
+                            the cells are locked. */}
+                        {(aTotal + bTotal > 0 && !decidedByHantei) && (
+                          <div className="sb-hint" data-testid="scoring-modal-clear-hint">Tap a scored mark to clear it</div>
+                        )}
                         <button
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
                           data-testid="scoring-modal-mark-draw"

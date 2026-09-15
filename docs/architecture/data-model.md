@@ -402,8 +402,9 @@ classDiagram
     }
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
-        TeamLineup by round
+        TeamLineup by round or match
         position to name and member id
+        a position may hold an id and an empty name
     }
     class squads_yaml["squads.yaml"] {
         <<YAML>>

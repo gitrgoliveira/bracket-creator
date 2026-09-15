@@ -784,73 +784,15 @@ describe('PoolNumberedMatchRow DH badge id-vs-name (bc-pnum)', () => {
   });
 });
 
-// ------------------------------------------------------------------
-// bc-pnum: PoolMatchRow's aWin/bWin used to compare the winner by NAME
-// alone. Two competitors sharing a display name from different dojos
-// facing each other made BOTH sides' names equal the winner's name, so
-// both sides showed the win highlight for a single winner.
-// ------------------------------------------------------------------
-describe('PoolMatchRow win highlight id-vs-name (bc-pnum)', () => {
-  const realReact = global.React;
-  let runtime;
-  let PoolMatchRow;
-  const savedGlobals = {};
-  const STUBBED = ['matchStateCell'];
-
-  beforeEach(async () => {
-    runtime = makeReactive();
-    global.React = runtime.React;
-    global.window = global.window || {};
-    STUBBED.forEach(k => {
-      savedGlobals[k] = Object.prototype.hasOwnProperty.call(global.window, k)
-        ? { had: true, val: global.window[k] }
-        : { had: false };
-    });
-    global.window.matchStateCell = () => 'vs';
-    vi.resetModules();
-    ({ PoolMatchRow } = await import('../viewer_standings.jsx'));
-  });
-
-  afterEach(() => {
-    runtime.unmount();
-    global.React = realReact;
-    STUBBED.forEach(k => {
-      if (savedGlobals[k]?.had) global.window[k] = savedGlobals[k].val;
-      else delete global.window[k];
-    });
-    vi.restoreAllMocks();
-    vi.resetModules();
-  });
-
-  it('highlights only the id-matched winning side, not both, when both sides share a name', () => {
-    const m = {
-      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
-      sideB: { id: 'S2', name: 'Sato', dojo: 'Osaka' },
-      winner: { id: 'S1', name: 'Sato' },
-      status: 'completed',
-    };
-    const tree = runtime.mount(PoolMatchRow, { m, onClick: null });
-    const winSides = findAll(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-row__side--win'));
-    expect(winSides).toHaveLength(1);
-  });
-
-  // bc-pnum item 1 (BEHAVIOUR CHANGE): routing through sameCompetitor means
-  // a mixed pair -- an id-less winner beside an id-carrying side -- is
-  // never guessed at by name. Before this item, aWin/bWin fell through to
-  // `winnerName === aRawName` whenever the winner carried no id at all,
-  // regardless of whether the side itself had one.
-  it('highlights no side when the winner is id-less but a side carries an id (mixed pair, never guess)', () => {
-    const m = {
-      sideA: { id: 'S1', name: 'Sato', dojo: 'Tokyo' },
-      sideB: { id: '', name: 'Tanaka' },
-      winner: { id: '', name: 'Sato' },
-      status: 'completed',
-    };
-    const tree = runtime.mount(PoolMatchRow, { m, onClick: null });
-    const winSides = findAll(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-row__side--win'));
-    expect(winSides).toHaveLength(0);
-  });
-});
+// bc-dnst: PoolMatchRow (and the win-highlight it rendered via
+// .pool-match-row__side--win) had no production consumer -- every render
+// site uses PoolNumberedMatchRow instead -- and was removed along with its
+// dead .pool-match-row* CSS. The id-vs-name rule its two tests used to pin
+// for it (a shared display name across dojos must never light up both
+// sides; a mixed id-less/id-carrying pair must never be guessed at by name)
+// is the exact same `sameCompetitor` contract already pinned on
+// PoolNumberedMatchRow by 'PoolNumberedMatchRow DH badge id-vs-name
+// (bc-pnum)' above, so nothing here needs a replacement test.
 
 // ------------------------------------------------------------------
 // mp-gy6g (Naginata/Engi): PoolsViewer standings shows stacked pair

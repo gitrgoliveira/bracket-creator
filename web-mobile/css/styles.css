@@ -1902,41 +1902,6 @@ a:hover {
   }
 }
 
-/* ---------- Pool match results ---------- */
-.pool-match-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 12px;
-  border-bottom: 1px solid var(--line-2);
-}
-
-.pool-match-row__name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pool-match-row__name:last-child {
-  text-align: right;
-}
-
-.pool-match-row__name--win {
-  font-weight: 600;
-}
-
-.pool-match-row__score {
-  flex-shrink: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--ink-3);
-  min-width: 40px;
-  text-align: center;
-}
-
 /* ---------- Match card list (schedule) ---------- */
 .schedule {
   display: flex;
@@ -3074,20 +3039,6 @@ button.vsched-item:not([data-clickable]) {
 .bc-running-count {
   color: var(--red);
   font-weight: 600;
-}
-
-/* PoolMatchRow as button, do NOT set display here; the base .pool-match-row
-   rule (display:grid) has lower specificity and would be overridden. Clear UA
-   button chrome per-side so the class's border-bottom still applies. */
-button.pool-match-row {
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-  background: none;
-  border-top: 0;
-  border-left: 0;
-  border-right: 0;
-  color: inherit;
 }
 
 /* tournament index list */
@@ -6182,88 +6133,6 @@ button.pool-match-row {
   text-decoration: underline;
 }
 
-
-/* Pool match row Aka/Shiro */
-.pool-match-row {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 6px;
-  align-items: center;
-  padding: 5px 8px;
-  border-bottom: 1px solid var(--line-2);
-  font-size: 13px;
-}
-
-.pool-match-row:last-child {
-  border-bottom: none;
-}
-
-.pool-match-row__side {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.pool-match-row__side--right {
-  justify-content: flex-end;
-}
-
-/* Aka/Shiro side treatment (DESIGN.md §4): tint each side cell so red vs white
-   reads as area, not just a 7px badge. SideA = Aka (left grid col), the
-   --right cell = Shiro. Padding + radius give the tint a contained shape. */
-.pool-match-row__side {
-  padding: 4px 8px;
-  border-radius: 7px;
-}
-.pool-match-row__side:not(.pool-match-row__side--right) {
-  background: var(--red-soft);
-}
-.pool-match-row__side--right {
-  background: var(--white-side);
-  background-image: repeating-linear-gradient(
-    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
-}
-
-.pool-match-row__name {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.pool-match-row__side--win .pool-match-row__name {
-  font-weight: 700;
-}
-
-.pool-match-row__badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  padding: 1px 3px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-.pool-match-row__badge--aka {
-  background: var(--red);
-  color: white;
-}
-
-.pool-match-row__badge--shiro {
-  background: #fff;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-
-.pool-match-row__score {
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 13px;
-  text-align: center;
-  min-width: 44px;
-}
 
 /* Score editor row Aka/Shiro badges */
 .se-color-badge {

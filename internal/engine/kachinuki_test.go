@@ -3625,3 +3625,32 @@ func TestDeriveKachinukiWinner_SameNameDecidingBout(t *testing.T) {
 		assert.Equal(t, "Kaze", r.Winner)
 	})
 }
+
+// TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID pins the bc-dnst
+// rule that a fighter picked by squad number before being named stays on
+// like any other: the client records such a winner as the TEAM name (there
+// is no fighter name to record) alongside the member id, and the advance
+// attributes the bout by id through the shared owner rather than by a name
+// comparison that could never match.
+func TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID(t *testing.T) {
+	bout := state.SubMatchResult{
+		Position:       2,
+		SideA:          "Aoki",
+		SideAMemberID:  "id-aoki",
+		SideB:          "",
+		SideBMemberID:  "id-b2",
+		Winner:         "Minami Budokan",
+		WinnerMemberID: "id-b2",
+		Decision:       "fought",
+	}
+	res := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: bout,
+		SideA:    []kachinukiFighter{{Name: "", MemberID: "id-a2"}, {Name: "", MemberID: "id-a3"}},
+		SideB:    []kachinukiFighter{{Name: "", MemberID: "id-b3"}},
+	})
+	require.NotNil(t, res.Next, "the nameless winner must stay on and be paired against side A's next fighter")
+	assert.Equal(t, 3, res.Next.Position)
+	assert.Equal(t, "id-a2", res.Next.SideAMemberID, "side A sends its next fighter, by id")
+	assert.Equal(t, "id-b2", res.Next.SideBMemberID, "the winner keeps its side and its id")
+	assert.False(t, res.MatchEnded)
+}

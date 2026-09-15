@@ -151,18 +151,25 @@ func AdvanceKachinuki(in AdvanceKachinukiInput) AdvanceKachinukiResult {
 	// there is malformed input, not a draw.
 	hikiwake := state.IsDraw(last.Decision)
 
-	switch {
-	case hikiwake:
+	// Which side stayed on is decided by the ONE owner of "which side won
+	// this bout" (domain.SubBoutAttribution + AttributeWinnerSide): the
+	// row's member ids first, its names second. A fighter picked by squad
+	// number before being named (bc-dnst) has an empty name and a member
+	// id, and the client records such a winner as its TEAM name plus the
+	// member id, so a name comparison alone could never see it stay on.
+	if hikiwake {
 		return advanceAfterHikiwake(in)
-	case last.Winner == last.SideA && last.SideA != "":
+	}
+	switch domain.AttributeWinnerSide(domain.SubBoutAttribution(last.Attribution())) {
+	case domain.MatchSideA:
 		return advanceWinnerStays(kachinukiFighter{Name: last.SideA, MemberID: last.SideAMemberID}, last.Position, in.SideB, "A")
-	case last.Winner == last.SideB && last.SideB != "":
+	case domain.MatchSideB:
 		return advanceWinnerStays(kachinukiFighter{Name: last.SideB, MemberID: last.SideBMemberID}, last.Position, in.SideA, "B")
 	default:
 		// Unexpected: Winner is set but doesn't match either bout
-		// side. Treat as a no-op (no advancement) so callers fall
-		// back to manual scheduling instead of silently producing a
-		// wrong pairing.
+		// side by id or by name. Treat as a no-op (no advancement) so
+		// callers fall back to manual scheduling instead of silently
+		// producing a wrong pairing.
 		log.Printf("engine.AdvanceKachinuki: unrecognized bout outcome, winner=%q sideA=%q sideB=%q decision=%q; no advancement",
 			last.Winner, last.SideA, last.SideB, last.Decision)
 		return AdvanceKachinukiResult{}
@@ -587,12 +594,14 @@ func (e *Engine) MaybeAdvanceKachinuki(compID, matchID string) (bool, []state.Su
 		return false, nil, nil
 	}
 	// Identity guard: retirement math needs to know WHO fought. A bout
-	// carrying an outcome but no side names (e.g. a client that could not
-	// resolve the lineup submitted a nameless hikiwake) retires nobody,
-	// and advancing off it would append a wrong pairing and shift the
-	// whole sequence by one. Refuse loudly and leave the match untouched
-	// so the operator can correct the bout.
-	if last.SideA == "" && last.SideB == "" {
+	// carrying an outcome but no side identity at all (e.g. a client that
+	// could not resolve the lineup submitted a nameless hikiwake) retires
+	// nobody, and advancing off it would append a wrong pairing and shift
+	// the whole sequence by one. Refuse loudly and leave the match
+	// untouched so the operator can correct the bout. A side is identified
+	// by its name OR its member id: a fighter picked by squad number and
+	// not yet named (bc-dnst) carries only the id, and that is enough.
+	if last.SideA == "" && last.SideAMemberID == "" && last.SideB == "" && last.SideBMemberID == "" {
 		log.Printf("engine.MaybeAdvanceKachinuki compId=%s matchId=%s: last bout (position %d) has an outcome but no side names; skipping advancement", compID, matchID, last.Position)
 		return false, nil, nil
 	}

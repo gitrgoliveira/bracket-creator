@@ -55,8 +55,16 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
   let origAPI, origHelpers, origResolveRound, origCompMatches;
 
   const COMP = { id: 'comp-1', name: 'Team Event', kind: 'team', teamSize: 3 };
-  const TEAM = { id: 'uuid-grouped', name: 'Grouped Team' };
+  const TEAM = { id: 'uuid-grouped', name: 'Grouped Team', number: 'T5' };
   const MATCH = { id: 'match-1', compId: 'comp-1', sideA: { id: 'uuid-grouped', name: 'Grouped Team' }, sideB: { id: 'other', name: 'Other' }, status: 'scheduled' };
+  // A 7-slot squad: 3 named members (index 1-3) and 4 blank reserve slots
+  // (index 4-7, bc-dnst's SquadReserveSlots), the shape the row's list must
+  // now show every one of (CLAUDE.md "Team Lineups & Kachinuki").
+  const SQUAD_7 = Array.from({ length: 7 }, (_, i) => ({
+    id: `mem-${i + 1}`,
+    index: i + 1,
+    name: i < 3 ? `Fighter ${i + 1}` : '',
+  }));
 
   beforeEach(async () => {
     origAPI = global.window.API;
@@ -237,5 +245,61 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     const text = collectText(warning);
     expect(text).toContain('squad list could not be loaded');
     expect(text).not.toContain('Sato'); // no per-position enumeration
+  });
+
+  // bc-dnst: the "Enter lineup" panel offers every squad slot, blank ones
+  // included, by number (squadMemberLabel), same as the score sheet's row
+  // list -- not just already-named members.
+  it('shows every squad slot, blank ones included, as a labelled entry in a position\'s list', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+
+    const tree = await mount();
+    const pickers = findComponents(tree, 'LineupNameInput');
+    const senpoRoster = pickers[0].props.roster;
+
+    expect(senpoRoster.length).toBe(7);
+    expect(senpoRoster.every(e => e.label)).toBe(true);
+    expect(senpoRoster[0]).toMatchObject({ id: 'mem-1', name: 'Fighter 1', label: 'T5.1' });
+    expect(senpoRoster[6]).toMatchObject({ id: 'mem-7', name: '', label: 'T5.7' });
+  });
+
+  it('a member picked at Senpo is not offered at Jiho', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+
+    let tree = await mount();
+    let pickers = findComponents(tree, 'LineupNameInput');
+    // Pick SQUAD_7[0] (mem-1) at position "1" (Senpo): onSelect's second
+    // argument is the whole squad-member entry, exactly what LineupNameInput
+    // hands back for an object roster entry.
+    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    tree = runtime.currentTree();
+    pickers = findComponents(tree, 'LineupNameInput');
+
+    const jihoRoster = pickers[1].props.roster; // position "2"
+    expect(jihoRoster.some(e => e && e.id === 'mem-1')).toBe(false);
+    // Still offered at its OWN position, so re-opening Senpo's own picker
+    // does not hide the member it currently holds.
+    const senpoRoster = pickers[0].props.roster;
+    expect(senpoRoster.some(e => e && e.id === 'mem-1')).toBe(true);
+  });
+
+  it('picking an entry writes its id in memberIds, without a resolver round trip', async () => {
+    global.window.API.fetchSquads = vi.fn().mockResolvedValue({ 'uuid-grouped': SQUAD_7 });
+
+    let tree = await mount();
+    const pickers = findComponents(tree, 'LineupNameInput');
+    pickers[0].props.onSelect('Fighter 1', SQUAD_7[0]);
+    tree = runtime.currentTree();
+    saveButton(tree).props.onClick();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The picked id is already known, so this position never goes through
+    // resolveMemberIdsForPositions at all.
+    expect(global.window.AdminLineupHelpers.resolveMemberIdsForPositions).not.toHaveBeenCalled();
+    expect(global.window.API.putMatchLineup).toHaveBeenCalled();
+    const call = global.window.API.putMatchLineup.mock.calls.at(-1);
+    expect(call[3]).toEqual({ 1: 'Fighter 1' });
+    expect(call[5]).toEqual({ 1: 'mem-1' });
   });
 });

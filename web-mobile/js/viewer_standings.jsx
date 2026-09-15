@@ -406,46 +406,6 @@ export function LeagueStandingsViewer({ competition, poolMatches, tweaks, onMatc
   );
 }
 
-export const PoolMatchRow = React.memo(({ m, onClick }) => {
-  const aRawName = typeof m.sideA === "object" ? m.sideA?.name : m.sideA;
-  const bRawName = typeof m.sideB === "object" ? m.sideB?.name : m.sideB;
-  // Competitor numbers ride on the OUTER side of the name via NumberedName
-  // below (Shiro's before it, Aka's after it); the winner comparison still
-  // uses the bare name/id.
-  const aNum = m.sideA?.number || "";
-  const bNum = m.sideB?.number || "";
-  // sameCompetitor (competitor_identity.jsx): id decides whenever the
-  // winner carries one, name only when neither side does. A name-only
-  // compare would light BOTH sides when two competitors share a display
-  // name (different dojos) and face each other.
-  const aId = typeof m.sideA === "object" ? m.sideA?.id : "";
-  const bId = typeof m.sideB === "object" ? m.sideB?.id : "";
-  const aWin = sameCompetitor(m.winner, { id: aId, name: aRawName });
-  const bWin = sameCompetitor(m.winner, { id: bId, name: bRawName });
-
-  // Render a non-interactive <div> when there's no click handler (read-only
-  // reuse, e.g. the operator console passes onClick=null) so we don't leave a
-  // focusable button that does nothing for keyboard/screen-reader users.
-  const Tag = onClick ? "button" : "div";
-  const interactiveProps = onClick ? { type: "button", onClick } : {};
-  return (
-    <Tag className={`pool-match-row${m.status === "running" ? " is-running" : ""}`} {...interactiveProps}>
-      <div className={`pool-match-row__side pool-match-row__side--right ${bWin ? "pool-match-row__side--win" : ""}`}>
-        <span className="pool-match-row__name"><NumberedName side="shiro" name={bRawName} number={bNum} clip /></span>
-        <span className="pool-match-row__badge pool-match-row__badge--shiro">SHIRO</span>
-      </div>
-      <span className="pool-match-row__score">
-        {window.matchStateCell(m)}
-      </span>
-      <div className={`pool-match-row__side ${aWin ? "pool-match-row__side--win" : ""}`}>
-        <span className="pool-match-row__badge pool-match-row__badge--aka">AKA</span>
-        <span className="pool-match-row__name"><NumberedName side="aka" name={aRawName} number={aNum} clip /></span>
-      </div>
-    </Tag>
-  );
-});
-PoolMatchRow.displayName = "PoolMatchRow";
-
 // Round-robin matrix for a single pool/league. Each off-diagonal cell shows the
 // row player's result (W/L/X) against the column player; diagonal cells are self.
 // isEngi is threaded in as a prop (rather than read off a `competition` object,
@@ -663,7 +623,8 @@ function rankOrdinal(rank) {
 
 // PoolNumberedMatchRow renders a single numbered pool match with Shiro/Aka
 // sides and the formatted score string (via formatIpponsScore when completed).
-// sideB = Shiro (left), sideA = Aka (right): matches PoolMatchRow convention.
+// sideB = Shiro (left), sideA = Aka (right): the SHIRO-left/AKA-right
+// convention shared across every surface (score_display.test.jsx).
 // isEngi: when true, each side is an engi pair (combined "Name 1 - Name 2") —
 // render member1 over member2 stacked, matching the engi score editor layout.
 export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }) => {
@@ -948,7 +909,8 @@ export function PoolsViewer({ pools, standings, poolMatches, tweaks, competition
                 <div className="pool-match-numbered-list">
                   {matches.map((m, idx) => {
                     if (isTeam) {
-                      // Team: enrich match the same way as the legacy PoolMatchRow path.
+                      // Team: enrich match the same way as the pool matches list's
+                      // own team-match branch above.
                       // A daihyosen ('-DH-') or tiebreaker ('-TB-') is a single rep
                       // bout even in a team comp, so force compKind/teamSize to route
                       // it to the individual editor (matches enrichPoolMatchWithComp).

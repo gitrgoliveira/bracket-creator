@@ -16,8 +16,13 @@ A team's people are its squad. A team starts with one position per fighter the
 competition's team size defines, plus two reserve positions, each numbered and
 waiting for a name. Fill those names in from the **Squad members** section of the competition's **Settings**
 page, or build the squad as you go from the lineup panel. In the panel, pick an existing member
-for a position, or type a new name. The app adds a new name to the squad in the same step, but confirms first, so a
-mistyped name cannot quietly create a person nobody expected.
+for a position, or type a new name. Every position the squad has is offered, including the ones
+still waiting for a name, so you can field a fighter by number first and fill the name in later;
+a fighter picked that way counts in every format, winner-stays-on included. Typing a name into a
+position names its blank slot when one exists; otherwise the app adds a new position to the
+squad in the same step. Either way it confirms first, so a mistyped name cannot quietly create
+a person nobody expected. Nobody can be placed at two positions of the same lineup: the app
+refuses the second pick and tells you where that fighter already is.
 
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person

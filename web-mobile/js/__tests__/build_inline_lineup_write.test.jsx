@@ -205,4 +205,64 @@ describe('buildInlineLineupWrite', () => {
       expect(out.memberIds.jiho).toBe('mem-tanaka');
     });
   });
+
+  // bc-dnst: a squad member may only occupy ONE position in a lineup at a
+  // time. buildInlineLineupWrite refuses the write entirely (no
+  // positions/memberIds are returned, so submitInlineLineup never calls
+  // putMatchLineup) rather than letting the server's own duplicate-member
+  // guard (domain.TeamLineup.ValidatePositions) 400 a write the operator
+  // never needed to send.
+  describe('duplicate member guard (bc-dnst)', () => {
+    const twoSlotLineup = {
+      positions: { senpo: 'Sato', jiho: 'Tanaka' },
+      memberIds: { senpo: 'mem-sato', jiho: 'mem-tanaka' },
+    };
+
+    it('picked member already elsewhere is refused, not written', async () => {
+      const resolveMemberIdsForPositions = vi.fn();
+      global.window.AdminLineupHelpers = { resolveMemberIdsForPositions };
+
+      const member = { id: 'mem-sato', index: 1, name: 'Sato' };
+      const out = await buildInlineLineupWrite(
+        'comp1', 'team1', twoSlotLineup, [], 'chuken', 'Sato', 'pw', member
+      );
+
+      expect(out.refused).toEqual({ position: 'senpo', name: 'Sato' });
+      expect(out.positions).toBeUndefined();
+      expect(out.memberIds).toBeUndefined();
+      // Picked-by-id path never calls the resolver anyway, but confirm the
+      // refusal doesn't trigger it either.
+      expect(resolveMemberIdsForPositions).not.toHaveBeenCalled();
+    });
+
+    it('a typed name resolving to a member already placed elsewhere is refused', async () => {
+      const resolveMemberIdsForPositions = vi.fn().mockResolvedValue({
+        // The resolver matched the typed name to the EXISTING "Sato" member,
+        // who is already at senpo.
+        memberIds: { chuken: 'mem-sato' },
+        squad: [{ id: 'mem-sato', name: 'Sato' }],
+        failures: [],
+      });
+      global.window.AdminLineupHelpers = { resolveMemberIdsForPositions };
+
+      const out = await buildInlineLineupWrite(
+        'comp1', 'team1', twoSlotLineup, [{ id: 'mem-sato', name: 'Sato' }], 'chuken', 'Sato', 'pw'
+      );
+
+      expect(out.refused).toEqual({ position: 'senpo', name: 'Sato' });
+      expect(out.positions).toBeUndefined();
+      expect(out.memberIds).toBeUndefined();
+    });
+
+    it('the same member re-picked at its OWN position is written normally', async () => {
+      const member = { id: 'mem-sato', index: 1, name: 'Sato' };
+      const out = await buildInlineLineupWrite(
+        'comp1', 'team1', twoSlotLineup, [], 'senpo', 'Sato', 'pw', member
+      );
+
+      expect(out.refused).toBeUndefined();
+      expect(out.positions).toEqual({ senpo: 'Sato', jiho: 'Tanaka' });
+      expect(out.memberIds).toEqual({ senpo: 'mem-sato', jiho: 'mem-tanaka' });
+    });
+  });
 });

@@ -3,6 +3,7 @@
 
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+import { squadMemberLabel } from './squad_member_label.jsx';
 
 const { useState: useStateA, useEffect: useEffectA } = React;
 
@@ -82,8 +83,8 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     ? lineupPositionsForSize(teamSize)
     : [];
   // The team's members as the PRE-SQUAD model stored them, in the roster
-  // row's untyped metadata array. Kept only as a fallback: see `roster`
-  // below, which prefers the squad.
+  // row's untyped metadata array. Kept only as a fallback tail: see
+  // `suggestions` below, which leads with the squad.
   const legacyRoster = (typeof lineupRosterFor === "function")
     ? lineupRosterFor(team)
     : [];
@@ -111,6 +112,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     positions.forEach(p => { init[p.key] = ""; });
     return init;
   });
+  // bc-dnst: the squad member id backing each position, keyed the same as
+  // `values`. Set directly (no resolver round trip) when the operator picks
+  // one of the roster's numbered squad entries; cleared when a position is
+  // cleared or a free name is typed over it, in which case save() falls
+  // back to resolving that position's name through the shared resolver, as
+  // it always has.
+  const [memberIds, setMemberIds] = useStateA({});
   const [loading, setLoading] = useStateA(true);
   const [saving, setSaving] = useStateA(false);
   const [copying, setCopying] = useStateA(false);
@@ -126,9 +134,12 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
 
   // bc-pnum gap closure: this team's squad, loaded once so save() can
   // resolve a typed/picked name to its member id (see doSave below) --
-  // this panel is free-text (LineupNameInput), unlike the round-scoped
-  // AdminLineup form's select-by-id picker, so a name→id lookup is needed
-  // here at all. Independent of the lineup-load effect below: a squad
+  // this panel's picker (LineupNameInput) stays typeable, unlike the
+  // round-scoped AdminLineup form's strict select-by-id dropdown: it now
+  // ALSO offers every numbered squad entry as a pickable suggestion
+  // (bc-dnst, see `suggestions` below), but a freely typed name is still
+  // accepted, so a name→id lookup is still needed on that path. Independent
+  // of the lineup-load effect below: a squad
   // fetch failure must not block loading OR saving the lineup itself, so
   // it is swallowed and the resolver (window.AdminLineupHelpers.
   // resolveMemberIdsForPositions) simply mints for every name it cannot
@@ -143,23 +154,80 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // which was their home before this PR moved them out, so a team whose
   // members were entered through the squad UI arrived here looking empty --
   // the operator was told "this team has no registered members" under a full
-  // squad, and had to retype every name the app already knew. Blank entries
-  // are skipped: a squad is seeded with one unnamed position per team size,
-  // and an unnamed position is not a person to suggest.
+  // squad, and had to retype every name the app already knew.
   //
-  // The metadata array stays as the fallback for the two cases where no
-  // squad comes back, both of them reachable. The load-time migration folds
-  // a team's metadata into a squad keyed by its PARTICIPANT ID, and skips a
-  // roster row that has no id -- the legacy state this PR's own data-issue
-  // notices describe -- so such a team has members in metadata and nothing
-  // under its key. And the fetch above can simply fail, where falling back
-  // beats suggesting nothing. Migration does not clear metadata, so the
-  // fallback still has names to offer in both.
-  const squadNames = squad.map(m => ((m && m.name) || "").trim()).filter(Boolean);
-  const roster = squadNames.length > 0 ? squadNames : legacyRoster;
-  const suggestions = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
-    ? window.AdminLineupHelpers.mergeRosterWithAssigned(roster, { positions: values })
-    : roster;
+  // bc-dnst (operator ruling 2026-09-15, restated in CLAUDE.md's "Team
+  // Lineups & Kachinuki"): the list must show every squad slot, blank ones
+  // included, by NUMBER alone (squadMemberLabel), so the operator can pick a
+  // number and type a name into it -- not just the already-named members.
+  // squadEntries below is therefore every member, unfiltered, in index
+  // order; only the LEGACY metadata tail below still drops blanks (a bare
+  // name string with no number to show is not worth suggesting twice).
+  //
+  // The metadata array stays as a fallback tail: names entered before the
+  // squad existed, or names a squad fetch failure left this session unable
+  // to see. The load-time migration folds a team's metadata into a squad
+  // keyed by its PARTICIPANT ID, and skips a roster row that has no id --
+  // the legacy state this PR's own data-issue notices describe -- so such a
+  // team has members in metadata and nothing under its key. And the fetch
+  // above can simply fail, where falling back beats suggesting nothing.
+  // Migration does not clear metadata, so the fallback still has names to
+  // offer in both.
+  const teamNumber = team?.number || team?.Number || "";
+  const squadSorted = squad.slice().sort((x, y) => (x?.index || 0) - (y?.index || 0));
+  const squadEntries = squadSorted.map(mem => ({
+    id: mem?.id || "",
+    index: mem?.index || 0,
+    name: String(mem?.name || "").trim(),
+    label: squadMemberLabel(teamNumber, mem?.index),
+  }));
+  const squadNameSet = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
+  const seen = new Set(squadNameSet);
+  const legacyBase = legacyRoster.filter(n => {
+    const key = String(n).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const legacyMerged = (window.AdminLineupHelpers && typeof window.AdminLineupHelpers.mergeRosterWithAssigned === "function")
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned(legacyBase, { positions: values })
+    : legacyBase;
+  // merged may re-add a position's own currently-assigned name even when it
+  // matches a squad member (mergeRosterWithAssigned's own job, unaware of
+  // the squad); strip those back out so a squad member is never listed
+  // twice -- once as its object entry, once as a plain string.
+  const legacyEntries = legacyMerged.filter(n => {
+    const key = String(n).trim().toLowerCase();
+    return key && !squadNameSet.has(key);
+  });
+  const suggestions = [...squadEntries, ...legacyEntries];
+  // A fixed-order lineup fields each fighter once: a member (by id) or a
+  // plain legacy name already placed at ANOTHER position is not offered
+  // again here, so the same fighter cannot be picked onto two rows. A
+  // blank-named squad entry is compared by id only -- every blank slot
+  // shares the same empty name, so matching on name would hide every other
+  // blank slot the moment one of them is placed (bc-dnst rule, mirrored
+  // from admin_scoring_team.jsx's withoutPlacedElsewhere).
+  const pickedLabelFor = (posKey) => {
+    const id = memberIds[posKey];
+    return id ? (squadEntries.find(e => e.id === id)?.label || "") : "";
+  };
+  const rosterForPosition = (posKey) => {
+    const otherMemberIds = new Set(
+      Object.entries(memberIds).filter(([key, id]) => key !== posKey && id).map(([, id]) => id)
+    );
+    const otherNames = new Set(
+      Object.entries(values)
+        .filter(([key, name]) => key !== posKey && String(name || "").trim())
+        .map(([, name]) => String(name).trim().toLowerCase())
+    );
+    return suggestions.filter(entry => {
+      if (typeof entry === "string") return !otherNames.has(entry.trim().toLowerCase());
+      if (entry.id && otherMemberIds.has(entry.id)) return false;
+      if (!entry.name) return true;
+      return !otherNames.has(entry.name.trim().toLowerCase());
+    });
+  };
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) return;
@@ -187,10 +255,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
         if (cancelled) return;
         if (matchLineup) {
           const next = {};
+          const nextIds = {};
           positions.forEach(p => {
             next[p.key] = (matchLineup.positions || {})[p.key] || "";
+            nextIds[p.key] = (matchLineup.memberIds || {})[p.key] || "";
           });
           setValues(next);
+          setMemberIds(nextIds);
           setIsMatchOverride(true);
         } else {
           // No per-match entry: reflect the round default (fetch-and-show,
@@ -201,10 +272,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
             if (cancelled) return;
             if (roundLineup) {
               const next = {};
+              const nextIds = {};
               positions.forEach(p => {
                 next[p.key] = (roundLineup.positions || {})[p.key] || "";
+                nextIds[p.key] = (roundLineup.memberIds || {})[p.key] || "";
               });
               setValues(next);
+              setMemberIds(nextIds);
             }
           } catch (_e) { /* no round lineup: leave blank */ }
           setIsMatchOverride(false);
@@ -218,14 +292,18 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     return () => { cancelled = true; };
   }, [compId, teamId, matchId]);
 
-  const doSave = async (positionsOut, successMsg = "Match lineup saved") => {
+  // knownMemberIds (bc-dnst): the subset of positionsOut whose member id is
+  // already known -- picked directly off the roster's numbered entries
+  // (see onSelect above), never resolved by name. Those positions skip the
+  // resolver entirely; only positions with NO known id still go through it.
+  const doSave = async (positionsOut, successMsg = "Match lineup saved", knownMemberIds = {}) => {
     setError("");
     setLineupWarning("");
     setSaving(true);
     try {
-      // bc-pnum gap closure: resolve each occupied position's name to a
-      // squad member id before writing. A name not on the squad is a
-      // substitute typed straight into the slot; per operator ruling,
+      // bc-pnum gap closure: resolve each occupied-but-unresolved position's
+      // name to a squad member id before writing. A name not on the squad is
+      // a substitute typed straight into the slot; per operator ruling,
       // adding a new name in a position MINTS the member in that one step
       // (see resolveMemberIdsForPositions, admin_lineup.jsx -- the ONE
       // place this resolve/mint contract lives, shared with the inline
@@ -236,20 +314,27 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       // behaves today. bc-cse: the failure is no longer discarded either --
       // `memberFailures` carries it through to the warning shown below on
       // a successful save.
-      let memberIdsOut = {};
+      let memberIdsOut = { ...knownMemberIds };
       let memberFailures = [];
-      try {
-        const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
-        if (typeof resolver === "function") {
-          const resolved = await resolver(compId, teamId, positionsOut, squad, password);
-          memberIdsOut = resolved.memberIds || {};
-          memberFailures = resolved.failures || [];
-          setSquad(resolved.squad);
+      const positionsForResolver = {};
+      Object.keys(positionsOut).forEach(key => {
+        const name = (positionsOut[key] || "").trim();
+        if (name && !knownMemberIds[key]) positionsForResolver[key] = name;
+      });
+      if (Object.keys(positionsForResolver).length > 0) {
+        try {
+          const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
+          if (typeof resolver === "function") {
+            const resolved = await resolver(compId, teamId, positionsForResolver, squad, password);
+            memberIdsOut = { ...memberIdsOut, ...resolved.memberIds };
+            memberFailures = resolved.failures || [];
+            setSquad(resolved.squad);
+          }
+        } catch (_e) {
+          // Defense in depth on top of the helper's own per-position mint
+          // catch: even an unexpected failure IN the resolver itself must
+          // not block the save. Proceed with the names alone.
         }
-      } catch (_e) {
-        // Defense in depth on top of the helper's own per-position mint
-        // catch: even an unexpected failure IN the resolver itself must
-        // not block the save. Proceed with the names alone.
       }
       const hasMemberIds = Object.keys(memberIdsOut).length > 0;
       const updated = await window.API.putMatchLineup(
@@ -267,6 +352,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const next = {};
       positions.forEach(p => { next[p.key] = (updated.positions || {})[p.key] || ""; });
       setValues(next);
+      setMemberIds({ ...memberIdsOut, ...updated.memberIds });
       setIsMatchOverride(true);
       if (typeof showToast === "function") showToast(successMsg);
       const composer = window.AdminLineupHelpers?.memberIdentityWarning;
@@ -286,13 +372,23 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     // validator treats an absent key the same as an explicit "": both
     // "missing". Sending explicit empties only bloats the persisted YAML.
     const positionsOut = {};
+    const knownMemberIds = {};
     positions.forEach(p => {
       // Trim here too (not only at the picker's onSelect) so a Save can never
       // persist leading/trailing or whitespace-only names: matches AdminLineup.
       const v = (values[p.key] || "").trim();
-      if (v) positionsOut[p.key] = v;
+      const pickedId = memberIds[p.key];
+      if (pickedId) {
+        // A picked squad entry is a real placement even when its member is
+        // still unnamed (bc-dnst): keep the position so the id survives,
+        // exactly like buildInlineLineupWrite (admin_scoring_team.jsx).
+        positionsOut[p.key] = v;
+        knownMemberIds[p.key] = pickedId;
+      } else if (v) {
+        positionsOut[p.key] = v;
+      }
     });
-    doSave(positionsOut);
+    doSave(positionsOut, undefined, knownMemberIds);
   };
 
   const hasSiblings = allMatches.some(m => m.id !== matchId && matchInvolvesTeam(m));
@@ -372,17 +468,39 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
         {positions.map(p => (
           <label key={p.key} data-testid={`match-lineup-pos-${teamId}-${p.key}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12 }}>{p.label}</span>
+            {/* The picked member's number (bc-dnst) sits UNDER the position
+                name, inside the label's fixed column: a picked blank slot has
+                no name, so without it the box reads empty after the pick and
+                the operator cannot see which slot the position holds. Stacked
+                rather than beside the box so it adds no width: the box keeps
+                its intrinsic width as flex basis, so a chip beside it grew the
+                column's minimum past the modal and brought in a scrollbar. */}
+            <span style={{ minWidth: 72, fontWeight: 600, color: "var(--ink-2)", fontSize: 12, display: "flex", flexDirection: "column" }}>
+              {p.label}
+              {pickedLabelFor(p.key) ? <span className="pmf__opt-label">{pickedLabelFor(p.key)}</span> : null}
+            </span>
             <LineupNameInput
               value={values[p.key] || ""}
-              roster={suggestions}
+              roster={rosterForPosition(p.key)}
               ariaLabel={`${p.label} player`}
               disabled={saving || copying}
-              onSelect={(name) => setValues(v => ({ ...v, [p.key]: (name || "").trim() }))}
+              onSelect={(name, entry) => {
+                setValues(v => ({ ...v, [p.key]: (name || "").trim() }));
+                // A picked squad entry (LineupNameInput's second onSelect
+                // argument) carries its own member id: record it directly.
+                // A typed/"+ Add" name (no entry) or the clear button falls
+                // back to the resolver on save, as it always has.
+                setMemberIds(ids => {
+                  if (entry && entry.id) return { ...ids, [p.key]: entry.id };
+                  const next = { ...ids };
+                  delete next[p.key];
+                  return next;
+                });
+              }}
             />
           </label>
         ))}
-        {roster.length === 0 && (
+        {suggestions.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
             This team has no registered members: type each competitor's name directly.
           </div>

@@ -6,7 +6,7 @@
 // mounting anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning } from '../admin_lineup.jsx';
+import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition } from '../admin_lineup.jsx';
 
 const SQUAD = [
   { id: 'mem-sato', index: 0, name: 'Sato' },
@@ -236,6 +236,41 @@ describe('resolveMemberIdsForPositions', () => {
     expect(memberIds).toEqual({ senpo: 'm6' });
     expect(nextSquad.find(m => m.id === 'm6').name).toBe('Picked Name');
     expect(nextSquad.find(m => m.id === 'm1').name).toBe('');
+  });
+});
+
+// bc-dnst: blankMemberForPosition is the pure lookup resolveMemberIdsForPositions
+// uses internally (rename vs mint) and commitAdd (admin_lineup.jsx's own
+// "+ Add new member…" option) now shares, so the two "does this slot already
+// have a home" checks cannot drift.
+describe('blankMemberForPosition', () => {
+  const BLANK_SQUAD = [
+    { id: 'm1', index: 1, name: '' },
+    { id: 'm2', index: 2, name: '' },
+  ];
+
+  it('finds the blank member seeded at the position\'s own index', () => {
+    expect(blankMemberForPosition(BLANK_SQUAD, 'senpo', {})).toEqual(BLANK_SQUAD[0]);
+    expect(blankMemberForPosition(BLANK_SQUAD, '2', {})).toEqual(BLANK_SQUAD[1]);
+  });
+
+  it('prefers the member named by currentIds over the index default', () => {
+    const squad = [
+      { id: 'm1', index: 1, name: '' }, // senpo's own index default
+      { id: 'm6', index: 6, name: '' }, // the reserve actually picked into senpo
+    ];
+    expect(blankMemberForPosition(squad, 'senpo', { senpo: 'm6' })).toEqual(squad[1]);
+  });
+
+  it('returns null when the position has no blank slot (already named, or none at that index)', () => {
+    const namedSquad = [{ id: 'm1', index: 1, name: 'Ito' }];
+    expect(blankMemberForPosition(namedSquad, 'senpo', {})).toBeNull();
+    expect(blankMemberForPosition(BLANK_SQUAD, 'taisho', {})).toBeNull();
+  });
+
+  it('tolerates a missing/empty squad', () => {
+    expect(blankMemberForPosition([], 'senpo', {})).toBeNull();
+    expect(blankMemberForPosition(undefined, 'senpo', {})).toBeNull();
   });
 });
 

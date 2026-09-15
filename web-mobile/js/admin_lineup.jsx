@@ -173,6 +173,32 @@ function positionNumberForKey(posKey) {
   return idx >= 0 ? idx + 1 : 0;
 }
 
+// blankMemberForPosition finds the squad member a name typed or picked into
+// `posKey` should be attached to when no EXISTING named member already
+// matches it by name: the member currently pinned to this position by id
+// (currentIds[posKey]), when that member is still blank, else the member
+// SEEDED for this position's index (positionNumberForKey). Returns null
+// when neither exists, meaning the caller must mint a new squad member.
+//
+// Shared by resolveMemberIdsForPositions below (the score sheet's inline
+// picker and the match-scoped panel) and commitAdd (the Lineups page's own
+// "+ Add new member…" option, bc-dnst): both need to answer the same
+// question, "does this slot already have a blank home, or would this
+// mint?", and a second, independently-written lookup would risk drifting
+// from this one the first time either surface's rule changed alone.
+function blankMemberForPosition(squad, posKey, currentIds) {
+  const currentSquad = Array.isArray(squad) ? squad : [];
+  const currentMemberId = (currentIds || {})[posKey];
+  const pickedBlankMember = currentMemberId
+    ? currentSquad.find(mem => mem && mem.id === currentMemberId && !(mem.name || "").trim())
+    : null;
+  if (pickedBlankMember) return pickedBlankMember;
+  const slotNumber = positionNumberForKey(posKey);
+  return slotNumber
+    ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim()) || null
+    : null;
+}
+
 // resolveMemberIdsForPositions resolves a WHOLE positions map (posKey →
 // name) to its memberIds counterpart against an already-loaded `squad`.
 // Shared by BOTH match-scoped lineup writers (admin_schedule_lineup.jsx's
@@ -248,14 +274,7 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
       memberIds[posKey] = existing.id;
       continue;
     }
-    const currentMemberId = ids[posKey];
-    const pickedBlankMember = currentMemberId
-      ? currentSquad.find(mem => mem && mem.id === currentMemberId && !(mem.name || "").trim())
-      : null;
-    const slotNumber = positionNumberForKey(posKey);
-    const blankMember = pickedBlankMember || (slotNumber
-      ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim())
-      : null);
+    const blankMember = blankMemberForPosition(currentSquad, posKey, ids);
     if (blankMember) {
       try {
         await window.API.renameTeamMember(compId, teamId, blankMember.id, name, password);
@@ -322,6 +341,13 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // squadMemberLabel. Not the member's: a squad member has no number of
   // its own, only an index, and the label composes the two together.
   const teamNumber = team?.number || team?.Number || "";
+  // A slot's visible handle on THIS page. squadMemberLabel is "" before the
+  // draw (a competitor number belongs to a draw position, and this page is
+  // mostly used before one exists), and a blank slot has no name to fall
+  // back on, so it would otherwise render as an empty option and a bare
+  // "Rename" row (bc-dnst). The member's index is the one stable handle it
+  // always has, so that is the pre-draw label; once numbered, "T1.3" wins.
+  const slotLabelOf = (m) => squadMemberLabel(teamNumber, m?.index) || `Slot ${m?.index || ""}`.trim();
 
   // Position state mirrors domain.TeamLineup: display names in `values`,
   // squad member ids in `memberIds`, keyed by the SAME position key so a
@@ -444,33 +470,50 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     if (member) selectMember(posKey, member);
   };
 
-  // Operation 2 (ADD): mint the member server-side, then place it, in one
-  // round trip's worth of user action. commitAdd is the only place that
-  // calls addTeamMember: a new name is never stored as a bare string.
+  // Operation 2 (ADD): resolve the typed name through the SAME rule the
+  // score sheet's inline picker uses (resolveMemberIdsForPositions, bc-dnst),
+  // so naming a position whose seeded slot is still blank RENAMES that
+  // blank member instead of minting a new one -- the score sheet and the
+  // Lineups page must agree on when a name mints a new squad position and
+  // when it merely fills one that already exists. Minting still happens,
+  // through the very same resolver, whenever the position has no blank
+  // slot to take the name.
   //
-  // bc-pnum: confirm before MINTING. Creating a squad member is rare and
-  // deliberate -- picking an existing member from the dropdown above
-  // creates nothing, and only this explicit "+ Add new member…" choice
-  // does -- so a confirmation here is cheap and is the last guard against
-  // a typo becoming a permanent squad position. Declining leaves the
-  // add-row open with the typed name intact so the operator can correct it
-  // rather than restarting the picker.
+  // bc-pnum: confirm first. Creating a squad member is rare and deliberate,
+  // so a confirmation here is cheap and is the last guard against a typo
+  // becoming a permanent squad position; the copy names which of the two
+  // outcomes will happen (blankMemberForPosition decides which, using the
+  // same lookup the resolver itself uses) so the operator is never
+  // surprised by which one occurred. Declining leaves the add-row open
+  // with the typed name intact so the operator can correct it rather than
+  // restarting the picker.
   const commitAdd = async () => {
     const posKey = addingPos;
     const name = addingName.trim();
     if (!posKey || !name) { setAddingPos(null); setAddingName(""); return; }
+    const blankMember = blankMemberForPosition(squad, posKey, memberIds);
+    const message = blankMember
+      ? `Name ${slotLabelOf(blankMember)} as "${name}"?`
+      : `Add "${name}" as a new squad member of ${team?.name || team?.Name || "this team"}? This adds a new position to the squad. Once added, it can be cleared but never removed.`;
     const ok = await window.confirmDialog({
-      message: `Add "${name}" as a new squad member of ${team?.name || team?.Name || "this team"}? This adds a new position to the squad. Once added, it can be cleared but never removed.`,
-      confirmLabel: "Add member",
+      message,
+      confirmLabel: blankMember ? "Name slot" : "Add member",
       cancelLabel: "Cancel",
     });
     if (!ok) return;
     setAddBusy(true);
     setError("");
     try {
-      const member = await window.API.addTeamMember(compId, teamId, name, password);
-      setSquad(s => [...s, member]);
-      selectMember(posKey, member);
+      const resolved = await resolveMemberIdsForPositions(compId, teamId, { [posKey]: name }, squad, password, memberIds);
+      const failure = (resolved.failures || []).find(f => f.position === posKey);
+      if (failure) {
+        setError(failure.reason || "Failed to add team member");
+        return;
+      }
+      const resolvedId = resolved.memberIds[posKey];
+      const resolvedMember = resolved.squad.find(m => m.id === resolvedId);
+      setSquad(resolved.squad);
+      if (resolvedMember) selectMember(posKey, resolvedMember);
       setAddingPos(null);
       setAddingName("");
     } catch (e) {
@@ -524,18 +567,21 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     setSaveWarning("");
     setSaving(true);
     try {
-      // Strip empty positions before sending: an omitted key reads as
+      // Strip vacant positions before sending: an omitted key reads as
       // "vacant" the same way an explicit empty string would (the server's
       // ValidatePositions only checks that submitted KEYS are valid for the
       // team size, not whether values are filled), so this is a storage-
-      // hygiene choice, an omitted key, not a stored empty string.
+      // hygiene choice, an omitted key, not a stored empty string. A
+      // position holding a picked squad slot with no name yet is NOT vacant
+      // (bc-dnst): the id is the placement, so it is written with an empty
+      // name, exactly as the match panel and the score sheet write it.
       const positionsOut = {};
       const memberIdsOut = {};
       Object.entries(values).forEach(([k, v]) => {
         // Trim here too (not just on commit), so a Save never persists
         // leading/trailing or whitespace-only names.
         const trimmed = (v || "").trim();
-        if (trimmed) {
+        if (trimmed || memberIds[k]) {
           positionsOut[k] = trimmed;
           if (memberIds[k]) memberIdsOut[k] = memberIds[k];
         }
@@ -635,7 +681,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                     </option>
                     {squadSorted.map(m => (
                       <option key={m.id} value={m.id}>
-                        {[squadMemberLabel(teamNumber, m.index), m.name].filter(Boolean).join(" ")}
+                        {[slotLabelOf(m), m.name].filter(Boolean).join(" ")}
                       </option>
                     ))}
                     <option value="__add__">+ Add new member…</option>
@@ -697,7 +743,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                   ) : (
                     <>
                       <span style={{ fontSize: 13, color: "var(--ink-3)", minWidth: 44 }}>
-                        {squadMemberLabel(teamNumber, m.index)}
+                        {slotLabelOf(m)}
                       </span>
                       <span style={{ flex: 1 }}>{m.name}</span>
                       <button type="button" className="btn btn--ghost btn--sm" onClick={() => startRename(m)}>Rename</button>
@@ -803,10 +849,12 @@ if (typeof window !== "undefined") {
   window.AdminLineupHelpers = {
     positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
     resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning,
+    lineupPositionLabel, blankMemberForPosition,
   };
 }
 
 export {
   AdminLineup, AdminTeamLineupsList, positionsForSize, rosterFor, mergeRosterWithAssigned, teamIdOf,
+  lineupPositionLabel, blankMemberForPosition,
   resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning,
 };

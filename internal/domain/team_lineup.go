@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 )
 
@@ -59,6 +60,12 @@ type TeamLineup struct {
 
 var ErrLineupTeamSizeInvalid = errors.New("team_lineup: teamSize must be positive")
 
+// ErrLineupDuplicateMember is the sentinel behind every duplicate-member
+// error ValidatePositions returns (bc-dnst); check it with errors.Is rather
+// than the message text. checkDuplicateMembers wraps it under a message
+// that names the member id and the two conflicting positions.
+var ErrLineupDuplicateMember = errors.New("member is placed at two positions")
+
 // ValidatePositions checks only that the position KEYS are valid for the team
 // size; it does NOT enforce any completeness or vacancy rule. Position
 // vacancies are irrelevant and never block a lineup (mp-gmcg): team sizes are
@@ -87,6 +94,33 @@ func (t TeamLineup) ValidatePositions(teamSize int) error {
 		if _, ok := allowed[pos]; !ok {
 			return fmt.Errorf("team_lineup: position %q not allowed in %d-person team", pos, teamSize)
 		}
+	}
+	return t.checkDuplicateMembers()
+}
+
+// checkDuplicateMembers rejects a lineup that places the same squad member
+// id at two different positions: a member fights one bout at a time, so a
+// duplicate id is never legal, whether typed via a name that resolved to an
+// already-placed member or picked directly. Positions are walked in sorted
+// order so the reported pair is deterministic rather than depending on map
+// iteration order.
+func (t TeamLineup) checkDuplicateMembers() error {
+	positions := make([]Position, 0, len(t.MemberIDs))
+	for pos := range t.MemberIDs {
+		positions = append(positions, pos)
+	}
+	sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
+
+	seen := make(map[string]Position, len(positions))
+	for _, pos := range positions {
+		id := t.MemberIDs[pos]
+		if id == "" {
+			continue
+		}
+		if prior, ok := seen[id]; ok {
+			return fmt.Errorf("team_lineup: member %q is at both %q and %q: %w", id, prior, pos, ErrLineupDuplicateMember)
+		}
+		seen[id] = pos
 	}
 	return nil
 }
@@ -125,25 +159,31 @@ func canonicalPositionOrder(teamSize int) []Position {
 }
 
 // OrderedMembers returns the occupied lineup slots in canonical position
-// order, skipping vacancies (an empty Positions entry). Each slot's
-// MemberID is read from the SAME position key as its Name in the SAME
-// iteration step, so a slot with no id yet reports one that is simply
-// empty rather than one borrowed from a neighbouring position.
+// order, skipping vacancies. A slot is occupied when it carries a name OR a
+// member id: a squad slot picked by number before it is named is a real
+// placement (bc-dnst, the number belongs to the member), so it fields a
+// fighter with an empty Name and a MemberID, and only a position with
+// neither is vacant. Each slot's MemberID is read from the SAME position
+// key as its Name in the SAME iteration step, so a slot with no id yet
+// reports one that is simply empty rather than one borrowed from a
+// neighbouring position.
 func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 	order := canonicalPositionOrder(teamSize)
 	out := make([]LineupSlot, 0, len(order))
 	for _, pos := range order {
 		name := t.Positions[pos]
-		if name == "" {
+		memberID := t.MemberIDs[pos]
+		if name == "" && memberID == "" {
 			continue
 		}
-		out = append(out, LineupSlot{Position: pos, Name: name, MemberID: t.MemberIDs[pos]})
+		out = append(out, LineupSlot{Position: pos, Name: name, MemberID: memberID})
 	}
 	return out
 }
 
 // OrderedRoster returns the player names for this lineup in position order,
-// skipping vacancies (empty strings) -- a thin projection of OrderedMembers
+// skipping vacancies (a slot placed by id but not yet named contributes its
+// empty name, since it IS occupied) -- a thin projection of OrderedMembers
 // (bc-tmid pass 2: see that method's doc for why this must stay a
 // projection rather than becoming a second, independent traversal).
 //

@@ -3,7 +3,7 @@
 
 import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
-import { pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
+import { pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { realIppons, nameOf } from './result_slot.jsx';
 
@@ -183,8 +183,18 @@ function StreamingOverlay({ court, position, competitions }) {
         const ovlLineupName = (lu) =>
             ovlHidesLineup ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
         const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;
-        boutShiroName = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) }) || ovlFallback;
-        boutAkaName   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) }) || ovlFallback;
+        const boutShiroBase = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) });
+        const boutAkaBase   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) });
+        // bc-dnst: the displayed name only -- a rename reaches this bout's
+        // stored side text (boutShiroBase/boutAkaBase, the frozen record)
+        // via resolveBoutSideDisplayName's id-first lookup against the
+        // current squad. The lookup runs even when the base is empty (a
+        // fighter fielded by number and named later has an empty stored
+        // name and a resolving id); when the id resolves to nothing the
+        // rule hands back the base, or the bare bout/position fallback
+        // (ovlFallback), untouched, exactly as match_scoreboard.jsx does.
+        boutShiroName = resolveBoutSideDisplayName({ squad: ovlSquadB, memberId: currentSub.sideBMemberId || "", storedName: boutShiroBase || ovlFallback });
+        boutAkaName = resolveBoutSideDisplayName({ squad: ovlSquadA, memberId: currentSub.sideAMemberId || "", storedName: boutAkaBase || ovlFallback });
         // The member id mirrors the SAME kachinuki/fixed-format tier the name
         // above used (existingMemberId from the sub's own recorded id,
         // lineupMemberId gated on the SAME ovlHidesLineup flag), so the label
@@ -308,8 +318,11 @@ function StreamingOverlay({ court, position, competitions }) {
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
                             <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsA}</span>
                             <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {boutAkaLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginRight: '0.35em' }} data-testid="overlay-aka-member-label">{boutAkaLabel}</span>}
+                                {/* Aka's member label sits AFTER the name, on the outer
+                                    side, like its competitor number (operator ruling
+                                    2026-09-14, bc-dnst); Shiro's sits before. */}
                                 {boutAkaName}
+                                {boutAkaLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginLeft: '0.35em' }} data-testid="overlay-aka-member-label">{boutAkaLabel}</span>}
                             </span>
                         </div>
                     </div>

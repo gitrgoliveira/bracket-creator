@@ -287,6 +287,40 @@ describe('match_scoreboard components', () => {
     expect(collectText(aka)).toBe('Tanaka');
   });
 
+  it('BoutSubRow shows the squad member CURRENT name for an already-fought bout, not the frozen stored spelling (bc-dnst)', () => {
+    // The stored sub.sideB text is a name the member no longer carries (a
+    // rename happened after this bout was fought). The row must show the
+    // squad's current name, resolved by sideBMemberId, while the stored
+    // text itself is never touched.
+    const sub = { position: 1, sideA: 'Aka Player', sideB: 'Old Spelling', sideAMemberId: '', sideBMemberId: 'm-shiro', ipponsB: ['M'], ipponsA: [] };
+    const squadB = [{ id: 'm-shiro', index: 1, name: 'New Spelling' }];
+    const tree = runtime.mount(BoutSubRow, {
+      sub, index: 0, lineupA: null, lineupB: null, teamSize: 5, squadB,
+    });
+    const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-shiro-name');
+    const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'sub-aka-name');
+    expect(collectText(shiro)).toBe('New Spelling');
+    // Aka carries no memberId, so it stays whatever the stored text says.
+    expect(collectText(aka)).toBe('Aka Player');
+  });
+
+  it('BoutSubRow shows the name a fighter fielded by number was given later, and keeps the bout number when the id resolves to nothing (bc-dnst)', () => {
+    // A fighter fielded by squad number has an empty stored name; once the
+    // member is named, every bout they fought shows that name by id.
+    const sub = { position: 2, sideBMemberId: 'm-shiro', ipponsB: [], ipponsA: [] };
+    const named = runtime.mount(BoutSubRow, {
+      sub, index: 1, lineupA: null, lineupB: null, teamSize: 5,
+      squadB: [{ id: 'm-shiro', index: 1, name: 'New Spelling' }],
+    });
+    expect(collectText(findInTree(named, n => n?.props?.['data-testid'] === 'sub-shiro-name'))).toBe('New Spelling');
+    runtime.unmount();
+    // An id that resolves to nothing leaves the bare bout number untouched.
+    const unresolved = runtime.mount(BoutSubRow, {
+      sub, index: 1, lineupA: null, lineupB: null, teamSize: 5, squadB: [],
+    });
+    expect(collectText(findInTree(unresolved, n => n?.props?.['data-testid'] === 'sub-shiro-name'))).toBe('#2');
+  });
+
   it('IndividualScore: same-name head-to-head does NOT mark BOTH sides as winners on an ippon-less decision', () => {
     // mp-13y: when both sides share a NAME and no ids disambiguate them, a
     // hantei/fusensho decision must not flag a win on both sides (the

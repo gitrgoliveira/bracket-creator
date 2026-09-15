@@ -201,6 +201,28 @@ func resolveKachinukiMemberLabel(teamNumbers map[string]string, squads map[strin
 	return ""
 }
 
+// resolveKachinukiDisplayName is the Go twin of resolveBoutSideDisplayName
+// (web-mobile/js/lineup_resolver.jsx, bc-dnst): a bout side shows its
+// member's CURRENT name, resolved by member id against the team's squad,
+// on every surface including this Excel export -- the stored sub.SideA/
+// sub.SideB text (storedName here) stays frozen forever and is never
+// rewritten. Display-only, exactly like its JS twin: nothing that WRITES a
+// bout may route a name through this. Returns storedName verbatim when
+// memberID is empty, the team id is empty, no member in squads[teamID]
+// carries that id, or that member's own Name is still blank (an unnamed
+// seeded slot has nothing newer to show).
+func resolveKachinukiDisplayName(squads map[string][]domain.TeamMember, teamID, memberID, storedName string) string {
+	if teamID == "" || memberID == "" {
+		return storedName
+	}
+	for _, member := range squads[teamID] {
+		if member.ID == memberID && member.Name != "" {
+			return member.Name
+		}
+	}
+	return storedName
+}
+
 // buildKachinukiDetail converts a single state.MatchResult into the
 // helper-layer detail struct, including eliminations and the final
 // decision.
@@ -212,11 +234,11 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 	for _, sub := range m.SubResults {
 		bouts = append(bouts, helper.KachinukiBout{
 			Position:   sub.Position,
-			SideAName:  sub.SideA,
+			SideAName:  resolveKachinukiDisplayName(squads, m.SideAID, sub.SideAMemberID, sub.SideA),
 			SideALabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideAID, sub.SideAMemberID),
 			SideAPos:   resolvePos(m.SideA, sub.SideAMemberID, sub.SideA),
 			ScoreA:     strings.Join(sub.IpponsA, ""),
-			SideBName:  sub.SideB,
+			SideBName:  resolveKachinukiDisplayName(squads, m.SideBID, sub.SideBMemberID, sub.SideB),
 			SideBLabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideBID, sub.SideBMemberID),
 			SideBPos:   resolvePos(m.SideB, sub.SideBMemberID, sub.SideB),
 			ScoreB:     strings.Join(sub.IpponsB, ""),

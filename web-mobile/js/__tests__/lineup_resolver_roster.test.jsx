@@ -10,6 +10,7 @@ import {
   memberPlacedElsewhere,
   squadRosterEntries,
   rosterWithoutPlacedElsewhere,
+  resolveBoutSideDisplayName,
 } from '../lineup_resolver.jsx';
 
 describe('memberPlacedElsewhere (bc-dnst)', () => {
@@ -52,7 +53,7 @@ describe('squadRosterEntries (bc-dnst, the one builder of a lineup picker\'s lis
     ]);
   });
 
-  it('appends legacy names not already on the squad, case-insensitively de-duplicated', () => {
+  it('bc-dnst: a squad present yields ONLY the squad entries, legacy names dropped entirely', () => {
     const squad = [{ id: 'm1', index: 1, name: 'Sato' }];
     const entries = squadRosterEntries({
       teamNumber: 'T10',
@@ -60,17 +61,64 @@ describe('squadRosterEntries (bc-dnst, the one builder of a lineup picker\'s lis
       legacyNames: ['SATO', 'Ito', 'ito', 'Ito'],
       lineup: {},
     });
-    // Sato is already a squad entry, dropped from the legacy tail
-    // case-insensitively; Ito appears once despite three spellings/repeats.
+    // A squad member list already answers for every fighter the legacy
+    // roster could offer, so mixing the two would only reintroduce the
+    // stale pre-rename spellings resolveBoutSideDisplayName exists to stop
+    // showing (bc-dnst).
     expect(entries).toEqual([
       { id: 'm1', index: 1, name: 'Sato', label: 'T10.1' },
-      'Ito',
     ]);
+  });
+
+  it('bc-dnst: an EMPTY squad falls back to the legacy names, case-insensitively de-duplicated', () => {
+    const entries = squadRosterEntries({
+      teamNumber: 'T10',
+      squad: [],
+      legacyNames: ['SATO', 'Ito', 'ito', 'Ito'],
+      lineup: {},
+    });
+    // "no squad" covers both a legacy team with no id at all and a failed
+    // squad fetch; either way the legacy roster is the only thing left to
+    // offer, de-duplicated case-insensitively.
+    expect(entries).toEqual(['SATO', 'Ito']);
   });
 
   it('tolerates a missing squad/legacyNames and an absent AdminLineupHelpers merge', () => {
     expect(squadRosterEntries({ teamNumber: 'T10', squad: undefined, legacyNames: undefined, lineup: {} }))
       .toEqual([]);
+  });
+});
+
+describe('resolveBoutSideDisplayName (bc-dnst)', () => {
+  it('resolves the CURRENT squad member name by id, over a stale stored name', () => {
+    const squad = [{ id: 'm1', index: 1, name: 'Renamed Fighter' }];
+    expect(resolveBoutSideDisplayName({ squad, memberId: 'm1', storedName: 'Old Spelling' }))
+      .toBe('Renamed Fighter');
+  });
+
+  it('falls back to storedName when the id resolves to a still-blank member', () => {
+    const squad = [{ id: 'm1', index: 1, name: '' }];
+    expect(resolveBoutSideDisplayName({ squad, memberId: 'm1', storedName: 'Old Spelling' }))
+      .toBe('Old Spelling');
+  });
+
+  it('falls back to storedName when there is no memberId at all', () => {
+    const squad = [{ id: 'm1', index: 1, name: 'Renamed Fighter' }];
+    expect(resolveBoutSideDisplayName({ squad, memberId: '', storedName: 'Old Spelling' }))
+      .toBe('Old Spelling');
+  });
+
+  it('never matches a squad member by NAME alone, only by id', () => {
+    const squad = [{ id: 'm1', index: 1, name: 'Old Spelling' }];
+    // memberId 'm2' names nobody in the squad; the fact that a DIFFERENT
+    // member happens to carry the stored name must not cause a match.
+    expect(resolveBoutSideDisplayName({ squad, memberId: 'm2', storedName: 'Old Spelling' }))
+      .toBe('Old Spelling');
+  });
+
+  it('returns "" when there is neither a resolved member nor a stored name', () => {
+    expect(resolveBoutSideDisplayName({ squad: [], memberId: '', storedName: '' })).toBe('');
+    expect(resolveBoutSideDisplayName({ squad: [], memberId: '', storedName: undefined })).toBe('');
   });
 });
 

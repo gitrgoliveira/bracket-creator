@@ -23,12 +23,15 @@ import { squadMemberLabel } from './squad_member_label.jsx';
 // .jsx rosterForSide) and the Up Next "Enter lineup" panel
 // (admin_schedule_lineup.jsx): the squad's members first, every one of them
 // in index order as `{id, index, name, label}` objects so a still-blank slot
-// is offered by its number alone (operator ruling 2026-09-15), then the
-// LEGACY names (the pre-squad metadata roster, plus whatever
-// `mergeRosterWithAssigned` re-adds for the lineup's own assigned names) as
-// plain strings, de-duplicated case-insensitively against each other and
-// against the squad names in ONE pass so a squad member is never listed
-// twice, once as its object entry and once as a plain string. Reads
+// is offered by its number alone (operator ruling 2026-09-15). The LEGACY
+// names (the pre-squad metadata roster, plus whatever
+// `mergeRosterWithAssigned` re-adds for the lineup's own assigned names) are
+// appended ONLY when the squad itself is empty: the fallback exists for
+// exactly two "no squad" cases, a legacy team that predates squads
+// altogether (no id at all) and a squad fetch that failed, and a squad that
+// IS present already lists every member the legacy roster could offer, so
+// mixing the two would only reintroduce the stale pre-rename names
+// resolveBoutSideDisplayName exists to stop showing. Reads
 // mergeRosterWithAssigned off window.AdminLineupHelpers (this module must
 // not import admin_lineup.jsx, see the header) and copes with its absence.
 export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
@@ -41,7 +44,8 @@ export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
       name: String(mem?.name || "").trim(),
       label: squadMemberLabel(teamNumber, mem?.index),
     }));
-  const seen = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
+  if (squadEntries.length > 0) return squadEntries;
+  const seen = new Set();
   const merge = (typeof window !== "undefined" && window.AdminLineupHelpers?.mergeRosterWithAssigned)
     ? window.AdminLineupHelpers.mergeRosterWithAssigned
     : (names) => names;
@@ -51,7 +55,7 @@ export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
     seen.add(key);
     return true;
   });
-  return [...squadEntries, ...legacyEntries];
+  return legacyEntries;
 }
 
 // memberPlacedElsewhere: the ONE predicate behind "a member holds one
@@ -277,4 +281,30 @@ export function resolveBoutSideSquadLabel({ isKachinuki, isDaihyosen, existingMe
   const memberId = resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId });
   const member = resolveSquadMember(squad, memberId, name);
   return member ? squadMemberLabel(teamNumber, member.index) : "";
+}
+
+// resolveBoutSideDisplayName: the ONE rule for what name a bout side shows
+// on screen (bc-dnst, operator ruling 2026-09-15). A rename reaches every
+// bout that member has already fought -- the STORED SubMatchResult text
+// (sub.sideA/sub.sideB) stays frozen forever (it is not rewritten, and
+// nothing on the wire changes when a member is renamed), but every render
+// site resolves the member's CURRENT name by id and shows that instead.
+// Resolution is id-only, exactly like resolveSquadMember: a name can never
+// re-attach a bout to a different member than the id it was recorded with.
+//
+// This is DISPLAY-ONLY. Nothing that WRITES a bout (buildPatch's
+// playerNamesForBout, the kachinuki bout log, a lineup PUT) may pass a name
+// through this function; doing so would let a stale render silently rewrite
+// the stored record. Every call site below is a render, never a writer.
+//
+// storedName is returned verbatim (falling back to "" for a nullish/absent
+// value) whenever memberId resolves to nothing, or resolves to a squad
+// member whose own name is still blank (an unnamed seeded slot has nothing
+// newer to show).
+export function resolveBoutSideDisplayName({ squad, memberId, storedName }) {
+  const list = Array.isArray(squad) ? squad : [];
+  const member = memberId ? list.find(mem => mem && mem.id === memberId) : null;
+  const currentName = member ? String(member.name || "").trim() : "";
+  if (currentName) return currentName;
+  return storedName || "";
 }

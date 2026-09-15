@@ -31,7 +31,8 @@ bout they fought, and the winner-stays-on order, still refer to the same person
 after the change. You can correct a spelling or switch to a full name mid
 tournament without disturbing results already recorded. Rename from the squad
 list on the Lineups page, or from the match's lineup panel on the court console
-(the Rename control under the position), at any time.
+(the Rename control under the position), at any time. The corrected name shows
+everywhere, including bouts already fought and the exported sheet.
 
 Nobody is removed from a squad. Instead, you can clear a name from the squad
 list on the Lineups page, which empties that position and keeps its number.

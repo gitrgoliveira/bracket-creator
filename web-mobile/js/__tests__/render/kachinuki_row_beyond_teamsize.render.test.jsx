@@ -88,7 +88,14 @@ beforeEach(() => {
 // name (the winner-stays bout log), SHIRO is still unresolved.
 function kachinukiMatchBeyondTeamSize() {
   const playedBouts = [1, 2, 3, 4, 5].map((pos) => ({
-    position: pos, sideA: `Aka ${pos}`, sideB: `Shiro ${pos}`,
+    position: pos,
+    // bc-dnst: bout 1's stored AKA text is an OLD spelling for the same
+    // squad member ('m-kept', SQUAD_A's "Kept Winner"), simulating a rename
+    // that happened after this bout was already fought. The read-only row
+    // must show the squad's CURRENT name, never this frozen stored text.
+    sideA: pos === 1 ? 'Old Winner Name' : `Aka ${pos}`,
+    sideAMemberId: pos === 1 ? 'm-kept' : undefined,
+    sideB: `Shiro ${pos}`,
     ipponsA: ['M'], ipponsB: [],
   }));
   return {
@@ -187,5 +194,25 @@ describe('bc-dnst: kachinuki row beyond teamSize routes name picks off the lineu
     expect(putMatchLineup).not.toHaveBeenCalled();
     expect(window.API.renameTeamMember.mock.calls).toEqual([['comp1', 'team-A', 'm-blank', 'Ito', 'secret']]);
     expect(akaSide().textContent).toContain('T5.7');
+  });
+
+  // bc-dnst: a rename reaches a bout already fought (renderReadOnlyBout,
+  // admin_scoring_team.jsx). Bout 1's stored AKA text ('Old Winner Name')
+  // is frozen on the SubMatchResult, but its sideAMemberId ('m-kept')
+  // resolves to SQUAD_A's "Kept Winner" (the member's CURRENT name), so
+  // the read-only row must display that instead.
+  it('a played bout shows the squad member\'s CURRENT name, not the frozen stored spelling', async () => {
+    await renderEditor();
+    const row = document.querySelector('[data-testid="kachinuki-done-bout-0"]');
+    expect(row, 'expected the read-only row for bout 1').toBeTruthy();
+    const akaStatic = row.querySelector('.team-sub-match__side--aka .tsm-name__static');
+    expect(akaStatic.textContent).toBe('Kept Winner');
+    expect(row.textContent).not.toContain('Old Winner Name');
+    // Display-only: this substitution must never reach the wire. buildPatch
+    // (and the playerNamesForBout it and squadLabelFor both read) is
+    // untouched by this change -- only the rendered text swaps, via a
+    // reassignment local to renderReadOnlyBout's own return block -- so a
+    // save from this screen still carries whatever stored/resolved name
+    // playerNamesForBout would have returned before this fix.
   });
 });

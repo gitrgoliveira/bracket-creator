@@ -17,7 +17,7 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
@@ -31,6 +31,9 @@ import { sideLookupKey } from './competitor_identity.jsx';
 // reasoning applies to any admin panel. `em` sizing (rather than a fixed px)
 // scales with the name it rides beside across variant="card"/"tv".
 const SQUAD_MEMBER_LABEL_STYLE = { fontSize: "0.7em", fontWeight: 600, opacity: 0.75, marginRight: "0.35em" };
+// Aka's label sits AFTER the name (the outer side), so its gap is on the
+// other side of it (bc-dnst).
+const SQUAD_MEMBER_LABEL_STYLE_AFTER = { ...SQUAD_MEMBER_LABEL_STYLE, marginRight: 0, marginLeft: "0.35em" };
 
 const { useState: useSB, useEffect: useEB } = React;
 
@@ -101,6 +104,13 @@ export function useTeamLineups(match, competition, roundIndex) {
     return () => window.removeEventListener("lineup-updated", handler);
   }, [compId]);
 
+  // The squads the passed competition carries, as a value the effect below
+  // can depend on (bc-dnst): a member renamed or named while the board is
+  // up arrives as a fresher competition item with a new squads map, and the
+  // resolved squadA/squadB must follow it, or every bout row keeps showing
+  // the spelling the first run captured. The map is a handful of members
+  // per team, so serialising it per render is cheap.
+  const squadsSig = competition && competition.squads ? JSON.stringify(competition.squads) : "";
   useEB(() => {
     // Clear stale lineups immediately so the previous match's names never leak
     // into the next render (Copilot review: stale lineup state).
@@ -167,7 +177,7 @@ export function useTeamLineups(match, competition, roundIndex) {
     return () => { cancelled = true; };
     // match?.round participates in the fallback-round lineup fetch, so a round
     // change on a reused match id must re-run the effect.
-  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion]);
+  }, [compId, matchId, sideAId, sideBId, roundIndex, match?.round, lineupVersion, squadsSig]);
 
   return { lineupA, lineupB, squadA, squadB };
 }
@@ -413,6 +423,19 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);
   const akaName = resolveSide(sub && sub.sideA, lineupA);
+  // shiroDisplayName/akaDisplayName: the DISPLAYED name only (bc-dnst). A
+  // rename reaches a bout already fought: the stored sub.sideA/sub.sideB
+  // text stays frozen (shiroName/akaName above, unchanged, are what the
+  // label composition below and every other consumer of this row keep
+  // using), but the rendered text swaps in the squad member's CURRENT name
+  // when its id resolves (resolveBoutSideDisplayName, lineup_resolver.jsx).
+  // The lookup runs even when resolveSide fell through to the bare bout
+  // number: a fighter fielded by squad number and named LATER has an empty
+  // stored name and a resolving id, and must show the name once it has
+  // one; when the id resolves to nothing the rule hands the bout number
+  // back untouched.
+  const shiroDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: (sub && sub.sideBMemberId) || "", storedName: shiroName });
+  const akaDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: (sub && sub.sideAMemberId) || "", storedName: akaName });
   // The squad member label rides beside the SAME name resolved above, via the
   // ONE shared composer (resolveBoutSideSquadLabel, lineup_resolver.jsx): the
   // member id comes from the SAME kachinuki/fixed-format tier the name used
@@ -442,12 +465,16 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
       <span className="msb-name">
         {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
-        <span data-testid="sub-shiro-name">{shiroName}</span>
+        <span data-testid="sub-shiro-name">{shiroDisplayName}</span>
       </span>
       {centreMarks(sub, matchSideA, matchSideB)}
+      {/* The member label sits on the OUTER side of the name like the
+          competitor number (operator ruling 2026-09-14, bc-dnst): Shiro's
+          before the name, Aka's after it, so the two labels frame the
+          pairing from the outside as the score sheet's bout rows do. */}
       <span className="msb-name msb-name--aka">
-        {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-a">{akaLabel}</span>}
-        <span data-testid="sub-aka-name">{akaName}</span>
+        <span data-testid="sub-aka-name">{akaDisplayName}</span>
+        {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE_AFTER} data-testid="sub-member-label-a">{akaLabel}</span>}
       </span>
     </div>
   );

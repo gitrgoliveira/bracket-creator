@@ -231,7 +231,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, resolveBoutSideDisplayName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -2168,6 +2168,15 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     const { aName, bName, aMemberId, bMemberId } = playerNamesForBout(idx);
     const aLabel = squadLabelFor("a", aMemberId, aName);
     const bLabel = squadLabelFor("b", bMemberId, bName);
+    // bc-dnst: this is a SEPARATE render path from the rowSides-based
+    // editable/current row below (renderReadOnlyBout is kachinuki's own
+    // already-fought display), so it needs its own displayed-name
+    // substitution. aName/bName themselves stay untouched (squadLabelFor
+    // above, and the correction-warning path, keep reading the stored/
+    // resolved name); only the rendered text swaps in the squad member's
+    // current name by id.
+    const aDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: aMemberId, storedName: aName });
+    const bDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: bMemberId, storedName: bName });
     const nameCls = (side) => "tsm-name__static" + (t.winner === side ? " tsm-name__static--win" : "");
     return (
       <div key={`ro-${idx}`} className="team-sub-match team-sub-match--readonly team-sub-match--editable" data-testid={`kachinuki-done-bout-${idx}`}
@@ -2181,7 +2190,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           <div className="team-sub-match__side team-sub-match__side--shiro">
             <div className="tsm-name">
               {bLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`kachinuki-done-bout-${idx}-member-label-b`}>{bLabel}</span>}
-              <span className={nameCls("b")}>{bName || "-"}</span>
+              <span className={nameCls("b")}>{bDisplayName || "-"}</span>
             </div>
           </div>
           <div className="team-sub-match__center">
@@ -2200,7 +2209,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
           <div className="team-sub-match__side team-sub-match__side--aka team-sub-match__side--right">
             <div className="tsm-name">
               {aLabel && <span className="tsm-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid={`kachinuki-done-bout-${idx}-member-label-a`}>{aLabel}</span>}
-              <span className={nameCls("a")}>{aName || "-"}</span>
+              <span className={nameCls("a")}>{aDisplayName || "-"}</span>
             </div>
           </div>
         </div>
@@ -2958,7 +2967,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // accepts only senpo/… or "1".."N"), so a name pick there would
                 // 4xx. Suppress the picker by passing an empty roster (the input
                 // only renders when roster.length > 0).
-                playerName: playerBName, memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
+                // bc-dnst: playerName is the DISPLAYED name only -- a rename
+                // reaches a bout already fought via resolveBoutSideDisplayName
+                // (id-first against the current squad), while playerBName
+                // itself (used by squadLabelFor above and by buildPatch's own
+                // playerNamesForBout on the wire) stays the stored/resolved
+                // name untouched. This covers both the live LineupNameInput's
+                // `value` and the read-only static row, which both render
+                // from this same prop.
+                playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }),
+                memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
                 onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
               },
@@ -2972,7 +2990,9 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 }),
                 color: "aka", label: "AKA",
                 // See SHIRO note above: no lineup picker on the daihyosen row.
-                playerName: playerAName, memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
+                // bc-dnst: displayed name only, see the SHIRO note above.
+                playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }),
+                memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
                 onSelectName: manualPathA ? pickManual("aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
               },

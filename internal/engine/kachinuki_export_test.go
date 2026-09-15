@@ -683,6 +683,74 @@ func TestResolveKachinukiMemberLabel(t *testing.T) {
 		"no member id recorded on the bout row")
 }
 
+// TestResolveKachinukiDisplayName exercises resolveKachinukiDisplayName,
+// the Go twin of web-mobile/js/lineup_resolver.jsx's
+// resolveBoutSideDisplayName (bc-dnst): a rename reaches a bout already
+// fought on every surface including this Excel export, resolved by member
+// id against the team's CURRENT squad, while the stored bout text itself
+// stays frozen.
+func TestResolveKachinukiDisplayName(t *testing.T) {
+	squads := map[string][]domain.TeamMember{
+		"team-red": {
+			{ID: "m1", Index: 1, Name: "New Spelling"},
+			{ID: "m2", Index: 2, Name: ""}, // unfilled seeded slot
+		},
+	}
+
+	assert.Equal(t, "New Spelling", resolveKachinukiDisplayName(squads, "team-red", "m1", "Old Spelling"),
+		"member id resolves to a renamed member: the current name wins over the frozen stored text")
+	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "team-red", "m2", "Old Spelling"),
+		"member id resolves to a still-blank member: nothing newer to show, stored text stands")
+	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "team-red", "no-such-member", "Old Spelling"),
+		"unknown member id: stored text stands")
+	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "no-such-team", "m1", "Old Spelling"),
+		"unknown team id: stored text stands")
+	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "team-red", "", "Old Spelling"),
+		"no member id recorded on the row: stored text stands")
+	assert.Equal(t, "Old Spelling", resolveKachinukiDisplayName(squads, "", "m1", "Old Spelling"),
+		"no team id recorded on the row: stored text stands")
+}
+
+// TestBuildKachinukiDetail_DisplayNameFollowsRename verifies the export
+// wires resolveKachinukiDisplayName into every bout's SideAName/SideBName:
+// a bout whose stored side text predates a rename exports the CURRENT
+// squad name, while a side carrying no member id keeps its stored text
+// exactly as before this feature (bc-dnst).
+func TestBuildKachinukiDetail_DisplayNameFollowsRename(t *testing.T) {
+	squads := map[string][]domain.TeamMember{
+		"RedTeam": {
+			{ID: "m-red-1", Index: 1, Name: "Renamed Senpo"},
+		},
+	}
+	m := &state.MatchResult{
+		SideA:   "RedTeam",
+		SideB:   "WhiteTeam",
+		SideAID: "RedTeam",
+		Winner:  "RedTeam",
+		Status:  state.MatchStatusCompleted,
+		SubResults: []state.SubMatchResult{
+			{
+				Position:      1,
+				SideA:         "Old Senpo Spelling",
+				SideAMemberID: "m-red-1",
+				SideB:         "W-Senpo", // no member id: stays exactly as stored
+				IpponsA:       []string{"M", "K"},
+				IpponsB:       []string{},
+				Winner:        "Old Senpo Spelling",
+				Decision:      "fought",
+			},
+		},
+	}
+
+	detail := buildKachinukiDetail(m, "Pool Match 1", map[string]string{}, map[string]string{}, squads)
+
+	require.Len(t, detail.Bouts, 1)
+	assert.Equal(t, "Renamed Senpo", detail.Bouts[0].SideAName,
+		"member id resolves against squads[SideAID]: the export shows the CURRENT name")
+	assert.Equal(t, "W-Senpo", detail.Bouts[0].SideBName,
+		"no member id on this side: the stored text is exported unchanged")
+}
+
 // TestBuildKachinukiTeamNumbers_NilOrNoPrefix verifies the guard clause:
 // a nil competition or one with no number prefix assigned yet returns an
 // empty map without attempting any read.

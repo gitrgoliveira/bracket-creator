@@ -5944,13 +5944,6 @@ button.pool-match-row {
   font-size: 13px;
   color: var(--ink-2);
 }
-.team-sub-match__pos-name {
-  font-size: 9px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: var(--ink-3);
-}
 /* Team header aligned to the bout rows, the one owner of that alignment for
    both hosts (inline in either mode, overlay in compact): the centre column is
    the rows' 160px centre plus the two 8px column gaps either side of it

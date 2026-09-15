@@ -273,7 +273,6 @@ function recordedDaihyosenSideOf(existingDaihyosen, m) {
 // modal. 5-person teams use the canonical FIK names (POS_LABELS_5 from
 // lineup_resolver.jsx, the single source of truth); non-5 sizes use the
 // position number.
-const POS_ABBREV_BY_INDEX_5 = ["Sen", "Ji", "Chu", "Fuk", "Tai"];
 function positionLabelFor(teamSize, index, sub) {
   if (sub && sub.position && typeof sub.position === "string" && sub.position.length > 0 && /[a-z]/i.test(sub.position)) {
     // Backend may emit a name string in Position for non-5 sizes once
@@ -283,19 +282,6 @@ function positionLabelFor(teamSize, index, sub) {
   if (teamSize === 5 && index >= 0 && index < 5) return POS_LABELS_5[index];
   return `Match ${index + 1}`;
 }
-// Short position handle shown beside the bout number. Operators think in
-// positions ("Taisho's up"), so for 5-person teams we surface the abbreviation
-// in the row itself rather than hiding the full name in a title tooltip
-// (unreachable on a touch tablet). Returns "" for sizes/rows with no canonical
-// position, where the number alone is the right label.
-function positionAbbrevFor(teamSize, index, sub) {
-  if (sub && sub.position && typeof sub.position === "string" && /[a-z]/i.test(sub.position)) {
-    return sub.position.slice(0, 3);
-  }
-  if (teamSize === 5 && index >= 0 && index < 5) return POS_ABBREV_BY_INDEX_5[index];
-  return "";
-}
-
 // teamResultLabel: the RESULT-band / Finish-button verdict text for a team
 // encounter. A knockout match cannot be a draw (a tie is broken by a daihyosen,
 // FIK rules), so a null winner in the bracket phase never reads "DRAW": it's
@@ -2772,7 +2758,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // winner vs the NEXT team's fighter, not "Jiho vs Jiho", so the label
             // misleads. This is the single home for the rule (the read-only rows
             // simply never render it).
-            const posAbbrev = (isDaihyoRow || isKachinuki) ? "" : positionAbbrevFor(teamSize, idx, existingSubAtIdx);
             // Resolve the player name occupying this position on each
             // side: lineup data first (canonical when present), then the
             // SubMatchResult.SideA/SideB strings from a prior score.
@@ -2972,18 +2957,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                     <button type="button" className="tsm-caret tsm-caret--open tsm-caret-btn" data-testid={`kachinuki-done-collapse-${idx}`}
                       aria-label={`Collapse bout ${idx + 1}`} aria-expanded={true} onClick={closeDoneBoutEdit}>▶</button>
                   )}
-                  {/* Bout number AND the FIK position handle (Sen/Ji/Chu/Fuk/Tai
-                      for 5-person teams): operators think in positions, so the
-                      abbreviation rides in the row instead of hiding in the
-                      title tooltip (unreachable on touch). The number stays as
-                      the size-agnostic anchor; >5-person teams show it alone.
-                      Daihyosen (the rep bout) shows "DH". */}
+                  {/* Bout number only: the FIK position abbreviations
+                      (Sen/Ji/Chu/Fuk/Tai) that used to ride under it were
+                      removed on operator ruling 2026-09-15 (bc-dnst); the
+                      number is the size-agnostic anchor and the full position
+                      name stays in the row's title. Daihyosen (the rep bout)
+                      shows "DH". */}
                   <span className="team-sub-match__pos-num">{isDaihyoRow ? "DH" : idx + 1}</span>
-                  {/* posAbbrev is already "" for kachinuki + daihyosen (see its
-                      computation above), so only the number shows for those. */}
-                  {posAbbrev && (
-                    <span className="team-sub-match__pos-name">{posAbbrev}</span>
-                  )}
                 </div>
                 <div className="team-sub-match__row">
                   {rowSides.map((rs, rsIdx) => (

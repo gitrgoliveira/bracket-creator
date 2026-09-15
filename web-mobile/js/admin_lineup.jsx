@@ -349,6 +349,12 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // squadMemberLabel. Not the member's: a squad member has no number of
   // its own, only an index, and the label composes the two together.
   const teamNumber = team?.number || team?.Number || "";
+  // Mirrors admin_competition_settings.jsx's own isStarted derivation (the
+  // removed Squad members section used the same check): once the
+  // competition has left setup/draw-ready the server refuses a clear with
+  // a 409 (state.ErrTeamMemberClearAfterStart), so the button below is
+  // disabled here too rather than surfacing that refusal as an error banner.
+  const started = !!(comp?.status && comp.status !== "setup" && comp.status !== "draw-ready");
 
   // Position state mirrors domain.TeamLineup: display names in `values`,
   // squad member ids in `memberIds`, keyed by the SAME position key so a
@@ -389,6 +395,13 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const [renamingId, setRenamingId] = useStateA(null);
   const [renamingName, setRenamingName] = useStateA("");
   const [renameBusy, setRenameBusy] = useStateA(false);
+
+  // CLEAR: which squad member (by id), if any, has a clear in flight. This
+  // page is now the one home for a team's people (bc-dnst, operator
+  // decision 2026-09-15): "Clear name" used to live on the competition
+  // Settings page's now-removed Squad members section, and moved here
+  // alongside Rename rather than being duplicated on both.
+  const [clearingId, setClearingId] = useStateA(null);
 
   // Load the existing lineup: positions/memberIds. 404 -> fresh form
   // (server contract, unchanged).
@@ -582,6 +595,34 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   const cancelRename = () => { setRenamingId(null); setRenamingName(""); setError(""); };
 
+  // Clearing: the operator's own "removal" of a squad member's name. The
+  // id and index survive: the member stays placed wherever it already sits
+  // (memberIds keeps pointing at it), now nameless, which is a legal
+  // placement everywhere this codebase reads a lineup. The button is
+  // already disabled once the competition has started (`started` above),
+  // but a 409 can still arrive if another device started the competition
+  // after this page loaded its squad -- surfaced via `error`, never
+  // swallowed.
+  const clearMember = async (member) => {
+    setClearingId(member.id);
+    setError("");
+    try {
+      await window.API.clearTeamMember(compId, teamId, member.id, password);
+      setSquad(s => s.map(m => (m.id === member.id ? { ...m, name: "" } : m)));
+      setValues(v => {
+        const next = { ...v };
+        Object.keys(memberIds).forEach(posKey => {
+          if (memberIds[posKey] === member.id) next[posKey] = "";
+        });
+        return next;
+      });
+    } catch (e) {
+      setError(e?.message || "Failed to clear the name");
+    } finally {
+      setClearingId(null);
+    }
+  };
+
   const save = async () => {
     setError("");
     setSaveWarning("");
@@ -772,6 +813,22 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                       </span>
                       <span style={{ flex: 1 }}>{m.name}</span>
                       <button type="button" className="btn btn--ghost btn--sm" onClick={() => startRename(m)}>Rename</button>
+                      {/* Nothing to clear on an already-blank slot: the row
+                          shows no Clear button at all rather than one that
+                          would refuse itself (a blank candidate never
+                          collides and clearing it would be a no-op the
+                          operator has no reason to ask for). */}
+                      {!!(m.name || "").trim() && (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => clearMember(m)}
+                          disabled={renameBusy || clearingId !== null || started}
+                          title={started ? "Names cannot be cleared once the competition has started" : undefined}
+                        >
+                          {clearingId === m.id ? "Clearing…" : "Clear name"}
+                        </button>
+                      )}
                     </>
                   )}
                 </div>

@@ -83,6 +83,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       fetchSquads: vi.fn().mockResolvedValue({}),
       addTeamMember: vi.fn(),
       renameTeamMember: vi.fn().mockResolvedValue(true),
+      clearTeamMember: vi.fn().mockResolvedValue(true),
       putTeamLineup: vi.fn().mockResolvedValue({}),
     };
     // bc-pnum: commitAdd (operation 2) now confirms before minting. Default
@@ -114,7 +115,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       global.window.API.fetchSquads.mockResolvedValue(opts.squads);
     }
     runtime.mount(AdminLineup, {
-      comp: COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
+      comp: opts.comp || COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
     });
     await flush();
     return runtime.currentTree();
@@ -351,6 +352,74 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const allText = collectText(tree);
     expect(allText).not.toMatch(/remove/i);
     expect(allText).not.toMatch(/delete member/i);
+  });
+
+  // bc-dnst: this page is now the one home for a team's people. "Clear
+  // name" used to live on the competition Settings page's now-removed
+  // Squad members section; it moved here alongside Rename.
+  describe('Clear name (bc-dnst)', () => {
+    it('shows "Clear name" on a named member\'s row, but not on a blank one', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [
+          { id: 'sq-sato', index: 1, name: 'Sato' },
+          { id: 'sq-blank', index: 2, name: '' },
+        ] },
+      });
+      const namedRow = squadRow(tree, 'sq-sato');
+      const blankRow = squadRow(tree, 'sq-blank');
+      expect(buttonNamed(namedRow, 'Clear name')).toBeTruthy();
+      expect(buttonNamed(blankRow, 'Clear name')).toBeFalsy();
+    });
+
+    it('clicking it clears the server-side name and blanks the position that held that member by id, keeping the id placement', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+      });
+      // Place the member at position 1 first, so its persistence can be checked.
+      positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+
+      let tree2 = runtime.currentTree();
+      buttonNamed(squadRow(tree2, 'sq-sato'), 'Clear name').props.onClick();
+      await flush();
+
+      expect(global.window.API.clearTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'pw');
+
+      const tree3 = runtime.currentTree();
+      expect(collectText(squadRow(tree3, 'sq-sato'))).not.toContain('Sato');
+      // Still placed BY ID...
+      expect(positionSelect(tree3, '1').props.value).toBe('sq-sato');
+
+      mainSaveButton(tree3).props.onClick();
+      await flush();
+      const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+      // ...but its written name is now empty, matching what the row shows.
+      expect(call[3]['1']).toBe('');
+      expect(call[5]['1']).toBe('sq-sato');
+    });
+
+    it('a rejected clear leaves the name in place and shows the server\'s message', async () => {
+      global.window.API.clearTeamMember.mockRejectedValue(new Error('cannot clear: competition started'));
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+      });
+
+      buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name').props.onClick();
+      await flush();
+
+      const tree2 = runtime.currentTree();
+      expect(collectText(squadRow(tree2, 'sq-sato'))).toContain('Sato');
+      expect(collectText(tree2)).toContain('cannot clear: competition started');
+    });
+
+    it('is disabled once the competition has started', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+        comp: { ...COMP, status: 'running' },
+      });
+      const clearBtn = buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name');
+      expect(clearBtn).toBeTruthy();
+      expect(clearBtn.props.disabled).toBe(true);
+    });
   });
 
   it('operation 1 (SELECT) of a still-unnamed squad slot is a placement: Save writes it by id with an empty name (bc-dnst)', async () => {

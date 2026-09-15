@@ -14,27 +14,29 @@ Each team encounter has its own lineup. To carry over the same order from the pr
 
 A team's people are its squad. A team starts with one position per fighter the
 competition's team size defines, plus two reserve positions, each numbered and
-waiting for a name. Fill those names in from the **Squad members** section of the competition's **Settings**
-page, or build the squad as you go from the lineup panel. In the panel, pick an existing member
-for a position, or type a new name. Every position the squad has is offered, including the ones
-still waiting for a name, so you can field a fighter by number first and fill the name in later;
-a fighter picked that way counts in every format, winner-stays-on included. Typing a name into a
-position names its blank slot when one exists; otherwise the app adds a new position to the
-squad in the same step. Either way it confirms first, so a mistyped name cannot quietly create
-a person nobody expected. Nobody can be placed at two positions of the same lineup: the app
-refuses the second pick and tells you where that fighter already is.
+waiting for a name. The **Lineups** page is the one place to name, rename, add
+and clear a team's people: build the squad as you go, picking an existing
+member for a position, or typing a new name. Every position the squad has is
+offered, including the ones still waiting for a name, so you can field a
+fighter by number first and fill the name in later; a fighter picked that way
+counts in every format, winner-stays-on included. Typing a name into a
+position names its blank slot when one exists; otherwise the app adds a new
+position to the squad in the same step. Either way it confirms first, so a
+mistyped name cannot quietly create a person nobody expected. Nobody can be
+placed at two positions of the same lineup: the app refuses the second pick
+and tells you where that fighter already is.
 
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person
 after the change. You can correct a spelling or switch to a full name mid
-tournament without disturbing results already recorded. Rename from either
-place, at any time.
+tournament without disturbing results already recorded. Rename from the squad
+list on the Lineups page, at any time.
 
-Nobody is removed from a squad. Instead, you can clear a name, which
-empties that position and keeps its number. You can only do that before the
-competition starts. Once it has started every name stays, so a bout already
-fought always names the same person. An unused member is harmless: they never
-appear in a lineup.
+Nobody is removed from a squad. Instead, you can clear a name from the squad
+list on the Lineups page, which empties that position and keeps its number.
+You can only do that before the competition starts. Once it has started every
+name stays, so a bout already fought always names the same person. An unused
+member is harmless: they never appear in a lineup.
 
 The squad can be larger than the number of positions a round has. Add the
 replacements a team brings and field whichever of them you need in each

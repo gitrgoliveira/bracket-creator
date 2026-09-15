@@ -30,8 +30,9 @@ export function squadMemberLabel(teamNumber, memberIndex) {
   return `${teamNumber}.${memberIndex}`;
 }
 
-// squadSlotLabel is the OPERATOR's handle for a squad slot on the surfaces
-// used before the draw (the Lineups page, the Settings squad editor), where
+// squadSlotLabel is the OPERATOR's handle for a squad slot on the Lineups
+// page, the one operator surface used before the draw (bc-dnst: the
+// competition Settings page's Squad members section was removed), where
 // squadMemberLabel is "" and a blank slot otherwise rendered as an empty
 // option, an empty label column and an aria-label of "Name for " (bc-dnst):
 // the numbered label once the team has a number, else the member's index

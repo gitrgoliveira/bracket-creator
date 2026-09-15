@@ -205,8 +205,8 @@ func resolveKachinukiMemberLabel(teamNumbers map[string]string, squads map[strin
 // helper-layer detail struct, including eliminations and the final
 // decision.
 func buildKachinukiDetail(m *state.MatchResult, label string, positions map[string]string, teamNumbers map[string]string, squads map[string][]domain.TeamMember) helper.KachinukiMatchDetail {
-	resolvePos := func(team, player string) string {
-		return resolveKachinukiPosition(positions, m.ID, team, player)
+	resolvePos := func(team, memberID, player string) string {
+		return resolveKachinukiBoutPosition(positions, m.ID, team, memberID, player)
 	}
 	bouts := make([]helper.KachinukiBout, 0, len(m.SubResults))
 	for _, sub := range m.SubResults {
@@ -214,11 +214,11 @@ func buildKachinukiDetail(m *state.MatchResult, label string, positions map[stri
 			Position:   sub.Position,
 			SideAName:  sub.SideA,
 			SideALabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideAID, sub.SideAMemberID),
-			SideAPos:   resolvePos(m.SideA, sub.SideA),
+			SideAPos:   resolvePos(m.SideA, sub.SideAMemberID, sub.SideA),
 			ScoreA:     strings.Join(sub.IpponsA, ""),
 			SideBName:  sub.SideB,
 			SideBLabel: resolveKachinukiMemberLabel(teamNumbers, squads, m.SideBID, sub.SideBMemberID),
-			SideBPos:   resolvePos(m.SideB, sub.SideB),
+			SideBPos:   resolvePos(m.SideB, sub.SideBMemberID, sub.SideB),
 			ScoreB:     strings.Join(sub.IpponsB, ""),
 			Winner:     sub.Winner,
 			Decision:   sub.Decision,
@@ -266,6 +266,15 @@ func matchLineupKey(matchID, team, player string) string {
 	return matchID + "\x00" + team + "\x00" + player
 }
 
+// memberKey is the player half of a lineup key for a position held by
+// MEMBER ID rather than by name (bc-dnst): a fighter fielded by squad number
+// and not yet named has an id and an empty name, so a name-keyed lookup
+// could never find its position. The NUL-framed marker keeps the id
+// namespace apart from names, which never contain NUL.
+func memberKey(memberID string) string {
+	return "\x00id\x00" + memberID
+}
+
 // buildKachinukiPositionMap loads team lineups for the competition and
 // flattens them into a position lookup. Two namespaces share one map:
 // match-scoped entries (mp-825) keyed by matchLineupKey, and
@@ -301,18 +310,29 @@ func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competitio
 		if name, ok := idToName[lineup.TeamID]; ok && name != lineup.TeamID {
 			teamKeys = append(teamKeys, name)
 		}
+		index := func(player string, label string) {
+			for _, teamKey := range teamKeys {
+				if lineup.MatchID != "" {
+					out[matchLineupKey(lineup.MatchID, teamKey, player)] = label
+				} else {
+					out[lineupKey(teamKey, player)] = label
+				}
+			}
+		}
 		for pos, playerName := range lineup.Positions {
 			if playerName == "" {
 				continue
 			}
-			label := formatPositionLabel(pos)
-			for _, teamKey := range teamKeys {
-				if lineup.MatchID != "" {
-					out[matchLineupKey(lineup.MatchID, teamKey, playerName)] = label
-				} else {
-					out[lineupKey(teamKey, playerName)] = label
-				}
+			index(playerName, formatPositionLabel(pos))
+		}
+		// Every position held by id is indexed under the id as well, so a
+		// nameless fighter (bc-dnst) still resolves; resolveKachinukiPosition
+		// tries the id first.
+		for pos, memberID := range lineup.MemberIDs {
+			if memberID == "" {
+				continue
 			}
+			index(memberKey(memberID), formatPositionLabel(pos))
 		}
 	}
 	return out
@@ -328,6 +348,19 @@ func resolveKachinukiPosition(positions map[string]string, matchID, team, player
 		}
 	}
 	return positions[lineupKey(team, player)]
+}
+
+// resolveKachinukiBoutPosition resolves a bout side's position by its
+// MEMBER ID first (the identity, present for every squad-era row and the
+// only handle a nameless fighter has), then by name for legacy rows that
+// carry no id.
+func resolveKachinukiBoutPosition(positions map[string]string, matchID, team, memberID, player string) string {
+	if memberID != "" {
+		if label := resolveKachinukiPosition(positions, matchID, team, memberKey(memberID)); label != "" {
+			return label
+		}
+	}
+	return resolveKachinukiPosition(positions, matchID, team, player)
 }
 
 // formatPositionLabel turns a domain.Position wire value into a

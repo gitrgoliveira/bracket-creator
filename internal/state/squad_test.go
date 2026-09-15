@@ -796,3 +796,45 @@ func TestSquad_ClearUnknownMemberOrTeam(t *testing.T) {
 		assert.True(t, errors.Is(err, ErrTeamMemberNotFound))
 	})
 }
+
+// TestSquad_RenameAndClearReachStoredLineups pins that a member's new name
+// (or its clearing) is carried into every stored lineup position holding
+// that member by id, and nowhere else (bc-dnst): the score sheet and the
+// export read the lineup's stored name, so a rename that left it behind
+// showed the old spelling until that lineup was saved again.
+func TestSquad_RenameAndClearReachStoredLineups(t *testing.T) {
+	store, compID, teamA, _ := newSquadTestStore(t)
+	sato, err := store.AddTeamMember(compID, teamA, "Satoh")
+	require.NoError(t, err)
+	tanaka, err := store.AddTeamMember(compID, teamA, "Tanaka")
+	require.NoError(t, err)
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: teamA, CompetitionID: compID, Round: 0,
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Satoh", domain.PositionNumbered(2): "Tanaka"},
+		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): sato.ID, domain.PositionNumbered(2): tanaka.ID},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: teamA, CompetitionID: compID, MatchID: "Pool A-1",
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Satoh"},
+		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): sato.ID},
+	}, 3))
+
+	require.NoError(t, store.RenameTeamMember(compID, teamA, sato.ID, "Sato"))
+	lineups, err := store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	require.Len(t, lineups, 2)
+	for _, l := range lineups {
+		assert.Equal(t, "Sato", l.Positions[domain.PositionNumbered(1)], "every lineup holding the member by id carries the new name")
+		if l.MatchID == "" {
+			assert.Equal(t, "Tanaka", l.Positions[domain.PositionNumbered(2)], "another member's position is untouched")
+		}
+	}
+
+	require.NoError(t, store.ClearTeamMemberName(compID, teamA, sato.ID))
+	lineups, err = store.LoadTeamLineups(compID)
+	require.NoError(t, err)
+	for _, l := range lineups {
+		assert.Equal(t, "", l.Positions[domain.PositionNumbered(1)], "a cleared name is blank in the lineup, the id stays")
+		assert.Equal(t, sato.ID, l.MemberIDs[domain.PositionNumbered(1)])
+	}
+}

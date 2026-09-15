@@ -855,3 +855,30 @@ func TestKachinukiDetailMatches_SquadLabel_BracketMatch(t *testing.T) {
 	require.Len(t, out[0].Bouts, 1)
 	assert.Equal(t, "T1.1", out[0].Bouts[0].SideALabel, "RedTeam is DrawOrder[0] -> T1, Alice is squad member index 1")
 }
+
+// TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID pins the
+// bc-dnst rule that a fighter fielded by squad number and not yet named (an
+// id, an empty name) still gets a position label on the export: the map is
+// indexed by member id as well as by name, and a bout side resolves by its
+// id first, falling back to its name for legacy rows that carry no id.
+func TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pos-map-nameless"
+	comp := &state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}
+	require.NoError(t, store.SaveCompetition(comp))
+	redID := helper.NewUUID4()
+	require.NoError(t, store.SaveParticipants(compID, []domain.Player{{ID: redID, Name: "RedTeam", Dojo: "DojoR"}}))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID:    redID,
+		MatchID:   "SF-2",
+		Positions: map[domain.Position]string{domain.PosSenpo: "R-Senpo", domain.PosJiho: ""},
+		MemberIDs: map[domain.Position]string{domain.PosSenpo: "mem-senpo", domain.PosJiho: "mem-jiho"},
+	}, 5))
+
+	posMap := eng.buildKachinukiPositionMap(compID, comp)
+
+	assert.Equal(t, "Jiho", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "mem-jiho", ""), "a nameless fighter resolves by id")
+	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "mem-senpo", "R-Senpo"), "id wins for a named fighter too")
+	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "", "R-Senpo"), "a row with no id still resolves by name")
+	assert.Equal(t, "", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "", ""), "no id and no name resolves nothing")
+}

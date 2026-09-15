@@ -384,7 +384,43 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 
 	existing[target].Name = newName
 	squads[teamID] = existing
-	return s.saveSquadsLocked(compID, squads, s.directWrite)
+	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+		return err
+	}
+	return s.renameMemberInLineupsLocked(compID, memberID, newName)
+}
+
+// renameMemberInLineupsLocked carries a member's new name into every stored
+// lineup position that holds that member by id (bc-dnst): the id is the
+// identity, and the name a lineup stores beside it is a display copy that
+// the score sheet and the export read, so a rename or a clear that left it
+// behind showed the old spelling there until the operator happened to save
+// that lineup again. Fought bouts are NOT touched: a bout row's names are
+// frozen at the time it was fought, by design. Saves only when a position
+// changed. Caller holds the competition lock.
+func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string) error {
+	lineups, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for key, lineup := range lineups {
+		for pos, id := range lineup.MemberIDs {
+			if id != memberID || lineup.Positions[pos] == name {
+				continue
+			}
+			if lineup.Positions == nil {
+				lineup.Positions = map[domain.Position]string{}
+			}
+			lineup.Positions[pos] = name
+			lineups[key] = lineup
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
 }
 
 // ClearTeamMemberName is the operator's "removal": it blanks memberID's
@@ -451,5 +487,8 @@ func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
 
 	existing[target].Name = ""
 	squads[teamID] = existing
-	return s.saveSquadsLocked(compID, squads, s.directWrite)
+	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+		return err
+	}
+	return s.renameMemberInLineupsLocked(compID, memberID, "")
 }

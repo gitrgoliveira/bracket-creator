@@ -514,7 +514,10 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
   // stub, exactly like a team with no team.metadata roster). Every numbered
   // position must now still offer a typeable name box, labelled with the
   // number of the blank squad member seeded for that position.
-  afterEach(() => { delete window.API.fetchSquads; });
+  afterEach(() => {
+    delete window.API.fetchSquads;
+    delete window.API.fetchMatchLineup;
+  });
 
   it('every numbered row renders a name input on both sides, labelled with each blank member\'s own number', async () => {
     const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
@@ -551,5 +554,86 @@ describe('TeamScoreEditorModal: a fixed-order row with no roster metadata still 
       .map(n => n.textContent);
     expect(shiroLabels).toEqual(['T2.1', 'T2.2', 'T2.3', 'T2.4', 'T2.5']);
     expect(akaLabels).toEqual(['T1.1', 'T1.2', 'T1.3', 'T1.4', 'T1.5']);
+  });
+
+  // Operator ruling 2026-09-15 (bc-dnst): team order changes between
+  // matches, so a squad member not currently placed in the lineup (a
+  // reserve, or a fighter a reorder displaced) must still be pickable from
+  // the row's own name box, not just the members already assigned to a
+  // position.
+  it('a squad member with no lineup position is still offered in the name box', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': [...blankSquad('b'), { id: 'b6', index: 6, name: 'Reserve Sato' }],
+    });
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(5);
+    });
+
+    const shiroInput = container.querySelector('input[aria-label="Senpo SHIRO player"]');
+    expect(shiroInput).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.focus(shiroInput);
+      fireEvent.change(shiroInput, { target: { value: 'Res' } });
+    });
+
+    const optionNames = [...container.querySelectorAll('.pmf__opt-name')].map(n => n.textContent);
+    expect(optionNames).toContain('Reserve Sato');
+  });
+
+  // Operator ruling 2026-09-15 (bc-dnst), slotLabelFor's "placed elsewhere"
+  // guard: an unplaced fixed-order position shows its default seeded
+  // member's number (named or still blank) UNLESS that member has already
+  // been placed at ANOTHER position of this lineup, in which case the
+  // number belongs to that other row and this one shows none -- a number
+  // must never appear twice on the sheet.
+  it('a default member placed at another position shows no number on its own row', async () => {
+    const blankSquad = (prefix) => Array.from({ length: 5 }, (_, i) => (
+      { id: `${prefix}-m${i + 1}`, index: i + 1, name: '' }
+    ));
+    const squadB = blankSquad('b').map(mem => (
+      mem.index === 2 ? { id: 'b2', index: 2, name: 'Kenji Tanaka' } : mem
+    ));
+    window.API.fetchSquads = vi.fn().mockResolvedValue({
+      'team-A': blankSquad('a'),
+      'team-B': squadB,
+    });
+    // Kenji Tanaka (member b2, seeded to position 2) is placed at Chuken
+    // (position 3) in the saved Shiro lineup.
+    window.API.fetchMatchLineup = vi.fn().mockImplementation(async (_compId, teamId) => (
+      teamId === 'team-B'
+        ? { positions: { chuken: 'Kenji Tanaka' }, memberIds: { chuken: 'b2' } }
+        : null
+    ));
+    const cell = { format: 'mixed', phase: 'pool', teamSize: 5, tmt: 'fixed', naginata: false };
+    const { container } = await renderCell(cell, {
+      sideA: { id: 'team-A', name: 'Team A', number: 'T1' }, // AKA
+      sideB: { id: 'team-B', name: 'Team B', number: 'T2' }, // SHIRO
+    });
+
+    await waitFor(() => {
+      // Row 3 (Chuken) resolves Kenji Tanaka via the lineup and carries a
+      // label; row 2, his seeded default position, has none -- so only 4 of
+      // the 5 rows show a Shiro label once the lineup fetch settles.
+      expect(container.querySelectorAll('[data-testid="team-sub-match-member-label-shiro"]').length).toBe(4);
+    });
+
+    const rows = [...container.querySelectorAll('.team-sub-match')];
+    expect(rows.length).toBe(5);
+    const shiroLabels = rows.map(row => {
+      const el = row.querySelector('[data-testid="team-sub-match-member-label-shiro"]');
+      return el ? el.textContent : '';
+    });
+    expect(shiroLabels).toEqual(['T2.1', '', 'T2.2', 'T2.4', 'T2.5']);
   });
 });

@@ -1209,8 +1209,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   // folds any operator-added substitute (a "+ Add …" free name not in
   // team.metadata) back into the autocomplete so it reappears for the team's
   // other positions instead of vanishing after a single entry.
-  const rosterForSide = (side, lineup) => {
-    if (!window.AdminLineupHelpers?.rosterFor) return [];
+  //
+  // bc-dnst: the squad store (squadA/squadB, `{id, index, name}` per member)
+  // is the team's actual roster of record, so its NAMED members come first,
+  // in index order -- that is what lets an operator pick a reserve, or a
+  // fighter a reorder displaced, into a position from this row's name box
+  // (operator ruling 2026-09-15: team order changes between matches, and
+  // picking a different member must move THEIR number onto the row). The
+  // legacy team.metadata list (via AdminLineupHelpers.rosterFor) is kept
+  // only as a fallback for teams that predate the squad store, appended
+  // after and de-duplicated case-insensitively. Either way a pick still
+  // resolves to that member's id through resolveMemberIdsForPositions, so
+  // the row's number follows the member chosen here.
+  const rosterForSide = (side, lineup, squad) => {
     const sideKey = sideLookupKey(side);
     // sideLookupKey returns "" (not undefined) for an id-less, name-less
     // side. Bail before the find() below: a roster entry whose own
@@ -1224,8 +1235,24 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const pname = p?.name || p?.Name || "";
       return pid === sideKey || pname === sideKey;
     });
-    const base = window.AdminLineupHelpers.rosterFor(teamObj || null);
-    return window.AdminLineupHelpers.mergeRosterWithAssigned
+    const squadNames = (Array.isArray(squad) ? squad : [])
+      .slice()
+      .sort((x, y) => (x?.index || 0) - (y?.index || 0))
+      .map(m => String(m?.name || "").trim())
+      .filter(Boolean);
+    const legacyNames = window.AdminLineupHelpers?.rosterFor
+      ? window.AdminLineupHelpers.rosterFor(teamObj || null)
+      : [];
+    const seen = new Set(squadNames.map(n => n.toLowerCase()));
+    const base = squadNames.concat(
+      legacyNames.filter(n => {
+        const key = String(n).trim().toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+    );
+    return window.AdminLineupHelpers?.mergeRosterWithAssigned
       ? window.AdminLineupHelpers.mergeRosterWithAssigned(base, lineup)
       : base;
   };
@@ -2025,11 +2052,22 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const slotLabelFor = (side, position) => {
     const squad = side === "a" ? squadA : squadB;
     const teamNumber = (side === "a" ? m.sideA : m.sideB)?.number || "";
-    // BLANK only, matching the resolver's reuse rule: a named member with
-    // this index is somebody already, possibly fighting at another position,
-    // and a name typed here would mint a new member rather than rename them.
-    const blank = (Array.isArray(squad) ? squad : []).find(mem => mem && mem.index === position && !(mem.name || "").trim());
-    return blank ? squadMemberLabel(teamNumber, position) : "";
+    // Named or blank: by default member i fights position i (squad.go's
+    // seeded order), so an unplaced position shows its default member's
+    // number even when that member already has a name. Picking a different
+    // member into the box moves THAT member's number onto the row, and a new
+    // name typed here renames the member only while the slot is still blank
+    // (resolveMemberIdsForPositions), otherwise it mints a new number; either
+    // way the number follows the name, which is the ruling.
+    const member = (Array.isArray(squad) ? squad : []).find(mem => mem && mem.index === position);
+    if (!member) return "";
+    // A default member already placed at ANOTHER position of this lineup is
+    // fighting there, so this row has no default left and shows no number
+    // (its number would otherwise appear twice on the sheet).
+    const lineup = side === "a" ? lineupA : lineupB;
+    const placedElsewhere = Object.values(lineup?.memberIds || {}).includes(member.id)
+      || (!!(member.name || "").trim() && Object.values(lineup?.positions || {}).includes(member.name));
+    return placedElsewhere ? "" : squadMemberLabel(teamNumber, position);
   };
 
   // mp-gmcg: open a past (already-fought) bout for inline correction. Snapshot
@@ -2715,8 +2753,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             const lineupPosKey = posKey5 || posKeyN;
             const teamIdB = teamIdForSide(m.sideB); // SHIRO = left
             const teamIdA = teamIdForSide(m.sideA); // AKA = right
-            const rosterB = rosterForSide(m.sideB, lineupB);
-            const rosterA = rosterForSide(m.sideA, lineupA);
+            const rosterB = rosterForSide(m.sideB, lineupB, squadB);
+            const rosterA = rosterForSide(m.sideA, lineupA, squadA);
             const pickPlayer = (teamId, lineup, squad, setSquad) => (value) => {
               submitInlineLineup(teamId, lineup, squad, setSquad, lineupPosKey, value);
             };

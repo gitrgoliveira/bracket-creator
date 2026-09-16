@@ -1,5 +1,5 @@
 // Package mobileapp, handlers_squad.go owns the
-// `/api/competitions/:id/squads` and
+// `/api/competitions/:id/team-members` and
 // `/api/competitions/:id/teams/:tid/members[/:memberId]` endpoints
 // (bc-tmid pass 1; DELETE added bc-pnum): a team's squad, the people on it,
 // kept in its own per-competition store (internal/state/squad.go) rather
@@ -55,7 +55,7 @@ type SquadMemberRequest struct {
 // per-competition directory does not exist to write into); mirrors
 // handlers_lineup.go's own comp == nil check.
 func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore) {
-	r.GET("/competitions/:id/squads", func(c *gin.Context) {
+	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -68,7 +68,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"squads": squads})
+		c.JSON(http.StatusOK, gin.H{"teamMembers": squads})
 	})
 
 	r.POST("/competitions/:id/teams/:tid/members", func(c *gin.Context) {

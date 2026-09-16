@@ -74,7 +74,7 @@ func squadJSONReq(method, path, password string, body any) *http.Request {
 }
 
 // POST mints an id and the next index (6, continuing past the 5 seeded
-// slots), returns 201; GET /squads then reflects it.
+// slots), returns 201; GET /team-members then reflects it.
 func TestSquadHandlers_AddMember(t *testing.T) {
 	r, _, teamID := setupSquadTestRouter(t)
 
@@ -89,12 +89,12 @@ func TestSquadHandlers_AddMember(t *testing.T) {
 	assert.Equal(t, 6, member.Index, "the team already carries 5 seeded slots (TeamSize 3, floor 5)")
 	assert.Equal(t, "Alice", member.Name)
 
-	req2 := squadJSONReq(http.MethodGet, "/api/competitions/c1/squads", "secret", nil)
+	req2 := squadJSONReq(http.MethodGet, "/api/competitions/c1/team-members", "secret", nil)
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
 	var got struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &got))
 	require.Len(t, got.Squads[teamID], 6, "5 seeded slots plus the reserve added above")
@@ -160,7 +160,7 @@ func TestSquadHandlers_UnknownCompetitionIs404(t *testing.T) {
 	r, _, teamID := setupSquadTestRouter(t)
 
 	t.Run("GET", func(t *testing.T) {
-		req := squadJSONReq(http.MethodGet, "/api/competitions/no-such-comp/squads", "secret", nil)
+		req := squadJSONReq(http.MethodGet, "/api/competitions/no-such-comp/team-members", "secret", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -193,7 +193,7 @@ func TestSquadHandlers_RequireAuth(t *testing.T) {
 	r, _, teamID := setupSquadTestRouter(t)
 
 	routes := []struct{ method, path string }{
-		{http.MethodGet, "/api/competitions/c1/squads"},
+		{http.MethodGet, "/api/competitions/c1/team-members"},
 		{http.MethodPost, "/api/competitions/c1/teams/" + teamID + "/members"},
 		{http.MethodPut, "/api/competitions/c1/teams/" + teamID + "/members/some-id"},
 		{http.MethodDelete, "/api/competitions/c1/teams/" + teamID + "/members/some-id"},

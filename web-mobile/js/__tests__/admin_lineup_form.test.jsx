@@ -5,7 +5,7 @@
 // exactly three operations: SELECT an existing squad member into a
 // position, ADD a new name in a position (minting the member's id in that
 // one step), and RENAME a member (keeping its id). The squad itself is
-// read from GET /api/competitions/:id/squads, never from team.metadata.
+// read from GET /api/competitions/:id/team-members, never from team.metadata.
 //
 // Because the test runtime (makeReactive) does NOT recurse into child
 // component bodies, host elements (<select>, <option>, <input>, <button>)
@@ -133,7 +133,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(optionTexts).toContain('T10.1');
   });
 
-  it('reads the squad from GET .../squads rather than from team.metadata', async () => {
+  it('reads the squad from GET .../team-members rather than from team.metadata', async () => {
     // metadata carries a name the squad endpoint does NOT: proves the
     // picker's options come from the squad store, not team.metadata.
     const tree = await mountFor(

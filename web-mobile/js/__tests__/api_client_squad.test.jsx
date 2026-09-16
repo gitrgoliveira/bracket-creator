@@ -22,22 +22,22 @@ describe('API.fetchSquads', () => {
   beforeEach(() => { originalFetch = global.fetch; });
   afterEach(() => { global.fetch = originalFetch; });
 
-  it('returns the squads map on 200', async () => {
+  it('returns the team members map on 200', async () => {
     const squads = { 'team-1': [{ id: 'm1', index: 1, name: 'Sato' }] };
-    global.fetch = mockFetch(200, { squads });
+    global.fetch = mockFetch(200, { teamMembers: squads });
     const result = await API.fetchSquads('c1', 'pw');
     expect(result).toEqual(squads);
   });
 
-  it('calls GET /api/competitions/:id/squads with the password header', async () => {
-    global.fetch = mockFetch(200, { squads: {} });
+  it('calls GET /api/competitions/:id/team-members with the password header', async () => {
+    global.fetch = mockFetch(200, { teamMembers: {} });
     await API.fetchSquads('c42', 'secret');
     const [url, opts] = global.fetch.mock.calls[0];
-    expect(url).toBe('/api/competitions/c42/squads');
+    expect(url).toBe('/api/competitions/c42/team-members');
     expect(opts.headers['X-Tournament-Password']).toBe('secret');
   });
 
-  it('returns {} when the response carries no squads key', async () => {
+  it('returns {} when the response carries no teamMembers key', async () => {
     global.fetch = mockFetch(200, {});
     const result = await API.fetchSquads('c1', 'pw');
     expect(result).toEqual({});

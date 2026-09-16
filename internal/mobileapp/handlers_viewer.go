@@ -380,7 +380,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		"poolMatches": poolMatches,
 		"bracket":     bracket,
 	}
-	// SAME shape and SAME gate as the detail endpoint's own "squads" key
+	// SAME shape and SAME gate as the detail endpoint's own "teamMembers" key
 	// (GET /api/viewer/competitions/:id, above): present only for a team
 	// competition, keyed by the team's participant id, matching the admin
 	// endpoint's shape. Deliberately identical rather than a leaner variant
@@ -391,7 +391,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// the detail endpoint, so this is the shape those two surfaces
 	// actually see.
 	if isTeamComp {
-		payload["squads"] = squads
+		payload["teamMembers"] = squads
 	}
 	// Both loads above already SWALLOW their error into a log and carry on with
 	// whatever they got, which is right -- one unreadable file must not blank a
@@ -802,18 +802,18 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"standings":   standings,
 				"bracket":     bracket,
 			}
-			// "squads" is present only for a team competition (isTeamComp,
+			// "teamMembers" is present only for a team competition (isTeamComp,
 			// above) and omitted entirely for an individual one, rather than
 			// carrying an always-empty {} -- a client can treat the key's
 			// absence as "this competition has no squads to resolve" without
 			// inspecting comp.kind/comp.teamSize itself. Keyed by the TEAM's
 			// participant id, matching the admin endpoint's shape
-			// (GET /api/competitions/:id/squads, handlers_squad.go) exactly,
+			// (GET /api/competitions/:id/team-members, handlers_squad.go) exactly,
 			// so a client resolves a bout row's sideAMemberId/sideBMemberId
 			// (state.SubMatchResult) to {id, index, name} without a second,
 			// admin-gated call this public surface could never make anyway.
 			if isTeamComp {
-				payload["squads"] = squads
+				payload["teamMembers"] = squads
 			}
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues

@@ -140,7 +140,11 @@ export function useTeamLineups(match, competition, roundIndex) {
             (detail && detail.players && detail.players.length ? detail.players : null)
             || (detail && detail.config && detail.config.players)
             || [];
-          if (!squadsMap) squadsMap = (detail && detail.squads) || null;
+          // detail.teamMembers, not .squads: normalizeCompetitionDetail spreads the
+          // payload unchanged, so this object carries the WIRE key, while the
+          // `competition` above is a normalizeViewerCompItem result that remaps it
+          // to an internal `squads` field. Two shapes, two names, one concept.
+          if (!squadsMap) squadsMap = (detail && detail.teamMembers) || null;
         } catch (_e) {
           console.warn("useTeamLineups: competition fetch failed", _e);
         }

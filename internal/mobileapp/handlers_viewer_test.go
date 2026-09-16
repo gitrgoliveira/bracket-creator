@@ -707,7 +707,7 @@ func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
 // TestViewerCompetitionDetail_TeamCompetitionCarriesSquads pins the wire
 // contract: a team competition's GET /api/viewer/competitions/:id payload
 // carries a "squads" key, keyed by the team's participant id (matching
-// the admin endpoint's shape, GET /api/competitions/:id/squads), so a
+// the admin endpoint's shape, GET /api/competitions/:id/team-members), so a
 // client can resolve a bout row's sideAMemberId/sideBMemberId without a
 // second, admin-gated call. A blank-named member (an unfilled seeded
 // position) is still present with its index: the index, not the name, is
@@ -737,7 +737,7 @@ func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var body struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Contains(t, body.Squads, redID)
@@ -824,7 +824,7 @@ func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var body struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	// The exact CONTENT is deliberately not pinned here: this same request's
@@ -875,7 +875,7 @@ func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var comps []struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
@@ -960,7 +960,7 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var comps []struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
@@ -1013,7 +1013,7 @@ func TestViewerCourtFeed_TeamCompetitionCarriesSquads(t *testing.T) {
 
 	var body struct {
 		Competitions []struct {
-			Squads map[string][]domain.TeamMember `json:"squads"`
+			Squads map[string][]domain.TeamMember `json:"teamMembers"`
 		} `json:"competitions"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))

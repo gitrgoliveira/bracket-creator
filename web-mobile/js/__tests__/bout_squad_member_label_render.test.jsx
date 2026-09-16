@@ -97,7 +97,7 @@ describe('BoutSubRow: squad member label on public surfaces', () => {
   });
 
   it('a blank-named squad member (an unfilled position) never produces a label for a fighter', () => {
-    // squads.yaml's wire shape: a member with a BLANK name is a normal
+    // team-members.yaml's wire shape: a member with a BLANK name is a normal
     // unfilled position, not an absence. It must never be mistaken for a
     // match against a fighter whose own name happens to be empty/absent --
     // here the fighter has no recorded name and no lineup pick at all, so

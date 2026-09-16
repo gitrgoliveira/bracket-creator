@@ -133,12 +133,11 @@ page depends on them.
 
 `Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
-competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its members, stored in `squads.yaml` under the team's participant
-id. That file name is older than the wording these pages use and is kept as it is, because
-every tournament already recorded holds a file under that name.
+competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its members, stored in `team-members.yaml` under the team's participant
+id.
 
 That one setting decides which records exist at all. An individual competition has no
-`squads.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
+`team-members.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
 directly. A team competition has both, and its entrants are teams, so the person who fights
 a given bout is named one level further down. The positions a round has are the five FIK
 names, senpo, jiho, chuken, fukusho and taisho, when the team size is five, and numbers for
@@ -408,7 +407,7 @@ classDiagram
         position to name and member id
         a position may hold an id and an empty name
     }
-    class squads_yaml["squads.yaml"] {
+    class team_members_yaml["team-members.yaml"] {
         <<YAML>>
         TeamMember list by team
     }
@@ -440,9 +439,9 @@ classDiagram
     config_md --> bracket_json
     config_md --> status_yaml
     config_md --> lineups_yaml
-    config_md --> squads_yaml
+    config_md --> team_members_yaml
     config_md --> overrides_json
-    squads_yaml --> lineups_yaml : positions reference members
+    team_members_yaml --> lineups_yaml : positions reference members
 ```
 
 Markdown, CSV, and JSON or YAML each earn their place:

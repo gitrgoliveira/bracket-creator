@@ -158,7 +158,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 // requireValidCompID (format only), so this is the existence check that
 // turns a bad id into "competition not found" instead of falling through to
 // a store write that would fail with a bare, unmappable I/O error (no
-// competition directory to write squads.yaml into).
+// competition directory to write team-members.yaml into).
 func requireExistingCompetitionForSquad(c *gin.Context, comps CompetitionStore, compID string) bool {
 	comp, err := comps.LoadCompetition(compID)
 	if err != nil {

@@ -217,7 +217,7 @@ export function pickMemberIdFromLineup(lineup, index, teamSize) {
 // resolveBoutSideName's kachinuki-vs-fixed priority exactly: the id must
 // come from the SAME source tier the name was resolved from (a kachinuki
 // numbered bout's pairing is server-bout-log first, the SubMatchResult's own
-// sideAMemberId/sideBMemberId -- backfilled from squads.yaml by the
+// sideAMemberId/sideBMemberId -- backfilled from team-members.yaml by the
 // legacy-upgrade repair -- so the lineup position's id must never outrank
 // it; fixed-format and the daihyosen row stay lineup-first). Callers pass
 // existingMemberId/lineupMemberId from the SAME existing/lineup objects

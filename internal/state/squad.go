@@ -6,7 +6,7 @@
 // data-loss sites) can no longer destroy it.
 //
 // One file per competition lives at
-// tournament-data/competitions/<id>/squads.yaml, keyed by the TEAM's
+// tournament-data/competitions/<id>/team-members.yaml, keyed by the TEAM's
 // participant id (never its name -- a team may be renamed, and the id is
 // what does not change underneath that). Modelled closely on
 // team_lineup.go, the same shape of problem (per-competition YAML keyed by
@@ -37,7 +37,7 @@
 // (state.CanStart(comp.Status) false), the same precondition
 // engine.StartCompetition itself gates on.
 //
-// squads.yaml is deliberately NOT in allowedDrawFiles (competition.go): a
+// team-members.yaml is deliberately NOT in allowedDrawFiles (competition.go): a
 // team's squad and its draw are independent lifecycles, so discarding the
 // draw must never touch it.
 package state
@@ -53,7 +53,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const squadsFilename = "squads.yaml"
+const teamMembersFilename = "team-members.yaml"
 
 // SquadReserveSlots is the number of extra numbered slots a squad is
 // seeded with beyond the competition's TeamSize (operator ruling
@@ -107,7 +107,7 @@ type squadsFile struct {
 	Squads map[string][]domain.TeamMember `yaml:"squads"`
 }
 
-// parseSquadsFile reads and parses squads.yaml at path. A missing file is
+// parseSquadsFile reads and parses team-members.yaml at path. A missing file is
 // "no squad recorded yet" and returns an empty map, matching
 // parseTeamLineupsFile's contract for the identical situation.
 func parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
@@ -121,7 +121,7 @@ func parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
 	return parseSquadsBytes(data)
 }
 
-// parseSquadsBytes parses squads.yaml from in-memory bytes. Empty input →
+// parseSquadsBytes parses team-members.yaml from in-memory bytes. Empty input →
 // empty map, matching the "file does not exist" contract.
 func parseSquadsBytes(data []byte) (map[string][]domain.TeamMember, error) {
 	if len(data) == 0 {
@@ -157,7 +157,7 @@ func copySquads(in map[string][]domain.TeamMember) map[string][]domain.TeamMembe
 // Cache-aware (mtime-keyed via loadCached, same as LoadTeamLineups).
 // Returns a deep copy so callers can mutate the map freely.
 func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
-	data, err := s.loadCached(compID, squadsFilename, func(path string) (any, error) {
+	data, err := s.loadCached(compID, teamMembersFilename, func(path string) (any, error) {
 		return parseSquadsFile(path)
 	})
 	if err != nil {
@@ -166,12 +166,12 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 	return copySquads(data.(map[string][]domain.TeamMember)), nil
 }
 
-// loadSquadsLocked reads squads.yaml directly from disk WITHOUT acquiring
+// loadSquadsLocked reads team-members.yaml directly from disk WITHOUT acquiring
 // the per-competition lock. Caller MUST already hold the lock. Bypasses the
 // cache: locked callers are about to load-mutate-save and need a fresh
 // private map, mirroring loadTeamLineupsLocked.
 func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember, error) {
-	return parseSquadsFile(s.compPath(compID, squadsFilename))
+	return parseSquadsFile(s.compPath(compID, teamMembersFilename))
 }
 
 // saveSquadsLocked persists the squads map. Caller MUST hold the per-comp
@@ -180,7 +180,7 @@ func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember,
 // Deliberately does NOT create the competition directory -- see
 // saveOverridesLocked's doc comment for the full reasoning (a write
 // landing after DeleteCompetition would otherwise rebuild
-// competitions/<id>/ around a lone squads.yaml, which ListCompetitions
+// competitions/<id>/ around a lone team-members.yaml, which ListCompetitions
 // keeps reporting and a same-named recreation adopts).
 // saveCompetitionChangedLocked is the ONE writer that legitimately creates
 // the directory; do not reintroduce os.MkdirAll here.
@@ -189,23 +189,23 @@ func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamM
 	if err != nil {
 		return err
 	}
-	path := s.compPath(compID, squadsFilename)
+	path := s.compPath(compID, teamMembersFilename)
 	if err := write(path, data, 0600); err != nil {
 		return err
 	}
 
-	cache := s.getFileCache(compID, squadsFilename)
+	cache := s.getFileCache(compID, teamMembersFilename)
 	cache.mu.Lock()
 	cache.data = copySquads(squads)
-	cache.mtime = s.FileMtime(compID, squadsFilename)
+	cache.mtime = s.FileMtime(compID, teamMembersFilename)
 	cache.mu.Unlock()
 
 	// Bumped AFTER the bytes land and the cache is refreshed
 	// (bumpFileVersion's contract, store.go): a future consumer keying a
-	// derived cache on squads.yaml (bout-log/kachinuki member resolution,
+	// derived cache on team-members.yaml (bout-log/kachinuki member resolution,
 	// a later pass of bc-tmid) must see this write without a
 	// same-millisecond mtime hiding it from FileVersion.
-	s.bumpFileVersion(compID, squadsFilename)
+	s.bumpFileVersion(compID, teamMembersFilename)
 	return nil
 }
 

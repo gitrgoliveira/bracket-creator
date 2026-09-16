@@ -4,7 +4,7 @@ package state_test
 // EnsureLegacyUpgraded gives up when a file it opens will not parse: only
 // the work that genuinely needed that file, and never in silence.
 //
-// squads.yaml: both side-id repairs open it for ONE branch -- resolving a
+// team-members.yaml: both side-id repairs open it for ONE branch -- resolving a
 // team bout log's member ids -- and used to return its error, abandoning
 // the MATCH-level SideAID/SideBID/WinnerID stamping in the same breath.
 // That stamping needs no squad at all, and since bc-pnum standings resolve
@@ -27,13 +27,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// writeUnreadableSquads replaces c1's squads.yaml with bytes no parser can
+// writeUnreadableSquads replaces c1's team-members.yaml with bytes no parser can
 // accept. A MISSING file is deliberately NOT this case: parseSquadsFile
 // reads that as an empty map with no error, which is the ordinary "no
 // squads yet" state every individual competition is in.
 func writeUnreadableSquads(t *testing.T, dir string) {
 	t.Helper()
-	path := filepath.Join(dir, "competitions", "c1", "squads.yaml")
+	path := filepath.Join(dir, "competitions", "c1", "team-members.yaml")
 	require.NoError(t, os.WriteFile(path, []byte("\tthis: [is not\n  valid: yaml\n"), 0o600))
 	_, err := state.NewStore(dir)
 	require.NoError(t, err)

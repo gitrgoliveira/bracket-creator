@@ -284,24 +284,24 @@ func TestSquadMigration_AlreadyMigratedTeamIsUntouched(t *testing.T) {
 }
 
 // Nothing is written when there is nothing to migrate: file bytes AND
-// Store.FileVersion for squads.yaml stay unchanged.
+// Store.FileVersion for team-members.yaml stay unchanged.
 func TestSquadMigration_WritesNothingWhenNothingToMigrate(t *testing.T) {
 	s, id := newTeamMemberTestStore(t, "individual", 0, false)
 	require.NoError(t, s.SaveParticipants(id, []domain.Player{
 		{Name: "Akira Tanaka", Dojo: "Gyokusen", Metadata: []string{"3"}},
 	}))
 
-	versionBefore := s.FileVersion(id, squadsFilename)
-	squadsPath := filepath.Join(s.GetFolder(), "competitions", id, squadsFilename)
+	versionBefore := s.FileVersion(id, teamMembersFilename)
+	squadsPath := filepath.Join(s.GetFolder(), "competitions", id, teamMembersFilename)
 	_, statErrBefore := os.Stat(squadsPath)
-	require.True(t, os.IsNotExist(statErrBefore), "squads.yaml must not exist before any migration-eligible load")
+	require.True(t, os.IsNotExist(statErrBefore), "team-members.yaml must not exist before any migration-eligible load")
 
 	_, err := s.LoadParticipants(id, false)
 	require.NoError(t, err)
 
-	assert.Equal(t, versionBefore, s.FileVersion(id, squadsFilename), "FileVersion must not bump when nothing changed")
+	assert.Equal(t, versionBefore, s.FileVersion(id, teamMembersFilename), "FileVersion must not bump when nothing changed")
 	_, statErrAfter := os.Stat(squadsPath)
-	assert.True(t, os.IsNotExist(statErrAfter), "squads.yaml must still not exist; nothing was written")
+	assert.True(t, os.IsNotExist(statErrAfter), "team-members.yaml must still not exist; nothing was written")
 }
 
 // A TEAM competition whose row carries no Metadata at all is now SEEDED
@@ -316,7 +316,7 @@ func TestSquadMigration_WritesNothingWhenNothingToMigrate(t *testing.T) {
 // SaveParticipants' own pre-write migration call (participants.go) sees
 // nothing yet the FIRST time it runs against a brand-new roster (it reads
 // whatever is CURRENTLY on disk, which is nothing before this very write
-// lands), so squads.yaml still does not exist immediately after
+// lands), so team-members.yaml still does not exist immediately after
 // SaveParticipants returns; seeding happens on the LoadParticipants call
 // below, once the roster (and the team's minted id) are actually on disk.
 func TestSquadMigration_TeamWithNoMetadataIsSeededToTeamSize(t *testing.T) {
@@ -325,7 +325,7 @@ func TestSquadMigration_TeamWithNoMetadataIsSeededToTeamSize(t *testing.T) {
 		{Name: "Tora A", Dojo: "Tora Dojo"}, // no Metadata at all
 	}))
 
-	squadsPath := filepath.Join(s.GetFolder(), "competitions", id, squadsFilename)
+	squadsPath := filepath.Join(s.GetFolder(), "competitions", id, teamMembersFilename)
 	_, statErrBefore := os.Stat(squadsPath)
 	require.True(t, os.IsNotExist(statErrBefore), "the very first roster write must not itself have seeded a squad")
 
@@ -422,7 +422,7 @@ func TestSquadMigration_SurvivesMetadataBlankingWriteEvenWhenNeverMigratedBefore
 
 // TestSquadMigration_InvalidatesTheSharedLazyCache pins the cache-coherence
 // half of EnsureLegacyUpgraded's step ordering. The sub-bout and lineup
-// member-id repairs resolve against a squads.yaml the squad migration may
+// member-id repairs resolve against a team-members.yaml the squad migration may
 // have just written, and they read it through legacyUpgradeRoster's shared
 // lazy accessor. If that accessor was materialised before the migration ran,
 // it holds the PRE-migration map, and every downstream repair sees "no
@@ -725,7 +725,7 @@ func TestSquad_ClearRefusedOnceStarted(t *testing.T) {
 	comp.Status = CompStatusPools
 	require.NoError(t, s.SaveCompetition(comp))
 
-	versionBefore := s.FileVersion(id, squadsFilename)
+	versionBefore := s.FileVersion(id, teamMembersFilename)
 	err = s.ClearTeamMemberName(id, teamA, m.ID)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrTeamMemberClearAfterStart))
@@ -739,7 +739,7 @@ func TestSquad_ClearRefusedOnceStarted(t *testing.T) {
 		}
 	}
 	assert.True(t, stillNamed, "a refused clear must not have changed the stored name")
-	assert.Equal(t, versionBefore, s.FileVersion(id, squadsFilename), "a refused clear must write nothing")
+	assert.Equal(t, versionBefore, s.FileVersion(id, teamMembersFilename), "a refused clear must write nothing")
 }
 
 // Renaming a member and adding one stay available once the competition has

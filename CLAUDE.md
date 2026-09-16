@@ -93,7 +93,7 @@ tournament-data/
     ├── bracket.json               Elimination bracket structure + results
     ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
     ├── lineups.yaml               Team lineups, keyed by round
-    ├── squads.yaml                A team's members, keyed by the team's participant id
+    ├── team-members.yaml                A team's members, keyed by the team's participant id
     └── overrides.json             Manual ranking overrides
 ```
 
@@ -320,7 +320,7 @@ Name[, Zekken/DisplayName], Dojo[, DanGrade][, source]
 
 ## Common Pitfalls
 
-- **A team's people are its "team members", never its "squad"** in UI strings and in `docs/` (operator ruling 2026-09-16, bc-dnst). "Squad" survives ONLY as a code name for the same thing: the `squads.yaml` file, the `squads` wire key, and identifiers such as `squadMemberLabel`, `squadSlotLabel` and `squadRosterEntries`. Those are load-bearing (the file is on disk in every existing tournament and the key is on the wire), so renaming them is NOT part of the rule. The Lineups page heading reads "Team members"; write the same in any new operator copy or docs page.
+- **A team's people are its "team members", never its "squad"** in UI strings, in `docs/`, and on disk (operator ruling 2026-09-16, bc-dnst). The store file is `team-members.yaml`; it was renamed from `squads.yaml` WITHOUT a legacy read path, by operator decision, so a competition folder written before that rename has no team members the app can see. "Squad" survives as a code name only: the `squads` JSON key and the `/squads` route (client and server ship in one binary, so they agree), and identifiers such as `squadMemberLabel`, `squadSlotLabel` and `squadRosterEntries`. The Lineups page heading reads "Team members"; write the same in any new operator copy or docs page.
 - **Kendo uses NO MATS. Never write "mat" or "mats"** in code, comments, tests, UI strings, docs or commit messages. The fighting area is a **shiaijo** (in prose, a **court**); "shiai-jo" hyphenated on the public `docs/` site. "Mat" is judo/wrestling vocabulary and is simply wrong for this sport. Reaching for it to avoid repeating "court" is how it gets in. (The only legitimate `mat` in the tree is a QR bitmap variable in `web-mobile/js/qr.jsx`, plus the rule's own name inside `docs/check_prose.py`.)
 - Excel coordinates matter: changing match generation requires updating cell references and formula links across sheets
 - `team-matches=0` means individual tournaments, not team tournaments

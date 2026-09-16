@@ -2,7 +2,7 @@ package state_test
 
 // legacy_upgrade_lineup_ids_test.go pins the bc-tmid pass 2 load-time
 // repair for lineups.yaml: an occupied position holding a NAME but no
-// MemberIDs entry is filled from the team's OWN squad (squads.yaml) when
+// MemberIDs entry is filled from the team's OWN squad (team-members.yaml) when
 // the name resolves to exactly one member on that team, exactly like the
 // header comment on legacy_upgrade.go documents. Two members of ONE team
 // sharing a name is already impossible (bc-tmdup), so this repair needs

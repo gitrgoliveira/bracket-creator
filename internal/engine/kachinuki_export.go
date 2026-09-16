@@ -54,7 +54,7 @@ func (e *Engine) collectKachinukiMatches(compID string, comp *state.Competition)
 	// to the public surfaces" -- the printed record is one of the
 	// surfaces the operator ruling names). Both lookups are tolerant of
 	// every read failure the same way positionByPlayer is above: a
-	// missing/corrupt squads.yaml, roster, pools.csv or bracket.json must
+	// missing/corrupt team-members.yaml, roster, pools.csv or bracket.json must
 	// degrade to blank labels, not fail the whole Kachinuki Detail export.
 	teamNumbers := e.buildKachinukiTeamNumbers(compID, comp)
 	squads := e.buildKachinukiSquads(compID)
@@ -161,7 +161,7 @@ func (e *Engine) buildKachinukiTeamNumbers(compID string, comp *state.Competitio
 	return out
 }
 
-// buildKachinukiSquads loads compID's squads.yaml (internal/state/squad.go),
+// buildKachinukiSquads loads compID's team-members.yaml (internal/state/squad.go),
 // tolerant of any read failure. A missing file is already "no squads"
 // from LoadSquads itself (state.parseSquadsFile's contract); a genuinely
 // corrupt file degrades to no labels for this export rather than failing

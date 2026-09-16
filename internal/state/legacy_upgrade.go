@@ -121,7 +121,7 @@ import (
 //
 //   - a team's Player.Metadata (its ordered member-name list, sharing that
 //     array ambiguously with an individual's dan grade) converts to
-//     squads.yaml ON READ *and* ON WRITE (bc-tmid), below
+//     team-members.yaml ON READ *and* ON WRITE (bc-tmid), below
 //     (upgradeSquadsFromMetadataLocked). Unlike every upgrade above, this
 //     one is not resolving a foreign id against the roster; a team's own
 //     Metadata needs no lookup, only its OWN already-resolved participant
@@ -138,10 +138,10 @@ import (
 //
 //   - a team's lineups.yaml positions (occupied Positions entries with no
 //     MemberIDs counterpart) convert ON READ, below (bc-tmid pass 2),
-//     AFTER the squads.yaml migration above so a team migrated in the SAME
+//     AFTER the team-members.yaml migration above so a team migrated in the SAME
 //     pass is still resolvable. Unlike every upgrade above this one is not
 //     resolving against the roster at all, but against the TEAM'S OWN
-//     squad (squads.yaml), and needs none of the NameCount-gated
+//     squad (team-members.yaml), and needs none of the NameCount-gated
 //     uniqueness dance those upgrades carry: two members of ONE team
 //     sharing a name is already impossible (bc-tmdup, enforced on every
 //     squad mutation), so an exact name match inside a single team's squad
@@ -271,7 +271,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	}
 	// Squads BEFORE pool-matches/bracket/lineups (bc-tmid pass 2 reorder):
 	// those three now also resolve SUB-BOUT / lineup-position member ids
-	// against squads.yaml, so a team whose squad is migrated from
+	// against team-members.yaml, so a team whose squad is migrated from
 	// Player.Metadata in THIS SAME pass must be migrated before anything
 	// downstream tries to resolve against it, or the very team this pass
 	// just gave a squad to would still see "no squad" and skip repair for
@@ -446,7 +446,7 @@ type legacyUpgradeRoster struct {
 
 	// squadsLoaded / squadsData / squadsErr back the squads() accessor
 	// below (bc-tmid pass 2): the sub-bout and lineup member-id repairs
-	// both resolve against squads.yaml, so it is loaded lazily and cached
+	// both resolve against team-members.yaml, so it is loaded lazily and cached
 	// here exactly like the roster fields above, at most once per
 	// EnsureLegacyUpgraded call.
 	squadsLoaded bool
@@ -538,10 +538,10 @@ func (r *legacyUpgradeRoster) rosterPlayers() ([]domain.Player, error) {
 	return r.players, nil
 }
 
-// squads returns compID's squads.yaml contents, loading it on the first
+// squads returns compID's team-members.yaml contents, loading it on the first
 // call and caching the result (including a load failure) for every
 // subsequent call in this same EnsureLegacyUpgraded invocation -- the
-// squads.yaml sibling of get()/rosterPlayers() above (bc-tmid pass 2). A
+// team-members.yaml sibling of get()/rosterPlayers() above (bc-tmid pass 2). A
 // nil map with a nil error means "no squads recorded", which every caller
 // below treats as "nothing to resolve against".
 // reset drops what this pass has already read off disk, so the steps below
@@ -869,7 +869,7 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 	if err != nil || idx == nil {
 		return err
 	}
-	// A squads.yaml this pass cannot read must not cost the MATCH-level
+	// A team-members.yaml this pass cannot read must not cost the MATCH-level
 	// repair below, which needs no squad at all -- only the sub-bout branch
 	// resolves against it. Aborting here left every legacy row's
 	// SideAID/SideBID/WinnerID empty forever, and standings resolve BY ID
@@ -1119,7 +1119,7 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	// (a) just resolved -- a match neither reached leaves its sub-bouts
 	// alone too, the same "can only repair what its parent resolved" rule
 	// resolveSubMemberIDs' doc states.
-	// A squads.yaml this pass cannot read must not cost the MATCH-level
+	// A team-members.yaml this pass cannot read must not cost the MATCH-level
 	// repair below, which needs no squad at all -- only the sub-bout branch
 	// resolves against it. Aborting here left every legacy row's
 	// SideAID/SideBID/WinnerID empty forever, and standings resolve BY ID
@@ -1155,7 +1155,7 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 }
 
 // upgradeSquadsFromMetadataLocked migrates a team's squad OUT of
-// Player.Metadata into squads.yaml (bc-tmid), and SEEDS it up to
+// Player.Metadata into team-members.yaml (bc-tmid), and SEEDS it up to
 // squadFloor(comp.TeamSize) -- the competition's TeamSize plus two reserve
 // slots (bc-pnum ruling: "by default teams have x team members, as defined
 // in the competition config, and those positions have their numbers";
@@ -1195,10 +1195,10 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 //
 // Deliberately does NOT clear or rewrite Player.Metadata (operator ruling:
 // "nothing is deleted" -- migrate on load, don't build a separate repair):
-// squads.yaml becomes the source of truth going forward and the old array
+// team-members.yaml becomes the source of truth going forward and the old array
 // is simply left where it is.
 //
-// Requires the row's OWN participant id: squads.yaml is keyed by the
+// Requires the row's OWN participant id: team-members.yaml is keyed by the
 // team's participant id, and a genuinely legacy (pre-id-column) row has
 // none yet -- the same residual miss the four legacy-upgrade steps above
 // accept for the identical reason. Such a team is left alone here; the
@@ -1631,7 +1631,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
 		return err
 	}
-	// Drop the shared lazy squad cache: this call just changed squads.yaml,
+	// Drop the shared lazy squad cache: this call just changed team-members.yaml,
 	// and the sub-bout and lineup repairs that follow resolve against it.
 	// Today nothing reads squads before this step, so this is a no-op -- and
 	// that is exactly the point. It makes the ordering above a property of
@@ -1649,7 +1649,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 
 // upgradeLineupMemberIDsLocked completes a legacy (or otherwise unrepaired)
 // lineups.yaml: an occupied position's MemberIDs entry is filled from the
-// team's OWN squad (squads.yaml) whenever the position's Name resolves to
+// team's OWN squad (team-members.yaml) whenever the position's Name resolves to
 // EXACTLY one member on that team -- always true once bc-tmdup's
 // duplicate-name refusal holds (bc-tmid pass 2), so this needs none of the
 // NameCount-gated uniqueness dance the participants.csv-facing repairs

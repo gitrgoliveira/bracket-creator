@@ -2894,7 +2894,7 @@ const API = {
         return true;
     },
     // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
-    // own per-competition store (squads.yaml), keyed by the team's
+    // own per-competition store (team-members.yaml), keyed by the team's
     // participant id -- see internal/state/squad.go. Returns the whole
     // map ({ teamId: [{id, index, name}, …] }) since the lineup editor
     // needs its own team's list, not one member at a time.

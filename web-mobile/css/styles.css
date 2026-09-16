@@ -5163,6 +5163,13 @@ button.vsched-item:not([data-clickable]) {
   margin: 2px 0 0;
 }
 
+/* The team sheet states the hint once for the whole encounter, between the
+   team header and the first bout, so it needs the breathing room below that
+   the individual board's copy (which sits under its own marks) does not. */
+.sb-hint--encounter {
+  margin: 0 0 8px;
+}
+
 .sb-slots {
   display: flex;
   gap: 12px;

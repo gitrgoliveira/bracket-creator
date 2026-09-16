@@ -1528,6 +1528,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
+  // Does any bout carry a mark the operator could tap away? Read off
+  // subTotals rather than re-filtering the rows, so the hint and the score
+  // agree by construction. Counted through realIppons like everything else,
+  // which drops the hantei mark: that one names a verdict, carries its own
+  // "click to undo" title, and is not what this sentence is about.
+  const anyMarkScored = subTotals.some(t => t.aTotal + t.bTotal > 0);
+
   // Who the SERVER says won a bout, through the same one winner rule as
   // subTotals above (the local-state answer). Only the re-seed needs this, to
   // re-baseline an open correction against the row it is about to adopt; the
@@ -2726,6 +2733,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 </div>
               ) : null)}
             </div>
+          )}
+
+          {/* One clear-a-mark hint for the whole encounter, after the team
+              names and before the first bout (operator ruling 2026-09-16,
+              bc-dnst). The team sheet repeats a row per bout, so the line
+              that sits under the marks on the individual board would be
+              noise here; it is stated once for the sheet instead. Same
+              words and same .sb-hint owner as that board, and shown on the
+              same condition: only while there is a mark to clear. */}
+          {anyMarkScored && (
+            <div className="sb-hint sb-hint--encounter" data-testid="team-scoring-clear-hint">Tap a scored mark to clear it</div>
           )}
 
           {/* Individual match rows. T136: in kachinuki mode only the

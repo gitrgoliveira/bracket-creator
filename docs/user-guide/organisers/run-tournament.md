@@ -218,7 +218,7 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
      (/user-guide/organisers/run-tournament/): three levels up, not two. -->
 <figure class="bc-fig">
   <video controls loop muted playsinline preload="metadata" width="900" height="580" aria-label="Generating the draw: the pools preview appears after clicking Generate draw.">
-    <source src="../../../screenshots/draw-generation.mp4" type="video/mp4">
+    <source src="../../../screenshots/draw-generation.webm" type="video/webm">
   </video>
   <figcaption>Generating the draw. Press play to watch.</figcaption>
 </figure>

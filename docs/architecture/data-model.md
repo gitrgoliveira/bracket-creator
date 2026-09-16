@@ -134,7 +134,8 @@ page depends on them.
 `Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
 competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its members, stored in `squads.yaml` under the team's participant
-id.
+id. That file name is older than the wording these pages use and is kept as it is, because
+every tournament already recorded holds a file under that name.
 
 That one setting decides which records exist at all. An individual competition has no
 `squads.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them

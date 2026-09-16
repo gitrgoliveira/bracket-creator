@@ -57,7 +57,7 @@ Scores entered by the operator appear on the viewer immediately, across every co
      (/user-guide/spectators/following/): three levels up, not two. -->
 <figure class="bc-fig">
   <video class="bc-phone" controls loop muted playsinline preload="metadata" width="440" height="900" aria-label="A scorer's result appears on the viewer in real time, with no refresh.">
-    <source src="../../../screenshots/realtime-update.mp4" type="video/mp4">
+    <source src="../../../screenshots/realtime-update.webm" type="video/webm">
   </video>
   <figcaption>A scorer's result appearing on the viewer in real time, with no refresh. Press play to watch.</figcaption>
 </figure>

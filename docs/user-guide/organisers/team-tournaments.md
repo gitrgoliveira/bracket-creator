@@ -21,15 +21,18 @@ member for a position or typing a new name.
 Every position a team has is offered, including the ones still waiting for a
 name, so you can field a fighter by number first and fill the name in later. A
 fighter picked that way counts in every format, winner-stays-on included.
-Typing a name into a position names its blank slot when one is free. When none
-is left, the app adds a new position to the team in the same step. On the
-Lineups page the app confirms first, so a mistyped name cannot quietly create a
-person nobody expected. The match lineup panel and the score sheet apply the
-name when you save.
+Typing a name that already belongs to a member simply picks that member, with
+nothing created and nothing to confirm. A new name instead names the position's
+blank slot when one is free, and when none is left the app adds a new position
+to the team in the same step. On the Lineups page it confirms both of those
+first, so a mistyped name cannot quietly create a person nobody expected. The
+match lineup panel and the score sheet apply the name when you save.
 
-Nobody can be placed at two positions of the same lineup. The pickers do not
+Nobody can be placed at two positions of the same lineup. Those pickers do not
 offer a fighter who is already placed, and a name typed for one is refused with
-the position they hold.
+the position they hold. A winner-stays-on bout after the first is not a lineup
+position, so its list offers everyone: the fighter who stayed on is meant to
+appear again.
 
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person

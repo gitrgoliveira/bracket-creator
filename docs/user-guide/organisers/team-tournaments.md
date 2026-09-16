@@ -34,13 +34,15 @@ the position they hold.
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person
 after the change. You can correct a spelling or switch to a full name mid
-tournament without disturbing results already recorded. Rename from the member
-list on the Lineups page, or from the match's lineup panel on the court console
+tournament without disturbing results already recorded. Rename from the **Team
+members** list on the Lineups page, or from the match's lineup panel on the
+court console
 (the Rename control under the position), at any time. The corrected name shows
 everywhere, including bouts already fought and the exported sheet.
 
-Nobody is removed from a team. Instead, you can clear a name from the member
-list on the Lineups page, which empties that position and keeps its number.
+Nobody is removed from a team. Instead, you can clear a name from the **Team
+members** list on the Lineups page, which empties that position and keeps its
+number.
 You can only do that before the competition starts. Once it has started every
 name stays, so a bout already fought always names the same person. An unused
 member is harmless: they never appear in a lineup.

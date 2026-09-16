@@ -96,15 +96,15 @@ var ErrTeamNotFound = errors.New("no team with that id in this competition")
 // than requireSetupLocked's stricter check is deliberate, not an oversight.
 var ErrTeamMemberClearAfterStart = errors.New("cannot clear a team member's name once the competition has started")
 
-// squadsFile is the on-disk YAML shape: a single top-level key so the file
+// teamMembersFile is the on-disk YAML shape: a single top-level key so the file
 // is self-describing and can grow a sibling key later without a format
 // break (mirrors teamLineupFile's own reasoning). Marshaling a
 // map[string][]domain.TeamMember directly (rather than flattening to a
 // slice the way teamLineupFile does) is safe here: gopkg.in/yaml.v3 sorts
 // map keys before encoding, so the team-id ordering on disk is
 // deterministic without this package doing it by hand.
-type squadsFile struct {
-	Squads map[string][]domain.TeamMember `yaml:"squads"`
+type teamMembersFile struct {
+	Members map[string][]domain.TeamMember `yaml:"members"`
 }
 
 // parseSquadsFile reads and parses team-members.yaml at path. A missing file is
@@ -127,14 +127,14 @@ func parseSquadsBytes(data []byte) (map[string][]domain.TeamMember, error) {
 	if len(data) == 0 {
 		return map[string][]domain.TeamMember{}, nil
 	}
-	var file squadsFile
+	var file teamMembersFile
 	if err := yaml.Unmarshal(data, &file); err != nil {
 		return nil, err
 	}
-	if file.Squads == nil {
-		file.Squads = map[string][]domain.TeamMember{}
+	if file.Members == nil {
+		file.Members = map[string][]domain.TeamMember{}
 	}
-	return file.Squads, nil
+	return file.Members, nil
 }
 
 // copySquads deep-copies a squads map so cached data is never aliased to a
@@ -185,7 +185,7 @@ func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember,
 // saveCompetitionChangedLocked is the ONE writer that legitimately creates
 // the directory; do not reintroduce os.MkdirAll here.
 func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamMember, write writeFn) error {
-	data, err := yaml.Marshal(&squadsFile{Squads: squads})
+	data, err := yaml.Marshal(&teamMembersFile{Members: squads})
 	if err != nil {
 		return err
 	}

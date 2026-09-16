@@ -117,5 +117,7 @@ func TestPoolGeneration_SinglePoolMultiCourt_RejectsTooManyCourts(t *testing.T) 
 
 	err := eng.StartCompetition(compID)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "too many courts")
+	assert.Contains(t, err.Error(), "too many courts for the entry")
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve, "the draw must refuse this as a client error (400), not a bare 500")
 }

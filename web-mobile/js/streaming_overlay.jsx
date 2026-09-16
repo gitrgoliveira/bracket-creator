@@ -183,8 +183,17 @@ function StreamingOverlay({ court, position, competitions }) {
         const ovlLineupName = (lu) =>
             ovlHidesLineup ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
         const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;
-        const boutShiroBase = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB) });
-        const boutAkaBase   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA) });
+        // teamName: a FIXED-ORDER row stores the TEAM's name in sideA/sideB by
+        // design (buildPatch), so without this the overlay showed a team name
+        // where the fighter's name goes whenever no lineup was set, instead of
+        // falling through to the FIK position label below. The TV board has
+        // always filtered it (match_scoreboard's subSideName); this is the
+        // same rule, now owned by the resolver (bc-dnst). Raw names, not the
+        // zekken-aware labels below: the stored value is the raw team name.
+        const rawShiroTeam = nameOf(running?.match?.sideB);
+        const rawAkaTeam = nameOf(running?.match?.sideA);
+        const boutShiroBase = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB), teamName: rawShiroTeam });
+        const boutAkaBase   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA), teamName: rawAkaTeam });
         // bc-dnst: the displayed name only -- a rename reaches this bout's
         // stored side text (boutShiroBase/boutAkaBase, the frozen record)
         // via resolveBoutSideDisplayName's id-first lookup against the

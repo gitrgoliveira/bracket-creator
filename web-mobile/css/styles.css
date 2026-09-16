@@ -1861,8 +1861,14 @@ a:hover {
   line-height: 1.2;
   /* Wrap rather than ellipsis: the side cell is narrow and the Shiro/Aka
      text badge was dropped (the hatched/red fill already encodes side), so
-     the name now owns the full cell width and may wrap to a second line. */
-  overflow-wrap: anywhere;
+     the name now owns the full cell width and may wrap to a second line.
+     break-word, NOT anywhere: `anywhere` also lets the browser count a
+     mid-word break when it sizes the column, so once the competitor-number
+     chip joined this cell (bc-dnst) an ordinary two-word name split as
+     "Yamamot/o" on a narrow desktop instead of breaking at its space.
+     break-word keeps the same wrap-not-ellipsis behaviour and only ever
+     splits a word that cannot fit a line on its own. */
+  overflow-wrap: break-word;
 }
 
 /* Screen-reader-only utility: visually hidden, still announced. Used to keep

@@ -163,9 +163,24 @@ export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.
 // seeds the bootstrapped bout 1 before the first submit. Fixed-format
 // matches and the daihyosen row stay LINEUP-FIRST: lineups are always
 // editable and drive fixed position-vs-position pairings.
-export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName }) {
+//
+// `teamName` closes a trap that only shows with NO lineup set (bc-dnst). A
+// FIXED-ORDER bout settles at the match level, so buildPatch deliberately
+// writes the TEAM's name into every row's sideA/sideB; standings read the
+// match-level side first and depend on it. That stored value is therefore
+// not a fighter's name, and falling back to it dressed the team's own name
+// up as the person fighting: score one mark with no lineup and every
+// position, including untouched ones, came back named after the team, on the
+// score sheet and in the stored bout log that the viewer, the court display
+// and the export all read. A lineup hid it, because the lineup name wins.
+// So a fixed-order row ignores a stored name that IS the team's name: the
+// fighter is simply unnamed, which is legitimate and which the empty name
+// box already says. Kachinuki is untouched: there the engine writes real
+// fighter names per pairing, and a team name never lands in that field.
+export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName, teamName }) {
   if (isKachinuki && !isDaihyosen) return existingName || lineupName || "";
-  return lineupName || existingName || "";
+  const stored = existingName && teamName && existingName === teamName ? "" : existingName;
+  return lineupName || stored || "";
 }
 
 // kachinukiHidesLineupPosition: for a kachinuki NUMBERED bout past the

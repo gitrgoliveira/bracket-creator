@@ -2639,19 +2639,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     { key: "a", name: m.sideA?.name || m.sideA, number: m.sideA?.number, label: "AKA (Red)", color: "aka", iv: ivA, pw: pwA },
   ];
 
-  // Compute whether each team's 5-person lineup is incomplete (any position
-  // empty). Used for the non-blocking UI warning; does NOT block scoring.
-  // mp-gmcg: suppressed entirely for kachinuki: team sizes are unregulated
-  // and position vacancies are irrelevant, so "Lineup incomplete" would
-  // contradict legitimate play.
-  const isFivePersonLineupIncomplete = (lineup) => {
-    if (teamSize !== 5 || isKachinuki) return false;
-    const pos = lineup?.positions || {};
-    return !pos.senpo || !pos.jiho || !pos.chuken || !pos.fukusho || !pos.taisho;
-  };
-  const lineupIncompleteB = isFivePersonLineupIncomplete(lineupB);
-  const lineupIncompleteA = isFivePersonLineupIncomplete(lineupA);
-
   // a11y: label the dialog with the match/court context (mirrors the
   // individual ScoreEditorModal).
   const dialogLabel = `Team score editor: ${m.sideB?.name || m.sideB || "Shiro"} vs ${m.sideA?.name || m.sideA || "Aka"}${m.court ? ` · Shiaijo ${m.court}` : ""}`;
@@ -2691,7 +2678,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               panel get it from ONE placement and cannot diverge. */}
           {matchDataUnreadable(m) ? <UnreadableEditorNote /> : null}
           {/* Team header */}
-          <div className="sb-match" style={{ marginBottom: teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) ? 4 : 16 }}>
+          <div className="sb-match" style={{ marginBottom: 16 }}>
             {teamSides.map((s, idx) => (
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
@@ -2719,22 +2706,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               </React.Fragment>
             ))}
           </div>
-          {/* Non-blocking lineup-incomplete hints: one per team, shown only
-              for 5-person teams when Senpo or Taisho is unset or any position
-              is empty. Muted and informational: does NOT block scoring. */}
-          {teamSize === 5 && (lineupIncompleteB || lineupIncompleteA) && (
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              {[
-                { incomplete: lineupIncompleteB, label: "SHIRO" },
-                { incomplete: lineupIncompleteA, label: "AKA" },
-              ].map(({ incomplete, label }) => incomplete ? (
-                <div key={label} className="tsm-lineup__incomplete">
-                  {label}: Lineup incomplete, add the remaining players
-                </div>
-              ) : null)}
-            </div>
-          )}
-
           {/* One clear-a-mark hint for the whole encounter, after the team
               names and before the first bout (operator ruling 2026-09-16,
               bc-dnst). The team sheet repeats a row per bout, so the line

@@ -5986,14 +5986,6 @@ button.vsched-item:not([data-clickable]) {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Rendered as a standalone hint in the team header block (not inside a
-   bout side), so target the class directly. */
-.tsm-lineup__incomplete {
-  font-size: 11px;
-  color: var(--ink-3);
-  padding: 2px 0 4px;
-  font-style: italic;
-}
 /* Only the AKA (right) static name aligns right, so both names sit on the
    outer edge of the bout row; the SHIRO (left) name keeps the default left
    alignment. */

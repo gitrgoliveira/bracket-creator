@@ -263,7 +263,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     const [opts] = global.window.confirmDialog.mock.calls[0];
     expect(opts.message).toContain('T10.1');
     expect(opts.message).toContain('Sato');
-    expect(opts.message).not.toContain('new squad member');
+    expect(opts.message).not.toContain('as a new member of');
 
     expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'm1', 'Sato', 'pw');
     expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
@@ -297,7 +297,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     await flush();
 
     const [opts] = global.window.confirmDialog.mock.calls.at(-1);
-    expect(opts.message).toContain('new squad member');
+    expect(opts.message).toContain('as a new member of');
 
     expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
     expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
@@ -465,7 +465,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(warning).toBeTruthy();
     const text = collectText(warning);
     expect(text).toContain('Lineup saved');
-    expect(text).toContain('squad list could not be loaded');
+    expect(text).toContain('team member list could not be loaded');
     expect(text).toContain('Scores will still record normally');
   });
 

@@ -326,7 +326,7 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
 // Returns "" when there is nothing to say.
 function memberIdentityWarning(failures, squadUnavailable) {
   if (squadUnavailable) {
-    return "Lineup saved, but the squad list could not be loaded, so no position could be linked to a squad member this time. Scores will still record normally.";
+    return "Lineup saved, but the team member list could not be loaded, so no position could be linked to a team member this time. Scores will still record normally.";
   }
   const list = (Array.isArray(failures) ? failures : []).filter(f => f && f.position);
   if (list.length === 0) return "";
@@ -334,8 +334,8 @@ function memberIdentityWarning(failures, squadUnavailable) {
     const label = lineupPositionLabel(f.position);
     const who = f.name ? `${label} (${f.name})` : label;
     return f.reason
-      ? `${who} could not be linked to a squad member (${f.reason})`
-      : `${who} could not be linked to a squad member`;
+      ? `${who} could not be linked to a team member (${f.reason})`
+      : `${who} could not be linked to a team member`;
   });
   return `Lineup saved, but ${parts.join(". ")}. Scores will still record normally.`;
 }
@@ -527,7 +527,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
     const blankMember = blankMemberForPosition(squad, posKey, memberIds);
     const message = blankMember
       ? `Name ${squadSlotLabel(teamNumber, blankMember.index)} as "${name}"?`
-      : `Add "${name}" as a new squad member of ${team?.name || team?.Name || "this team"}? This adds a new position to the squad. Once added, it can be cleared but never removed.`;
+      : `Add "${name}" as a new member of ${team?.name || team?.Name || "this team"}? This adds a new position to the team. Once added, it can be cleared but never removed.`;
     const ok = await window.confirmDialog({
       message,
       confirmLabel: blankMember ? "Name slot" : "Add member",
@@ -776,14 +776,14 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
           })}
           {squadSorted.length === 0 && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
-              This team has no squad members yet: choose "+ Add new member…" in a position above to add the first one.
+              This team has no members yet: choose "+ Add new member…" in a position above to add the first one.
             </div>
           )}
         </div>
 
         {squadSorted.length > 0 && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line, #ddd)" }}>
-            <div className="overline" style={{ marginBottom: 8 }}>Squad</div>
+            <div className="overline" style={{ marginBottom: 8 }}>Team members</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {squadSorted.map(m => (
                 <div key={m.id} data-testid={`squad-member-${m.id}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>

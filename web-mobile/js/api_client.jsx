@@ -2904,7 +2904,7 @@ const API = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load squads");
+            throw new Error(err.error || "Failed to load team members");
         }
         const data = await res.json();
         return data.squads || {};

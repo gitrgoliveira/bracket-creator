@@ -6,51 +6,61 @@ Team tournaments work with any of the four formats described in [Tournament form
 
 Before each team encounter, set the fighting order for each team across the five positions: Senpo, Jiho, Chuken, Fukusho, and Taisho. Smaller teams use fewer positions.
 
-![The Lineups tab: a team and round selector above a completed fighting order, with a competitor assigned to each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) and a Save lineup button.](../../screenshots/team-lineup.png)
+![The Lineups tab: a team and round selector above a completed fighting order, with a competitor picked for each of the five positions (Senpo, Jiho, Chuken, Fukusho, Taisho) from a numbered list, and the Team members list beneath it with a Rename and a Clear name control on each named position.](../../screenshots/team-lineup.png)
 
 Each team encounter has its own lineup. To carry over the same order from the previous encounter, use **Copy from previous match** at the top of the lineup panel.
 
-### The squad
+### Team members
 
-A team's people are its squad. A team starts with one position per fighter the
-competition's team size defines, plus two reserve positions, each numbered and
-waiting for a name. The **Lineups** page is the one place to name, rename, add
-and clear a team's people: build the squad as you go, picking an existing
-member for a position, or typing a new name. Every position the squad has is
-offered, including the ones still waiting for a name, so you can field a
-fighter by number first and fill the name in later; a fighter picked that way
-counts in every format, winner-stays-on included. Typing a name into a
-position names its blank slot when one exists; otherwise the app adds a new
-position to the squad in the same step. Either way it confirms first, so a
-mistyped name cannot quietly create a person nobody expected. Nobody can be
-placed at two positions of the same lineup: the app refuses the second pick
-and tells you where that fighter already is.
+A team's people are its members. A team starts with one position per fighter
+the competition's team size defines, plus two reserve positions, each numbered
+and waiting for a name. The **Lineups** page is the one place to name, rename,
+add and clear a team's people. Build the list as you go, picking an existing
+member for a position or typing a new name.
+
+Every position a team has is offered, including the ones still waiting for a
+name, so you can field a fighter by number first and fill the name in later. A
+fighter picked that way counts in every format, winner-stays-on included.
+Typing a name into a position names its blank slot when one is free. When none
+is left, the app adds a new position to the team in the same step. On the
+Lineups page the app confirms first, so a mistyped name cannot quietly create a
+person nobody expected. The match lineup panel and the score sheet apply the
+name when you save.
+
+Nobody can be placed at two positions of the same lineup. The pickers do not
+offer a fighter who is already placed, and a name typed for one is refused with
+the position they hold.
 
 Renaming a member keeps them attached to everything they have already done. A
 bout they fought, and the winner-stays-on order, still refer to the same person
 after the change. You can correct a spelling or switch to a full name mid
-tournament without disturbing results already recorded. Rename from the squad
+tournament without disturbing results already recorded. Rename from the member
 list on the Lineups page, or from the match's lineup panel on the court console
 (the Rename control under the position), at any time. The corrected name shows
 everywhere, including bouts already fought and the exported sheet.
 
-Nobody is removed from a squad. Instead, you can clear a name from the squad
+Nobody is removed from a team. Instead, you can clear a name from the member
 list on the Lineups page, which empties that position and keeps its number.
 You can only do that before the competition starts. Once it has started every
 name stays, so a bout already fought always names the same person. An unused
 member is harmless: they never appear in a lineup.
 
-The squad can be larger than the number of positions a round has. Add the
+A team can hold more members than the number of positions a round has. Add the
 replacements a team brings and field whichever of them you need in each
 encounter. You can add a member after the competition has started, which is how
 a team fields a replacement mid tournament.
 
 Each member shows as the team's competitor number followed by their position in
-the squad, for example T10.1 and T10.2. These labels follow the team's number,
+the team, for example T10.1 and T10.2. These labels follow the team's number,
 so if you change a competition's number prefix the labels change with it. A
 label appears wherever the member's name does: the lineup panel, the score
 sheet, the viewer, the court display, the streaming overlay, and the bout detail
 sheet a winner-stays-on competition adds to its export.
+
+Before the draw a team has no number yet, so the Lineups page labels each
+position by its place in the order alone, Slot 1 upwards. A five-person team
+runs to Slot 7, its five positions plus the two reserves. The numbered form
+appears once the draw is generated.
 
 ### Incomplete and uneven teams
 

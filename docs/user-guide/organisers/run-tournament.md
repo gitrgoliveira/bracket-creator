@@ -229,7 +229,7 @@ The **Pools** tab shows standings for every pool. Ranks are computed automatical
 
 Pool finishers move into the knockout bracket on their own: as soon as a pool's last match is scored, its qualifiers are seeded into their bracket slots. Those knockout matches can be scored without waiting for the other pools. Once the last pool is seeded, the competition moves to the knockout phase. The bracket updates in real time as results come in.
 
-![Pools view](../../screenshots/mobile-pool-standings.png)
+![The Pools tab: each pool as a card with its standings in draw order, every competitor carrying their number and a rank badge, the pool's matches with their results, and the head-to-head grid beneath.](../../screenshots/mobile-pool-standings.png)
 
 For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
 

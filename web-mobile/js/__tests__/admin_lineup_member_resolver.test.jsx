@@ -344,7 +344,7 @@ describe('memberIdentityWarning', () => {
       true,
     );
     expect(msg).toContain('Lineup saved');
-    expect(msg).toContain('squad list could not be loaded');
+    expect(msg).toContain('team member list could not be loaded');
     expect(msg).toContain('Scores will still record normally');
     expect(msg).not.toContain('Sato');
     expect(msg).not.toContain('Tanaka');
@@ -370,11 +370,11 @@ describe('memberIdentityWarning', () => {
     }
   });
 
-  it('uses operator vocabulary ("squad member"), never internal jargon ("member id")', () => {
+  it('uses operator vocabulary ("team member"), never internal jargon ("member id")', () => {
     const msg = memberIdentityWarning(
       [{ position: 'senpo', name: 'Sato', reason: 'offline' }], false,
     );
-    expect(msg).toContain('squad member');
+    expect(msg).toContain('team member');
     expect(msg.toLowerCase()).not.toContain('member id');
   });
 

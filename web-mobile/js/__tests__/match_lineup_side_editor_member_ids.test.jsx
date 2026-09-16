@@ -246,7 +246,7 @@ describe('MatchLineupSideEditor resolves names to squad member ids (bc-pnum gap 
     const warning = memberWarning(tree);
     expect(warning).toBeTruthy();
     const text = collectText(warning);
-    expect(text).toContain('squad list could not be loaded');
+    expect(text).toContain('team member list could not be loaded');
     expect(text).not.toContain('Sato'); // no per-position enumeration
   });
 

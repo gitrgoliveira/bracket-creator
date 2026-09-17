@@ -281,7 +281,7 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// team-members.yaml, so a competition still holding v2.0.0's squads.yaml
 	// must be moved onto the new name first or every one of them reads "no
 	// team members" and skips its repair for a whole extra load.
-	if err := s.upgradeTeamMembersFilenameLocked(compID); err != nil {
+	if err := s.upgradeTeamMembersFilenameLocked(compID, atomicWriteFile); err != nil {
 		log.Printf("state: legacy team-members filename upgrade for %s: %v", compID, err)
 	}
 	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
@@ -1759,12 +1759,17 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 // exactly one shape live afterwards, so no reader has to know two names
 // forever, and it matches how every other step in this file works.
 //
+// Takes the writer rather than reaching for atomicWriteFile, the same seam
+// saveSquadsLocked already has: the ordering below (write, THEN remove) is
+// the crash-safety story, and a test can only prove it by making the write
+// fail while the remove would have succeeded.
+//
 // Refuses to overwrite: if team-members.yaml already exists, this competition
 // has been migrated (or was written new) and the stale squads.yaml is left
 // alone rather than allowed to win. The old file is REMOVED only after the new
 // one is safely written, so a crash between the two leaves the original intact
 // and the next load simply retries.
-func (s *Store) upgradeTeamMembersFilenameLocked(compID string) error {
+func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) error {
 	newPath := s.compPath(compID, teamMembersFilename)
 	if _, err := os.Stat(newPath); err == nil {
 		return nil // already on the current name
@@ -1788,7 +1793,7 @@ func (s *Store) upgradeTeamMembersFilenameLocked(compID string) error {
 		// files alone rather than writing an empty member list over nothing.
 		return nil
 	}
-	if err := s.saveSquadsLocked(compID, members, atomicWriteFile); err != nil {
+	if err := s.saveSquadsLocked(compID, members, write); err != nil {
 		return err
 	}
 	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {

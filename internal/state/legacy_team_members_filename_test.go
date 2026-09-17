@@ -1,6 +1,8 @@
 package state
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -94,4 +96,32 @@ func TestLegacyUpgrade_IgnoresAForeignFileAtTheLegacyPath(t *testing.T) {
 
 	_, statErr := os.Stat(filepath.Join(dir, teamMembersFilename))
 	assert.True(t, os.IsNotExist(statErr), "no new file should have been minted from a foreign document")
+}
+
+// The old file must survive a migration that FAILS to write the new one,
+// because the ordering is the whole crash-safety story: write first, remove
+// only after. Without it a failed write loses the members outright.
+//
+// The write is failed through saveSquadsLocked's own writer seam, which is the
+// only way to fail it while the REMOVE would still have succeeded. An earlier
+// version of this test made the directory read-only, which failed both, so it
+// passed with the ordering reversed and pinned nothing.
+func TestLegacyUpgrade_FailedWriteLeavesTheLegacyFileIntact(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	dir := filepath.Join(s.GetFolder(), "competitions", id)
+	legacy := filepath.Join(dir, legacySquadsFilename)
+	require.NoError(t, os.WriteFile(legacy, []byte(v200SquadsYAML), 0o600))
+	kept, err := os.ReadFile(legacy) // #nosec G304, test-owned temp path.
+	require.NoError(t, err)
+
+	failing := func(string, []byte, fs.FileMode) error { return errors.New("disk full") }
+	err = s.upgradeTeamMembersFilenameLocked(id, failing)
+	require.Error(t, err, "a migration that cannot write must report it, not swallow it")
+
+	survived, readErr := os.ReadFile(legacy) // #nosec G304, test-owned temp path.
+	require.NoError(t, readErr, "the legacy file must still be there for the next load to retry")
+	assert.Equal(t, kept, survived, "and must be byte-identical: nothing was consumed")
+
+	_, statErr := os.Stat(filepath.Join(dir, teamMembersFilename))
+	assert.True(t, os.IsNotExist(statErr), "and no half-written new file is left behind")
 }

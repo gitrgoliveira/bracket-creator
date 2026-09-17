@@ -107,6 +107,36 @@ type teamMembersFile struct {
 	Members map[string][]domain.TeamMember `yaml:"members"`
 }
 
+// legacySquadsFilename is what v2.0.0 wrote this file as, with the root key
+// below. It is read exactly once per competition, by the load-time migration
+// in legacy_upgrade.go, and never written.
+const legacySquadsFilename = "squads.yaml"
+
+// legacyTeamMembersFile is v2.0.0's on-disk shape: the same map under a
+// `squads` root key. Renaming the file and the key (bc-dnst) made a
+// tournament recorded by that release read as having no team members at all,
+// which the operator's migration policy exists to prevent: a storage change
+// carries a load path for the last two releases. v1.1.0 and earlier stored no
+// team members at all, so this one shape is the whole history.
+type legacyTeamMembersFile struct {
+	Squads map[string][]domain.TeamMember `yaml:"squads"`
+}
+
+// parseLegacySquadsBytes decodes v2.0.0's file. A file that parses as YAML but
+// carries no `squads` key returns nil, which the caller reads as "nothing to
+// migrate" rather than "an empty squad list", so an unrelated file sitting at
+// that path can never blank a competition's real members.
+func parseLegacySquadsBytes(data []byte) (map[string][]domain.TeamMember, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var file legacyTeamMembersFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	return file.Squads, nil
+}
+
 // parseSquadsFile reads and parses team-members.yaml at path. A missing file is
 // "no squad recorded yet" and returns an empty map, matching
 // parseTeamLineupsFile's contract for the identical situation.

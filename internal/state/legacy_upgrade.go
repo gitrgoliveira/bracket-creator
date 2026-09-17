@@ -276,6 +276,14 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// downstream tries to resolve against it, or the very team this pass
 	// just gave a squad to would still see "no squad" and skip repair for
 	// a full extra load.
+	// BEFORE the metadata migration and everything downstream of it: that
+	// step, and the three id repairs after it, all resolve against
+	// team-members.yaml, so a competition still holding v2.0.0's squads.yaml
+	// must be moved onto the new name first or every one of them reads "no
+	// team members" and skips its repair for a whole extra load.
+	if err := s.upgradeTeamMembersFilenameLocked(compID); err != nil {
+		log.Printf("state: legacy team-members filename upgrade for %s: %v", compID, err)
+	}
 	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
 		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
 	}
@@ -1733,4 +1741,60 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		return nil
 	}
 	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+}
+
+// upgradeTeamMembersFilenameLocked moves a competition recorded by v2.0.0 from
+// squads.yaml onto team-members.yaml, re-keying the document's root from
+// `squads` to `members`. Caller holds compID's per-competition write lock.
+//
+// bc-dnst renamed both the file and its key. Without this, a tournament
+// written by the last release opens with every team showing numbered slots and
+// no names: the members are on disk but under a name nothing looks for. That
+// is data loss on upgrade, which is what the operator's rule ("a storage
+// change carries a migration path on load from the last two releases") is for.
+// v1.1.0 and earlier had no team-member storage at all, so v2.0.0's shape is
+// the entire history to carry.
+//
+// Deliberately NOT a dual-read at the load path. A one-time convergence keeps
+// exactly one shape live afterwards, so no reader has to know two names
+// forever, and it matches how every other step in this file works.
+//
+// Refuses to overwrite: if team-members.yaml already exists, this competition
+// has been migrated (or was written new) and the stale squads.yaml is left
+// alone rather than allowed to win. The old file is REMOVED only after the new
+// one is safely written, so a crash between the two leaves the original intact
+// and the next load simply retries.
+func (s *Store) upgradeTeamMembersFilenameLocked(compID string) error {
+	newPath := s.compPath(compID, teamMembersFilename)
+	if _, err := os.Stat(newPath); err == nil {
+		return nil // already on the current name
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	oldPath := s.compPath(compID, legacySquadsFilename)
+	data, err := os.ReadFile(oldPath) // #nosec G304, compPath enforces containment under the competitions dir.
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing recorded by an older release either
+		}
+		return err
+	}
+	members, err := parseLegacySquadsBytes(data)
+	if err != nil {
+		return err
+	}
+	if members == nil {
+		// Parsed, but carries no `squads` key: not v2.0.0's shape. Leave both
+		// files alone rather than writing an empty member list over nothing.
+		return nil
+	}
+	if err := s.saveSquadsLocked(compID, members, atomicWriteFile); err != nil {
+		return err
+	}
+	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+		// The members are safe on the new name; a leftover old file is
+		// cosmetic and must not fail the load.
+		log.Printf("state: team-members migration for %s left %s in place: %v", compID, legacySquadsFilename, err)
+	}
+	return nil
 }

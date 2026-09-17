@@ -314,6 +314,34 @@ function parseCourtFromSearch() {
 // Counts are reported as FINISHED RESULTS when the alert carries any, falling
 // back to raw writes otherwise: an operator counts results, and a queued running
 // autosave is not one. Exported for test.
+
+// handleLineupUpdated: what a `lineup_updated` SSE event must do. BOTH halves
+// are load-bearing and the second one does not look it, which is why it is
+// extracted and pinned rather than left inline.
+//
+// The CustomEvent is for useTeamLineups hooks, which subscribe directly (same
+// pattern as competitor-status-updated in patch.jsx); the lineup itself is not
+// part of the competition object, so patching state would not reach them.
+//
+// The LIST REFRESH is for a different writer of the same event.
+// RenameTeamMember / ClearTeamMemberName (handlers_squad.go) fire
+// `lineup_updated` too, and those DO change the competition object: the
+// aggregate item carries the team-members map that resolveBoutSideDisplayName
+// reads to name an ALREADY-FOUGHT kachinuki bout row. This was the one SSE
+// branch that never refreshed the list, so the map kept the spelling the first
+// load captured and the TV board and the OBS overlay showed the pre-rename name
+// (match_scoreboard.jsx's squadsSig dependency exists to follow it and can only
+// fire once something refetches it). Fixed-order rows never showed the bug,
+// since their names come from the lineup the CustomEvent already refreshes,
+// which is exactly what made the refresh look redundant and go missing.
+//
+// Extracted because the handler is inline in App(), nothing mounts App, and the
+// refresh therefore shipped unpinned in f901b891.
+export function handleLineupUpdated(detail, { notify, refreshList }) {
+  notify(new CustomEvent("lineup-updated", { detail }));
+  refreshList();
+}
+
 export function queueAlertMessage(alert) {
   if (!alert) return null;
   const total = Number(alert.count) || 0;
@@ -1178,24 +1206,10 @@ function App() {
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
-            // A team lineup was saved or deleted by an operator. The lineup
-            // data is not part of the competition object, so patchCompetitionData
-            // / setSelectedCompData won't help: instead we dispatch a window
-            // CustomEvent that useTeamLineups hooks can subscribe to directly
-            // (same pattern as competitor-status-updated in patch.jsx).
-            window.dispatchEvent(new CustomEvent("lineup-updated", { detail: event.data }));
-            // RenameTeamMember / ClearTeamMemberName fire this SAME event
-            // (handlers_squad.go), and those DO change the competition object:
-            // the aggregate item carries the team-members map that
-            // resolveBoutSideDisplayName reads to name an ALREADY-FOUGHT
-            // kachinuki bout row. This was the one SSE branch that never
-            // refreshed the list, so that map stayed at the spelling the first
-            // load captured and the TV board and OBS overlay kept showing the
-            // old name (match_scoreboard.jsx's squadsSig dependency exists to
-            // follow it, and can only fire if something refetches it).
-            // Fixed-order rows were never affected: their names come from the
-            // lineup, which the CustomEvent above already refreshes.
-            jitteredTimeout(maybeLoad, listJitter);
+            handleLineupUpdated(event.data, {
+                notify: (e) => window.dispatchEvent(e),
+                refreshList: () => jitteredTimeout(maybeLoad, listJitter),
+            });
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];

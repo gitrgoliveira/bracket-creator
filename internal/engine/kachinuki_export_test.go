@@ -90,6 +90,38 @@ func TestTallyKachinukiEliminations_Hikiwake(t *testing.T) {
 	assert.Equal(t, 1, b, "hikiwake retires SideB player")
 }
 
+// TestTallyKachinukiEliminations_CountsAFighterFieldedByNumber pins the
+// switch from len(retiredX.Names) to retiredX.Count().
+//
+// The three fixtures above cannot pin it: every fighter in them carries a
+// NAME and no member id, so the two expressions agree by construction and
+// reverting the change leaves them green (verified -- the revert left the
+// whole repo green, which is how this gap was found). The discriminating
+// shape is the one bc-dnst introduced: a fighter picked by squad number and
+// never named retires under a member id and an EMPTY name, so the Names set
+// never hears about them and the exported Kachinuki Detail sheet under-counts
+// that side's eliminations.
+func TestTallyKachinukiEliminations_CountsAFighterFieldedByNumber(t *testing.T) {
+	m := &state.MatchResult{
+		SideA: "RedTeam",
+		SideB: "WhiteTeam",
+		SubResults: []state.SubMatchResult{
+			// SideA is a blank squad slot fielded by number: id, no name.
+			// The winner is named, so attribution takes the name tier and
+			// retires SideA -- under its id alone.
+			{Position: 1, SideA: "", SideAMemberID: "m-red-1", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
+			// A second, NAMED SideA retirement, so the assertion below is a
+			// count of two distinct fighters rather than of one: a naive
+			// len(Names) would report 1 here, not 0, and an assertion of 1
+			// could not tell the two implementations apart.
+			{Position: 2, SideA: "R-Jiho", SideB: "W-Senpo", Winner: "W-Senpo", Decision: "fought"},
+		},
+	}
+	a, b := tallyKachinukiEliminations(m)
+	assert.Equal(t, 2, a, "both SideA fighters retired; the nameless one is counted by member id")
+	assert.Equal(t, 0, b, "SideB's fighter won both bouts and stays on")
+}
+
 // TestTallyKachinukiEliminations_Empty verifies no panics/zero counts
 // for a match with no sub-results.
 func TestTallyKachinukiEliminations_Empty(t *testing.T) {

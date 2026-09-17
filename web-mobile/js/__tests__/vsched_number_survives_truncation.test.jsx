@@ -83,6 +83,27 @@ describe('VSchedItem: the competitor number is a chip, not trailing text', () =>
     expect(akaChild.props.name).not.toContain('K2');
   });
 
+  // The cases above stop at the call site: they prove the row ASKS for clip
+  // mode. They do not prove NumberedName does anything with it, and the whole
+  // fix rests on the class `numbered-name--clip`, which is what every ellipsis
+  // rule in styles.css:6099-6113 hangs off. Dropping that class left the
+  // entire JS suite green, so nothing in the repo referenced it. NumberedName
+  // is a leaf component, so this harness renders it fully.
+  it('NumberedName in clip mode emits the class the ellipsis rules need', async () => {
+    const { NumberedName } = await import('../numbered_name.jsx');
+    const tree = runtime.mount(NumberedName, { side: 'aka', name: 'YAMAMOTO TAKESHIRO', number: 'K2', clip: true });
+    const roots = findAll(tree, n => hasClass(n, 'numbered-name'));
+    expect(roots.length).toBeGreaterThan(0);
+    expect(roots.some(n => hasClass(n, 'numbered-name--clip'))).toBe(true);
+    // The number must be a SIBLING element of the name, not part of its text:
+    // that separation is what lets the ellipsis fall on the name alone.
+    const chips = findAll(tree, n => hasClass(n, 'num-prefix--after'));
+    expect(chips).toHaveLength(1);
+    const texts = findAll(tree, n => hasClass(n, 'numbered-name__text'));
+    expect(texts).toHaveLength(1);
+    expect(JSON.stringify(texts[0])).not.toContain('K2');
+  });
+
   it('numberedParts splits name from number for every side shape', () => {
     expect(numberedParts(AKA)).toEqual({ name: 'YAMAMOTO TAKESHIRO', number: 'K2' });
     // Zekken mode prefers displayName, matching withNumber.

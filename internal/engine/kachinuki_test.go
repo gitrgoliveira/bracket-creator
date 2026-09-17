@@ -3781,3 +3781,80 @@ func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *
 	assert.Contains(t, ids, "m2",
 		"the namesake with a DIFFERENT id has not retired and must still be fielded")
 }
+
+// TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber pins the
+// identity guard's widening from two names to names-OR-member-ids.
+//
+// Before bc-dnst the guard refused whenever both side NAMES were empty. A
+// fresh team's squad slots are numbered and unnamed by design, so two such
+// slots can legitimately meet: the row then carries member ids and no names
+// at all, and the old condition read that as "no side identity" and stopped
+// the encounter dead, mid-sequence, with nothing appended.
+//
+// Reverting the guard to the two-name form left the ENTIRE repo green, which
+// is how this gap was found: no test fought a bout by number alone. The
+// assertion is the APPEND, because a refusal and an exhausted roster both
+// report changed=false -- only a guard that lets the roster be consulted can
+// produce a new pairing.
+func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "advance-by-number"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+	}))
+	// Both teams field blank numbered slots: ids present, names absent.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "",
+			domain.PositionNumbered(2): "",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): "red-1",
+			domain.PositionNumbered(2): "red-2",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "",
+			domain.PositionNumbered(2): "",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): "white-1",
+			domain.PositionNumbered(2): "white-2",
+		},
+	}, 3))
+
+	// The only bout: red-1 beats white-1, both fielded by number. Neither
+	// side carries a NAME, which is precisely what the old guard refused.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{
+					Position:       1,
+					SideA:          "",
+					SideB:          "",
+					SideAMemberID:  "red-1",
+					SideBMemberID:  "white-1",
+					WinnerMemberID: "red-1",
+					Winner:         "RedTeam",
+					Decision:       "fought",
+				},
+			},
+		},
+	}))
+
+	changed, postLog, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	require.True(t, changed,
+		"a bout fought entirely by squad number identifies both sides through their member ids; the encounter must keep advancing")
+	require.Len(t, postLog, 2, "the next pairing is appended after the scored bout")
+	assert.Equal(t, 2, postLog[1].Position, "the appended row is bout 2")
+}

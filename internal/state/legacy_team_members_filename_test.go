@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -177,4 +178,90 @@ func TestLegacyUpgrade_RosterWriteAdoptsTheLegacyFileFirst(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, members["c1-p1"], "the v2.0.0 members must have been adopted, not replaced by blanks")
 	assert.Equal(t, "Haruki Tanaka", members["c1-p1"][0].Name)
+}
+
+// unadoptedLegacyCompetition returns a team competition holding ONE real team
+// participant, an unadopted v2.0.0 squads.yaml keyed to that team, and nothing
+// under the current name. That is the state a failed or never-run adoption
+// leaves behind, and it is the state the three squad mutators can reach
+// without EnsureLegacyUpgraded ever having run for this competition.
+//
+// The roster save is what mints the team's id, and it adopts as it goes, so
+// the legacy file is (re)planted afterwards and the current file removed.
+func unadoptedLegacyCompetition(t *testing.T, legacyBody string) (*Store, string, string, string) {
+	t.Helper()
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	dir := filepath.Join(s.GetFolder(), "competitions", id)
+
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
+	players, err := s.LoadParticipants(id, false)
+	require.NoError(t, err)
+	require.Len(t, players, 1)
+	teamID := players[0].ID
+	require.NotEmpty(t, teamID, "the team needs a real id: AddTeamMember validates it against the roster")
+
+	require.NoError(t, os.Remove(filepath.Join(dir, teamMembersFilename)))
+	body := strings.ReplaceAll(legacyBody, "c1-p1", teamID)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(body), 0o600))
+	return s, id, teamID, dir
+}
+
+// A squad mutator reaches loadSquadsLocked without ever passing through
+// EnsureLegacyUpgraded, so the adoption has to sit under that read. Without it
+// AddTeamMember reads an unadopted competition as "no members", appends one,
+// and saves the whole file, which strands the operator's real members under a
+// name nothing looks for AND permanently arms the refuse-to-overwrite guard.
+func TestSquadMutator_AdoptsTheLegacyFileBeforeWriting(t *testing.T) {
+	s, id, teamID, dir := unadoptedLegacyCompetition(t, v200SquadsYAML)
+
+	added, err := s.AddTeamMember(id, teamID, "Kenji Mori")
+	require.NoError(t, err)
+
+	members, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	require.Len(t, members[teamID], 3, "the two v2.0.0 members must survive, plus the one added")
+	names := make([]string, 0, 3)
+	for _, m := range members[teamID] {
+		names = append(names, m.Name)
+	}
+	assert.Contains(t, names, "Haruki Tanaka", "an Add must not mint a fresh file over the real members")
+	assert.Contains(t, names, "Kenji Mori")
+	assert.Equal(t, "11111111-1111-4111-8111-111111111111", members[teamID][0].ID,
+		"and the adopted ids must carry over: lineups and fought bouts resolve by them")
+	assert.Equal(t, 3, added.Index, "the new member takes the next index AFTER the adopted two")
+
+	_, statErr := os.Stat(filepath.Join(dir, legacySquadsFilename))
+	assert.True(t, os.IsNotExist(statErr), "the legacy file is consumed by the adoption, not left behind")
+}
+
+// The same floor on the rename path. Renaming a member recorded by v2.0.0 used
+// to fail its lookup against an empty map and return ErrTeamMemberNotFound,
+// which is a lesser bug than the Add's overwrite but the same missing step.
+func TestSquadMutator_RenameAdoptsTheLegacyFileBeforeLookingUp(t *testing.T) {
+	s, id, teamID, _ := unadoptedLegacyCompetition(t, v200SquadsYAML)
+
+	err := s.RenameTeamMember(id, teamID, "11111111-1111-4111-8111-111111111111", "Haruki Sato")
+	require.NoError(t, err, "a member recorded by v2.0.0 must be reachable by id after adoption")
+
+	members, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	require.Len(t, members[teamID], 2)
+	assert.Equal(t, "Haruki Sato", members[teamID][0].Name)
+}
+
+// And a mutator that CANNOT adopt must fail rather than proceed: proceeding is
+// what writes the blank file the migration then refuses to overwrite forever.
+// Same protection as TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt,
+// reached through the door that bypasses EnsureLegacyUpgraded.
+func TestSquadMutator_RefusesToMintOverAnUnreadableLegacyFile(t *testing.T) {
+	s, id, teamID, dir := unadoptedLegacyCompetition(t, "squads: [this is not a map\n")
+
+	_, err := s.AddTeamMember(id, teamID, "Kenji Mori")
+	require.Error(t, err, "an Add that cannot adopt must report it, not mint a file over the real members")
+
+	_, statErr := os.Stat(filepath.Join(dir, teamMembersFilename))
+	assert.True(t, os.IsNotExist(statErr),
+		"no file may be minted under the current name while the legacy one is unadopted")
+	_, statErr = os.Stat(filepath.Join(dir, legacySquadsFilename))
+	assert.False(t, os.IsNotExist(statErr), "and the legacy file stays put for the next retry")
 }

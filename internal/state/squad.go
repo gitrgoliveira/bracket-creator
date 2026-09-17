@@ -200,7 +200,33 @@ func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error
 // the per-competition lock. Caller MUST already hold the lock. Bypasses the
 // cache: locked callers are about to load-mutate-save and need a fresh
 // private map, mirroring loadTeamLineupsLocked.
+//
+// Adopts a v2.0.0 squads.yaml FIRST, and fails the read when that adoption
+// fails. This is the floor under the load-mutate-save shape rather than a
+// convenience, and it belongs here rather than beside a caller:
+//
+// Every caller rewrites the whole file, and parseSquadsFile reports a MISSING
+// team-members.yaml as an empty map with NO error. So a caller that read past
+// an unadopted squads.yaml would save its one change over a team's real
+// roster and permanently arm upgradeTeamMembersFilenameLocked's
+// refuse-to-overwrite guard: the operator's members are then stranded under a
+// name nothing looks for, with ids that orphan every lineup position and
+// fought bout referencing the old ones.
+//
+// Registering the adoption only on EnsureLegacyUpgraded's load hook and
+// saveParticipantsNoLock's pre-write call left that open, because
+// AddTeamMember, RenameTeamMember and ClearTeamMemberName reach this read
+// through NEITHER. The startup sweep hides it but does not close it: an
+// adoption that fails leaves the competition deliberately unstamped so a
+// later reader retries, and the next operator click can be an Add.
+//
+// upgradeSquadsFromMetadataLocked keeps its own explicit call even so. It
+// returns before reaching this read when the roster is empty, and a plain
+// load must converge the file for a competition with no entrants yet.
 func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember, error) {
+	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+		return nil, err
+	}
 	return parseSquadsFile(s.compPath(compID, teamMembersFilename))
 }
 

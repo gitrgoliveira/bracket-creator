@@ -294,7 +294,14 @@ func (s *Store) invalidateCachesForWALIntents(compID string, intents []wal.FileI
 			"pool-matches.csv",
 			"bracket.json",
 			competitorStatusFilename,
-			teamLineupFilename:
+			teamLineupFilename,
+			// team-members.yaml joined this list when RenameTeamMember and
+			// ClearTeamMemberName started staging BOTH of their files through
+			// one transaction (bc-dnst). saveSquadsLocked publishes into
+			// cache.data at save time like every other saver, so without it an
+			// aborted rename left the new name live in the cache while the
+			// file on disk still held the old one.
+			teamMembersFilename:
 			// An aborted transaction rolls the file back to content that
 			// downstream caches may already have derived state from (the staged
 			// results were published into cache.data at save time), so the
@@ -330,7 +337,14 @@ func (s *Store) refreshCachesAfterWALApply(compID string, intents []wal.FileInte
 			"pool-matches.csv",
 			"bracket.json",
 			competitorStatusFilename,
-			teamLineupFilename:
+			teamLineupFilename,
+			// team-members.yaml joined this list when RenameTeamMember and
+			// ClearTeamMemberName started staging BOTH of their files through
+			// one transaction (bc-dnst). saveSquadsLocked publishes into
+			// cache.data at save time like every other saver, so without it an
+			// aborted rename left the new name live in the cache while the
+			// file on disk still held the old one.
+			teamMembersFilename:
 			cache := s.getFileCache(compID, base)
 			cache.mu.Lock()
 			if cache.data != nil {

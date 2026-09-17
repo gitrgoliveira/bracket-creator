@@ -185,7 +185,10 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 // projection rather than becoming a second, independent traversal).
 //
 // The returned slice is always non-nil. Its length equals the number of
-// non-empty positions. Callers (e.g. kachinuki roster resolution) use
+// OCCUPIED positions, which since bc-dnst means carrying a name OR a member
+// id: a position picked by number and not yet named is a real placement, and
+// the name it projects is the empty string. Callers (e.g. kachinuki roster
+// resolution) use
 // this to get the full ordered queue before filtering out retired players.
 func (t TeamLineup) OrderedRoster(teamSize int) []string {
 	members := t.OrderedMembers(teamSize)

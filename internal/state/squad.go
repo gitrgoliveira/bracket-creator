@@ -312,8 +312,9 @@ func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
 // exactly as they are there.
 //
 // Blank names are excluded from BOTH sides of the comparison (bc-pnum): a
-// team's squad is seeded with TeamSize members whose Name is blank until
-// filled in or after a clear, so a real team routinely holds several blank
+// team's squad is seeded to squadFloor (TeamSize plus SquadReserveSlots)
+// members whose Name is blank until filled in or after a clear, so a real
+// team routinely holds several blank
 // names at once. helper.NormalizeParticipantName("") returns "", so without
 // this exclusion every blank slot beyond the first would register as a
 // "duplicate" of the one before it -- refusing the team's own default state,
@@ -406,16 +407,30 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 // RenameTeamMember keeps memberID's id and index and replaces its Name.
 // Returns ErrTeamMemberNotFound when (teamID, memberID) does not resolve
 // (no squad for teamID at all, or no member with that id inside it).
+//
+// BOTH writes ride ONE WAL transaction. A rename changes team-members.yaml and
+// every lineup position holding that member by id, and those used to be two
+// independent direct writes: a fault between them left the member renamed with
+// every lineup still showing the old spelling, and nothing repaired it, because
+// the load-time lineup pass only fills an EMPTY id and never corrects a name
+// sitting beside one already stamped. It also returned the SECOND write's error
+// as the whole call's, so the operator was told a rename that HAD landed had
+// failed, and retyping the old name became a second real rename.
 func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
 	newName = strings.TrimSpace(newName)
+	return s.WithTransaction(compID, func(tx StoreTx) error {
+		return s.renameTeamMemberTx(tx, compID, teamID, memberID, newName)
+	})
+}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
+// renameTeamMemberTx is RenameTeamMember's body, staged through the
+// transaction's writer so the squad file and the lineups file land together
+// or not at all.
+func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string) error {
+	write := tx.(*storeTx).txWriteFn()
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {
 		return err
@@ -440,10 +455,10 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 
 	existing[target].Name = newName
 	squads[teamID] = existing
-	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
 		return err
 	}
-	return s.renameMemberInLineupsLocked(compID, memberID, newName)
+	return s.renameMemberInLineupsLocked(compID, memberID, newName, write)
 }
 
 // renameMemberInLineupsLocked carries a member's new name into every stored
@@ -454,7 +469,7 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 // that lineup again. Fought bouts are NOT touched: a bout row's names are
 // frozen at the time it was fought, by design. Saves only when a position
 // changed. Caller holds the competition lock.
-func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string) error {
+func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write writeFn) error {
 	lineups, err := s.loadTeamLineupsLocked(compID)
 	if err != nil {
 		return err
@@ -476,7 +491,7 @@ func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string) error
 	if !changed {
 		return nil
 	}
-	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+	return s.saveTeamLineupsLocked(compID, lineups, write)
 }
 
 // ClearTeamMemberName is the operator's "removal": it blanks memberID's
@@ -507,15 +522,20 @@ func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string) error
 // Does NOT run squadDuplicateNameCheck: blanking a name can never collide
 // with anything (squadDuplicateNameCheck already treats a blank candidate
 // as never a collision), so the check would be a costly no-op here.
+//
+// Like RenameTeamMember, both writes ride ONE WAL transaction; see that
+// function's comment for why.
 func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
+	return s.WithTransaction(compID, func(tx StoreTx) error {
+		return s.clearTeamMemberNameTx(tx, compID, teamID, memberID)
+	})
+}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID string) error {
+	write := tx.(*storeTx).txWriteFn()
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
 		return err
@@ -543,8 +563,8 @@ func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
 
 	existing[target].Name = ""
 	squads[teamID] = existing
-	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
+	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
 		return err
 	}
-	return s.renameMemberInLineupsLocked(compID, memberID, "")
+	return s.renameMemberInLineupsLocked(compID, memberID, "", write)
 }

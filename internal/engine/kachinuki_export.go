@@ -11,6 +11,8 @@ package engine
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -350,10 +352,25 @@ func (e *Engine) buildKachinukiPositionMap(compID string, comp *state.Competitio
 		// Every position held by id is indexed under the id as well, so a
 		// nameless fighter (bc-dnst) still resolves; resolveKachinukiPosition
 		// tries the id first.
-		for pos, memberID := range lineup.MemberIDs {
+		//
+		// Iterated over SORTED keys, and first-write-wins, because a lineup can
+		// still hold one member id at two positions: the duplicate guard is new
+		// and rows written before it are live data repaired by hand. Both
+		// iterations compute the same map key here, so a plain range let Go's
+		// randomised map order decide which position label survived, and the
+		// same competition exported "Senpo" on one run and "Chuken" on the
+		// next. Which of the two wins is arbitrary either way; that it is the
+		// SAME one every time is not.
+		indexedIDs := make(map[string]struct{}, len(lineup.MemberIDs))
+		for _, pos := range slices.Sorted(maps.Keys(lineup.MemberIDs)) {
+			memberID := lineup.MemberIDs[pos]
 			if memberID == "" {
 				continue
 			}
+			if _, dup := indexedIDs[memberID]; dup {
+				continue
+			}
+			indexedIDs[memberID] = struct{}{}
 			index(memberKey(memberID), formatPositionLabel(pos))
 		}
 	}

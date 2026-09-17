@@ -1869,6 +1869,16 @@ a:hover {
      break-word keeps the same wrap-not-ellipsis behaviour and only ever
      splits a word that cannot fit a line on its own. */
   overflow-wrap: break-word;
+  /* min-width: 0 is what makes break-word enough here. Not counting the
+     mid-word break when it sizes the column is the whole point above, but it
+     also leaves this flex item with a min-content width as wide as its
+     longest token, and a flex item refuses to shrink below that by default.
+     So on a 320px phone a long single-token name painted straight out of its
+     tinted cell and across the score column -- and since the SHIRO/AKA text
+     badge was dropped, that tint is now the only thing saying which side the
+     name belongs to. Letting the box shrink puts the break back on the one
+     word that cannot fit, without letting it back into the column sizing. */
+  min-width: 0;
 }
 
 /* Screen-reader-only utility: visually hidden, still announced. Used to keep

@@ -838,3 +838,61 @@ func TestSquad_RenameAndClearReachStoredLineups(t *testing.T) {
 		assert.Equal(t, sato.ID, l.MemberIDs[domain.PositionNumbered(1)])
 	}
 }
+
+// A rename touches TWO files: team-members.yaml and every lineup position
+// holding that member by id. They must land together or not at all.
+//
+// They used to be independent direct writes with the squad file written
+// FIRST, so a fault reaching the lineup half left the member renamed and every
+// lineup showing the old spelling, permanently: the load-time lineup pass only
+// fills an EMPTY id and never corrects a name beside one already stamped. The
+// operator was also told the rename had failed, so retyping the old name
+// became a second real rename.
+//
+// The fault is injected by making lineups.yaml unparseable, which is both
+// realistic and the one failure reachable from a test without a fake writer.
+func TestRenameTeamMember_LeavesTheSquadUntouchedWhenTheLineupHalfFails(t *testing.T) {
+	s, compID, teamA, _ := newSquadTestStore(t)
+	member, err := s.AddTeamMember(compID, teamA, "Sato")
+	require.NoError(t, err)
+
+	lineupPath := filepath.Join(s.GetFolder(), "competitions", compID, teamLineupFilename)
+	require.NoError(t, os.WriteFile(lineupPath, []byte("lineups: [this is not a list\n"), 0o600))
+
+	err = s.RenameTeamMember(compID, teamA, member.ID, "Sato Kenji")
+	require.Error(t, err, "a rename that cannot reach the lineup half must report it")
+
+	// THE POINT: the squad write is rolled back with it, so the operator's
+	// retry is a first rename rather than a second one.
+	squads, loadErr := s.LoadSquads(compID)
+	require.NoError(t, loadErr)
+	var found bool
+	for _, m := range squads[teamA] {
+		if m.ID == member.ID {
+			found = true
+			assert.Equal(t, "Sato", m.Name, "the rename must not have landed on its own")
+		}
+	}
+	require.True(t, found, "the member must still be there")
+}
+
+// The same atomicity for the clear path, which shares the body.
+func TestClearTeamMemberName_LeavesTheSquadUntouchedWhenTheLineupHalfFails(t *testing.T) {
+	s, compID, teamA, _ := newSquadTestStore(t)
+	member, err := s.AddTeamMember(compID, teamA, "Sato")
+	require.NoError(t, err)
+
+	lineupPath := filepath.Join(s.GetFolder(), "competitions", compID, teamLineupFilename)
+	require.NoError(t, os.WriteFile(lineupPath, []byte("lineups: [this is not a list\n"), 0o600))
+
+	err = s.ClearTeamMemberName(compID, teamA, member.ID)
+	require.Error(t, err)
+
+	squads, loadErr := s.LoadSquads(compID)
+	require.NoError(t, loadErr)
+	for _, m := range squads[teamA] {
+		if m.ID == member.ID {
+			assert.Equal(t, "Sato", m.Name, "the clear must not have landed on its own")
+		}
+	}
+}

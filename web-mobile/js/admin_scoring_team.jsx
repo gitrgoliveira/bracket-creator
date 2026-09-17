@@ -1537,12 +1537,6 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     });
     return { aTotal: aT, bTotal: bT, winner, draw: !!s.draw };
   });
-  // Does any bout carry a mark the operator could tap away? Read off
-  // subTotals rather than re-filtering the rows, so the hint and the score
-  // agree by construction. Counted through realIppons like everything else,
-  // which drops the hantei mark: that one names a verdict, carries its own
-  // "click to undo" title, and is not what this sentence is about.
-  const anyMarkScored = subTotals.some(t => t.aTotal + t.bTotal > 0);
 
   // Who the SERVER says won a bout, through the same one winner rule as
   // subTotals above (the local-state answer). Only the re-seed needs this, to
@@ -1680,6 +1674,25 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
   const kachinukiDoneBoutIdxs = kachinukiBoutMode
     ? positions.map((_, i) => i).filter(i => i !== daihyosenIdx && i !== kachinukiCurBoutIdx && subBoutHasBeenPlayed(subs[i]))
     : [];
+  // Does any bout carry a mark the operator could TAP AWAY? Read off subTotals
+  // rather than re-filtering the rows, so the hint and the score agree by
+  // construction. Counted through realIppons like everything else, which drops
+  // the hantei mark: that one names a verdict, carries its own "click to undo"
+  // title, and is not what this sentence is about.
+  //
+  // Read-only rows are excluded, and that is the point of computing it here
+  // rather than beside subTotals. Under kachinuki the bouts already fought
+  // render above the current one as read-only (kachinukiDoneBoutIdxs), where a
+  // mark is a span rather than a button and a tap opens the whole bout for
+  // correction instead of clearing anything. Counting them made the hint
+  // promise something the surface does not do, on exactly the encounters that
+  // carry the most scored rows. The one done bout opened for correction is
+  // editable again, so it counts.
+  const anyMarkScored = subTotals.some((t, i) => (
+    t.aTotal + t.bTotal > 0
+    && (i === editingDoneBoutIdx || !kachinukiDoneBoutIdxs.includes(i))
+  ));
+
   const scoreCurrentBoutWaza = (side, waza) => {
     if (kachinukiCurBoutIdx < 0) return;
     const cur = subs[kachinukiCurBoutIdx];

@@ -3,7 +3,9 @@ package state
 import (
 	"fmt"
 	"log"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -1745,6 +1747,25 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		if needs {
 			break
 		}
+		// A lineup already holding ONE member at two positions needs this pass
+		// too, even with every position id-stamped, so the scan cannot stop at
+		// "is an id missing". Such a row is refused by ValidatePositions on
+		// every future write, so it is repaired here rather than blamed on the
+		// next unrelated operator edit.
+		seenIDs := make(map[string]struct{}, len(l.MemberIDs))
+		for _, id := range l.MemberIDs {
+			if id == "" {
+				continue
+			}
+			if _, dup := seenIDs[id]; dup {
+				needs = true
+				break
+			}
+			seenIDs[id] = struct{}{}
+		}
+		if needs {
+			break
+		}
 	}
 	if !needs {
 		return nil
@@ -1760,17 +1781,58 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 			continue
 		}
 		lineupChanged := false
-		for pos, name := range l.Positions {
+		// The ids this lineup ALREADY fields, so no member ends up at two
+		// positions -- neither one carried over from disk, nor one this pass
+		// would otherwise create.
+		//
+		// The creation half is the sharp one. The backfill below resolves by
+		// NAME, so a lineup naming one person at two positions used to stamp
+		// the SAME id onto both. A lineup may not hold one member twice
+		// (ValidatePositions refuses it), so this pass manufactured a row the
+		// server then rejected -- on the operator's next unrelated edit, for
+		// damage the operator never made, which is precisely the "a write
+		// answers for what it introduces, not for what it inherited" rule.
+		//
+		// The carry-over half repairs what older releases left: the duplicate
+		// is cleared HERE, on load, so the write-time guard only ever sees what
+		// a write introduced. The position keeps its NAME, so nothing changes
+		// on screen and the operator's next save re-resolves it.
+		//
+		// Sorted, because which of the two positions keeps the id must not
+		// depend on Go's randomised map order: the same file would otherwise
+		// repair differently on two loads.
+		used := make(map[string]struct{}, len(l.MemberIDs))
+		for _, pos := range slices.Sorted(maps.Keys(l.MemberIDs)) {
+			id := l.MemberIDs[pos]
+			if id == "" {
+				continue
+			}
+			if _, dup := used[id]; dup {
+				delete(l.MemberIDs, pos)
+				lineupChanged = true
+				log.Printf("state: lineup repair for %s: member %s was at two positions; cleared the id at %q, its name is kept", compID, id, pos)
+				continue
+			}
+			used[id] = struct{}{}
+		}
+		for _, pos := range slices.Sorted(maps.Keys(l.Positions)) {
+			name := l.Positions[pos]
 			if name == "" || l.MemberIDs[pos] != "" {
 				continue
 			}
-			if id := squadMemberIDByName(squads, l.TeamID, name); id != "" {
-				if l.MemberIDs == nil {
-					l.MemberIDs = map[domain.Position]string{}
-				}
-				l.MemberIDs[pos] = id
-				lineupChanged = true
+			id := squadMemberIDByName(squads, l.TeamID, name)
+			if id == "" {
+				continue
 			}
+			if _, dup := used[id]; dup {
+				continue // already fielded elsewhere; leave this row id-less
+			}
+			if l.MemberIDs == nil {
+				l.MemberIDs = map[domain.Position]string{}
+			}
+			l.MemberIDs[pos] = id
+			used[id] = struct{}{}
+			lineupChanged = true
 		}
 		if lineupChanged {
 			lineups[key] = l

@@ -309,16 +309,42 @@ type RetiredMemberSet struct {
 	// fielded by squad number before being named (bc-dnst) retires under an
 	// id and an empty name, and a count of Names alone would miss them.
 	nameOnly map[string]struct{}
+	// namedByID holds every name that retired ALONGSIDE a member id. It exists
+	// only so Count can tell a second, id-less row for a fighter ALREADY
+	// counted through their id from a genuinely different id-less fighter.
+	namedByID map[string]struct{}
 }
 
 func newRetiredMemberSet() RetiredMemberSet {
-	return RetiredMemberSet{IDs: map[string]struct{}{}, Names: map[string]struct{}{}, nameOnly: map[string]struct{}{}}
+	return RetiredMemberSet{
+		IDs: map[string]struct{}{}, Names: map[string]struct{}{},
+		nameOnly: map[string]struct{}{}, namedByID: map[string]struct{}{},
+	}
 }
 
 // Count is the number of distinct fighters retired: every id-carrying
-// retirement plus every retirement that carried a name alone.
+// retirement, plus every name-only retirement for a fighter no id already
+// counted.
+//
+// The second clause is why this is not len(IDs)+len(nameOnly). One fighter can
+// be recorded BOTH ways -- reopen an encounter and re-score a bout through a
+// path that omits the member id while the original row still carries it -- and
+// the naive sum then reported two eliminations for a team that lost one
+// fighter, straight into the exported Kachinuki Detail sheet.
+//
+// Two teammates genuinely sharing a display name, one retiring with an id and
+// one without, still collapse to one. That is the same name ambiguity
+// ambiguousFighterNames exists for, and under-counting it is the safe
+// direction: a tally that is short never ends an encounter early.
 func (r RetiredMemberSet) Count() int {
-	return len(r.IDs) + len(r.nameOnly)
+	n := len(r.IDs)
+	for name := range r.nameOnly {
+		if _, alsoByID := r.namedByID[name]; alsoByID {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // retire records one retirement: name (when non-empty) into Names,
@@ -332,6 +358,9 @@ func (r RetiredMemberSet) retire(name, memberID string) {
 	}
 	if memberID != "" {
 		r.IDs[memberID] = struct{}{}
+		if name != "" {
+			r.namedByID[name] = struct{}{}
+		}
 	} else if name != "" {
 		r.nameOnly[name] = struct{}{}
 	}
@@ -1999,12 +2028,17 @@ func (e *Engine) kachinukiRemainingRoster(compID, matchID string, comp *state.Co
 				continue
 			}
 			seen[key] = struct{}{}
-			if IsMemberRetired(f, retired, nil) {
-				continue
-			}
 			out = append(out, f)
 		}
-		return out, false
+		// Filtered through the SHARED helper, in a second pass, for the reason
+		// its own doc gives: the roster IS the context the name tier needs, so
+		// it cannot be judged one fighter at a time while the roster is still
+		// being built. Filtering inline passed a nil ambiguity set, which let
+		// the name tier fire for a fighter whose OWN member id proves they have
+		// not retired: two teammates sharing a display name (grandfathered
+		// pre-uniqueness data) meant one losing retired the other, who was then
+		// never fielded. The lineup branch above has always used this helper.
+		return filterRemainingFighters(out, retired), false
 	}
 
 	remainingA, foundA := resolveRoster(parent.SideA, retiredA)

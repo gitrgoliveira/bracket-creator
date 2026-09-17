@@ -18,6 +18,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestLegacyLineupMemberIDUpgradeOnRead: a lineup position holding a name
@@ -77,4 +78,101 @@ func TestLegacyLineupMemberIDUpgradeOnRead(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(dir, "competitions", "c1", "lineups.yaml"))
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), sato.ID, "the repair lands on disk, not just in the returned copy")
+}
+
+// A lineup may not field one member at two positions (ValidatePositions
+// refuses it), so this pass must neither CREATE such a row nor leave one it
+// inherited.
+//
+// The creation half is the sharp one: the backfill resolves by NAME, so a
+// legacy lineup naming one person at two positions used to stamp the SAME
+// member id onto both. The server then rejected that lineup on the operator's
+// next unrelated edit, for damage the operator never made.
+func TestLegacyLineupUpgrade_NeverFieldsOneMemberAtTwoPositions(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	teamID := legacyUpgradeTeams(t, s, "Tora")[0]
+
+	sato, err := s.AddTeamMember("c1", teamID, "Sato")
+	require.NoError(t, err)
+
+	// One person named at two positions, the pre-guard shape, with no ids.
+	require.NoError(t, s.SetTeamLineup("c1", domain.TeamLineup{
+		TeamID: teamID, Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "Sato",
+			domain.PositionNumbered(2): "Sato",
+		},
+	}, 3))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	lineups, err := fresh.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	repaired, ok := state.FindBestLineup(lineups, teamID, "", 0)
+	require.True(t, ok)
+
+	ids := []string{
+		repaired.MemberIDs[domain.PositionNumbered(1)],
+		repaired.MemberIDs[domain.PositionNumbered(2)],
+	}
+	assert.Equal(t, sato.ID, ids[0], "the FIRST position in key order takes the id, deterministically")
+	assert.Empty(t, ids[1], "the second must not receive the same id: that row is refused on every future write")
+
+	// Both positions keep their NAME: the repair touches only the id half, so
+	// nothing changes on the operator's screen.
+	assert.Equal(t, "Sato", repaired.Positions[domain.PositionNumbered(1)])
+	assert.Equal(t, "Sato", repaired.Positions[domain.PositionNumbered(2)])
+
+	// And the repaired lineup is one the server will now accept.
+	require.NoError(t, repaired.ValidatePositions(3),
+		"a lineup this pass has repaired must pass the guard that refuses duplicates")
+}
+
+// The same rule for a duplicate this pass did not create: one written by an
+// older release, already carrying the same id twice on disk. It is cleared on
+// load so the write-time guard only ever answers for what a write introduced.
+func TestLegacyLineupUpgrade_RepairsADuplicateAlreadyOnDisk(t *testing.T) {
+	dir, s := newLegacyUpgradeFixture(t)
+	teamID := legacyUpgradeTeams(t, s, "Tora")[0]
+
+	sato, err := s.AddTeamMember("c1", teamID, "Sato")
+	require.NoError(t, err)
+
+	// Written straight to disk in the pre-guard shape: SetTeamLineup would
+	// refuse this today, which is the whole point of repairing it on load.
+	// Produced by marshalling the real types through the real file shape (a
+	// LIST under `lineups:`), not hand-typed, so the fixture cannot drift from
+	// what the store actually writes.
+	type lineupFileShape struct {
+		Lineups []domain.TeamLineup `yaml:"lineups"`
+	}
+	body, err := yaml.Marshal(&lineupFileShape{Lineups: []domain.TeamLineup{{
+		TeamID: teamID, Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "Sato",
+			domain.PositionNumbered(2): "Sato",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): sato.ID,
+			domain.PositionNumbered(2): sato.ID,
+		},
+	}}})
+	require.NoError(t, err)
+	path := filepath.Join(dir, "competitions", "c1", "lineups.yaml")
+	require.NoError(t, os.WriteFile(path, body, 0o600))
+
+	fresh := freshLegacyUpgradeStore(t, dir)
+	fresh.EnsureLegacyUpgraded("c1")
+
+	lineups, err := fresh.LoadTeamLineups("c1")
+	require.NoError(t, err)
+	repaired, ok := state.FindBestLineup(lineups, teamID, "", 0)
+	require.True(t, ok)
+
+	assert.Equal(t, sato.ID, repaired.MemberIDs[domain.PositionNumbered(1)])
+	assert.Empty(t, repaired.MemberIDs[domain.PositionNumbered(2)],
+		"the inherited duplicate is cleared on load, not left to fail every future write")
+	assert.Equal(t, "Sato", repaired.Positions[domain.PositionNumbered(2)], "its name is kept")
+	require.NoError(t, repaired.ValidatePositions(3))
 }

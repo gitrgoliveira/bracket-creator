@@ -657,7 +657,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// LoadBracket each call state.EnsureLegacyUpgraded, which can
 			// SEED team-members.yaml as a side effect the very first time a team's
 			// squad is touched (state.upgradeSquadsFromMetadataLocked pads
-			// it to TeamSize). Reading team-members.yaml concurrently with those
+			// it to TeamSize plus the reserve slots). Reading team-members.yaml
+			// concurrently with those
 			// three would race that side effect: whichever goroutine's
 			// per-comp lock acquisition the Go runtime happened to schedule
 			// first would decide whether THIS request saw the pre-seed or

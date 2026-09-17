@@ -509,7 +509,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
   );
 
   if (variant === "inline") {
-    return <div className="scoring-panel" aria-label={dialogLabel} data-testid="engi-score-editor">{inner}</div>;
+    return <div className="scoring-panel editor-modal--compact" aria-label={dialogLabel} data-testid="engi-score-editor">{inner}</div>;
   }
 
   return (

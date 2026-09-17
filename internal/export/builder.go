@@ -664,9 +664,13 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// A row that names no fighter is attributed by the encounter's own
 		// sides, which is what its Winner holds. Only when the row itself is
 		// silent: a row naming its fighters keeps deciding for itself, and a
-		// same-name pair SubBoutAttribution already blanked stays blanked,
-		// because team names are unique by rule and would re-attribute it.
-		if att.SideA == "" && att.SideB == "" && sub.SideA == "" && sub.SideB == "" {
+		// same-name pair (SideA == SideB, both non-empty) fails this same
+		// test, so it stays blanked as SubBoutAttribution left it rather than
+		// being re-attributed by team names, which ARE unique by rule.
+		// Asked of sub, not of att: Attribution() copies these two names
+		// verbatim and SubBoutAttribution only ever blanks a pair, so an
+		// att-side conjunct could restate this one but never narrow it.
+		if sub.SideA == "" && sub.SideB == "" {
 			att.SideA, att.SideB = matchSideA, matchSideB
 		}
 		scoreA, scoreB := DefaultWinMaruAB(

@@ -1598,15 +1598,21 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 	// A failed migration ABORTS rather than logging on: minting is the
 	// irreversible half, and a transient fault (a permission blip, a
 	// half-mounted volume) must cost a retry, not the members.
-	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
-		return err
-	}
+	// AFTER the kind gate below, not before it: this function's second caller is
+	// saveParticipantsNoLock, the chokepoint EVERY roster write funnels through,
+	// and an individual competition can never reach the seeding that needs the
+	// migration. Probing the filesystem above that gate put two uncached
+	// syscalls on every participant add, edit and check-in of a competition
+	// that will never have a team member at all.
 	comp, err := roster.competition()
 	if err != nil || comp == nil {
 		return err
 	}
 	if comp.Kind != "team" && comp.TeamSize == 0 {
 		return nil
+	}
+	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+		return err
 	}
 	players, err := roster.rosterPlayers()
 	if err != nil || len(players) == 0 {

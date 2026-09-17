@@ -218,15 +218,15 @@ export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
 // id-first. Mirrors Go's internal/domain.AttributeWinnerSide exactly (that
 // function is this one's twin - a divergence between the two is a bug, not a
 // style choice):
-//   - when winnerId, sideAId AND sideBId are the winner id matching a side that carries one, ids are
-//     AUTHORITATIVE and win over names when they disagree: winnerId ===
-//     sideAId -> "a", winnerId === sideBId -> "b", matches neither -> null
-//     (unattributable - do NOT fall back to names in this branch: a
-//     same-name/different-dojo pair is exactly the case ids exist to
+//   - when the winner id equals the id a side CARRIES, that side is named,
+//     even if the other side carries none: ids are AUTHORITATIVE and win over
+//     names wherever the two disagree (winnerId === sideAId -> "a",
+//     winnerId === sideBId -> "b"). Do NOT fall back to names in this branch:
+//     a same-name/different-dojo pair is exactly the case ids exist to
 //     disambiguate, so a name fallback here would silently reintroduce the
-//     bug this function fixes).
+//     bug this function fixes.
 //   - with BOTH side ids known and the winner id matching neither, the row is
-//     unattributable and names get no say.
+//     unattributable (null) and names get no say.
 //   - otherwise (no winner id, or no side id to compare it against - legacy
 //     data, id-less payloads) fall back to the name comparison this
 //     file has always used: an empty winner name is unattributable, then

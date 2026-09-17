@@ -91,9 +91,6 @@ export function memberPlacedElsewhere(memberIds, posKey, id) {
 }
 
 export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
-  const otherMemberIds = new Set(Object.entries(lineup?.memberIds || {})
-    .filter(([key, id]) => key !== posKey && id)
-    .map(([, id]) => id));
   const otherNames = new Set(Object.entries(lineup?.positions || {})
     .filter(([key, name]) => key !== posKey && String(name || "").trim())
     .map(([, name]) => String(name).trim().toLowerCase()));
@@ -107,7 +104,11 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
     // squadMemberIdForUniqueName's own comment says -- while
     // memberPlacedElsewhere, the write-time predicate this list must agree
     // with, is id-only and would have allowed them (bc-dnst).
-    if (entry.id) return !otherMemberIds.has(entry.id);
+    //
+    // So ASK that predicate rather than re-deriving its answer from a local
+    // Set: "the offer and the refusal can never disagree" then holds by
+    // construction instead of by discipline, and a squad is single digits.
+    if (entry.id) return !memberPlacedElsewhere(lineup?.memberIds, posKey, entry.id);
     // No id: the legacy shape, placed by name, so judged by name.
     if (!entry.name) return true;
     return !otherNames.has(entry.name.trim().toLowerCase());

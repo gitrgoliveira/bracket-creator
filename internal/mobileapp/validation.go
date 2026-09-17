@@ -450,11 +450,9 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 	// struct carries SideAMemberID/SideBMemberID and an Attribution() method, and a
 	// numbered fixed-order row now carries no side NAMES either (bc-dnst), so
 	// extending the hantei rule to numbered bouts means threading those ids here.
-	// A numbered team bout names the
-	// two individual PLAYERS fielded, and player names are not unique (only
-	// (name, dojo) is) - so names are all there is here, resolved by the
-	// documented sideA-first convention. This call always takes the
-	// name-fallback branch of validateHanteiMarkPlacement/
+	// This row's own sides are TEAM names, which are unique by rule, so names
+	// alone settle it: the literal below carries no ids, and the call therefore
+	// always takes the name-fallback branch of validateHanteiMarkPlacement/
 	// domain.AttributeWinnerSide.
 	if err := validateHanteiMarkPlacement(prefix, sr.IpponsA, sr.IpponsB, domain.WinnerAttribution{Winner: sr.Winner, SideA: sr.SideA, SideB: sr.SideB}); err != nil {
 		return err

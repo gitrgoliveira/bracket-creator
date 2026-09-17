@@ -228,9 +228,16 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Shiro:</span>
-          {/* NumberedName in `clip` mode, not withNumber's string: `.n` is a
-              nowrap-ellipsis box, so a string would truncate whatever sits
-              last, which for Aka is its number (see numberedParts). */}
+          {/* Both cells below render NumberedName in `clip` mode rather than
+              withNumber's flat string. `.n` is a nowrap-ellipsis box, and a
+              string puts the number inside the text it ellipsises -- which for
+              AKA, whose number sits last, means the number is what gets eaten
+              (measured: gone at 360px for every name tried). Wrapping in an
+              element is NOT by itself what saves it: `.numbered-name--clip` is
+              an inline-flex box whose TEXT child carries the ellipsis and
+              `min-width: 0`, so the name shrinks inside the flex row and the
+              content never overflows `.n` for its `overflow: hidden` to clip.
+              Shiro is unaffected either way, its number being first. */}
           <span className="n"><NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} /></span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>

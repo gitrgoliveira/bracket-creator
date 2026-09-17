@@ -706,7 +706,7 @@ func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
 
 // TestViewerCompetitionDetail_TeamCompetitionCarriesSquads pins the wire
 // contract: a team competition's GET /api/viewer/competitions/:id payload
-// carries a "squads" key, keyed by the team's participant id (matching
+// carries a "teamMembers" key, keyed by the team's participant id (matching
 // the admin endpoint's shape, GET /api/competitions/:id/team-members), so a
 // client can resolve a bout row's sideAMemberId/sideBMemberId without a
 // second, admin-gated call. A blank-named member (an unfilled seeded
@@ -760,7 +760,7 @@ func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead
 // verifies both halves of "an individual competition's payload carries
 // none, and no squad read is attempted": the response carries no
-// "squads" key at all, and garbage bytes planted directly at
+// "teamMembers" key at all, and garbage bytes planted directly at
 // team-members.yaml's path produce no log line, proving state.LoadSquads was
 // never called (mirrors TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead's
 // same proof-by-corruption technique for pools.csv above).
@@ -789,8 +789,8 @@ func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	_, hasSquads := body["squads"]
-	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	_, hasSquads := body["teamMembers"]
+	assert.False(t, hasSquads, "an individual competition must never carry a teamMembers key")
 	assert.NotContains(t, logBuf.String(), "load squads",
 		"an individual competition must never attempt the team-members.yaml read, so garbage bytes there produce no log line")
 }
@@ -798,7 +798,7 @@ func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing
 // TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError verifies that
 // a team competition with no team-members.yaml written yet (an individual
 // competition, or a team competition not yet loaded/never given a squad
-// member) still returns 200 with an empty "squads" object, never an
+// member) still returns 200 with an empty "teamMembers" object, never an
 // error: state.LoadSquads treats a missing file as "no squads recorded",
 // not a fault.
 func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
@@ -898,7 +898,7 @@ func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
 
 // TestViewerAggregate_IndividualCompetitionSkipsSquadsRead mirrors
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead for the
-// aggregate endpoint: no "squads" key, and garbage bytes at team-members.yaml's
+// aggregate endpoint: no "teamMembers" key, and garbage bytes at team-members.yaml's
 // path produce no log line, proving state.LoadSquads was never called for
 // an individual competition even though buildViewerCompetitionPayload runs
 // once per competition in the whole tournament.
@@ -928,8 +928,8 @@ func TestViewerAggregate_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
 	var comps []map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
-	_, hasSquads := comps[0]["squads"]
-	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	_, hasSquads := comps[0]["teamMembers"]
+	assert.False(t, hasSquads, "an individual competition must never carry a teamMembers key")
 	assert.NotContains(t, logBuf.String(), "load squads",
 		"an individual competition must never attempt the team-members.yaml read, so garbage bytes there produce no log line")
 }

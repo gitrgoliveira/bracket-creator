@@ -5,7 +5,7 @@ import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
 
-const { useState: useStateA, useEffect: useEffectA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 // pickCopySource: pure helper that selects the most recent saved lineup
 // among this team's *earlier* matches ("Copy from previous match").
@@ -119,6 +119,11 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   // back to resolving that position's name through the shared resolver, as
   // it always has.
   const [memberIds, setMemberIds] = useStateA({});
+  // memberIdsRef mirrors memberIds for commitRename below, which awaits a
+  // round trip before touching it while the pickers stay interactive. Same
+  // rule and same reason as the Lineups page's copy.
+  const memberIdsRef = useRefA(memberIds);
+  memberIdsRef.current = memberIds;
   // RENAME (bc-dnst, operator decision 2026-09-15): a member's name can be
   // corrected from this panel as well as from the Lineups page (the score
   // sheet stays add-only). `renamingKey` is the position whose member is
@@ -227,7 +232,12 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       setSquad(sq => sq.map(m => (m && m.id === id ? { ...m, name } : m)));
       setValues(v => {
         const next = { ...v };
-        Object.keys(memberIds).forEach(key => { if (memberIds[key] === id) next[key] = name; });
+        // Read the CURRENT placements, not the ones this handler closed over
+        // before its round trip: the pickers stay interactive while a rename
+        // is in flight, so a position moved meanwhile would otherwise take the
+        // new name while the position it moved to kept the old spelling.
+        const ids = memberIdsRef.current;
+        Object.keys(ids).forEach(key => { if (ids[key] === id) next[key] = name; });
         return next;
       });
       cancelRename();
@@ -243,13 +253,22 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
     (async () => {
       try {
         const squads = await window.API.fetchSquads(compId, password);
-        if (!cancelled) setSquad((squads && squads[teamId]) || []);
+        if (cancelled) return;
+        setSquad((squads && squads[teamId]) || []);
+        setSquadUnavailable(false);
       } catch (_e) {
         if (!cancelled) setSquadUnavailable(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [compId, teamId]);
+    // `password` is a DEPENDENCY, not just a closure read, and the success
+    // path CLEARS squadUnavailable. Same rule as the Lineups page's copy of
+    // this effect, which carries the full rationale: the re-auth modal is a
+    // SIBLING of the admin app, so a 401 here unmounts nothing and neither
+    // compId nor teamId ever changes. Without both halves one 401 leaves this
+    // panel's pickers empty for its whole lifetime and every typed name mints
+    // a new member instead of resolving to the one already on the team.
+  }, [compId, teamId, password]);
 
   // Load per-match lineup on mount; record whether it was a real hit.
   useEffectA(() => {

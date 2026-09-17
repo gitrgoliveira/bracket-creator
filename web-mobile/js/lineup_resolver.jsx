@@ -51,7 +51,29 @@ export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
       // spectator surfaces keep squadMemberLabel and stay bare (bc-dnst).
       label: squadSlotLabel(teamNumber, mem?.index),
     }));
-  if (squadEntries.length > 0) return squadEntries;
+  if (squadEntries.length > 0) {
+    // A name the LINEUP already holds that NO squad member carries is
+    // appended, as a plain string: the same shape the no-squad branch below
+    // returns, and one every consumer already handles.
+    //
+    // This is not defensive. It is the documented mint-failure path:
+    // resolveMemberIdsForPositions saves a substitute BY NAME with no member
+    // id when addTeamMember fails, and deliberately never blocks the write
+    // for it. Such a fighter is in neither the squad nor the legacy metadata,
+    // so without this tail no picker offers them for any OTHER position and
+    // the operator retypes the name at every row. The score sheet applied
+    // mergeRosterWithAssigned for exactly this before the squad list arrived.
+    const known = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
+    const assigned = [];
+    for (const raw of Object.values(lineup?.positions || {})) {
+      const name = String(raw == null ? "" : raw).trim();
+      const key = name.toLowerCase();
+      if (!key || known.has(key)) continue;
+      known.add(key);
+      assigned.push(name);
+    }
+    return assigned.length ? [...squadEntries, ...assigned] : squadEntries;
+  }
   const seen = new Set();
   const merge = (typeof window !== "undefined" && window.AdminLineupHelpers?.mergeRosterWithAssigned)
     ? window.AdminLineupHelpers.mergeRosterWithAssigned
@@ -206,8 +228,17 @@ export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.
 // TV board filtered them for years before this rule moved here. Scoping the
 // test below the kachinuki return dropped exactly that coverage and printed the
 // team's own name in the fighter slot of every bout row.
+// THE DAIHYOSEN ROW IS EXEMPT, and that is not a detail. It is the one bout
+// whose sideA/sideB ARE the two team names by rule: buildPatch keeps them
+// there so placeHt can put the hantei mark on the winner's side, and blanking
+// them drops the mark from the wire. Filtering them here blanked both of that
+// row's name cells, and the rep bout is the ONE row with no fallback label
+// (its lineup key is the literal "daihyosen", which no lineup carries, and it
+// offers no roster or typeable box), so the editor printed "-" against both
+// teams where the two names used to be.
 export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName, teamNameA, teamNameB }) {
-  const stored = existingName === teamNameA || existingName === teamNameB ? "" : existingName;
+  const namesATeam = existingName === teamNameA || existingName === teamNameB;
+  const stored = namesATeam && !isDaihyosen ? "" : existingName;
   if (isKachinuki && !isDaihyosen) return stored || lineupName || "";
   return lineupName || stored || "";
 }

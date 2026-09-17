@@ -1312,12 +1312,21 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         if (cancelled) return;
         if (teamAId) setSquadA((squads && squads[teamAId]) || []);
         if (teamBId) setSquadB((squads && squads[teamBId]) || []);
+        setSquadUnavailable(false);
       } catch (_e) {
         if (!cancelled) setSquadUnavailable(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [m.compId, compMeta]);
+    // `password` is a DEPENDENCY, not just a closure read, and the success
+    // path CLEARS squadUnavailable. Same rule as the Lineups page's copy of
+    // this effect, which carries the full rationale: requestReauth renders
+    // the re-auth modal as a SIBLING of the admin app, so a 401 here unmounts
+    // nothing and neither m.compId nor compMeta ever changes. Without both
+    // halves one 401 strands the editor for the whole encounter: every bout
+    // row's picker offers nothing, every row loses the squad number this
+    // ruling put on it, and every typed name is written with no member id.
+  }, [m.compId, compMeta, password]);
 
   // Submit an inline position change: builds the full positions map from the
   // existing lineup + the changed key→value, resolves/mints that position's
@@ -2129,9 +2138,17 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
     // A default member already placed at ANOTHER position of this lineup is
     // fighting there, so this row has no default left and shows no number
     // (its number would otherwise appear twice on the sheet).
+    //
+    // ID-ONLY, matching the shared predicate every picker and writer asks.
+    // This used to carry a NAME arm beside the id arm, which the owner
+    // deliberately does not have: two members of one team may share a display
+    // name on a roster predating the uniqueness rule, so the name arm blanked
+    // the number on the row whose default fighter is the FREE same-named
+    // member, while that same row's picker (id-only) still offered him. The
+    // label and the offer must not disagree on one screen, and CLAUDE.md's
+    // id-only rule forbids the name arm beside the id lookup regardless.
     const lineup = side === "a" ? lineupA : lineupB;
-    const placedElsewhere = Object.values(lineup?.memberIds || {}).includes(member.id)
-      || (!!(member.name || "").trim() && Object.values(lineup?.positions || {}).includes(member.name));
+    const placedElsewhere = Object.values(lineup?.memberIds || {}).includes(member.id);
     return placedElsewhere ? "" : squadMemberLabel(teamNumber, position);
   };
 

@@ -151,12 +151,19 @@ func TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt(t *testing.T) 
 	_, statErr = os.Stat(filepath.Join(dir, legacySquadsFilename))
 	assert.False(t, os.IsNotExist(statErr), "the legacy file must still be there to retry")
 
+	// STAMPED ANYWAY, which is this package's documented failure policy rather
+	// than an oversight. Leaving it unstamped was tried and reverted: this
+	// function is on the viewer's hot path, so a permanently unreadable file
+	// made every poll re-take the exclusive lock and re-parse four files for
+	// the life of the process. The stamp gates only that sweep; what protects
+	// the members is the abort asserted above, which runs on every call.
 	_, stamped := s.legacyUpgraded.Load(id)
-	assert.False(t, stamped, "a failed squad upgrade must not be stamped, or this process never retries")
+	assert.True(t, stamped, "a failed squad step still stamps: this runs on the viewer's hot path")
 
-	// And once the fault clears, the retry adopts the real members.
+	// And once the fault clears the adoption still happens, through a caller
+	// the stamp does not gate. A roster write is one; so is any squad mutator.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
-	s.EnsureLegacyUpgraded(id)
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
 	members, err := s.LoadSquads(id)
 	require.NoError(t, err)
 	assert.Equal(t, "Haruki Tanaka", members["c1-p1"][0].Name, "the retry must recover the real names")

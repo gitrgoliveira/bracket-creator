@@ -37,10 +37,13 @@ import (
 // CONTRACT: this classification relies on the "team_lineup:" prefix being at
 // position 0 of the message. The store path (SetTeamLineup -> setTeamLineupLocked
 // and the domain ValidatePositions in internal/domain/team_lineup.go) returns
-// these validation errors UNWRAPPED (plain sentinels / %q-%v fmt.Errorf, never
-// %w). Do NOT wrap a lineup validation error with added context before it reaches
-// here, or it would fall through to 500. If wrapping becomes necessary, switch
-// this to a typed error checked via errors.As instead of a prefix match.
+// these validation errors with the prefix FIRST. Most are plain sentinels or
+// %q-%v fmt.Errorf; checkDuplicateMembers does use %w (so callers can match
+// ErrLineupDuplicateMember), which is fine here ONLY because it still puts
+// "team_lineup:" at position 0. Do NOT add context in FRONT of the prefix,
+// as fmt.Errorf("lineup %s: %w", id, err) would: that falls through to 500.
+// If a producer ever needs a leading context, switch this to a typed error
+// checked via errors.As instead of a prefix match.
 func lineupSetStatus(err error) int {
 	if strings.HasPrefix(err.Error(), "team_lineup:") {
 		return http.StatusBadRequest

@@ -41,7 +41,7 @@ import { squadSlotLabel } from './squad_member_label.jsx';
 import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
 import { normalizeParticipantName } from './data.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA } = React;
+const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
 
 // Term: kendo-glossary tooltip wrapper. Lazy lookup so the script
 // load order between glossary.jsx and this module doesn't matter (both
@@ -213,7 +213,12 @@ function blankMemberForPosition(squad, posKey, currentIds) {
   // member the lineup holds elsewhere would name the wrong row's fighter,
   // and the write that followed would then be refused as a duplicate after
   // the rename had already landed. With its slot taken, the name mints.
-  const placedElsewhere = (mem) => Object.entries(ids).some(([key, id]) => key !== posKey && id && id === mem.id);
+  // ASKED of the owner rather than re-derived here: this body was a
+  // byte-for-byte copy of memberPlacedElsewhere minus its return value, and
+  // the picker filter in that same owner was rewritten this round to ask
+  // rather than copy for exactly this reason. Agreement now holds by
+  // construction on all three of the offer, the refusal and this rename.
+  const placedElsewhere = (mem) => !!memberPlacedElsewhere(ids, posKey, mem.id);
   const slotNumber = positionNumberForKey(posKey);
   return slotNumber
     ? currentSquad.find(mem => mem && mem.index === slotNumber && !(mem.name || "").trim() && !placedElsewhere(mem)) || null
@@ -326,8 +331,9 @@ async function resolveMemberIdsForPositions(compId, teamId, positions, squad, pa
 // never grow three different wordings for the same event. Order is fixed by
 // the operator's ruling: the lineup WAS saved, which positions lack an
 // identity and why, then that scores are unaffected. Copy rules this repo
-// enforces: never "live", no em-dashes, "squad member" not "member id"
-// (operator vocabulary, not internal jargon).
+// enforces: never "live", no em-dashes, and "team member" -- never "squad",
+// which survives only as a code name (operator ruling, bc-dnst), and never
+// "member id", which is internal jargon.
 //
 // squadUnavailable takes priority over `failures` and is checked first: when
 // the squad itself could not be loaded this session, EVERY name in the
@@ -415,6 +421,17 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // Settings page's now-removed Squad members section, and moved here
   // alongside Rename rather than being duplicated on both.
   const [clearingId, setClearingId] = useStateA(null);
+
+  // memberIdsRef mirrors memberIds for the two handlers that AWAIT a round
+  // trip before touching it. The position pickers stay interactive while a
+  // rename or a clear is in flight (they are gated on `saving` alone), so the
+  // memberIds captured in a handler's closure can be stale by the time it
+  // resolves. An operator who re-picks the position mid-flight otherwise has
+  // that position blanked by the resolving clear, and save() then writes it
+  // with a member id and no name, which the occupancy rule reads as a real
+  // placement fielding a nameless fighter.
+  const memberIdsRef = useRefA(memberIds);
+  memberIdsRef.current = memberIds;
 
   // Load the existing lineup: positions/memberIds. 404 -> fresh form
   // (server contract, unchanged).
@@ -604,8 +621,9 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       setSquad(s => s.map(m => (m.id === id ? { ...m, name } : m)));
       setValues(v => {
         const next = { ...v };
-        Object.keys(memberIds).forEach(posKey => {
-          if (memberIds[posKey] === id) next[posKey] = name;
+        const ids = memberIdsRef.current;
+        Object.keys(ids).forEach(posKey => {
+          if (ids[posKey] === id) next[posKey] = name;
         });
         return next;
       });
@@ -636,8 +654,9 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       setSquad(s => s.map(m => (m.id === member.id ? { ...m, name: "" } : m)));
       setValues(v => {
         const next = { ...v };
-        Object.keys(memberIds).forEach(posKey => {
-          if (memberIds[posKey] === member.id) next[posKey] = "";
+        const ids = memberIdsRef.current;
+        Object.keys(ids).forEach(posKey => {
+          if (ids[posKey] === member.id) next[posKey] = "";
         });
         return next;
       });
@@ -817,7 +836,18 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
               </label>
             );
           })}
-          {squadSorted.length === 0 && (
+          {/* An EMPTY list and a list that FAILED TO LOAD look identical, and
+              telling the operator the team is empty when it is not invites
+              them to mint a brand-new permanent numbered slot for a member
+              who already exists on the server (a member can be cleared but
+              never removed). The deleted Settings section said which of the
+              two it was; say it here. */}
+          {squadSorted.length === 0 && squadUnavailable && (
+            <div className="field__hint field__hint--warn" data-testid="lineup-members-unavailable">
+              The team member list could not be loaded, so this may not be the whole team. Reload before adding a member, or you may add a second slot for someone who already has one.
+            </div>
+          )}
+          {squadSorted.length === 0 && !squadUnavailable && (
             <div style={{ fontSize: 12, color: "var(--ink-3)", fontStyle: "italic" }}>
               This team has no members yet: choose "+ Add new member…" in a position above to add the first one.
             </div>
@@ -827,6 +857,16 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         {squadSorted.length > 0 && (
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line, #ddd)" }}>
             <div className="overline" style={{ marginBottom: 8 }}>Team members</div>
+            {/* A `title` is the only reason a disabled Clear name carries, and
+                a title needs hover, which a touch tablet does not have. The
+                deleted Settings section stated it as a persistent line; state
+                it here too, so the greyed-out control is never unexplained on
+                the device the desk actually runs on. */}
+            {started && (
+              <div className="field__hint field__hint--warn" data-testid="lineup-clear-locked" style={{ marginBottom: 8 }}>
+                Clearing a name is locked once the competition has started. Rename still works.
+              </div>
+            )}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {squadSorted.map(m => (
                 <div key={m.id} data-testid={`squad-member-${m.id}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>

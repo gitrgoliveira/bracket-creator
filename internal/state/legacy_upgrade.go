@@ -282,14 +282,25 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// also runs before the three id repairs below, which all resolve against
 	// team-members.yaml.
 	//
-	// squadsUpgraded is false when the migration or the seeding failed: the
-	// downstream repairs resolve against a file that is now missing or stale,
-	// so running them writes nothing useful, and the competition must NOT be
-	// stamped as upgraded or this process never retries it.
-	squadsUpgraded := true
+	// A failure here is logged and the competition is STAMPED ANYWAY, like
+	// every other step. Not stamping was tried and reverted: this function is
+	// on the viewer's hot path (LoadPools, LoadPoolMatches, LoadBracket and
+	// loadParticipants each call it, and one viewer payload calls three of
+	// them), so a competition whose squads.yaml is permanently unreadable
+	// made EVERY poll take the exclusive per-competition lock and re-parse
+	// four files for the life of the process, which is exactly what the
+	// failure policy above exists to prevent.
+	//
+	// Stamping costs nothing here, because the stamp gates only THIS path.
+	// The write that could actually destroy data is the blank-member seeding
+	// inside the step below, and that step aborts before minting whenever the
+	// adoption fails -- on every call, stamp or no stamp. Its other caller,
+	// saveParticipantsNoLock, is not stamp-gated at all, and loadSquadsLocked
+	// re-attempts the adoption for all three squad mutators (squad.go). So a
+	// fault that clears is still picked up; what stops is only the re-sweep
+	// of seven unrelated steps from a read.
 	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
 		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
-		squadsUpgraded = false
 	}
 	if err := s.upgradePoolMatchSideIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy pool-match-side-id upgrade for %s: %v", compID, err)
@@ -299,11 +310,6 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	}
 	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
-	}
-	if !squadsUpgraded {
-		// Leave the competition unstamped so the next reader retries. The steps
-		// above are all idempotent, so a retry costs a re-read, not a re-write.
-		return
 	}
 	s.legacyUpgraded.Store(compID, struct{}{})
 }
@@ -1820,7 +1826,17 @@ func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) e
 	}
 	members, err := parseLegacySquadsBytes(data)
 	if err != nil {
-		return err
+		// Named, and naming the remedy, because this error REFUSES every squad
+		// read and write for the competition: loadSquadsLocked hard-fails on
+		// it, so the three team-member endpoints answer 500 until it clears,
+		// and a corrupt file never clears on its own. That is the safe
+		// direction rather than an oversight. Reading past it reports the team
+		// as having no members, and the next whole-file write then strands the
+		// real ones under a name nothing looks for, with ids that orphan every
+		// lineup position and fought bout. A refusal is recoverable; that
+		// write is not. The remedy is on disk, so the message says which file.
+		return fmt.Errorf("competition %s: %s cannot be parsed, so its team members cannot be adopted onto %s; repair or remove that file: %w",
+			compID, legacySquadsFilename, teamMembersFilename, err)
 	}
 	if members == nil {
 		// Parsed, but carries no `squads` key: not v2.0.0's shape. Leave both

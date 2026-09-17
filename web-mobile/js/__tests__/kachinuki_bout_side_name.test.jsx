@@ -145,5 +145,29 @@ describe('resolveBoutSideName', () => {
         existingName: 'Ryu Shiro', lineupName: 'Ryu Goro', teamNameA: TEAM, teamNameB: OTHER,
       })).toBe('Ryu Shiro');
     });
+
+    // THE DAIHYOSEN EXEMPTION. The rep bout's sides ARE the two team names by
+    // rule, kept there so the hantei mark can be placed on the winner's side,
+    // and it is the one bout row with no fallback label to degrade to. When
+    // the filter reached it, the editor printed "-" against both teams.
+    it('KEEPS both team names on the daihyosen row, whose sides are the teams', () => {
+      expect(resolveBoutSideName({
+        isKachinuki: false, isDaihyosen: true,
+        existingName: TEAM, lineupName: '', teamNameA: TEAM, teamNameB: OTHER,
+      })).toBe(TEAM);
+      expect(resolveBoutSideName({
+        isKachinuki: false, isDaihyosen: true,
+        existingName: OTHER, lineupName: '', teamNameA: TEAM, teamNameB: OTHER,
+      })).toBe(OTHER);
+    });
+
+    it('lets a lineup still name the daihyosen fighter over the team name', () => {
+      // The exemption restores the stored value as a FALLBACK, not a winner:
+      // an operator who named the rep fighter still sees that name.
+      expect(resolveBoutSideName({
+        isKachinuki: false, isDaihyosen: true,
+        existingName: TEAM, lineupName: 'Ryu Goro', teamNameA: TEAM, teamNameB: OTHER,
+      })).toBe('Ryu Goro');
+    });
   });
 });

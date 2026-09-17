@@ -13,7 +13,8 @@
 // unchanged.
 
 import { writeDidNotLand } from './write_result.jsx';
-import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
+import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber, numberedParts } from './match_scoreboard.jsx';
+import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
@@ -227,7 +228,10 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Shiro:</span>
-          <span className="n">{withNumber(m.sideB, undefined, "shiro")}</span>
+          {/* NumberedName in `clip` mode, not withNumber's string: `.n` is a
+              nowrap-ellipsis box, so a string would truncate whatever sits
+              last, which for Aka is its number (see numberedParts). */}
+          <span className="n"><NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} /></span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {/* No score string (pending, or completed with no recorded cells) →
@@ -253,7 +257,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>
-          <span className="n">{withNumber(m.sideA, undefined, "aka")}</span>
+          <span className="n"><NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} /></span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

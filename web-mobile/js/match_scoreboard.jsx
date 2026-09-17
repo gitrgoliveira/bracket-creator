@@ -530,12 +530,28 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 // `numberPrefix` render identically to before. Honours the zekken
 // `displayName` when `withZekkenName` is true. Keep this in step with
 // NumberedName; the two must not drift apart.
-export function withNumber(side, withZekkenName, color) {
-  if (!side) return "TBD";
-  if (typeof side === "string") return side;
+// numberedParts: the name/number pair BOTH renderers are built from, so the
+// string form and the component form cannot disagree about which name wins
+// (zekken displayName) or when a number exists at all.
+//
+// It exists because the two DID disagree about something else: a surface that
+// renders the string into a nowrap-ellipsis box truncates whatever sits last,
+// and since the number moved to the OUTER side (operator ruling 2026-09-14)
+// that is Aka's number. Measured at 360px, every Aka name tested lost its
+// number outright. NumberedName's `clip` mode ellipsises the NAME and keeps
+// the chip, so a JSX host should pass these parts to NumberedName rather than
+// render withNumber's string.
+export function numberedParts(side, withZekkenName) {
+  if (!side) return { name: "TBD", number: "" };
+  if (typeof side === "string") return { name: side, number: "" };
   const name = (withZekkenName && side.displayName) ? side.displayName : (side.name || "TBD");
-  if (!side.number) return name;
-  return color === "aka" ? `${name} ${side.number}` : `${side.number} ${name}`;
+  return { name, number: side.number || "" };
+}
+
+export function withNumber(side, withZekkenName, color) {
+  const { name, number } = numberedParts(side, withZekkenName);
+  if (!number) return name;
+  return color === "aka" ? `${name} ${number}` : `${number} ${name}`;
 }
 
 // shiroName / akaName: optional resolved display names, mirroring the props

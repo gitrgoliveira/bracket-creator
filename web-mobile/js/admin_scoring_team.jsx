@@ -3099,9 +3099,19 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               onSelect={(name, member) => rs.onSelectName(name, member)}
                             />
                           ) : (
+                            /* The read-only branch, which the DAIHYOSEN row
+                               always takes: it has no picker, so it never gets
+                               LineupNameInput's `<position> <side> player`
+                               aria-label. Removing the visible SHIRO/AKA chip
+                               (operator ruling: the side is named once, by the
+                               header badge) therefore left this one row with no
+                               side in text at all, only tint and position. The
+                               ruling explicitly allows aria-labels to name the
+                               side, so the label moves here rather than the
+                               chip coming back (bc-dnst). */
                             rs.playerName
-                              ? <span className="tsm-name__static">{rs.playerName}</span>
-                              : <span className="tsm-name__static tsm-name__static--empty">-</span>
+                              ? <span className="tsm-name__static" aria-label={`${posLabel} ${rs.label}: ${rs.playerName}`}>{rs.playerName}</span>
+                              : <span className="tsm-name__static tsm-name__static--empty" aria-label={`${posLabel} ${rs.label}: no player named`}>-</span>
                           )}
                         </div>
                         {/* Row 1: the ippon mark buttons and the per-bout

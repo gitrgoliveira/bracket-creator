@@ -136,6 +136,19 @@ function teamIdOf(team) {
   return idOf(team) || team?.ID || nameOf(team) || team?.Name || "";
 }
 
+// teamServerIdOf is teamIdOf WITHOUT the name arm, for the one thing teamIdOf
+// must never be used for here: addressing the server. This page mints members,
+// renames them and saves lineups, all keyed by team id. A name sent as an id is
+// not refused everywhere -- addTeamMember 404s, but SetTeamLineup does not check
+// the roster at all, so the lineup persists under a key no id-keyed reader ever
+// finds. The deleted Settings section carried this same split deliberately and
+// rendered the id-less team an explanation instead; that guard came back with
+// its section removed (bc-dnst). teamIdOf keeps its name arm for the LOCAL uses
+// (the select's value, the remount key) where no server call is behind it.
+function teamServerIdOf(team) {
+  return idOf(team) || team?.ID || "";
+}
+
 // squadMemberOptions returns a team's squad sorted by display Index, the
 // order the position pickers and the rename panel both list members in.
 // Pure and exported so the ordering can be pinned without mounting the
@@ -343,7 +356,7 @@ function memberIdentityWarning(failures, squadUnavailable) {
 function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   const teamSize = comp?.teamSize || 5;
   const positions = useMemoA(() => positionsForSize(teamSize), [teamSize]);
-  const teamId = teamIdOf(team);
+  const teamId = teamServerIdOf(team);
   const compId = comp?.id || "";
   // The team's OWN competitor number (e.g. "T10"), the input to
   // squadMemberLabel. Not the member's: a squad member has no number of
@@ -441,19 +454,31 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   // the picker shows no existing members this session, so anything typed
   // through "+ Add new member..." looks new to the resolver even when it
   // is not; squadUnavailable carries that fact to memberIdentityWarning.
+  // `password` is a dependency, not just a closure read, and squadUnavailable
+  // is cleared on every attempt. The operator can reach this screen before
+  // entering the password (or with a rotated one), and the 401 that follows
+  // used to strand the section in its error state until the whole route
+  // remounted, because compId never changed: requestReauth renders the modal
+  // as a SIBLING of the admin app, so nothing unmounts and setPassword only
+  // changes a closure value. That rationale came with the deleted Settings
+  // section and was lost when this effect moved here; without it every picker
+  // stays empty, "+ Add new member" mints instead of resolving, and every save
+  // shows a false "the team member list could not be loaded" (bc-dnst).
   useEffectA(() => {
     let cancelled = false;
     if (!compId || !teamId) return;
     (async () => {
       try {
         const squads = await window.API.fetchSquads(compId, password);
-        if (!cancelled) setSquad((squads && squads[teamId]) || []);
+        if (cancelled) return;
+        setSquad((squads && squads[teamId]) || []);
+        setSquadUnavailable(false);
       } catch (_e) {
         if (!cancelled) setSquadUnavailable(true);
       }
     })();
     return () => { cancelled = true; };
-  }, [compId, teamId]);
+  }, [compId, teamId, password]);
 
   const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
 
@@ -675,6 +700,24 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
 
   if (loading) {
     return <div className="page" style={{ padding: 24 }}>Loading lineup…</div>;
+  }
+
+  // An id-less team is EXPLAINED, not addressed. Every control below writes by
+  // team id: naming a member 404s without one, and a lineup save would persist
+  // under a key no id-keyed reader ever finds, which is worse because it looks
+  // like it worked. The roster gains ids the first time it is saved, so the way
+  // out is one sentence rather than a dead screen (bc-dnst; the deleted Settings
+  // section rendered the same explanation for the same reason).
+  if (!teamId) {
+    return (
+      <div className="page" data-testid="lineup-team-no-id" style={{ padding: 24, maxWidth: 640 }}>
+        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{team?.name || team?.Name || "Team"}</h2>
+        <p style={{ color: "var(--ink-3)", marginTop: 8 }}>
+          No id on file for this team, so its people cannot be recorded yet.
+          Save the roster once on Participants &amp; seeds and the ids are assigned.
+        </p>
+      </div>
+    );
   }
 
   return (

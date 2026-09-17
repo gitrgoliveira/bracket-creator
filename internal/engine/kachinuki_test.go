@@ -3702,3 +3702,82 @@ func TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody(t *testing.T)
 	assert.Equal(t, 0, retiredA.Count())
 	assert.Equal(t, 0, retiredB.Count(), "Tanaka must not be retired by a bout nobody has scored")
 }
+
+// One fighter recorded BOTH with and without a member id is ONE elimination.
+//
+// retire() files an id-carrying retirement under IDs and an id-less one under
+// nameOnly, and the naive len(IDs)+len(nameOnly) counted such a fighter twice.
+// tallyKachinukiEliminations feeds that straight into the exported Kachinuki
+// Detail sheet, so a team that lost one fighter was reported as having lost
+// two. Reachable by reopening an encounter and re-scoring a bout through a
+// path that omits the member id while the original row still carries it.
+func TestRetiredMemberSet_CountsOneFighterOnceAcrossMixedRows(t *testing.T) {
+	boutLog := []state.SubMatchResult{
+		// Kenji loses carrying his member id.
+		{Position: 1, SideA: "Kenji", SideAMemberID: "m7", SideB: "Taro", SideBMemberID: "m9",
+			Winner: "Taro", WinnerMemberID: "m9"},
+		// The SAME fighter loses again on a row that lost its id.
+		{Position: 2, SideA: "Kenji", SideB: "Goro", SideBMemberID: "m11",
+			Winner: "Goro", WinnerMemberID: "m11"},
+	}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(boutLog, "TeamA", "TeamB")
+
+	assert.Equal(t, 1, retiredA.Count(), "one fighter, recorded two ways, is one elimination")
+	assert.Equal(t, 0, retiredB.Count(), "the other side lost nobody")
+
+	// Both buckets really are populated, so the test is exercising the
+	// dedup rather than a shape where only one of them was ever filled.
+	assert.Contains(t, retiredA.IDs, "m7")
+	assert.Contains(t, retiredA.nameOnly, "Kenji")
+
+	// A genuinely different id-less fighter still counts on top.
+	boutLog = append(boutLog, state.SubMatchResult{
+		Position: 3, SideA: "Hiro", SideB: "Ken", SideBMemberID: "m12",
+		Winner: "Ken", WinnerMemberID: "m12",
+	})
+	retiredA, _ = RetiredPlayersFromBoutLog(boutLog, "TeamA", "TeamB")
+	assert.Equal(t, 2, retiredA.Count(), "a second, distinct id-less fighter is its own elimination")
+}
+
+// The BOUT-LOG-ONLY roster branch (no saved lineup) must consult the same
+// name-ambiguity context the lineup branch does.
+//
+// It used to filter one fighter at a time with a hardcoded nil ambiguity set,
+// so the name tier fired for a fighter whose OWN member id proves they have
+// not retired: with two teammates sharing a display name, the one who lost
+// retired the one who did not, and that fighter was never fielded. The lineup
+// branch has always guarded this by passing a real set, which is why the fix
+// is to route this branch through the SAME shared filter.
+func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-namesake-boutlog", 3, func(c *state.Competition) {
+		c.Format = state.CompFormatMixed
+	})
+	require.NoError(t, store.SaveParticipants(comp.ID, []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Ryu", Dojo: "DojoR"},
+		{ID: helper.NewUUID4(), Name: "Tora", Dojo: "DojoT"},
+	}))
+	// Deliberately NO lineup saved: that is what selects the branch under test.
+
+	parent := &state.MatchResult{
+		ID: "P1-0", SideA: "Ryu", SideB: "Tora",
+		SubResults: []state.SubMatchResult{
+			// Two teammates share the display name "Tanaka" with distinct ids,
+			// a roster shape that predates the within-team uniqueness rule.
+			{Position: 1, SideA: "Tanaka", SideAMemberID: "m1", SideB: "Taro", SideBMemberID: "m9",
+				Winner: "Taro", WinnerMemberID: "m9"},
+			{Position: 2, SideA: "Tanaka", SideAMemberID: "m2", SideB: "Taro", SideBMemberID: "m9"},
+		},
+	}
+
+	// The third return is "a lineup resolved it", which is false here by
+	// construction; the roster itself is what this pins.
+	remainingA, _, _ := eng.kachinukiRemainingRoster(comp.ID, "P1-0", comp, parent, 0)
+
+	ids := make([]string, 0, len(remainingA))
+	for _, f := range remainingA {
+		ids = append(ids, f.MemberID)
+	}
+	assert.NotContains(t, ids, "m1", "the fighter who actually lost is retired, by id")
+	assert.Contains(t, ids, "m2",
+		"the namesake with a DIFFERENT id has not retired and must still be fielded")
+}

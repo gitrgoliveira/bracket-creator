@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -8,6 +10,7 @@ import (
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestFormatPositionLabel exercises every named position and the
@@ -949,4 +952,52 @@ func TestBuildKachinukiPositionMap_NamelessFighterResolvesByMemberID(t *testing.
 	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "mem-senpo", "R-Senpo"), "id wins for a named fighter too")
 	assert.Equal(t, "Senpo", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "", "R-Senpo"), "a row with no id still resolves by name")
 	assert.Equal(t, "", resolveKachinukiBoutPosition(posMap, "SF-2", "RedTeam", "", ""), "no id and no name resolves nothing")
+}
+
+// A lineup can still hold ONE member id at TWO positions: the duplicate guard
+// is new, and rows written before it are live data repaired by hand. Both
+// iterations compute the same map key here, so a plain range over MemberIDs
+// let Go's randomised map order decide which position label survived, and the
+// same competition exported "Senpo" on one run and "Chuken" on the next from
+// byte-identical state. Which of the two wins is arbitrary; that it is the
+// SAME one every time is not.
+func TestBuildKachinukiPositionMap_DuplicateMemberIDLabelsDeterministically(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "pos-map-dup"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5,
+	}))
+	// Written STRAIGHT TO DISK: SetTeamLineup refuses this shape today, which
+	// is exactly why the export still has to cope with it. LoadTeamLineups does
+	// not run the legacy repair, so a row like this reaches the export as-is.
+	type lineupFileShape struct {
+		Lineups []domain.TeamLineup `yaml:"lineups"`
+	}
+	body, mErr := yaml.Marshal(&lineupFileShape{Lineups: []domain.TeamLineup{{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PosSenpo:  "R-Senpo",
+			domain.PosChuken: "R-Chuken",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PosSenpo:  "m-dup",
+			domain.PosChuken: "m-dup",
+		},
+	}}})
+	require.NoError(t, mErr)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(store.GetFolder(), "competitions", compID, "lineups.yaml"), body, 0o600))
+
+	comp := &state.Competition{ID: compID, TeamMatchType: state.TeamMatchTypeKachinuki, TeamSize: 5}
+
+	// Repeated because the defect was map-order-dependent: one run could agree
+	// with the fix by luck, so the pin is that many runs agree with EACH OTHER.
+	first := eng.buildKachinukiPositionMap(compID, comp)[lineupKey("RedTeam", memberKey("m-dup"))]
+	require.NotEmpty(t, first, "the duplicated member must still resolve to a position")
+	for i := 0; i < 24; i++ {
+		got := eng.buildKachinukiPositionMap(compID, comp)[lineupKey("RedTeam", memberKey("m-dup"))]
+		require.Equal(t, first, got, "the surviving label must not depend on map iteration order")
+	}
+	assert.Equal(t, "Chuken", first, "sorted key order keeps the first, which is chuken before senpo")
 }

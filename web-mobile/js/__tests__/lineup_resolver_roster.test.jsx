@@ -157,3 +157,25 @@ describe('rosterWithoutPlacedElsewhere (bc-dnst)', () => {
     expect(rosterWithoutPlacedElsewhere([entry], lineup, 'senpo')).toEqual([entry]);
   });
 });
+
+// bc-dnst: same-name teammates. A name arm beside the id arm hid an UNPLACED
+// member from every picker because a teammate elsewhere shared their display
+// name, while memberPlacedElsewhere -- the write-time predicate this list must
+// agree with -- is id-only and would have allowed them.
+describe('rosterWithoutPlacedElsewhere: same-name teammates', () => {
+  const roster = [
+    { id: 'A', index: 1, name: 'Tanaka', label: 'T1.1' },
+    { id: 'B', index: 5, name: 'Tanaka', label: 'T1.5' },
+  ];
+  const lineup = { positions: { senpo: 'Tanaka' }, memberIds: { senpo: 'A' } };
+
+  it('still offers the unplaced namesake at another position', () => {
+    const out = rosterWithoutPlacedElsewhere(roster, lineup, 'jiho');
+    expect(out.map(e => e.id)).toEqual(['B']);
+  });
+
+  it('agrees with memberPlacedElsewhere, which is id-only', () => {
+    expect(memberPlacedElsewhere(lineup.memberIds, 'jiho', 'B')).toBe('');
+    expect(memberPlacedElsewhere(lineup.memberIds, 'jiho', 'A')).toBe('senpo');
+  });
+});

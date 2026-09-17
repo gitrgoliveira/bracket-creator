@@ -16,7 +16,7 @@
 // squad member id half of a lineup pick (bc-tmid pass 3), keyed by the SAME
 // posKey as `positions`; a lineup saved before squads existed simply omits it.
 
-import { squadMemberLabel } from './squad_member_label.jsx';
+import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
 
 // squadRosterEntries: the ONE builder of a lineup picker's list for a team
 // (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
@@ -42,7 +42,14 @@ export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
       id: mem?.id || "",
       index: mem?.index || 0,
       name: String(mem?.name || "").trim(),
-      label: squadMemberLabel(teamNumber, mem?.index),
+      // squadSlotLabel, not squadMemberLabel: before the draw a team has no
+      // number, so the numbered form is "" and every seeded blank slot rendered
+      // as an identical unlabelled "no name yet" row -- the operator could not
+      // tell which slot they had picked, nor which they had already used, while
+      // the Lineups page showed "Slot 1".."Slot 7" for the same members. These
+      // are all OPERATOR pickers, which is exactly what squadSlotLabel is for;
+      // spectator surfaces keep squadMemberLabel and stay bare (bc-dnst).
+      label: squadSlotLabel(teamNumber, mem?.index),
     }));
   if (squadEntries.length > 0) return squadEntries;
   const seen = new Set();
@@ -92,7 +99,16 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
     .map(([, name]) => String(name).trim().toLowerCase()));
   return roster.filter(entry => {
     if (typeof entry === "string") return !otherNames.has(entry.trim().toLowerCase());
-    if (entry.id && otherMemberIds.has(entry.id)) return false;
+    // An entry that CARRIES an id is judged by that id alone: "a record that
+    // carries an id field is resolved by id only" (CLAUDE.md, bc-pnum). A name
+    // arm beside the id arm hid an UNPLACED member from every picker whenever a
+    // teammate placed elsewhere shared their display name -- same-name
+    // teammates exist on rosters predating the uniqueness rule, as
+    // squadMemberIdForUniqueName's own comment says -- while
+    // memberPlacedElsewhere, the write-time predicate this list must agree
+    // with, is id-only and would have allowed them (bc-dnst).
+    if (entry.id) return !otherMemberIds.has(entry.id);
+    // No id: the legacy shape, placed by name, so judged by name.
     if (!entry.name) return true;
     return !otherNames.has(entry.name.trim().toLowerCase());
   });

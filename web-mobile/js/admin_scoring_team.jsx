@@ -2988,6 +2988,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // `value` and the read-only static row, which both render
                 // from this same prop.
                 playerName: resolveBoutSideDisplayName({ squad: squadB, memberId: playerBMemberId, storedName: playerBName }),
+                memberId: playerBMemberId,
                 memberLabel: playerBLabel, roster: isDaihyoRow ? [] : rosterB, forceInput: manualPathB,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
                 onSelectName: manualPathB ? pickManual("bName", "bMemberIdOverride", squadB, setSquadB, teamIdB) : pickPlayer(teamIdB, lineupB, squadB, setSquadB),
@@ -3004,6 +3005,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                 // See SHIRO note above: no lineup picker on the daihyosen row.
                 // bc-dnst: displayed name only, see the SHIRO note above.
                 playerName: resolveBoutSideDisplayName({ squad: squadA, memberId: playerAMemberId, storedName: playerAName }),
+                memberId: playerAMemberId,
                 memberLabel: playerALabel, roster: isDaihyoRow ? [] : rosterA, forceInput: manualPathA,
                 lineupSlot: !isDaihyoRow && idx + 1 <= teamSize,
                 onSelectName: manualPathA ? pickManual("aName", "aMemberIdOverride", squadA, setSquadA, teamIdA) : pickPlayer(teamIdA, lineupA, squadA, setSquadA),
@@ -3095,6 +3097,13 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                               roster={rs.roster}
                               color={rs.color}
                               disabled={inlineLineupSaving}
+                              // A slot picked by NUMBER and not yet named is a
+                              // real placement with an empty name, so the clear
+                              // control's `value || clearable` gate is false and
+                              // the row had no way out but picking someone else.
+                              // The Up Next panel passes this for exactly that
+                              // case; only this host was missed (bc-dnst).
+                              clearable={!!rs.memberId}
                               ariaLabel={`${posLabel} ${rs.label} player`}
                               onSelect={(name, member) => rs.onSelectName(name, member)}
                             />

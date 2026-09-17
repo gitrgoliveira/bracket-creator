@@ -99,6 +99,17 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 // editor since bc-pnum carries the winner's member id and is unaffected;
 // what loses an IV here is drifted or legacy data that never recorded who
 // won in a form that survives two fighters sharing a name.
+//
+// The Excel export's writeTeamSubMatchScores (internal/export/builder.go)
+// reads the same match-level rule and reads it NARROWER: it substitutes the
+// encounter's names only when the row names NO fighter, so a row that does
+// name its fighters keeps deciding for itself. The two look unifiable and are
+// not. Take a row naming Kenji and Taro whose Winner drifted to the team name
+// Kyoto: this function attributes it to A through the sideAName arm below,
+// while the export leaves it unmarked rather than print a default-win maru
+// beside a fighter the winner does not name. Standings counting a bout the
+// sheet declines to mark is the accepted asymmetry, so hoisting either
+// reading onto the other is a behaviour change, not a tidy-up.
 func SubBoutWinnerSide(sub SubMatchResult, sideAName, sideBName string) domain.MatchSide {
 	if side := domain.AttributeWinnerSide(domain.SubBoutAttribution(sub.Attribution())); side != domain.MatchSideNone {
 		return side

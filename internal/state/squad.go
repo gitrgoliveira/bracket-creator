@@ -45,6 +45,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -187,13 +188,50 @@ func copySquads(in map[string][]domain.TeamMember) map[string][]domain.TeamMembe
 // Cache-aware (mtime-keyed via loadCached, same as LoadTeamLineups).
 // Returns a deep copy so callers can mutate the map freely.
 func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
-	data, err := s.loadCached(compID, teamMembersFilename, func(path string) (any, error) {
-		return parseSquadsFile(path)
-	})
-	if err != nil {
-		return nil, err
+	read := func() (map[string][]domain.TeamMember, error) {
+		data, err := s.loadCached(compID, teamMembersFilename, func(path string) (any, error) {
+			return parseSquadsFile(path)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return copySquads(data.(map[string][]domain.TeamMember)), nil
 	}
-	return copySquads(data.(map[string][]domain.TeamMember)), nil
+	out, err := read()
+	if err != nil || len(out) > 0 {
+		return out, err
+	}
+	// An EMPTY result is also exactly what an unadopted v2.0.0 competition
+	// looks like, because parseSquadsFile reports a missing file as "no
+	// members" with no error. This read is the ONE squad path that does not
+	// funnel through loadSquadsLocked, so without this it is the one that
+	// never adopts: EnsureLegacyUpgraded stamps even when its squad step
+	// failed (its documented policy, and this function sits on the viewer's
+	// hot path), so a file repaired on disk mid-run would otherwise stay
+	// invisible to GET /team-members, the viewer payload and the export for
+	// the life of the process, while the three mutators saw it fine. The
+	// operator's symptom is the worst kind: "this team has no members yet"
+	// printed under a full roster.
+	//
+	// Bounded on purpose. The probe is a single os.Stat, taken only when the
+	// map came back empty, and the lock is taken only when the legacy file is
+	// really there. A competition with no team members at all pays one stat.
+	if _, statErr := os.Stat(s.compPath(compID, legacySquadsFilename)); statErr != nil {
+		return out, nil
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	adoptErr := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite)
+	mu.Unlock()
+	if adoptErr != nil {
+		// Degrade to the empty read rather than failing every reader: a
+		// corrupt legacy file must not take down the viewer. The WRITE paths
+		// still refuse loudly (loadSquadsLocked), which is where refusing is
+		// the safe direction, and the error is logged there.
+		log.Printf("state: LoadSquads %s: could not adopt %s: %v", compID, legacySquadsFilename, adoptErr)
+		return out, nil
+	}
+	return read()
 }
 
 // loadSquadsLocked reads team-members.yaml directly from disk WITHOUT acquiring

@@ -7650,7 +7650,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
      44px on coarse pointers. */
   width: 36px;
   height: 36px;
-  min-width: var(--tap-floor);
+  min-width: max(36px, var(--tap-floor));
   min-height: var(--tap-floor);
   font-size: 15px;
   border-radius: 6px;
@@ -7906,8 +7906,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .editor-modal--compact .decision-controls .btn {
   min-height: max(32px, var(--tap-floor));
 }
+/* Each min-width below is max(<the control's own size>, var(--tap-floor)),
+   never the bare variable. On a FINE pointer --tap-floor is 0px, so a bare
+   min-width: var(--tap-floor) resolves to 0 and REPLACES the min-width: auto
+   these flex items had before, which is what floored them at their content
+   width. Under main-axis pressure (a long fighter name beside the clear in a
+   narrow team-bout side column) they could then be squeezed to nothing and
+   become untappable, on the pointer that has no tap floor to save them. */
 .editor-modal--compact .foul-counter__btn {
-  min-width: var(--tap-floor);
+  min-width: max(32px, var(--tap-floor));
   min-height: var(--tap-floor);
 }
 .editor-modal--compact .encho-pill {
@@ -7959,11 +7966,18 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   min-height: var(--tap-floor);
 }
 .team-bouts-scroll .lineup-name__clear {
-  min-width: var(--tap-floor);
   min-height: var(--tap-floor);
 }
+/* This control declares no width of its own, so there is no size to put in a
+   max() with. Its width floor is therefore scoped to the coarse pointer, where
+   the variable is 44px: on a fine pointer it keeps min-width: auto, its content
+   width, rather than being handed the 0 that would let a long fighter name
+   beside it squeeze the clear away entirely. */
+@media (pointer: coarse) {
+  .team-bouts-scroll .lineup-name__clear { min-width: var(--tap-floor); }
+}
 .engi-counter__btn {
-  min-width: var(--tap-floor);
+  min-width: max(36px, var(--tap-floor));
   min-height: var(--tap-floor);
 }
 

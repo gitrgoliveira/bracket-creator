@@ -58,11 +58,18 @@ export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
     //
     // This is not defensive. It is the documented mint-failure path:
     // resolveMemberIdsForPositions saves a substitute BY NAME with no member
-    // id when addTeamMember fails, and deliberately never blocks the write
-    // for it. Such a fighter is in neither the squad nor the legacy metadata,
-    // so without this tail no picker offers them for any OTHER position and
-    // the operator retypes the name at every row. The score sheet applied
-    // mergeRosterWithAssigned for exactly this before the squad list arrived.
+    // id when addTeamMember fails, and deliberately never blocks the write for
+    // it. Such a fighter is in neither the squad nor the legacy metadata, so
+    // without this tail they are in NO list at all. The score sheet applied
+    // mergeRosterWithAssigned for exactly this before the squad list arrived;
+    // this restores that parity rather than adding something new.
+    //
+    // Scope, stated precisely because it is narrower than it looks: on the
+    // FILTERED pickers rosterWithoutPlacedElsewhere then drops this entry at
+    // every position except the one already holding the name, which is
+    // correct, since one fighter holds one position. Where the tail actually
+    // shows is the UNFILTERED list a kachinuki row past the first offers,
+    // where the fighter who stayed on legitimately repeats.
     const known = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
     const assigned = [];
     for (const raw of Object.values(lineup?.positions || {})) {

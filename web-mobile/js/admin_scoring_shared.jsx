@@ -890,7 +890,17 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
     const nameHit = (e.name || "").toLowerCase().includes(ql);
     const labelHit = (e.label || "").toLowerCase().includes(ql);
     return nameHit || labelHit;
-  }).slice(0, 12);
+  });
+  // Capped only while FILTERING. With no query the operator is BROWSING this
+  // team's own numbered slots, and every one has to be reachable: the list
+  // grew from "the team's named members" to every seeded slot (team size plus
+  // two reserves, bc-dnst) plus any assigned-name tail, so a flat cap of 12
+  // silently hid the highest slots on an 11-person team -- exactly the reserve
+  // slots the +2 exists to expose, and the operator could only reach them by
+  // guessing that typing narrows the list. The dropdown scrolls, so showing
+  // the whole of a team's own roster costs nothing; a QUERY can still match
+  // the long legacy tail, which is what the cap is for.
+  if (ql) matches.splice(12);
   const exact = entries.some(e => (e.name || "").toLowerCase() === ql);
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);

@@ -135,8 +135,10 @@ func TestLegacyUpgrade_FailedWriteLeavesTheLegacyFileIntact(t *testing.T) {
 // names are stranded under a name nothing looks for, with fresh ids that orphan
 // every lineup position and fought bout referencing the old ones.
 //
-// The competition must also stay UNSTAMPED, so the next reader retries once the
-// fault clears, rather than the process caching the failure for its lifetime.
+// The competition IS still stamped, which is this package's documented failure
+// policy (see the assertion below for why leaving it unstamped was reverted).
+// What retries once the fault clears is the ADOPTION, through every path that
+// reaches loadSquadsLocked plus LoadSquads' own probe, not this sweep.
 func TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt(t *testing.T) {
 	s, id := newTeamMemberTestStore(t, "team", 3, false)
 	dir := filepath.Join(s.GetFolder(), "competitions", id)
@@ -271,4 +273,43 @@ func TestSquadMutator_RefusesToMintOverAnUnreadableLegacyFile(t *testing.T) {
 		"no file may be minted under the current name while the legacy one is unadopted")
 	_, statErr = os.Stat(filepath.Join(dir, legacySquadsFilename))
 	assert.False(t, os.IsNotExist(statErr), "and the legacy file stays put for the next retry")
+}
+
+// The READ path adopts too, and it is the one that needed saying out loud.
+// EnsureLegacyUpgraded stamps even when its squad step failed, so nothing on
+// the read side retries afterwards; every squad MUTATOR retries through
+// loadSquadsLocked, but LoadSquads is cache-aware and goes straight to the
+// current filename. A file repaired on disk mid-run was therefore invisible to
+// GET /team-members, the viewer payload and the export for the life of the
+// process, and the operator's symptom was "this team has no members yet"
+// printed under a full roster.
+func TestLoadSquads_AdoptsALegacyFileTheStampedUpgradeNeverReached(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	dir := filepath.Join(s.GetFolder(), "competitions", id)
+
+	// Stamp the competition with the squad step FAILING, exactly as a
+	// transient fault at startup would leave it.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte("squads: [not a map\n"), 0o600))
+	s.EnsureLegacyUpgraded(id)
+	_, stamped := s.legacyUpgraded.Load(id)
+	require.True(t, stamped, "precondition: the failed step still stamps")
+
+	// A read now sees nothing, which is the honest state.
+	members, err := s.LoadSquads(id)
+	require.NoError(t, err, "a corrupt legacy file must not take the viewer down")
+	require.Empty(t, members)
+
+	// The operator repairs the file. No further EnsureLegacyUpgraded call can
+	// help: the competition is stamped for the life of this process.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
+	s.EnsureLegacyUpgraded(id)
+
+	members, err = s.LoadSquads(id)
+	require.NoError(t, err)
+	require.Len(t, members["c1-p1"], 2, "the read itself must adopt, or nothing on the read side ever does")
+	assert.Equal(t, "Haruki Tanaka", members["c1-p1"][0].Name)
+
+	// Converged, so the next read is the ordinary cached one.
+	_, statErr := os.Stat(filepath.Join(dir, legacySquadsFilename))
+	assert.True(t, os.IsNotExist(statErr), "the legacy file is consumed by the adopting read")
 }

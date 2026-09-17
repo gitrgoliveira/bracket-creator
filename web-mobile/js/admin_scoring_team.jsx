@@ -2319,8 +2319,31 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
         sideBMemberId = bMemberId || "";
         if (winner) winnerMemberId = (wKey === "a" ? aMemberId : wKey === "b" ? bMemberId : "") || "";
       } else {
-        sideA = sideAName;
-        sideB = sideBName;
+        // A fixed-order (or daihyosen) bout settles at the MATCH level, so the
+        // row records no per-fighter identity: the winner is the team, and the
+        // side names stay EMPTY rather than repeating the team's own name.
+        //
+        // They used to hold the team name, and that value was never a
+        // fighter's: every display then had to know it was not a person, and
+        // one that did not (the score sheet, the overlay) showed the team's
+        // name where the competitor goes as soon as a lineup was missing. The
+        // storage is the source of truth, so the row is simply honest about
+        // what it knows (operator ruling 2026-09-17, bc-dnst).
+        //
+        // Nothing needed the copy. Attribution reads the MATCH-level name
+        // first (state.SubBoutWinnerSide: `sub.Winner == sideAName`, with the
+        // `sub.SideA` arm guarded against ""==""), and the JS IV fallback
+        // mirrors it. The server's own quick-score path already writes this
+        // exact shape for the same reason (handlers_match.go).
+        //
+        // The DAIHYOSEN row is the exception and keeps the team names: the
+        // hantei mark is placed on the WINNER's side, and the serializer
+        // decides which side that is by comparing the winner to this row's
+        // own sideA/sideB (placeHt, api_serializers.jsx). Blanking them there
+        // dropped the Ht from the wire, which a test caught. A rep bout is
+        // won by a team, so naming the teams on that row is honest anyway.
+        sideA = isDaihyo ? sideAName : "";
+        sideB = isDaihyo ? sideBName : "";
         winner = teamWinnerName;
       }
       const entry = {

@@ -3793,9 +3793,10 @@ func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *
 //
 // Reverting the guard to the two-name form left the ENTIRE repo green, which
 // is how this gap was found: no test fought a bout by number alone. The
-// assertion is the APPEND, because a refusal and an exhausted roster both
-// report changed=false -- only a guard that lets the roster be consulted can
-// produce a new pairing.
+// assertions are `changed` AND the appended pairing: a refusal and an
+// exhausted roster both report changed=false, so `changed` alone distinguishes
+// the guard from nothing else -- it is the pairing that proves the roster was
+// actually consulted, and that the winner stayed on.
 func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing.T) {
 	eng, store, _ := setupTestEngine(t)
 	compID := "advance-by-number"
@@ -3857,4 +3858,10 @@ func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing
 		"a bout fought entirely by squad number identifies both sides through their member ids; the encounter must keep advancing")
 	require.Len(t, postLog, 2, "the next pairing is appended after the scored bout")
 	assert.Equal(t, 2, postLog[1].Position, "the appended row is bout 2")
+	// WHO is paired matters as much as that a row appeared: red-1 won and must
+	// stay on, white-2 is the next unretired White member. Asserting only the
+	// position would pass for an append that paired the wrong two fighters,
+	// which is the failure winner-stays-on exists to prevent.
+	assert.Equal(t, "red-1", postLog[1].SideAMemberID, "the winner stays on, by id")
+	assert.Equal(t, "white-2", postLog[1].SideBMemberID, "the next White member comes in, by id")
 }

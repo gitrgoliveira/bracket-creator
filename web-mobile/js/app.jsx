@@ -314,34 +314,6 @@ function parseCourtFromSearch() {
 // Counts are reported as FINISHED RESULTS when the alert carries any, falling
 // back to raw writes otherwise: an operator counts results, and a queued running
 // autosave is not one. Exported for test.
-
-// handleLineupUpdated: what a `lineup_updated` SSE event must do. BOTH halves
-// are load-bearing and the second one does not look it, which is why it is
-// extracted and pinned rather than left inline.
-//
-// The CustomEvent is for useTeamLineups hooks, which subscribe directly (same
-// pattern as competitor-status-updated in patch.jsx); the lineup itself is not
-// part of the competition object, so patching state would not reach them.
-//
-// The LIST REFRESH is for a different writer of the same event.
-// RenameTeamMember / ClearTeamMemberName (handlers_squad.go) fire
-// `lineup_updated` too, and those DO change the competition object: the
-// aggregate item carries the team-members map that resolveBoutSideDisplayName
-// reads to name an ALREADY-FOUGHT kachinuki bout row. This was the one SSE
-// branch that never refreshed the list, so the map kept the spelling the first
-// load captured and the TV board and the OBS overlay showed the pre-rename name
-// (match_scoreboard.jsx's squadsSig dependency exists to follow it and can only
-// fire once something refetches it). Fixed-order rows never showed the bug,
-// since their names come from the lineup the CustomEvent already refreshes,
-// which is exactly what made the refresh look redundant and go missing.
-//
-// Extracted because the handler is inline in App(), nothing mounts App, and the
-// refresh therefore shipped unpinned in f901b891.
-export function handleLineupUpdated(detail, { notify, refreshList }) {
-  notify(new CustomEvent("lineup-updated", { detail }));
-  refreshList();
-}
-
 export function queueAlertMessage(alert) {
   if (!alert) return null;
   const total = Number(alert.count) || 0;
@@ -1206,10 +1178,31 @@ function App() {
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
-            handleLineupUpdated(event.data, {
-                notify: (e) => window.dispatchEvent(e),
-                refreshList: () => jitteredTimeout(maybeLoad, listJitter),
-            });
+            // A team lineup was saved or deleted by an operator. The lineup data
+            // is not part of the competition object, so patchCompetitionData /
+            // setSelectedCompData won't help: instead we dispatch a window
+            // CustomEvent that useTeamLineups hooks subscribe to directly (same
+            // pattern as competitor-status-updated in patch.jsx).
+            window.dispatchEvent(new CustomEvent("lineup-updated", { detail: event.data }));
+            // The refresh below is for a DIFFERENT writer of this same event.
+            // RenameTeamMember / ClearTeamMemberName (handlers_squad.go) fire
+            // lineup_updated too, and those DO change the competition object:
+            // the aggregate carries the team-members map resolveBoutSideDisplayName
+            // reads to name an ALREADY-FOUGHT kachinuki bout row. Of the branches
+            // carrying such a change this was the only one that never refreshed,
+            // so the map kept the spelling the first load captured and the TV
+            // board and OBS overlay showed the pre-rename name (squadsSig in
+            // match_scoreboard.jsx exists to follow it, and can only fire once
+            // something refetches). Fixed-order rows never showed the bug: their
+            // names come from the lineup the CustomEvent already refreshes, which
+            // is exactly what makes this line look redundant -- it is not.
+            //
+            // NOT PINNED BY ANY TEST, deliberately recorded: nothing mounts App,
+            // so deleting this line reddens nothing. Extracting it into a helper
+            // was tried (f901b891 + 0ae7ed25) and reverted -- the helper's own
+            // test passed while the CALL SITE stayed mutable to a no-op, so it
+            // bought indirection and a swallowed-TypeError path, not coverage.
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];

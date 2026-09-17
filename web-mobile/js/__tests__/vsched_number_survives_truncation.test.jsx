@@ -29,7 +29,7 @@ const realReact = global.React;
 const SHIRO = { id: 'p-shiro', name: 'KOBAYASHI HIROSHI', number: 'K1' };
 const AKA = { id: 'p-aka', name: 'YAMAMOTO TAKESHIRO', number: 'K2' };
 
-describe('VSchedItem: the competitor number is a chip, not trailing text', () => {
+describe('the competitor number is a chip, not trailing text', () => {
   let runtime, VSchedItem, numberedParts;
 
   beforeEach(async () => {
@@ -84,11 +84,13 @@ describe('VSchedItem: the competitor number is a chip, not trailing text', () =>
   });
 
   // The cases above stop at the call site: they prove the row ASKS for clip
-  // mode. They do not prove NumberedName does anything with it, and the whole
-  // fix rests on the class `numbered-name--clip`, which is what every ellipsis
-  // rule in styles.css:6099-6113 hangs off. Dropping that class left the
-  // entire JS suite green, so nothing in the repo referenced it. NumberedName
-  // is a leaf component, so this harness renders it fully.
+  // mode, not that NumberedName does anything with it. The whole fix rests on
+  // the class `numbered-name--clip`, which is what the ellipsis rule
+  // (`.numbered-name--clip > .numbered-name__text` in styles.css) hangs off.
+  // Dropping that class left the entire JS suite green, because nothing in the
+  // repo referenced it. NumberedName is a leaf, so this harness renders it
+  // fully and the class boundary IS assertable, even though jsdom can never
+  // measure the ellipsis itself.
   it('NumberedName in clip mode emits the class the ellipsis rules need', async () => {
     const { NumberedName } = await import('../numbered_name.jsx');
     const tree = runtime.mount(NumberedName, { side: 'aka', name: 'YAMAMOTO TAKESHIRO', number: 'K2', clip: true });

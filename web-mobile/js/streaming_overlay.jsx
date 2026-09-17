@@ -192,8 +192,8 @@ function StreamingOverlay({ court, position, competitions }) {
         // are the team names this component already derived above (shiro =
         // sideB, aka = sideA), not the zekken-aware labels further down: the
         // stored value is the raw name, so the comparison must use it.
-        const boutShiroBase = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB), teamName: ovlSideB });
-        const boutAkaBase   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA), teamName: ovlSideA });
+        const boutShiroBase = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideB), lineupName: ovlLineupName(ovlLineupB), teamNameA: ovlSideA, teamNameB: ovlSideB });
+        const boutAkaBase   = resolveBoutSideName({ isKachinuki: isKachinukiOvl, isDaihyosen: isDaihyosenBout, existingName: subSideName(currentSub.sideA), lineupName: ovlLineupName(ovlLineupA), teamNameA: ovlSideA, teamNameB: ovlSideB });
         // bc-dnst: the displayed name only -- a rename reaches this bout's
         // stored side text (boutShiroBase/boutAkaBase, the frozen record)
         // via resolveBoutSideDisplayName's id-first lookup against the

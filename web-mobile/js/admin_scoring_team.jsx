@@ -2071,7 +2071,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       const existingName = key === "a" ? existing?.sideA : existing?.sideB;
       const existingMemberId = key === "a" ? existing?.sideAMemberId : existing?.sideBMemberId;
       return {
-        name: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: name || existingName, lineupName: pick(lineup), teamName: key === "a" ? sideAName : sideBName }),
+        name: resolveBoutSideName({ isKachinuki, isDaihyosen: isDaihyoRow, existingName: name || existingName, lineupName: pick(lineup), teamNameA: sideAName, teamNameB: sideBName }),
         memberId: name
           ? overrideId(key)
           : resolveBoutSideMemberId({ isKachinuki, isDaihyosen: isDaihyoRow, existingMemberId, lineupMemberId: pickMemberId(lineup) }),

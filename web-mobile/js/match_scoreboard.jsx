@@ -404,15 +404,10 @@ const NO_SQUAD = [];
 // individual competition, or a host that has not been updated yet) renders
 // exactly as before.
 export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki, squadA = NO_SQUAD, squadB = NO_SQUAD, numberA = "", numberB = "" }) {
-  const subSideName = (v) => {
-    const n = nameOf(v);
-    if (!n) return "";
-    // Filter out match-level team names: when the backend stores the team
-    // name in every sub-bout (quick-score path), we must fall through to the
-    // bout number rather than repeating the team name on every row.
-    if (n === matchSideA || n === matchSideB) return "";
-    return n;
-  };
+  // The match-level team-name filter that used to live here now belongs to
+  // resolveBoutSideName (teamNameA/teamNameB), which the editor and the
+  // overlay share: one rule, one owner, same two-sided check this had.
+  const subSideName = nameOf;
   const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
   // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki is
   // server-bout-first with the lineup only seeding the index-0 bootstrap;
@@ -424,7 +419,7 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   const lineupHidden = kachinukiHidesLineupPosition(kachinuki, isDH, index);
   const lineupNameFor = (lu) => lineupHidden ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
   const resolveSide = (subSide, lu) =>
-    resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu) }) || boutNum;
+    resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu), teamNameA: matchSideA, teamNameB: matchSideB }) || boutNum;
   const shiroName = resolveSide(sub && sub.sideB, lineupB);
   const akaName = resolveSide(sub && sub.sideA, lineupA);
   // shiroDisplayName/akaDisplayName: the DISPLAYED name only (bc-dnst). A

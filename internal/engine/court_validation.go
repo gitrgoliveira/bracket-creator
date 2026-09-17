@@ -39,14 +39,10 @@ func SuggestedMaxCourts(numPlayers int) int {
 func ValidateCourtCount(numPlayers, numCourts int) error {
 	hardCap := max(1, numPlayers/2)
 	if numCourts > hardCap {
-		bouts := "bout"
-		if hardCap > 1 {
-			bouts = "bouts"
-		}
-		return &ValidationError{Msg: fmt.Sprintf(
-			"too many courts for the entry: %d shiaijo but only %d %s can run at once with %d entrants, so the rest would sit idle; give this competition at most %d",
-			numCourts, hardCap, bouts, numPlayers, hardCap,
-		)}
+		return validationErrorf(
+			"too many courts for the entry: %d shiaijo but only %d bout%s can run at once with %d entrants, so the rest would sit idle; give this competition at most %d",
+			numCourts, hardCap, helper.Plural(hardCap), numPlayers, hardCap,
+		)
 	}
 	return nil
 }

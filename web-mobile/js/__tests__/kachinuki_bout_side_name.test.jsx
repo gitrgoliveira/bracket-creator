@@ -102,15 +102,6 @@ describe('resolveBoutSideName', () => {
       })).toBe('Ren Suzuki');
     });
 
-    it('leaves kachinuki alone: the engine writes real fighter names there', () => {
-      // A kachinuki row is server-first and a team name never lands in it, so
-      // the guard must not reach in and blank a legitimate stored name.
-      expect(resolveBoutSideName({
-        isKachinuki: true, isDaihyosen: false,
-        existingName: TEAM, lineupName: '', teamNameA: TEAM, teamNameB: OTHER,
-      })).toBe(TEAM);
-    });
-
     it('is inert when the caller passes no team name', () => {
       // Every caller threads one today, but the argument is optional and an
       // omitted team name must not change the answer for anyone.
@@ -135,6 +126,24 @@ describe('resolveBoutSideName', () => {
         isKachinuki: false, isDaihyosen: false,
         existingName: OTHER, lineupName: '', teamNameA: TEAM, teamNameB: OTHER,
       })).toBe('');
+    });
+
+    it('drops a team name on a KACHINUKI row too, which the TV board used to filter', () => {
+      // Today's engine writes real fighter names per pairing, but rows holding
+      // a team name exist (quick-score synth shape, hand-edited bracket.json,
+      // an imported tournament). Scoping the test below the kachinuki return
+      // printed the team's own name in every bout row's fighter slot.
+      expect(resolveBoutSideName({
+        isKachinuki: true, isDaihyosen: false,
+        existingName: TEAM, lineupName: '', teamNameA: TEAM, teamNameB: OTHER,
+      })).toBe('');
+    });
+
+    it('still prefers a kachinuki row\'s real stored name over the lineup', () => {
+      expect(resolveBoutSideName({
+        isKachinuki: true, isDaihyosen: false,
+        existingName: 'Ryu Shiro', lineupName: 'Ryu Goro', teamNameA: TEAM, teamNameB: OTHER,
+      })).toBe('Ryu Shiro');
     });
   });
 });

@@ -181,12 +181,18 @@ export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.
 // hand-edited data. Passing them is how a caller opts in; a caller with no
 // team names to give (none today) simply gets the old behaviour.
 //
-// Kachinuki is untouched: there the engine writes real fighter names per
-// pairing, and a team name never lands in that field.
+// The team-name test applies to KACHINUKI too, and must run BEFORE its
+// server-first return. Today's engine writes real fighter names per pairing, so
+// a team name should never land in that field -- but rows that already carry
+// one exist (the quick-score synth shape state.SubBoutWinnerSide's own team
+// arms answer for, a hand-edited bracket.json, an imported tournament), and the
+// TV board filtered them for years before this rule moved here. Scoping the
+// test below the kachinuki return dropped exactly that coverage and printed the
+// team's own name in the fighter slot of every bout row.
 export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName, teamNameA, teamNameB }) {
-  if (isKachinuki && !isDaihyosen) return existingName || lineupName || "";
-  const isTeamName = existingName === teamNameA || existingName === teamNameB;
-  return lineupName || (isTeamName ? "" : existingName) || "";
+  const stored = existingName === teamNameA || existingName === teamNameB ? "" : existingName;
+  if (isKachinuki && !isDaihyosen) return stored || lineupName || "";
+  return lineupName || stored || "";
 }
 
 // kachinukiHidesLineupPosition: for a kachinuki NUMBERED bout past the

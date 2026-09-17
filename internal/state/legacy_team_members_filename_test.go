@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -124,4 +126,55 @@ func TestLegacyUpgrade_FailedWriteLeavesTheLegacyFileIntact(t *testing.T) {
 
 	_, statErr := os.Stat(filepath.Join(dir, teamMembersFilename))
 	assert.True(t, os.IsNotExist(statErr), "and no half-written new file is left behind")
+}
+
+// THE REPORTED DATA LOSS. A v2.0.0 squads.yaml the migration cannot read must
+// never be followed by the seeding pass minting blank members over it: that
+// write permanently arms the migration's refuse-to-overwrite guard, so the real
+// names are stranded under a name nothing looks for, with fresh ids that orphan
+// every lineup position and fought bout referencing the old ones.
+//
+// The competition must also stay UNSTAMPED, so the next reader retries once the
+// fault clears, rather than the process caching the failure for its lifetime.
+func TestLegacyUpgrade_UnreadableLegacyFileNeverMintsBlanksOverIt(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	dir := filepath.Join(s.GetFolder(), "competitions", id)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte("squads: [this is not a map\n"), 0o600))
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
+
+	s.EnsureLegacyUpgraded(id)
+
+	_, statErr := os.Stat(filepath.Join(dir, teamMembersFilename))
+	assert.True(t, os.IsNotExist(statErr),
+		"no blank-seeded team-members.yaml may be written while an unadopted legacy file is present")
+	_, statErr = os.Stat(filepath.Join(dir, legacySquadsFilename))
+	assert.False(t, os.IsNotExist(statErr), "the legacy file must still be there to retry")
+
+	_, stamped := s.legacyUpgraded.Load(id)
+	assert.False(t, stamped, "a failed squad upgrade must not be stamped, or this process never retries")
+
+	// And once the fault clears, the retry adopts the real members.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
+	s.EnsureLegacyUpgraded(id)
+	members, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	assert.Equal(t, "Haruki Tanaka", members["c1-p1"][0].Name, "the retry must recover the real names")
+}
+
+// The same protection must hold on the OTHER caller: a roster write that lands
+// before anything ever reads the competition. That path calls the seeding pass
+// directly, which is why the migration lives inside it rather than beside the
+// load hook.
+func TestLegacyUpgrade_RosterWriteAdoptsTheLegacyFileFirst(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	dir := filepath.Join(s.GetFolder(), "competitions", id)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
+
+	// A roster save, with no prior read of this competition.
+	require.NoError(t, s.SaveParticipants(id, []domain.Player{{Name: "Tora A", Dojo: "Tora Dojo"}}))
+
+	members, err := s.LoadSquads(id)
+	require.NoError(t, err)
+	require.NotEmpty(t, members["c1-p1"], "the v2.0.0 members must have been adopted, not replaced by blanks")
+	assert.Equal(t, "Haruki Tanaka", members["c1-p1"][0].Name)
 }

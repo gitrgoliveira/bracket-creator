@@ -276,16 +276,20 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	// downstream tries to resolve against it, or the very team this pass
 	// just gave a squad to would still see "no squad" and skip repair for
 	// a full extra load.
-	// BEFORE the metadata migration and everything downstream of it: that
-	// step, and the three id repairs after it, all resolve against
-	// team-members.yaml, so a competition still holding v2.0.0's squads.yaml
-	// must be moved onto the new name first or every one of them reads "no
-	// team members" and skips its repair for a whole extra load.
-	if err := s.upgradeTeamMembersFilenameLocked(compID, atomicWriteFile); err != nil {
-		log.Printf("state: legacy team-members filename upgrade for %s: %v", compID, err)
-	}
+	// The v2.0.0 filename migration runs INSIDE this step (see its own comment)
+	// so both of its callers get it, and so a failure aborts before anything
+	// mints blank members over the file it has not adopted yet. It therefore
+	// also runs before the three id repairs below, which all resolve against
+	// team-members.yaml.
+	//
+	// squadsUpgraded is false when the migration or the seeding failed: the
+	// downstream repairs resolve against a file that is now missing or stale,
+	// so running them writes nothing useful, and the competition must NOT be
+	// stamped as upgraded or this process never retries it.
+	squadsUpgraded := true
 	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
 		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
+		squadsUpgraded = false
 	}
 	if err := s.upgradePoolMatchSideIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy pool-match-side-id upgrade for %s: %v", compID, err)
@@ -295,6 +299,11 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	}
 	if err := s.upgradeLineupMemberIDsLocked(compID, roster); err != nil {
 		log.Printf("state: legacy lineup-member-id upgrade for %s: %v", compID, err)
+	}
+	if !squadsUpgraded {
+		// Leave the competition unstamped so the next reader retries. The steps
+		// above are all idempotent, so a retry costs a re-read, not a re-write.
+		return
 	}
 	s.legacyUpgraded.Store(compID, struct{}{})
 }
@@ -1573,6 +1582,25 @@ func (r *legacyUpgradeRoster) adoptStampedPlayers(players []domain.Player) {
 // EnsureLegacyUpgraded passes nil: on a plain load there is no pending
 // write to borrow an id from, so an id-less row still migrates to nothing.
 func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpgradeRoster, mintedByCompetitor map[string]string) error {
+	// FIRST, and inside this function rather than beside one of its callers.
+	// This step MINTS blank members and writes team-members.yaml, which
+	// permanently arms the filename migration's refuse-to-overwrite guard: seed
+	// over an unadopted v2.0.0 squads.yaml and the operator's real members are
+	// stranded under a name nothing looks for, with fresh ids that orphan every
+	// lineup position and fought bout referencing the old ones.
+	//
+	// Both callers reach that damage through here -- EnsureLegacyUpgraded's
+	// load hook AND saveParticipantsNoLock's pre-write call, which exists
+	// precisely because the load hook misses a save that lands before anything
+	// reads the competition -- so the migration belongs HERE, not at a call
+	// site. Registering it beside one caller left the other open.
+	//
+	// A failed migration ABORTS rather than logging on: minting is the
+	// irreversible half, and a transient fault (a permission blip, a
+	// half-mounted volume) must cost a retry, not the members.
+	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+		return err
+	}
 	comp, err := roster.competition()
 	if err != nil || comp == nil {
 		return err

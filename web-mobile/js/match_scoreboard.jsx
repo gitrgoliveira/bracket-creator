@@ -406,7 +406,9 @@ const NO_SQUAD = [];
 export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state, matchSideA, matchSideB, kachinuki, squadA = NO_SQUAD, squadB = NO_SQUAD, numberA = "", numberB = "" }) {
   // The match-level team-name filter that used to live here now belongs to
   // resolveBoutSideName (teamNameA/teamNameB), which the editor and the
-  // overlay share: one rule, one owner, same two-sided check this had.
+  // overlay share: one rule, one owner, and the same two-sided check this
+  // had, INCLUDING on kachinuki rows -- the resolver applies it before its
+  // server-first return, because this board's copy always did.
   const subSideName = nameOf;
   const boutNum = isDH ? "DH" : "#" + (sub && sub.position > 0 ? sub.position : index + 1);
   // Name priority is resolveBoutSideName (lineup_resolver.jsx): kachinuki is

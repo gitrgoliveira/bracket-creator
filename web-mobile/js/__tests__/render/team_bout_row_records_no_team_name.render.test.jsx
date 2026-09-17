@@ -105,15 +105,27 @@ describe('a fixed-order bout row records no team name', () => {
     for (const s of numbered) {
       expect(s.sideA).toBe('');
       expect(s.sideB).toBe('');
-      // The row is not anonymous to the standings: the winner still names the
-      // team, which is what attribution reads.
-      expect(['', 'Kyoto', 'Osaka']).toContain(s.winner || '');
+    }
+    // The row is not anonymous to the standings: a bout that was SCORED still
+    // names the winning team, which is what attribution reads. Asserted on the
+    // scored row only, and as an exact value: the old allow-list included ''
+    // and folded undefined into it, so the only failing value was a third team
+    // name, which two teams cannot produce. A regression that stopped writing
+    // `winner` passed it.
+    const scored = numbered.filter(s => (s.ipponsA || []).length || (s.ipponsB || []).length);
+    expect(scored.length).toBeGreaterThan(0);
+    for (const s of scored) {
+      expect(['Kyoto', 'Osaka']).toContain(s.winner);
     }
   });
 
   it('never writes the team name into a numbered row', async () => {
     const subs = await scoreAndCapture(makeMatch());
-    for (const s of subs.filter((x) => x.position > 0)) {
+    const numbered = subs.filter((x) => x.position > 0);
+    // Guarded like its sibling: without this the body never runs if buildPatch
+    // stops emitting numbered rows, and the test passes by iterating nothing.
+    expect(numbered.length).toBeGreaterThan(0);
+    for (const s of numbered) {
       expect(s.sideA).not.toBe('Kyoto');
       expect(s.sideB).not.toBe('Osaka');
     }

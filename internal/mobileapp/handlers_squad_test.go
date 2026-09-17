@@ -53,7 +53,7 @@ func setupSquadTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 	r := gin.New()
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterSquadHandlers(admin, store, store)
+	RegisterSquadHandlers(admin, store, store, stubBroadcaster{})
 	return r, store, teams[0].ID
 }
 
@@ -273,4 +273,63 @@ func TestSquadHandlers_AddToUnknownTeamIs404(t *testing.T) {
 	assert.Empty(t, squads["not-a-real-team"], "a refused add must not persist a squad for the bogus id")
 	require.Len(t, squads, 1, "only the real team's pre-seeded squad must exist")
 	assert.Len(t, squads[teamID], 5, "the refused add must not have touched the real team's seeded slots")
+}
+
+// A rename and a clear now rewrite lineups.yaml as well as the squad file,
+// so they must fire the same event every other writer of that file fires.
+//
+// Without it the failure is LOSS, not staleness: a second admin holding a
+// pre-rename lineup makes any unrelated inline pick, its write spreads the
+// whole stale positions map, and the operator's correction is reverted on
+// disk. ADD stays silent on purpose and is asserted here so the split cannot
+// be "tidied" into one rule.
+func TestSquadHandlers_RenameAndClearBroadcastTheLineupEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir, err := os.MkdirTemp("", "squad-bcast-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Kind: "team", TeamSize: 3}))
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "Tora", Dojo: "Tora Dojo"}}))
+	teams, err := store.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.Len(t, teams, 1)
+	teamID := teams[0].ID
+
+	hub := &recordingBroadcaster{}
+	r := gin.New()
+	admin := r.Group("/api")
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
+	RegisterSquadHandlers(admin, store, store, hub)
+
+	base := "/api/competitions/c1/teams/" + teamID + "/members"
+
+	// ADD: deliberately silent.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodPost, base, "secret", map[string]any{"name": "Sato"}))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	assert.Empty(t, hub.events, "adding a member stays silent, as its own rationale says")
+
+	var added domain.TeamMember
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
+	require.NotEmpty(t, added.ID)
+
+	// RENAME: fires, because it rewrote lineups.yaml too.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodPut, base+"/"+added.ID, "secret", map[string]any{"name": "Sato Kenji"}))
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, hub.events, 1, "a rename must announce the lineup change it made")
+	assert.Equal(t, EventLineupUpdated, hub.events[0],
+		"the EXISTING lineup event, so no squad reader needs a new subscriber")
+
+	// CLEAR: fires for the same reason.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodDelete, base+"/"+added.ID, "secret", nil))
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, hub.events, 2)
+	assert.Equal(t, EventLineupUpdated, hub.events[1])
 }

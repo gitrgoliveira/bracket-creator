@@ -411,7 +411,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       expect(collectText(tree2)).toContain('cannot clear: competition started');
     });
 
-    it('is disabled once the competition has started', async () => {
+    it('is disabled once the competition has started, and SAYS SO on screen', async () => {
       const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
         squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
         comp: { ...COMP, status: 'running' },
@@ -419,7 +419,36 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       const clearBtn = buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name');
       expect(clearBtn).toBeTruthy();
       expect(clearBtn.props.disabled).toBe(true);
+      // The reason must be VISIBLE, not only in a title: the desk runs on
+      // touch tablets, which have no hover to reveal one. The deleted Settings
+      // section stated it as a persistent line and nothing replaced it.
+      expect(collectText(tree)).toContain('Clearing a name is locked once the competition has started');
     });
+
+    // Rename and Add deliberately stay available after the start; only
+    // clearing locks. Nothing exercised that, so adding `|| started` to either
+    // control would have left the whole suite green while reversing a ruling.
+    it('leaves Rename and Add available on the SAME render that locks clearing', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+        comp: { ...COMP, status: 'running' },
+      });
+      const renameBtn = buttonNamed(squadRow(tree, 'sq-sato'), 'Rename');
+      expect(renameBtn).toBeTruthy();
+      expect(renameBtn.props.disabled).toBeFalsy();
+      expect(buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name').props.disabled).toBe(true);
+    });
+  });
+
+  // A list that FAILED to load and a genuinely empty team rendered the same
+  // sentence, which invited the operator to mint a second permanent numbered
+  // slot for a member who already has one.
+  it('says the team-member list could not be loaded, rather than that the team is empty', async () => {
+    global.window.API.fetchSquads.mockRejectedValue(new Error('network down'));
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {});
+    const text = collectText(runtime.currentTree() || tree);
+    expect(text).toContain('could not be loaded');
+    expect(text).not.toContain('This team has no members yet');
   });
 
   it('operation 1 (SELECT) of a still-unnamed squad slot is a placement: Save writes it by id with an empty name (bc-dnst)', async () => {

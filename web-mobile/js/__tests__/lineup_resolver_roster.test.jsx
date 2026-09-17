@@ -39,6 +39,28 @@ describe('squadRosterEntries (bc-dnst, the one builder of a lineup picker\'s lis
     delete window.AdminLineupHelpers;
   });
 
+  // The no-squad branch reads mergeRosterWithAssigned off the window (this
+  // module may not import admin_lineup.jsx) and falls back to identity when it
+  // is absent. Only that fallback was covered, so breaking the real call, or
+  // handing it the wrong lineup shape, kept the file green while a legacy team
+  // stopped being offered its own already-assigned names.
+  it('merges the lineup\'s assigned names into the LEGACY list, through the shared helper', () => {
+    window.AdminLineupHelpers = {
+      mergeRosterWithAssigned: (names, lu) => {
+        const seen = new Set(names.map(n => String(n).trim().toLowerCase()));
+        const extra = Object.values(lu?.positions || {})
+          .map(n => String(n || '').trim())
+          .filter(n => n && !seen.has(n.toLowerCase()));
+        return [...names, ...extra];
+      },
+    };
+    const out = squadRosterEntries({
+      teamNumber: '', squad: [], legacyNames: ['Sato'],
+      lineup: { positions: { senpo: 'Sato', jiho: 'Ren Suzuki' } },
+    });
+    expect(out).toEqual(['Sato', 'Ren Suzuki']);
+  });
+
   it('lists every squad slot in index order, blank ones by label only', () => {
     const squad = [
       { id: 'm2', index: 2, name: 'Tanaka' },
@@ -174,8 +196,17 @@ describe('rosterWithoutPlacedElsewhere: same-name teammates', () => {
     expect(out.map(e => e.id)).toEqual(['B']);
   });
 
-  it('agrees with memberPlacedElsewhere, which is id-only', () => {
-    expect(memberPlacedElsewhere(lineup.memberIds, 'jiho', 'B')).toBe('');
-    expect(memberPlacedElsewhere(lineup.memberIds, 'jiho', 'A')).toBe('senpo');
+  // The OFFER and the REFUSAL, asserted against each other rather than each
+  // against itself: this used to re-check two memberPlacedElsewhere cases the
+  // describe above already covered and never invoked the list filter at all,
+  // so it pinned no agreement between them.
+  it('offers exactly the members memberPlacedElsewhere would let a writer place', () => {
+    for (const posKey of ['senpo', 'jiho', 'chuken']) {
+      const offered = rosterWithoutPlacedElsewhere(roster, lineup, posKey).map(e => e.id).sort();
+      const allowed = roster
+        .filter(e => !memberPlacedElsewhere(lineup.memberIds, posKey, e.id))
+        .map(e => e.id).sort();
+      expect(offered).toEqual(allowed);
+    }
   });
 });

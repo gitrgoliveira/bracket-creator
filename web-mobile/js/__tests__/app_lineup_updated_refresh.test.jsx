@@ -36,15 +36,20 @@ describe('a lineup_updated SSE event', () => {
     expect(refreshList).toHaveBeenCalledTimes(1);
   });
 
-  it('does both for every payload shape the server can send', () => {
-    // ClearTeamMemberName sends the same {competitionId} shape as a rename,
-    // and a lineup delete can arrive with no detail at all.
-    for (const detail of [{ competitionId: 'c1' }, undefined]) {
-      const notify = vi.fn();
-      const refreshList = vi.fn();
-      handleLineupUpdated(detail, { notify, refreshList });
-      expect(notify).toHaveBeenCalledTimes(1);
-      expect(refreshList).toHaveBeenCalledTimes(1);
-    }
+  it('does both halves in the same call, not one or the other', () => {
+    // The two cases above mock one collaborator each; this one asserts a
+    // single call drives BOTH, which is the actual contract.
+    //
+    // Only one payload shape is exercised because only one exists: all six
+    // EventLineupUpdated producers (four in handlers_lineup.go, two in
+    // handlers_squad.go) send gin.H{"competitionId": compID}, deletes
+    // included. An earlier version of this test also passed `undefined` on
+    // the guess that a delete sends no detail; it does not, and a test for an
+    // unreachable input only invites defensive code to satisfy it.
+    const notify = vi.fn();
+    const refreshList = vi.fn();
+    handleLineupUpdated({ competitionId: 'c1' }, { notify, refreshList });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(refreshList).toHaveBeenCalledTimes(1);
   });
 });

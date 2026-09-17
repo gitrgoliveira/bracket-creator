@@ -183,8 +183,8 @@ function StreamingOverlay({ court, position, competitions }) {
         const ovlLineupName = (lu) =>
             ovlHidesLineup ? "" : pickFromLineup(lu, currentBoutIdx, teamSizeOvl);
         const ovlFallback = (isKachinukiOvl && !isDaihyosenBout) ? String(currentBoutIdx + 1) : boutPosLabel;
-        // teamName: a FIXED-ORDER row stores the TEAM's name in sideA/sideB by
-        // design (buildPatch), so without this the overlay showed a team name
+        // teamName: a fixed-order row written before bc-dnst stores the TEAM's
+        // name in sideA/sideB, so without this the overlay showed a team name
         // where the fighter's name goes whenever no lineup was set, instead of
         // falling through to the FIK position label below. The TV board
         // already filtered it (match_scoreboard's subSideName); this is the

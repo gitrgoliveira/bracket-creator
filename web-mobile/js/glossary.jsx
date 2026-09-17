@@ -188,7 +188,7 @@ function Term({ name, children, nested }) {
     // clickable card (e.g. a match row) from triggering the row click.
     e.stopPropagation();
     if (!open) measureFlip(); // about to open: measure before it renders
-    setOpen(!open);
+    setOpen(v => !v); // functional: two toggles in one batch must not collapse
   };
 
   const handleBlur = (e) => {
@@ -221,7 +221,7 @@ function Term({ name, children, nested }) {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (!open) measureFlip();
-          setOpen(!open);
+          setOpen(v => !v);
         }
       },
     },

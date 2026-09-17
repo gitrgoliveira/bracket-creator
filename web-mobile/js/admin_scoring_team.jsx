@@ -2290,8 +2290,8 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
       // Competition-type-aware sub-bout identity: a kachinuki bout is consumed
       // per-competitor (advancement + bout-log export), so persist player-name
       // sides + winner; a fixed-position or daihyosen bout settles at the match
-      // level, so it keeps the team-name behaviour (standings match the
-      // match-level side first via isWinForSide).
+      // level. It records NO fighter name (bc-dnst): standings match the
+      // match-level side first via isWinForSide, so the row needs none.
       let sideA, sideB, winner;
       // bc-pnum: the winner's squad MEMBER ID, stamped from wKey -- the SIDE
       // the operator picked -- and never from the winner's name. It is the
@@ -2905,8 +2905,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
                   setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
                 }
               } catch (_e) {
-                // The row already carries the name and the id; the squad's
-                // own name catches up on its next load.
+                // TELL THE OPERATOR. The rename never reached the server, so
+                // the member stays nameless there permanently: every later
+                // picker row, the Lineups page and the member list keep
+                // offering it as "no name yet", and nothing catches up on a
+                // later load because nothing was written. The bout row itself
+                // is fine (it carries the typed name and the id), which is
+                // exactly why this needs saying out loud rather than looking
+                // correct. The sibling resolver path reports the same failure
+                // through this channel for the same reason (bc-dnst).
+                setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. Rename them on the Lineups page.`);
               }
             };
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup

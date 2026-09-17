@@ -181,8 +181,8 @@ export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.
 // editable and drive fixed position-vs-position pairings.
 //
 // teamNameA/teamNameB close a trap that only shows with NO lineup set
-// (bc-dnst). A FIXED-ORDER bout settles at the match level, so buildPatch
-// writes the TEAM's name into every row's sideA/sideB, and the server's
+// (bc-dnst). A FIXED-ORDER bout settles at the match level. Rows written
+// before that rule put the TEAM's name into sideA/sideB, and the server's
 // attribution reads it (state.SubBoutWinnerSide matches sub.Winner against
 // the match-level names). That stored value is therefore not a fighter's
 // name, and falling back to it dressed the team's own name up as the person

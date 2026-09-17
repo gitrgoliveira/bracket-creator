@@ -570,9 +570,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const queueShowBtnRef = useRefSh(null);
     const queueHideBtnRef = useRefSh(null);
     const toggleQueue = () => {
-        try { localStorage.setItem(QUEUE_OPEN_KEY, queueOpen ? "0" : "1"); } catch (_) { /* private mode */ }
         queueToggledByUser.current = true;
-        setQueueOpen((open) => !open);
+        // Persist from INSIDE the updater, off the live value. Reading the
+        // render-time `queueOpen` here while updating functionally let two taps
+        // in one batch cancel each other in state while both wrote the same
+        // stale value, so the operator's choice and what was stored disagreed
+        // (bc-dnst). This console runs on tablets, where a double-tap is one
+        // batch.
+        setQueueOpen((open) => {
+            const next = !open;
+            try { localStorage.setItem(QUEUE_OPEN_KEY, next ? "1" : "0"); } catch (_) { /* private mode */ }
+            return next;
+        });
     };
     // Collapsing hides the header "Hide" button (it stays mounted; its
     // .shiaijo__queue parent is hidden via .shiaijo--queue-collapsed) and

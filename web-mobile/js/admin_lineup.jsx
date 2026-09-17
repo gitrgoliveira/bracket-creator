@@ -20,7 +20,7 @@
 // team.metadata (the untyped array a team's roster row shares with an
 // individual's dan grade, and the confirmed source of several data-loss
 // bugs, see bc-tmid). It is loaded from its own per-competition store via
-// GET /api/competitions/:id/squads, and edited through exactly THREE
+// GET /api/competitions/:id/team-members, and edited through exactly THREE
 // operations, per the operator's ruling: SELECT an existing squad member
 // into a position, ADD a new name in a position (which creates the member
 // and mints its id in that one step), and RENAME a member (which keeps

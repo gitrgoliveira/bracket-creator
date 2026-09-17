@@ -445,7 +445,12 @@ func validateSubBout(prefix string, sr *state.SubMatchResult, allowNumberedEncho
 			Message: "hantei is only valid for the daihyosen representative bout (position -1)",
 		}
 	}
-	// SubMatchResult carries no ids at all - a numbered team bout names the
+	// This row is the DAIHYOSEN (the hantei gate above confines it there), which
+	// still names its two teams. Do NOT read this as "a sub-bout has no ids": the
+	// struct carries SideAMemberID/SideBMemberID and an Attribution() method, and a
+	// numbered fixed-order row now carries no side NAMES either (bc-dnst), so
+	// extending the hantei rule to numbered bouts means threading those ids here.
+	// A numbered team bout names the
 	// two individual PLAYERS fielded, and player names are not unique (only
 	// (name, dojo) is) - so names are all there is here, resolved by the
 	// documented sideA-first convention. This call always takes the

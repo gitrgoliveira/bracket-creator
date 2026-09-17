@@ -218,22 +218,25 @@ export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
 // id-first. Mirrors Go's internal/domain.AttributeWinnerSide exactly (that
 // function is this one's twin - a divergence between the two is a bug, not a
 // style choice):
-//   - when winnerId, sideAId AND sideBId are ALL non-empty, ids are
+//   - when winnerId, sideAId AND sideBId are the winner id matching a side that carries one, ids are
 //     AUTHORITATIVE and win over names when they disagree: winnerId ===
 //     sideAId -> "a", winnerId === sideBId -> "b", matches neither -> null
 //     (unattributable - do NOT fall back to names in this branch: a
 //     same-name/different-dojo pair is exactly the case ids exist to
 //     disambiguate, so a name fallback here would silently reintroduce the
 //     bug this function fixes).
-//   - otherwise (any id missing - legacy data, id-less payloads, sub-bout
-//     rows that carry no ids at all) fall back to the name comparison this
+//   - with BOTH side ids known and the winner id matching neither, the row is
+//     unattributable and names get no say.
+//   - otherwise (no winner id, or no side id to compare it against - legacy
+//     data, id-less payloads) fall back to the name comparison this
 //     file has always used: an empty winner name is unattributable, then
 //     sideA-first when the winner name matches BOTH sides (CLAUDE.md's
 //     documented defensive AKA/sideA-first convention), so id-less data
 //     stays byte-identical to before this function existed.
 // The id branch is checked FIRST and unconditionally - it does not require a
-// non-empty winner NAME, only a non-empty winnerId matching all three ids'
-// presence. This mirrors Go's ordering exactly (AttributeWinnerSide checks
+// non-empty winner NAME, and it decides on ONE side's id: a winner id equal to
+// the id a side carries names that side even when the other carries none
+// (bc-dnst, a fighter fielded by number against a typed substitute). This mirrors Go's ordering exactly (AttributeWinnerSide checks
 // the id triple before its `winner == ""` guard, which belongs to the name
 // fallback only); do not hoist an empty-winner-name guard above the id
 // branch, which would silently disagree with the Go twin whenever a caller

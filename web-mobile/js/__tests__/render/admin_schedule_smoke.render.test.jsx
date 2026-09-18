@@ -18,6 +18,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // ── window stubs ─────────────────────────────────────────────────────────────
 // Split into:
@@ -50,25 +51,17 @@ const STUBBED_GLOBALS = {
   compMatches: () => [],
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminSchedulePage, AdminScoreEditorPage;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_schedule.jsx');
   AdminSchedulePage    = window.AdminSchedulePage;
   AdminScoreEditorPage = window.AdminScoreEditorPage;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 

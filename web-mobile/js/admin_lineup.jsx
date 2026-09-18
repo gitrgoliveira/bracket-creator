@@ -40,6 +40,7 @@ import { idOf, nameOf } from './competitor_identity.jsx';
 import { squadSlotLabel } from './squad_member_label.jsx';
 import { rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
 import { normalizeParticipantName } from './data.jsx';
+import { renameMemberFields } from './lineup_rename.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useMemo: useMemoA, useRef: useRefA } = React;
 
@@ -264,7 +265,7 @@ function blankMemberForPosition(squad, posKey, currentIds) {
 // save on its own account.
 //
 // currentIds (bc-dnst, optional) is the lineup's OWN memberIds map before
-// this write -- buildInlineLineupWrite (admin_scoring_team.jsx) passes
+// this write -- buildInlineLineupWrite (lineup_resolver.jsx) passes
 // lineup?.memberIds. It covers naming a slot that was PICKED by number
 // rather than typed: an operator who picks a blank squad entry from the
 // row's list (LineupNameInput's object-entry shape) writes that member's
@@ -498,6 +499,18 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
   }, [compId, teamId, password]);
 
   const squadSorted = useMemoA(() => squadMemberOptions(squad), [squad]);
+
+  // rostersByPosition (bc-rvfx): the per-position "who's left to pick" list,
+  // precomputed once per render of the dependencies it actually reads rather
+  // than once PER POSITION inside the JSX below. Each position's own filter
+  // legitimately excludes a different slot (itself), so the per-position work
+  // is real, but re-deriving all of them on a render that touched neither the
+  // squad nor the lineup (e.g. typing into the Rename box) was pure waste.
+  const rostersByPosition = useMemoA(() => {
+    const byKey = {};
+    positions.forEach(p => { byKey[p.key] = rosterWithoutPlacedElsewhere(squadSorted, { positions: values, memberIds }, p.key); });
+    return byKey;
+  }, [positions, squadSorted, values, memberIds]);
 
   // Operation 1 (SELECT): put an existing squad member's (name, id) pair
   // into a position, both keyed together so they can never drift apart.
@@ -807,7 +820,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
                         the server refuses one member at two positions, and
                         that refusal must never be the first the operator
                         hears of it. */}
-                    {rosterWithoutPlacedElsewhere(squadSorted, { positions: values, memberIds }, p.key).map(m => (
+                    {rostersByPosition[p.key].map(m => (
                       <option key={m.id} value={m.id}>
                         {[squadSlotLabel(teamNumber, m.index), m.name].filter(Boolean).join(" ")}
                       </option>
@@ -870,26 +883,16 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {squadSorted.map(m => (
                 <div key={m.id} data-testid={`squad-member-${m.id}`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  {renamingId === m.id ? (
-                    <>
-                      <input
-                        className="input"
-                        style={{ flex: 1 }}
-                        aria-label={`Rename ${m.name}`}
-                        value={renamingName}
-                        disabled={renameBusy}
-                        onChange={(e) => setRenamingName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                          else if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
-                        }}
-                      />
-                      <button type="button" className="btn btn--sm" onClick={commitRename} disabled={renameBusy || !renamingName.trim()}>
-                        {renameBusy ? "Saving…" : "Save"}
-                      </button>
-                      <button type="button" className="btn btn--ghost btn--sm" onClick={cancelRename} disabled={renameBusy}>Cancel</button>
-                    </>
-                  ) : (
+                  {renamingId === m.id ? renameMemberFields({
+                    value: renamingName,
+                    onChange: setRenamingName,
+                    onCommit: commitRename,
+                    onCancel: cancelRename,
+                    busy: renameBusy,
+                    ariaLabel: `Rename ${m.name}`,
+                    inputStyle: { flex: 1 },
+                    disabled: renameBusy,
+                  }) : (
                     <>
                       <span style={{ fontSize: 13, color: "var(--ink-3)", minWidth: 44 }}>
                         {squadSlotLabel(teamNumber, m.index)}

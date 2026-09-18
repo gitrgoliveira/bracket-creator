@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // RENDER-SMOKE for the Registration desk (mp-25bk). The unit suite calls the
 // pure helpers directly but never MOUNTS the page, so a window.* dep that's
@@ -32,24 +33,16 @@ const STUBBED_GLOBALS = {
   },
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminRegistrationDeskPage;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_registration_desk.jsx');
   AdminRegistrationDeskPage = window.AdminRegistrationDeskPage;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 function makeTournament(overrides = {}) {
   return {

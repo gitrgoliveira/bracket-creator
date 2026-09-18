@@ -39,7 +39,7 @@ import {
   ReasonPrompt,
   CORRECTION_PRESETS,
   useAdoptFromServer,
-  sideName,
+  sideColorName,
 } from './admin_scoring_shared.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
@@ -278,6 +278,17 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     markScoringDirty(); // C1: trigger debounced autosave
   };
   const removePt = (side, idx) => {
+    // Mirror of addPt's no-op guard above, for the same reason. An UNFILLED slot
+    // is still an ENABLED button -- the grid disables only on decidedByHantei, and the
+    // slot's own aria-label announces it as "empty" -- so a stray tap used to
+    // filter nothing out, mark dirty anyway, and 300ms later send a full
+    // running-match PUT stamped NOW. That write can beat another device's
+    // correctly-entered result still sitting in its offline queue (stamped at
+    // enqueue, so OLDER) on ApplyByTimestamp, and that operator is then told
+    // {"applied": false, "reason": "superseded"} and not to re-enter -- all from
+    // a tap that changed nothing.
+    const cur = side === "a" ? aPts : bPts;
+    if (cur[idx] === undefined) return; // fast no-op path: don't mark dirty / autosave
     if (side === "a") setAPts((p) => p.filter((_, i) => i !== idx));
     else setBPts((p) => p.filter((_, i) => i !== idx));
     markScoringDirty(); // C1
@@ -526,8 +537,15 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // sideSlotOrder: the same visual mirror the read-only scoreboard and the
     // team editor apply, so DOM order is visual order and no CSS mirror is
     // needed here any more (result_slot.jsx owns the rule).
-    return sideSlotOrder(s.color).map((i) => {
+    return sideSlotOrder(s.color).map((i, ordinal) => {
       const isHt = htSlot === i;
+      // The spoken ordinal counts in READING order (ordinal), not by the
+      // array index (i). Those differ on Aka, whose slots are mirrored:
+      // labelling by index made Aka announce "slot 2" then "slot 1" while
+      // Shiro announced "slot 1" then "slot 2", so the two sides counted
+      // opposite ways through the same control. `i` stays the identity for
+      // key/removePt, and "slot 0 = outer" remains the convention in code
+      // comments and tests -- this is the user-facing number only.
       return (
         <button
           key={i}
@@ -535,7 +553,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
           onClick={() => removePt(s.key, i)}
           disabled={decidedByHantei}
           title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
-          aria-label={`${sideName(s.color)} slot ${i + 1}: ${isHt ? "Ht" : (s.pts[i] ? `remove ${s.pts[i]}` : "empty")}`}
+          aria-label={`${sideColorName(s.color)} slot ${ordinal + 1}: ${isHt ? "Ht" : (s.pts[i] ? `remove ${s.pts[i]}` : "empty")}`}
         >
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>
@@ -806,7 +824,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       {/* Explicit SHIRO/AKA pill, matching the Engi editor's
                           side badge so both editors label the side the same way
                           (impeccable re-critique symmetry). */}
-                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideName(s.color)}</div>
+                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideColorName(s.color)}</div>
                       {/* Competitor number chip: owned by numbered_name.jsx
                           (the outer-side rule lives there). */}
                       <div className="sb-name">

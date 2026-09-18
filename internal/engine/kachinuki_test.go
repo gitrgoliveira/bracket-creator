@@ -222,14 +222,6 @@ func TestRetiredPlayersFromBoutLog(t *testing.T) {
 	assert.Empty(t, retiredB.IDs, "no bout row carried a member id")
 }
 
-// TestFilterRemaining smoke-tests the order-preserving filter.
-func TestFilterRemaining(t *testing.T) {
-	roster := []string{"A-Senpo", "A-Jiho", "A-Chuken", "A-Fukusho", "A-Taisho"}
-	retired := map[string]struct{}{"A-Senpo": {}, "A-Chuken": {}}
-	got := FilterRemaining(roster, retired)
-	assert.Equal(t, []string{"A-Jiho", "A-Fukusho", "A-Taisho"}, got)
-}
-
 // TestRetiredPlayersFromBoutLog_WithMemberIDs verifies that a bout row
 // carrying member ids populates BOTH RetiredMemberSet halves: the retiring
 // fighter's id lands in IDs, their name (as recorded on that row) still
@@ -3652,6 +3644,46 @@ func TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID(t *testing.T) {
 	assert.Equal(t, 3, res.Next.Position)
 	assert.Equal(t, "id-a2", res.Next.SideAMemberID, "side A sends its next fighter, by id")
 	assert.Equal(t, "id-b2", res.Next.SideBMemberID, "the winner keeps its side and its id")
+	assert.False(t, res.MatchEnded)
+}
+
+// TestAdvanceKachinuki_WinnerStaysOnByIDWhenOpponentCarriesNoID pins the
+// bc-dnst id-tier EXTENSION specifically: domain.AttributeWinnerSide names a
+// side when the winner id equals THAT side's id even when the OTHER side
+// carries no id at all. TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID
+// above is not a distinguishing test for this: its fixture stamps a member id
+// on BOTH SideA and SideB (id-aoki and id-b2), so the pre-bc-dnst id tier --
+// which required a.WinnerID, a.SideAID AND a.SideBID all non-empty before
+// attributing by id at all -- would have matched WinnerID against SideBID and
+// produced the identical MatchSideB result. That older, stricter code is
+// exactly as green on that fixture as the current one.
+//
+// Here SideB carries NO member id (a typed substitute fielded without a
+// squad pick), so the old three-ids-required tier could never engage and
+// fell through to the name comparison; Winner is deliberately the TEAM name
+// ("Minami Budokan"), matching neither fighter's name, so that fallback
+// answered MatchSideNone and the advance produced no next pairing at all.
+// Only the current one-side-suffices rule attributes this bout.
+func TestAdvanceKachinuki_WinnerStaysOnByIDWhenOpponentCarriesNoID(t *testing.T) {
+	bout := state.SubMatchResult{
+		Position:       2,
+		SideA:          "Aoki",
+		SideAMemberID:  "id-aoki",
+		SideB:          "Substitute",
+		SideBMemberID:  "", // the opponent carries NO id
+		Winner:         "Minami Budokan",
+		WinnerMemberID: "id-aoki",
+		Decision:       "fought",
+	}
+	res := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: bout,
+		SideA:    []kachinukiFighter{{Name: "", MemberID: "id-a2"}, {Name: "", MemberID: "id-a3"}},
+		SideB:    []kachinukiFighter{{Name: "", MemberID: "id-b3"}},
+	})
+	require.NotNil(t, res.Next, "Aoki's id alone must attribute the bout even though SideB carries no id")
+	assert.Equal(t, 3, res.Next.Position)
+	assert.Equal(t, "id-aoki", res.Next.SideAMemberID, "Aoki (side A) stays on, decided by id alone")
+	assert.Equal(t, "id-b3", res.Next.SideBMemberID, "side B sends its next fighter, by id")
 	assert.False(t, res.MatchEnded)
 }
 

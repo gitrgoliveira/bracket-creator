@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { hasClass } from './helpers/vdom.js';
+import { hasClass, collectText, findInTree } from './helpers/vdom.js';
 
 // Lineup resolver: pure utility functions
 
@@ -197,33 +197,6 @@ describe('viewer: BoutSubRow canonical layout (mp-13y)', () => {
   const realReact = global.React;
   let runtime;
   let BoutSubRow;
-
-  function collectText(node) {
-    if (node == null) return '';
-    if (typeof node === 'string' || typeof node === 'number') return String(node);
-    if (Array.isArray(node)) return node.map(collectText).join('');
-    if (node.children) return collectText(node.children);
-    if (node.props?.children) return collectText(node.props.children);
-    return '';
-  }
-
-  function findInTree(node, predicate) {
-    if (!node || typeof node !== 'object') return null;
-    if (Array.isArray(node)) {
-      for (const k of node) {
-        const found = findInTree(k, predicate);
-        if (found) return found;
-      }
-      return null;
-    }
-    if (predicate(node)) return node;
-    const kids = node.children || node.props?.children || [];
-    for (const k of [].concat(kids)) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
 
   beforeEach(async () => {
     runtime = makeReactive();

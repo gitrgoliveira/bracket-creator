@@ -4,8 +4,9 @@
 import { LineupNameInput } from './admin_scoring_shared.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
 import { squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere } from './lineup_resolver.jsx';
+import { renameMemberFields } from './lineup_rename.jsx';
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 
 // pickCopySource: pure helper that selects the most recent saved lineup
 // among this team's *earlier* matches ("Copy from previous match").
@@ -190,17 +191,31 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
   const teamNumber = team?.number || team?.Number || "";
   // Built by the shared owner (lineup_resolver.jsx), the same list the score
   // sheet's per-row picker shows: every squad slot by number, then the legacy
-  // names not already on the squad.
-  const suggestions = squadRosterEntries({ teamNumber, squad, legacyNames: legacyRoster, lineup: { positions: values } });
-  const squadEntries = suggestions.filter(e => typeof e !== "string");
+  // names not already on the squad. Memoised (bc-rvfx): every keystroke in
+  // the Rename box re-renders this whole component (renamingName is local
+  // state), which used to re-derive this list -- and the per-position roster
+  // below -- on every one of those renders even though neither the squad nor
+  // the lineup positions had changed.
+  const suggestions = useMemoA(
+    () => squadRosterEntries({ teamNumber, squad, legacyNames: legacyRoster, lineup: { positions: values } }),
+    [teamNumber, squad, legacyRoster, values]
+  );
+  const squadEntries = useMemoA(() => suggestions.filter(e => typeof e !== "string"), [suggestions]);
   const pickedLabelFor = (posKey) => {
     const id = memberIds[posKey];
     return id ? (squadEntries.find(e => e.id === id)?.label || "") : "";
   };
   // A fixed-order lineup fields each fighter once (shared rule, see
   // rosterWithoutPlacedElsewhere): this panel's lineup-so-far is the local
-  // `values` + `memberIds` state, keyed like a lineup's own maps.
-  const rosterForPosition = (posKey) => rosterWithoutPlacedElsewhere(suggestions, { positions: values, memberIds }, posKey);
+  // `values` + `memberIds` state, keyed like a lineup's own maps. Precomputed
+  // for every position at once, rather than once per call inside the JSX map
+  // below, for the same reason `suggestions` above is memoised.
+  const rostersByPosition = useMemoA(() => {
+    const byKey = {};
+    positions.forEach(p => { byKey[p.key] = rosterWithoutPlacedElsewhere(suggestions, { positions: values, memberIds }, p.key); });
+    return byKey;
+  }, [positions, suggestions, values, memberIds]);
+  const rosterForPosition = (posKey) => rostersByPosition[posKey];
   // The member a position holds, when it is a squad member with a name: the
   // only case Rename applies to (a blank slot is named by typing into it).
   const namedMemberAt = (posKey) => {
@@ -420,7 +435,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const pickedId = memberIds[p.key];
       // A picked squad entry is a real placement even when its member is
       // still unnamed (bc-dnst): keep the position so the id survives,
-      // exactly like buildInlineLineupWrite (admin_scoring_team.jsx). The
+      // exactly like buildInlineLineupWrite (lineup_resolver.jsx). The
       // id is KNOWN (no resolver) while the box still reads the picked
       // member's own name, or nothing; a DIFFERENT name typed over the pick
       // goes through the resolver with this id as the position's current
@@ -541,33 +556,19 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
                   aria-label={`Rename ${p.label} player`}>Rename</button>
               ) : null}
             </span>
-            {renamingKey === p.key ? (
-              /* Input on top, Save and Cancel below: the editor adds height,
-                 never width, so the two-column modal keeps its columns (an
-                 input keeps its intrinsic width as flex basis, and beside
-                 two buttons it pushed the other side out and brought in a
-                 scrollbar). */
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 }}>
-                <input
-                  className="input"
-                  style={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}
-                  value={renamingName}
-                  autoFocus
-                  aria-label={`Rename ${p.label} player`}
-                  onChange={(e) => setRenamingName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
-                    if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
-                  }}
-                />
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button type="button" className="btn btn--sm" onClick={commitRename} disabled={renameBusy || !renamingName.trim()}>
-                    {renameBusy ? "Saving…" : "Save"}
-                  </button>
-                  <button type="button" className="btn btn--ghost btn--sm" onClick={cancelRename} disabled={renameBusy}>Cancel</button>
-                </div>
-              </div>
-            ) : (
+            {renamingKey === p.key ? renameMemberFields({
+              // stacked: this row is a fixed two-column layout that must not
+              // grow WIDTH (see lineup_rename.jsx for the full rationale).
+              value: renamingName,
+              onChange: setRenamingName,
+              onCommit: commitRename,
+              onCancel: cancelRename,
+              busy: renameBusy,
+              ariaLabel: `Rename ${p.label} player`,
+              inputStyle: { width: "100%", minWidth: 0, boxSizing: "border-box" },
+              autoFocus: true,
+              stacked: true,
+            }) : (
             <LineupNameInput
               value={values[p.key] || ""}
               roster={rosterForPosition(p.key)}

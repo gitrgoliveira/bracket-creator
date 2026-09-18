@@ -6709,6 +6709,19 @@ button.vsched-item:not([data-clickable]) {
 .msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
+/* A bout row's name cell carries a member label on the OUTER side, so the
+   cell holds TWO inline children. Ellipsis truncates the END of the run,
+   which on Aka is the label: a long name clipped Aka's label away while
+   Shiro's leading one always survived. Same mechanism the competitor-number
+   clip fix addressed (bc-dnst). Flex makes the NAME the only shrinkable
+   child, so the label survives on both sides and the name ellipsises
+   instead. Scoped to --labelled so the single-child name cells elsewhere
+   (and the --stacked name-over-dojo variant) keep the plain block flow. */
+.msb-name--labelled { display: flex; align-items: center; }
+.msb-name--labelled.msb-name--aka { justify-content: flex-end; }
+.msb-name--labelled .msb-name__text {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msb-name--labelled .msb-member-label { flex-shrink: 0; }
 /* The decided winner's name. .msb-slots--win marks only an ippon-LESS result
    (hantei, or a default win), so without this an ordinary 2-0 or 1-0 win is
    emphasised nowhere. Set by IndividualScore from the same id-first winner key
@@ -7453,9 +7466,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    kachinuki team matches (regardless of size, since kachinuki renders the
    current bout only). Fixed-format team matches with teamSize > 5 keep the
    roomy legacy layout but get the `.team-bouts-scroll` rule below for
-   independent bout-list scrolling. The engi (kata) editor body is NOT
-   compact on either host; it has its own density and its own coarse-pointer
-   block (`.engi-counter__btn`).
+   independent bout-list scrolling. The engi (kata) editor body is compact on
+   BOTH hosts (operator ruling 2026-09-18): this text used to say engi was
+   compact on neither, while the inline panel carried the class and the overlay
+   did not, so the same editor rendered at two densities and the comment
+   described neither. Rendered side by side on a live match the two were near
+   indistinguishable, because these rules only change PADDING on the engi body
+   -- the pair cards, the five flag circles and the `.engi-counter__btn`
+   controls below are untouched, so engi keeps its own coarse-pointer sizing
+   either way.
 
    All compact rules are layered after the duplicate
    .editor-modal--team / .team-sub-match / .team-summary blocks at
@@ -7890,7 +7909,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* Same measurement, vertical half: a box that would need the scroll body to
    grow (and so bring in a scrollbar, re-wrap the content and slide the term
-   out from under the pointer, which flickers) opens upwards instead. */
+   out from under the pointer, which flickers) opens upwards INSTEAD, but
+   only when it also fits above. glossary.jsx sets .tw-term--up on both
+   conditions together; a box too tall for its container fits in neither
+   direction and keeps the downward default. */
 .tw-term--up .tw-tooltip {
   top: auto;
   bottom: 100%;

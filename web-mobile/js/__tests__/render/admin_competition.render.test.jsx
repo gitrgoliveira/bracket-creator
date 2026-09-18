@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 // Pure helper (no fetch, no DOM, no globals), imported directly so the
 // dataIssues-on-detail render test below exercises the REAL normalisation
 // boundary rather than hand-setting the field on the fixture.
@@ -75,24 +76,16 @@ const STUBBED_GLOBALS = {
   },
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminCompetition;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_competition.jsx');
   AdminCompetition = window.AdminCompetition;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 function makeCompetition(overrides = {}) {
   return {

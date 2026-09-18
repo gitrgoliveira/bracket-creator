@@ -47,10 +47,16 @@ func TeamResultFrom(subResults []SubMatchResult, sideAName, sideBName string) *T
 	for _, sub := range subResults {
 		if sub.Position <= DaihyosenSubPosition {
 			// Skip the daihyosen placeholder (DaihyosenSubPosition, -1) and,
-			// defensively, any other negative position: real bouts have a
-			// non-negative Position (fixed-format 0-based, kachinuki 1-based),
-			// so a Position < -1 is malformed input and must not count into
-			// IV/PW.
+			// defensively, any other negative position: real bouts are
+			// numbered from 1 in both formats (see DaihyosenSubPosition), so a
+			// Position < -1 is malformed input and must not count into IV/PW.
+			//
+			// Position 0 is unproducible too, and this tally and the Excel
+			// export answer for it differently ON PURPOSE: the export's
+			// writeTeamSubMatchScores drops it as a BOUNDS check, because it
+			// addresses a row as subStartExcelRow+(Position-1) and a 0 would
+			// write above the grid. One is a count, the other is a cell
+			// address; there is nothing to reconcile.
 			continue
 		}
 		hasBout = true

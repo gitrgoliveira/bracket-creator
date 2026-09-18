@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCourtSlots, LOBBY_ROWS, LobbyMatchCell, LOBBY_COLORS } from '../display.jsx';
 import { IndividualScore } from '../match_scoreboard.jsx';
+import { findAll } from './helpers/vdom.js';
 
 // Unit tests for buildCourtSlots: the slot-building logic that drives the
 // cross-court table in LobbyDisplay (mp-1nf).
@@ -142,15 +143,6 @@ describe('buildCourtSlots', () => {
     });
 });
 
-// ── Depth-first vnode walker (same pattern as display_completed_state.test.jsx) ──
-function findAll(node, pred, out = []) {
-    if (!node || typeof node !== 'object') return out;
-    if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, out)); return out; }
-    if (pred(node)) out.push(node);
-    const kids = node.children || node.props?.children || [];
-    [].concat(kids).forEach(k => findAll(k, pred, out));
-    return out;
-}
 function treeStr(node) { return JSON.stringify(node); }
 
 // Minimal slot factories for LobbyMatchCell rendering tests.

@@ -214,7 +214,10 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 	// check needs is already in hand here (bc-dnst).
 	if len(pools) == 1 && numCourts > 1 {
 		if err := ValidateCourtCount(len(players), numCourts); err != nil {
-			return err
+			// Same prefix as this function's three other refusals: the
+			// operator sees these side by side and a bare sentence here read
+			// as coming from somewhere else entirely.
+			return wrapValidationErrorf(err, "competition %s cannot start: %s", comp.ID, err.Error())
 		}
 	}
 

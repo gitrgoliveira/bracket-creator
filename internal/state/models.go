@@ -1102,9 +1102,16 @@ const DecisionDraw = "hikiwake"
 
 // DaihyosenSubPosition is the sentinel Position value marking a
 // SubMatchResult as the daihyosen (representative bout) rather than a
-// numbered roster bout (real bouts have a non-negative Position:
-// fixed-format is 0-based, kachinuki 1-based). It is negative so it never
-// collides with a real bout index. Use this constant instead of a bare -1.
+// numbered roster bout (real bouts are numbered from 1 in BOTH formats: the
+// team editor sends idx+1, quick-score counts up from 1, and kachinuki
+// appends LastBout.Position+1). It is negative so it never collides with a
+// real bout index. Use this constant instead of a bare -1.
+//
+// An earlier revision of this comment claimed fixed-format was 0-based. It
+// is not, and no writer has ever emitted a 0: the Excel export places a bout
+// at subStartExcelRow+(Position-1), so a real 0 would land one row ABOVE the
+// sub-match grid and the first bout of every fixed-order team match would be
+// missing from the sheet.
 const DaihyosenSubPosition = -1
 
 // IsDraw reports whether a match decision string represents a draw.

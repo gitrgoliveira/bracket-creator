@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // bc-draw R9 UAT gap 2: the "Add competition" form had NO shiaijo-count guard
 // and swallowed server rejections.
@@ -43,26 +44,18 @@ const STUBBED_GLOBALS = {
   },
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminCreateCompetition;
 let AdminEditTournament;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_setup.jsx');
   AdminCreateCompetition = window.AdminCreateCompetition;
   AdminEditTournament = window.AdminEditTournament;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 function makeTournament(overrides = {}) {
   return {

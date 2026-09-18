@@ -15,6 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { collectText } from './helpers/vdom.js';
 
 const realReact = global.React;
 
@@ -37,15 +38,6 @@ function findHosts(tree, typeName) {
   const out = [];
   walk(tree, n => { if (n && n.type === typeName) out.push(n); });
   return out;
-}
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
 }
 
 const mainSaveButton = (tree) =>

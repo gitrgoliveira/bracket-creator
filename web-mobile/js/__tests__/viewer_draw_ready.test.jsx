@@ -1,24 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-
-// Walks a vnode tree and concatenates all string/number leaves, including
-// the literal children of child-component vnodes (which the reactive shim
-// does not execute). Mirrors collectText in viewer.test.jsx.
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (typeof node.type === 'function') {
-    try {
-      const p = { ...node.props };
-      if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
-      return collectText(node.type(p));
-    } catch { /* fall through */ }
-  }
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { collectText, expandAll } from './helpers/vdom.js';
 
 // Collect every vnode whose `type` is the named child component reference.
 // The reactive shim does not execute child components, but it preserves the
@@ -136,7 +118,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     // Tab buttons are plain <button> nodes whose text is the tab label.
     const tabButtons = [];
     findAllByType(tree, 'button', tabButtons);
-    const labels = tabButtons.map(b => collectText(b));
+    const labels = tabButtons.map(b => collectText(b, expandAll));
     expect(labels.some(l => l.includes('Pools'))).toBe(true);
     expect(labels.some(l => l.includes('Bracket'))).toBe(true);
     expect(labels.some(l => l.includes('Overview'))).toBe(true);
@@ -156,7 +138,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     });
     const tabButtons = [];
     findAllByType(tree, 'button', tabButtons);
-    const labels = tabButtons.map(b => collectText(b));
+    const labels = tabButtons.map(b => collectText(b, expandAll));
     expect(labels.some(l => l.includes('Pools'))).toBe(false);
     expect(labels.some(l => l.includes('Bracket'))).toBe(false);
   });
@@ -175,7 +157,7 @@ describe('ViewerCompetition draw-ready exposure (mp-rrd)', () => {
     });
     const tabButtons = [];
     findAllByType(tree, 'button', tabButtons);
-    const labels = tabButtons.map(b => collectText(b));
+    const labels = tabButtons.map(b => collectText(b, expandAll));
     expect(labels.some(l => l.includes('Pools'))).toBe(false);
     expect(labels.some(l => l.includes('Bracket'))).toBe(false);
     // Swiss surfaces its own Standings tab instead.
@@ -231,7 +213,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
 
   it('draw-ready shows "Draw is ready" and points to the tabs, not "Not started yet"', () => {
     const tree = runtime.mount(ViewerOverview, { c: { status: 'draw-ready', startTime: '09:00' }, ...baseProps });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Draw is ready');
     expect(text).toContain('Pools and Bracket');
     expect(text).not.toContain('Not started yet');
@@ -239,7 +221,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
 
   it('setup still shows "Not started yet"', () => {
     const tree = runtime.mount(ViewerOverview, { c: { status: 'setup', startTime: '09:00' }, ...baseProps });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Not started yet');
     expect(text).not.toContain('Draw is ready');
   });
@@ -248,7 +230,7 @@ describe('ViewerOverview pre-start messaging (mp-rrd)', () => {
     // Swiss renders a Standings tab instead of Pools/Bracket, so the
     // "browse the Pools and Bracket tabs" wording would be misleading.
     const tree = runtime.mount(ViewerOverview, { c: { status: 'draw-ready', format: 'swiss', startTime: '09:00' }, ...baseProps });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Draw is ready');
     expect(text).toContain('Standings');
     expect(text).not.toContain('Pools and Bracket');

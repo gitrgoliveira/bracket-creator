@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // mp-yuy8: the print booklet (POST /api/print/:type) now SKIPS competitions
 // it cannot export (Swiss, or a stored bracket that no longer matches the
@@ -22,24 +23,16 @@ const STUBBED_GLOBALS = {
   useEscapeToClose: () => {},
 };
 
-const originals = {};
+let restoreGlobals;
 let ExportPdfModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_shell.jsx');
   ExportPdfModal = window.ExportPdfModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 let savedURL;
 beforeEach(() => {

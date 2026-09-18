@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText } from './helpers/vdom.js';
 
 // Tests for the "Share registration link" feature added in mp-a1jz:
 // CompCard share-button visibility (canShare predicate); asserts which
@@ -14,33 +16,15 @@ const STUBBED_GLOBALS = {
   StatusBadge: function StatusBadge() { return null; },
   useEscapeToClose: vi.fn(),
 };
-const originalGlobals = {};
+let restoreGlobals;
 
 beforeAll(async () => {
-  for (const [key, stub] of Object.entries(STUBBED_GLOBALS)) {
-    originalGlobals[key] = { had: key in window, value: window[key] };
-    window[key] = stub;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../admin_shell.jsx');
   CompCard = window.CompCard;
 });
 
-afterAll(() => {
-  for (const [key, orig] of Object.entries(originalGlobals)) {
-    if (orig.had) window[key] = orig.value;
-    else delete window[key];
-  }
-});
-
-// Recursively gather string/number leaves from the React-stub vnode tree.
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
-}
+afterAll(() => restoreGlobals());
 
 function hasShareButton(vnode) {
   const text = collectText(vnode);

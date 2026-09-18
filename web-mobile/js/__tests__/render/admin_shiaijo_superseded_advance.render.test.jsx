@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // bc-lww1 regression. The shiaijo console optimistically advances its LOCAL
 // bracket when a knockout bout is scored to completion, so a court running
@@ -51,24 +52,16 @@ const STUBBED_GLOBALS = {
   // window and the component under test always gets the real implementations.
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminShiaijoPage;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_shiaijo.jsx');
   AdminShiaijoPage = window.AdminShiaijoPage;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // A two-round knockout: the running semifinal r1-m0 feeds the final r2-m0,
 // whose sideA is still a "Winner of" placeholder. Advancing r1-m0 writes the

@@ -17,10 +17,11 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, boutSideView, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+import { NumberedName, numberFollowsName } from './numbered_name.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
 // row's fighter name (BoutSubRow below), the public twin of
@@ -54,9 +55,12 @@ export function boutHansokuMark(foulCount) {
 // squadA/squadB (bc-pnum: extend the squad member label to the public
 // surfaces) are resolved from the SAME source the players list already
 // comes from: the passed `competition.squads` when present (TvDisplay /
-// StreamingOverlay carry the aggregate item, which now carries it), else
-// the `fetchCompetitionDetails` fallback fetch's own top-level `squads`
-// (the viewer card, which never gets a `competition` prop at all). Both are
+// StreamingOverlay carry the aggregate item, which normalizeViewerCompItem
+// maps the wire key onto), else the `fetchCompetitionDetails` fallback
+// fetch's own top-level `teamMembers` -- NOT `squads`, because
+// normalizeCompetitionDetail SPREADS the payload instead of renaming it, so
+// the detail shape keeps the wire name (the viewer card, which never gets a
+// `competition` prop at all). Both are
 // the identical {teamParticipantId: [{id,index,name}]} shape the public
 // viewer payload carries only for a team competition, so an individual
 // competition (or a payload predating this field) simply yields {} and
@@ -129,8 +133,8 @@ export function useTeamLineups(match, competition, roundIndex) {
         : [];
       // squads (bc-pnum): prefer the passed competition's own squads map
       // (present only for a team competition); only fall through to the
-      // detail fetch's squads when the caller passed no competition at all
-      // (the viewer card) or it carried no squads of its own.
+      // detail fetch's teamMembers when the caller passed no competition at
+      // all (the viewer card) or it carried no squads of its own.
       let squadsMap = (competition && competition.squads) || null;
       if (!players.length) {
         try {
@@ -420,23 +424,21 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // a caller ever passes it).
   const lineupHidden = kachinukiHidesLineupPosition(kachinuki, isDH, index);
   const lineupNameFor = (lu) => lineupHidden ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
-  const resolveSide = (subSide, lu) =>
-    resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu), teamNameA: matchSideA, teamNameB: matchSideB }) || boutNum;
-  const shiroName = resolveSide(sub && sub.sideB, lineupB);
-  const akaName = resolveSide(sub && sub.sideA, lineupA);
-  // shiroDisplayName/akaDisplayName: the DISPLAYED name only (bc-dnst). A
-  // rename reaches a bout already fought: the stored sub.sideA/sub.sideB
-  // text stays frozen (shiroName/akaName above, unchanged, are what the
-  // label composition below and every other consumer of this row keep
-  // using), but the rendered text swaps in the squad member's CURRENT name
-  // when its id resolves (resolveBoutSideDisplayName, lineup_resolver.jsx).
-  // The lookup runs even when resolveSide fell through to the bare bout
-  // number: a fighter fielded by squad number and named LATER has an empty
-  // stored name and a resolving id, and must show the name once it has
-  // one; when the id resolves to nothing the rule hands the bout number
-  // back untouched.
-  const shiroDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: (sub && sub.sideBMemberId) || "", storedName: shiroName });
-  const akaDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: (sub && sub.sideAMemberId) || "", storedName: akaName });
+  // sideView: resolve-then-display for one side (boutSideView,
+  // lineup_resolver.jsx), the shared shape this row and the OBS overlay
+  // both need. `name` (the frozen base identity) is what the label
+  // composition below and every other consumer of this row keep using;
+  // `displayName` is the DISPLAYED name only (bc-dnst) -- a rename reaches
+  // a bout already fought via the squad member's CURRENT name, resolved by
+  // id, while sub.sideA/sub.sideB on disk stay frozen. The lookup runs even
+  // when the base name fell through to the bare bout number: a fighter
+  // fielded by squad number and named LATER has an empty stored name and a
+  // resolving id, and must show the name once it has one; when the id
+  // resolves to nothing the rule hands the bout number back untouched.
+  const sideView = (subSide, lu, squad, memberId) =>
+    boutSideView({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu), teamNameA: matchSideA, teamNameB: matchSideB, fallback: boutNum, squad, memberId });
+  const { name: shiroName, displayName: shiroDisplayName } = sideView(sub && sub.sideB, lineupB, squadB, (sub && sub.sideBMemberId) || "");
+  const { name: akaName, displayName: akaDisplayName } = sideView(sub && sub.sideA, lineupA, squadA, (sub && sub.sideAMemberId) || "");
   // The squad member label rides beside the SAME name resolved above, via the
   // ONE shared composer (resolveBoutSideSquadLabel, lineup_resolver.jsx): the
   // member id comes from the SAME kachinuki/fixed-format tier the name used
@@ -464,17 +466,21 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     + (isDH ? " msb-row--dh" : "");
   return (
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
-      <span className="msb-name">
+      <span className="msb-name msb-name--labelled">
         {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
-        <span data-testid="sub-shiro-name">{shiroDisplayName}</span>
+        <span className="msb-name__text" data-testid="sub-shiro-name">{shiroDisplayName}</span>
       </span>
       {centreMarks(sub, matchSideA, matchSideB)}
       {/* The member label sits on the OUTER side of the name like the
           competitor number (operator ruling 2026-09-14, bc-dnst): Shiro's
           before the name, Aka's after it, so the two labels frame the
-          pairing from the outside as the score sheet's bout rows do. */}
-      <span className="msb-name msb-name--aka">
-        <span data-testid="sub-aka-name">{akaDisplayName}</span>
+          pairing from the outside as the score sheet's bout rows do.
+          --labelled makes the cell a flex row so the NAME is the only
+          shrinkable child: .msb-name's own ellipsis truncates the END of the
+          cell's text run, which on Aka is the LABEL, so a long name used to
+          eat Aka's label while Shiro's (leading) survived (bc-rvfx). */}
+      <span className="msb-name msb-name--aka msb-name--labelled">
+        <span className="msb-name__text" data-testid="sub-aka-name">{akaDisplayName}</span>
         {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE_AFTER} data-testid="sub-member-label-a">{akaLabel}</span>}
       </span>
     </div>
@@ -518,9 +524,13 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 // IndividualScore: §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
 // withNumber: the plain-STRING twin of NumberedName (numbered_name.jsx), for
-// surfaces that build a string rather than JSX: the TV board, the streaming
-// (OBS) overlay, and the viewer match card, called directly here and via
-// `sideLabel` in display_helpers.jsx. Where the two sides sit LEFT/RIGHT it
+// surfaces that build a string rather than JSX: the viewer match card, and
+// the NON-CLIPPING rows of the TV board and the streaming (OBS) overlay,
+// called directly here and via `sideLabel` in display_helpers.jsx. Those two
+// surfaces are MIXED rather than string-only: any cell of theirs that
+// ellipsises would truncate Aka's trailing number away, so it takes
+// NumberedName's clip mode off sideLabelParts instead (bc-rvfx). Where the
+// two sides sit LEFT/RIGHT it
 // renders the outer-side rule (operator ruling 2026-09-14, bc-dnst): Shiro's
 // number sits BEFORE the name, Aka's AFTER it, so `color` ("shiro" | "aka")
 // is required there wherever a number can appear. A caller whose sides STACK
@@ -551,7 +561,10 @@ export function numberedParts(side, withZekkenName) {
 export function withNumber(side, withZekkenName, color) {
   const { name, number } = numberedParts(side, withZekkenName);
   if (!number) return name;
-  return color === "aka" ? `${name} ${number}` : `${number} ${name}`;
+  // numberFollowsName, not a second `=== "aka"` here: the placement rule has
+  // ONE owner (numbered_name.jsx) and this is its string form, so the two
+  // cannot drift about which side the number trails on.
+  return numberFollowsName(color) ? `${name} ${number}` : `${number} ${name}`;
 }
 
 // shiroName / akaName: optional resolved display names, mirroring the props
@@ -722,7 +735,13 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
     <div className={"msb msb-team" + (tv ? " msb--tv" : "")} data-testid="team-scoreboard">
       {/* §277 summary row: team name + IV then PW per side */}
       <div className="msb-row msb-row--summary" data-testid="team-summary">
-        <span className="msb-name" data-testid="summary-shiro-name">{shiroName || ""}</span>
+        {/* The summary cell ellipsises, so it takes the chip as its own flex
+            child rather than a number baked into the string: at 402px the cell
+            is 85px wide and "Seishinkan Ember T7" (126px) lost its T7 outright,
+            while Shiro's leading number survived (measured, bc-rvfx). */}
+        <span className="msb-name msb-name--labelled" data-testid="summary-shiro-name">
+          <NumberedName side="shiro" clip name={shiroName || ""} number={numberB || ""} />
+        </span>
         <span className="msb-marks">
           <span className="msb-slots">
             <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
@@ -734,7 +753,9 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
             <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>
           </span>
         </span>
-        <span className="msb-name msb-name--aka" data-testid="summary-aka-name">{akaName || ""}</span>
+        <span className="msb-name msb-name--aka msb-name--labelled" data-testid="summary-aka-name">
+          <NumberedName side="aka" clip name={akaName || ""} number={numberA || ""} />
+        </span>
       </div>
 
       {/* One row per lineup position (teamSize), padding past the recorded

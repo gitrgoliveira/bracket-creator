@@ -7,6 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { collectText } from './helpers/vdom.js';
 
 const realReact = global.React;
 
@@ -31,14 +32,6 @@ function findComponents(tree, name) {
   const out = [];
   walk(tree, n => { if (n && typeof n.type === 'function' && n.type.name === name) out.push(n); });
   return out;
-}
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
 }
 const saveButton = (tree) =>
   findHosts(tree, 'button').find(b => /Save lineup/.test(collectText(b)));

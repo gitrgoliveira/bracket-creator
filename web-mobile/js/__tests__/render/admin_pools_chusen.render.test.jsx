@@ -62,33 +62,25 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
-const originals = {};
+let restoreGlobals;
 let AdminPools;
 
 beforeAll(async () => {
-  const STUBBED_AT_LOAD = {
+  restoreGlobals = installWindowStubs({
     // Captured at admin_pools.jsx module-eval time (`const X = window.X`
     // outside the component). EmptyState is published by ui.jsx, already
     // loaded by vitest.setup.render.js; ScoreEditorModal is not exercised by
     // these tests (the score modal is never opened) so a stub is enough to
     // avoid an undefined capture leaking into an unrelated assertion.
     ScoreEditorModal: () => null,
-  };
-  for (const [k, v] of Object.entries(STUBBED_AT_LOAD)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  });
   await import('../../admin_pools.jsx');
   AdminPools = window.AdminPools;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   // Rendered before the banner; a stub is enough since these tests only

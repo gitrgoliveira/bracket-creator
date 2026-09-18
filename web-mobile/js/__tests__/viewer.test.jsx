@@ -2,43 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
-
-// Walks a vnode tree and concatenates all string/number leaves. Child
-// component vnodes (e.g. TermV) are NOT executed by the reactive shim,
-// but their literal children (the term text) still live in props.children,
-// so this captures everything MatchDetailCard renders itself. Mirrors the
-// collectText helper in reset.test.jsx.
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
-
-// Depth-first search for the first vnode matching predicate. Mirrors the
-// helper in reset.test.jsx; used to assert props (e.g. style) on a rendered
-// element, which collectText (text-only) can't see.
-function findInTree(node, predicate) {
-  if (!node || typeof node !== 'object') return null;
-  // Arrays appear wherever the component renders a .map() (e.g. the sub-rows),
-  // so recurse into them rather than treating the array itself as a vnode.
-  if (Array.isArray(node)) {
-    for (const k of node) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (predicate(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) {
-    const found = findInTree(k, predicate);
-    if (found) return found;
-  }
-  return null;
-}
+import { collectText, findInTree } from './helpers/vdom.js';
+const findVnode = findInTree;
 
 describe('Viewer Utils', () => {
   describe('formatDate', () => {
@@ -555,14 +520,6 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // not expand, so we assert delegation (type + props). The scoreboard's own
   // rendering (DH banner, Hantei, ippon slots, IV/PW summary) is covered by
   // match_scoreboard.test.jsx.
-  function findVnode(node, pred) {
-    if (!node || typeof node !== 'object') return null;
-    if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
-    if (pred(node)) return node;
-    const kids = node.children || node.props?.children || [];
-    for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
-    return null;
-  }
 
   it('delegates a team match to TeamScoreboard (showDH when a DH sub exists)', () => {
     const tree = runtime.mount(MatchDetailCard, {

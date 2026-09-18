@@ -141,9 +141,10 @@ type LineupSlot struct {
 }
 
 // canonicalPositionOrder returns the position traversal order OrderedMembers
-// (and, via it, OrderedRoster) walks: the five FIK names for a 5-person
-// team, else 1..teamSize numerically. Extracted so the two consumers of
-// this exact order cannot drift the way an inline copy in each would risk.
+// walks: the five FIK names for a 5-person team, else 1..teamSize
+// numerically. It has a single consumer today, but stays its own named step
+// rather than being inlined into OrderedMembers, so the order itself stays
+// separately readable and testable.
 func canonicalPositionOrder(teamSize int) []Position {
 	if teamSize == 5 {
 		return []Position{PosSenpo, PosJiho, PosChuken, PosFukusho, PosTaisho}
@@ -174,27 +175,6 @@ func (t TeamLineup) OrderedMembers(teamSize int) []LineupSlot {
 			continue
 		}
 		out = append(out, LineupSlot{Position: pos, Name: name, MemberID: memberID})
-	}
-	return out
-}
-
-// OrderedRoster returns the player names for this lineup in position order,
-// skipping vacancies (a slot placed by id but not yet named contributes its
-// empty name, since it IS occupied) -- a thin projection of OrderedMembers
-// (bc-tmid pass 2: see that method's doc for why this must stay a
-// projection rather than becoming a second, independent traversal).
-//
-// The returned slice is always non-nil. Its length equals the number of
-// OCCUPIED positions, which since bc-dnst means carrying a name OR a member
-// id: a position picked by number and not yet named is a real placement, and
-// the name it projects is the empty string. Callers (e.g. kachinuki roster
-// resolution) use
-// this to get the full ordered queue before filtering out retired players.
-func (t TeamLineup) OrderedRoster(teamSize int) []string {
-	members := t.OrderedMembers(teamSize)
-	out := make([]string, len(members))
-	for i, m := range members {
-		out[i] = m.Name
 	}
 	return out
 }

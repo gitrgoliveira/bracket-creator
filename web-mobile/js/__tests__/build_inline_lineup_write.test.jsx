@@ -1,13 +1,13 @@
 // bc-pnum gap closure: buildInlineLineupWrite / mergeLineupIdsForPosition
-// (admin_scoring_team.jsx) compute exactly what the in-modal inline lineup
-// picker (submitInlineLineup, inside TeamScoreEditorModal) sends to
-// putMatchLineup. Pinned directly here rather than through the editor:
-// TeamScoreEditorModal cannot be mounted in vitest (see
-// tie_button_no_term.test.jsx's header) because the hook stubs only
-// support initial renders and this flow needs a full interaction.
+// (lineup_resolver.jsx) compute exactly what the in-modal inline lineup
+// picker (submitInlineLineup, inside TeamScoreEditorModal in
+// admin_scoring_team.jsx) sends to putMatchLineup. Pinned directly here
+// rather than through the editor: TeamScoreEditorModal cannot be mounted in
+// vitest (see tie_button_no_term.test.jsx's header) because the hook stubs
+// only support initial renders and this flow needs a full interaction.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildInlineLineupWrite, mergeLineupIdsForPosition } from '../admin_scoring_team.jsx';
+import { buildInlineLineupWrite, mergeLineupIdsForPosition } from '../lineup_resolver.jsx';
 
 describe('mergeLineupIdsForPosition', () => {
   it('carries existing ids forward and sets the resolved id for the changed position', () => {

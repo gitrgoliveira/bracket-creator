@@ -144,6 +144,120 @@ export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
   });
 }
 
+// mergeLineupIdsForPosition composes the WHOLE memberIds map an inline
+// lineup write sends: carries `existingIds` forward untouched, then either
+// sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
+// the operator cleared the position (no name, so nothing to resolve) and
+// when a name was typed/picked but resolution/minting failed (offline venue
+// wifi). Either way a stale id must never survive under a position it no
+// longer names: kachinuki retirement keys on the member id (CLAUDE.md §
+// Team Lineups & Kachinuki), so a stale id left behind would attribute a
+// bout to whoever used to occupy that slot. Exported so this exact rule is
+// pinned without mounting TeamScoreEditorModal.
+export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
+  const updated = { ...existingIds };
+  if (resolvedId) updated[posKey] = resolvedId;
+  else delete updated[posKey];
+  return updated;
+}
+
+// buildInlineLineupWrite computes exactly what the inline lineup picker
+// (submitInlineLineup, inside TeamScoreEditorModal in admin_scoring_team.jsx)
+// sends to putMatchLineup: the WHOLE positions map (existing + the one
+// changed position) and its memberIds counterpart, merged via
+// mergeLineupIdsForPosition above. Exported (and pulled out of the
+// component) so this exact value-in/body-out contract -- including "a mint
+// failure never blocks the write" -- is pinned directly, without mounting
+// TeamScoreEditorModal, which vitest's hook stubs cannot drive through a
+// full interaction (see tie_button_no_term.test.jsx). It lives here, not in
+// the scoring module, because it IS the lineup-write authority every other
+// writer (the Up Next panel's save, the Lineups page's add path) already
+// pointed at in prose -- a resolver pointing at a scoring component module
+// for its own contract was backwards (bc-rvfx).
+//
+// member (bc-dnst) is the squad-member object LineupNameInput hands back
+// when the operator picked one of the row's numbered entries, rather than
+// typing/"+ Add"-ing a free name. When member carries an id, this WRITES
+// BY ID directly -- positions[posKey] = member.name || "" and
+// memberIds[posKey] = member.id -- and never calls the resolver: the
+// picked entry already names its own member, so resolving by name would be
+// redundant at best and wrong at worst (two blank members share the same
+// "" name). This is also why a picked member's position is kept even when
+// its name is empty: picking a blank slot is a real placement (the row
+// shows that member's number and an empty box to type the name into), not
+// a clear. A falsy `value` with NO member is the only thing that clears
+// the position, matching the pre-bc-dnst contract exactly.
+//
+// Without a member, the pre-existing name-resolution path runs: a name is
+// only resolved when `value` is truthy (a cleared position has no name to
+// look up, and mergeLineupIdsForPosition's own clear-on-falsy-id branch
+// handles it), via resolveMemberIdsForPositions (admin_lineup.jsx, reached
+// here via window.AdminLineupHelpers -- see this file's own header for why
+// this stays a window lookup rather than an ES import).
+//
+// bc-cse gap closure: also returns `failures` (the resolver's own, or []
+// when the resolver is unavailable/threw, or never invoked because member
+// already answered) so submitInlineLineup can warn the operator on a
+// successful save without ever blocking this one.
+//
+// bc-dnst duplicate guard: a member can only ever occupy ONE position at a
+// time, so once the id for `posKey` is known (picked directly, or resolved
+// from a typed name that matched an existing member), this checks the
+// lineup's OWN memberIds -- the state BEFORE this write -- for that same id
+// under a DIFFERENT position. A hit means the operator just tried to place
+// someone who is already fighting elsewhere in this same encounter; the
+// write is refused entirely (no positions/memberIds returned, nothing is
+// sent to the server) and the caller is told which position already holds
+// them via `refused`, so it can leave the box exactly as it was and tell
+// the operator rather than silently doubling the member up server-side
+// (internal/domain/team_lineup.go's ValidatePositions rejects the same
+// case, but refusing here means the operator never round-trips to the
+// server to find out).
+export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password, member) {
+  const existing = lineup?.positions || {};
+  const positions = { ...existing };
+  const pickedMemberId = member && member.id ? member.id : null;
+  if (pickedMemberId) positions[posKey] = member.name || "";
+  else if (value) positions[posKey] = value;
+  else delete positions[posKey];
+
+  let resolvedId = pickedMemberId;
+  let nextSquad = Array.isArray(squad) ? squad : [];
+  let failures = [];
+  if (!pickedMemberId && value) {
+    try {
+      const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
+      if (typeof resolver === "function") {
+        // currentIds: a name typed into a slot PICKED by number (its
+        // memberId already set on this position) renames that same member
+        // rather than falling back to the position's index default -- see
+        // resolveMemberIdsForPositions' own doc comment.
+        const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password, lineup?.memberIds);
+        nextSquad = resolved.squad;
+        resolvedId = resolved.memberIds[posKey] || null;
+        failures = resolved.failures || [];
+      }
+    } catch (_e) {
+      // On top of the helper's own per-position mint catch, because this
+      // runs on the live scoring path: an operator swapping a fighter
+      // mid-encounter must not lose the swap because identity resolution
+      // failed. The NAME is the load-bearing half of a lineup slot and the
+      // id is an enhancement over it, so the write proceeds either way;
+      // mergeLineupIdsForPosition below clears this position's id, the same
+      // as any other unresolved name, and the load-time repair fills it in
+      // later from the squad.
+    }
+  }
+
+  const otherPosKey = memberPlacedElsewhere(lineup?.memberIds, posKey, resolvedId);
+  if (otherPosKey) {
+    return { refused: { position: otherPosKey, name: value || (member && (member.name || member.label)) || "" } };
+  }
+
+  const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
+  return { positions, memberIds, squad: nextSquad, failures };
+}
+
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
 // entry exists (404 → null → round lookup). Network errors on either
@@ -389,4 +503,34 @@ export function resolveBoutSideDisplayName({ squad, memberId, storedName }) {
   const currentName = member ? String(member.name || "").trim() : "";
   if (currentName) return currentName;
   return storedName || "";
+}
+
+// boutSideView: the resolve-then-display sequence every read-only bout-row
+// surface repeats for ONE side (bc-rvfx) -- the TV/viewer scoreboard and the
+// OBS overlay both derive a side's name this way. resolveBoutSideName picks
+// the base identity (kachinuki-vs-fixed priority, the team-name trap
+// filtered out), `fallback` stands in when that resolves to nothing (a bare
+// bout number or FIK position label, exactly as every call site already
+// applied via `|| boutNum` / `|| ovlFallback`), then resolveBoutSideDisplayName
+// swaps in the squad member's CURRENT name by id -- a rename reaches a bout
+// already fought without the stored record ever being touched.
+//
+// Returns both `name` (the frozen base identity, post-fallback) and
+// `displayName`: a caller that also feeds the base name to
+// resolveBoutSideSquadLabel (as match_scoreboard.jsx does) or to the
+// display name (as streaming_overlay.jsx does -- the two surfaces disagree
+// on which, and that disagreement predates this helper) keeps reading
+// whichever field it already used.
+//
+// admin_scoring_team.jsx's bout rows do NOT go through this: their base
+// identity comes from playerNamesForBout, which layers a manual-override
+// short-circuit (a picked or typed fighter beats the lineup/server
+// priority below) ahead of resolveBoutSideName, so folding it in here would
+// either reach into that editor's local per-row override state from this
+// shared leaf, or add a bypass parameter unused by every other caller.
+// Those two sites call resolveBoutSideDisplayName directly instead.
+export function boutSideView({ isKachinuki, isDaihyosen, existingName, lineupName, teamNameA, teamNameB, fallback, squad, memberId }) {
+  const name = resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName, teamNameA, teamNameB }) || fallback;
+  const displayName = resolveBoutSideDisplayName({ squad, memberId, storedName: name });
+  return { name, displayName };
 }

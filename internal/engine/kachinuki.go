@@ -448,9 +448,12 @@ func IsMemberRetired(f kachinukiFighter, retired RetiredMemberSet, ambiguousName
 //
 // Helper for callers building AdvanceKachinukiInput.{SideA,SideB} from a
 // roster; they filter the initial roster by IsMemberRetired against the
-// returned sets to derive the remaining un-retired queue (filterRemainingFighters
-// for a lineup-resolved roster, retired.Names directly for the bout-log-only
-// heuristic, which has no member ids to offer either side of the check).
+// returned sets to derive the remaining un-retired queue. BOTH branches of
+// kachinukiRemainingRoster do that through filterRemainingFighters -- the
+// lineup-resolved one and the bout-log-only heuristic alike -- because the
+// name tier needs the whole roster as context and cannot judge one fighter
+// at a time. The heuristic branch simply supplies fighters whose MemberID
+// is empty.
 //
 // teamAName / teamBName are the parent MatchResult.SideA / SideB
 // (the team names), used to disambiguate which side won each bout.
@@ -513,12 +516,14 @@ func RetiredPlayersFromBoutLog(boutLog []state.SubMatchResult, teamAName, teamBN
 	return retiredA, retiredB
 }
 
-// filterRemainingFighters is FilterRemaining's member-aware twin: it
-// filters a slice of kachinukiFighter (name + possible member id) via
-// IsMemberRetired, preserving order. Used by the lineup-resolved branch of
-// kachinukiRemainingRoster; the bout-log-only heuristic branch has no
-// lineup to draw ids from and keeps using plain FilterRemaining over
-// retired.Names.
+// filterRemainingFighters filters a slice of kachinukiFighter (name plus a
+// possible member id) via IsMemberRetired, preserving order. It is the ONE
+// filter kachinukiRemainingRoster uses, on both branches: the
+// lineup-resolved one passes fighters carrying member ids, the bout-log-only
+// heuristic passes fighters whose MemberID is empty and lets the name tier
+// decide. Routing the heuristic through here too is deliberate and is the
+// fix for the shared-name defect its call site describes; there is no
+// name-only twin left to drift from.
 func filterRemainingFighters(roster []kachinukiFighter, retired RetiredMemberSet) []kachinukiFighter {
 	// The roster IS the context IsMemberRetired's name tier needs: whether a
 	// name belongs to one member of this team or to several is a fact about
@@ -530,23 +535,6 @@ func filterRemainingFighters(roster []kachinukiFighter, retired RetiredMemberSet
 			continue
 		}
 		out = append(out, f)
-	}
-	return out
-}
-
-// FilterRemaining returns roster entries that are NOT present in the
-// retired set, preserving original order. Helper for callers building
-// AdvanceKachinukiInput.{SideA,SideB} from a roster and a retired set
-// produced by RetiredPlayersFromBoutLog -- pass retired.Names, since this
-// is the plain NAME-only filter the bout-log-only heuristic (no lineup, no
-// member ids) has always used.
-func FilterRemaining(roster []string, retired map[string]struct{}) []string {
-	out := make([]string, 0, len(roster))
-	for _, name := range roster {
-		if _, gone := retired[name]; gone {
-			continue
-		}
-		out = append(out, name)
 	}
 	return out
 }

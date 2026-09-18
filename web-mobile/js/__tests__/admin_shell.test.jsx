@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText } from './helpers/vdom.js';
 
 // Regression: CompCard crashed the entire admin console with
 //   TypeError: Cannot read properties of null (reading 'join')
@@ -30,35 +32,15 @@ const STUBBED_GLOBALS = {
   // React stub's createElement never invokes it, so a no-op suffices.
   StatusBadge: function StatusBadge() { return null; },
 };
-const originalGlobals = {};
+let restoreGlobals;
 
 beforeAll(async () => {
-  for (const [key, stub] of Object.entries(STUBBED_GLOBALS)) {
-    originalGlobals[key] = { had: key in window, value: window[key] };
-    window[key] = stub;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../admin_shell.jsx');
   CompCard = window.CompCard;
 });
 
-afterAll(() => {
-  for (const [key, orig] of Object.entries(originalGlobals)) {
-    if (orig.had) window[key] = orig.value;
-    else delete window[key];
-  }
-});
-
-// Recursively gather string/number leaves from the React-stub vnode tree
-// ({type, props, children}) so we can assert on rendered text without a
-// real DOM.
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
-}
+afterAll(() => restoreGlobals());
 
 // Walk the React-stub vnode tree and collect all nodes matching pred.
 function findAll(node, pred) {

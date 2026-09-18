@@ -6,26 +6,16 @@
 // state from the vnode and the async aggregation logic separately via
 // buildAllWinners.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText, expandAll } from './helpers/vdom.js';
 import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '../viewer.jsx';
 
-// ── tree helpers ─────────────────────────────────────────────────────────────
+// ── tree helpers ──────────────────────────────────────────────────────────────
 
 function mergeChildrenIntoProps(node) {
   const p = { ...node.props };
   if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
   return p;
-}
-
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (typeof node.type === 'function') {
-    try { return collectText(node.type(mergeChildrenIntoProps(node))); } catch { /* fall through */ }
-  }
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
 }
 
 function findAll(node, pred) {
@@ -63,27 +53,18 @@ const STUBBED_GLOBALS = {
   bracketHasDecidedFinal,
   resolveCompetitionAwards,
 };
-const originalGlobals = {};
+let restoreGlobals;
 
 // buildAllWinners and AllWinnersModal are loaded with admin_shell.jsx import.
 // They are also exposed on window so we can test them without remounting
 // the full AdminDashboard.
 
 beforeAll(async () => {
-  for (const [key, stub] of Object.entries(STUBBED_GLOBALS)) {
-    originalGlobals[key] = { had: key in window, value: window[key] };
-    window[key] = stub;
-  }
-
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../admin_shell.jsx');
 });
 
-afterAll(() => {
-  for (const [key, orig] of Object.entries(originalGlobals)) {
-    if (orig.had) window[key] = orig.value;
-    else delete window[key];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // ── buildAllWinners ───────────────────────────────────────────────────────────
 
@@ -229,14 +210,14 @@ describe('AllWinnersModal', () => {
 
   it('renders the modal title', () => {
     const vnode = window.AllWinnersModal({ comps: [], onClose: vi.fn() });
-    const text = collectText(vnode);
+    const text = collectText(vnode, expandAll);
     expect(text).toContain('All winners');
   });
 
   it('shows loading state initially (useState returns initial value in static stub)', () => {
     const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'knockout', players: [] };
     const vnode = window.AllWinnersModal({ comps: [comp], onClose: vi.fn() });
-    const text = collectText(vnode);
+    const text = collectText(vnode, expandAll);
     // Initial state is loading:true: should render loading text
     expect(text).toContain('Loading results');
   });
@@ -244,7 +225,7 @@ describe('AllWinnersModal', () => {
   it('renders a Close button', () => {
     const vnode = window.AllWinnersModal({ comps: [], onClose: vi.fn() });
     const btns = findAll(vnode, (n) => n.type === 'button');
-    const closeBtn = btns.find((b) => collectText(b).includes('Close'));
+    const closeBtn = btns.find((b) => collectText(b, expandAll).includes('Close'));
     expect(closeBtn).toBeDefined();
   });
 
@@ -252,7 +233,7 @@ describe('AllWinnersModal', () => {
     const onClose = vi.fn();
     const vnode = window.AllWinnersModal({ comps: [], onClose });
     const btns = findAll(vnode, (n) => n.type === 'button');
-    const closeBtn = btns.find((b) => collectText(b).includes('Close'));
+    const closeBtn = btns.find((b) => collectText(b, expandAll).includes('Close'));
     closeBtn.props.onClick();
     expect(onClose).toHaveBeenCalled();
   });

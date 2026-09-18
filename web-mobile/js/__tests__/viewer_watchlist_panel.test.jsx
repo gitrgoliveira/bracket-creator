@@ -7,18 +7,9 @@
 // directly for its own inner-render assertions.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { collectText, expandNamed } from './helpers/vdom.js';
 
 const realReact = global.React;
-
-// Concatenate all string/number leaves in a vnode tree.
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children != null) return collectText(node.children);
-  if (node.props?.children != null) return collectText(node.props.children);
-  return '';
-}
 
 // Collect every vnode matching predicate (depth-first).
 function findAll(node, pred, out = []) {
@@ -68,17 +59,49 @@ describe('WatchHeroCard', () => {
   it('shows the side-A player as AKA when the primary is on side A', () => {
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
     const name = byClass(tree, 'my-match__name')[0];
-    expect(collectText(name)).toContain('AKA');
-    expect(collectText(name)).toContain('Robert Young');
+    expect(collectText(name, expandNamed('NumberedName'))).toContain('AKA');
+    expect(collectText(name, expandNamed('NumberedName'))).toContain('Robert Young');
     // Opponent is the other side.
-    expect(collectText(byClass(tree, 'my-match__opp')[0])).toContain('Nolan Clark');
+    expect(collectText(byClass(tree, 'my-match__opp')[0], expandNamed('NumberedName'))).toContain('Nolan Clark');
   });
 
   it('shows the side-B player as SHIRO when the primary is on side B', () => {
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p2']), entityLabel: 'Nolan Clark', onMatchClick: vi.fn() });
     const name = byClass(tree, 'my-match__name')[0];
-    expect(collectText(name)).toContain('SHIRO');
-    expect(collectText(name)).toContain('Nolan Clark');
+    expect(collectText(name, expandNamed('NumberedName'))).toContain('SHIRO');
+    expect(collectText(name, expandNamed('NumberedName'))).toContain('Nolan Clark');
+  });
+
+  // bc-rvfx: the watchlist card rendered NO competitor number anywhere, while
+  // the VSchedItem rows inside the very same panel rendered one. A spectator
+  // saw the card they look at first as the only place they could not match
+  // against the printed draw sheet.
+  //
+  // The fixture above deliberately carries NO `number`, which is why widening
+  // collectText alone would leave this rendering unpinned -- the failure the
+  // PR #428 audit found in four sibling files. This fixture supplies one.
+  it('renders the competitor number on both the subject and the opponent', () => {
+    const numbered = {
+      ...MATCH,
+      sideA: { ...MATCH.sideA, number: 'K12' },
+      sideB: { ...MATCH.sideB, number: 'K7' },
+    };
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: numbered, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const name = collectText(byClass(tree, 'my-match__name')[0], expandNamed('NumberedName'));
+    expect(name).toContain('K12');
+    expect(name).toContain('Robert Young');
+    const opp = collectText(byClass(tree, 'my-match__opp')[0], expandNamed('NumberedName'));
+    expect(opp).toContain('K7');
+    expect(opp).toContain('Nolan Clark');
+  });
+
+  it('renders the name alone when the competitor has no number yet', () => {
+    // Pre-draw, nobody has a number: the chip must not render a stray gap or
+    // an empty element. MATCH carries no `number`, which is that state.
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const name = collectText(byClass(tree, 'my-match__name')[0], expandNamed('NumberedName'));
+    expect(name).toContain('Robert Young');
+    expect(name).not.toMatch(/K\d/);
   });
 
   it('uses a dojo eyebrow when the entity label differs from the competing member', () => {
@@ -86,10 +109,10 @@ describe('WatchHeroCard', () => {
     // MATCH is running, so the hero label is the bare dojo eyebrow: no
     // "· next up" suffix (a running match is happening now, not next up).
     const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1', 'p3']), entityLabel: 'Hagane Dojo', onMatchClick: vi.fn() });
-    const lbl = collectText(byClass(tree, 'my-match__lbl')[0]);
+    const lbl = collectText(byClass(tree, 'my-match__lbl')[0], expandNamed('NumberedName'));
     expect(lbl).toContain('Hagane Dojo');
     expect(lbl).not.toMatch(/next up/i);
-    expect(collectText(byClass(tree, 'my-match__name')[0])).toContain('Robert Young');
+    expect(collectText(byClass(tree, 'my-match__name')[0], expandNamed('NumberedName'))).toContain('Robert Young');
   });
 });
 
@@ -126,7 +149,7 @@ describe('WatchlistPanel', () => {
 
   it('empty state: hint, picker, no chips, no hero, no pin hint', () => {
     const tree = runtime.mount(WatchlistPanel, baseProps());
-    expect(collectText(tree)).toMatch(/Track yourself/);
+    expect(collectText(tree, expandNamed('NumberedName'))).toMatch(/Track yourself/);
     expect(byClass(tree, 'pmf__chip')).toHaveLength(0);
     expect(heroNodes(tree)).toHaveLength(0);
     expect(byClass(tree, 'watchlist-pin-hint')).toHaveLength(0);
@@ -179,7 +202,7 @@ describe('WatchlistPanel', () => {
     const dojoChip = byClass(tree, 'pmf__chip--dojo')[0];
     expect(dojoChip).toBeTruthy();
     // Hagane Dojo has 2 members in ROSTER (p1, p3).
-    expect(collectText(dojoChip)).toContain('Hagane Dojo (2)');
+    expect(collectText(dojoChip, expandNamed('NumberedName'))).toContain('Hagane Dojo (2)');
   });
 
   // onFirstAdd / maybeFirstAdd: fires exactly once per empty→add transition.
@@ -252,18 +275,18 @@ describe('WatchPicker', () => {
     expect(opts.length).toBeGreaterThan(0);
     const dojoOpts = byClass(tree, 'pmf__option--dojo');
     expect(dojoOpts).toHaveLength(1);
-    expect(collectText(dojoOpts[0])).toMatch(/Hagane Dojo/);
-    expect(collectText(dojoOpts[0])).toMatch(/Watch all · 2 members/);
+    expect(collectText(dojoOpts[0], expandNamed('NumberedName'))).toMatch(/Hagane Dojo/);
+    expect(collectText(dojoOpts[0], expandNamed('NumberedName'))).toMatch(/Watch all · 2 members/);
     // The dojo's members also match the query by dojo name.
-    expect(collectText(tree)).toContain('Robert Young');
+    expect(collectText(tree, expandNamed('NumberedName'))).toContain('Robert Young');
   });
 
   it('excludes already-watched players and dojos from the dropdown', () => {
     const tree = openWith('', { watchedPlayerIds: ['p1'], watchedDojos: ['Hagane Dojo'] });
-    const txt = collectText(byClass(tree, 'pmf__dropdown')[0]);
+    const txt = collectText(byClass(tree, 'pmf__dropdown')[0], expandNamed('NumberedName'));
     expect(txt).not.toContain('Robert Young'); // excluded player
     // The Hagane Dojo *option* is excluded; assert no dojo option for it.
-    const dojoOpts = byClass(tree, 'pmf__option--dojo').map(collectText).join(' ');
+    const dojoOpts = byClass(tree, 'pmf__option--dojo').map(n => collectText(n, expandNamed('NumberedName'))).join(' ');
     expect(dojoOpts).not.toContain('Hagane Dojo');
     expect(dojoOpts).toContain('Tsubaki Kenyukai');
   });

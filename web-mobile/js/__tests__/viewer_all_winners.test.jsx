@@ -4,18 +4,11 @@
 //
 // Both are exported to window by viewer.jsx.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText } from './helpers/vdom.js';
 import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '../viewer.jsx';
 
 // ── tree helpers ──────────────────────────────────────────────────────────────
-
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
-}
 
 function findAll(node, pred) {
   if (!node || typeof node !== 'object') return [];
@@ -55,24 +48,16 @@ const STUBBED_GLOBALS = {
   bracketHasDecidedFinal,
   resolveCompetitionAwards,
 };
-const originalGlobals = {};
+let restoreGlobals;
 
 beforeAll(async () => {
-  for (const [key, stub] of Object.entries(STUBBED_GLOBALS)) {
-    originalGlobals[key] = { had: key in window, value: window[key] };
-    window[key] = stub;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   // viewer.jsx is already imported (it's the source of the exported functions at
   // the top of this file). All window.* exports are set by the module load,
   // including buildAllWinnersPublic and AllWinnersView.
 });
 
-afterAll(() => {
-  for (const [key, orig] of Object.entries(originalGlobals)) {
-    if (orig.had) window[key] = orig.value;
-    else delete window[key];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // ── buildAllWinnersPublic ─────────────────────────────────────────────────────
 

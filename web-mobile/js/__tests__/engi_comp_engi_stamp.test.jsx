@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { findAll } from './helpers/vdom.js';
 
 // mp-94v0: ScoreEditorModal picks the engi flag editor purely from
 // `m.compEngi` (admin_scoring_individual.jsx: `const isEngi = !!m.compEngi`),
@@ -17,15 +18,6 @@ import { makeReactive } from './helpers/reactive_react.js';
 // the reactive stub's createElement does not invoke function components, so a
 // child vnode still carries the exact onMatchClick closure the parent built.
 
-// Walk a vnode tree collecting every node matching a predicate.
-function findAll(node, pred, acc = []) {
-  if (node == null || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, acc)); return acc; }
-  if (pred(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, pred, acc));
-  return acc;
-}
 
 // The enrichment closures only. PoolsViewer forwards the RAW onMatchClick to
 // its LeagueMatrix child (pass-through), so filtering by identity against the

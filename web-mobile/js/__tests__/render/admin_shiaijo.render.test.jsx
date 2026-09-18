@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -38,24 +39,16 @@ const STUBBED_GLOBALS = {
   compMatches: () => [],
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminShiaijoPage;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_shiaijo.jsx');
   AdminShiaijoPage = window.AdminShiaijoPage;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // Reset per-test window overrides so each test starts from a known baseline.
 afterEach(() => {

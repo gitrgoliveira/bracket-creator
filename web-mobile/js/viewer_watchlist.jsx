@@ -16,6 +16,14 @@
 // (inside the component body), by which point both scripts have evaluated and
 // populated `window`. Only React (a vendor global) and pluralize (from ui.js,
 // loaded before this file) are read at module-eval time.
+//
+// NumberedName is the one ES import here, and it is safe where a window read
+// would be pointless: it is a LEAF (no imports of its own, so no cycle to
+// break) and it is never script-tagged, so this import and the ten existing
+// ones all resolve to the same /dist/numbered_name.jsx URL and the browser
+// evaluates it once. It is not on `window` at all, so there is nothing to read.
+import { NumberedName } from './numbered_name.jsx';
+
 const { useState, useMemo } = React;
 const useRefV = React.useRef;
 const pluralize = window.pluralize;
@@ -164,9 +172,14 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
           ? (showDojoEyebrow ? entityLabel : "Your match")
           : (showDojoEyebrow ? `${entityLabel} · next up` : "Your next match")}
       </div>
+      {/* The number comes from the side object, which resolveSide clones off
+          the playerMap precisely so it carries the right dojo/number. No
+          `side` prop: this card stacks its two competitors rather than placing
+          them left/right, and the ruling puts the number BEFORE the name on
+          both wherever they stack. */}
       <div className="my-match__name">
         <span className={`bc-color-badge ${myBadgeClass}`}>{myBadgeLabel}</span>
-        {subjectName}
+        <NumberedName name={subjectName} number={(subject && subject.number) || ""} />
       </div>
       <div className="my-match__round">
         {nextMatch.compName ? `${nextMatch.compName} · ` : ""}{phaseLabel}
@@ -211,7 +224,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
             <span className={`bc-color-badge ${oppBadgeClass}`}>{oppBadgeLabel}</span>
             vs Opponent
           </div>
-          <div className="n">{opponent.name}</div>
+          <div className="n"><NumberedName name={opponent.name} number={opponent.number || ""} /></div>
           {opponent.dojo ? <div className="d">{opponent.dojo}</div> : null}
         </button>
       ) : null}
@@ -312,7 +325,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
             {isPrimary ? "★" : "☆"}
           </button>
         )}
-        {name}
+        <NumberedName name={name} number={(pRecord && pRecord.number) || ""} />
         {checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
         <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>
       </span>

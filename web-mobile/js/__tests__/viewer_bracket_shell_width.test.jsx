@@ -1,21 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { findAll } from './helpers/vdom.js';
 
-// Depth-first search for all nodes matching a predicate. Same shape as the
-// helper in viewer_bronze_match.test.jsx, minus the function-type recursion:
-// this file only ever asserts on the shell element ViewerCompetition returns
-// itself, so executing child components would add noise, not coverage.
-function findAll(node, predicate, acc = []) {
-  if (!node || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) {
-    node.forEach(k => findAll(k, predicate, acc));
-    return acc;
-  }
-  if (predicate(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, predicate, acc));
-  return acc;
-}
 
 const shellClass = (tree) => {
   const hits = findAll(tree, n =>

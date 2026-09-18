@@ -21,6 +21,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 import { FORMAT_PHASES, IMPOSSIBLE_FORMAT_PHASES, cellKey, NAGINATA, KENDO_SET, NAGINATA_SET } from './score_editor_matrix_axes.js';
 
 const STUBBED_GLOBALS = {
@@ -45,24 +46,16 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let ScoreEditorModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // ── matrix ───────────────────────────────────────────────────────────────────
 

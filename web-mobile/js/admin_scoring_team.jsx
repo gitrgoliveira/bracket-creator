@@ -30,7 +30,7 @@ import {
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
   useAdoptFromServer,
-  sideName,
+  sideColorName,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -66,116 +66,6 @@ import { NumberedName } from './numbered_name.jsx';
 // winner-un-draws rule is pinned without mounting the editor.
 export function teamBoutIsDraw(s, t) {
   return t.winner === null && !!(s.draw || t.aTotal > 0 || t.bTotal > 0);
-}
-
-// mergeLineupIdsForPosition composes the WHOLE memberIds map an inline
-// lineup write sends: carries `existingIds` forward untouched, then either
-// sets `posKey` to `resolvedId` or CLEARS it -- clearing happens both when
-// the operator cleared the position (no name, so nothing to resolve) and
-// when a name was typed/picked but resolution/minting failed (offline venue
-// wifi). Either way a stale id must never survive under a position it no
-// longer names: kachinuki retirement keys on the member id (CLAUDE.md §
-// Team Lineups & Kachinuki), so a stale id left behind would attribute a
-// bout to whoever used to occupy that slot. Exported so this exact rule is
-// pinned without mounting TeamScoreEditorModal.
-export function mergeLineupIdsForPosition(existingIds, posKey, resolvedId) {
-  const updated = { ...existingIds };
-  if (resolvedId) updated[posKey] = resolvedId;
-  else delete updated[posKey];
-  return updated;
-}
-
-// buildInlineLineupWrite computes exactly what the inline lineup picker
-// (submitInlineLineup, inside TeamScoreEditorModal below) sends to
-// putMatchLineup: the WHOLE positions map (existing + the one changed
-// position) and its memberIds counterpart, merged via
-// mergeLineupIdsForPosition above. Exported (and pulled out of the
-// component) so this exact value-in/body-out contract -- including "a mint
-// failure never blocks the write" -- is pinned directly, without mounting
-// TeamScoreEditorModal, which vitest's hook stubs cannot drive through a
-// full interaction (see tie_button_no_term.test.jsx).
-//
-// member (bc-dnst) is the squad-member object LineupNameInput hands back
-// when the operator picked one of the row's numbered entries, rather than
-// typing/"+ Add"-ing a free name. When member carries an id, this WRITES
-// BY ID directly -- positions[posKey] = member.name || "" and
-// memberIds[posKey] = member.id -- and never calls the resolver: the
-// picked entry already names its own member, so resolving by name would be
-// redundant at best and wrong at worst (two blank members share the same
-// "" name). This is also why a picked member's position is kept even when
-// its name is empty: picking a blank slot is a real placement (the row
-// shows that member's number and an empty box to type the name into), not
-// a clear. A falsy `value` with NO member is the only thing that clears
-// the position, matching the pre-bc-dnst contract exactly.
-//
-// Without a member, the pre-existing name-resolution path runs: a name is
-// only resolved when `value` is truthy (a cleared position has no name to
-// look up, and mergeLineupIdsForPosition's own clear-on-falsy-id branch
-// handles it), via resolveMemberIdsForPositions (admin_lineup.jsx, reached
-// here via window.AdminLineupHelpers -- see that file's header for why
-// this stays a window lookup rather than an ES import).
-//
-// bc-cse gap closure: also returns `failures` (the resolver's own, or []
-// when the resolver is unavailable/threw, or never invoked because member
-// already answered) so submitInlineLineup below can warn the operator on a
-// successful save without ever blocking this one.
-//
-// bc-dnst duplicate guard: a member can only ever occupy ONE position at a
-// time, so once the id for `posKey` is known (picked directly, or resolved
-// from a typed name that matched an existing member), this checks the
-// lineup's OWN memberIds -- the state BEFORE this write -- for that same id
-// under a DIFFERENT position. A hit means the operator just tried to place
-// someone who is already fighting elsewhere in this same encounter; the
-// write is refused entirely (no positions/memberIds returned, nothing is
-// sent to the server) and the caller is told which position already holds
-// them via `refused`, so it can leave the box exactly as it was and tell
-// the operator rather than silently doubling the member up server-side
-// (internal/domain/team_lineup.go's ValidatePositions rejects the same
-// case, but refusing here means the operator never round-trips to the
-// server to find out).
-export async function buildInlineLineupWrite(compId, teamId, lineup, squad, posKey, value, password, member) {
-  const existing = lineup?.positions || {};
-  const positions = { ...existing };
-  const pickedMemberId = member && member.id ? member.id : null;
-  if (pickedMemberId) positions[posKey] = member.name || "";
-  else if (value) positions[posKey] = value;
-  else delete positions[posKey];
-
-  let resolvedId = pickedMemberId;
-  let nextSquad = Array.isArray(squad) ? squad : [];
-  let failures = [];
-  if (!pickedMemberId && value) {
-    try {
-      const resolver = window.AdminLineupHelpers?.resolveMemberIdsForPositions;
-      if (typeof resolver === "function") {
-        // currentIds: a name typed into a slot PICKED by number (its
-        // memberId already set on this position) renames that same member
-        // rather than falling back to the position's index default -- see
-        // resolveMemberIdsForPositions' own doc comment.
-        const resolved = await resolver(compId, teamId, { [posKey]: value }, squad, password, lineup?.memberIds);
-        nextSquad = resolved.squad;
-        resolvedId = resolved.memberIds[posKey] || null;
-        failures = resolved.failures || [];
-      }
-    } catch (_e) {
-      // On top of the helper's own per-position mint catch, because this
-      // runs on the live scoring path: an operator swapping a fighter
-      // mid-encounter must not lose the swap because identity resolution
-      // failed. The NAME is the load-bearing half of a lineup slot and the
-      // id is an enhancement over it, so the write proceeds either way;
-      // mergeLineupIdsForPosition below clears this position's id, the same
-      // as any other unresolved name, and the load-time repair fills it in
-      // later from the squad.
-    }
-  }
-
-  const otherPosKey = memberPlacedElsewhere(lineup?.memberIds, posKey, resolvedId);
-  if (otherPosKey) {
-    return { refused: { position: otherPosKey, name: value || (member && (member.name || member.label)) || "" } };
-  }
-
-  const memberIds = mergeLineupIdsForPosition(lineup?.memberIds, posKey, resolvedId);
-  return { positions, memberIds, squad: nextSquad, failures };
 }
 
 function renderTeamBoutMiddle(s, t, isDaihyoRow) {
@@ -231,7 +121,7 @@ export function preserveStoredDaihyosenVerdict({ armed, pickedSide, tied, existi
 // StreamingOverlay). The implementations live in lineup_resolver.jsx;
 // re-exported here so existing imports from admin_scoring_modal.jsx (which
 // re-exports them onward) continue to work.
-import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, memberPlacedElsewhere, resolveBoutSideDisplayName, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, resolveBoutSideName, resolveBoutSideMemberId, resolveSquadMember, squadMemberIdForUniqueName, squadRosterEntries, rosterWithoutPlacedElsewhere, resolveBoutSideDisplayName, buildInlineLineupWrite, POS_KEYS_5, POS_LABELS_5 } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 // The shared owner of what an operator is told about unreadable data; the
 // editor gets the repair-oriented wording, the pool surfaces get theirs.
@@ -657,6 +547,53 @@ export function resolveKachinukiBoutSides({ aName, bName, wKey, teamWinnerName }
   if (wKey === "a") winner = aName || teamWinnerName || "";
   else if (wKey === "b") winner = bName || teamWinnerName || "";
   return { sideA, sideB, winner };
+}
+
+// pickManualBoutName: the write behind a name typed or picked on a bout row
+// with no lineup slot to route through -- a beyond-teamSize kachinuki bout,
+// or any row forced onto the manual path (see the call site's own doc
+// comment, above the `pickManual` factory in TeamScoreEditorModal, for
+// exactly which rows that covers). Hoisted to module scope so this exact
+// rename-vs-substitute contract is pinned directly, and so it is built ONCE
+// rather than once per bout row on every render -- it used to be a closure
+// defined inside the per-row map, mirroring buildInlineLineupWrite
+// (lineup_resolver.jsx), which was pulled out of this same component for
+// the same reason.
+//
+// A picked squad member (member.id set) writes the sub directly: no rename
+// is possible there, since the operator picked an existing identity rather
+// than typing over one. Without a pick, a name typed over a picked-but-
+// still-BLANK member RENAMES that member (the ruling: the name attaches to
+// the number it was shown with) and keeps the row's id; typed over anything
+// else (a named member, or no prior pick at all) is a substitution and
+// carries no id, exactly as the fixed-order lineup path does.
+export async function pickManualBoutName({ sub, idx, sideKey, memberIdKey, squad, setSquad, compId, teamId, password, updateSub, onRenameFailed }, value, member) {
+  if (member && member.id) {
+    updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
+    return;
+  }
+  const typed = String(value || "").trim();
+  const priorId = sub[memberIdKey] || "";
+  const prior = priorId ? (squad || []).find(mm => mm && mm.id === priorId) : null;
+  const renames = !!(prior && !(prior.name || "").trim() && typed);
+  updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
+  if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
+  try {
+    await window.API.renameTeamMember(compId, teamId, priorId, typed, password);
+    if (typeof setSquad === "function") {
+      setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
+    }
+  } catch (_e) {
+    // TELL THE OPERATOR. The rename never reached the server, so the member
+    // stays nameless there permanently: every later picker row, the Lineups
+    // page and the member list keep offering it as "no name yet", and
+    // nothing catches up on a later load because nothing was written. The
+    // bout row itself is fine (it carries the typed name and the id), which
+    // is exactly why this needs saying out loud rather than looking
+    // correct. The sibling resolver path reports the same failure through
+    // this channel for the same reason (bc-dnst).
+    onRenameFailed(typed);
+  }
 }
 
 // fusenshoSideFromSub: which side ("a" / "b" / "") a persisted fusensho sub-bout
@@ -2736,7 +2673,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
                   {/* SHIRO/AKA pill, matching the individual + Engi editors. */}
-                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideName(s.color)}</div>
+                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideColorName(s.color)}</div>
                   {/* Team number chip: owned by numbered_name.jsx
                       (the outer-side rule lives there). */}
                   <div className="sb-name">
@@ -2912,41 +2849,16 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             // is what lets the row's member-number label follow a picked
             // blank slot the same way it does for a within-teamSize pick.
             const isManualRow = isKachinuki && !isDaihyoRow && manualBouts.includes(idx + 1);
-            //
-            // A name TYPED over a picked, still-blank member names that member
-            // (the ruling: the name attaches to the number it was shown with):
-            // the row keeps the id and the squad member is renamed, exactly
-            // as the fixed-order path does through the resolver. A name typed
-            // over a NAMED pick is a substitution and carries no id, as before.
-            const pickManual = (sideKey, memberIdKey, squad, setSquad, teamId) => async (value, member) => {
-              if (member && member.id) {
-                updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: member.id }));
-                return;
-              }
-              const typed = String(value || "").trim();
-              const priorId = s[memberIdKey] || "";
-              const prior = priorId ? (squad || []).find(mm => mm && mm.id === priorId) : null;
-              const renames = !!(prior && !(prior.name || "").trim() && typed);
-              updateSub(idx, prev => ({ ...prev, [sideKey]: value, [memberIdKey]: renames ? priorId : "" }));
-              if (!renames || !teamId || typeof window.API?.renameTeamMember !== "function") return;
-              try {
-                await window.API.renameTeamMember(m.compId, teamId, priorId, typed, password);
-                if (typeof setSquad === "function") {
-                  setSquad(sq => (Array.isArray(sq) ? sq : []).map(mm => (mm && mm.id === priorId) ? { ...mm, name: typed } : mm));
-                }
-              } catch (_e) {
-                // TELL THE OPERATOR. The rename never reached the server, so
-                // the member stays nameless there permanently: every later
-                // picker row, the Lineups page and the member list keep
-                // offering it as "no name yet", and nothing catches up on a
-                // later load because nothing was written. The bout row itself
-                // is fine (it carries the typed name and the id), which is
-                // exactly why this needs saying out loud rather than looking
-                // correct. The sibling resolver path reports the same failure
-                // through this channel for the same reason (bc-dnst).
-                setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. Rename them on the Lineups page.`);
-              }
-            };
+            // The write itself (pickManualBoutName above, module scope) is
+            // hoisted out of this row closure; this factory just binds it to
+            // the row's own sub/index and this side's key, mirroring
+            // pickPlayer above.
+            const pickManual = (sideKey, memberIdKey, squad, setSquad, teamId) => (value, member) =>
+              pickManualBoutName({
+                sub: s, idx, sideKey, memberIdKey, squad, setSquad, teamId,
+                compId: m.compId, password, updateSub,
+                onRenameFailed: (typed) => setEditorWarning(`"${typed}" was used for this bout, but the team member could not be renamed. Rename them on the Lineups page.`),
+              }, value, member);
             // mp-gmcg: a kachinuki side with NO resolved name AND no lineup
             // route gets a free-typed name input riding the sub (like a
             // manual row). This covers the one-sided WALKOVER SLOT the engine

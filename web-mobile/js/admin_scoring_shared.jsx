@@ -3,7 +3,7 @@
 // out so the foundation can be reused and the modal file stays focused on the
 // two stateful editors. See web-mobile/admin_split_plan.md.
 
-const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA, useMemo: useMemoA } = React;
 const Icon = window.Icon;
 
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
@@ -809,9 +809,11 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   );
 }
 
-// sideName: the human-readable side name for a "shiro"/"aka" colour key, for
-// the header badges and aria-labels of both editors.
-function sideName(color) {
+// sideColorName: the human-readable side name for a "shiro"/"aka" colour key.
+// Named for the colour it takes so it cannot be confused with admin_helpers.jsx's
+// sideName(side), which takes a side object and returns a participant name.
+// Used in header badges and aria-labels of both editors.
+function sideColorName(color) {
   return color === "shiro" ? "Shiro" : "Aka";
 }
 
@@ -836,11 +838,11 @@ function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
       <div className="foul-counter__label">Fouls</div>
       <div className="foul-counter__controls">
-        <button type="button" className="foul-counter__btn foul-counter__btn--dec" aria-label={`Remove a ${sideName(color)} foul`} onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--dec" aria-label={`Remove a ${sideColorName(color)} foul`} onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideName(color)} foul`} onClick={onIncrement} disabled={disabled}>+</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideColorName(color)} foul`} onClick={onIncrement} disabled={disabled}>+</button>
       </div>
     </div>
   );
@@ -879,29 +881,44 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, 
   const ql = q.toLowerCase();
   // `raw` keeps the ORIGINAL roster item (unmodified: no isObject marker,
   // no spread copy) so a caller picking an object entry gets back exactly
-  // what it put into `roster`, never an internal-shape lookalike.
-  const entries = (roster || []).map(r =>
+  // what it put into `roster`, never an internal-shape lookalike. Memoised
+  // (bc-rvfx) on `roster` alone: this component is mounted once per lineup
+  // row and its own `query` state changes on every keystroke, which used to
+  // re-map the whole roster on every one of those renders even though
+  // `roster` itself had not changed.
+  const entries = useMemoA(() => (roster || []).map(r =>
     typeof r === "string"
       ? { name: r, label: "", isObject: false, raw: r }
       : { name: r?.name || "", label: r?.label || "", isObject: true, raw: r }
-  );
-  const matches = entries.filter(e => {
-    if (!ql) return true;
-    const nameHit = (e.name || "").toLowerCase().includes(ql);
-    const labelHit = (e.label || "").toLowerCase().includes(ql);
-    return nameHit || labelHit;
-  });
-  // Capped only while FILTERING. With no query the operator is BROWSING this
-  // team's own numbered slots, and every one has to be reachable: the list
-  // grew from "the team's named members" to every seeded slot (team size plus
-  // two reserves, bc-dnst) plus any assigned-name tail, so a flat cap of 12
-  // silently hid the highest slots on an 11-person team -- exactly the reserve
-  // slots the +2 exists to expose, and the operator could only reach them by
-  // guessing that typing narrows the list. The dropdown scrolls, so showing
-  // the whole of a team's own roster costs nothing; a QUERY can still match
-  // the long legacy tail, which is what the cap is for.
-  if (ql) matches.splice(12);
-  const exact = entries.some(e => (e.name || "").toLowerCase() === ql);
+  ), [roster]);
+  // matches/exact still recompute on every keystroke (ql is one of their own
+  // dependencies), but no longer on a re-render this component causes for
+  // itself where neither `entries` nor `ql` changed -- arrow-key navigation
+  // (`active`) and open/close (`open`) are the common case, and previously
+  // re-filtered and re-capped the whole roster on each of those too.
+  const { matches, exact } = useMemoA(() => {
+    const matches = entries.filter(e => {
+      if (!ql) return true;
+      const nameHit = (e.name || "").toLowerCase().includes(ql);
+      const labelHit = (e.label || "").toLowerCase().includes(ql);
+      return nameHit || labelHit;
+    });
+    // Capped only while FILTERING. With no query the operator is BROWSING this
+    // team's own numbered slots, and every one has to be reachable: the list
+    // grew from "the team's named members" to every seeded slot (team size plus
+    // two reserves, bc-dnst) plus any assigned-name tail, so a flat cap of 12
+    // silently hid the highest slots on an 11-person team -- exactly the reserve
+    // slots the +2 exists to expose, and the operator could only reach them by
+    // guessing that typing narrows the list. The dropdown scrolls, so showing
+    // the whole of a team's own roster costs nothing; a QUERY can still match
+    // the long legacy tail, which is what the cap is for.
+    if (ql) matches.splice(12);
+    // Scans `entries`, not the capped `matches`: an exact match past the cap
+    // must still count as "already on the roster", or the "+ Add" row would
+    // offer to add a name that is already there, just scrolled out of view.
+    const exact = entries.some(e => (e.name || "").toLowerCase() === ql);
+    return { matches, exact };
+  }, [entries, ql]);
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
@@ -1191,7 +1208,7 @@ function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty 
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
   MAX_IPPONS_PER_SIDE,
-  sideName,
+  sideColorName,
   isBoutDecided,
   getIpponButtons,
   getValidPointKeys,

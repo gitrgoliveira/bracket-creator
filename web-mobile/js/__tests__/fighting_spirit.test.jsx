@@ -6,17 +6,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { FightingSpiritSection, AwardsView } from '../viewer.jsx';
 import { API } from '../api_client.jsx';
+import { collectText } from './helpers/vdom.js';
 
 // --- Tree helpers (mirrors viewer.test.jsx) ---
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
 
 function findByTestId(node, testId) {
   if (!node || typeof node !== 'object') return null;

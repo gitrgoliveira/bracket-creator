@@ -264,3 +264,45 @@ describe('mp-yqxn.1: engi editor has no ippon buttons and no Sune', () => {
     expect(screen.getByTestId('engi-aka-inc')).toBeTruthy();
   });
 });
+
+// bc-rvfx: both hosts render the engi editor at the SAME density.
+//
+// The inline panel carried `editor-modal--compact` and the overlay did not, so
+// the same editor rendered at two densities depending on which screen opened
+// it -- while the CSS comment claimed engi was compact on neither. Nothing
+// asserted the class on either variant, which is why the three statements were
+// free to disagree.
+//
+// Operator ruling 2026-09-18: compact on BOTH. Rendered side by side on a live
+// match the two densities were near-indistinguishable, because these rules
+// change only PADDING on the engi body; the flag counters keep their own
+// coarse-pointer sizing either way, which the last case here pins.
+describe('bc-rvfx: engi editor density is the same on both hosts', () => {
+  it('the inline shiaijo panel carries the compact class', () => {
+    const { container } = render(
+      <EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} variant="inline" />,
+    );
+    const panel = container.querySelector('.scoring-panel');
+    expect(panel).not.toBeNull();
+    expect(panel.classList.contains('editor-modal--compact')).toBe(true);
+  });
+
+  it('the overlay modal carries the compact class too', () => {
+    const { container } = render(
+      <EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} />,
+    );
+    const modal = container.querySelector('.editor-modal');
+    expect(modal).not.toBeNull();
+    expect(modal.classList.contains('editor-modal--compact')).toBe(true);
+  });
+
+  it('keeps the flag counters on both hosts, which compact must never touch', () => {
+    for (const variant of ['inline', undefined]) {
+      const { container, unmount } = render(
+        <EngiScoreEditorModal match={makeMatch()} onClose={() => {}} onSubmit={() => {}} variant={variant} />,
+      );
+      expect(container.querySelectorAll('.engi-counter__btn').length).toBeGreaterThan(0);
+      unmount();
+    }
+  });
+});

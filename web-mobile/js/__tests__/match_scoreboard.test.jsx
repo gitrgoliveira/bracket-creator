@@ -646,11 +646,30 @@ describe('match_scoreboard components', () => {
   });
 
   it('TeamScoreboard shows team names in the summary row when provided (mp-13y #2)', () => {
+    // bc-rvfx: the summary cell hands its name to NumberedName rather than
+    // rendering a flat string, because that cell ELLIPSISES and a number baked
+    // into the string is the first thing truncated on Aka (measured: an 85px
+    // cell at 402px, where "Seishinkan Ember T7" lost its T7 while Shiro's
+    // leading number survived). collectText does not expand a function
+    // component, so a swept-text assertion would quietly stop seeing the name
+    // here -- the same masking this PR fixes elsewhere. Assert the HANDOVER.
     const subResults = [{ position: 1, ipponsB: ['M'], ipponsA: [] }];
-    const tree = runtime.mount(TeamScoreboard, { subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false, shiroName: 'White Team', akaName: 'Red Team' });
-    expect(findInTree(tree, n => n?.props?.['data-testid'] === 'summary-shiro-name')).toBeTruthy();
-    const text = collectText(tree);
-    expect(text).toContain('White Team'); expect(text).toContain('Red Team');
+    const tree = runtime.mount(TeamScoreboard, {
+      subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false,
+      shiroName: 'White Team', akaName: 'Red Team', numberB: 'T3', numberA: 'T9',
+    });
+    const cell = (id) => findInTree(tree, n => n?.props?.['data-testid'] === id);
+    expect(cell('summary-shiro-name')).toBeTruthy();
+    expect(cell('summary-aka-name')).toBeTruthy();
+
+    const handedOver = (id) => findInTree(cell(id), n => n?.props?.name !== undefined && n?.props?.side !== undefined);
+    const shiro = handedOver('summary-shiro-name');
+    const aka = handedOver('summary-aka-name');
+    expect(shiro.props).toMatchObject({ side: 'shiro', name: 'White Team', number: 'T3' });
+    expect(aka.props).toMatchObject({ side: 'aka', name: 'Red Team', number: 'T9' });
+    // clip is what keeps the chip out of the ellipsised run on both sides.
+    expect(shiro.props.clip).toBeTruthy();
+    expect(aka.props.clip).toBeTruthy();
   });
 
   it('a DRAWN team encounter leaves the summary centre bare (the mark is the drawn BOUT\'s)', () => {

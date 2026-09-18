@@ -23,8 +23,12 @@ describe('resultRecencyDesc; newest result first', () => {
     expect([...rows].sort(resultRecencyDesc).map((m) => m.id)).toEqual(['c', 'b', 'a']);
   });
 
-  it('is total on missing fields, so a drifted row cannot throw', () => {
-    expect(() => [{}, { scheduledAt: '09:00' }, { modifiedAt: 5 }].sort(resultRecencyDesc)).not.toThrow();
+  // A row missing a field is ordinary: an unstamped bout carries no
+  // modifiedAt, and an untimed row (the ""-scheduledAt rows Skip produces)
+  // carries no scheduledAt.
+  it('orders rows with missing fields without throwing', () => {
+    const rows = [{ id: 'bare' }, { id: 'timed', scheduledAt: '09:00' }, { id: 'stamped', modifiedAt: 5 }];
+    expect(rows.sort(resultRecencyDesc).map((m) => m.id)).toEqual(['stamped', 'timed', 'bare']);
   });
 });
 

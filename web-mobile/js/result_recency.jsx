@@ -24,10 +24,13 @@
 // positive evidence of when the result landed; scheduled time is not), and
 // equal stamps fall back to the later slot.
 export function resultRecencyDesc(a, b) {
-    const ta = Number(a && a.modifiedAt) || 0;
-    const tb = Number(b && b.modifiedAt) || 0;
+    // A missing field is ordinary (an unstamped bout, an untimed row); a
+    // missing MATCH is not, so there is no null guard here: both callers sort
+    // a filtered list of match objects.
+    const ta = Number(a.modifiedAt) || 0;
+    const tb = Number(b.modifiedAt) || 0;
     if (ta !== tb) return tb - ta;
-    return ((b && b.scheduledAt) || "").localeCompare((a && a.scheduledAt) || "");
+    return (b.scheduledAt || "").localeCompare(a.scheduledAt || "");
 }
 
 // The `count` most recently played bouts, returned in the CALLER's order so a

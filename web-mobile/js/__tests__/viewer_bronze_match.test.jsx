@@ -1,25 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-
-// Walks a vnode tree and concatenates all string/number leaves. Child
-// component vnodes (those with a function type) are recursively executed
-// to expose their children (within a try/catch), matching the pattern used
-// in other viewer tests (viewer_draw_ready.test.jsx, viewer.test.jsx).
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (typeof node.type === 'function') {
-    try {
-      const p = { ...node.props };
-      if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
-      return collectText(node.type(p));
-    } catch { /* fall through */ }
-  }
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { collectText, expandAll } from './helpers/vdom.js';
 
 // Depth-first search for all nodes matching a predicate. Function-type nodes
 // (child components that the reactive shim does not auto-execute) are also
@@ -191,7 +172,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
       onTabChange: () => {},
     });
 
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     // The "3rd Place" label must appear in the bracket tab.
     expect(text).toContain('3rd Place');
 
@@ -229,7 +210,7 @@ describe('ViewerCompetition bronze / 3rd-place match rendering (mp-gy6g)', () =>
     const card = findByTestId(tree, 'viewer-bronze-match-card');
     expect(card).toBeNull();
 
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).not.toContain('3rd Place');
   });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText } from './helpers/vdom.js';
 
 // Tests for the "Share registration link" feature added in mp-a1jz:
 // CompCard share-button visibility (canShare predicate); asserts which
@@ -24,16 +25,6 @@ beforeAll(async () => {
 });
 
 afterAll(() => restoreGlobals());
-
-// Recursively gather string/number leaves from the React-stub vnode tree.
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
-}
 
 function hasShareButton(vnode) {
   const text = collectText(vnode);

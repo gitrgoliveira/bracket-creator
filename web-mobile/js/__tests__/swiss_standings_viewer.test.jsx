@@ -1,29 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { collectText, findAll } from './helpers/vdom.js';
 
 // mp-8pba: SwissStandingsViewer must dispatch its columns on the scoring
 // paradigm (engi flags / team sub-bouts), mirroring the pool/league standings
 // table, so the tie-break data the backend now tallies is actually visible.
 // Before the fix it hardcoded the individual W/L/D/PW/PL shape, which rendered
 // engi flags and team IV/PW as zeros.
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
-
-function findAll(node, pred, acc = []) {
-  if (node == null || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, acc)); return acc; }
-  if (pred(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, pred, acc));
-  return acc;
-}
 
 describe('SwissStandingsViewer (mp-8pba)', () => {
   const realReact = global.React;

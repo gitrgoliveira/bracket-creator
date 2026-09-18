@@ -3,21 +3,7 @@
 // instead of truncating on narrow cards. Non-engi cards render the name as-is.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  // NumberedName is a plain (hookless) function component: the mock React
-  // runtime's createElement never invokes it, so expand it explicitly to
-  // reach the name text it wraps. Matched by name, not identity: bracket.jsx
-  // is re-imported per test via vi.resetModules(), so a statically imported
-  // reference here would never === the freshly loaded one.
-  if (typeof node.type === 'function' && node.type.name === 'NumberedName') return collectText(node.type(node.props));
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { collectText, expandNamed } from './helpers/vdom.js';
 
 // Count bc-name spans in the rendered tree (member lines).
 function countNameSpans(node, acc = { n: 0 }) {
@@ -58,7 +44,7 @@ describe('bracket MatchCard engi pair stacking', () => {
 
   it('renders both members on separate lines when isEngi=true', () => {
     const tree = runtime.mount(PlayerLine, { player, side: 'a', showDojo: true, score: '2', isEngi: true });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('Ren Suzuki');
     expect(text).toContain('Emi Nakamura');
     expect(text).not.toContain('Ren Suzuki - Emi Nakamura');
@@ -67,7 +53,7 @@ describe('bracket MatchCard engi pair stacking', () => {
 
   it('renders the plain combined name on one line when isEngi is not set', () => {
     const tree = runtime.mount(PlayerLine, { player, side: 'a', showDojo: true, score: '2' });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('Ren Suzuki - Emi Nakamura');
     expect(countNameSpans(tree)).toBe(1);
   });
@@ -120,7 +106,7 @@ describe('PlayerLine: outer number placement and no colour badge (bc-rvfx)', () 
   it('places the competitor number before the name on the Shiro (side b) card', () => {
     const shiroPlayer = { id: 'p1', name: 'Tanaka Kenji', dojo: 'Higashi Dojo', number: 'K5' };
     const tree = runtime.mount(PlayerLine, { player: shiroPlayer, side: 'b', showDojo: false });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('K5');
     expect(text).toContain('Tanaka Kenji');
     expect(text.indexOf('K5')).toBeLessThan(text.indexOf('Tanaka Kenji'));
@@ -129,7 +115,7 @@ describe('PlayerLine: outer number placement and no colour badge (bc-rvfx)', () 
   it('places the competitor number before the name on the Aka (side a) card too', () => {
     const akaPlayer = { id: 'p2', name: 'Yamada Hanako', dojo: 'Nishi Dojo', number: 'K8' };
     const tree = runtime.mount(PlayerLine, { player: akaPlayer, side: 'a', showDojo: false });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('K8');
     expect(text).toContain('Yamada Hanako');
     expect(text.indexOf('K8')).toBeLessThan(text.indexOf('Yamada Hanako'));
@@ -144,7 +130,7 @@ describe('PlayerLine: outer number placement and no colour badge (bc-rvfx)', () 
     const player2 = { id: 'p3', name: 'Suzuki Ichiro', dojo: 'Minami Dojo', number: 'K2' };
     const tree = runtime.mount(PlayerLine, { player: player2, side: 'a', showDojo: false });
     expect(hasClassToken(tree, 'bc-color-badge')).toBe(false);
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).not.toContain('AKA');
     expect(text).not.toContain('SHIRO');
   });
@@ -152,7 +138,7 @@ describe('PlayerLine: outer number placement and no colour badge (bc-rvfx)', () 
   it('renders no side-name colour badge on the TBD placeholder card', () => {
     const tree = runtime.mount(PlayerLine, { player: null, side: 'b', isTBD: true });
     expect(hasClassToken(tree, 'bc-color-badge')).toBe(false);
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('TBD');
     expect(text).not.toContain('AKA');
     expect(text).not.toContain('SHIRO');

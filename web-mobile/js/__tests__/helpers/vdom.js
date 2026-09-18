@@ -34,22 +34,26 @@ export function findInTree(node, pred) {
 // identity must NOT expand them -- so the policy stays with the caller and only
 // the walk lives here.
 //
-// The try/catch is not defensive padding: components that read context or hooks
-// throw when called outside the runtime's own bookkeeping, and two suites
-// expand broadly enough to hit that. Falling through to the children is the
-// same answer not expanding would have given.
+// NO try/catch around the expansion, deliberately. Two of the local copies had
+// one, and the assumption that a bare component call might throw looks
+// reasonable -- but it was tested rather than assumed: making the catch rethrow
+// left all 4213 tests passing, so nothing any caller expands actually throws.
+// Swallowing errors here would only hide a real one, and it already did exactly
+// that once in this codebase: a findAll copy whose catch turned a ReferenceError
+// (a helper deleted out from under it) into a silent "found nothing", so the
+// assertions quietly stopped matching instead of failing. If a component ever
+// does need calling defensively, narrow the guard to that component rather than
+// re-adding a blanket catch.
 export function collectText(node, expand) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(n => collectText(n, expand)).join('');
   if (expand && typeof node.type === 'function' && expand(node.type)) {
-    try {
-      const props = { ...node.props };
-      if (node.children?.length) {
-        props.children = node.children.length === 1 ? node.children[0] : node.children;
-      }
-      return collectText(node.type(props), expand);
-    } catch { /* not callable bare: fall through to its children */ }
+    const props = { ...node.props };
+    if (node.children?.length) {
+      props.children = node.children.length === 1 ? node.children[0] : node.children;
+    }
+    return collectText(node.type(props), expand);
   }
   if (node.children) return collectText(node.children, expand);
   if (node.props?.children) return collectText(node.props.children, expand);

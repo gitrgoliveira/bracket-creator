@@ -5,18 +5,10 @@
 // Both are exported to window by viewer.jsx.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText } from './helpers/vdom.js';
 import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '../viewer.jsx';
 
 // ── tree helpers ──────────────────────────────────────────────────────────────
-
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
-}
 
 function findAll(node, pred) {
   if (!node || typeof node !== 'object') return [];

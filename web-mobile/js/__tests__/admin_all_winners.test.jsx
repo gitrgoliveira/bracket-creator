@@ -7,26 +7,15 @@
 // buildAllWinners.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText, expandAll } from './helpers/vdom.js';
 import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '../viewer.jsx';
 
-// ── tree helpers ─────────────────────────────────────────────────────────────
+// ── tree helpers ──────────────────────────────────────────────────────────────
 
 function mergeChildrenIntoProps(node) {
   const p = { ...node.props };
   if (node.children?.length) p.children = node.children.length === 1 ? node.children[0] : node.children;
   return p;
-}
-
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (typeof node.type === 'function') {
-    try { return collectText(node.type(mergeChildrenIntoProps(node))); } catch { /* fall through */ }
-  }
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
 }
 
 function findAll(node, pred) {
@@ -221,14 +210,14 @@ describe('AllWinnersModal', () => {
 
   it('renders the modal title', () => {
     const vnode = window.AllWinnersModal({ comps: [], onClose: vi.fn() });
-    const text = collectText(vnode);
+    const text = collectText(vnode, expandAll);
     expect(text).toContain('All winners');
   });
 
   it('shows loading state initially (useState returns initial value in static stub)', () => {
     const comp = { id: 'c1', name: 'Open', status: 'completed', format: 'knockout', players: [] };
     const vnode = window.AllWinnersModal({ comps: [comp], onClose: vi.fn() });
-    const text = collectText(vnode);
+    const text = collectText(vnode, expandAll);
     // Initial state is loading:true: should render loading text
     expect(text).toContain('Loading results');
   });
@@ -236,7 +225,7 @@ describe('AllWinnersModal', () => {
   it('renders a Close button', () => {
     const vnode = window.AllWinnersModal({ comps: [], onClose: vi.fn() });
     const btns = findAll(vnode, (n) => n.type === 'button');
-    const closeBtn = btns.find((b) => collectText(b).includes('Close'));
+    const closeBtn = btns.find((b) => collectText(b, expandAll).includes('Close'));
     expect(closeBtn).toBeDefined();
   });
 
@@ -244,7 +233,7 @@ describe('AllWinnersModal', () => {
     const onClose = vi.fn();
     const vnode = window.AllWinnersModal({ comps: [], onClose });
     const btns = findAll(vnode, (n) => n.type === 'button');
-    const closeBtn = btns.find((b) => collectText(b).includes('Close'));
+    const closeBtn = btns.find((b) => collectText(b, expandAll).includes('Close'));
     closeBtn.props.onClick();
     expect(onClose).toHaveBeenCalled();
   });

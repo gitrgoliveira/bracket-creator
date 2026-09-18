@@ -1,19 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  // NumberedName is a plain (hookless) function component: the mock React
-  // runtime's createElement never invokes it, so expand it explicitly to
-  // reach the name text it wraps. Matched by name, not identity: the
-  // component under test is re-imported per test via vi.resetModules().
-  if (typeof node.type === 'function' && node.type.name === 'NumberedName') return collectText(node.type(node.props));
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { collectText, expandNamed } from './helpers/vdom.js';
 
 function findInTree(node, predicate) {
   if (!node || typeof node !== 'object') return null;
@@ -153,7 +140,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: mixedMatches(3, 5),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('Standings');
     expect(text).toContain('Player 1');
     expect(text).toContain('Player 5');
@@ -188,7 +175,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       if (node.type === 'tr') {
         const kids = [].concat(node.props?.children || []).filter(Boolean);
         const firstTd = kids.find(k => k && k.type === 'td');
-        if (firstTd) rankCells.push(collectText(firstTd));
+        if (firstTd) rankCells.push(collectText(firstTd, expandNamed('NumberedName')));
       }
       walk(node.props?.children ?? node.children);
     })(container);
@@ -215,7 +202,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     });
     const nameCell = findInTree(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool__player-name'));
     expect(nameCell).not.toBeNull();
-    const text = collectText(nameCell);
+    const text = collectText(nameCell, expandNamed('NumberedName'));
     expect(text).toContain('K9');
     expect(text).toContain('Player A');
     expect(text.indexOf('K9')).toBeLessThan(text.indexOf('Player A'));
@@ -230,7 +217,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: completedMatches(6),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('Final standings');
     expect(text).toContain('Player 4');
     expect(text).not.toContain('Showing top 5');
@@ -250,7 +237,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools: [{ poolName: 'PoolA', players: [] }],
       poolMatches: mixedMatches(2, 4),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).not.toContain('Standings');
     expect(text).not.toContain('Player 1');
   });
@@ -283,7 +270,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: mixedMatches(1, 2),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('Team');
     expect(text).toContain('IV');
     expect(text).toContain('IL');
@@ -298,7 +285,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: [],
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).not.toContain('Standings');
   });
 
@@ -369,7 +356,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: mixedMatches(1, 2),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     // Engi header: "Pair", "V" (Victories), "Flags"
     expect(text).toContain('Pair');
     expect(text).toContain('Flags');
@@ -388,7 +375,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: mixedMatches(1, 2),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     // Row data: first entry has wins=3, flags=9
     expect(text).toContain('Member1-1');
   });
@@ -402,7 +389,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       pools,
       poolMatches: mixedMatches(1, 1),
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).toContain('Member1-1');
     expect(text).toContain('Member2-1');
   });
@@ -420,7 +407,7 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
       if (node.type === 'tr') {
         const firstTd = [].concat(node.props?.children || []).filter(Boolean).find(k => k && k.type === 'td');
         const hasBadge = !!findInTree(node, n => n?.type === DHBadge);
-        if (firstTd) out.push({ rank: collectText(firstTd), hasBadge });
+        if (firstTd) out.push({ rank: collectText(firstTd, expandNamed('NumberedName')), hasBadge });
       }
       walk(node.props?.children ?? node.children);
     })(container);

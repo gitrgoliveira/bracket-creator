@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from './helpers/stub_globals.js';
+import { collectText } from './helpers/vdom.js';
 
 // Regression: CompCard crashed the entire admin console with
 //   TypeError: Cannot read properties of null (reading 'join')
@@ -40,18 +41,6 @@ beforeAll(async () => {
 });
 
 afterAll(() => restoreGlobals());
-
-// Recursively gather string/number leaves from the React-stub vnode tree
-// ({type, props, children}) so we can assert on rendered text without a
-// real DOM.
-function collectText(node) {
-  if (node == null || node === false || node === true) return '';
-  if (typeof node === 'string') return node;
-  if (typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children !== undefined) return collectText(node.children);
-  return '';
-}
 
 // Walk the React-stub vnode tree and collect all nodes matching pred.
 function findAll(node, pred) {

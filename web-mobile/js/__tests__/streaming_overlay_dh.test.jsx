@@ -1,22 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { collectText, findAll } from './helpers/vdom.js';
 
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
-function findAll(node, pred, acc = []) {
-  if (node == null || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, acc)); return acc; }
-  if (pred(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, pred, acc));
-  return acc;
-}
 
 // The broadcast overlay must signal a daihyosen bout on court. isPoolDaihyosenBout
 // (the "…-DH-N" rep-bout id) drives the DAIHYOSEN chip regardless of how the bout

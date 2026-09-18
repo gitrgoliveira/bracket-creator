@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { findAll } from './helpers/vdom.js';
 
 function collectText(node) {
   if (node == null) return '';
@@ -18,15 +19,6 @@ function collectText(node) {
   return '';
 }
 
-// Walk a vnode tree and collect all vnodes matching a predicate.
-function findAll(node, pred, acc = []) {
-  if (node == null || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, acc)); return acc; }
-  if (pred(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, pred, acc));
-  return acc;
-}
 
 // Walk a vnode tree and return the first vnode matching a predicate.
 function findFirst(node, pred) {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TvDisplay } from '../display.jsx';
 import { emptyStateHeadline } from '../display_scoreboard.jsx';
+import { findAll } from './helpers/vdom.js';
 
 // mp-s99q: TvDisplay empty-state redesign tests.
 // Covers the three empty-state sub-states, the IN PROGRESS wayfinding strip,
@@ -18,15 +19,6 @@ afterEach(() => {
     }
 });
 
-// Depth-first vnode walker. Same pattern as display_white_board.test.jsx.
-function findAll(node, pred, out = []) {
-    if (!node || typeof node !== 'object') return out;
-    if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, out)); return out; }
-    if (pred(node)) out.push(node);
-    const kids = node.children || node.props?.children || [];
-    [].concat(kids).forEach(k => findAll(k, pred, out));
-    return out;
-}
 
 function findFirst(node, pred) {
     const all = findAll(node, pred);

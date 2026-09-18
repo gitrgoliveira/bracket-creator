@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { findAll } from './helpers/vdom.js';
 
 function collectText(node) {
   if (node == null) return '';
@@ -15,14 +16,6 @@ function collectText(node) {
   return '';
 }
 
-function findAll(node, pred, acc = []) {
-  if (node == null || typeof node !== 'object') return acc;
-  if (Array.isArray(node)) { node.forEach(k => findAll(k, pred, acc)); return acc; }
-  if (pred(node)) acc.push(node);
-  const kids = node.children || node.props?.children || [];
-  [].concat(kids).forEach(k => findAll(k, pred, acc));
-  return acc;
-}
 
 describe('LeagueStandingsViewer (mp-dunx)', () => {
   const realReact = global.React;

@@ -100,6 +100,14 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // bare team name. sideA is Aka, sideB is Shiro.
   const aName = slotName(withNumber(match.sideA, undefined, "aka"), (match.feeders || [])[0]);
   const bName = slotName(withNumber(match.sideB, undefined, "shiro"), (match.feeders || [])[1]);
+  // TeamScoreboard's summary cell composes the number itself through
+  // NumberedName, because that cell ellipsises and a number baked into the
+  // string is the first thing truncated on Aka: at 402px the cell is 85px and
+  // "Seishinkan Ember T7" lost its T7 (bc-rvfx). So it takes the BARE name.
+  // IndividualScore below still renders shiroName/akaName AS the display name,
+  // so it keeps the numbered form above: do not collapse these into one value.
+  const aNameBare = slotName(numberedParts(match.sideA, undefined).name, (match.feeders || [])[0]);
+  const bNameBare = slotName(numberedParts(match.sideB, undefined).name, (match.feeders || [])[1]);
   const isRunning = match.status === "running";
   const isDone = match.status === "completed";
 
@@ -156,7 +164,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
           as they do in a lobby cell. */}
       {isTeam
         ? <TeamScoreboard subResults={match.subResults || []} teamResult={match.teamResult} lineupA={lineupA} lineupB={lineupB}
-            teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bName} akaName={aName}
+            teamSize={teamSize} showDH={showDH} variant="card" isRunning={isRunning} shiroName={bNameBare} akaName={aNameBare}
             matchSideA={match.sideA?.name || (typeof match.sideA === "string" ? match.sideA : "")}
             matchSideB={match.sideB?.name || (typeof match.sideB === "string" ? match.sideB : "")}
             squadA={squadA} squadB={squadB}

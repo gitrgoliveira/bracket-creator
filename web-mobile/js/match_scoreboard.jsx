@@ -21,6 +21,7 @@ import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFr
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
+import { NumberedName } from './numbered_name.jsx';
 
 // bc-pnum: inline style for the squad member label riding beside a bout
 // row's fighter name (BoutSubRow below), the public twin of
@@ -733,7 +734,13 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
     <div className={"msb msb-team" + (tv ? " msb--tv" : "")} data-testid="team-scoreboard">
       {/* §277 summary row: team name + IV then PW per side */}
       <div className="msb-row msb-row--summary" data-testid="team-summary">
-        <span className="msb-name" data-testid="summary-shiro-name">{shiroName || ""}</span>
+        {/* The summary cell ellipsises, so it takes the chip as its own flex
+            child rather than a number baked into the string: at 402px the cell
+            is 85px wide and "Seishinkan Ember T7" (126px) lost its T7 outright,
+            while Shiro's leading number survived (measured, bc-rvfx). */}
+        <span className="msb-name msb-name--labelled" data-testid="summary-shiro-name">
+          <NumberedName side="shiro" clip name={shiroName || ""} number={numberB || ""} />
+        </span>
         <span className="msb-marks">
           <span className="msb-slots">
             <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
@@ -745,7 +752,9 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
             <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>
           </span>
         </span>
-        <span className="msb-name msb-name--aka" data-testid="summary-aka-name">{akaName || ""}</span>
+        <span className="msb-name msb-name--aka msb-name--labelled" data-testid="summary-aka-name">
+          <NumberedName side="aka" clip name={akaName || ""} number={numberA || ""} />
+        </span>
       </div>
 
       {/* One row per lineup position (teamSize), padding past the recorded

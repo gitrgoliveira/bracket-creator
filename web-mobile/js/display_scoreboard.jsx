@@ -75,14 +75,17 @@ function LinkDot({ linkState }) {
 }
 
 function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, squadA, squadB, teamSize, showDH, queueMatches, zekken }) {
-    const shiroTeam = sideLabel(promoted.match.sideB, zekken, "shiro");
-    const akaTeam = sideLabel(promoted.match.sideA, zekken, "aka");
-    // The headline cells below ELLIPSISE, and Aka's number rides at the end of
-    // the string, so a long team name truncated it away while Shiro's leading
-    // number always survived (measured at 1920x1080: an 811px cell at 54px, so
-    // ~28 characters). Those cells render these PARTS through NumberedName's
-    // clip mode instead, which keeps the chip out of the ellipsised run. The
-    // string form above is still what the non-clipping rows use (bc-rvfx).
+    // Every cell on this board that shows a team name ELLIPSISES -- the two
+    // headline cells, their rep sub-lines, and the summary row inside
+    // TeamScoreboard. sideLabel's string form puts Aka's number LAST, and an
+    // ellipsis truncates the END of a run, so a long team name took Aka's
+    // number with it while Shiro's leading number always survived (measured at
+    // 1920x1080: an 811px headline cell at 54px, so ~28 characters; and 85px
+    // on the 402px viewer card, which a perfectly ordinary name overflows).
+    // So this board passes PARTS and lets NumberedName's clip mode keep the
+    // chip out of the ellipsised run. sideLabel is still used below for
+    // NextPair's rows, which were measured at the same viewport and do not
+    // clip (bc-rvfx).
     const shiroTeamParts = sideLabelParts(promoted.match.sideB, zekken);
     const akaTeamParts = sideLabelParts(promoted.match.sideA, zekken);
     // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
@@ -162,7 +165,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                     <TeamScoreboard subResults={subResults} teamResult={promoted.match?.teamResult} lineupA={lineupA} lineupB={lineupB}
                         teamSize={teamSize} showDH={showDH} variant="tv"
                         isRunning={promoted.match?.status === "running"}
-                        shiroName={shiroTeam} akaName={akaTeam}
+                        shiroName={shiroTeamParts.name} akaName={akaTeamParts.name}
                         matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
                         matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
                         squadA={squadA} squadB={squadB}

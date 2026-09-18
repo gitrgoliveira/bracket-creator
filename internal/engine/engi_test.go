@@ -672,3 +672,84 @@ func TestRecordMatchResult_EngiBackfillsWinnerForBroadcast(t *testing.T) {
 	assert.Equal(t, "A", result.WinnerSide)
 	assert.Equal(t, state.MatchStatusCompleted, result.Status)
 }
+
+// TestRecordMatchResult_EngiMatchCanBeStarted pins the engi dispatch's scope.
+//
+// Every engi write used to be routed through recordEngiMatchResult regardless
+// of status, and that function validates the flag total (odd, in {1,3,5}: a 3-
+// or 5-referee panel cannot draw). "Start match" sends status:"running" with no
+// flags, which arrived as 0+0=0 and came back a 400. The effect was total: an
+// engi competition could not be run from the court console, because its first
+// match could never start.
+//
+// Nothing caught it because every other engi test calls recordEngiMatchResult
+// DIRECTLY, bypassing the dispatch this bug lived in. This one goes through the
+// public entry point the HTTP handler uses, which is the only place the bug is
+// visible.
+func TestRecordMatchResult_EngiMatchCanBeStarted(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-start"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	first := matches[0]
+
+	// The write the Start-match button sends: a status transition, no flags.
+	// RecordMatchResultWithIneligibility, not RecordMatchResult: only this door
+	// reaches the engi dispatch (RecordMatchResult calls writeMatchResult
+	// directly and never sees it), and it is the door handlers_match.go uses.
+	_, err = eng.RecordMatchResultWithIneligibility(compID, first.ID, &state.MatchResult{
+		ID:     first.ID,
+		Status: state.MatchStatusRunning,
+	})
+	require.NoError(t, err, "an engi match must be startable; a start write carries no flags to validate")
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range stored {
+		if m.ID == first.ID {
+			assert.Equal(t, state.MatchStatusRunning, m.Status, "the start actually persisted")
+		}
+	}
+}
+
+// TestRecordMatchResult_EngiCompletionStillValidatesFlags is the other half:
+// the gate must narrow the validation to COMPLETING writes, not remove it. An
+// engi result cannot be a draw, so a completing write whose flag total is even
+// (or out of range) is still the operator's error and must still be refused.
+func TestRecordMatchResult_EngiCompletionStillValidatesFlags(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "engi-complete-guard"
+
+	createEngiCompetition(t, store, compID, state.CompFormatLeague, 4)
+	saveTestParticipants(t, store, compID, []string{"Alice", "Bob", "Charlie", "Dave"})
+	require.NoError(t, eng.StartCompetition(compID))
+
+	matches, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	first := matches[0]
+
+	for _, bad := range [][2]int{{0, 0}, {2, 0}, {1, 1}, {4, 2}} {
+		_, err := eng.RecordMatchResultWithIneligibility(compID, first.ID, &state.MatchResult{
+			ID:     first.ID,
+			Status: state.MatchStatusCompleted,
+			FlagsA: bad[0],
+			FlagsB: bad[1],
+		})
+		assert.Errorf(t, err, "a COMPLETING engi write with %d-%d must still be rejected", bad[0], bad[1])
+	}
+
+	// And a legal panel result still records through the same door.
+	_, okErr := eng.RecordMatchResultWithIneligibility(compID, first.ID, &state.MatchResult{
+		ID:     first.ID,
+		Status: state.MatchStatusCompleted,
+		FlagsA: 3,
+		FlagsB: 2,
+	})
+	require.NoError(t, okErr)
+}

@@ -98,7 +98,25 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	if loadErr != nil {
 		return nil, fmt.Errorf("RecordMatchResultWithIneligibilityTx: load competition %s: %w", compID, loadErr)
 	}
-	if comp != nil && comp.Engi {
+	// Only a COMPLETING write goes through the engi recorder. Engi's flag-total
+	// rule (odd, in {1,3,5}: a 3- or 5-referee panel cannot draw) can only be
+	// satisfied by a real result, so routing every engi write through it
+	// rejected the one write that opens a match: "Start match" sends
+	// status:"running" with no flags at all, which arrived as 0+0=0 and came
+	// back a 400. The effect was total -- an engi competition could not be run
+	// from the court console, because its first match could never start.
+	//
+	// Same scoping rule as applyHansokuIppons below: a write answers for what
+	// it INTRODUCES. A start write introduces no flags, so it has no flag total
+	// to be judged on, and it falls through to the ordinary path that records
+	// the status transition.
+	// A START write is the one shape with no flag total to judge: no flags at
+	// all AND not completing. Everything else still goes through the recorder,
+	// including a scoring write that omits Status entirely (the engine's own
+	// callers do, so gating on Status == completed would have silently stopped
+	// stamping winners -- caught by TestWinnerIDInvariant_EveryWritePathStampsASideID).
+	engiStartWrite := result.FlagsA == 0 && result.FlagsB == 0 && result.Status != state.MatchStatusCompleted
+	if comp != nil && comp.Engi && !engiStartWrite {
 		rec, recErr := e.recordEngiMatchResult(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
 		if recErr != nil {
 			return nil, recErr

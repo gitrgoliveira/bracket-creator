@@ -525,9 +525,13 @@ export function teamIVPW(subResults, matchSideA, matchSideB) {
 // IndividualScore: §263 row for an individual match: ippon slots per side
 // (the match IS one bout). Renders the same CentreMarks as a bout row.
 // withNumber: the plain-STRING twin of NumberedName (numbered_name.jsx), for
-// surfaces that build a string rather than JSX: the TV board, the streaming
-// (OBS) overlay, and the viewer match card, called directly here and via
-// `sideLabel` in display_helpers.jsx. Where the two sides sit LEFT/RIGHT it
+// surfaces that build a string rather than JSX: the viewer match card, and
+// the NON-CLIPPING rows of the TV board and the streaming (OBS) overlay,
+// called directly here and via `sideLabel` in display_helpers.jsx. Those two
+// surfaces are MIXED rather than string-only: any cell of theirs that
+// ellipsises would truncate Aka's trailing number away, so it takes
+// NumberedName's clip mode off sideLabelParts instead (bc-rvfx). Where the
+// two sides sit LEFT/RIGHT it
 // renders the outer-side rule (operator ruling 2026-09-14, bc-dnst): Shiro's
 // number sits BEFORE the name, Aka's AFTER it, so `color` ("shiro" | "aka")
 // is required there wherever a number can appear. A caller whose sides STACK

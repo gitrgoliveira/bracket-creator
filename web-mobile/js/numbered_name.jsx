@@ -16,9 +16,19 @@
 // Shiro/Aka layout that shows a numbered side ES-imports it directly instead
 // of restating the before/after ternary pair inline, per this repo's rule
 // that a display contract lives in one primitive. withNumber in
-// match_scoreboard.jsx is the plain-string twin of this rule, for the string
-// contexts (the TV board, the OBS lower third, the viewer match card); keep
-// the two in step.
+// match_scoreboard.jsx is the plain-string twin of this rule, for the
+// contexts that genuinely need a string; keep the two in step. Both read
+// the same numberedParts, so they cannot disagree about a side's name and
+// number.
+//
+// Which form a surface takes is decided by ONE question: does the cell CLIP?
+// A cell with text-overflow:ellipsis truncates the END of its run, which on
+// Aka is the number, so the string form silently loses it there while Shiro's
+// leading number survives. The TV board and the OBS lower third are therefore
+// MIXED, not string-only as an earlier revision of this comment said: their
+// clipping cells pass `clip` here, and their non-clipping rows keep the
+// string. display_helpers.jsx's sideLabelParts carries that decision and the
+// measurement behind it (bc-rvfx).
 //
 // The wrapper span (.numbered-name) is layout-transparent (display: contents)
 // by default, so it never affects a host's flex/grid layout. The name text is

@@ -12,28 +12,20 @@
 import React from 'react';
 import { render, act, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
-const originals = {};
+let restoreGlobals;
 let AdminPools;
 
 beforeAll(async () => {
-  const STUBBED_AT_LOAD = {
+  restoreGlobals = installWindowStubs({
     ScoreEditorModal: () => null,
-  };
-  for (const [k, v] of Object.entries(STUBBED_AT_LOAD)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  });
   await import('../../admin_pools.jsx');
   AdminPools = window.AdminPools;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 const PASSWORD = 'pw';
 

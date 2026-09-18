@@ -508,13 +508,19 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
     </>
   );
 
+  // BOTH hosts are compact (operator ruling 2026-09-18). The inline panel had
+  // the class and the overlay did not, so the same editor rendered at two
+  // densities depending on which screen opened it. Rendered side by side on a
+  // live match the two were near-indistinguishable -- the compact rules only
+  // change padding here, never the pair cards, the flag circles or the
+  // `.engi-counter__btn` controls -- so consistency won at no visual cost.
   if (variant === "inline") {
     return <div className="scoring-panel editor-modal--compact" aria-label={dialogLabel} data-testid="engi-score-editor">{inner}</div>;
   }
 
   return (
     <div className="modal-backdrop" data-testid="scoring-modal-root" onClick={handleDismiss}>
-      <div className="editor-modal" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()} data-testid="engi-score-editor">
+      <div className="editor-modal editor-modal--compact" role="dialog" aria-modal="true" aria-label={dialogLabel} onClick={(e) => e.stopPropagation()} data-testid="engi-score-editor">
         {inner}
       </div>
     </div>

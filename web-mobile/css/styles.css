@@ -7453,9 +7453,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    kachinuki team matches (regardless of size, since kachinuki renders the
    current bout only). Fixed-format team matches with teamSize > 5 keep the
    roomy legacy layout but get the `.team-bouts-scroll` rule below for
-   independent bout-list scrolling. The engi (kata) editor body is NOT
-   compact on either host; it has its own density and its own coarse-pointer
-   block (`.engi-counter__btn`).
+   independent bout-list scrolling. The engi (kata) editor body is compact on
+   BOTH hosts (operator ruling 2026-09-18): this text used to say engi was
+   compact on neither, while the inline panel carried the class and the overlay
+   did not, so the same editor rendered at two densities and the comment
+   described neither. Rendered side by side on a live match the two were near
+   indistinguishable, because these rules only change PADDING on the engi body
+   -- the pair cards, the five flag circles and the `.engi-counter__btn`
+   controls below are untouched, so engi keeps its own coarse-pointer sizing
+   either way.
 
    All compact rules are layered after the duplicate
    .editor-modal--team / .team-sub-match / .team-summary blocks at

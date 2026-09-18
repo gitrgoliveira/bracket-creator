@@ -21,6 +21,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // ── the probe ────────────────────────────────────────────────────────────────
 
@@ -92,16 +93,13 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminShiaijoPage, AdminPools, AdminBracket, AdminScoreEditor, MatchViewerModal;
 
 beforeAll(async () => {
   // jsdom doesn't implement scrollTo; the schedule surface calls it on open.
   window.scrollTo = vi.fn();
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_shiaijo.jsx');
   await import('../../admin_pools.jsx');
   await import('../../admin_competition_bracket.jsx');
@@ -114,12 +112,7 @@ beforeAll(async () => {
   MatchViewerModal = viewer.MatchViewerModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   probe.props = null;

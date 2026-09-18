@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // Window globals required by admin_scoring_modal.jsx (and its transitive
 // import admin_scoring_shared.jsx). Divide into:
@@ -35,24 +36,16 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let ScoreEditorModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 function makeIndividualMatch(overrides = {}) {
   return {

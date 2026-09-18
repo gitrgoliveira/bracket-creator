@@ -6,6 +6,7 @@
 // state from the vnode and the async aggregation logic separately via
 // buildAllWinners.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from './helpers/stub_globals.js';
 import { bracketHasDecidedFinal, resolveCompetitionAwards, deriveAwards } from '../viewer.jsx';
 
 // ── tree helpers ─────────────────────────────────────────────────────────────
@@ -63,27 +64,18 @@ const STUBBED_GLOBALS = {
   bracketHasDecidedFinal,
   resolveCompetitionAwards,
 };
-const originalGlobals = {};
+let restoreGlobals;
 
 // buildAllWinners and AllWinnersModal are loaded with admin_shell.jsx import.
 // They are also exposed on window so we can test them without remounting
 // the full AdminDashboard.
 
 beforeAll(async () => {
-  for (const [key, stub] of Object.entries(STUBBED_GLOBALS)) {
-    originalGlobals[key] = { had: key in window, value: window[key] };
-    window[key] = stub;
-  }
-
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../admin_shell.jsx');
 });
 
-afterAll(() => {
-  for (const [key, orig] of Object.entries(originalGlobals)) {
-    if (orig.had) window[key] = orig.value;
-    else delete window[key];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // ── buildAllWinners ───────────────────────────────────────────────────────────
 

@@ -26,6 +26,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // ── the probe ────────────────────────────────────────────────────────────────
 
@@ -66,27 +67,19 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminScoreEditor, MatchViewerModal;
 
 beforeAll(async () => {
   window.scrollTo = vi.fn(); // jsdom doesn't implement it; the schedule surface calls it on open.
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   const sched = await import('../../admin_schedule_score_editor.jsx');
   const viewer = await import('../../viewer_match.jsx');
   AdminScoreEditor = sched.AdminScoreEditor;
   MatchViewerModal = viewer.MatchViewerModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   probe.props = null;

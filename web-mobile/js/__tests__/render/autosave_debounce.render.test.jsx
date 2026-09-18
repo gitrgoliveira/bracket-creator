@@ -13,6 +13,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // window globals required by admin_scoring_modal.jsx
 // Split into SYNC (evaluated in the component body on every render) and LAZY
@@ -44,26 +45,18 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let ScoreEditorModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   // admin_helpers.jsx sets MAX_TEAM_SIZE etc. at module evaluation time;
   // already loaded by vitest.setup.render.js, so no re-import needed here.
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // Reset the recordScore mock between tests so call counts start fresh.
 beforeEach(() => {

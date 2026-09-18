@@ -20,6 +20,7 @@
 import React from 'react';
 import { render, act, fireEvent, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 import { toBackendMatchResult } from '../../api_serializers.jsx';
 
 const STUBBED_GLOBALS = {
@@ -38,24 +39,16 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let ScoreEditorModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 beforeEach(() => {
   window.compMatches = () => [];

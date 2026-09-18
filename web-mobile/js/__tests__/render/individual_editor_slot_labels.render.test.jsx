@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll, vi as viMock } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // The two ippon slots are MIRRORED on Aka: result_slot.jsx's sideSlotOrder
 // returns [0, 1] for Shiro and [1, 0] for Aka, so DOM order is visual order
@@ -38,24 +39,16 @@ const STUBBED_GLOBALS = {
   GlossaryHint: ({ name }) => <span title={name} />,
 };
 
-const originals = {};
+let restoreGlobals;
 let ScoreEditorModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_scoring_modal.jsx');
   ScoreEditorModal = window.ScoreEditorModal;
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 // A running match with one ippon on each side, so some slots are filled and
 // some empty: the label's ordinal must be right in both states.

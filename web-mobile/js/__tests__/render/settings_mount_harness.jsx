@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act } from '@testing-library/react';
 import { vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // Shared mount harness for the AdminSettings render tests.
 //
@@ -74,22 +75,16 @@ let AdminCompetition = null;
 // `{ competitionKindLabel: () => 'Team' }` for a team-competition fixture.
 export function installSettingsHarness(overrides = {}) {
   const stubs = { ...defaultStubbedGlobals(), ...overrides };
-  const originals = {};
+  let restoreGlobals;
 
   beforeAll(async () => {
-    for (const [k, v] of Object.entries(stubs)) {
-      originals[k] = { had: k in window, value: window[k] };
-      window[k] = v;
-    }
+    restoreGlobals = installWindowStubs(stubs);
     await import('../../admin_competition.jsx');
     AdminCompetition = window.AdminCompetition;
   });
 
   afterAll(() => {
-    for (const [k, orig] of Object.entries(originals)) {
-      if (orig.had) window[k] = orig.value;
-      else delete window[k];
-    }
+    restoreGlobals();
     AdminCompetition = null;
   });
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 // spec 007 R9: two surfaces bypassed the shiaijo-count blocker.
 //
@@ -37,26 +38,18 @@ const STUBBED_GLOBALS = {
   },
 };
 
-const originals = {};
+let restoreGlobals;
 let CompCard;
 let StartAllModal;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   await import('../../admin_shell.jsx');
   CompCard = window.CompCard;
   ({ StartAllModal } = await import('../../admin.jsx'));
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 const makeComp = (over = {}) => ({
   id: 'c1',

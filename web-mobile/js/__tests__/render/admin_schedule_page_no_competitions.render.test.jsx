@@ -18,6 +18,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { installWindowStubs } from '../helpers/stub_globals.js';
 
 const Stub = (name) => function StubComp() {
   return React.createElement('div', { 'data-testid': name });
@@ -38,23 +39,15 @@ const STUBBED_GLOBALS = {
   PlayerMultiFilter: Stub('player-multi-filter'),
 };
 
-const originals = {};
+let restoreGlobals;
 let AdminSchedulePage;
 
 beforeAll(async () => {
-  for (const [k, v] of Object.entries(STUBBED_GLOBALS)) {
-    originals[k] = { had: k in window, value: window[k] };
-    window[k] = v;
-  }
+  restoreGlobals = installWindowStubs(STUBBED_GLOBALS);
   ({ AdminSchedulePage } = await import('../../admin_schedule_page.jsx'));
 });
 
-afterAll(() => {
-  for (const [k, orig] of Object.entries(originals)) {
-    if (orig.had) window[k] = orig.value;
-    else delete window[k];
-  }
-});
+afterAll(() => restoreGlobals());
 
 const noop = () => {};
 

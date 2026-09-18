@@ -60,6 +60,35 @@ export function sortShiaijoMatches(matches) {
     });
 }
 
+// The `count` bouts whose RESULTS were written most recently, kept in the
+// caller's own order. This is not the tail of `completed`: sortShiaijoMatches
+// orders by scheduled time, so on a court running out of schedule order the
+// tail is whichever bout was scheduled latest, not what the operator just
+// finished (mp-jnvl).
+//
+// `modifiedAt` is the write stamp the SPA sends with a score (mp-y3nk). Only
+// the /score path carries one: quick-score, /decision and the daihyosen paths
+// build their result without it, and files written before the stamp existed
+// have none either. An unstamped bout therefore falls back to its schedule
+// position, which is all it can offer, and ranks below every stamped one - so
+// a fought result outranks the byes a draw resolves at generation time.
+export function recentlyPlayed(completed, count) {
+    if (completed.length <= count) return completed;
+    const keep = new Set(
+        completed
+            .map((m, i) => ({ i, ts: Number(m.modifiedAt) || 0 }))
+            .sort((a, b) => (b.ts - a.ts) || (b.i - a.i))
+            .slice(0, count)
+            .map((e) => e.i)
+    );
+    return completed.filter((_, i) => keep.has(i));
+}
+
+// The single bout just played, for the context/standings panel to anchor to.
+export function mostRecentlyPlayed(completed) {
+    return recentlyPlayed(completed, 1)[0] || null;
+}
+
 export function partitionShiaijoMatches(matches) {
     const sorted = sortShiaijoMatches(matches);
     const running = [], scheduled = [], completed = [];
@@ -793,13 +822,20 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The standings/context panel follows the court's current focus: not
     // strictly the running match: so it stays visible (and updates) after a
     // bout is finished, instead of collapsing to the empty state. Priority:
-    // the running match; else the bout just played (last completed), so the
-    // operator sees their result land in the standings; else the next
-    // scheduled bout (before the court's first match).
+    // the running match; else the bout just played (mostRecentlyPlayed, by
+    // result-write time rather than schedule position), so the operator sees
+    // their result land in the standings; else the next scheduled bout
+    // (before the court's first match).
     const contextMatch = useMemoSh(
-        () => selectedMatch || filteredCompleted[filteredCompleted.length - 1] || filteredScheduled[0] || null,
+        () => selectedMatch || mostRecentlyPlayed(filteredCompleted) || filteredScheduled[0] || null,
         [selectedMatch, filteredCompleted, filteredScheduled]
     );
+
+    // Whether the panel is describing a bout that is already over. The heading
+    // says so, because the panel keeps a finished bout on screen (and, for
+    // knockout, highlights it in the bracket) while the operator's attention
+    // has moved to the next one (mp-jnvl).
+    const contextIsPast = !selectedMatch && contextMatch?.status === "completed";
 
     // Up Next = the first scheduled match in the selected competition.
     const upNext = filteredScheduled[0] || null;
@@ -1383,14 +1419,18 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         so it must not be hidden behind a collapse toggle. To keep the
                                         live queue above the fold on a full day, only the most recent
                                         COMPLETED_PREVIEW show by default; "Show all N" reveals the rest.
-                                        completed is sorted ascending, so the most recent are the tail. */}
+                                        "Most recent" is by result-write time (recentlyPlayed), not the
+                                        tail of the list: the list is ordered by SCHEDULE, so on a court
+                                        running out of order the tail would hide the bout just played.
+                                        The rows kept stay in schedule order, so only which bouts are
+                                        shown changes, never how the section reads. */}
                                     <div className="section-title">
                                         Completed <span className="shiaijo-count" aria-label={`${filteredCompleted.length} matches`}>{filteredCompleted.length}</span>
                                     </div>
                                     <ShiaijoQueueGroup
-                                        matches={(showAllCompleted || filteredCompleted.length <= COMPLETED_PREVIEW)
+                                        matches={showAllCompleted
                                             ? filteredCompleted
-                                            : filteredCompleted.slice(-COMPLETED_PREVIEW)}
+                                            : recentlyPlayed(filteredCompleted, COMPLETED_PREVIEW)}
                                         courts={courts} onMoveCourt={requestMoveCourt} onCorrect={correctMatch}
                                     />
                                     {filteredCompleted.length > COMPLETED_PREVIEW && (
@@ -1572,6 +1612,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                 <ShiaijoContext
                                     match={contextMatch} competitions={courtCompetitions}
                                     court={court} nextPoolName={nextPoolName} tweaks={tweaks}
+                                    isPast={contextIsPast}
                                     open={contextOpen} onToggle={() => setContextOpen((v) => !v)}
                                 />
                             )}
@@ -1909,8 +1950,11 @@ export function shiaijoStandingsKind(match) {
 //   • pool phase  → live standings + results for the current pool, routed by
 //     shiaijoStandingsKind. Pools also show which pool is next on this
 //     court; leagues have no "next pool" concept.
-//   • bracket phase → a bracket fragment with the current match highlighted.
-function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open, onToggle }) {
+//   • bracket phase → a bracket fragment with the anchored match highlighted.
+// `isPast` says the anchored match is a finished bout the operator has moved
+// on from, which the heading states outright: the highlight would otherwise
+// read as the bout now being fought (mp-jnvl).
+function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, isPast, open, onToggle }) {
     const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
     const isPool = match.phase === "pool";
@@ -1974,7 +2018,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, open
     return (
         <div className="shiaijo-context">
             <button type="button" className="section-title shiaijo-context__toggle" aria-expanded={open} onClick={onToggle}>
-                {open ? "−" : "+"} {isPool ? "Standings" : "Context"} · {match.compName} · {phaseLabel}
+                {open ? "−" : "+"} {isPast ? "Just played" : (isPool ? "Standings" : "Context")} · {match.compName} · {phaseLabel}
             </button>
             {open && (
                 <div className="shiaijo-context__body">

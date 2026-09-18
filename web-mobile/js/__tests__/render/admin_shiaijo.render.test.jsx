@@ -106,6 +106,46 @@ describe('AdminShiaijoPage render-smoke', () => {
     expect(() => renderPage(makeMinimalTournament())).not.toThrow();
   });
 
+  // mp-jnvl: once the court has nothing running, the context strip anchors to a
+  // finished bout. Two things must hold: it names the bout whose RESULT was
+  // written last (not the one scheduled last: a court interleaving pools runs
+  // out of schedule order routinely), and the heading admits the bout is over
+  // instead of reading like the bout now being fought.
+  const completedPoolBout = (over) => ({
+    compId: 'c1', compName: 'Cup', status: 'completed', phase: 'pool', court: 'A',
+    sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+    ...over,
+  });
+
+  it('anchors the context strip to the bout written last, not the one scheduled last', () => {
+    // Played first, but holds the later slot: the tail-of-list pick this replaces.
+    const playedFirst = completedPoolBout({ id: 'm-p2', poolName: 'Pool 2', scheduledAt: '09:05', modifiedAt: 1000 });
+    const playedLast = completedPoolBout({ id: 'm-p1', poolName: 'Pool 1', scheduledAt: '09:00', modifiedAt: 2000 });
+    window.tournamentMatches = () => [playedLast, playedFirst];
+    window.filterMatchesByCourt = (matches) => matches;
+    const { container } = renderPage(makeMinimalTournament());
+    const heading = container.querySelector('.shiaijo-context__toggle').textContent;
+    expect(heading).toContain('Pool 1');
+    expect(heading).not.toContain('Pool 2');
+    expect(heading).toContain('Just played');
+  });
+
+  it('keeps the live heading while a bout is running, even with a finished bout behind it', () => {
+    const finished = completedPoolBout({ id: 'm-p1', poolName: 'Pool 1', scheduledAt: '09:00', modifiedAt: 2000 });
+    const running = {
+      id: 'm-p3', compId: 'c1', compName: 'Cup', status: 'running', phase: 'pool',
+      poolName: 'Pool 3', court: 'A', scheduledAt: '09:10',
+      sideA: { id: 'p5', name: 'Sato' }, sideB: { id: 'p6', name: 'Kato' },
+    };
+    window.tournamentMatches = () => [running, finished];
+    window.filterMatchesByCourt = (matches) => matches;
+    const { container } = renderPage(makeMinimalTournament());
+    const heading = container.querySelector('.shiaijo-context__toggle').textContent;
+    expect(heading).toContain('Pool 3');
+    expect(heading).toContain('Standings');
+    expect(heading).not.toContain('Just played');
+  });
+
   it('renders without throwing with a running team match', () => {
     const runningTeamMatch = {
       id: 'm2', compId: 'c1', status: 'running',

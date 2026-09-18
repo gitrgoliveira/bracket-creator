@@ -16,19 +16,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
+import { collectText } from './helpers/vdom.js';
 
 // ---------------------------------------------------------------------------
 // Helpers shared across suites
 // ---------------------------------------------------------------------------
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
 
 function findInTree(node, predicate) {
   if (!node || typeof node !== 'object') return null;

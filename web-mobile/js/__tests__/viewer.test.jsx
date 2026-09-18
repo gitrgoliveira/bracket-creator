@@ -2,20 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
-
-// Walks a vnode tree and concatenates all string/number leaves. Child
-// component vnodes (e.g. TermV) are NOT executed by the reactive shim,
-// but their literal children (the term text) still live in props.children,
-// so this captures everything MatchDetailCard renders itself. Mirrors the
-// collectText helper in reset.test.jsx.
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { collectText } from './helpers/vdom.js';
 
 // Depth-first search for the first vnode matching predicate. Mirrors the
 // helper in reset.test.jsx; used to assert props (e.g. style) on a rendered

@@ -16,29 +16,11 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { collectText } from './helpers/vdom.js';
+import { collectText, findInTree } from './helpers/vdom.js';
 
 // ---------------------------------------------------------------------------
 // Helpers shared across suites
 // ---------------------------------------------------------------------------
-
-function findInTree(node, predicate) {
-  if (!node || typeof node !== 'object') return null;
-  if (Array.isArray(node)) {
-    for (const k of node) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (predicate(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) {
-    const found = findInTree(k, predicate);
-    if (found) return found;
-  }
-  return null;
-}
 
 function findAllByType(node, typeRef, acc = []) {
   if (!node || typeof node !== 'object') return acc;

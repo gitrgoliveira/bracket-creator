@@ -2,30 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalStandings, swissStandingsHeading, isFollowedPlayer, compMatches, subBoutLabel, TournamentInfo, isHttpURL, linkBase, isNonPublicOrigin } from '../viewer.jsx';
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
-import { collectText } from './helpers/vdom.js';
-
-// Depth-first search for the first vnode matching predicate. Mirrors the
-// helper in reset.test.jsx; used to assert props (e.g. style) on a rendered
-// element, which collectText (text-only) can't see.
-function findInTree(node, predicate) {
-  if (!node || typeof node !== 'object') return null;
-  // Arrays appear wherever the component renders a .map() (e.g. the sub-rows),
-  // so recurse into them rather than treating the array itself as a vnode.
-  if (Array.isArray(node)) {
-    for (const k of node) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (predicate(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) {
-    const found = findInTree(k, predicate);
-    if (found) return found;
-  }
-  return null;
-}
+import { collectText, findInTree } from './helpers/vdom.js';
 
 describe('Viewer Utils', () => {
   describe('formatDate', () => {

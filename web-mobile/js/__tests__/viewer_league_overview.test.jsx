@@ -1,24 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { collectText, expandNamed } from './helpers/vdom.js';
-
-function findInTree(node, predicate) {
-  if (!node || typeof node !== 'object') return null;
-  if (Array.isArray(node)) {
-    for (const k of node) {
-      const found = findInTree(k, predicate);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (predicate(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) {
-    const found = findInTree(k, predicate);
-    if (found) return found;
-  }
-  return null;
-}
+import { collectText, expandNamed, findInTree } from './helpers/vdom.js';
 
 describe('ViewerOverview league standings (mp-ldnr)', () => {
   const realReact = global.React;

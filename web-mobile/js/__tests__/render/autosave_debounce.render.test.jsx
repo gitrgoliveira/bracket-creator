@@ -371,3 +371,51 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
     expect(window.API.recordScore).toHaveBeenCalledTimes(0);
   });
 });
+
+// bc-rvfx: a tap that changes NOTHING must not reach the wire.
+//
+// addPt has always guarded its no-op (the side already at the 2-ippon cap);
+// removePt did not, and an UNFILLED slot is a live button -- the grid disables
+// only on decidedByHantei, and the slot's own aria-label announces it as
+// "empty". So tapping one filtered nothing out, marked dirty anyway, and 300ms
+// later sent a full running-match PUT stamped NOW.
+//
+// That is not merely wasteful. The write can beat another device's correctly
+// entered result still sitting in its offline queue (stamped at ENQUEUE, so
+// older) on ApplyByTimestamp, and that operator is then told
+// {"applied": false, "reason": "superseded"} and specifically NOT to re-enter.
+// A tap on an empty cell can therefore cost a real result.
+describe('bc-rvfx: tapping an EMPTY ippon slot is a no-op', () => {
+
+  it('does not schedule an autosave write', async () => {
+    renderModal(makeRunningMatch());
+
+    // Both sides start with two empty slots; the aria-label is the contract.
+    const empties = screen.getAllByLabelText(/slot \d: empty/);
+    expect(empties.length).toBeGreaterThanOrEqual(2);
+
+    await act(async () => { fireEvent.click(empties[0]); });
+    await act(async () => { vi.advanceTimersByTime(500); });
+
+    expect(window.API.recordScore).toHaveBeenCalledTimes(0);
+  });
+
+  it('still writes when the tap actually clears a scored mark', async () => {
+    // The guard must not be over-broad: clearing a REAL mark is the documented
+    // way to take a strike back, and it must still autosave.
+    renderModal(makeRunningMatch());
+
+    const menButtons = screen.getAllByText('M');
+    await act(async () => { fireEvent.click(menButtons[0]); });
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(1);
+
+    // That slot now holds a mark, so its label changes from "empty" to "remove".
+    const filled = screen.getAllByLabelText(/slot \d: remove /);
+    expect(filled.length).toBeGreaterThanOrEqual(1);
+
+    await act(async () => { fireEvent.click(filled[0]); });
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(window.API.recordScore).toHaveBeenCalledTimes(2);
+  });
+});

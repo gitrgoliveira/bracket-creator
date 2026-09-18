@@ -15,6 +15,11 @@ function collectText(node) {
   if (node == null) return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
   if (Array.isArray(node)) return node.map(collectText).join('');
+  // bc-rvfx: descend into NumberedName, which now wraps every competitor name
+  // here. Guarded by NAME rather than invoking any function-typed vnode: the
+  // unguarded form throws the moment such a child grows a hook, and this file
+  // renders several other components.
+  if (typeof node.type === 'function' && node.type.name === 'NumberedName') return collectText(node.type(node.props));
   if (node.children != null) return collectText(node.children);
   if (node.props?.children != null) return collectText(node.props.children);
   return '';
@@ -79,6 +84,38 @@ describe('WatchHeroCard', () => {
     const name = byClass(tree, 'my-match__name')[0];
     expect(collectText(name)).toContain('SHIRO');
     expect(collectText(name)).toContain('Nolan Clark');
+  });
+
+  // bc-rvfx: the watchlist card rendered NO competitor number anywhere, while
+  // the VSchedItem rows inside the very same panel rendered one. A spectator
+  // saw the card they look at first as the only place they could not match
+  // against the printed draw sheet.
+  //
+  // The fixture above deliberately carries NO `number`, which is why widening
+  // collectText alone would leave this rendering unpinned -- the failure the
+  // PR #428 audit found in four sibling files. This fixture supplies one.
+  it('renders the competitor number on both the subject and the opponent', () => {
+    const numbered = {
+      ...MATCH,
+      sideA: { ...MATCH.sideA, number: 'K12' },
+      sideB: { ...MATCH.sideB, number: 'K7' },
+    };
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: numbered, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const name = collectText(byClass(tree, 'my-match__name')[0]);
+    expect(name).toContain('K12');
+    expect(name).toContain('Robert Young');
+    const opp = collectText(byClass(tree, 'my-match__opp')[0]);
+    expect(opp).toContain('K7');
+    expect(opp).toContain('Nolan Clark');
+  });
+
+  it('renders the name alone when the competitor has no number yet', () => {
+    // Pre-draw, nobody has a number: the chip must not render a stray gap or
+    // an empty element. MATCH carries no `number`, which is that state.
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const name = collectText(byClass(tree, 'my-match__name')[0]);
+    expect(name).toContain('Robert Young');
+    expect(name).not.toMatch(/K\d/);
   });
 
   it('uses a dojo eyebrow when the entity label differs from the competing member', () => {

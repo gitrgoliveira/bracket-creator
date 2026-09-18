@@ -9,8 +9,9 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 // daihyosen-specific; the rep pickers below stay gated on m.repIsTeam (a "-TB-"
 // tiebreaker is also a rep bout, just not a daihyosen).
 import { isPoolDaihyosenBout } from './pool_ids.jsx';
-import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey } from './result_slot.jsx';
+import { realIppons, hanteiTied, hanteiSlot, hanteiWinnerKey, sideSlotOrder } from './result_slot.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { NumberedName } from './numbered_name.jsx';
 // Imported from the leaf, not read off `window`: this editor is ES-imported by
 // its host and by unit tests that never load api_client, and write_result.jsx
 // is import-only so it can be reached directly (see its header).
@@ -38,6 +39,7 @@ import {
   ReasonPrompt,
   CORRECTION_PRESETS,
   useAdoptFromServer,
+  sideName,
 } from './admin_scoring_shared.jsx';
 
 import { SyncStatusPill, useDebouncedRunningWrite } from './admin_scoring_autosave.jsx';
@@ -521,10 +523,20 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
     // raw and filtered agree here and the mark lands in a genuinely free cell.
     const htSlot = hanteiSlot(
       decidedByHantei && hanteiTied(aPts, bPts) && recordedHtKey === s.key, s.pts);
-    return [0, 1].map((i) => {
+    // sideSlotOrder: the same visual mirror the read-only scoreboard and the
+    // team editor apply, so DOM order is visual order and no CSS mirror is
+    // needed here any more (result_slot.jsx owns the rule).
+    return sideSlotOrder(s.color).map((i) => {
       const isHt = htSlot === i;
       return (
-        <button key={i} className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`} onClick={() => removePt(s.key, i)} disabled={decidedByHantei} title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}>
+        <button
+          key={i}
+          className={`sb-slot ${(isHt || s.pts[i]) ? "sb-slot--filled" : ""}`}
+          onClick={() => removePt(s.key, i)}
+          disabled={decidedByHantei}
+          title={decidedByHantei ? (hanteiRecorded ? "Locked: hantei already recorded" : "Hantei armed: choose a winner above, or cancel") : "Click to remove"}
+          aria-label={`${sideName(s.color)} slot ${i + 1}: ${isHt ? "Ht" : (s.pts[i] ? `remove ${s.pts[i]}` : "empty")}`}
+        >
           {isHt ? "Ht" : (s.pts[i] || "\u00b7")}
         </button>
       );
@@ -533,7 +545,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
 
   const sides = [
     {
-      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, pts: bPts, fouls: bFouls,
+      key: "b", name: m.sideB?.name, dojo: m.sideB?.dojo, number: m.sideB?.number, pts: bPts, fouls: bFouls,
       setFouls: (v) => { setBFouls(v); markScoringDirty(); }, // C1
       onIncrement: () => {
         const r = applyFoulIncrement(bFouls, aPts, bPts);
@@ -541,10 +553,10 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         setAPts(r.opponentPts);
         markScoringDirty(); // C1
       },
-      color: "shiro", label: "SHIRO (White)",
+      color: "shiro",
     },
     {
-      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, pts: aPts, fouls: aFouls,
+      key: "a", name: m.sideA?.name, dojo: m.sideA?.dojo, number: m.sideA?.number, pts: aPts, fouls: aFouls,
       setFouls: (v) => { setAFouls(v); markScoringDirty(); }, // C1
       onIncrement: () => {
         const r = applyFoulIncrement(aFouls, bPts, aPts);
@@ -552,7 +564,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
         setBPts(r.opponentPts);
         markScoringDirty(); // C1
       },
-      color: "aka", label: "AKA (Red)",
+      color: "aka",
     },
   ];
 
@@ -794,10 +806,11 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                       {/* Explicit SHIRO/AKA pill, matching the Engi editor's
                           side badge so both editors label the side the same way
                           (impeccable re-critique symmetry). */}
-                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{s.color === "shiro" ? "Shiro" : "Aka"}</div>
-                      <div className="sb-name">{s.name}</div>
-                      <div className="sb-slots">
-                        {slotButtons(s)}
+                      <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideName(s.color)}</div>
+                      {/* Competitor number chip: owned by numbered_name.jsx
+                          (the outer-side rule lives there). */}
+                      <div className="sb-name">
+                        <NumberedName side={s.color} name={s.name} number={s.number} />
                       </div>
                       <div className="sb-points-grid">
                         {getIpponButtons(isNaginata).map((cc) => (
@@ -819,9 +832,24 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                             draw toggle below (seeded from the persisted decision
                             via initialIsDrawToggled), encho via the "· (E)
                             Overtime ×N" eyebrow + EnchoControl pill, daihyosen via
-                            the DH eyebrow badge. Don't "restore" X/(E)/(DH) here. */}
-                        {!isDrawToggled && (
-                          <div className="sb-vs">VS</div>
+                            the DH eyebrow badge. Don't "restore" X/(E)/(DH) here.
+                            The scored ippon sit HERE, flanking the VS, as on the
+                            team bout rows (operator ruling): Shiro's pair on the
+                            left, Aka's on the right, each filling outside-in. */}
+                        <div className="sb-center__marks">
+                          <div className="sb-slots sb-slots--shiro">{slotButtons(sides[0])}</div>
+                          <div className={`sb-vs${isDrawToggled ? " sb-vs--quiet" : ""}`} aria-hidden={isDrawToggled}>VS</div>
+                          <div className="sb-slots sb-slots--aka">{slotButtons(sides[1])}</div>
+                        </div>
+                        {/* Clearing a mark is a tap on the mark itself, which
+                            nothing else on the board says (a mouse tooltip
+                            never reaches a tablet), so one hint line names it
+                            while any mark is scored (operator decision
+                            2026-09-15, bc-dnst: the cells stay as they are, no
+                            corner badge, no undo). Hidden under hantei, where
+                            the cells are locked. */}
+                        {(aTotal + bTotal > 0 && !decidedByHantei) && (
+                          <div className="sb-hint" data-testid="scoring-modal-clear-hint">Tap a scored mark to clear it</div>
                         )}
                         <button
                           className={`sb-draw-toggle btn${isDrawToggled ? " sb-draw-toggle--active" : ""}`}
@@ -846,7 +874,6 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                 {sides.map((s) => (
                   <FoulCounter
                     key={s.key}
-                    label={s.label}
                     fouls={s.fouls}
                     setFouls={s.setFouls}
                     onIncrement={s.onIncrement}
@@ -1148,8 +1175,13 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   // the panel lives in the page. The shiaijo page passes no prevMatch/
   // nextMatch (queue drives navigation) so the foot's prev/next render as
   // empty spans; Cancel/Close still call onClose to deselect.
+  // bc-dnst: the inline panel takes the same compact density as the overlay.
+  // Two hosts mount variant="inline": the shiaijo console (admin_shiaijo.jsx)
+  // and the Competition > Bracket running-match panel
+  // (admin_competition_bracket.jsx). Both are surfaces operators actually
+  // score on, so neither may miss the density pass.
   if (variant === "inline") {
-    return <div className="scoring-panel" aria-label={dialogLabel}>{inner}</div>;
+    return <div className="scoring-panel editor-modal--compact" aria-label={dialogLabel}>{inner}</div>;
   }
 
   return (

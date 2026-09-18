@@ -2459,11 +2459,32 @@ func TestScoreCellsCarryOutstandingHansokuTriangle(t *testing.T) {
 			{Position: 1, SideA: "Ann", SideB: "Ben", Winner: "Ann",
 				IpponsA: []string{"M", "K"}, HansokuB: 1},
 		}
-		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false)
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "", "")
 		left, _ := f.GetCellValue(sheet, "B5")
 		right, _ := f.GetCellValue(sheet, "F5")
 		assert.Equal(t, "MK", left)
 		assert.Equal(t, "▲", right, "a bout the offender lost 0-2 still records the standing foul")
+	})
+
+	// bc-dnst: a FIXED-ORDER bout records no fighter name, so its row names
+	// only the TEAM in Winner. Without the encounter's own side names the
+	// attribution collapses to MatchSideNone and the row silently loses both
+	// the default-win maru and the Fus. mark, while this same sheet's IV/PW
+	// summary still counts the bout. Nothing covered this: the cases above all
+	// hand-write fighter names onto the sub rows.
+	t.Run("fixed-order row, no fighter names: the default win still prints", func(t *testing.T) {
+		f := excelize.NewFile()
+		defer f.Close()
+		sheet := helper.SheetPoolMatches
+		f.NewSheet(sheet)
+
+		subs := []state.SubMatchResult{
+			{Position: 1, SideA: "", SideB: "", Winner: "Tora A", Decision: "fusensho"},
+		}
+		writeTeamSubMatchScores(f, sheet, 1, 5, subs, 3, false, "Tora A", "Kenshi B")
+		left, _ := f.GetCellValue(sheet, "B5")
+		assert.Contains(t, left, "Fus.", "the no-show mark must name the winning side")
+		assert.Contains(t, left, "○", "and the default win must still award its maru")
 	})
 }
 
@@ -2485,7 +2506,7 @@ func TestWriteTeamSubMatchScores_OutOfRangePositionSkipped(t *testing.T) {
 		{Position: 3, IpponsA: []string{"K"}},
 		{Position: 9, IpponsA: []string{"D"}}, // corrupted: > teamSize
 	}
-	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, false)
+	writeTeamSubMatchScores(f, sheet, courtStartCol, subStartRow, subs, teamSize, false, "", "")
 
 	// Position 1 -> row 5, Position 3 -> row 7 (both written).
 	v1, _ := f.GetCellValue(sheet, "B5")

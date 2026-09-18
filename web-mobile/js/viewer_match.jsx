@@ -13,7 +13,8 @@
 // unchanged.
 
 import { writeDidNotLand } from './write_result.jsx';
-import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber } from './match_scoreboard.jsx';
+import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber, numberedParts } from './match_scoreboard.jsx';
+import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
@@ -93,11 +94,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // for a mount without bracket.js; production load order rules it out
   // (index.html tags bracket.js before every viewer module).
   const slotName = slotLabel || window.slotDisplayName || ((n) => n);
-  // withNumber prepends the assigned competitor number (e.g. "K1") when the
-  // competition has numberPrefix; team-level sides have no .number so this
-  // degrades to the bare team name.
-  const aName = slotName(withNumber(match.sideA), (match.feeders || [])[0]);
-  const bName = slotName(withNumber(match.sideB), (match.feeders || [])[1]);
+  // withNumber places the assigned competitor number on the outer side (e.g.
+  // "K1 Tanaka" for Shiro, "Yamada K2" for Aka) when the competition has
+  // numberPrefix; team-level sides have no .number so this degrades to the
+  // bare team name. sideA is Aka, sideB is Shiro.
+  const aName = slotName(withNumber(match.sideA, undefined, "aka"), (match.feeders || [])[0]);
+  const bName = slotName(withNumber(match.sideB, undefined, "shiro"), (match.feeders || [])[1]);
   const isRunning = match.status === "running";
   const isDone = match.status === "completed";
 
@@ -226,7 +228,17 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
       <div className="vsched-item__players">
         <div className={`vsched-item__side vsched-item__side--shiro ${bWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Shiro:</span>
-          <span className="n">{withNumber(m.sideB)}</span>
+          {/* Both cells below render NumberedName in `clip` mode rather than
+              withNumber's flat string. `.n` is a nowrap-ellipsis box, and a
+              string puts the number inside the text it ellipsises -- which for
+              AKA, whose number sits last, means the number is what gets eaten
+              (measured: gone at 360px for every name tried). Wrapping in an
+              element is NOT by itself what saves it: `.numbered-name--clip` is
+              an inline-flex box whose TEXT child carries the ellipsis and
+              `min-width: 0`, so the name shrinks inside the flex row and the
+              content never overflows `.n` for its `overflow: hidden` to clip.
+              Shiro is unaffected either way, its number being first. */}
+          <span className="n"><NumberedName side="shiro" clip {...numberedParts(m.sideB, undefined)} /></span>
           {tweaks.showDojo && m.sideB?.dojo ? <span className="d">{m.sideB.dojo}</span> : null}
         </div>
         {/* No score string (pending, or completed with no recorded cells) →
@@ -252,7 +264,7 @@ export const VSchedItem = React.memo(({ m, tweaks, showCompetition, onClick, hig
         )}
         <div className={`vsched-item__side vsched-item__side--aka ${aWin ? "vsched-item__side--w" : ""}`}>
           <span className="sr-only">Aka:</span>
-          <span className="n">{withNumber(m.sideA)}</span>
+          <span className="n"><NumberedName side="aka" clip {...numberedParts(m.sideA, undefined)} /></span>
           {tweaks.showDojo && m.sideA?.dojo ? <span className="d">{m.sideA.dojo}</span> : null}
         </div>
       </div>

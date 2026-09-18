@@ -124,18 +124,19 @@ export function resultSlot(cells) {
 // It lives beside resultSlot because they are one contract seen from two
 // angles: resultSlot says WHICH slot a mark takes, this says WHERE that slot
 // appears. Splitting them is how a mark ends up logically outer and visually
-// inner. All THREE JS pair-builders derive from here: the read-only scoreboard
-// (slotCells), the team editor's live slots (ptSlots), and its read-only
-// done-bout rows (renderReadOnlyBout) — previously spelled `cells.toReversed()`
-// and `[1, 0]` twice. An earlier version of this comment said "both", having
-// missed the third; a `grep -n "\[1, 0\]"` in web-mobile/js is the check.
-//
-// A THIRD expression of this rule exists and is deliberately left alone: the
-// individual score editor mirrors its Aka slots in CSS (`flex-direction:
-// row-reverse`, styles.css). That surface renders its cells in DOM order and
-// flips them in the layout layer, so there is no index to derive; converting it
-// would be a visual refactor of an operator-critical surface for no behavioural
-// gain. If you change the direction here, change that declaration too.
+// inner. All FOUR JS pair-builders derive from here: the read-only scoreboard
+// (slotCells), the team editor's live slots (ptSlots), its read-only
+// done-bout rows (renderReadOnlyBout), and the individual editor's live slots
+// (slotButtons, admin_scoring_individual.jsx), previously spelled
+// `cells.toReversed()` and `[1, 0]` three times, the individual editor's own
+// copy expressed instead as a CSS `flex-direction: row-reverse` mirror
+// (styles.css) rather than an index. That CSS mirror is gone: slotButtons now
+// maps sideSlotOrder like every other consumer, so this function is the rule's
+// only owner and there is no second expression of it to keep in sync. An
+// earlier version of this comment said "both", having missed the team
+// editor's done-bout rows; a `grep -n "\[1, 0\]"` in web-mobile/js is the
+// check (it should find only this file's own array literal and the test that
+// pins it, a hit anywhere else means a new copy has appeared).
 export function sideSlotOrder(side) {
   return side === "aka" ? [1, 0] : [0, 1];
 }
@@ -217,22 +218,25 @@ export const stripHt = (arr) => (arr || []).filter((v) => v !== HANTEI_MARK);
 // id-first. Mirrors Go's internal/domain.AttributeWinnerSide exactly (that
 // function is this one's twin - a divergence between the two is a bug, not a
 // style choice):
-//   - when winnerId, sideAId AND sideBId are ALL non-empty, ids are
-//     AUTHORITATIVE and win over names when they disagree: winnerId ===
-//     sideAId -> "a", winnerId === sideBId -> "b", matches neither -> null
-//     (unattributable - do NOT fall back to names in this branch: a
-//     same-name/different-dojo pair is exactly the case ids exist to
+//   - when the winner id equals the id a side CARRIES, that side is named,
+//     even if the other side carries none: ids are AUTHORITATIVE and win over
+//     names wherever the two disagree (winnerId === sideAId -> "a",
+//     winnerId === sideBId -> "b"). Do NOT fall back to names in this branch:
+//     a same-name/different-dojo pair is exactly the case ids exist to
 //     disambiguate, so a name fallback here would silently reintroduce the
-//     bug this function fixes).
-//   - otherwise (any id missing - legacy data, id-less payloads, sub-bout
-//     rows that carry no ids at all) fall back to the name comparison this
+//     bug this function fixes.
+//   - with BOTH side ids known and the winner id matching neither, the row is
+//     unattributable (null) and names get no say.
+//   - otherwise (no winner id, or no side id to compare it against - legacy
+//     data, id-less payloads) fall back to the name comparison this
 //     file has always used: an empty winner name is unattributable, then
 //     sideA-first when the winner name matches BOTH sides (CLAUDE.md's
 //     documented defensive AKA/sideA-first convention), so id-less data
 //     stays byte-identical to before this function existed.
 // The id branch is checked FIRST and unconditionally - it does not require a
-// non-empty winner NAME, only a non-empty winnerId matching all three ids'
-// presence. This mirrors Go's ordering exactly (AttributeWinnerSide checks
+// non-empty winner NAME, and it decides on ONE side's id: a winner id equal to
+// the id a side carries names that side even when the other carries none
+// (bc-dnst, a fighter fielded by number against a typed substitute). This mirrors Go's ordering exactly (AttributeWinnerSide checks
 // the id triple before its `winner == ""` guard, which belongs to the name
 // fallback only); do not hoist an empty-winner-name guard above the id
 // branch, which would silently disagree with the Go twin whenever a caller
@@ -263,10 +267,15 @@ export function subBoutAttribution(sub) {
 }
 
 export function attributeWinnerSide({ winnerId, sideAId, sideBId, winner, sideA, sideB } = {}) {
-  if (winnerId && sideAId && sideBId) {
-    if (winnerId === sideAId) return "a";
-    if (winnerId === sideBId) return "b";
-    return null;
+  // Mirror of domain.AttributeWinnerSide: a winner id equal to a side's id
+  // names that side even when the other side has no id (bc-dnst, a fighter
+  // fielded by number against a typed substitute); with BOTH side ids known
+  // and neither matching, the row is unattributable and names do not get a
+  // say.
+  if (winnerId) {
+    if (sideAId && winnerId === sideAId) return "a";
+    if (sideBId && winnerId === sideBId) return "b";
+    if (sideAId && sideBId) return null;
   }
   if (!winner) return null;
   if (winner === sideA) return "a";

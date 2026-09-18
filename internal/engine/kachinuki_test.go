@@ -3625,3 +3625,243 @@ func TestDeriveKachinukiWinner_SameNameDecidingBout(t *testing.T) {
 		assert.Equal(t, "Kaze", r.Winner)
 	})
 }
+
+// TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID pins the bc-dnst
+// rule that a fighter picked by squad number before being named stays on
+// like any other: the client records such a winner as the TEAM name (there
+// is no fighter name to record) alongside the member id, and the advance
+// attributes the bout by id through the shared owner rather than by a name
+// comparison that could never match.
+func TestAdvanceKachinuki_NamelessWinnerStaysOnByMemberID(t *testing.T) {
+	bout := state.SubMatchResult{
+		Position:       2,
+		SideA:          "Aoki",
+		SideAMemberID:  "id-aoki",
+		SideB:          "",
+		SideBMemberID:  "id-b2",
+		Winner:         "Minami Budokan",
+		WinnerMemberID: "id-b2",
+		Decision:       "fought",
+	}
+	res := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: bout,
+		SideA:    []kachinukiFighter{{Name: "", MemberID: "id-a2"}, {Name: "", MemberID: "id-a3"}},
+		SideB:    []kachinukiFighter{{Name: "", MemberID: "id-b3"}},
+	})
+	require.NotNil(t, res.Next, "the nameless winner must stay on and be paired against side A's next fighter")
+	assert.Equal(t, 3, res.Next.Position)
+	assert.Equal(t, "id-a2", res.Next.SideAMemberID, "side A sends its next fighter, by id")
+	assert.Equal(t, "id-b2", res.Next.SideBMemberID, "the winner keeps its side and its id")
+	assert.False(t, res.MatchEnded)
+}
+
+// TestAdvanceKachinuki_SameNameNoIDsStillAdvances pins the residue the advance
+// keeps in step with RetiredPlayersFromBoutLog (bc-dnst): two opposing
+// fighters sharing a display name on a row with no member ids cannot be
+// settled by the shared attribution owner, and the retired-set derivation
+// has already retired the loser by name (side A first), so the advance
+// answers the same way rather than leaving a retired fighter with no next
+// pairing.
+func TestAdvanceKachinuki_SameNameNoIDsStillAdvances(t *testing.T) {
+	bout := state.SubMatchResult{Position: 1, SideA: "Sato", SideB: "Sato", Winner: "Sato", Decision: "fought"}
+	res := AdvanceKachinuki(AdvanceKachinukiInput{
+		LastBout: bout,
+		SideA:    []kachinukiFighter{{Name: "A-Jiho"}},
+		SideB:    []kachinukiFighter{{Name: "B-Jiho"}},
+	})
+	require.NotNil(t, res.Next, "the same-name row must still produce a pairing")
+	assert.Equal(t, "Sato", res.Next.SideA, "side A's Sato stays on, the aka-first residue")
+	assert.Equal(t, "B-Jiho", res.Next.SideB)
+}
+
+// TestRetiredMemberSet_CountIncludesNamelessFighters pins that the elimination
+// tally counts a fighter retired under an id and an empty name (fielded by
+// squad number before being named, bc-dnst) exactly like a named one.
+func TestRetiredMemberSet_CountIncludesNamelessFighters(t *testing.T) {
+	log := []state.SubMatchResult{
+		{Position: 1, SideA: "", SideAMemberID: "a1", SideB: "", SideBMemberID: "b1", Winner: "Team A", WinnerMemberID: "a1", Decision: "fought"},
+		{Position: 2, SideA: "", SideAMemberID: "a1", SideB: "Tanaka", SideBMemberID: "b2", Winner: "Tanaka", WinnerMemberID: "b2", Decision: "fought"},
+		{Position: 3, SideA: "Legacy", SideB: "Tanaka", SideBMemberID: "b2", Winner: "Tanaka", Decision: "fought"},
+	}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
+	assert.Equal(t, 2, retiredA.Count(), "a1 (nameless, by id) and Legacy (name only)")
+	assert.Equal(t, 1, retiredB.Count(), "b1 (nameless, by id)")
+	assert.Equal(t, 1, len(retiredA.Names), "the name set alone would have missed a1")
+}
+
+// TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody pins that a
+// pending pairing whose side is a fighter fielded by squad number and not yet
+// named (empty name, member id, no outcome) retires nobody: the name fallback
+// used to match the empty Winner against that empty side name and retire the
+// opponent before the bout was fought.
+func TestRetiredPlayersFromBoutLog_PendingNamelessRowRetiresNobody(t *testing.T) {
+	log := []state.SubMatchResult{
+		{Position: 4, SideA: "", SideAMemberID: "a3", SideB: "Tanaka", SideBMemberID: "b2"},
+	}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(log, "Team A", "Team B")
+	assert.Equal(t, 0, retiredA.Count())
+	assert.Equal(t, 0, retiredB.Count(), "Tanaka must not be retired by a bout nobody has scored")
+}
+
+// One fighter recorded BOTH with and without a member id is ONE elimination.
+//
+// retire() files an id-carrying retirement under IDs and an id-less one under
+// nameOnly, and the naive len(IDs)+len(nameOnly) counted such a fighter twice.
+// tallyKachinukiEliminations feeds that straight into the exported Kachinuki
+// Detail sheet, so a team that lost one fighter was reported as having lost
+// two. Reachable by reopening an encounter and re-scoring a bout through a
+// path that omits the member id while the original row still carries it.
+func TestRetiredMemberSet_CountsOneFighterOnceAcrossMixedRows(t *testing.T) {
+	boutLog := []state.SubMatchResult{
+		// Kenji loses carrying his member id.
+		{Position: 1, SideA: "Kenji", SideAMemberID: "m7", SideB: "Taro", SideBMemberID: "m9",
+			Winner: "Taro", WinnerMemberID: "m9"},
+		// The SAME fighter loses again on a row that lost its id.
+		{Position: 2, SideA: "Kenji", SideB: "Goro", SideBMemberID: "m11",
+			Winner: "Goro", WinnerMemberID: "m11"},
+	}
+	retiredA, retiredB := RetiredPlayersFromBoutLog(boutLog, "TeamA", "TeamB")
+
+	assert.Equal(t, 1, retiredA.Count(), "one fighter, recorded two ways, is one elimination")
+	assert.Equal(t, 0, retiredB.Count(), "the other side lost nobody")
+
+	// Both buckets really are populated, so the test is exercising the
+	// dedup rather than a shape where only one of them was ever filled.
+	assert.Contains(t, retiredA.IDs, "m7")
+	assert.Contains(t, retiredA.nameOnly, "Kenji")
+
+	// A genuinely different id-less fighter still counts on top.
+	boutLog = append(boutLog, state.SubMatchResult{
+		Position: 3, SideA: "Hiro", SideB: "Ken", SideBMemberID: "m12",
+		Winner: "Ken", WinnerMemberID: "m12",
+	})
+	retiredA, _ = RetiredPlayersFromBoutLog(boutLog, "TeamA", "TeamB")
+	assert.Equal(t, 2, retiredA.Count(), "a second, distinct id-less fighter is its own elimination")
+}
+
+// The BOUT-LOG-ONLY roster branch (no saved lineup) must consult the same
+// name-ambiguity context the lineup branch does.
+//
+// It used to filter one fighter at a time with a hardcoded nil ambiguity set,
+// so the name tier fired for a fighter whose OWN member id proves they have
+// not retired: with two teammates sharing a display name, the one who lost
+// retired the one who did not, and that fighter was never fielded. The lineup
+// branch has always guarded this by passing a real set, which is why the fix
+// is to route this branch through the SAME shared filter.
+func TestKachinukiRemainingRoster_BoutLogBranchKeepsANamesakeWithADistinctID(t *testing.T) {
+	eng, store, comp := setupKachinukiComp(t, "kachinuki-namesake-boutlog", 3, func(c *state.Competition) {
+		c.Format = state.CompFormatMixed
+	})
+	require.NoError(t, store.SaveParticipants(comp.ID, []domain.Player{
+		{ID: helper.NewUUID4(), Name: "Ryu", Dojo: "DojoR"},
+		{ID: helper.NewUUID4(), Name: "Tora", Dojo: "DojoT"},
+	}))
+	// Deliberately NO lineup saved: that is what selects the branch under test.
+
+	parent := &state.MatchResult{
+		ID: "P1-0", SideA: "Ryu", SideB: "Tora",
+		SubResults: []state.SubMatchResult{
+			// Two teammates share the display name "Tanaka" with distinct ids,
+			// a roster shape that predates the within-team uniqueness rule.
+			{Position: 1, SideA: "Tanaka", SideAMemberID: "m1", SideB: "Taro", SideBMemberID: "m9",
+				Winner: "Taro", WinnerMemberID: "m9"},
+			{Position: 2, SideA: "Tanaka", SideAMemberID: "m2", SideB: "Taro", SideBMemberID: "m9"},
+		},
+	}
+
+	// The third return is "a lineup resolved it", which is false here by
+	// construction; the roster itself is what this pins.
+	remainingA, _, _ := eng.kachinukiRemainingRoster(comp.ID, "P1-0", comp, parent, 0)
+
+	ids := make([]string, 0, len(remainingA))
+	for _, f := range remainingA {
+		ids = append(ids, f.MemberID)
+	}
+	assert.NotContains(t, ids, "m1", "the fighter who actually lost is retired, by id")
+	assert.Contains(t, ids, "m2",
+		"the namesake with a DIFFERENT id has not retired and must still be fielded")
+}
+
+// TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber pins the
+// identity guard's widening from two names to names-OR-member-ids.
+//
+// Before bc-dnst the guard refused whenever both side NAMES were empty. A
+// fresh team's squad slots are numbered and unnamed by design, so two such
+// slots can legitimately meet: the row then carries member ids and no names
+// at all, and the old condition read that as "no side identity" and stopped
+// the encounter dead, mid-sequence, with nothing appended.
+//
+// Reverting the guard to the two-name form left the ENTIRE repo green, which
+// is how this gap was found: no test fought a bout by number alone. The
+// assertions are `changed` AND the appended pairing: a refusal and an
+// exhausted roster both report changed=false, so `changed` alone distinguishes
+// the guard from nothing else -- it is the pairing that proves the roster was
+// actually consulted, and that the winner stayed on.
+func TestMaybeAdvanceKachinuki_AdvancesOffABoutFoughtEntirelyByNumber(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "advance-by-number"
+
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID:            compID,
+		TeamMatchType: state.TeamMatchTypeKachinuki,
+		TeamSize:      3,
+	}))
+	// Both teams field blank numbered slots: ids present, names absent.
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "RedTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "",
+			domain.PositionNumbered(2): "",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): "red-1",
+			domain.PositionNumbered(2): "red-2",
+		},
+	}, 3))
+	require.NoError(t, store.SetTeamLineup(compID, domain.TeamLineup{
+		TeamID: "WhiteTeam", Round: 0,
+		Positions: map[domain.Position]string{
+			domain.PositionNumbered(1): "",
+			domain.PositionNumbered(2): "",
+		},
+		MemberIDs: map[domain.Position]string{
+			domain.PositionNumbered(1): "white-1",
+			domain.PositionNumbered(2): "white-2",
+		},
+	}, 3))
+
+	// The only bout: red-1 beats white-1, both fielded by number. Neither
+	// side carries a NAME, which is precisely what the old guard refused.
+	require.NoError(t, store.SavePoolMatches(compID, []state.MatchResult{
+		{
+			ID:    "P1-0",
+			SideA: "RedTeam",
+			SideB: "WhiteTeam",
+			SubResults: []state.SubMatchResult{
+				{
+					Position:       1,
+					SideA:          "",
+					SideB:          "",
+					SideAMemberID:  "red-1",
+					SideBMemberID:  "white-1",
+					WinnerMemberID: "red-1",
+					Winner:         "RedTeam",
+					Decision:       "fought",
+				},
+			},
+		},
+	}))
+
+	changed, postLog, err := eng.MaybeAdvanceKachinuki(compID, "P1-0")
+	require.NoError(t, err)
+	require.True(t, changed,
+		"a bout fought entirely by squad number identifies both sides through their member ids; the encounter must keep advancing")
+	require.Len(t, postLog, 2, "the next pairing is appended after the scored bout")
+	assert.Equal(t, 2, postLog[1].Position, "the appended row is bout 2")
+	// WHO is paired matters as much as that a row appeared: red-1 won and must
+	// stay on, white-2 is the next unretired White member. Asserting only the
+	// position would pass for an append that paired the wrong two fighters,
+	// which is the failure winner-stays-on exists to prevent.
+	assert.Equal(t, "red-1", postLog[1].SideAMemberID, "the winner stays on, by id")
+	assert.Equal(t, "white-2", postLog[1].SideBMemberID, "the next White member comes in, by id")
+}

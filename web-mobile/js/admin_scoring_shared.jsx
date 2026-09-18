@@ -234,6 +234,9 @@ function TermAS(props) {
 
 // Lazily loaded from window for the same load-order reason as TermAS above.
 // Falls back to null: the icon is purely decorative; no content to preserve.
+// No align prop: the tooltip now self-positions (Term in glossary.jsx
+// measures its room on open and flips leftwards itself), so no call site
+// needs to say where in a wrapping row its hint landed.
 function GlossaryHintAS({ name }) {
   if (typeof window !== 'undefined' && window.GlossaryHint) {
     return React.createElement(window.GlossaryHint, { name });
@@ -806,26 +809,38 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   );
 }
 
+// sideName: the human-readable side name for a "shiro"/"aka" colour key, for
+// the header badges and aria-labels of both editors.
+function sideName(color) {
+  return color === "shiro" ? "Shiro" : "Aka";
+}
+
 // Reusable foul counter: independent +/- buttons per side with clear labeling.
 // The `+` button delegates to `onIncrement` which applies the
 // applyFoulIncrement rule (auto-award H + reset at the 2-foul boundary);
 // `setFouls` is kept for the `−` button (simple decrement). After the
 // 2-foul auto-award the awarded H lives in the opponent's pts array, so
 // the counter shows only "outstanding fouls not yet discharged."
-function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
+function FoulCounter({ fouls, setFouls, onIncrement, color, disabled }) {
   // color is "shiro" or "aka": surface as data-testid so Playwright probes
   // (T023a) can target each side without depending on the className.
-  // `disabled` freezes the `+` button when the bout is already decided: 
+  // `disabled` freezes the `+` button when the bout is already decided:
   // a 2nd-foul auto-award in that state would create an invalid 2-2.
+  // In the individual editor the two counters sit BELOW the board in
+  // .sb-fouls, left = Shiro, right = Aka (the app-wide column convention),
+  // with the Aka box tinted. The visible label names no side (it is
+  // conveyed by position and tint alone, matching the bout rows above), so
+  // "Fouls" stays unprefixed; the aria-labels below carry the side for
+  // assistive tech.
   return (
     <div className={`foul-counter foul-counter--${color}`} data-testid={`scoring-modal-hansoku-${color}`}>
-      <div className="foul-counter__label">{label} Fouls</div>
+      <div className="foul-counter__label">Fouls</div>
       <div className="foul-counter__controls">
-        <button type="button" className="foul-counter__btn foul-counter__btn--dec" onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--dec" aria-label={`Remove a ${sideName(color)} foul`} onClick={() => setFouls(Math.max(0, fouls - 1))} disabled={fouls === 0}>−</button>
         <div className="foul-counter__count">
           <span className={`foul-counter__num ${fouls >= 1 ? "foul-counter__num--warn" : ""}`}>{fouls}</span>
         </div>
-        <button type="button" className="foul-counter__btn foul-counter__btn--inc" onClick={onIncrement} disabled={disabled}>+</button>
+        <button type="button" className="foul-counter__btn foul-counter__btn--inc" aria-label={`Add a ${sideName(color)} foul`} onClick={onIncrement} disabled={disabled}>+</button>
       </div>
     </div>
   );
@@ -837,7 +852,22 @@ function FoulCounter({ label, fouls, setFouls, onIncrement, color, disabled }) {
 // ADDED as-is via the "+ Add …" row: the lineup stores a free name string,
 // which is what an operator needs when entering a late substitute while bouts
 // are running. The × clears the slot. Keyboard: ↑/↓ move, Enter picks, Esc closes.
-function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }) {
+//
+// roster entries are either plain name strings (admin_schedule_lineup.jsx's
+// suggestion list) or squad-member objects `{ id, index, name, label }`
+// (admin_scoring_team.jsx's rosterForSide, bc-dnst: the row's list must show
+// every numbered slot the team can field, blank ones included, so the
+// operator can pick a number and name it). Both shapes are normalised to
+// `{ name, label, isObject }` once up front; isObject is what a plain
+// string entry never gets, so it alone decides whether the dropdown row
+// renders a number chip. Picking an object entry threads the WHOLE entry
+// through onSelect as a second argument (`onSelect(name, entry)`); a plain
+// string match, the "+ Add" row, and a typed-query commit call onSelect
+// with the name alone, exactly as before.
+// `clearable` (bc-dnst): show the clear button even with an empty value, for a
+// host whose position is occupied by a picked squad slot that has no name yet
+// (the Up Next lineup panel); without it a nameless placement had no way out.
+function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color, clearable }) {
   const [query, setQuery] = useStateA("");
   const [open, setOpen] = useStateA(false);
   const [active, setActive] = useStateA(-1); // -1 = no explicit selection yet
@@ -847,8 +877,31 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
   const skipBlurRef = useRefA(false);
   const q = query.trim();
   const ql = q.toLowerCase();
-  const matches = (roster || []).filter(n => !ql || n.toLowerCase().includes(ql)).slice(0, 12);
-  const exact = (roster || []).some(n => n.toLowerCase() === ql);
+  // `raw` keeps the ORIGINAL roster item (unmodified: no isObject marker,
+  // no spread copy) so a caller picking an object entry gets back exactly
+  // what it put into `roster`, never an internal-shape lookalike.
+  const entries = (roster || []).map(r =>
+    typeof r === "string"
+      ? { name: r, label: "", isObject: false, raw: r }
+      : { name: r?.name || "", label: r?.label || "", isObject: true, raw: r }
+  );
+  const matches = entries.filter(e => {
+    if (!ql) return true;
+    const nameHit = (e.name || "").toLowerCase().includes(ql);
+    const labelHit = (e.label || "").toLowerCase().includes(ql);
+    return nameHit || labelHit;
+  });
+  // Capped only while FILTERING. With no query the operator is BROWSING this
+  // team's own numbered slots, and every one has to be reachable: the list
+  // grew from "the team's named members" to every seeded slot (team size plus
+  // two reserves, bc-dnst) plus any assigned-name tail, so a flat cap of 12
+  // silently hid the highest slots on an 11-person team -- exactly the reserve
+  // slots the +2 exists to expose, and the operator could only reach them by
+  // guessing that typing narrows the list. The dropdown scrolls, so showing
+  // the whole of a team's own roster costs nothing; a QUERY can still match
+  // the long legacy tail, which is what the cap is for.
+  if (ql) matches.splice(12);
+  const exact = entries.some(e => (e.name || "").toLowerCase() === ql);
   const canAddNew = q.length > 0 && !exact;
   const optionCount = matches.length + (canAddNew ? 1 : 0);
 
@@ -866,7 +919,25 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
     }
   }, open);
 
-  const commit = (name) => { onSelect(name); setOpen(false); setQuery(""); setActive(-1); };
+  // commit's optional second argument is the matched roster entry (when the
+  // commit came from picking one). It is called with ONE argument (never a
+  // trailing explicit `undefined`) for the "+ Add" row, a typed-query
+  // commit, and the clear button -- calling onSelect(name, undefined)
+  // there instead would change every existing single-arg
+  // `onSelect(name)`/`toHaveBeenCalledWith(name)` consumer's call shape
+  // (Vitest's toHaveBeenCalledWith does not ignore a trailing explicit
+  // undefined), so this stays a real arity difference, not a value one.
+  const commit = (name, entry) => {
+    if (entry !== undefined) onSelect(name, entry);
+    else onSelect(name);
+    setOpen(false); setQuery(""); setActive(-1);
+  };
+  // A string-origin entry commits exactly like a plain string always did
+  // (ONE argument); an object entry threads its ORIGINAL raw value back as
+  // onSelect's second argument.
+  const commitEntry = (entry) => (
+    entry.isObject ? commit(entry.name || "", entry.raw) : commit(entry.name)
+  );
   const onKeyDown = (e) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -883,7 +954,7 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
       // Commit only on an explicit choice: a navigated list row, the add-row,
       // or a typed query. A bare focus + Enter (active === -1, empty query)
       // must NOT overwrite the current slot.
-      if (active >= 0 && active < matches.length) commit(matches[active]);
+      if (active >= 0 && active < matches.length) commitEntry(matches[active]);
       else if (active === matches.length && canAddNew) commit(q);
       else if (q) commit(q);
     } else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQuery(""); }
@@ -915,18 +986,25 @@ function LineupNameInput({ value, roster, onSelect, disabled, ariaLabel, color }
             else if (open) { setOpen(false); setQuery(""); }
           }}
         />
-        {value && !disabled && (
+        {(value || clearable) && !disabled && (
           <button type="button" className="lineup-name__clear" title="Clear player" aria-label="Clear player"
             onMouseDown={(e) => { e.preventDefault(); commit(""); }}>×</button>
         )}
       </div>
       {open && optionCount > 0 && (
         <div className="pmf__dropdown lineup-name__dropdown">
-          {matches.map((n, i) => (
-            <button type="button" key={n}
+          {matches.map((entry, i) => (
+            <button type="button" key={entry.isObject ? (entry.raw?.id || entry.raw?.index) : entry.name}
               className={`pmf__option ${i === active ? "pmf__option--active" : ""}`}
-              onMouseDown={(e) => { e.preventDefault(); commit(n); }}>
-              <span className="pmf__opt-name">{n}</span>
+              onMouseDown={(e) => { e.preventDefault(); commitEntry(entry); }}>
+              {entry.isObject ? (
+                <>
+                  <span className="pmf__opt-label">{entry.label}</span>
+                  <span className={`pmf__opt-name${entry.name ? "" : " pmf__opt-name--blank"}`}>{entry.name || "no name yet"}</span>
+                </>
+              ) : (
+                <span className="pmf__opt-name">{entry.name}</span>
+              )}
             </button>
           ))}
           {canAddNew && (
@@ -1113,6 +1191,7 @@ function useAdoptFromServer({ signature, apply, keepLocalEdits = false, isDirty 
 // subset, so `import { … } from './admin_scoring_modal.jsx'` keeps working.
 export {
   MAX_IPPONS_PER_SIDE,
+  sideName,
   isBoutDecided,
   getIpponButtons,
   getValidPointKeys,

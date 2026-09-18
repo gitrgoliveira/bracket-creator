@@ -80,8 +80,8 @@ describe('formatIpponsScore', () => {
   });
 
   describe('SHIRO-left / AKA-right display contract', () => {
-    // The Scores-edit list, VSchedItem, PoolMatchRow, MatchDetailCard, and TWMatch all
-    // display SHIRO on the left and AKA on the right, so they call
+    // The Scores-edit list, VSchedItem, PoolNumberedMatchRow, MatchDetailCard, and
+    // TWMatch all display SHIRO on the left and AKA on the right, so they call
     // formatIpponsScore(ipponsB, ipponsA, ...).
     //
     // These tests document and enforce that convention so a future refactor

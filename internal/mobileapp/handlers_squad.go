@@ -1,5 +1,5 @@
 // Package mobileapp, handlers_squad.go owns the
-// `/api/competitions/:id/squads` and
+// `/api/competitions/:id/team-members` and
 // `/api/competitions/:id/teams/:tid/members[/:memberId]` endpoints
 // (bc-tmid pass 1; DELETE added bc-pnum): a team's squad, the people on it,
 // kept in its own per-competition store (internal/state/squad.go) rather
@@ -13,15 +13,25 @@
 // management is organiser setup, not operational play, the same class as
 // team lineup PUT/DELETE.
 //
-// Deliberately NO SSE broadcast, unlike the lineup handlers next door which
-// fire EventLineupUpdated on every mutation. The consequence is real and
-// accepted: a member added or renamed on one device is invisible to a second
-// admin session already sitting in the lineup editor until it remounts.
-// Squad edits are setup done by one organiser, not the concurrent
-// multi-device traffic the lineup broadcast exists for, and adding an event
-// means a new wire event plus a subscriber on every squad reader. Stated
-// here because the omission otherwise reads as an oversight next to a
-// sibling that does broadcast.
+// ADD is deliberately silent; RENAME and CLEAR are not, and the split is the
+// point. The original rule was that squad edits are setup done by one
+// organiser, not the concurrent multi-device traffic the lineup broadcast
+// exists for, so a member added on one device is invisible to a second admin
+// session until it remounts. That consequence is still accepted for ADD.
+//
+// Rename and clear outgrew it. They now rewrite lineups.yaml as well
+// (state.renameMemberInLineupsLocked), because a lineup position stores a
+// display copy of the member's name that the score sheet and the export read.
+// Every other writer of that file fires EventLineupUpdated, and without it the
+// failure is not staleness but LOSS: a second admin holding a pre-rename
+// lineup makes any unrelated inline pick, its write spreads the whole stale
+// positions map, and the operator's correction is reverted on disk. So these
+// two fire the EXISTING lineup event rather than a new squad one, which is why
+// no squad reader needs a new subscriber.
+//
+// They fire it unconditionally, without asking whether a position actually
+// changed. A spurious refetch costs one request; a missed one costs the
+// rename. Same safe direction bumpFileVersion takes in the store.
 //
 // The public surfaces do not call these routes at all: the viewer, the
 // court display and the streaming overlay read a team's squad from the
@@ -54,8 +64,8 @@ type SquadMemberRequest struct {
 // a 404 instead of a confusing 500 from a write that can never land (the
 // per-competition directory does not exist to write into); mirrors
 // handlers_lineup.go's own comp == nil check.
-func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore) {
-	r.GET("/competitions/:id/squads", func(c *gin.Context) {
+func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps CompetitionStore, hub Broadcaster) {
+	r.GET("/competitions/:id/team-members", func(c *gin.Context) {
 		compID, ok := requireValidCompID(c)
 		if !ok {
 			return
@@ -68,7 +78,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			internalError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"squads": squads})
+		c.JSON(http.StatusOK, gin.H{"teamMembers": squads})
 	})
 
 	r.POST("/competitions/:id/teams/:tid/members", func(c *gin.Context) {
@@ -123,6 +133,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		c.Status(http.StatusNoContent)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 
 	// DELETE is the operator's "removal": it clears the member's Name back
@@ -150,6 +161,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 			return
 		}
 		c.Status(http.StatusNoContent)
+		hub.Broadcast(EventLineupUpdated, gin.H{"competitionId": compID})
 	})
 }
 
@@ -158,7 +170,7 @@ func RegisterSquadHandlers(r *gin.RouterGroup, store SquadStore, comps Competiti
 // requireValidCompID (format only), so this is the existence check that
 // turns a bad id into "competition not found" instead of falling through to
 // a store write that would fail with a bare, unmappable I/O error (no
-// competition directory to write squads.yaml into).
+// competition directory to write team-members.yaml into).
 func requireExistingCompetitionForSquad(c *gin.Context, comps CompetitionStore, compID string) bool {
 	comp, err := comps.LoadCompetition(compID)
 	if err != nil {

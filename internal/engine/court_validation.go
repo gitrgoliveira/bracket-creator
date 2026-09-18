@@ -17,19 +17,31 @@ func SuggestedMaxCourts(numPlayers int) int {
 }
 
 // ValidateCourtCount checks if numCourts is valid for a single-pool
-// competition with numPlayers players.
+// competition with numPlayers entrants.
 //
-// Returns error if numCourts > floor(numPlayers/2): courts would sit
-// idle because there are not enough players to fill a round.
+// Returns error if numCourts > floor(numPlayers/2): shiaijo would sit
+// idle because there are not enough entrants to fill a round.
+//
+// This is NOT the 16-shiaijo hard cap (helper.MaxCourts) nor the
+// power-of-two allocation rule (ValidateCompetitionShiaijoCount). It is the
+// far smaller cap the ENTRY COUNT imposes: two entrants make one bout, so a
+// second shiaijo has nothing to run. The message says so, because "too many
+// courts" against a documented limit of 16 reads as a contradiction to an
+// operator who has allocated two (bc-dnst).
+//
+// A *ValidationError, so the draw handlers answer 400 with this sentence
+// through respondEngineError rather than a bare 500 that tells the operator
+// nothing. It is the operator's allocation that is wrong, and it is fixable
+// by them, which is exactly what that type means.
 //
 // The warning case (numCourts == floor(N/2), no rest between fights) is
 // handled exclusively by the frontend, see admin_competition.jsx.
 func ValidateCourtCount(numPlayers, numCourts int) error {
 	hardCap := max(1, numPlayers/2)
 	if numCourts > hardCap {
-		return fmt.Errorf(
-			"too many courts: %d courts for %d players exceeds maximum of %d (floor(N/2)); extra courts would sit idle",
-			numCourts, numPlayers, hardCap,
+		return validationErrorf(
+			"too many courts for the entry: %d shiaijo but only %d bout%s can run at once with %d entrants, so the rest would sit idle; give this competition at most %d",
+			numCourts, hardCap, helper.Plural(hardCap), numPlayers, hardCap,
 		)
 	}
 	return nil

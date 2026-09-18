@@ -108,7 +108,7 @@ function normalizeViewerCompItem(item) {
         // StreamingOverlay (which consume this normalized shape via
         // tournament.competitions, app.jsx's `t.competitions = comps`) could
         // never see the squads the aggregate/court-feed payload now carries.
-        squads: item.squads,
+        squads: item.teamMembers,
         players: (c.players || []).map(normalizePlayer),
     });
 }
@@ -2894,20 +2894,20 @@ const API = {
         return true;
     },
     // bc-tmid pass 3: a team's squad, the actual people on it, lives in its
-    // own per-competition store (squads.yaml), keyed by the team's
+    // own per-competition store (team-members.yaml), keyed by the team's
     // participant id -- see internal/state/squad.go. Returns the whole
     // map ({ teamId: [{id, index, name}, …] }) since the lineup editor
     // needs its own team's list, not one member at a time.
     async fetchSquads(compID, password) {
-        const res = await fetch(`/api/competitions/${compID}/squads`, {
+        const res = await fetch(`/api/competitions/${compID}/team-members`, {
             headers: password ? { 'X-Tournament-Password': password } : {}
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to load squads");
+            throw new Error(err.error || "Failed to load team members");
         }
         const data = await res.json();
-        return data.squads || {};
+        return data.teamMembers || {};
     },
     // Mints the new member's id and display index server-side in one step
     // (operator ruling: assigned automatically as members are added) and

@@ -1178,12 +1178,31 @@ function App() {
             }
             jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "lineup_updated") {
-            // A team lineup was saved or deleted by an operator. The lineup
-            // data is not part of the competition object, so patchCompetitionData
-            // / setSelectedCompData won't help: instead we dispatch a window
-            // CustomEvent that useTeamLineups hooks can subscribe to directly
-            // (same pattern as competitor-status-updated in patch.jsx).
+            // A team lineup was saved or deleted by an operator. The lineup data
+            // is not part of the competition object, so patchCompetitionData /
+            // setSelectedCompData won't help: instead we dispatch a window
+            // CustomEvent that useTeamLineups hooks subscribe to directly (same
+            // pattern as competitor-status-updated in patch.jsx).
             window.dispatchEvent(new CustomEvent("lineup-updated", { detail: event.data }));
+            // The refresh below is for a DIFFERENT writer of this same event.
+            // RenameTeamMember / ClearTeamMemberName (handlers_squad.go) fire
+            // lineup_updated too, and those DO change the competition object:
+            // the aggregate carries the team-members map resolveBoutSideDisplayName
+            // reads to name an ALREADY-FOUGHT kachinuki bout row. Of the branches
+            // carrying such a change this was the only one that never refreshed,
+            // so the map kept the spelling the first load captured and the TV
+            // board and OBS overlay showed the pre-rename name (squadsSig in
+            // match_scoreboard.jsx exists to follow it, and can only fire once
+            // something refetches). Fixed-order rows never showed the bug: their
+            // names come from the lineup the CustomEvent already refreshes, which
+            // is exactly what makes this line look redundant -- it is not.
+            //
+            // NOT PINNED BY ANY TEST, deliberately recorded: nothing mounts App,
+            // so deleting this line reddens nothing. Extracting it into a helper
+            // was tried (f901b891 + 0ae7ed25) and reverted -- the helper's own
+            // test passed while the CALL SITE stayed mutable to a no-op, so it
+            // bought indirection and a swallowed-TypeError path, not coverage.
+            jitteredTimeout(maybeLoad, listJitter);
         } else if (event.type === "announcement") {
             // Payload is now the full list snapshot.
             const list = Array.isArray(event.data) ? event.data : [];

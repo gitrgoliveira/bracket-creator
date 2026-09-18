@@ -253,7 +253,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// surfaces". Same gate as the detail endpoint above (isTeamComp,
 	// buildViewerCompetitionPayload's caller for GET /competitions/:id):
 	// Kind == "team" || TeamSize > 0, so an individual competition never
-	// attempts a squads.yaml read at all. This matters MORE here than on
+	// attempts a team-members.yaml read at all. This matters MORE here than on
 	// the detail endpoint: this function runs once per competition in the
 	// tournament (buildViewerCompetitionPayloads' safeGo fan-out) on the
 	// aggregate GET /competitions and the court feed GET /court/:court/matches,
@@ -342,11 +342,11 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// file on every call but only re-parses when it actually changed), so
 	// gating this on isTeamComp keeps the added cost, for a team
 	// competition, at one extra stat (a cache hit on every poll where
-	// squads.yaml hasn't changed) -- the same class of cost the three
+	// team-members.yaml hasn't changed) -- the same class of cost the three
 	// sibling reads already pay here, not a new per-broadcast full read.
 	// Tolerant like the detail endpoint's own squad read: a squad label is
 	// enrichment (drives no scoring/standings/bracket advancement), so a
-	// broken squads.yaml degrades to no labels rather than dropping the
+	// broken team-members.yaml degrades to no labels rather than dropping the
 	// competition from the board, and a missing file is not an error at
 	// all (state.LoadSquads' own contract).
 	var squads map[string][]domain.TeamMember
@@ -380,7 +380,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 		"poolMatches": poolMatches,
 		"bracket":     bracket,
 	}
-	// SAME shape and SAME gate as the detail endpoint's own "squads" key
+	// SAME shape and SAME gate as the detail endpoint's own "teamMembers" key
 	// (GET /api/viewer/competitions/:id, above): present only for a team
 	// competition, keyed by the team's participant id, matching the admin
 	// endpoint's shape. Deliberately identical rather than a leaner variant
@@ -391,7 +391,7 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// the detail endpoint, so this is the shape those two surfaces
 	// actually see.
 	if isTeamComp {
-		payload["squads"] = squads
+		payload["teamMembers"] = squads
 	}
 	// Both loads above already SWALLOW their error into a log and carry on with
 	// whatever they got, which is right -- one unreadable file must not blank a
@@ -607,7 +607,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// rest of the codebase uses (Kind == "team" || TeamSize > 0, e.g.
 			// Competition.IsKachinuki's own condition and the JS twin in
 			// admin_schedule_lineup.jsx) so an individual competition never
-			// attempts a squads.yaml read at all: this is a hot path (every
+			// attempts a team-members.yaml read at all: this is a hot path (every
 			// viewer/TV/streaming-overlay poll), and a file that can only
 			// ever be empty for this shape of competition is not worth a
 			// stat, let alone a read+parse.
@@ -655,9 +655,10 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// concurrent read above has finished, not as one more safeGo
 			// goroutine alongside them. LoadParticipantsOpt, LoadPools and
 			// LoadBracket each call state.EnsureLegacyUpgraded, which can
-			// SEED squads.yaml as a side effect the very first time a team's
+			// SEED team-members.yaml as a side effect the very first time a team's
 			// squad is touched (state.upgradeSquadsFromMetadataLocked pads
-			// it to TeamSize). Reading squads.yaml concurrently with those
+			// it to TeamSize plus the reserve slots). Reading team-members.yaml
+			// concurrently with those
 			// three would race that side effect: whichever goroutine's
 			// per-comp lock acquisition the Go runtime happened to schedule
 			// first would decide whether THIS request saw the pre-seed or
@@ -672,7 +673,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// request): unlike pools/poolMatches/bracket/standings, a squad
 			// label is pure ENRICHMENT of an already-complete match row (it
 			// decorates a fighter's name with "T10.1"; it drives no scoring,
-			// standings, or bracket advancement), so a broken squads.yaml
+			// standings, or bracket advancement), so a broken team-members.yaml
 			// must never be able to take the whole competition page down
 			// with it -- the same "one bad cell cannot stop a tournament"
 			// principle this file's own read-fault handling already applies
@@ -681,7 +682,7 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			// its yaml.Unmarshal failures as *state.CorruptFileError the way
 			// the JSON/CSV readers do, so treating it like the strict loop
 			// below would 500 the whole page over a typo in one YAML file).
-			// A MISSING squads.yaml is not an error at all (state.LoadSquads'
+			// A MISSING team-members.yaml is not an error at all (state.LoadSquads'
 			// own contract, mirroring LoadTeamLineups).
 			var squads map[string][]domain.TeamMember
 			if isTeamComp {
@@ -802,18 +803,18 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 				"standings":   standings,
 				"bracket":     bracket,
 			}
-			// "squads" is present only for a team competition (isTeamComp,
+			// "teamMembers" is present only for a team competition (isTeamComp,
 			// above) and omitted entirely for an individual one, rather than
 			// carrying an always-empty {} -- a client can treat the key's
 			// absence as "this competition has no squads to resolve" without
 			// inspecting comp.kind/comp.teamSize itself. Keyed by the TEAM's
 			// participant id, matching the admin endpoint's shape
-			// (GET /api/competitions/:id/squads, handlers_squad.go) exactly,
+			// (GET /api/competitions/:id/team-members, handlers_squad.go) exactly,
 			// so a client resolves a bout row's sideAMemberId/sideBMemberId
 			// (state.SubMatchResult) to {id, index, name} without a second,
 			// admin-gated call this public surface could never make anyway.
 			if isTeamComp {
-				payload["squads"] = squads
+				payload["teamMembers"] = squads
 			}
 			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues

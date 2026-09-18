@@ -6,7 +6,7 @@
 // data-loss sites) can no longer destroy it.
 //
 // One file per competition lives at
-// tournament-data/competitions/<id>/squads.yaml, keyed by the TEAM's
+// tournament-data/competitions/<id>/team-members.yaml, keyed by the TEAM's
 // participant id (never its name -- a team may be renamed, and the id is
 // what does not change underneath that). Modelled closely on
 // team_lineup.go, the same shape of problem (per-competition YAML keyed by
@@ -16,10 +16,11 @@
 // Squad size is unconstrained and independent of the competition's
 // TeamSize (operator ruling 2026-09-09): real teams carry reserves and
 // replacements, so a squad may be larger than however many fight at once.
-// A squad's FLOOR, however, IS the competition's TeamSize (bc-pnum ruling:
-// "by default teams have x team members, as defined in the competition
-// config, and those positions have their numbers"): upgradeSquadsFromMetadataLocked
-// (legacy_upgrade.go) seeds every team up to TeamSize on load, minting an
+// A squad's FLOOR, however, IS the competition's TeamSize plus two reserve
+// slots (squadFloor; operator ruling 2026-09-15, bc-dnst: the score
+// sheet's name list must offer every number the team can field, so a
+// 5-person team's floor is 7, not 5): upgradeSquadsFromMetadataLocked
+// (legacy_upgrade.go) seeds every team up to that floor on load, minting an
 // id and a 1-based index for each slot with Name left blank unless already
 // known, and pads (never trims) the squad again if TeamSize is later
 // raised.
@@ -36,7 +37,7 @@
 // (state.CanStart(comp.Status) false), the same precondition
 // engine.StartCompetition itself gates on.
 //
-// squads.yaml is deliberately NOT in allowedDrawFiles (competition.go): a
+// team-members.yaml is deliberately NOT in allowedDrawFiles (competition.go): a
 // team's squad and its draw are independent lifecycles, so discarding the
 // draw must never touch it.
 package state
@@ -44,6 +45,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -52,7 +54,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const squadsFilename = "squads.yaml"
+const teamMembersFilename = "team-members.yaml"
+
+// SquadReserveSlots is the number of extra numbered slots a squad is
+// seeded with beyond the competition's TeamSize (operator ruling
+// 2026-09-15, bc-dnst): every team lists team size + 2 numbered slots, two
+// reserves, so the score sheet's name list can offer every number the
+// team can field before anyone is named.
+const SquadReserveSlots = 2
+
+// squadFloor returns the minimum number of numbered slots a squad is
+// seeded with for a competition whose TeamSize is teamSize: 0 when
+// teamSize <= 0 (an individual competition has no squad floor at all),
+// else teamSize + SquadReserveSlots. See SquadReserveSlots' doc comment
+// for the ruling behind the +2.
+func squadFloor(teamSize int) int {
+	if teamSize <= 0 {
+		return 0
+	}
+	return teamSize + SquadReserveSlots
+}
 
 // ErrTeamMemberNotFound is returned by RenameTeamMember and
 // ClearTeamMemberName when (teamID, memberID) does not resolve to a stored
@@ -76,18 +97,48 @@ var ErrTeamNotFound = errors.New("no team with that id in this competition")
 // than requireSetupLocked's stricter check is deliberate, not an oversight.
 var ErrTeamMemberClearAfterStart = errors.New("cannot clear a team member's name once the competition has started")
 
-// squadsFile is the on-disk YAML shape: a single top-level key so the file
+// teamMembersFile is the on-disk YAML shape: a single top-level key so the file
 // is self-describing and can grow a sibling key later without a format
 // break (mirrors teamLineupFile's own reasoning). Marshaling a
 // map[string][]domain.TeamMember directly (rather than flattening to a
 // slice the way teamLineupFile does) is safe here: gopkg.in/yaml.v3 sorts
 // map keys before encoding, so the team-id ordering on disk is
 // deterministic without this package doing it by hand.
-type squadsFile struct {
+type teamMembersFile struct {
+	Members map[string][]domain.TeamMember `yaml:"members"`
+}
+
+// legacySquadsFilename is what v2.0.0 wrote this file as, with the root key
+// below. It is read exactly once per competition, by the load-time migration
+// in legacy_upgrade.go, and never written.
+const legacySquadsFilename = "squads.yaml"
+
+// legacyTeamMembersFile is v2.0.0's on-disk shape: the same map under a
+// `squads` root key. Renaming the file and the key (bc-dnst) made a
+// tournament recorded by that release read as having no team members at all,
+// which the operator's migration policy exists to prevent: a storage change
+// carries a load path for the last two releases. v1.1.0 and earlier stored no
+// team members at all, so this one shape is the whole history.
+type legacyTeamMembersFile struct {
 	Squads map[string][]domain.TeamMember `yaml:"squads"`
 }
 
-// parseSquadsFile reads and parses squads.yaml at path. A missing file is
+// parseLegacySquadsBytes decodes v2.0.0's file. A file that parses as YAML but
+// carries no `squads` key returns nil, which the caller reads as "nothing to
+// migrate" rather than "an empty squad list", so an unrelated file sitting at
+// that path can never blank a competition's real members.
+func parseLegacySquadsBytes(data []byte) (map[string][]domain.TeamMember, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var file legacyTeamMembersFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
+		return nil, err
+	}
+	return file.Squads, nil
+}
+
+// parseSquadsFile reads and parses team-members.yaml at path. A missing file is
 // "no squad recorded yet" and returns an empty map, matching
 // parseTeamLineupsFile's contract for the identical situation.
 func parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
@@ -101,20 +152,20 @@ func parseSquadsFile(path string) (map[string][]domain.TeamMember, error) {
 	return parseSquadsBytes(data)
 }
 
-// parseSquadsBytes parses squads.yaml from in-memory bytes. Empty input →
+// parseSquadsBytes parses team-members.yaml from in-memory bytes. Empty input →
 // empty map, matching the "file does not exist" contract.
 func parseSquadsBytes(data []byte) (map[string][]domain.TeamMember, error) {
 	if len(data) == 0 {
 		return map[string][]domain.TeamMember{}, nil
 	}
-	var file squadsFile
+	var file teamMembersFile
 	if err := yaml.Unmarshal(data, &file); err != nil {
 		return nil, err
 	}
-	if file.Squads == nil {
-		file.Squads = map[string][]domain.TeamMember{}
+	if file.Members == nil {
+		file.Members = map[string][]domain.TeamMember{}
 	}
-	return file.Squads, nil
+	return file.Members, nil
 }
 
 // copySquads deep-copies a squads map so cached data is never aliased to a
@@ -137,21 +188,84 @@ func copySquads(in map[string][]domain.TeamMember) map[string][]domain.TeamMembe
 // Cache-aware (mtime-keyed via loadCached, same as LoadTeamLineups).
 // Returns a deep copy so callers can mutate the map freely.
 func (s *Store) LoadSquads(compID string) (map[string][]domain.TeamMember, error) {
-	data, err := s.loadCached(compID, squadsFilename, func(path string) (any, error) {
-		return parseSquadsFile(path)
-	})
-	if err != nil {
-		return nil, err
+	read := func() (map[string][]domain.TeamMember, error) {
+		data, err := s.loadCached(compID, teamMembersFilename, func(path string) (any, error) {
+			return parseSquadsFile(path)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return copySquads(data.(map[string][]domain.TeamMember)), nil
 	}
-	return copySquads(data.(map[string][]domain.TeamMember)), nil
+	out, err := read()
+	if err != nil || len(out) > 0 {
+		return out, err
+	}
+	// An EMPTY result is also exactly what an unadopted v2.0.0 competition
+	// looks like, because parseSquadsFile reports a missing file as "no
+	// members" with no error. This read is the ONE squad path that does not
+	// funnel through loadSquadsLocked, so without this it is the one that
+	// never adopts: EnsureLegacyUpgraded stamps even when its squad step
+	// failed (its documented policy, and this function sits on the viewer's
+	// hot path), so a file repaired on disk mid-run would otherwise stay
+	// invisible to GET /team-members, the viewer payload and the export for
+	// the life of the process, while the three mutators saw it fine. The
+	// operator's symptom is the worst kind: "this team has no members yet"
+	// printed under a full roster.
+	//
+	// Bounded on purpose. The probe is a single os.Stat, taken only when the
+	// map came back empty, and the lock is taken only when the legacy file is
+	// really there. A competition with no team members at all pays one stat.
+	if _, statErr := os.Stat(s.compPath(compID, legacySquadsFilename)); statErr != nil {
+		return out, nil
+	}
+	mu := s.getCompLock(compID)
+	mu.Lock()
+	adoptErr := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite)
+	mu.Unlock()
+	if adoptErr != nil {
+		// Degrade to the empty read rather than failing every reader: a
+		// corrupt legacy file must not take down the viewer. The WRITE paths
+		// still refuse loudly (loadSquadsLocked), which is where refusing is
+		// the safe direction, and the error is logged there.
+		log.Printf("state: LoadSquads %s: could not adopt %s: %v", compID, legacySquadsFilename, adoptErr)
+		return out, nil
+	}
+	return read()
 }
 
-// loadSquadsLocked reads squads.yaml directly from disk WITHOUT acquiring
+// loadSquadsLocked reads team-members.yaml directly from disk WITHOUT acquiring
 // the per-competition lock. Caller MUST already hold the lock. Bypasses the
 // cache: locked callers are about to load-mutate-save and need a fresh
 // private map, mirroring loadTeamLineupsLocked.
+//
+// Adopts a v2.0.0 squads.yaml FIRST, and fails the read when that adoption
+// fails. This is the floor under the load-mutate-save shape rather than a
+// convenience, and it belongs here rather than beside a caller:
+//
+// Every caller rewrites the whole file, and parseSquadsFile reports a MISSING
+// team-members.yaml as an empty map with NO error. So a caller that read past
+// an unadopted squads.yaml would save its one change over a team's real
+// roster and permanently arm upgradeTeamMembersFilenameLocked's
+// refuse-to-overwrite guard: the operator's members are then stranded under a
+// name nothing looks for, with ids that orphan every lineup position and
+// fought bout referencing the old ones.
+//
+// Registering the adoption only on EnsureLegacyUpgraded's load hook and
+// saveParticipantsNoLock's pre-write call left that open, because
+// AddTeamMember, RenameTeamMember and ClearTeamMemberName reach this read
+// through NEITHER. The startup sweep hides it but does not close it: an
+// adoption that fails leaves the competition deliberately unstamped so a
+// later reader retries, and the next operator click can be an Add.
+//
+// upgradeSquadsFromMetadataLocked keeps its own explicit call even so. It
+// returns before reaching this read when the roster is empty, and a plain
+// load must converge the file for a competition with no entrants yet.
 func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember, error) {
-	return parseSquadsFile(s.compPath(compID, squadsFilename))
+	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+		return nil, err
+	}
+	return parseSquadsFile(s.compPath(compID, teamMembersFilename))
 }
 
 // saveSquadsLocked persists the squads map. Caller MUST hold the per-comp
@@ -160,32 +274,32 @@ func (s *Store) loadSquadsLocked(compID string) (map[string][]domain.TeamMember,
 // Deliberately does NOT create the competition directory -- see
 // saveOverridesLocked's doc comment for the full reasoning (a write
 // landing after DeleteCompetition would otherwise rebuild
-// competitions/<id>/ around a lone squads.yaml, which ListCompetitions
+// competitions/<id>/ around a lone team-members.yaml, which ListCompetitions
 // keeps reporting and a same-named recreation adopts).
 // saveCompetitionChangedLocked is the ONE writer that legitimately creates
 // the directory; do not reintroduce os.MkdirAll here.
 func (s *Store) saveSquadsLocked(compID string, squads map[string][]domain.TeamMember, write writeFn) error {
-	data, err := yaml.Marshal(&squadsFile{Squads: squads})
+	data, err := yaml.Marshal(&teamMembersFile{Members: squads})
 	if err != nil {
 		return err
 	}
-	path := s.compPath(compID, squadsFilename)
+	path := s.compPath(compID, teamMembersFilename)
 	if err := write(path, data, 0600); err != nil {
 		return err
 	}
 
-	cache := s.getFileCache(compID, squadsFilename)
+	cache := s.getFileCache(compID, teamMembersFilename)
 	cache.mu.Lock()
 	cache.data = copySquads(squads)
-	cache.mtime = s.FileMtime(compID, squadsFilename)
+	cache.mtime = s.FileMtime(compID, teamMembersFilename)
 	cache.mu.Unlock()
 
 	// Bumped AFTER the bytes land and the cache is refreshed
 	// (bumpFileVersion's contract, store.go): a future consumer keying a
-	// derived cache on squads.yaml (bout-log/kachinuki member resolution,
+	// derived cache on team-members.yaml (bout-log/kachinuki member resolution,
 	// a later pass of bc-tmid) must see this write without a
 	// same-millisecond mtime hiding it from FileVersion.
-	s.bumpFileVersion(compID, squadsFilename)
+	s.bumpFileVersion(compID, teamMembersFilename)
 	return nil
 }
 
@@ -236,8 +350,9 @@ func (s *Store) requireTeamParticipantLocked(compID, teamID string) error {
 // exactly as they are there.
 //
 // Blank names are excluded from BOTH sides of the comparison (bc-pnum): a
-// team's squad is seeded with TeamSize members whose Name is blank until
-// filled in or after a clear, so a real team routinely holds several blank
+// team's squad is seeded to squadFloor (TeamSize plus SquadReserveSlots)
+// members whose Name is blank until filled in or after a clear, so a real
+// team routinely holds several blank
 // names at once. helper.NormalizeParticipantName("") returns "", so without
 // this exclusion every blank slot beyond the first would register as a
 // "duplicate" of the one before it -- refusing the team's own default state,
@@ -330,16 +445,30 @@ func (s *Store) AddTeamMember(compID, teamID, name string) (domain.TeamMember, e
 // RenameTeamMember keeps memberID's id and index and replaces its Name.
 // Returns ErrTeamMemberNotFound when (teamID, memberID) does not resolve
 // (no squad for teamID at all, or no member with that id inside it).
+//
+// BOTH writes ride ONE WAL transaction. A rename changes team-members.yaml and
+// every lineup position holding that member by id, and those used to be two
+// independent direct writes: a fault between them left the member renamed with
+// every lineup still showing the old spelling, and nothing repaired it, because
+// the load-time lineup pass only fills an EMPTY id and never corrects a name
+// sitting beside one already stamped. It also returned the SECOND write's error
+// as the whole call's, so the operator was told a rename that HAD landed had
+// failed, and retyping the old name became a second real rename.
 func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
 	newName = strings.TrimSpace(newName)
+	return s.WithTransaction(compID, func(tx StoreTx) error {
+		return s.renameTeamMemberTx(tx, compID, teamID, memberID, newName)
+	})
+}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
+// renameTeamMemberTx is RenameTeamMember's body, staged through the
+// transaction's writer so the squad file and the lineups file land together
+// or not at all.
+func (s *Store) renameTeamMemberTx(tx StoreTx, compID, teamID, memberID, newName string) error {
+	write := tx.(*storeTx).txWriteFn()
 	squads, err := s.loadSquadsLocked(compID)
 	if err != nil {
 		return err
@@ -364,7 +493,43 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 
 	existing[target].Name = newName
 	squads[teamID] = existing
-	return s.saveSquadsLocked(compID, squads, s.directWrite)
+	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
+		return err
+	}
+	return s.renameMemberInLineupsLocked(compID, memberID, newName, write)
+}
+
+// renameMemberInLineupsLocked carries a member's new name into every stored
+// lineup position that holds that member by id (bc-dnst): the id is the
+// identity, and the name a lineup stores beside it is a display copy that
+// the score sheet and the export read, so a rename or a clear that left it
+// behind showed the old spelling there until the operator happened to save
+// that lineup again. Fought bouts are NOT touched: a bout row's names are
+// frozen at the time it was fought, by design. Saves only when a position
+// changed. Caller holds the competition lock.
+func (s *Store) renameMemberInLineupsLocked(compID, memberID, name string, write writeFn) error {
+	lineups, err := s.loadTeamLineupsLocked(compID)
+	if err != nil {
+		return err
+	}
+	changed := false
+	for key, lineup := range lineups {
+		for pos, id := range lineup.MemberIDs {
+			if id != memberID || lineup.Positions[pos] == name {
+				continue
+			}
+			if lineup.Positions == nil {
+				lineup.Positions = map[domain.Position]string{}
+			}
+			lineup.Positions[pos] = name
+			lineups[key] = lineup
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveTeamLineupsLocked(compID, lineups, write)
 }
 
 // ClearTeamMemberName is the operator's "removal": it blanks memberID's
@@ -395,15 +560,20 @@ func (s *Store) RenameTeamMember(compID, teamID, memberID, newName string) error
 // Does NOT run squadDuplicateNameCheck: blanking a name can never collide
 // with anything (squadDuplicateNameCheck already treats a blank candidate
 // as never a collision), so the check would be a costly no-op here.
+//
+// Like RenameTeamMember, both writes ride ONE WAL transaction; see that
+// function's comment for why.
 func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
 	if err := ValidateCompetitionID(compID); err != nil {
 		return err
 	}
+	return s.WithTransaction(compID, func(tx StoreTx) error {
+		return s.clearTeamMemberNameTx(tx, compID, teamID, memberID)
+	})
+}
 
-	mu := s.getCompLock(compID)
-	mu.Lock()
-	defer mu.Unlock()
-
+func (s *Store) clearTeamMemberNameTx(tx StoreTx, compID, teamID, memberID string) error {
+	write := tx.(*storeTx).txWriteFn()
 	comp, err := s.loadCompetitionLocked(compID)
 	if err != nil {
 		return err
@@ -431,5 +601,8 @@ func (s *Store) ClearTeamMemberName(compID, teamID, memberID string) error {
 
 	existing[target].Name = ""
 	squads[teamID] = existing
-	return s.saveSquadsLocked(compID, squads, s.directWrite)
+	if err := s.saveSquadsLocked(compID, squads, write); err != nil {
+		return err
+	}
+	return s.renameMemberInLineupsLocked(compID, memberID, "", write)
 }

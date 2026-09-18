@@ -124,7 +124,7 @@ classDiagram
     Competition "1" o-- "0..*" TeamLineup
     Competition "1" o-- "0..1" Overrides
     Pool "1" o-- "1..*" Player : draws from
-    Player "1" o-- "0..*" TeamMember : squad, only when the row is a team
+    Player "1" o-- "0..*" TeamMember : members, only when the row is a team
     TeamLineup "1" ..> "0..*" TeamMember : positions reference
 ```
 
@@ -133,11 +133,11 @@ page depends on them.
 
 `Kind` separates individual from team competitions; `Format` selects knockout, pools plus
 knockout, league or Swiss. `TeamMatchType` selects fixed order or kachinuki for team
-competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its squad, stored in `squads.yaml` under the team's participant
+competitions. A competition in the `team` kind treats each `Player` entry as a team. The people on that team are its members, stored in `team-members.yaml` under the team's participant
 id.
 
 That one setting decides which records exist at all. An individual competition has no
-`squads.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
+`team-members.yaml` and no `lineups.yaml`: its entrants are people, and a match pairs two of them
 directly. A team competition has both, and its entrants are teams, so the person who fights
 a given bout is named one level further down. The positions a round has are the five FIK
 names, senpo, jiho, chuken, fukusho and taisho, when the team size is five, and numbers for
@@ -145,11 +145,12 @@ any other size. Everything else, the pools, the eligibility records and
 the ranking overrides, is the same for either kind, and reads a `Player` row without caring
 which of the two it is.
 
-Each squad member carries a stable id, minted once when the member is added and never
+Each team member carries a stable id, minted once when the member is added and never
 reused, and a display index. The id is what a lineup position and a bout row record, so a
-member can be renamed without any record losing track of who fought. A squad is seeded with
-one member per position the competition's team size defines, so a team has its shape before
-anyone is named. No member is ever removed, so an index is never freed and no
+member can be renamed without any record losing track of who fought. A team's member list is
+seeded with one member per position the competition's team size defines, plus two reserve
+positions, so a
+team has its shape before anyone is named. No member is ever removed, so an index is never freed and no
 renumbering question arises. Instead, an organiser can clear a name, which empties that position but keeps its id and index. That is possible only until the competition starts. After that, a name can still be corrected, which is what renaming is for: a bout row holds the member's
 id, so a bout already fought names the same person whatever the name is changed to. Adding a
 member stays available at any time, including after the start, because a team fields
@@ -158,12 +159,12 @@ replacements mid tournament.
 The label an organiser reads is the team's competitor number followed by the member index,
 for example `T10.1`. That label is composed when it is shown and never stored, because a
 competitor number can change and the identity underneath it cannot. It is derived the same
-way on both sides: the public surfaces receive a team's squad on the viewer payload and
+way on both sides: the public surfaces receive a team's members on the viewer payload and
 compose the label themselves, rather than reading a stored string.
 
 Two rules govern member names. Within one team the names must be unique: a name is how an
 organiser picks a member, and the winner-stays-on format has to tell two teammates apart.
-Members of different teams may share a name freely. The squad is not a starting line-up, so
+Members of different teams may share a name freely. The member list is not a starting line-up, so
 it may hold more members than the competition's team size: the extra entries are the
 replacements an organiser can field, and the team size only fixes how many positions a
 round has.
@@ -312,15 +313,15 @@ on the sheet, the id is what the app resolves by. Where a record has an id field
 read by id alone; a name is consulted only for a row old enough to predate the field,
 which the app repairs when it loads it.
 
-That applies one level further down as well. A team bout carries its two fighters' SQUAD
-member ids beside their names, and the winner's id beside the winner's name. Without them
+That applies one level further down as well. A team bout carries its two fighters' TEAM
+MEMBER ids beside their names, and the winner's id beside the winner's name. Without them
 a bout between two people who happen to share a display name could not be attributed at
 all, because the name identifies neither of them, and competitors are allowed to share
 one.
 
 Those are two different namespaces, and the field names keep them apart on purpose. A
 match side carries a PARTICIPANT id, which names a competitor or a whole team; a bout side
-carries a SQUAD MEMBER id, which names one person inside a team. They sit one level apart
+carries a TEAM MEMBER id, which names one person inside a team. They sit one level apart
 and are never interchangeable.
 
 The cost of the pattern is this model's sharpest edge. A name
@@ -402,10 +403,11 @@ classDiagram
     }
     class lineups_yaml["lineups.yaml"] {
         <<YAML>>
-        TeamLineup by round
+        TeamLineup by round or match
         position to name and member id
+        a position may hold an id and an empty name
     }
-    class squads_yaml["squads.yaml"] {
+    class team_members_yaml["team-members.yaml"] {
         <<YAML>>
         TeamMember list by team
     }
@@ -437,9 +439,9 @@ classDiagram
     config_md --> bracket_json
     config_md --> status_yaml
     config_md --> lineups_yaml
-    config_md --> squads_yaml
+    config_md --> team_members_yaml
     config_md --> overrides_json
-    squads_yaml --> lineups_yaml : positions reference members
+    team_members_yaml --> lineups_yaml : positions reference members
 ```
 
 Markdown, CSV, and JSON or YAML each earn their place:

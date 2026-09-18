@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -117,5 +119,13 @@ func TestPoolGeneration_SinglePoolMultiCourt_RejectsTooManyCourts(t *testing.T) 
 
 	err := eng.StartCompetition(compID)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "too many courts")
+	assert.Contains(t, err.Error(), "too many courts for the entry")
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve, "the draw must refuse this as a client error (400), not a bare 500")
+
+	// And the refusal leaves nothing behind: the check runs BEFORE SavePools,
+	// so a competition that stays in setup carries no pools.csv from a draw it
+	// refused (DiscardDraw only cleans up a draw-ready competition).
+	_, statErr := os.Stat(filepath.Join(store.GetFolder(), "competitions", compID, "pools.csv"))
+	assert.True(t, os.IsNotExist(statErr), "a refused draw must not leave a pools.csv behind")
 }

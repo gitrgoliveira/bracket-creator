@@ -5,7 +5,7 @@
 // exactly three operations: SELECT an existing squad member into a
 // position, ADD a new name in a position (minting the member's id in that
 // one step), and RENAME a member (keeping its id). The squad itself is
-// read from GET /api/competitions/:id/squads, never from team.metadata.
+// read from GET /api/competitions/:id/team-members, never from team.metadata.
 //
 // Because the test runtime (makeReactive) does NOT recurse into child
 // component bodies, host elements (<select>, <option>, <input>, <button>)
@@ -83,6 +83,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       fetchSquads: vi.fn().mockResolvedValue({}),
       addTeamMember: vi.fn(),
       renameTeamMember: vi.fn().mockResolvedValue(true),
+      clearTeamMember: vi.fn().mockResolvedValue(true),
       putTeamLineup: vi.fn().mockResolvedValue({}),
     };
     // bc-pnum: commitAdd (operation 2) now confirms before minting. Default
@@ -114,7 +115,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
       global.window.API.fetchSquads.mockResolvedValue(opts.squads);
     }
     runtime.mount(AdminLineup, {
-      comp: COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
+      comp: opts.comp || COMP, team, round: 0, password: 'pw', showToast: vi.fn(), onClose: vi.fn(),
     });
     await flush();
     return runtime.currentTree();
@@ -132,7 +133,7 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(optionTexts).toContain('T10.1');
   });
 
-  it('reads the squad from GET .../squads rather than from team.metadata', async () => {
+  it('reads the squad from GET .../team-members rather than from team.metadata', async () => {
     // metadata carries a name the squad endpoint does NOT: proves the
     // picker's options come from the squad store, not team.metadata.
     const tree = await mountFor(
@@ -238,6 +239,73 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(nameFieldAfter.props.value).toBe('Ito');
   });
 
+  // bc-dnst: the "+ Add new member…" picker option now goes through the SAME
+  // rule the score sheet's inline picker uses (resolveMemberIdsForPositions):
+  // naming a position whose seeded slot is still blank renames that member
+  // rather than minting a fresh, number-less one.
+  it('operation 2 (ADD) via the picker: naming a blank seeded slot renames that member instead of minting', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'm1', index: 1, name: '' }] },
+    });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Sato' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    // The confirm copy names the SLOT being named, not a generic "new
+    // squad member" add, so the operator knows which of the two will happen.
+    expect(global.window.confirmDialog).toHaveBeenCalledTimes(1);
+    const [opts] = global.window.confirmDialog.mock.calls[0];
+    expect(opts.message).toContain('T10.1');
+    expect(opts.message).toContain('Sato');
+    expect(opts.message).not.toContain('as a new member of');
+
+    expect(global.window.API.renameTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'm1', 'Sato', 'pw');
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+
+    // The renamed (still m1) member is now selected in that position.
+    const tree3 = runtime.currentTree();
+    expect(positionSelect(tree3, '1').props.value).toBe('m1');
+
+    mainSaveButton(tree3).props.onClick();
+    await flush();
+    const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+    expect(call[3]['1']).toBe('Sato');
+    expect(call[5]['1']).toBe('m1');
+  });
+
+  it('operation 2 (ADD) via the picker: no blank slot for THIS position falls back to minting', async () => {
+    global.window.API.addTeamMember.mockResolvedValue({ id: 'sq-new', index: 1, name: 'Ito' });
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      // A blank member exists, but at position 2, not position 1: naming
+      // position 1 must still mint rather than reuse the wrong blank slot.
+      squads: { 'team-1': [{ id: 'm2', index: 2, name: '' }] },
+    });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Ito' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    const [opts] = global.window.confirmDialog.mock.calls.at(-1);
+    expect(opts.message).toContain('as a new member of');
+
+    expect(global.window.API.addTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'Ito', 'pw');
+    expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
+
+    const tree3 = runtime.currentTree();
+    expect(positionSelect(tree3, '1').props.value).toBe('sq-new');
+  });
+
   it('operation 3 (RENAME): renaming a squad member keeps its id in the position that references it', async () => {
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
       squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
@@ -286,6 +354,119 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(allText).not.toMatch(/delete member/i);
   });
 
+  // bc-dnst: this page is now the one home for a team's people. "Clear
+  // name" used to live on the competition Settings page's now-removed
+  // Squad members section; it moved here alongside Rename.
+  describe('Clear name (bc-dnst)', () => {
+    it('shows "Clear name" on a named member\'s row, but not on a blank one', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [
+          { id: 'sq-sato', index: 1, name: 'Sato' },
+          { id: 'sq-blank', index: 2, name: '' },
+        ] },
+      });
+      const namedRow = squadRow(tree, 'sq-sato');
+      const blankRow = squadRow(tree, 'sq-blank');
+      expect(buttonNamed(namedRow, 'Clear name')).toBeTruthy();
+      expect(buttonNamed(blankRow, 'Clear name')).toBeFalsy();
+    });
+
+    it('clicking it clears the server-side name and blanks the position that held that member by id, keeping the id placement', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+      });
+      // Place the member at position 1 first, so its persistence can be checked.
+      positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+
+      let tree2 = runtime.currentTree();
+      buttonNamed(squadRow(tree2, 'sq-sato'), 'Clear name').props.onClick();
+      await flush();
+
+      expect(global.window.API.clearTeamMember).toHaveBeenCalledWith('comp-1', 'team-1', 'sq-sato', 'pw');
+
+      const tree3 = runtime.currentTree();
+      expect(collectText(squadRow(tree3, 'sq-sato'))).not.toContain('Sato');
+      // Still placed BY ID...
+      expect(positionSelect(tree3, '1').props.value).toBe('sq-sato');
+
+      mainSaveButton(tree3).props.onClick();
+      await flush();
+      const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+      // ...but its written name is now empty, matching what the row shows.
+      expect(call[3]['1']).toBe('');
+      expect(call[5]['1']).toBe('sq-sato');
+    });
+
+    it('a rejected clear leaves the name in place and shows the server\'s message', async () => {
+      global.window.API.clearTeamMember.mockRejectedValue(new Error('cannot clear: competition started'));
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+      });
+
+      buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name').props.onClick();
+      await flush();
+
+      const tree2 = runtime.currentTree();
+      expect(collectText(squadRow(tree2, 'sq-sato'))).toContain('Sato');
+      expect(collectText(tree2)).toContain('cannot clear: competition started');
+    });
+
+    it('is disabled once the competition has started, and SAYS SO on screen', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+        comp: { ...COMP, status: 'running' },
+      });
+      const clearBtn = buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name');
+      expect(clearBtn).toBeTruthy();
+      expect(clearBtn.props.disabled).toBe(true);
+      // The reason must be VISIBLE, not only in a title: the desk runs on
+      // touch tablets, which have no hover to reveal one. The deleted Settings
+      // section stated it as a persistent line and nothing replaced it.
+      expect(collectText(tree)).toContain('Clearing a name is locked once the competition has started');
+    });
+
+    // Rename and Add deliberately stay available after the start; only
+    // clearing locks. Nothing exercised that, so adding `|| started` to either
+    // control would have left the whole suite green while reversing a ruling.
+    it('leaves Rename and Add available on the SAME render that locks clearing', async () => {
+      const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+        squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+        comp: { ...COMP, status: 'running' },
+      });
+      const renameBtn = buttonNamed(squadRow(tree, 'sq-sato'), 'Rename');
+      expect(renameBtn).toBeTruthy();
+      expect(renameBtn.props.disabled).toBeFalsy();
+      expect(buttonNamed(squadRow(tree, 'sq-sato'), 'Clear name').props.disabled).toBe(true);
+    });
+  });
+
+  // A list that FAILED to load and a genuinely empty team rendered the same
+  // sentence, which invited the operator to mint a second permanent numbered
+  // slot for a member who already has one.
+  it('says the team-member list could not be loaded, rather than that the team is empty', async () => {
+    global.window.API.fetchSquads.mockRejectedValue(new Error('network down'));
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {});
+    const text = collectText(runtime.currentTree() || tree);
+    expect(text).toContain('could not be loaded');
+    expect(text).not.toContain('This team has no members yet');
+  });
+
+  it('operation 1 (SELECT) of a still-unnamed squad slot is a placement: Save writes it by id with an empty name (bc-dnst)', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-blank-2', index: 2, name: '' }] },
+    });
+    positionSelect(tree, '2').props.onChange({ target: { value: 'sq-blank-2' } });
+
+    const tree2 = runtime.currentTree();
+    mainSaveButton(tree2).props.onClick();
+    await flush();
+
+    const call = global.window.API.putTeamLineup.mock.calls.at(-1);
+    // putTeamLineup(compId, teamId, round, positionsOut, password, memberIdsOut)
+    expect(call[3]).toEqual({ '2': '' });
+    expect(call[5]).toEqual({ '2': 'sq-blank-2' });
+  });
+
   it('Save omits memberIds entirely when no position resolved to a squad member', async () => {
     const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, { squads: {} });
     mainSaveButton(tree).props.onClick();
@@ -313,8 +494,80 @@ describe('AdminLineup form (competition-admin Lineups, bc-tmid pass 3)', () => {
     expect(warning).toBeTruthy();
     const text = collectText(warning);
     expect(text).toContain('Lineup saved');
-    expect(text).toContain('squad list could not be loaded');
+    expect(text).toContain('team member list could not be loaded');
     expect(text).toContain('Scores will still record normally');
+  });
+
+  // bc-cse: a member selected at one position must not be offered again at
+  // another (rosterWithoutPlacedElsewhere), but stays offered at its own
+  // position (so re-opening that position's picker does not hide the
+  // member it currently holds).
+  it('a member selected at position 1 is not offered again at position 2, but stays offered at position 1 itself', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-sato', index: 1, name: 'Sato' }] },
+    });
+    positionSelect(tree, '1').props.onChange({ target: { value: 'sq-sato' } });
+
+    const tree2 = runtime.currentTree();
+    expect(collectText(positionSelect(tree2, '1'))).toContain('Sato');
+    expect(collectText(positionSelect(tree2, '2'))).not.toContain('Sato');
+  });
+
+  // bc-cse: the "+ Add new member…" picker option resolves an EXISTING
+  // squad member's name through the same rule commitAdd itself documents --
+  // that member is simply SELECTED, no confirmation and no write happens,
+  // because nothing permanent is being created.
+  it('typing an EXISTING squad member\'s name via "+ Add new member…" selects them without confirming or minting/renaming', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-yamada', index: 3, name: 'Yamada' }] },
+    });
+
+    positionSelect(tree, '1').props.onChange({ target: { value: '__add__' } });
+    let tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Yamada' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).not.toHaveBeenCalled();
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
+
+    const tree3 = runtime.currentTree();
+    expect(positionSelect(tree3, '1').props.value).toBe('sq-yamada');
+  });
+
+  it('naming an EXISTING squad member already placed at another position sets an "is already at" error and leaves the position untouched', async () => {
+    const tree = await mountFor({ id: 'team-1', name: 'Tora A', number: 'T10' }, {
+      squads: { 'team-1': [{ id: 'sq-yamada', index: 3, name: 'Yamada' }] },
+    });
+    // Place Yamada at position 2 first.
+    positionSelect(tree, '2').props.onChange({ target: { value: 'sq-yamada' } });
+
+    let tree2 = runtime.currentTree();
+    positionSelect(tree2, '1').props.onChange({ target: { value: '__add__' } });
+    tree2 = runtime.currentTree();
+    const nameField = findHosts(tree2, 'input').find(i => i.props?.['aria-label'] === 'New member name for 1');
+    nameField.props.onChange({ target: { value: 'Yamada' } });
+
+    tree2 = runtime.currentTree();
+    buttonNamed(tree2, 'Add').props.onClick();
+    await flush();
+
+    expect(global.window.confirmDialog).not.toHaveBeenCalled();
+    expect(global.window.API.addTeamMember).not.toHaveBeenCalled();
+    expect(global.window.API.renameTeamMember).not.toHaveBeenCalled();
+
+    const tree3 = runtime.currentTree();
+    expect(collectText(tree3)).toContain('is already at');
+    // Position 1 was never assigned Yamada's id: the refusal returns before
+    // selectMember runs, so its add-row stays open rather than switching
+    // back to a select showing a (wrongly) resolved value.
+    expect(positionSelect(tree3, '1')).toBeFalsy();
+    // Position 2 still holds Yamada, unchanged.
+    expect(positionSelect(tree3, '2').props.value).toBe('sq-yamada');
   });
 
   it('shows no member-identity warning after an ordinary successful save (squad loaded fine)', async () => {

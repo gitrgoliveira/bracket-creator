@@ -218,7 +218,7 @@ A draw-ready competition is already listed on the shiai-jo operator views, since
      (/user-guide/organisers/run-tournament/): three levels up, not two. -->
 <figure class="bc-fig">
   <video controls loop muted playsinline preload="metadata" width="900" height="580" aria-label="Generating the draw: the pools preview appears after clicking Generate draw.">
-    <source src="../../../screenshots/draw-generation.mp4" type="video/mp4">
+    <source src="../../../screenshots/draw-generation.webm" type="video/webm">
   </video>
   <figcaption>Generating the draw. Press play to watch.</figcaption>
 </figure>
@@ -229,7 +229,7 @@ The **Pools** tab shows standings for every pool. Ranks are computed automatical
 
 Pool finishers move into the knockout bracket on their own: as soon as a pool's last match is scored, its qualifiers are seeded into their bracket slots. Those knockout matches can be scored without waiting for the other pools. Once the last pool is seeded, the competition moves to the knockout phase. The bracket updates in real time as results come in.
 
-![Pools view](../../screenshots/mobile-pool-standings.png)
+![The Pools tab: each pool as a card with its standings in draw order, every competitor carrying their number and a rank badge, the pool's matches with their results, and the head-to-head grid beneath.](../../screenshots/mobile-pool-standings.png)
 
 For the four competition formats and the Swiss round-by-round flow, refer to [Formats](formats.md).
 

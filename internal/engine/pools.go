@@ -206,15 +206,21 @@ func (e *Engine) generatePools(comp *state.Competition, players []domain.Player,
 		}
 	}
 
-	// Save pools
-	if err := e.store.SavePools(comp.ID, pools); err != nil {
-		return err
-	}
-
+	// BEFORE the save, not after. This refusal is a normal operator flow now
+	// that it answers 400 rather than crashing, and every occurrence used to
+	// leave a pools.csv on disk for a draw that was explicitly refused: the
+	// competition stays in setup, where DiscardDraw declines to clean it up
+	// (draw-ready only), so the artifact outlives the refusal. Every input the
+	// check needs is already in hand here (bc-dnst).
 	if len(pools) == 1 && numCourts > 1 {
 		if err := ValidateCourtCount(len(players), numCourts); err != nil {
 			return err
 		}
+	}
+
+	// Save pools
+	if err := e.store.SavePools(comp.ID, pools); err != nil {
+		return err
 	}
 
 	// drawCourts, derived above, is reused rather than recomputed: this

@@ -148,13 +148,17 @@ const (
 //
 // Rule:
 //
-//   - If winnerID, sideAID and sideBID are ALL non-empty, attribute by id:
-//     winnerID==sideAID -> MatchSideA; winnerID==sideBID -> MatchSideB;
-//     matches neither -> MatchSideNone. Ids WIN over names when they
-//     disagree; that is the point of this function.
-//   - Otherwise (any of the three ids empty: legacy data, id-less payloads,
-//     an unrepaired bracket row, or a sub-bout, which carries no ids at all
-//     by design), fall back to the name comparison: winner==sideA -> MatchSideA; else
+//   - A winnerID equal to the id a side CARRIES names that side, even when the
+//     other side carries none: winnerID==sideAID -> MatchSideA;
+//     winnerID==sideBID -> MatchSideB. A fighter fielded by number against a
+//     typed substitute is exactly that shape (bc-dnst), and waiting for all
+//     three ids would have dropped it to the name tier, which cannot see it.
+//     Ids WIN over names when they disagree; that is the point of this function.
+//   - With BOTH side ids known and the winner id matching neither, the row is
+//     unattributable and names get no say: MatchSideNone.
+//   - Otherwise (no winner id, or no side id to compare it against: legacy
+//     data, id-less payloads, an unrepaired bracket row), fall back to the
+//     name comparison: winner==sideA -> MatchSideA; else
 //     winner==sideB -> MatchSideB; matches neither -> MatchSideNone. sideA
 //     is checked first, so a winner name that matches BOTH sides (invalid
 //     data - see the same convention documented for team aggregation)
@@ -183,8 +187,8 @@ const (
 // for BracketMatch only on a bye, an unresolved "Winner of ..." feeder, or
 // an unrepaired legacy row (bc-brid: BracketMatch now carries
 // SideAID/SideBID/WinnerID and this struct carries them whenever the side
-// resolves); a partially-filled id set takes the name path too, per the
-// rule below.
+// resolves); a row where only ONE side carries an id is still decided by id
+// when the winner id matches it, per the rule below.
 //
 // Mirrored in JS as attributeWinnerSide's options object in
 // web-mobile/js/result_slot.jsx, which took an object from the start.
@@ -222,13 +226,20 @@ func SubBoutAttribution(att WinnerAttribution) WinnerAttribution {
 }
 
 func AttributeWinnerSide(a WinnerAttribution) MatchSide {
-	if a.WinnerID != "" && a.SideAID != "" && a.SideBID != "" {
-		switch a.WinnerID {
-		case a.SideAID:
+	// Ids first. A winner id equal to a side's id names that side outright,
+	// even when the OTHER side carries no id (bc-dnst: a fighter fielded by
+	// squad number has an id and no name, and its opponent may be a typed
+	// substitute with a name and no id; the names then cannot answer for
+	// the id-only side, but its id can). Only when BOTH sides carry ids
+	// and the winner id matches neither is the row unattributable by id
+	// AND by name: the ids were the better evidence and they disagree.
+	if a.WinnerID != "" {
+		switch {
+		case a.SideAID != "" && a.WinnerID == a.SideAID:
 			return MatchSideA
-		case a.SideBID:
+		case a.SideBID != "" && a.WinnerID == a.SideBID:
 			return MatchSideB
-		default:
+		case a.SideAID != "" && a.SideBID != "":
 			return MatchSideNone
 		}
 	}

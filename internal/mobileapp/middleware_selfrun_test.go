@@ -259,7 +259,7 @@ func TestSelfRun_SelfRunMode_CompetitionConfigRoutes_RequireMainPassword(t *test
 		{http.MethodGet, "/api/competitions/some-id/export-results"},
 		// Squad management (bc-tmid): organiser setup, same class as team
 		// lineup PUT/DELETE just above.
-		{http.MethodGet, "/api/competitions/some-id/squads"},
+		{http.MethodGet, "/api/competitions/some-id/team-members"},
 		{http.MethodPost, "/api/competitions/some-id/teams/some-team/members"},
 		{http.MethodPut, "/api/competitions/some-id/teams/some-team/members/some-member"},
 		// bc-pnum: clearing a member's name is the operator's "removal",

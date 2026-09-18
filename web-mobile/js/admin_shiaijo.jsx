@@ -25,6 +25,9 @@ import { writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock, CLOCK_SKE
 // swissRoundLabel: single owner is pool_ids.jsx (mp-dej2); this file used to
 // carry its own copy.
 import { swissRoundLabel } from './pool_ids.jsx';
+// NumberedName: single owner of the number-chip-on-the-outer-side rule
+// (bc-dnst); see that file's header for why this stays an ES import.
+import { NumberedName } from './numbered_name.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -34,6 +37,8 @@ const ScoreEditorModal = window.ScoreEditorModal;
 const CourtPicker = window.CourtPicker;
 const BracketTree = window.BracketTree;
 const Icon = window.Icon;
+
+const QUEUE_OPEN_KEY = "bc_shiaijo_queue_open";
 const Modal = window.Modal;
 const hasBothSides = window.hasBothSides;
 
@@ -551,6 +556,50 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     const [startingKey, setStartingKey] = useStateSh(null);
     const [startError, setStartError] = useStateSh("");
     const [contextOpen, setContextOpen] = useStateSh(true);
+    // The whole queue column folds away so the scorer can take the full width;
+    // the choice is per device, like the operator's other console preferences.
+    const [queueOpen, setQueueOpen] = useStateSh(() => {
+        try { return localStorage.getItem(QUEUE_OPEN_KEY) !== "0"; } catch (_) { return true; }
+    });
+    // Set only by an operator click in toggleQueue below, never true on mount
+    // or on a server-driven rerender, so the focus effect it gates fires
+    // solely for an explicit toggle.
+    const queueToggledByUser = useRefSh(false);
+    // The two controls that swap places across the fold: the rail button only
+    // exists while collapsed, the header button only exists while expanded.
+    const queueShowBtnRef = useRefSh(null);
+    const queueHideBtnRef = useRefSh(null);
+    const toggleQueue = () => {
+        queueToggledByUser.current = true;
+        // Persist from INSIDE the updater, off the live value. Reading the
+        // render-time `queueOpen` here while updating functionally let two taps
+        // in one batch cancel each other in state while both wrote the same
+        // stale value, so the operator's choice and what was stored disagreed
+        // (bc-dnst). This console runs on tablets, where a double-tap is one
+        // batch.
+        setQueueOpen((open) => {
+            const next = !open;
+            try { localStorage.setItem(QUEUE_OPEN_KEY, next ? "1" : "0"); } catch (_) { /* private mode */ }
+            return next;
+        });
+    };
+    // Collapsing hides the header "Hide" button (it stays mounted; its
+    // .shiaijo__queue parent is hidden via .shiaijo--queue-collapsed) and
+    // mounts the rail "Show queue" button in its place (and vice versa on
+    // expand: the rail unmounts and the header button becomes visible
+    // again), so a click or keyboard toggle would otherwise drop focus to
+    // the document body either way, hidden or unmounted. Move it to the
+    // counterpart control once the DOM has settled, but only for an
+    // operator-driven toggle: this must never steal focus on mount or when
+    // `queueOpen` merely reflects a rerender the operator didn't trigger.
+    useEffectSh(() => {
+        if (!queueToggledByUser.current) return;
+        queueToggledByUser.current = false;
+        const target = queueOpen ? queueHideBtnRef.current : queueShowBtnRef.current;
+        // preventScroll: the counterpart sits where the pressed control was,
+        // already in view, so the focus move must not scroll the page.
+        if (target) target.focus({ preventScroll: true });
+    }, [queueOpen]);
     // Completed list stays expanded (it's the operator's running record), but a
     // full-day court accumulates many bouts that would bury the live queue on
     // mobile. Show the most recent COMPLETED_PREVIEW by default; the rest fold
@@ -1072,8 +1121,11 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
             <AdminTopbar onLogout={onLogout} onViewerMode={onViewerMode} tournament={tournament} hideRunningStrip />
             <div className="page page--wide">
                 <Breadcrumbs items={[{ label: "Dashboard", onClick: onBack }, { label: `Shiaijo ${court}` }]} />
-                <div className="page-head">
-                    <div>
+                <div className="page-head page-head--oneline">
+                    {/* Title, court switcher and Refresh on ONE row, no subtitle:
+                        this is the court's working surface and every pixel above
+                        the scorer pushes the live bout down the page. */}
+                    <div className="page-head__title-row">
                         {courts.length > 1 && courtKnown ? (
                             // The page title doubles as the court switcher: clicking it
                             // opens a native court picker (transparent <select> overlay), so
@@ -1095,7 +1147,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                         ) : (
                             <h1 className="page-head__title">Shiaijo {court}</h1>
                         )}
-                        <div className="page-head__sub">{`Call, start, and score every match on Shiaijo ${court} from here.`}</div>
                         {courtKnown && typeof (window.API || {}).fetchCourtMatches === "function" && (
                             // Manual re-sync: recovers a court whose tablet fell behind
                             // (dropped SSE / flaky venue WiFi) so a stale queue: e.g. a
@@ -1141,7 +1192,6 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                             </select>
                                         </div>
                                     )}
-                                    <div className="page-head__sub shiaijo-officiating__sub">Officiating</div>
                                 </div>
                             </div>
                         );
@@ -1180,9 +1230,50 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                 )}
 
                 {courtKnown && (allMatches.length > 0 || pendingPlaceholder.length > 0) && (
-                    <div className="shiaijo">
+                    <div className={`shiaijo${queueOpen ? "" : " shiaijo--queue-collapsed"}`}>
                         {/* ── Queue (left) ───────────────────────────── */}
-                        <div className="shiaijo__queue">
+                        {/* Accordion: folded, the column becomes a narrow rail in the
+                            same place that reopens it, so the queue is never out of
+                            reach while the scorer takes the width. This rail button
+                            mounts while the header "Hide" button below stays mounted
+                            but hidden (its .shiaijo__queue parent goes display: none
+                            via .shiaijo--queue-collapsed); the toggleQueue/queueOpen
+                            effect above moves focus here after an operator-driven
+                            collapse. */}
+                        {!queueOpen && (
+                            <button
+                                type="button"
+                                ref={queueShowBtnRef}
+                                className="shiaijo-queue-rail"
+                                onClick={toggleQueue}
+                                aria-expanded={false}
+                                aria-controls="shiaijo-queue"
+                                data-testid="shiaijo-queue-show"
+                            >
+                                <span className="shiaijo-queue-rail__label">Show queue</span>
+                                <span aria-hidden="true">▸</span>
+                            </button>
+                        )}
+                        <div className="shiaijo__queue" id="shiaijo-queue">
+                            {/* This header button stays mounted throughout; only hidden
+                                while collapsed (the queue's display: none). Expanding
+                                unmounts the rail button above; the toggleQueue/queueOpen
+                                effect moves focus here after an operator-driven expand. */}
+                            <button
+                                type="button"
+                                ref={queueHideBtnRef}
+                                className="section-title shiaijo-queue__head"
+                                onClick={toggleQueue}
+                                aria-expanded={true}
+                                aria-controls="shiaijo-queue"
+                                data-testid="shiaijo-queue-hide"
+                            >
+                                <span>Queue</span>
+                                <span className="shiaijo-queue__head-action"><span aria-hidden="true">◂</span> Hide</span>
+                            </button>
+                            {filteredScheduled.length === 0 && filteredPending.length === 0 && filteredCompleted.length === 0 && (
+                                <p className="shiaijo-queue__empty">Nothing else queued on this court.</p>
+                            )}
                             {upNext && (
                                 <div className="shiaijo-upnext">
                                     <div className="section-title">Up next</div>
@@ -1700,12 +1791,12 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
             <div className="shiaijo-qrow__match">
                 <div className="shiaijo-qrow__side" aria-label={`Shiro: ${bName}`}>
                     <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
-                    <span className="shiaijo-qrow__name">{m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}{bName}</span>
+                    <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
                 </div>
                 <span className="shiaijo-qrow__vs">vs</span>
                 <div className="shiaijo-qrow__side shiaijo-qrow__side--aka" aria-label={`Aka: ${aName}`}>
                     <span className="se-color-badge se-color-badge--aka">AKA</span>
-                    <span className="shiaijo-qrow__name">{m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}{aName}</span>
+                    <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
                 </div>
             </div>
             {/* Completed result on its own centred line BELOW the names: the
@@ -1781,8 +1872,7 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" aria-label={`Shiro: ${m.sideB?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--shiro">SHIRO</span>
                 <div className="name">
-                    {m.sideB?.number ? <span className="num-prefix">{m.sideB.number}</span> : null}
-                    {m.sideB?.name}
+                    <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
             </div>
@@ -1790,8 +1880,7 @@ function MatchSides({ m, large }) {
             <div className="shiaijo-sides__side" style={{ textAlign: "right" }} aria-label={`Aka: ${m.sideA?.name || ""}`}>
                 <span className="se-color-badge se-color-badge--aka">AKA</span>
                 <div className="name">
-                    {m.sideA?.number ? <span className="num-prefix">{m.sideA.number}</span> : null}
-                    {m.sideA?.name}
+                    <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />
                 </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
             </div>

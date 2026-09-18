@@ -22,12 +22,13 @@ import (
 // participant carries, so these tests need a genuine team rather than a
 // placeholder string.
 //
-// The competition's TeamSize is 3 and the team carries no Metadata, so by
-// the time this returns, the team already carries 3 SEEDED members
-// (indices 1-3, blank names): the LoadParticipants call below runs
+// The competition's TeamSize is 3, so its squad floor is 5 (TeamSize + 2
+// reserves, bc-dnst), and the team carries no Metadata, so by the time
+// this returns, the team already carries 5 SEEDED members (indices 1-5,
+// blank names): the LoadParticipants call below runs
 // upgradeSquadsFromMetadataLocked (bc-pnum). Any test that adds a member
-// from here must account for those 3 pre-existing slots: a first Add gets
-// index 4, not 1.
+// from here must account for those 5 pre-existing slots: a first Add gets
+// index 6, not 1.
 func setupSquadTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -52,7 +53,7 @@ func setupSquadTestRouter(t *testing.T) (*gin.Engine, *state.Store, string) {
 	r := gin.New()
 	admin := r.Group("/api")
 	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
-	RegisterSquadHandlers(admin, store, store)
+	RegisterSquadHandlers(admin, store, store, stubBroadcaster{})
 	return r, store, teams[0].ID
 }
 
@@ -72,8 +73,8 @@ func squadJSONReq(method, path, password string, body any) *http.Request {
 	return req
 }
 
-// POST mints an id and the next index (4, continuing past the 3 seeded
-// slots), returns 201; GET /squads then reflects it.
+// POST mints an id and the next index (6, continuing past the 5 seeded
+// slots), returns 201; GET /team-members then reflects it.
 func TestSquadHandlers_AddMember(t *testing.T) {
 	r, _, teamID := setupSquadTestRouter(t)
 
@@ -85,19 +86,19 @@ func TestSquadHandlers_AddMember(t *testing.T) {
 	var member domain.TeamMember
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &member))
 	assert.NotEmpty(t, member.ID)
-	assert.Equal(t, 4, member.Index, "the team already carries 3 seeded slots (TeamSize 3)")
+	assert.Equal(t, 6, member.Index, "the team already carries 5 seeded slots (TeamSize 3, floor 5)")
 	assert.Equal(t, "Alice", member.Name)
 
-	req2 := squadJSONReq(http.MethodGet, "/api/competitions/c1/squads", "secret", nil)
+	req2 := squadJSONReq(http.MethodGet, "/api/competitions/c1/team-members", "secret", nil)
 	w2 := httptest.NewRecorder()
 	r.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
 	var got struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &got))
-	require.Len(t, got.Squads[teamID], 4, "3 seeded slots plus the reserve added above")
-	assert.Equal(t, "Alice", got.Squads[teamID][3].Name)
+	require.Len(t, got.Squads[teamID], 6, "5 seeded slots plus the reserve added above")
+	assert.Equal(t, "Alice", got.Squads[teamID][5].Name)
 }
 
 // A blank name is refused with a 400 before it ever reaches the store.
@@ -128,7 +129,7 @@ func TestSquadHandlers_AddDuplicateMemberIs409(t *testing.T) {
 // PUT renames a member, keeping id/index, and returns 204.
 func TestSquadHandlers_RenameMember(t *testing.T) {
 	r, store, teamID := setupSquadTestRouter(t)
-	member, err := store.AddTeamMember("c1", teamID, "Alice") // index 4: continues past the 3 seeded slots
+	member, err := store.AddTeamMember("c1", teamID, "Alice") // index 6: continues past the 5 seeded slots
 	require.NoError(t, err)
 
 	req := squadJSONReq(http.MethodPut, "/api/competitions/c1/teams/"+teamID+"/members/"+member.ID, "secret", SquadMemberRequest{Name: "Alicia"})
@@ -138,10 +139,10 @@ func TestSquadHandlers_RenameMember(t *testing.T) {
 
 	squads, err := store.LoadSquads("c1")
 	require.NoError(t, err)
-	require.Len(t, squads[teamID], 4, "3 seeded slots plus the renamed reserve")
-	assert.Equal(t, "Alicia", squads[teamID][3].Name)
-	assert.Equal(t, member.ID, squads[teamID][3].ID)
-	assert.Equal(t, member.Index, squads[teamID][3].Index)
+	require.Len(t, squads[teamID], 6, "5 seeded slots plus the renamed reserve")
+	assert.Equal(t, "Alicia", squads[teamID][5].Name)
+	assert.Equal(t, member.ID, squads[teamID][5].ID)
+	assert.Equal(t, member.Index, squads[teamID][5].Index)
 }
 
 // PUT on an unknown member id is a 404 (state.ErrTeamMemberNotFound).
@@ -159,7 +160,7 @@ func TestSquadHandlers_UnknownCompetitionIs404(t *testing.T) {
 	r, _, teamID := setupSquadTestRouter(t)
 
 	t.Run("GET", func(t *testing.T) {
-		req := squadJSONReq(http.MethodGet, "/api/competitions/no-such-comp/squads", "secret", nil)
+		req := squadJSONReq(http.MethodGet, "/api/competitions/no-such-comp/team-members", "secret", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -192,7 +193,7 @@ func TestSquadHandlers_RequireAuth(t *testing.T) {
 	r, _, teamID := setupSquadTestRouter(t)
 
 	routes := []struct{ method, path string }{
-		{http.MethodGet, "/api/competitions/c1/squads"},
+		{http.MethodGet, "/api/competitions/c1/team-members"},
 		{http.MethodPost, "/api/competitions/c1/teams/" + teamID + "/members"},
 		{http.MethodPut, "/api/competitions/c1/teams/" + teamID + "/members/some-id"},
 		{http.MethodDelete, "/api/competitions/c1/teams/" + teamID + "/members/some-id"},
@@ -208,7 +209,7 @@ func TestSquadHandlers_RequireAuth(t *testing.T) {
 // DELETE clears the member's name, returns 204, and keeps id/index.
 func TestSquadHandlers_ClearMember(t *testing.T) {
 	r, store, teamID := setupSquadTestRouter(t)
-	member, err := store.AddTeamMember("c1", teamID, "Alice") // index 4: continues past the 3 seeded slots
+	member, err := store.AddTeamMember("c1", teamID, "Alice") // index 6: continues past the 5 seeded slots
 	require.NoError(t, err)
 
 	req := squadJSONReq(http.MethodDelete, "/api/competitions/c1/teams/"+teamID+"/members/"+member.ID, "secret", nil)
@@ -218,10 +219,10 @@ func TestSquadHandlers_ClearMember(t *testing.T) {
 
 	squads, err := store.LoadSquads("c1")
 	require.NoError(t, err)
-	require.Len(t, squads[teamID], 4)
-	assert.Equal(t, "", squads[teamID][3].Name, "clearing must blank the name")
-	assert.Equal(t, member.ID, squads[teamID][3].ID, "clearing must keep the id")
-	assert.Equal(t, member.Index, squads[teamID][3].Index, "clearing must keep the index")
+	require.Len(t, squads[teamID], 6)
+	assert.Equal(t, "", squads[teamID][5].Name, "clearing must blank the name")
+	assert.Equal(t, member.ID, squads[teamID][5].ID, "clearing must keep the id")
+	assert.Equal(t, member.Index, squads[teamID][5].Index, "clearing must keep the index")
 }
 
 // DELETE on an unknown member id is a 404 (state.ErrTeamMemberNotFound).
@@ -252,8 +253,8 @@ func TestSquadHandlers_ClearRefusedAfterStart(t *testing.T) {
 
 	squads, err := store.LoadSquads("c1")
 	require.NoError(t, err)
-	require.Len(t, squads[teamID], 4)
-	assert.Equal(t, "Alice", squads[teamID][3].Name, "a refused clear must not have changed the stored name")
+	require.Len(t, squads[teamID], 6)
+	assert.Equal(t, "Alice", squads[teamID][5].Name, "a refused clear must not have changed the stored name")
 }
 
 // POST for a team id no participant carries is a 404, not a silent write.
@@ -271,5 +272,64 @@ func TestSquadHandlers_AddToUnknownTeamIs404(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, squads["not-a-real-team"], "a refused add must not persist a squad for the bogus id")
 	require.Len(t, squads, 1, "only the real team's pre-seeded squad must exist")
-	assert.Len(t, squads[teamID], 3, "the refused add must not have touched the real team's seeded slots")
+	assert.Len(t, squads[teamID], 5, "the refused add must not have touched the real team's seeded slots")
+}
+
+// A rename and a clear now rewrite lineups.yaml as well as the squad file,
+// so they must fire the same event every other writer of that file fires.
+//
+// Without it the failure is LOSS, not staleness: a second admin holding a
+// pre-rename lineup makes any unrelated inline pick, its write spreads the
+// whole stale positions map, and the operator's correction is reverted on
+// disk. ADD stays silent on purpose and is asserted here so the split cannot
+// be "tidied" into one rule.
+func TestSquadHandlers_RenameAndClearBroadcastTheLineupEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	dir, err := os.MkdirTemp("", "squad-bcast-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	store, err := state.NewStore(dir)
+	require.NoError(t, err)
+	require.NoError(t, store.SaveTournament(&state.Tournament{Name: "Test", Password: "secret"}))
+	require.NoError(t, store.SaveCompetition(&state.Competition{ID: "c1", Kind: "team", TeamSize: 3}))
+	require.NoError(t, store.SaveParticipants("c1", []domain.Player{{Name: "Tora", Dojo: "Tora Dojo"}}))
+	teams, err := store.LoadParticipants("c1", false)
+	require.NoError(t, err)
+	require.Len(t, teams, 1)
+	teamID := teams[0].ID
+
+	hub := &recordingBroadcaster{}
+	r := gin.New()
+	admin := r.Group("/api")
+	admin.Use(AuthMiddleware(NewFileVerifier(store), store))
+	RegisterSquadHandlers(admin, store, store, hub)
+
+	base := "/api/competitions/c1/teams/" + teamID + "/members"
+
+	// ADD: deliberately silent.
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodPost, base, "secret", map[string]any{"name": "Sato"}))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	assert.Empty(t, hub.events, "adding a member stays silent, as its own rationale says")
+
+	var added domain.TeamMember
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &added))
+	require.NotEmpty(t, added.ID)
+
+	// RENAME: fires, because it rewrote lineups.yaml too.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodPut, base+"/"+added.ID, "secret", map[string]any{"name": "Sato Kenji"}))
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, hub.events, 1, "a rename must announce the lineup change it made")
+	assert.Equal(t, EventLineupUpdated, hub.events[0],
+		"the EXISTING lineup event, so no squad reader needs a new subscriber")
+
+	// CLEAR: fires for the same reason.
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, squadJSONReq(http.MethodDelete, base+"/"+added.ID, "secret", nil))
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Len(t, hub.events, 2)
+	assert.Equal(t, EventLineupUpdated, hub.events[1])
 }

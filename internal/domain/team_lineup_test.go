@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -258,4 +259,99 @@ func TestTeamLineupValidatePositions_MemberIDs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTeamLineupValidatePositions_DuplicateMember pins the duplicate-member
+// guard: the same squad member id may not occupy two positions in one
+// lineup, whether the positions are named (5-person) or numeric keys. A
+// member id present at only ONE position is legal -- that's simply the
+// same slot, not a conflict.
+func TestTeamLineupValidatePositions_DuplicateMember(t *testing.T) {
+	cases := []struct {
+		name    string
+		size    int
+		lineup  domain.TeamLineup
+		wantErr bool
+	}{
+		{
+			name: "named positions: same member at two positions rejected",
+			size: 5,
+			lineup: domain.TeamLineup{
+				Positions: map[domain.Position]string{
+					domain.PosSenpo: "Sato",
+					domain.PosJiho:  "Sato",
+				},
+				MemberIDs: map[domain.Position]string{
+					domain.PosSenpo: "id-sato",
+					domain.PosJiho:  "id-sato",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "numeric positions: same member at two positions rejected",
+			size: 3,
+			lineup: domain.TeamLineup{
+				MemberIDs: map[domain.Position]string{
+					domain.PositionNumbered(1): "id-x",
+					domain.PositionNumbered(2): "id-x",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "same member id at only one position is fine",
+			size: 5,
+			lineup: domain.TeamLineup{
+				Positions: map[domain.Position]string{
+					domain.PosSenpo: "Sato",
+				},
+				MemberIDs: map[domain.Position]string{
+					domain.PosSenpo: "id-sato",
+				},
+			},
+		},
+		{
+			name: "distinct members at distinct positions is fine",
+			size: 5,
+			lineup: domain.TeamLineup{
+				Positions: map[domain.Position]string{
+					domain.PosSenpo: "Sato",
+					domain.PosJiho:  "Tanaka",
+				},
+				MemberIDs: map[domain.Position]string{
+					domain.PosSenpo: "id-sato",
+					domain.PosJiho:  "id-tanaka",
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.lineup.ValidatePositions(tc.size)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.True(t, errors.Is(err, domain.ErrLineupDuplicateMember))
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestTeamLineupOrderedMembers_IdOnlySlotIsOccupied pins the bc-dnst rule
+// that a squad slot picked by number before it is named still fields a
+// fighter: the walk keeps a position carrying only a member id, in order,
+// with its empty name, and skips only a position with neither.
+func TestTeamLineupOrderedMembers_IdOnlySlotIsOccupied(t *testing.T) {
+	lineup := domain.TeamLineup{
+		Positions: map[domain.Position]string{domain.PositionNumbered(1): "Aoki", domain.PositionNumbered(2): ""},
+		MemberIDs: map[domain.Position]string{domain.PositionNumbered(1): "id-aoki", domain.PositionNumbered(2): "id-blank"},
+	}
+	got := lineup.OrderedMembers(3)
+	require.Len(t, got, 2)
+	assert.Equal(t, domain.LineupSlot{Position: domain.PositionNumbered(1), Name: "Aoki", MemberID: "id-aoki"}, got[0])
+	assert.Equal(t, domain.LineupSlot{Position: domain.PositionNumbered(2), Name: "", MemberID: "id-blank"}, got[1])
+	assert.Equal(t, []string{"Aoki", ""}, lineup.OrderedRoster(3))
 }

@@ -706,8 +706,8 @@ func TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead(t *testing.T) {
 
 // TestViewerCompetitionDetail_TeamCompetitionCarriesSquads pins the wire
 // contract: a team competition's GET /api/viewer/competitions/:id payload
-// carries a "squads" key, keyed by the team's participant id (matching
-// the admin endpoint's shape, GET /api/competitions/:id/squads), so a
+// carries a "teamMembers" key, keyed by the team's participant id (matching
+// the admin endpoint's shape, GET /api/competitions/:id/team-members), so a
 // client can resolve a bout row's sideAMemberId/sideBMemberId without a
 // second, admin-gated call. A blank-named member (an unfilled seeded
 // position) is still present with its index: the index, not the name, is
@@ -737,24 +737,31 @@ func TestViewerCompetitionDetail_TeamCompetitionCarriesSquads(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var body struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Contains(t, body.Squads, redID)
-	require.Len(t, body.Squads[redID], 2)
+	// The GET above triggers EnsureLegacyUpgraded, which pads the squad up
+	// to its floor (TeamSize 2 + 2 reserves = 4): the 2 members added above
+	// plus 2 further blank seeded slots.
+	require.Len(t, body.Squads[redID], 4)
 	assert.Equal(t, member.ID, body.Squads[redID][0].ID)
 	assert.Equal(t, 1, body.Squads[redID][0].Index)
 	assert.Equal(t, "Alice", body.Squads[redID][0].Name)
 	assert.Equal(t, 2, body.Squads[redID][1].Index)
 	assert.Equal(t, "", body.Squads[redID][1].Name,
 		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+	assert.Equal(t, 3, body.Squads[redID][2].Index)
+	assert.Equal(t, "", body.Squads[redID][2].Name, "a floor-padded slot must be blank")
+	assert.Equal(t, 4, body.Squads[redID][3].Index)
+	assert.Equal(t, "", body.Squads[redID][3].Name, "a floor-padded slot must be blank")
 }
 
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead
 // verifies both halves of "an individual competition's payload carries
 // none, and no squad read is attempted": the response carries no
-// "squads" key at all, and garbage bytes planted directly at
-// squads.yaml's path produce no log line, proving state.LoadSquads was
+// "teamMembers" key at all, and garbage bytes planted directly at
+// team-members.yaml's path produce no log line, proving state.LoadSquads was
 // never called (mirrors TestViewerCompetitionsList_SetupCompetitionSkipsPoolsRead's
 // same proof-by-corruption technique for pools.csv above).
 func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
@@ -768,7 +775,7 @@ func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
 	}))
-	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "squads.yaml"), []byte("not: [valid yaml"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "team-members.yaml"), []byte("not: [valid yaml"), 0o600))
 
 	var logBuf bytes.Buffer
 	prevOut := log.Writer()
@@ -782,16 +789,16 @@ func TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead(t *testing
 
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	_, hasSquads := body["squads"]
-	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	_, hasSquads := body["teamMembers"]
+	assert.False(t, hasSquads, "an individual competition must never carry a teamMembers key")
 	assert.NotContains(t, logBuf.String(), "load squads",
-		"an individual competition must never attempt the squads.yaml read, so garbage bytes there produce no log line")
+		"an individual competition must never attempt the team-members.yaml read, so garbage bytes there produce no log line")
 }
 
 // TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError verifies that
-// a team competition with no squads.yaml written yet (an individual
+// a team competition with no team-members.yaml written yet (an individual
 // competition, or a team competition not yet loaded/never given a squad
-// member) still returns 200 with an empty "squads" object, never an
+// member) still returns 200 with an empty "teamMembers" object, never an
 // error: state.LoadSquads treats a missing file as "no squads recorded",
 // not a fault.
 func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
@@ -806,10 +813,10 @@ func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
 	}))
-	// No AddTeamMember call, and confirm the premise directly: squads.yaml
+	// No AddTeamMember call, and confirm the premise directly: team-members.yaml
 	// is not on disk yet.
-	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "squads.yaml"))
-	require.True(t, os.IsNotExist(statErr), "squads.yaml must not exist yet for this test to mean anything")
+	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "team-members.yaml"))
+	require.True(t, os.IsNotExist(statErr), "team-members.yaml must not exist yet for this test to mean anything")
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/competitions/"+cid, nil)
@@ -817,19 +824,19 @@ func TestViewerCompetitionDetail_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var body struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	// The exact CONTENT is deliberately not pinned here: this same request's
 	// own participants read (state.EnsureLegacyUpgraded, triggered inside
-	// LoadParticipantsOpt) may seed squads.yaml up to TeamSize as a side
-	// effect the very first time this team's squad is touched
+	// LoadParticipantsOpt) may seed team-members.yaml up to its floor (TeamSize + 2
+	// reserves) as a side effect the very first time this team's squad is touched
 	// (state.upgradeSquadsFromMetadataLocked) -- so "a missing file loads
 	// fine" can legitimately observe either an empty map or the auto-seeded
 	// pad, depending on load order, and BOTH are "not an error". What this
 	// test pins is the one thing that must hold either way: no error, and a
 	// present, well-typed squads map (never a 500, never a bare null/string).
-	assert.NotNil(t, body.Squads, "a missing squads.yaml must decode to a present (possibly empty) map, never null")
+	assert.NotNil(t, body.Squads, "a missing team-members.yaml must decode to a present (possibly empty) map, never null")
 }
 
 // --- Squads on the aggregate/court-feed payload (bc-pnum, continued):
@@ -868,23 +875,30 @@ func TestViewerAggregate_TeamCompetitionCarriesSquads(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var comps []struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
 	require.Contains(t, comps[0].Squads, redID)
-	require.Len(t, comps[0].Squads[redID], 2)
+	// The GET above triggers EnsureLegacyUpgraded, which pads the squad up
+	// to its floor (TeamSize 2 + 2 reserves = 4): the 2 members added above
+	// plus 2 further blank seeded slots.
+	require.Len(t, comps[0].Squads[redID], 4)
 	assert.Equal(t, member.ID, comps[0].Squads[redID][0].ID)
 	assert.Equal(t, 1, comps[0].Squads[redID][0].Index)
 	assert.Equal(t, "Alice", comps[0].Squads[redID][0].Name)
 	assert.Equal(t, 2, comps[0].Squads[redID][1].Index)
 	assert.Equal(t, "", comps[0].Squads[redID][1].Name,
 		"a blank-named member (unfilled slot) must still be present, keyed by its index")
+	assert.Equal(t, 3, comps[0].Squads[redID][2].Index)
+	assert.Equal(t, "", comps[0].Squads[redID][2].Name, "a floor-padded slot must be blank")
+	assert.Equal(t, 4, comps[0].Squads[redID][3].Index)
+	assert.Equal(t, "", comps[0].Squads[redID][3].Name, "a floor-padded slot must be blank")
 }
 
 // TestViewerAggregate_IndividualCompetitionSkipsSquadsRead mirrors
 // TestViewerCompetitionDetail_IndividualCompetitionSkipsSquadsRead for the
-// aggregate endpoint: no "squads" key, and garbage bytes at squads.yaml's
+// aggregate endpoint: no "teamMembers" key, and garbage bytes at team-members.yaml's
 // path produce no log line, proving state.LoadSquads was never called for
 // an individual competition even though buildViewerCompetitionPayload runs
 // once per competition in the whole tournament.
@@ -899,7 +913,7 @@ func TestViewerAggregate_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 		{ID: "11111111-1111-4111-8111-111111111111", Name: "Alice", Dojo: "Dojo Alice"},
 	}))
-	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "squads.yaml"), []byte("not: [valid yaml"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "competitions", cid, "team-members.yaml"), []byte("not: [valid yaml"), 0o600))
 
 	var logBuf bytes.Buffer
 	prevOut := log.Writer()
@@ -914,10 +928,10 @@ func TestViewerAggregate_IndividualCompetitionSkipsSquadsRead(t *testing.T) {
 	var comps []map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
-	_, hasSquads := comps[0]["squads"]
-	assert.False(t, hasSquads, "an individual competition must never carry a squads key")
+	_, hasSquads := comps[0]["teamMembers"]
+	assert.False(t, hasSquads, "an individual competition must never carry a teamMembers key")
 	assert.NotContains(t, logBuf.String(), "load squads",
-		"an individual competition must never attempt the squads.yaml read, so garbage bytes there produce no log line")
+		"an individual competition must never attempt the team-members.yaml read, so garbage bytes there produce no log line")
 }
 
 // TestViewerAggregate_MissingSquadsFileIsNotAnError mirrors
@@ -935,10 +949,10 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.NoError(t, store.SaveParticipants(cid, []domain.Player{
 		{ID: "11111111-1111-4111-8111-111111111111", Name: "RedTeam", Dojo: "DojoR"},
 	}))
-	// No AddTeamMember call, and confirm the premise directly: squads.yaml
+	// No AddTeamMember call, and confirm the premise directly: team-members.yaml
 	// is not on disk yet.
-	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "squads.yaml"))
-	require.True(t, os.IsNotExist(statErr), "squads.yaml must not exist yet for this test to mean anything")
+	_, statErr := os.Stat(filepath.Join(tempDir, "competitions", cid, "team-members.yaml"))
+	require.True(t, os.IsNotExist(statErr), "team-members.yaml must not exist yet for this test to mean anything")
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/viewer/competitions", nil)
@@ -946,7 +960,7 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 	require.Equalf(t, http.StatusOK, w.Code, "response: %s", w.Body.String())
 
 	var comps []struct {
-		Squads map[string][]domain.TeamMember `json:"squads"`
+		Squads map[string][]domain.TeamMember `json:"teamMembers"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &comps))
 	require.Len(t, comps, 1)
@@ -957,7 +971,7 @@ func TestViewerAggregate_MissingSquadsFileIsNotAnError(t *testing.T) {
 	// the seed-on-touch side effect has deterministically already run for
 	// THIS builder specifically. What matters is that a missing file is
 	// never an error: a present, well-typed map either way.
-	assert.NotNil(t, comps[0].Squads, "a missing squads.yaml must decode to a present (possibly empty) map, never null")
+	assert.NotNil(t, comps[0].Squads, "a missing team-members.yaml must decode to a present (possibly empty) map, never null")
 }
 
 // TestViewerCourtFeed_TeamCompetitionCarriesSquads verifies the court feed
@@ -999,7 +1013,7 @@ func TestViewerCourtFeed_TeamCompetitionCarriesSquads(t *testing.T) {
 
 	var body struct {
 		Competitions []struct {
-			Squads map[string][]domain.TeamMember `json:"squads"`
+			Squads map[string][]domain.TeamMember `json:"teamMembers"`
 		} `json:"competitions"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))

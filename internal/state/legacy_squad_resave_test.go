@@ -68,9 +68,9 @@ func TestLegacySquadSurvivesTheAdvertisedRosterResave(t *testing.T) {
 	squads, err := later.LoadSquads("c1")
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"Sato", "Kimura", "Abe"}, squadNames(squads[byName["Tora"]]),
-		"the members carried across to the id the save minted, not to a squad of blanks")
-	assert.Equal(t, []string{"Mori", "Oda", "Ito"}, squadNames(squads[byName["Kaze"]]))
+	assert.Equal(t, []string{"Sato", "Kimura", "Abe", "", ""}, squadNames(squads[byName["Tora"]]),
+		"the members carried across to the id the save minted, not to a squad of blanks, padded to the floor (TeamSize 3 + 2 reserves)")
+	assert.Equal(t, []string{"Mori", "Oda", "Ito", "", ""}, squadNames(squads[byName["Kaze"]]))
 }
 
 func squadNames(members []domain.TeamMember) []string {

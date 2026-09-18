@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { squadMemberLabel } from '../squad_member_label.jsx';
+import { squadMemberLabel, squadSlotLabel } from '../squad_member_label.jsx';
 
 // squadMemberLabel is the ONE primitive that composes a squad member's
 // visible label (bc-tmid pass 3): the team's competitor number plus the
@@ -35,5 +35,31 @@ describe('squadMemberLabel', () => {
     // 0 is falsy in JS but a legitimate index value; the guard must check
     // for null/undefined/"" specifically, not just truthiness.
     expect(squadMemberLabel('T10', 0)).toBe('T10.0');
+  });
+
+  it('stays "" for a blank team number even with a real index (bc-dnst)', () => {
+    expect(squadMemberLabel('', 3)).toBe('');
+  });
+});
+
+// squadSlotLabel is the OPERATOR's handle for a squad slot pre-draw, where
+// squadMemberLabel falls back to "" (bc-dnst): numbered once the team has a
+// number, else "Slot N", the one stable handle a member always has.
+describe('squadSlotLabel', () => {
+  it('returns the numbered label ("T1.3") once the team has a number', () => {
+    expect(squadSlotLabel('T1', 3)).toBe('T1.3');
+  });
+
+  it('falls back to "Slot N" when the team has no number yet', () => {
+    expect(squadSlotLabel('', 3)).toBe('Slot 3');
+    expect(squadSlotLabel(null, 3)).toBe('Slot 3');
+    expect(squadSlotLabel(undefined, 3)).toBe('Slot 3');
+  });
+
+  it('returns "" with no index, regardless of the team number', () => {
+    expect(squadSlotLabel('T1', null)).toBe('');
+    expect(squadSlotLabel('T1', undefined)).toBe('');
+    expect(squadSlotLabel('T1', '')).toBe('');
+    expect(squadSlotLabel('', null)).toBe('');
   });
 });

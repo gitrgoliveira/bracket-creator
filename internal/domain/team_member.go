@@ -56,9 +56,9 @@ type TeamMember struct {
 	// likewise refused from touching ID or Index and, per the same ruling,
 	// refused outright once the competition has started (state.CanStart).
 	// A blank Name is a normal, expected state, not an absence: a team's
-	// squad is SEEDED with the competition's TeamSize members on load
-	// (state.upgradeSquadsFromMetadataLocked), each already carrying its ID
-	// and Index, with Name blank until filled in.
+	// squad is SEEDED on load with the competition's TeamSize members plus
+	// state.SquadReserveSlots reserves (state.upgradeSquadsFromMetadataLocked),
+	// each already carrying its ID and Index, with Name blank until filled in.
 	Name string `json:"name" yaml:"name"`
 }
 

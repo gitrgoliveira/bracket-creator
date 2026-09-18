@@ -16,7 +16,133 @@
 // squad member id half of a lineup pick (bc-tmid pass 3), keyed by the SAME
 // posKey as `positions`; a lineup saved before squads existed simply omits it.
 
-import { squadMemberLabel } from './squad_member_label.jsx';
+import { squadMemberLabel, squadSlotLabel } from './squad_member_label.jsx';
+
+// squadRosterEntries: the ONE builder of a lineup picker's list for a team
+// (bc-dnst), shared by the score sheet's per-row picker (admin_scoring_team
+// .jsx rosterForSide) and the Up Next "Enter lineup" panel
+// (admin_schedule_lineup.jsx): the squad's members first, every one of them
+// in index order as `{id, index, name, label}` objects so a still-blank slot
+// is offered by its number alone (operator ruling 2026-09-15). The LEGACY
+// names (the pre-squad metadata roster, plus whatever
+// `mergeRosterWithAssigned` re-adds for the lineup's own assigned names) are
+// appended ONLY when the squad itself is empty: the fallback exists for
+// exactly two "no squad" cases, a legacy team that predates squads
+// altogether (no id at all) and a squad fetch that failed, and a squad that
+// IS present already lists every member the legacy roster could offer, so
+// mixing the two would only reintroduce the stale pre-rename names
+// resolveBoutSideDisplayName exists to stop showing. Reads
+// mergeRosterWithAssigned off window.AdminLineupHelpers (this module must
+// not import admin_lineup.jsx, see the header) and copes with its absence.
+export function squadRosterEntries({ teamNumber, squad, legacyNames, lineup }) {
+  const squadEntries = (Array.isArray(squad) ? squad : [])
+    .slice()
+    .sort((x, y) => (x?.index || 0) - (y?.index || 0))
+    .map(mem => ({
+      id: mem?.id || "",
+      index: mem?.index || 0,
+      name: String(mem?.name || "").trim(),
+      // squadSlotLabel, not squadMemberLabel: before the draw a team has no
+      // number, so the numbered form is "" and every seeded blank slot rendered
+      // as an identical unlabelled "no name yet" row -- the operator could not
+      // tell which slot they had picked, nor which they had already used, while
+      // the Lineups page showed "Slot 1".."Slot 7" for the same members. These
+      // are all OPERATOR pickers, which is exactly what squadSlotLabel is for;
+      // spectator surfaces keep squadMemberLabel and stay bare (bc-dnst).
+      label: squadSlotLabel(teamNumber, mem?.index),
+    }));
+  if (squadEntries.length > 0) {
+    // A name the LINEUP already holds that NO squad member carries is
+    // appended, as a plain string: the same shape the no-squad branch below
+    // returns, and one every consumer already handles.
+    //
+    // This is not defensive. It is the documented mint-failure path:
+    // resolveMemberIdsForPositions saves a substitute BY NAME with no member
+    // id when addTeamMember fails, and deliberately never blocks the write for
+    // it. Such a fighter is in neither the squad nor the legacy metadata, so
+    // without this tail they are in NO list at all. The score sheet applied
+    // mergeRosterWithAssigned for exactly this before the squad list arrived;
+    // this restores that parity rather than adding something new.
+    //
+    // Scope, stated precisely because it is narrower than it looks: on the
+    // FILTERED pickers rosterWithoutPlacedElsewhere then drops this entry at
+    // every position except the one already holding the name, which is
+    // correct, since one fighter holds one position. Where the tail actually
+    // shows is the UNFILTERED list a kachinuki row past the first offers,
+    // where the fighter who stayed on legitimately repeats.
+    const known = new Set(squadEntries.map(e => e.name.toLowerCase()).filter(Boolean));
+    const assigned = [];
+    for (const raw of Object.values(lineup?.positions || {})) {
+      const name = String(raw == null ? "" : raw).trim();
+      const key = name.toLowerCase();
+      if (!key || known.has(key)) continue;
+      known.add(key);
+      assigned.push(name);
+    }
+    return assigned.length ? [...squadEntries, ...assigned] : squadEntries;
+  }
+  const seen = new Set();
+  const merge = (typeof window !== "undefined" && window.AdminLineupHelpers?.mergeRosterWithAssigned)
+    ? window.AdminLineupHelpers.mergeRosterWithAssigned
+    : (names) => names;
+  const legacyEntries = merge(Array.isArray(legacyNames) ? legacyNames : [], lineup).filter(n => {
+    const key = String(n).trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return legacyEntries;
+}
+
+// memberPlacedElsewhere: the ONE predicate behind "a member holds one
+// position per lineup" (bc-dnst): the position key at which `memberIds`
+// already holds `id` other than `posKey`, or "" when it holds it nowhere
+// else. Every lineup writer asks it before writing (the score sheet's
+// buildInlineLineupWrite, the Up Next panel's save, the Lineups page's add
+// path) and rosterWithoutPlacedElsewhere below is the same answer rendered
+// as a list filter, so the offer and the refusal can never disagree; the
+// server's own ErrLineupDuplicateMember stays an unreachable backstop.
+//
+// rosterWithoutPlacedElsewhere: a fixed-order lineup fields each fighter
+// once, so the list offered for `posKey` drops every entry already placed at
+// ANOTHER position of `lineup` (bc-dnst; a click test once caught the list
+// offering a fighter twice and letting him be placed on two rows). An object
+// entry is dropped when its id appears in lineup.memberIds elsewhere, or its
+// name matches a NON-BLANK name elsewhere; a blank-named object entry is
+// compared by id only, since every blank slot shares the same empty name
+// and matching on it would hide every other blank slot the moment one of
+// them is placed. A plain legacy string is compared by name. Shared by the
+// same two pickers as squadRosterEntries.
+export function memberPlacedElsewhere(memberIds, posKey, id) {
+  if (!id) return "";
+  const hit = Object.entries(memberIds || {}).find(([key, other]) => key !== posKey && other === id);
+  return hit ? hit[0] : "";
+}
+
+export function rosterWithoutPlacedElsewhere(roster, lineup, posKey) {
+  const otherNames = new Set(Object.entries(lineup?.positions || {})
+    .filter(([key, name]) => key !== posKey && String(name || "").trim())
+    .map(([, name]) => String(name).trim().toLowerCase()));
+  return roster.filter(entry => {
+    if (typeof entry === "string") return !otherNames.has(entry.trim().toLowerCase());
+    // An entry that CARRIES an id is judged by that id alone: "a record that
+    // carries an id field is resolved by id only" (CLAUDE.md, bc-pnum). A name
+    // arm beside the id arm hid an UNPLACED member from every picker whenever a
+    // teammate placed elsewhere shared their display name -- same-name
+    // teammates exist on rosters predating the uniqueness rule, as
+    // squadMemberIdForUniqueName's own comment says -- while
+    // memberPlacedElsewhere, the write-time predicate this list must agree
+    // with, is id-only and would have allowed them (bc-dnst).
+    //
+    // So ASK that predicate rather than re-deriving its answer from a local
+    // Set: "the offer and the refusal can never disagree" then holds by
+    // construction instead of by discipline, and a squad is single digits.
+    if (entry.id) return !memberPlacedElsewhere(lineup?.memberIds, posKey, entry.id);
+    // No id: the legacy shape, placed by name, so judged by name.
+    if (!entry.name) return true;
+    return !otherNames.has(entry.name.trim().toLowerCase());
+  });
+}
 
 // resolveMatchLineup: prefer the per-match lineup endpoint (GET
 // match-lineups/:matchId); fall back to the round lineup when no per-match
@@ -83,9 +209,45 @@ export const POS_LABELS_5 = POS_KEYS_5.map((s) => s.charAt(0).toUpperCase() + s.
 // seeds the bootstrapped bout 1 before the first submit. Fixed-format
 // matches and the daihyosen row stay LINEUP-FIRST: lineups are always
 // editable and drive fixed position-vs-position pairings.
-export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName }) {
-  if (isKachinuki && !isDaihyosen) return existingName || lineupName || "";
-  return lineupName || existingName || "";
+//
+// teamNameA/teamNameB close a trap that only shows with NO lineup set
+// (bc-dnst). A FIXED-ORDER bout settles at the match level. Rows written
+// before that rule put the TEAM's name into sideA/sideB, and the server's
+// attribution reads it (state.SubBoutWinnerSide matches sub.Winner against
+// the match-level names). That stored value is therefore not a fighter's
+// name, and falling back to it dressed the team's own name up as the person
+// fighting: score one mark with no lineup and every position, untouched ones
+// included, came back named after the team. A lineup hid it, because the
+// lineup name wins.
+//
+// BOTH team names, not just the row's own side: that is the check the TV
+// board carried locally for the quick-score shape (match_scoreboard's
+// subSideName, now deleted in favour of this), and narrowing it to one side
+// would have quietly dropped coverage for a row whose sides are crossed by
+// hand-edited data. Passing them is how a caller opts in; a caller with no
+// team names to give (none today) simply gets the old behaviour.
+//
+// The team-name test applies to KACHINUKI too, and must run BEFORE its
+// server-first return. Today's engine writes real fighter names per pairing, so
+// a team name should never land in that field -- but rows that already carry
+// one exist (the quick-score synth shape state.SubBoutWinnerSide's own team
+// arms answer for, a hand-edited bracket.json, an imported tournament), and the
+// TV board filtered them for years before this rule moved here. Scoping the
+// test below the kachinuki return dropped exactly that coverage and printed the
+// team's own name in the fighter slot of every bout row.
+// THE DAIHYOSEN ROW IS EXEMPT, and that is not a detail. It is the one bout
+// whose sideA/sideB ARE the two team names by rule: buildPatch keeps them
+// there so placeHt can put the hantei mark on the winner's side, and blanking
+// them drops the mark from the wire. Filtering them here blanked both of that
+// row's name cells, and the rep bout is the ONE row with no fallback label
+// (its lineup key is the literal "daihyosen", which no lineup carries, and it
+// offers no roster or typeable box), so the editor printed "-" against both
+// teams where the two names used to be.
+export function resolveBoutSideName({ isKachinuki, isDaihyosen, existingName, lineupName, teamNameA, teamNameB }) {
+  const namesATeam = existingName === teamNameA || existingName === teamNameB;
+  const stored = namesATeam && !isDaihyosen ? "" : existingName;
+  if (isKachinuki && !isDaihyosen) return stored || lineupName || "";
+  return lineupName || stored || "";
 }
 
 // kachinukiHidesLineupPosition: for a kachinuki NUMBERED bout past the
@@ -137,7 +299,7 @@ export function pickMemberIdFromLineup(lineup, index, teamSize) {
 // resolveBoutSideName's kachinuki-vs-fixed priority exactly: the id must
 // come from the SAME source tier the name was resolved from (a kachinuki
 // numbered bout's pairing is server-bout-log first, the SubMatchResult's own
-// sideAMemberId/sideBMemberId -- backfilled from squads.yaml by the
+// sideAMemberId/sideBMemberId -- backfilled from team-members.yaml by the
 // legacy-upgrade repair -- so the lineup position's id must never outrank
 // it; fixed-format and the daihyosen row stay lineup-first). Callers pass
 // existingMemberId/lineupMemberId from the SAME existing/lineup objects
@@ -201,4 +363,30 @@ export function resolveBoutSideSquadLabel({ isKachinuki, isDaihyosen, existingMe
   const memberId = resolveBoutSideMemberId({ isKachinuki, isDaihyosen, existingMemberId, lineupMemberId });
   const member = resolveSquadMember(squad, memberId, name);
   return member ? squadMemberLabel(teamNumber, member.index) : "";
+}
+
+// resolveBoutSideDisplayName: the ONE rule for what name a bout side shows
+// on screen (bc-dnst, operator ruling 2026-09-15). A rename reaches every
+// bout that member has already fought -- the STORED SubMatchResult text
+// (sub.sideA/sub.sideB) stays frozen forever (it is not rewritten, and
+// nothing on the wire changes when a member is renamed), but every render
+// site resolves the member's CURRENT name by id and shows that instead.
+// Resolution is id-only, exactly like resolveSquadMember: a name can never
+// re-attach a bout to a different member than the id it was recorded with.
+//
+// This is DISPLAY-ONLY. Nothing that WRITES a bout (buildPatch's
+// playerNamesForBout, the kachinuki bout log, a lineup PUT) may pass a name
+// through this function; doing so would let a stale render silently rewrite
+// the stored record. Every call site below is a render, never a writer.
+//
+// storedName is returned verbatim (falling back to "" for a nullish/absent
+// value) whenever memberId resolves to nothing, or resolves to a squad
+// member whose own name is still blank (an unnamed seeded slot has nothing
+// newer to show).
+export function resolveBoutSideDisplayName({ squad, memberId, storedName }) {
+  const list = Array.isArray(squad) ? squad : [];
+  const member = memberId ? list.find(mem => mem && mem.id === memberId) : null;
+  const currentName = member ? String(member.name || "").trim() : "";
+  if (currentName) return currentName;
+  return storedName || "";
 }

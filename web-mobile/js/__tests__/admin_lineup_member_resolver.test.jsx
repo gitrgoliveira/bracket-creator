@@ -6,7 +6,7 @@
 // mounting anything.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning } from '../admin_lineup.jsx';
+import { resolveMemberIdForName, resolveMemberIdsForPositions, memberIdentityWarning, blankMemberForPosition } from '../admin_lineup.jsx';
 
 const SQUAD = [
   { id: 'mem-sato', index: 0, name: 'Sato' },
@@ -137,6 +137,155 @@ describe('resolveMemberIdsForPositions', () => {
     expect(memberIds).toEqual({});
     expect(addTeamMember).not.toHaveBeenCalled();
   });
+
+  // bc-dnst (operator ruling 2026-09-15): the number on a bout row belongs to
+  // the SQUAD MEMBER, not the row. A fresh team is seeded with one blank
+  // member per position (an id + index, no name yet), so a name typed into
+  // an unnamed position must FILL that member's blank slot (rename, keeping
+  // its id and its number) rather than minting a fresh, number-less member.
+  const BLANK_SQUAD = [
+    { id: 'm1', index: 1, name: '' },
+    { id: 'm2', index: 2, name: '' },
+  ];
+
+  it('bc-dnst: a name typed into a named position (senpo) renames the blank member seeded at its index, never mints', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    global.window.API = { addTeamMember, renameTeamMember };
+    const { memberIds, squad } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw'
+    );
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm1', 'Sato', 'pw');
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ senpo: 'm1' });
+    expect(squad.find(m => m.id === 'm1').name).toBe('Sato');
+  });
+
+  it('bc-dnst: a numeric position key ("2") renames the blank member seeded at that index', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    global.window.API = { addTeamMember, renameTeamMember };
+    const { memberIds, squad } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { '2': 'Ito' }, BLANK_SQUAD, 'pw'
+    );
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm2', 'Ito', 'pw');
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ '2': 'm2' });
+    expect(squad.find(m => m.id === 'm2').name).toBe('Ito');
+  });
+
+  it('bc-dnst: no blank member at that index falls back to minting, exactly as before', async () => {
+    const minted = { id: 'mem-new', index: 1, name: 'Sato' };
+    const addTeamMember = vi.fn().mockResolvedValue(minted);
+    const renameTeamMember = vi.fn();
+    global.window.API = { addTeamMember, renameTeamMember };
+    const squad = [{ id: 'm1', index: 1, name: 'Ito' }]; // already named: not a blank slot
+    const { memberIds } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, squad, 'pw'
+    );
+    expect(renameTeamMember).not.toHaveBeenCalled();
+    expect(addTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'Sato', 'pw');
+    expect(memberIds).toEqual({ senpo: 'mem-new' });
+  });
+
+  it('bc-dnst: a name already on the squad resolves without renaming or minting', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn();
+    global.window.API = { addTeamMember, renameTeamMember };
+    const squad = [{ id: 'm1', index: 1, name: 'Sato' }];
+    const { memberIds } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, squad, 'pw'
+    );
+    expect(renameTeamMember).not.toHaveBeenCalled();
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ senpo: 'm1' });
+  });
+
+  it('bc-dnst: a rename failure is reported in `failures`, leaving the position unresolved', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockRejectedValue(new Error('offline'));
+    global.window.API = { addTeamMember, renameTeamMember };
+    const { memberIds, failures } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Sato' }, BLANK_SQUAD, 'pw'
+    );
+    expect(memberIds.senpo).toBeUndefined();
+    expect(failures).toEqual([{ position: 'senpo', name: 'Sato', reason: 'offline' }]);
+    expect(addTeamMember).not.toHaveBeenCalled();
+  });
+
+  // bc-dnst (currentIds, the 6th argument): a name typed into a slot that
+  // was PICKED BY NUMBER (its memberId already recorded on this position,
+  // e.g. via LineupNameInput's object-entry roster) must rename THAT
+  // member, even when it is not the position's own index default. m6 here
+  // is a reserve at index 6 -- nothing to do with senpo's own default (m1,
+  // index 1) -- so this pins that currentIds is consulted BEFORE the
+  // index-default fallback, not merely as a tie-break when they agree.
+  it('bc-dnst: currentIds naming a blank member (not the index default) renames THAT member instead', async () => {
+    const addTeamMember = vi.fn();
+    const renameTeamMember = vi.fn().mockResolvedValue(true);
+    global.window.API = { addTeamMember, renameTeamMember };
+    const squad = [
+      { id: 'm1', index: 1, name: '' }, // senpo's own index default: must NOT be touched
+      { id: 'm6', index: 6, name: '' }, // the reserve actually picked into senpo
+    ];
+    const { memberIds, squad: nextSquad } = await resolveMemberIdsForPositions(
+      'comp1', 'team1', { senpo: 'Picked Name' }, squad, 'pw', { senpo: 'm6' }
+    );
+    expect(renameTeamMember).toHaveBeenCalledWith('comp1', 'team1', 'm6', 'Picked Name', 'pw');
+    expect(addTeamMember).not.toHaveBeenCalled();
+    expect(memberIds).toEqual({ senpo: 'm6' });
+    expect(nextSquad.find(m => m.id === 'm6').name).toBe('Picked Name');
+    expect(nextSquad.find(m => m.id === 'm1').name).toBe('');
+  });
+});
+
+// bc-dnst: blankMemberForPosition is the pure lookup resolveMemberIdsForPositions
+// uses internally (rename vs mint) and commitAdd (admin_lineup.jsx's own
+// "+ Add new member…" option) now shares, so the two "does this slot already
+// have a home" checks cannot drift.
+describe('blankMemberForPosition', () => {
+  const BLANK_SQUAD = [
+    { id: 'm1', index: 1, name: '' },
+    { id: 'm2', index: 2, name: '' },
+  ];
+
+  it('finds the blank member seeded at the position\'s own index', () => {
+    expect(blankMemberForPosition(BLANK_SQUAD, 'senpo', {})).toEqual(BLANK_SQUAD[0]);
+    expect(blankMemberForPosition(BLANK_SQUAD, '2', {})).toEqual(BLANK_SQUAD[1]);
+  });
+
+  it('prefers the member named by currentIds over the index default', () => {
+    const squad = [
+      { id: 'm1', index: 1, name: '' }, // senpo's own index default
+      { id: 'm6', index: 6, name: '' }, // the reserve actually picked into senpo
+    ];
+    expect(blankMemberForPosition(squad, 'senpo', { senpo: 'm6' })).toEqual(squad[1]);
+  });
+
+  it('returns null when the position has no blank slot (already named, or none at that index)', () => {
+    const namedSquad = [{ id: 'm1', index: 1, name: 'Ito' }];
+    expect(blankMemberForPosition(namedSquad, 'senpo', {})).toBeNull();
+    expect(blankMemberForPosition(BLANK_SQUAD, 'taisho', {})).toBeNull();
+  });
+
+  it('tolerates a missing/empty squad', () => {
+    expect(blankMemberForPosition([], 'senpo', {})).toBeNull();
+    expect(blankMemberForPosition(undefined, 'senpo', {})).toBeNull();
+  });
+
+  // bc-cse: the seeded blank member at a position's own index is only free
+  // to take that position's name when it is not already fielded ELSEWHERE
+  // in the lineup (renaming it there would name the wrong row's fighter).
+  it('does NOT return the index-seeded blank member when currentIds already holds its id at ANOTHER position', () => {
+    const squad = [{ id: 'm1', index: 1, name: '' }];
+    expect(blankMemberForPosition(squad, 'senpo', { taisho: 'm1' })).toBeNull();
+  });
+
+  it('DOES return the index-seeded blank member when currentIds holds it at THIS SAME position, or nowhere at all', () => {
+    const squad = [{ id: 'm1', index: 1, name: '' }];
+    expect(blankMemberForPosition(squad, 'senpo', { senpo: 'm1' })).toEqual(squad[0]);
+    expect(blankMemberForPosition(squad, 'senpo', {})).toEqual(squad[0]);
+  });
 });
 
 // bc-cse gap closure: memberIdentityWarning is the ONE composer all three
@@ -195,7 +344,7 @@ describe('memberIdentityWarning', () => {
       true,
     );
     expect(msg).toContain('Lineup saved');
-    expect(msg).toContain('squad list could not be loaded');
+    expect(msg).toContain('team member list could not be loaded');
     expect(msg).toContain('Scores will still record normally');
     expect(msg).not.toContain('Sato');
     expect(msg).not.toContain('Tanaka');
@@ -221,11 +370,11 @@ describe('memberIdentityWarning', () => {
     }
   });
 
-  it('uses operator vocabulary ("squad member"), never internal jargon ("member id")', () => {
+  it('uses operator vocabulary ("team member"), never internal jargon ("member id")', () => {
     const msg = memberIdentityWarning(
       [{ position: 'senpo', name: 'Sato', reason: 'offline' }], false,
     );
-    expect(msg).toContain('squad member');
+    expect(msg).toContain('team member');
     expect(msg.toLowerCase()).not.toContain('member id');
   });
 

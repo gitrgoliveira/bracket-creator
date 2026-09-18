@@ -466,7 +466,7 @@ func overlayTeamPoolScores(f *excelize.File, pools []helper.Pool, resultByID map
 
 			// Sub-match rows start two rows below the Red header (1-based).
 			subStartExcelRow := rowIdx + 3
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, teamSize, mirror)
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, subStartExcelRow, mr.SubResults, teamSize, mirror, mr.SideA, mr.SideB)
 		}
 	}
 
@@ -630,7 +630,15 @@ func setIVCellWithMark(f *excelize.File, sheetName, col string, row, iv int, mar
 // teamSize bounds the number of sub-match rows the grid actually has; a Position
 // outside [1, teamSize] (corrupted state) is skipped rather than writing into the
 // next encounter's cells. Shared by the pool sheet and overlayTeamBracketScores.
-func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool) {
+// matchSideA/matchSideB are the ENCOUNTER's team names. A fixed-order bout
+// settles at the match level, so its row records no per-fighter identity
+// (bc-dnst) and its Winner names the TEAM: without these, SubBoutAttribution
+// sees two empty side names, AttributeWinnerSide returns MatchSideNone, and the
+// row silently loses both its default-win maru and its Fus./Kiken mark while
+// this same sheet's IV/PW summary still counts the bout. state.SubBoutWinnerSide
+// and the JS twin subWinnerSides both carry the same match-level arms; this is
+// the third reader of that rule and it was the one without them.
+func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, subStartExcelRow int, subResults []state.SubMatchResult, teamSize int, mirror bool, matchSideA, matchSideB string) {
 	lVCol := colNum(courtStartCol + 1)
 	rVCol := colNum(courtStartCol + 5)
 
@@ -653,6 +661,18 @@ func writeTeamSubMatchScores(f *excelize.File, sheetName string, courtStartCol, 
 		// rows this was the sideA-first convention, and the paragraph here
 		// said so; that is no longer true.
 		att := domain.SubBoutAttribution(sub.Attribution())
+		// A row that names no fighter is attributed by the encounter's own
+		// sides, which is what its Winner holds. Only when the row itself is
+		// silent: a row naming its fighters keeps deciding for itself, and a
+		// same-name pair (SideA == SideB, both non-empty) fails this same
+		// test, so it stays blanked as SubBoutAttribution left it rather than
+		// being re-attributed by team names, which ARE unique by rule.
+		// Asked of sub, not of att: Attribution() copies these two names
+		// verbatim and SubBoutAttribution only ever blanks a pair, so an
+		// att-side conjunct could restate this one but never narrow it.
+		if sub.SideA == "" && sub.SideB == "" {
+			att.SideA, att.SideB = matchSideA, matchSideB
+		}
 		scoreA, scoreB := DefaultWinMaruAB(
 			IpponsScore(sub.IpponsA), IpponsScore(sub.IpponsB),
 			sub.Decision, sub.Encho, att)
@@ -1062,7 +1082,7 @@ func overlayTeamBracketScores(f *excelize.File, bracketByNum map[int]state.Brack
 
 			// Sub-match ippon letters: Position p sits at H+2+p, i.e. the sub
 			// rows start at H+3. Same writer as the pool sheet.
-			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror)
+			writeTeamSubMatchScores(f, sheetName, courtStartCol, headerExcelRow+3, bm.SubResults, teamSize, mirror, bm.SideA, bm.SideB)
 
 			// IV/PW summary row = H + 5 + teamSize. Route through the shared
 			// pool-sheet writer so the IV-mark contract (and the forfeit

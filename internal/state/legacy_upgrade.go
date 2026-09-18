@@ -3,7 +3,9 @@ package state
 import (
 	"fmt"
 	"log"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/gitrgoliveira/bracket-creator/internal/domain"
@@ -121,7 +123,7 @@ import (
 //
 //   - a team's Player.Metadata (its ordered member-name list, sharing that
 //     array ambiguously with an individual's dan grade) converts to
-//     squads.yaml ON READ *and* ON WRITE (bc-tmid), below
+//     team-members.yaml ON READ *and* ON WRITE (bc-tmid), below
 //     (upgradeSquadsFromMetadataLocked). Unlike every upgrade above, this
 //     one is not resolving a foreign id against the roster; a team's own
 //     Metadata needs no lookup, only its OWN already-resolved participant
@@ -138,10 +140,10 @@ import (
 //
 //   - a team's lineups.yaml positions (occupied Positions entries with no
 //     MemberIDs counterpart) convert ON READ, below (bc-tmid pass 2),
-//     AFTER the squads.yaml migration above so a team migrated in the SAME
+//     AFTER the team-members.yaml migration above so a team migrated in the SAME
 //     pass is still resolvable. Unlike every upgrade above this one is not
 //     resolving against the roster at all, but against the TEAM'S OWN
-//     squad (squads.yaml), and needs none of the NameCount-gated
+//     squad (team-members.yaml), and needs none of the NameCount-gated
 //     uniqueness dance those upgrades carry: two members of ONE team
 //     sharing a name is already impossible (bc-tmdup, enforced on every
 //     squad mutation), so an exact name match inside a single team's squad
@@ -271,11 +273,34 @@ func (s *Store) EnsureLegacyUpgraded(compID string) {
 	}
 	// Squads BEFORE pool-matches/bracket/lineups (bc-tmid pass 2 reorder):
 	// those three now also resolve SUB-BOUT / lineup-position member ids
-	// against squads.yaml, so a team whose squad is migrated from
+	// against team-members.yaml, so a team whose squad is migrated from
 	// Player.Metadata in THIS SAME pass must be migrated before anything
 	// downstream tries to resolve against it, or the very team this pass
 	// just gave a squad to would still see "no squad" and skip repair for
 	// a full extra load.
+	// The v2.0.0 filename migration runs INSIDE this step (see its own comment)
+	// so both of its callers get it, and so a failure aborts before anything
+	// mints blank members over the file it has not adopted yet. It therefore
+	// also runs before the three id repairs below, which all resolve against
+	// team-members.yaml.
+	//
+	// A failure here is logged and the competition is STAMPED ANYWAY, like
+	// every other step. Not stamping was tried and reverted: this function is
+	// on the viewer's hot path (LoadPools, LoadPoolMatches, LoadBracket and
+	// loadParticipants each call it, and one viewer payload calls three of
+	// them), so a competition whose squads.yaml is permanently unreadable
+	// made EVERY poll take the exclusive per-competition lock and re-parse
+	// four files for the life of the process, which is exactly what the
+	// failure policy above exists to prevent.
+	//
+	// Stamping costs nothing here, because the stamp gates only THIS path.
+	// The write that could actually destroy data is the blank-member seeding
+	// inside the step below, and that step aborts before minting whenever the
+	// adoption fails -- on every call, stamp or no stamp. Its other caller,
+	// saveParticipantsNoLock, is not stamp-gated at all, and loadSquadsLocked
+	// re-attempts the adoption for all three squad mutators (squad.go). So a
+	// fault that clears is still picked up; what stops is only the re-sweep
+	// of seven unrelated steps from a read.
 	if err := s.upgradeSquadsFromMetadataLocked(compID, roster, nil); err != nil {
 		log.Printf("state: legacy squad upgrade for %s: %v", compID, err)
 	}
@@ -446,7 +471,7 @@ type legacyUpgradeRoster struct {
 
 	// squadsLoaded / squadsData / squadsErr back the squads() accessor
 	// below (bc-tmid pass 2): the sub-bout and lineup member-id repairs
-	// both resolve against squads.yaml, so it is loaded lazily and cached
+	// both resolve against team-members.yaml, so it is loaded lazily and cached
 	// here exactly like the roster fields above, at most once per
 	// EnsureLegacyUpgraded call.
 	squadsLoaded bool
@@ -538,10 +563,10 @@ func (r *legacyUpgradeRoster) rosterPlayers() ([]domain.Player, error) {
 	return r.players, nil
 }
 
-// squads returns compID's squads.yaml contents, loading it on the first
+// squads returns compID's team-members.yaml contents, loading it on the first
 // call and caching the result (including a load failure) for every
 // subsequent call in this same EnsureLegacyUpgraded invocation -- the
-// squads.yaml sibling of get()/rosterPlayers() above (bc-tmid pass 2). A
+// team-members.yaml sibling of get()/rosterPlayers() above (bc-tmid pass 2). A
 // nil map with a nil error means "no squads recorded", which every caller
 // below treats as "nothing to resolve against".
 // reset drops what this pass has already read off disk, so the steps below
@@ -869,7 +894,7 @@ func (s *Store) upgradePoolMatchSideIDsLocked(compID string, roster *legacyUpgra
 	if err != nil || idx == nil {
 		return err
 	}
-	// A squads.yaml this pass cannot read must not cost the MATCH-level
+	// A team-members.yaml this pass cannot read must not cost the MATCH-level
 	// repair below, which needs no squad at all -- only the sub-bout branch
 	// resolves against it. Aborting here left every legacy row's
 	// SideAID/SideBID/WinnerID empty forever, and standings resolve BY ID
@@ -1119,7 +1144,7 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 	// (a) just resolved -- a match neither reached leaves its sub-bouts
 	// alone too, the same "can only repair what its parent resolved" rule
 	// resolveSubMemberIDs' doc states.
-	// A squads.yaml this pass cannot read must not cost the MATCH-level
+	// A team-members.yaml this pass cannot read must not cost the MATCH-level
 	// repair below, which needs no squad at all -- only the sub-bout branch
 	// resolves against it. Aborting here left every legacy row's
 	// SideAID/SideBID/WinnerID empty forever, and standings resolve BY ID
@@ -1155,10 +1180,13 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 }
 
 // upgradeSquadsFromMetadataLocked migrates a team's squad OUT of
-// Player.Metadata into squads.yaml (bc-tmid), and SEEDS it up to the
-// competition's TeamSize (bc-pnum ruling: "by default teams have x team
-// members, as defined in the competition config, and those positions have
-// their numbers"). Metadata is the untyped trailing-columns array
+// Player.Metadata into team-members.yaml (bc-tmid), and SEEDS it up to
+// squadFloor(comp.TeamSize) -- the competition's TeamSize plus two reserve
+// slots (bc-pnum ruling: "by default teams have x team members, as defined
+// in the competition config, and those positions have their numbers";
+// extended by operator ruling 2026-09-15, bc-dnst, to reserve two further
+// numbered slots beyond TeamSize so the score sheet can offer every number
+// the team can field). Metadata is the untyped trailing-columns array
 // participants.csv shares between two unrelated uses -- a team's ordered
 // member-name list (CreatePlayersFromRecords/marshalParticipantsCSV) and an
 // individual's dan grade at index 0 (buildPlayerMetadata, the SPA) -- so this
@@ -1167,24 +1195,24 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 // already uses); scanning an individual's Metadata as a member list would
 // invent members out of a dan-grade string.
 //
-// Two cases, both keyed on TeamSize rather than "has this team ever been
+// Two cases, both keyed on the floor rather than "has this team ever been
 // migrated":
 //
 //   - No entry at all for the team's id yet: build members from any Metadata
 //     names (indices 1..len(names), preserving the original migration's
-//     shape) and then PAD with blank-named members up to TeamSize, so a team
-//     with fewer named members than TeamSize (including zero) still ends up
-//     with a full set of numbered slots.
+//     shape) and then PAD with blank-named members up to the floor, so a
+//     team with fewer named members than the floor (including zero) still
+//     ends up with a full set of numbered slots.
 //   - An entry already exists (a prior migration, or an operator using
 //     AddTeamMember/RenameTeamMember/ClearTeamMemberName): re-folding
 //     Metadata into it would duplicate members, so the existing members are
-//     left untouched, but if TeamSize has since been RAISED the squad is
-//     padded with new blank slots to match. TeamSize being LOWERED never
-//     trims: a bout already fought refers to a position by its index, and a
-//     smaller roster limit does not un-fight it (existing indices are always
-//     contiguous 1..len(existing), because AddTeamMember only ever mints
-//     max(existing index)+1 and nothing ever removes an entry, so the next
-//     padded index is simply len(existing)+1).
+//     left untouched, but if the floor has since RISEN (TeamSize raised) the
+//     squad is padded with new blank slots to match. The floor falling
+//     never trims: a bout already fought refers to a position by its index,
+//     and a smaller roster limit does not un-fight it (existing indices are
+//     always contiguous 1..len(existing), because AddTeamMember only ever
+//     mints max(existing index)+1 and nothing ever removes an entry, so the
+//     next padded index is simply len(existing)+1).
 //
 // A member's Name is blank unless already known (from Metadata, or already
 // stored) -- operator ruling: "a member with a BLANK name is a normal,
@@ -1192,10 +1220,10 @@ func (s *Store) upgradeBracketSideIDsLocked(compID string, roster *legacyUpgrade
 //
 // Deliberately does NOT clear or rewrite Player.Metadata (operator ruling:
 // "nothing is deleted" -- migrate on load, don't build a separate repair):
-// squads.yaml becomes the source of truth going forward and the old array
+// team-members.yaml becomes the source of truth going forward and the old array
 // is simply left where it is.
 //
-// Requires the row's OWN participant id: squads.yaml is keyed by the
+// Requires the row's OWN participant id: team-members.yaml is keyed by the
 // team's participant id, and a genuinely legacy (pre-id-column) row has
 // none yet -- the same residual miss the four legacy-upgrade steps above
 // accept for the identical reason. Such a team is left alone here; the
@@ -1562,12 +1590,37 @@ func (r *legacyUpgradeRoster) adoptStampedPlayers(players []domain.Player) {
 // EnsureLegacyUpgraded passes nil: on a plain load there is no pending
 // write to borrow an id from, so an id-less row still migrates to nothing.
 func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpgradeRoster, mintedByCompetitor map[string]string) error {
+	// FIRST, and inside this function rather than beside one of its callers.
+	// This step MINTS blank members and writes team-members.yaml, which
+	// permanently arms the filename migration's refuse-to-overwrite guard: seed
+	// over an unadopted v2.0.0 squads.yaml and the operator's real members are
+	// stranded under a name nothing looks for, with fresh ids that orphan every
+	// lineup position and fought bout referencing the old ones.
+	//
+	// Both callers reach that damage through here -- EnsureLegacyUpgraded's
+	// load hook AND saveParticipantsNoLock's pre-write call, which exists
+	// precisely because the load hook misses a save that lands before anything
+	// reads the competition -- so the migration belongs HERE, not at a call
+	// site. Registering it beside one caller left the other open.
+	//
+	// A failed migration ABORTS rather than logging on: minting is the
+	// irreversible half, and a transient fault (a permission blip, a
+	// half-mounted volume) must cost a retry, not the members.
+	// AFTER the kind gate below, not before it: this function's second caller is
+	// saveParticipantsNoLock, the chokepoint EVERY roster write funnels through,
+	// and an individual competition can never reach the seeding that needs the
+	// migration. Probing the filesystem above that gate put two uncached
+	// syscalls on every participant add, edit and check-in of a competition
+	// that will never have a team member at all.
 	comp, err := roster.competition()
 	if err != nil || comp == nil {
 		return err
 	}
 	if comp.Kind != "team" && comp.TeamSize == 0 {
 		return nil
+	}
+	if err := s.upgradeTeamMembersFilenameLocked(compID, s.directWrite); err != nil {
+		return err
 	}
 	players, err := roster.rosterPlayers()
 	if err != nil || len(players) == 0 {
@@ -1588,10 +1641,11 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 		if id == "" {
 			continue // no stable key to migrate under yet; see doc comment above
 		}
+		floor := squadFloor(comp.TeamSize)
 		existing, alreadyMigrated := squads[id]
 		if !alreadyMigrated {
 			names := nonBlankMetadata(p.Metadata)
-			members := make([]domain.TeamMember, 0, max(len(names), comp.TeamSize))
+			members := make([]domain.TeamMember, 0, max(len(names), floor))
 			for i, name := range names {
 				members = append(members, domain.TeamMember{
 					ID:    newParticipantID(),
@@ -1599,7 +1653,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 					Name:  name,
 				})
 			}
-			for i := len(members); i < comp.TeamSize; i++ {
+			for i := len(members); i < floor; i++ {
 				members = append(members, domain.TeamMember{ID: newParticipantID(), Index: i + 1, Name: ""})
 			}
 			if len(members) == 0 {
@@ -1610,11 +1664,11 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 			continue
 		}
 		// Already migrated (or operator-managed): never re-fold Metadata, but
-		// pad up to a since-raised TeamSize. Indices are always contiguous
+		// pad up to a since-raised floor. Indices are always contiguous
 		// 1..len(existing) -- see the doc comment above -- so the next slot's
 		// index is simply len(existing)+1.
-		if len(existing) < comp.TeamSize {
-			for i := len(existing); i < comp.TeamSize; i++ {
+		if len(existing) < floor {
+			for i := len(existing); i < floor; i++ {
 				existing = append(existing, domain.TeamMember{ID: newParticipantID(), Index: i + 1, Name: ""})
 			}
 			squads[id] = existing
@@ -1627,7 +1681,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 	if err := s.saveSquadsLocked(compID, squads, s.directWrite); err != nil {
 		return err
 	}
-	// Drop the shared lazy squad cache: this call just changed squads.yaml,
+	// Drop the shared lazy squad cache: this call just changed team-members.yaml,
 	// and the sub-bout and lineup repairs that follow resolve against it.
 	// Today nothing reads squads before this step, so this is a no-op -- and
 	// that is exactly the point. It makes the ordering above a property of
@@ -1645,7 +1699,7 @@ func (s *Store) upgradeSquadsFromMetadataLocked(compID string, roster *legacyUpg
 
 // upgradeLineupMemberIDsLocked completes a legacy (or otherwise unrepaired)
 // lineups.yaml: an occupied position's MemberIDs entry is filled from the
-// team's OWN squad (squads.yaml) whenever the position's Name resolves to
+// team's OWN squad (team-members.yaml) whenever the position's Name resolves to
 // EXACTLY one member on that team -- always true once bc-tmdup's
 // duplicate-name refusal holds (bc-tmid pass 2), so this needs none of the
 // NameCount-gated uniqueness dance the participants.csv-facing repairs
@@ -1693,6 +1747,25 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		if needs {
 			break
 		}
+		// A lineup already holding ONE member at two positions needs this pass
+		// too, even with every position id-stamped, so the scan cannot stop at
+		// "is an id missing". Such a row is refused by ValidatePositions on
+		// every future write, so it is repaired here rather than blamed on the
+		// next unrelated operator edit.
+		seenIDs := make(map[string]struct{}, len(l.MemberIDs))
+		for _, id := range l.MemberIDs {
+			if id == "" {
+				continue
+			}
+			if _, dup := seenIDs[id]; dup {
+				needs = true
+				break
+			}
+			seenIDs[id] = struct{}{}
+		}
+		if needs {
+			break
+		}
 	}
 	if !needs {
 		return nil
@@ -1708,17 +1781,58 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 			continue
 		}
 		lineupChanged := false
-		for pos, name := range l.Positions {
+		// The ids this lineup ALREADY fields, so no member ends up at two
+		// positions -- neither one carried over from disk, nor one this pass
+		// would otherwise create.
+		//
+		// The creation half is the sharp one. The backfill below resolves by
+		// NAME, so a lineup naming one person at two positions used to stamp
+		// the SAME id onto both. A lineup may not hold one member twice
+		// (ValidatePositions refuses it), so this pass manufactured a row the
+		// server then rejected -- on the operator's next unrelated edit, for
+		// damage the operator never made, which is precisely the "a write
+		// answers for what it introduces, not for what it inherited" rule.
+		//
+		// The carry-over half repairs what older releases left: the duplicate
+		// is cleared HERE, on load, so the write-time guard only ever sees what
+		// a write introduced. The position keeps its NAME, so nothing changes
+		// on screen and the operator's next save re-resolves it.
+		//
+		// Sorted, because which of the two positions keeps the id must not
+		// depend on Go's randomised map order: the same file would otherwise
+		// repair differently on two loads.
+		used := make(map[string]struct{}, len(l.MemberIDs))
+		for _, pos := range slices.Sorted(maps.Keys(l.MemberIDs)) {
+			id := l.MemberIDs[pos]
+			if id == "" {
+				continue
+			}
+			if _, dup := used[id]; dup {
+				delete(l.MemberIDs, pos)
+				lineupChanged = true
+				log.Printf("state: lineup repair for %s: member %s was at two positions; cleared the id at %q, its name is kept", compID, id, pos)
+				continue
+			}
+			used[id] = struct{}{}
+		}
+		for _, pos := range slices.Sorted(maps.Keys(l.Positions)) {
+			name := l.Positions[pos]
 			if name == "" || l.MemberIDs[pos] != "" {
 				continue
 			}
-			if id := squadMemberIDByName(squads, l.TeamID, name); id != "" {
-				if l.MemberIDs == nil {
-					l.MemberIDs = map[domain.Position]string{}
-				}
-				l.MemberIDs[pos] = id
-				lineupChanged = true
+			id := squadMemberIDByName(squads, l.TeamID, name)
+			if id == "" {
+				continue
 			}
+			if _, dup := used[id]; dup {
+				continue // already fielded elsewhere; leave this row id-less
+			}
+			if l.MemberIDs == nil {
+				l.MemberIDs = map[domain.Position]string{}
+			}
+			l.MemberIDs[pos] = id
+			used[id] = struct{}{}
+			lineupChanged = true
 		}
 		if lineupChanged {
 			lineups[key] = l
@@ -1729,4 +1843,75 @@ func (s *Store) upgradeLineupMemberIDsLocked(compID string, roster *legacyUpgrad
 		return nil
 	}
 	return s.saveTeamLineupsLocked(compID, lineups, s.directWrite)
+}
+
+// upgradeTeamMembersFilenameLocked moves a competition recorded by v2.0.0 from
+// squads.yaml onto team-members.yaml, re-keying the document's root from
+// `squads` to `members`. Caller holds compID's per-competition write lock.
+//
+// bc-dnst renamed both the file and its key. Without this, a tournament
+// written by the last release opens with every team showing numbered slots and
+// no names: the members are on disk but under a name nothing looks for. That
+// is data loss on upgrade, which is what the operator's rule ("a storage
+// change carries a migration path on load from the last two releases") is for.
+// v1.1.0 and earlier had no team-member storage at all, so v2.0.0's shape is
+// the entire history to carry.
+//
+// Deliberately NOT a dual-read at the load path. A one-time convergence keeps
+// exactly one shape live afterwards, so no reader has to know two names
+// forever, and it matches how every other step in this file works.
+//
+// Takes the writer rather than reaching for atomicWriteFile, the same seam
+// saveSquadsLocked already has: the ordering below (write, THEN remove) is
+// the crash-safety story, and a test can only prove it by making the write
+// fail while the remove would have succeeded.
+//
+// Refuses to overwrite: if team-members.yaml already exists, this competition
+// has been migrated (or was written new) and the stale squads.yaml is left
+// alone rather than allowed to win. The old file is REMOVED only after the new
+// one is safely written, so a crash between the two leaves the original intact
+// and the next load simply retries.
+func (s *Store) upgradeTeamMembersFilenameLocked(compID string, write writeFn) error {
+	newPath := s.compPath(compID, teamMembersFilename)
+	if _, err := os.Stat(newPath); err == nil {
+		return nil // already on the current name
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	oldPath := s.compPath(compID, legacySquadsFilename)
+	data, err := os.ReadFile(oldPath) // #nosec G304, compPath enforces containment under the competitions dir.
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing recorded by an older release either
+		}
+		return err
+	}
+	members, err := parseLegacySquadsBytes(data)
+	if err != nil {
+		// Named, and naming the remedy, because this error REFUSES every squad
+		// read and write for the competition: loadSquadsLocked hard-fails on
+		// it, so the three team-member endpoints answer 500 until it clears,
+		// and a corrupt file never clears on its own. That is the safe
+		// direction rather than an oversight. Reading past it reports the team
+		// as having no members, and the next whole-file write then strands the
+		// real ones under a name nothing looks for, with ids that orphan every
+		// lineup position and fought bout. A refusal is recoverable; that
+		// write is not. The remedy is on disk, so the message says which file.
+		return fmt.Errorf("competition %s: %s cannot be parsed, so its team members cannot be adopted onto %s; repair or remove that file: %w",
+			compID, legacySquadsFilename, teamMembersFilename, err)
+	}
+	if members == nil {
+		// Parsed, but carries no `squads` key: not v2.0.0's shape. Leave both
+		// files alone rather than writing an empty member list over nothing.
+		return nil
+	}
+	if err := s.saveSquadsLocked(compID, members, write); err != nil {
+		return err
+	}
+	if err := os.Remove(oldPath); err != nil && !os.IsNotExist(err) {
+		// The members are safe on the new name; a leftover old file is
+		// cosmetic and must not fail the load.
+		log.Printf("state: team-members migration for %s left %s in place: %v", compID, legacySquadsFilename, err)
+	}
+	return nil
 }

@@ -290,8 +290,11 @@ func hanteiAttributionNeedsBackfill(req *state.MatchResult) bool {
 // validateWithOptions / validateBulkScoreLengths) attributes the "Ht" mark by
 // comparing the payload's Winner against its SideA/SideB (name path) or its
 // WinnerID/SideAID/SideBID (id path, validateHanteiMarkPlacement /
-// domain.AttributeWinnerSide, which only takes the id branch when all three
-// are non-empty). Per specs/openapi.yaml, MatchResult.sideA/sideB are NOT
+// domain.AttributeWinnerSide, whose id branch names a side as soon as the
+// winner id equals the id ONE side carries, even if the other carries none;
+// it was all-three-or-nothing before bc-dnst, and the backfill below is still
+// required because the SPA sends a winner id and NEITHER side id). Per
+// specs/openapi.yaml, MatchResult.sideA/sideB are NOT
 // required on a score write — the engine's reconcileSides (internal/engine/
 // scoring.go) backfills an omitted side from the stored match, exactly so a
 // minimal payload (winner + ippons only) still writes cleanly. But that

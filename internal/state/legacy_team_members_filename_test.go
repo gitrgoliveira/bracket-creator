@@ -62,6 +62,48 @@ func TestLegacyUpgrade_AdoptsV200SquadsFile(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "the old file is removed once the new one is safely written")
 }
 
+// TestLegacyUpgrade_AdoptsEvenWithNoParticipantsYet pins the FIRST of
+// upgradeSquadsFromMetadataLocked's two adoption call sites (legacy_upgrade.go):
+// its own explicit call to upgradeTeamMembersFilenameLocked, which runs before
+// the roster is even loaded. That placement is otherwise unpinned, because
+// upgradeSquadsFromMetadataLocked's own doc comment says a SECOND adopter sits
+// a few lines below it: "upgradeSquadsFromMetadataLocked keeps its own
+// explicit call even so. It returns before reaching this read [loadSquadsLocked]
+// when the roster is empty, and a plain load must converge the file for a
+// competition with no entrants yet." TestLegacyUpgrade_AdoptsV200SquadsFile
+// above cannot tell the two apart: it goes on to call LoadSquads, which
+// adopts via that very same loadSquadsLocked, so it would stay green even if
+// the first call were deleted.
+//
+// This competition has NO participants saved at all (newTeamMemberTestStore
+// only saves the competition, never a roster), so upgradeSquadsFromMetadataLocked
+// takes its early "len(players) == 0" return and never reaches
+// loadSquadsLocked; the other three EnsureLegacyUpgraded steps that also read
+// squads (pool-match/bracket/lineup id repair) each no-op before touching
+// squads too, since this fresh competition has none of those files either.
+// The assertions read the FILESYSTEM directly rather than through
+// LoadSquads/AddTeamMember/RenameTeamMember, because any of those would
+// adopt the file themselves and mask the exact deletion this test exists to
+// catch.
+func TestLegacyUpgrade_AdoptsEvenWithNoParticipantsYet(t *testing.T) {
+	s, id := newTeamMemberTestStore(t, "team", 3, false)
+	dir := filepath.Join(s.GetFolder(), "competitions", id)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, legacySquadsFilename), []byte(v200SquadsYAML), 0o600))
+
+	s.EnsureLegacyUpgraded(id)
+
+	// Read the filesystem directly -- see the doc comment above for why a
+	// LoadSquads/mutator call here would not distinguish this call site from
+	// its own masking second adopter.
+	data, err := os.ReadFile(filepath.Join(dir, teamMembersFilename))
+	require.NoError(t, err, "an empty-roster team competition must still have its legacy file adopted on load")
+	assert.Contains(t, string(data), "members:", "the new file carries the new root key")
+	assert.Contains(t, string(data), "Haruki Tanaka", "the v2.0.0 member data must survive the rename")
+
+	_, statErr := os.Stat(filepath.Join(dir, legacySquadsFilename))
+	assert.True(t, os.IsNotExist(statErr), "the old file is removed once the new one is safely written")
+}
+
 // A competition already on the current name must not be clobbered by a stale
 // squads.yaml left beside it: the current file wins and the old one is left
 // untouched rather than overwriting live data.

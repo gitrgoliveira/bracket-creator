@@ -581,6 +581,35 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     expect(text).toContain('Jane Austen');
     expect(text).toContain('Aaron Thompson');
   });
+
+  // bc-rvfx: collectText's NumberedName-expansion branch (added when the
+  // outer-side number rendering landed, see the comment on collectText above)
+  // was never exercised by a fixture that actually carries a `number` --
+  // every match in this describe block omits it, so the branch was pinned by
+  // nothing. PoolNumberedMatchRow sits sideB=Shiro (left) / sideA=Aka
+  // (right), so the number belongs on the OUTER side of each name: Shiro's
+  // before it, Aka's after (operator ruling 2026-09-14, bc-dnst).
+  it('places the competitor number on the outer side of the name: Shiro before, Aka after', () => {
+    const m = {
+      id: 'Pool A-0',
+      sideA: { name: 'Tanaka', number: 'K7' },
+      sideB: { name: 'Suzuki', number: 'K3' },
+      status: 'scheduled',
+    };
+    const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
+    const shiroSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--shiro'));
+    const akaSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--aka'));
+    const shiroText = collectText(shiroSide);
+    const akaText = collectText(akaSide);
+    // sideB (Suzuki) is Shiro: the number sits BEFORE the name.
+    expect(shiroText).toContain('K3');
+    expect(shiroText).toContain('Suzuki');
+    expect(shiroText.indexOf('K3')).toBeLessThan(shiroText.indexOf('Suzuki'));
+    // sideA (Tanaka) is Aka: the number sits AFTER the name.
+    expect(akaText).toContain('K7');
+    expect(akaText).toContain('Tanaka');
+    expect(akaText.indexOf('Tanaka')).toBeLessThan(akaText.indexOf('K7'));
+  });
 });
 
 // ------------------------------------------------------------------

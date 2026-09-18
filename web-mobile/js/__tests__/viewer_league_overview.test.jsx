@@ -195,6 +195,32 @@ describe('ViewerOverview league standings (mp-ldnr)', () => {
     expect(rankCells).toEqual(['10', '20', '30']); // s.rank, never 1/2/3
   });
 
+  // bc-rvfx: collectText's NumberedName-expansion branch above (added when
+  // the outer-side number rendering landed) was never exercised by a
+  // fixture that actually carries a `number` -- makeStandings/
+  // makeTeamStandings never set one, so the branch was pinned by nothing.
+  // This mini-table is a rank-ordered, single-column standings row (no
+  // left/right pairing), so the number sits BEFORE the name on every row
+  // (operator ruling 2026-09-14, bc-dnst).
+  it('places the competitor number before the name in the standings row', () => {
+    const standings = { League: [
+      { player: { id: 'a', name: 'Player A', dojo: '', number: 'K9' }, wins: 3, losses: 0, draws: 0, ipponsGiven: 6, ipponsTaken: 0 },
+    ] };
+    const tree = runtime.mount(ViewerOverview, {
+      ...baseProps,
+      c: leagueComp('pools'),
+      standings,
+      pools,
+      poolMatches: mixedMatches(1, 0),
+    });
+    const nameCell = findInTree(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool__player-name'));
+    expect(nameCell).not.toBeNull();
+    const text = collectText(nameCell);
+    expect(text).toContain('K9');
+    expect(text).toContain('Player A');
+    expect(text.indexOf('K9')).toBeLessThan(text.indexOf('Player A'));
+  });
+
   it('completed league shows winner badge and final standings', () => {
     const standings = { League: makeStandings(4) };
     const tree = runtime.mount(ViewerOverview, {

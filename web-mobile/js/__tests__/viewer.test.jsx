@@ -3,6 +3,7 @@ import { applyFilters, matchHighlightedBy, competitionKindLabel, isSwissFinalSta
 import { formatDate } from '../ui.jsx';
 import { makeReactive } from './helpers/reactive_react.js';
 import { collectText, findInTree } from './helpers/vdom.js';
+const findVnode = findInTree;
 
 describe('Viewer Utils', () => {
   describe('formatDate', () => {
@@ -519,14 +520,6 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
   // not expand, so we assert delegation (type + props). The scoreboard's own
   // rendering (DH banner, Hantei, ippon slots, IV/PW summary) is covered by
   // match_scoreboard.test.jsx.
-  function findVnode(node, pred) {
-    if (!node || typeof node !== 'object') return null;
-    if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
-    if (pred(node)) return node;
-    const kids = node.children || node.props?.children || [];
-    for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
-    return null;
-  }
 
   it('delegates a team match to TeamScoreboard (showDH when a DH sub exists)', () => {
     const tree = runtime.mount(MatchDetailCard, {

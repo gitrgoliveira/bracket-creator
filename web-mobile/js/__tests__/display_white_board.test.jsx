@@ -3,6 +3,7 @@ import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividual
 import { phaseLabel } from '../display_helpers.jsx';
 import { NumberedName } from '../numbered_name.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
+import { findInTree as findVnode } from './helpers/vdom.js';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
 // row, NEXT, sponsor) that delegates the scoreboard body to the SHARED
@@ -66,17 +67,6 @@ function teamPromoted(promotedKind = 'running') {
 }
 
 function render(props) { return JSON.stringify(TvWhiteBoard(props)); }
-
-// Depth-first search for a vnode matching the predicate (TvWhiteBoard delegates
-// the body to a child component vnode, so we assert on its type + props).
-function findVnode(node, pred) {
-  if (!node || typeof node !== 'object') return null;
-  if (Array.isArray(node)) { for (const k of node) { const f = findVnode(k, pred); if (f) return f; } return null; }
-  if (pred(node)) return node;
-  const kids = node.children || node.props?.children || [];
-  for (const k of [].concat(kids)) { const f = findVnode(k, pred); if (f) return f; }
-  return null;
-}
 
 describe('TvWhiteBoard', () => {
   const base = {

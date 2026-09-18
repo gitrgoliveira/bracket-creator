@@ -1,20 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { findAll } from './helpers/vdom.js';
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  // NumberedName is a plain (hookless) function component: the mock React
-  // runtime's createElement never invokes it, so expand it explicitly to
-  // reach the name text it wraps. Matched by name, not identity: the
-  // component under test is re-imported per test via vi.resetModules().
-  if (typeof node.type === 'function' && node.type.name === 'NumberedName') return collectText(node.type(node.props));
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { findAll, collectText, expandNamed } from './helpers/vdom.js';
 
 
 describe('LeagueStandingsViewer (mp-dunx)', () => {
@@ -96,7 +82,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     // updateProps re-renders with the same props but preserves hook slots
     // (including the standings state set by the resolved fetch).
     const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
-    const text = collectText(finalTree);
+    const text = collectText(finalTree, expandNamed('NumberedName'));
     // P3 (rank 1) must appear before P1 (rank 2)
     const p3Idx = text.indexOf('P3');
     const p1Idx = text.indexOf('P1');
@@ -114,7 +100,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
       return n.type === 'td' && typeof cls === 'string' && cls.includes('pool-standings__draw-pos');
     });
     expect(drawPosCells.length).toBeGreaterThan(0);
-    const texts = drawPosCells.map(c => collectText(c));
+    const texts = drawPosCells.map(c => collectText(c, expandNamed('NumberedName')));
     expect(texts).toEqual(['1', '2', '3', '4']);
   });
 
@@ -134,7 +120,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
     const nameCell = findAll(finalTree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool__player-name'))[0];
     expect(nameCell).toBeTruthy();
-    const text = collectText(nameCell);
+    const text = collectText(nameCell, expandNamed('NumberedName'));
     expect(text).toContain('K11');
     expect(text).toContain('P3');
     expect(text.indexOf('K11')).toBeLessThan(text.indexOf('P3'));
@@ -155,7 +141,7 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: [], tweaks });
     await Promise.resolve();
     const finalTree = runtime.updateProps({ competition: comp, poolMatches: [], tweaks });
-    const text = collectText(finalTree);
+    const text = collectText(finalTree, expandNamed('NumberedName'));
     expect(text).toContain('Ranked by standings');
   });
 
@@ -174,13 +160,13 @@ describe('LeagueStandingsViewer (mp-dunx)', () => {
     runtime.mount(LeagueStandingsViewer, { competition: comp, poolMatches: firstMatches, tweaks });
     await Promise.resolve();
     let tree = runtime.updateProps({ competition: comp, poolMatches: firstMatches, tweaks });
-    expect(collectText(tree)).toContain('P3'); // initial load resolved: table visible
+    expect(collectText(tree, expandNamed('NumberedName'))).toContain('P3'); // initial load resolved: table visible
 
     // A different match signature (the bout completed) re-triggers the fetch
     // while it's still pending (the second mock never resolves yet).
     const secondMatches = [{ id: 'Pool A-1', status: 'completed' }];
     tree = runtime.updateProps({ competition: comp, poolMatches: secondMatches, tweaks });
-    const text = collectText(tree);
+    const text = collectText(tree, expandNamed('NumberedName'));
     expect(text).not.toContain('Loading standings');
     expect(text).toContain('P3'); // last-known standings stay on screen
 

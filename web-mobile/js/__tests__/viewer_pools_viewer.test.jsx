@@ -1,23 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
-import { findAll } from './helpers/vdom.js';
-
-function collectText(node) {
-  if (node == null) return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(collectText).join('');
-  // The reactive test runtime does not itself recurse into function-typed
-  // vnodes (findAll relies on that: it matches DHBadge by identity, e.g.
-  // `n.type === DHBadge`, unexpanded). collectText's job is text, not
-  // identity, so it expands a function component (NumberedName, DHBadge,
-  // the window.Term stub) here to reach the text it renders. Every
-  // component reachable this way is a pure leaf with no hooks, so calling
-  // it outside the runtime's own render/hookIndex bookkeeping is safe.
-  if (typeof node.type === 'function') return collectText(node.type(node.props));
-  if (node.children) return collectText(node.children);
-  if (node.props?.children) return collectText(node.props.children);
-  return '';
-}
+import { findAll, collectText, expandAll } from './helpers/vdom.js';
 
 
 // Walk a vnode tree and return the first vnode matching a predicate.
@@ -111,7 +94,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
       tweaks,
       competition: baseComp,
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     // P1 should appear before P3 in the output (draw position 1 < draw position 3)
     const p1Idx = text.indexOf('P1');
     const p3Idx = text.indexOf('P3');
@@ -136,7 +119,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     // P3 (draw pos 3, rank 1) and P1 (draw pos 1, rank 2) should advance.
     // P2 (draw pos 2, rank 4) and P4 (draw pos 4, rank 3) should not.
     expect(advancingRows).toHaveLength(2);
-    const advancingText = advancingRows.map(r => collectText(r)).join(' ');
+    const advancingText = advancingRows.map(r => collectText(r, expandAll)).join(' ');
     expect(advancingText).toContain('P3');
     expect(advancingText).toContain('P1');
     expect(advancingText).not.toContain('P2');
@@ -151,7 +134,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
       tweaks,
       competition: baseComp,
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('1st');
     expect(text).toContain('2nd');
     expect(text).toContain('3rd');
@@ -177,12 +160,12 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     });
     // 2 advancing (P3=1st, P1=2nd), 2 non-advancing (P4=3rd, P2=4th)
     expect(advBadges).toHaveLength(2);
-    const advText = advBadges.map(b => collectText(b)).join(' ');
+    const advText = advBadges.map(b => collectText(b, expandAll)).join(' ');
     expect(advText).toContain('1st');
     expect(advText).toContain('2nd');
     // Non-advancing badges contain 3rd and 4th
     expect(allBadges).toHaveLength(2);
-    const otherText = allBadges.map(b => collectText(b)).join(' ');
+    const otherText = allBadges.map(b => collectText(b, expandAll)).join(' ');
     expect(otherText).toContain('3rd');
     expect(otherText).toContain('4th');
   });
@@ -202,7 +185,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
       return n.type === 'td' && typeof cls === 'string' && cls.includes('pool-standings__draw-pos');
     });
     expect(drawPosCells).toHaveLength(4);
-    const drawPosTexts = drawPosCells.map(cell => collectText(cell));
+    const drawPosTexts = drawPosCells.map(cell => collectText(cell, expandAll));
     // Pool players are in draw order P1→P2→P3→P4, so positions are 1,2,3,4
     expect(drawPosTexts).toEqual(['1', '2', '3', '4']);
   });
@@ -219,7 +202,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
       tweaks,
       competition: baseComp,
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Matches');
     // Assert on the PoolNumberedMatchRow component vnodes and their num props.
     // The test framework doesn't call sub-components, so we check the vnode
@@ -243,7 +226,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
       tweaks,
       competition: baseComp,
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     // All 4 players appear
     expect(text).toContain('P1');
     expect(text).toContain('P2');
@@ -281,7 +264,7 @@ describe('PoolsViewer draw-order standings (mp-938b)', () => {
     expect(advancingRows).toHaveLength(0);
     expect(rankBadges).toHaveLength(0);
     // The standings rows themselves still render (with their 0 stats).
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('P1');
     expect(text).toContain('P4');
   });
@@ -402,7 +385,7 @@ describe('PoolsViewer per-pool qualifier highlighting (bc-qual LP-5a)', () => {
       const cls = n.props?.className;
       return n.type === 'tr' && typeof cls === 'string' && cls.includes('advancing');
     });
-    return rows.map(r => collectText(r));
+    return rows.map(r => collectText(r, expandAll));
   }
 
   it('standard mode: poolWinners=1 highlights only rank 1 in every pool, regardless of size', () => {
@@ -501,7 +484,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     // Should show "2–1" from teamIVScore, not "-" (the fallback for empty score)
     expect(text).toContain('2–1');
     expect(text).not.toContain('-');
@@ -522,7 +505,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 2 });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('vs');
   });
 
@@ -540,7 +523,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 3 });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('M–·');
   });
 
@@ -569,7 +552,7 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
 
     // Names render in full (no truncation markup couples to the assertion;
     // both competitor names are present in the tree text).
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Jane Austen');
     expect(text).toContain('Aaron Thompson');
   });
@@ -591,8 +574,8 @@ describe('PoolNumberedMatchRow team IV score (mp-o4xl)', () => {
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1 });
     const shiroSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--shiro'));
     const akaSide = findFirst(tree, n => typeof n?.props?.className === 'string' && n.props.className.includes('pool-match-numbered-row__side--aka'));
-    const shiroText = collectText(shiroSide);
-    const akaText = collectText(akaSide);
+    const shiroText = collectText(shiroSide, expandAll);
+    const akaText = collectText(akaSide, expandAll);
     // sideB (Suzuki) is Shiro: the number sits BEFORE the name.
     expect(shiroText).toContain('K3');
     expect(shiroText).toContain('Suzuki');
@@ -667,7 +650,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 1, isEngi: true });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     // Both members of each pair render (member 2 stacked below member 1).
     expect(text).toContain('Yamada Hanako');
     expect(text).toContain('Suzuki Yuki');
@@ -684,7 +667,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 2, isEngi: false });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Watanabe');
     expect(text).toContain('Fujimoto');
     // displayName must NOT appear when engi is off
@@ -701,7 +684,7 @@ describe('PoolNumberedMatchRow engi stacked pair names (mp-gy6g)', () => {
     };
 
     const tree = runtime.mount(PoolNumberedMatchRow, { m, num: 3, isEngi: true });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Solo Shiro');
     expect(text).toContain('Solo Aka');
   });
@@ -896,7 +879,7 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
       tweaks,
       competition: engiComp,
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Pair1-Member1');
     expect(text).toContain('Pair1-Member2');
     expect(text).toContain('Pair2-Member1');
@@ -924,7 +907,7 @@ describe('PoolsViewer engi stacked pair names in standings (mp-gy6g)', () => {
       tweaks,
       competition: nonEngiComp,
     });
-    const text = collectText(tree);
+    const text = collectText(tree, expandAll);
     expect(text).toContain('Watanabe');
     expect(text).toContain('Fujimoto');
     expect(text).not.toContain('ZEKKEN-W');

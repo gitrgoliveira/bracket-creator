@@ -375,7 +375,7 @@ describe('C1 debounced autosave: TeamScoreEditorModal (team match)', () => {
 // bc-rvfx: a tap that changes NOTHING must not reach the wire.
 //
 // addPt has always guarded its no-op (the side already at the 2-ippon cap);
-// removePt did not, and an UNFILLED slot is a live button -- the grid disables
+// removePt did not, and an UNFILLED slot is still ENABLED -- the grid disables
 // only on decidedByHantei, and the slot's own aria-label announces it as
 // "empty". So tapping one filtered nothing out, marked dirty anyway, and 300ms
 // later sent a full running-match PUT stamped NOW.

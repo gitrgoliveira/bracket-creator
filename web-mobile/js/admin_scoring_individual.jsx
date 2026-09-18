@@ -279,7 +279,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
   };
   const removePt = (side, idx) => {
     // Mirror of addPt's no-op guard above, for the same reason. An UNFILLED slot
-    // is a live button -- the grid disables only on decidedByHantei, and the
+    // is still an ENABLED button -- the grid disables only on decidedByHantei, and the
     // slot's own aria-label announces it as "empty" -- so a stray tap used to
     // filter nothing out, mark dirty anyway, and 300ms later send a full
     // running-match PUT stamped NOW. That write can beat another device's

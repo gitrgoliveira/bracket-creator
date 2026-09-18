@@ -125,6 +125,13 @@ function Term({ name, children, nested }) {
   // hover ends, the box vanishes, the scrollbar goes, and the term slides
   // back: a visible flicker loop (seen on the 560px score overlay). Opening
   // upwards adds no scrollable overflow, so the loop cannot start.
+  //
+  // It flips up only when the box also FITS above (the `fitsAbove` half of
+  // the condition below). A flip that overflowed the top of the container
+  // would trade a flicker for a hint the reader cannot finish, which is
+  // worse. So a box taller than its own scroll container stays DOWNWARD and
+  // the loop above remains reachable for it: a deliberate floor, whose fix
+  // is a shorter hint rather than a flip with nowhere to go.
   const [flip, setFlip] = useStateT(false);
   const [up, setUp] = useStateT(false);
   const measureFlip = () => {

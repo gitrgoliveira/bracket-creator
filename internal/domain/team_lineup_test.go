@@ -9,10 +9,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestTeamLineup_OrderedRoster_FivePerson verifies that a fully-filled
-// 5-person lineup returns player names in the canonical Senpo-to-Taisho
-// order regardless of the map iteration order.
-func TestTeamLineup_OrderedRoster_FivePerson(t *testing.T) {
+// TestTeamLineup_OrderedMembers_FivePerson verifies that a fully-filled
+// 5-person lineup returns slots in the canonical Senpo-to-Taisho order
+// regardless of the map iteration order.
+func TestTeamLineup_OrderedMembers_FivePerson(t *testing.T) {
 	l := domain.TeamLineup{
 		Positions: map[domain.Position]string{
 			domain.PosSenpo:   "S",
@@ -22,30 +22,20 @@ func TestTeamLineup_OrderedRoster_FivePerson(t *testing.T) {
 			domain.PosTaisho:  "T",
 		},
 	}
-	got := l.OrderedRoster(5)
-	assert.Equal(t, []string{"S", "J", "C", "F", "T"}, got)
-}
-
-// TestTeamLineup_OrderedRoster_FivePersonWithVacancy verifies that a
-// vacant position (empty string) is skipped; the result carries only
-// the four filled names in canonical order.
-func TestTeamLineup_OrderedRoster_FivePersonWithVacancy(t *testing.T) {
-	l := domain.TeamLineup{
-		Positions: map[domain.Position]string{
-			domain.PosSenpo:   "S",
-			domain.PosJiho:    "", // vacant
-			domain.PosChuken:  "C",
-			domain.PosFukusho: "F",
-			domain.PosTaisho:  "T",
-		},
+	got := l.OrderedMembers(5)
+	want := []domain.LineupSlot{
+		{Position: domain.PosSenpo, Name: "S"},
+		{Position: domain.PosJiho, Name: "J"},
+		{Position: domain.PosChuken, Name: "C"},
+		{Position: domain.PosFukusho, Name: "F"},
+		{Position: domain.PosTaisho, Name: "T"},
 	}
-	got := l.OrderedRoster(5)
-	assert.Equal(t, []string{"S", "C", "F", "T"}, got)
+	assert.Equal(t, want, got)
 }
 
-// TestTeamLineup_OrderedRoster_ThreePerson verifies the numeric-position
+// TestTeamLineup_OrderedMembers_ThreePerson verifies the numeric-position
 // path: positions "1", "2", "3" are returned in ascending numeric order.
-func TestTeamLineup_OrderedRoster_ThreePerson(t *testing.T) {
+func TestTeamLineup_OrderedMembers_ThreePerson(t *testing.T) {
 	l := domain.TeamLineup{
 		Positions: map[domain.Position]string{
 			domain.PositionNumbered(3): "Three",
@@ -53,15 +43,20 @@ func TestTeamLineup_OrderedRoster_ThreePerson(t *testing.T) {
 			domain.PositionNumbered(2): "Two",
 		},
 	}
-	got := l.OrderedRoster(3)
-	assert.Equal(t, []string{"One", "Two", "Three"}, got)
+	got := l.OrderedMembers(3)
+	want := []domain.LineupSlot{
+		{Position: domain.PositionNumbered(1), Name: "One"},
+		{Position: domain.PositionNumbered(2), Name: "Two"},
+		{Position: domain.PositionNumbered(3), Name: "Three"},
+	}
+	assert.Equal(t, want, got)
 }
 
-// TestTeamLineup_OrderedRoster_Empty verifies that a lineup with no
+// TestTeamLineup_OrderedMembers_Empty verifies that a lineup with no
 // filled positions returns an empty (non-nil) slice.
-func TestTeamLineup_OrderedRoster_Empty(t *testing.T) {
+func TestTeamLineup_OrderedMembers_Empty(t *testing.T) {
 	l := domain.TeamLineup{Positions: map[domain.Position]string{}}
-	got := l.OrderedRoster(5)
+	got := l.OrderedMembers(5)
 	require.NotNil(t, got)
 	assert.Empty(t, got)
 }
@@ -102,9 +97,13 @@ func TestTeamLineup_OrderedMembers_AlignmentPin(t *testing.T) {
 	}
 	assert.Equal(t, want, got, "each slot's name must stay paired with ITS OWN member id, not a neighbour's")
 
-	// OrderedRoster is a thin projection of the same traversal: the names
-	// must come out in the identical order, Tanaka's missing id notwithstanding.
-	assert.Equal(t, []string{"Sato", "Tanaka", "Suzuki", "Ito"}, l.OrderedRoster(5))
+	// The Name fields alone must come out in the identical order, Tanaka's
+	// missing id notwithstanding.
+	gotNames := make([]string, len(got))
+	for i, m := range got {
+		gotNames[i] = m.Name
+	}
+	assert.Equal(t, []string{"Sato", "Tanaka", "Suzuki", "Ito"}, gotNames)
 }
 
 // TestTeamLineupValidatePositions pins the key-only contract (mp-gmcg):
@@ -353,5 +352,9 @@ func TestTeamLineupOrderedMembers_IdOnlySlotIsOccupied(t *testing.T) {
 	require.Len(t, got, 2)
 	assert.Equal(t, domain.LineupSlot{Position: domain.PositionNumbered(1), Name: "Aoki", MemberID: "id-aoki"}, got[0])
 	assert.Equal(t, domain.LineupSlot{Position: domain.PositionNumbered(2), Name: "", MemberID: "id-blank"}, got[1])
-	assert.Equal(t, []string{"Aoki", ""}, lineup.OrderedRoster(3))
+	gotNames := make([]string, len(got))
+	for i, m := range got {
+		gotNames[i] = m.Name
+	}
+	assert.Equal(t, []string{"Aoki", ""}, gotNames)
 }

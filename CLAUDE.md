@@ -93,7 +93,7 @@ tournament-data/
     ├── bracket.json               Elimination bracket structure + results
     ├── competitor-status.yaml     Eligibility records (kiken/fusenpai)
     ├── lineups.yaml               Team lineups, keyed by round
-    ├── team-members.yaml                A team's members, keyed by the team's participant id
+    ├── team-members.yaml          A team's members, keyed by the team's participant id
     └── overrides.json             Manual ranking overrides
 ```
 

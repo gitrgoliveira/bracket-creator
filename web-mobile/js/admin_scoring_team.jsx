@@ -30,7 +30,7 @@ import {
   CORRECTION_PRESETS,
   REOPEN_PRESETS,
   useAdoptFromServer,
-  sideName,
+  sideColorName,
 } from './admin_scoring_shared.jsx';
 
 import { useDebouncedRunningWrite, SyncStatusPill } from './admin_scoring_autosave.jsx';
@@ -2736,7 +2736,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
               <React.Fragment key={s.key}>
                 <div className={`sb-side sb-side--${s.color}`}>
                   {/* SHIRO/AKA pill, matching the individual + Engi editors. */}
-                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideName(s.color)}</div>
+                  <div className={`sb-side__badge sb-side__badge--${s.color}`}>{sideColorName(s.color)}</div>
                   {/* Team number chip: owned by numbered_name.jsx
                       (the outer-side rule lives there). */}
                   <div className="sb-name">

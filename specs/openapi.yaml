@@ -2888,13 +2888,33 @@ paths:
                     does not satisfy the requirement.
                 encho:
                   $ref: '#/components/schemas/EnchoMetadata'
+                modifiedAt:
+                  type: integer
+                  format: int64
+                  description: >
+                    Server-relative write stamp in unix milliseconds, learned
+                    from GET /api/time, exactly as PUT /score carries. Omitting
+                    it makes the write apply unconditionally (the last-write-wins
+                    unstamped bypass); sending it makes the decision compete on
+                    timestamps like a score write, so this endpoint can return
+                    the not-applied shape below. A stamp more than 5s in the
+                    server's future is refused with `clock_skew` and nothing is
+                    stored. It is also what gives a decision-completed match a
+                    time the UI can order results by: a match closed while still
+                    `scheduled` has no earlier write to inherit a stamp from.
       responses:
         '200':
-          description: Decision recorded.
+          description: >
+            Decision recorded, OR the write was refused. A refusal carries the
+            RefusedWrite shape (`applied: false` with a `reason` of
+            `superseded` or `clock_skew`) instead of a MatchResult; nothing is
+            stored and no SSE event is emitted.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MatchResult'
+                oneOf:
+                  - $ref: '#/components/schemas/MatchResult'
+                  - $ref: '#/components/schemas/RefusedWrite'
         '400':
           description: >
             Invalid payload, or a missing `decisionReason` on a match that was
@@ -3094,7 +3114,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/Error'
 
   /api/competitions/{id}/teams/{tid}/lineups/{round}:
     parameters:
@@ -3914,16 +3934,15 @@ components:
         an offline write queue retry an unwinnable request forever. Nothing is
         persisted and no SSE broadcast is emitted in either case.
 
-        PUT /score is the endpoint that produces both, because it is the only
-        one whose client-supplied payload carries a modifiedAt for the guard to
-        compare; PUT /override-winner produces `clock_skew` from its own
-        modifiedAt. The other match-write endpoints (/quick-score, /decision and
-        both /daihyosen paths) build their result server-side without a stamp,
-        so the guard takes its unstamped bypass and always applies; they
-        nonetheless map the superseded condition to this same shape rather than
-        to a 500, so that adding a stamp to any of those payloads later cannot
-        silently turn a benign supersede into a request an offline queue retries
-        forever. The batch endpoint /bulk-score is the one exception: it reports
+        PUT /score, POST /decision and PUT /override-winner each carry a
+        client-supplied modifiedAt, so the guard compares rather than bypassing
+        and any of them can produce either condition. The remaining match-write
+        endpoints (/quick-score and both /daihyosen paths) still build their
+        result server-side without a stamp, so the guard takes its unstamped
+        bypass and they always apply; they nonetheless map the superseded
+        condition to this same shape rather than to a 500, so that adding a
+        stamp to one of those payloads later cannot silently turn a benign
+        supersede into a request an offline queue retries forever. The batch endpoint /bulk-score is the one exception: it reports
         both conditions per-entry in its own errors[] array inside an overall
         200, carrying the same `reason` value there.
       properties:

@@ -17,7 +17,7 @@
 // `variant` ("card" | "tv") only changes sizing via a CSS modifier: the markup
 // and data-testids are identical across surfaces.
 
-import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
+import { resolveMatchLineup, resolveLineupTeamId, pickFromLineup, pickMemberIdFromLineup, boutSideView, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel } from './lineup_resolver.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { resultSlot, sideSlotOrder, realIppons, hanteiTied, nameOf, attributeWinnerSide, subBoutAttribution } from './result_slot.jsx';
 import { sideLookupKey } from './competitor_identity.jsx';
@@ -424,23 +424,21 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
   // a caller ever passes it).
   const lineupHidden = kachinukiHidesLineupPosition(kachinuki, isDH, index);
   const lineupNameFor = (lu) => lineupHidden ? "" : (lu ? pickFromLineup(lu, index, teamSize) : "");
-  const resolveSide = (subSide, lu) =>
-    resolveBoutSideName({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu), teamNameA: matchSideA, teamNameB: matchSideB }) || boutNum;
-  const shiroName = resolveSide(sub && sub.sideB, lineupB);
-  const akaName = resolveSide(sub && sub.sideA, lineupA);
-  // shiroDisplayName/akaDisplayName: the DISPLAYED name only (bc-dnst). A
-  // rename reaches a bout already fought: the stored sub.sideA/sub.sideB
-  // text stays frozen (shiroName/akaName above, unchanged, are what the
-  // label composition below and every other consumer of this row keep
-  // using), but the rendered text swaps in the squad member's CURRENT name
-  // when its id resolves (resolveBoutSideDisplayName, lineup_resolver.jsx).
-  // The lookup runs even when resolveSide fell through to the bare bout
-  // number: a fighter fielded by squad number and named LATER has an empty
-  // stored name and a resolving id, and must show the name once it has
-  // one; when the id resolves to nothing the rule hands the bout number
-  // back untouched.
-  const shiroDisplayName = resolveBoutSideDisplayName({ squad: squadB, memberId: (sub && sub.sideBMemberId) || "", storedName: shiroName });
-  const akaDisplayName = resolveBoutSideDisplayName({ squad: squadA, memberId: (sub && sub.sideAMemberId) || "", storedName: akaName });
+  // sideView: resolve-then-display for one side (boutSideView,
+  // lineup_resolver.jsx), the shared shape this row and the OBS overlay
+  // both need. `name` (the frozen base identity) is what the label
+  // composition below and every other consumer of this row keep using;
+  // `displayName` is the DISPLAYED name only (bc-dnst) -- a rename reaches
+  // a bout already fought via the squad member's CURRENT name, resolved by
+  // id, while sub.sideA/sub.sideB on disk stay frozen. The lookup runs even
+  // when the base name fell through to the bare bout number: a fighter
+  // fielded by squad number and named LATER has an empty stored name and a
+  // resolving id, and must show the name once it has one; when the id
+  // resolves to nothing the rule hands the bout number back untouched.
+  const sideView = (subSide, lu, squad, memberId) =>
+    boutSideView({ isKachinuki: kachinuki, isDaihyosen: isDH, existingName: subSideName(sub && subSide), lineupName: lineupNameFor(lu), teamNameA: matchSideA, teamNameB: matchSideB, fallback: boutNum, squad, memberId });
+  const { name: shiroName, displayName: shiroDisplayName } = sideView(sub && sub.sideB, lineupB, squadB, (sub && sub.sideBMemberId) || "");
+  const { name: akaName, displayName: akaDisplayName } = sideView(sub && sub.sideA, lineupA, squadA, (sub && sub.sideAMemberId) || "");
   // The squad member label rides beside the SAME name resolved above, via the
   // ONE shared composer (resolveBoutSideSquadLabel, lineup_resolver.jsx): the
   // member id comes from the SAME kachinuki/fixed-format tier the name used

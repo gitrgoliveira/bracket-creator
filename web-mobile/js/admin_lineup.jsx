@@ -265,7 +265,7 @@ function blankMemberForPosition(squad, posKey, currentIds) {
 // save on its own account.
 //
 // currentIds (bc-dnst, optional) is the lineup's OWN memberIds map before
-// this write -- buildInlineLineupWrite (admin_scoring_team.jsx) passes
+// this write -- buildInlineLineupWrite (lineup_resolver.jsx) passes
 // lineup?.memberIds. It covers naming a slot that was PICKED by number
 // rather than typed: an operator who picks a blank squad entry from the
 // row's list (LineupNameInput's object-entry shape) writes that member's

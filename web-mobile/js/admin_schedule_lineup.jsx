@@ -435,7 +435,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       const pickedId = memberIds[p.key];
       // A picked squad entry is a real placement even when its member is
       // still unnamed (bc-dnst): keep the position so the id survives,
-      // exactly like buildInlineLineupWrite (admin_scoring_team.jsx). The
+      // exactly like buildInlineLineupWrite (lineup_resolver.jsx). The
       // id is KNOWN (no resolver) while the box still reads the picked
       // member's own name, or nothing; a DIFFERENT name typed over the pick
       // goes through the resolver with this id as the position's current

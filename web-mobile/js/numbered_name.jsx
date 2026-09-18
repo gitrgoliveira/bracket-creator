@@ -41,12 +41,27 @@
 // `number` may be empty (pre-draw, or a competitor excluded from the draw):
 // then only the name renders. `name` is rendered as given; the caller owns
 // any "TBD"/"-" fallback, since surfaces differ on it.
+// numberFollowsName: THE operator ruling, as one predicate. Aka sits in the
+// right column, so its number goes AFTER the name; everything else (Shiro, and
+// every sideless or vertically-stacked surface) puts it before.
+//
+// It exists because the ruling used to be written twice -- `side === "aka"`
+// here and `color === "aka" ? ... : ...` in withNumber -- which is two places
+// for one rule to drift, and drift between the string form and the component
+// form is precisely what this module's header says must not happen. Both now
+// ask this. Exported from the leaf so withNumber can import it without
+// numbered_name.jsx taking on any import of its own.
+export function numberFollowsName(side) {
+  return side === "aka";
+}
+
 export function NumberedName({ side, name, number, clip }) {
+  const after = numberFollowsName(side);
   return (
     <span className={clip ? "numbered-name numbered-name--clip" : "numbered-name"}>
-      {side !== "aka" && number ? <span className="num-prefix">{number}</span> : null}
+      {!after && number ? <span className="num-prefix">{number}</span> : null}
       <span className="numbered-name__text">{name}</span>
-      {side === "aka" && number ? <span className="num-prefix num-prefix--after">{number}</span> : null}
+      {after && number ? <span className="num-prefix num-prefix--after">{number}</span> : null}
     </span>
   );
 }

@@ -109,6 +109,37 @@ describe('squadRosterEntries (bc-dnst, the one builder of a lineup picker\'s lis
     expect(squadRosterEntries({ teamNumber: 'T10', squad: undefined, legacyNames: undefined, lineup: {} }))
       .toEqual([]);
   });
+
+  // The mint-failure tail (documented in the function's own header comment):
+  // resolveMemberIdsForPositions saves a substitute BY NAME with no member id
+  // when addTeamMember fails server-side. Such a fighter is in neither the
+  // squad nor the legacy metadata, so without this tail they are in NO list
+  // at all. Every OTHER squad-present fixture in this file passes `lineup:
+  // {}`, so `Object.values(lineup?.positions || {})` is always `[]` and this
+  // whole branch (the loop, both its `continue` guards, and the ternary's
+  // true arm) goes unreached.
+  it('bc-gmcg: surfaces a lineup-assigned name that names no squad member', () => {
+    const squad = [{ id: 'm1', index: 1, name: 'Sato' }];
+    const entries = squadRosterEntries({
+      teamNumber: 'T10',
+      squad,
+      legacyNames: [],
+      lineup: { positions: {
+        // Already a squad member (case-insensitively): must be filtered, not
+        // duplicated, by the SAME `known` set squadEntries seeded.
+        senpo: 'sato',
+        // Names nobody in the squad: the mint-failure substitute, appended
+        // as a plain string -- the same shape the no-squad branch returns.
+        jiho: 'Substitute Kenji',
+        // Blank after trim: must be skipped, never appended as "".
+        chuken: '   ',
+      } },
+    });
+    expect(entries).toEqual([
+      { id: 'm1', index: 1, name: 'Sato', label: 'T10.1' },
+      'Substitute Kenji',
+    ]);
+  });
 });
 
 describe('resolveBoutSideDisplayName (bc-dnst)', () => {

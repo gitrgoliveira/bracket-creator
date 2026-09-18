@@ -1013,3 +1013,85 @@ describe('TvWhiteBoard: the headline number cannot be truncated away (bc-rvfx)',
     expect(aka.props.number).toBe('');
   });
 });
+
+// bc-rvfx / PR #428 audit: sideLabel's outer-side number placement (Shiro's
+// number BEFORE the name, Aka's AFTER it) is wired at several
+// display_scoreboard.jsx call sites. The two promoted-headline cells are
+// covered above (they went through the later NumberedName/clip conversion);
+// these NON-clipping rows still call sideLabel directly as a plain string
+// and were left unpinned by that same audit. NOTE: `base` above is scoped to
+// the `TvWhiteBoard`/`TvIndividualBoard` describes above, so this block
+// defines its own chrome props rather than reaching for either.
+describe('TvWhiteBoard NEXT line: competitor number sits on the outer side (bc-rvfx)', () => {
+  const chrome = {
+    tournament: { name: 'Cup' }, court: 'A', connected: true,
+    lineupA: null, lineupB: null, showDH: false, zekken: false,
+  };
+
+  it("puts Shiro's number before the name and Aka's after it", () => {
+    const p = teamPromoted();
+    const props = {
+      ...chrome, promoted: p, isTeamMatch: true,
+      subResults: p.match.subResults, teamSize: 5,
+      queueMatches: [{
+        sideA: { name: 'Yamada', number: 'K9' },
+        sideB: { name: 'Tanaka', number: 'K5' },
+        _comp: { withZekkenName: false },
+      }],
+    };
+    const str = render(props);
+    // sideB (Tanaka) is Shiro: number leads. sideA (Yamada) is Aka: number trails.
+    expect(str).toContain('K5 Tanaka');
+    expect(str).toContain('Yamada K9');
+    expect(str).not.toContain('K9 Yamada');
+    expect(str).not.toContain('Tanaka K5');
+  });
+});
+
+describe('TvIndividualBoard: competitor number sits on the outer side (bc-rvfx)', () => {
+  const chrome = { tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false };
+
+  it("NEXT line puts Shiro's number before the name and Aka's after it", () => {
+    const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'B', sideA: 'X', sideB: 'Y', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    // A queued match not already in the body's single row, and no format
+    // "mixed" competing UP NEXT pool strip, so this exercises TvIndividualBoard's
+    // OWN "Next match line" (display_scoreboard.jsx, gated on `next && !nextPool`).
+    const queueMatches = [{
+      id: 'Pool A-9',
+      sideA: { name: 'Yamada', number: 'K9' },
+      sideB: { name: 'Tanaka', number: 'K5' },
+      _comp: { withZekkenName: false },
+    }];
+    const str = JSON.stringify(TvIndividualBoard({ ...chrome, promoted, queueMatches }));
+    expect(str).not.toContain('tvd-next-pool'); // sanity: not exercising the pool strip below
+    expect(str).toContain('K5 Tanaka');
+    expect(str).toContain('Yamada K9');
+    expect(str).not.toContain('K9 Yamada');
+    expect(str).not.toContain('Tanaka K5');
+  });
+
+  it("UP NEXT pool bout strip puts each bout's number on the outer side", () => {
+    // Mirrors the existing "renders the UP NEXT pool strip..." fixture above,
+    // but with NUMBERED sides: that test's fixture uses bare name strings, so
+    // it never exercises sideLabel's number-placement behaviour at this
+    // render site (findNextPoolOnCourt's OWN unit test covers the computed
+    // shiro/aka strings directly; this covers those strings actually
+    // reaching the rendered NextPair unmangled).
+    const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, format: 'mixed', poolMatches: [
+      { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol', status: 'running', scheduledAt: '09:00' },
+      { id: 'Pool B-0', court: 'B', status: 'scheduled', scheduledAt: '09:30',
+        sideA: { name: 'Yamada', number: 'K9' },
+        sideB: { name: 'Tanaka', number: 'K5' } },
+    ] };
+    const promoted = { competition: multiPool, match: multiPool.poolMatches[0], isBracket: false };
+    const str = JSON.stringify(TvIndividualBoard({ ...chrome, promoted, queueMatches: [] }));
+    expect(str).toContain('tvd-next-pool');
+    expect(str).toContain('K5 Tanaka');
+    expect(str).toContain('Yamada K9');
+    expect(str).not.toContain('K9 Yamada');
+    expect(str).not.toContain('Tanaka K5');
+  });
+});

@@ -786,7 +786,20 @@ func (e *Engine) hasStartedKnockoutMatchTx(tx state.StoreTx, compID string, play
 // RecordDecision otherwise.
 //
 // T090, T103, T156, contracts/match-decisions.md §POST /decision, bc-twin.
-func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
+// clientWriteStamp is the caller's server-relative write stamp, or 0 when the
+// caller has none to give. Variadic because the ONE caller that must always
+// stamp is the /decision HTTP handler: the engine-internal pass-through and the
+// suite's decision tests have no client clock, and a required parameter would
+// have them all pass a meaningless 0. A stamped decision competes on timestamps
+// like a score write instead of taking ApplyByTimestamp's unstamped bypass.
+func clientWriteStamp(stamp []int64) int64 {
+	if len(stamp) == 0 {
+		return 0
+	}
+	return stamp[0]
+}
+
+func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	if decisionBy != "shiro" && decisionBy != "aka" {
 		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
 	}
@@ -879,6 +892,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		DecisionReason: decisionReason,
 		Encho:          encho,
 		Status:         state.MatchStatusCompleted,
+		ModifiedAt:     clientWriteStamp(modifiedAt),
 	}
 	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
 	// gets the ○ default-win fill and becomes Winner. WinnerSide/WinnerID are

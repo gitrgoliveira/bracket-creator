@@ -130,6 +130,26 @@ describe('AdminShiaijoPage render-smoke', () => {
     expect(heading).toContain('Just played');
   });
 
+  // The panel can land on a finished bout two ways, and they are different
+  // facts: it FELL BACK there (nothing running), or the operator opened that
+  // result to correct it. "Just played" would be wrong for the second.
+  it('says "Correcting", not "Just played", when the operator opened a finished bout to fix it', () => {
+    const finished = completedPoolBout({ id: 'm-p1', poolName: 'Pool 1', scheduledAt: '09:00', modifiedAt: 2000 });
+    window.tournamentMatches = () => [finished];
+    window.filterMatchesByCourt = (matches) => matches;
+    const { container } = renderPage(makeMinimalTournament());
+    expect(container.querySelector('.shiaijo-context__toggle').textContent).toContain('Just played');
+
+    const correct = [...container.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Correct');
+    expect(correct).toBeTruthy();
+    act(() => { correct.click(); });
+
+    const heading = container.querySelector('.shiaijo-context__toggle').textContent;
+    expect(heading).toContain('Correcting');
+    expect(heading).not.toContain('Just played');
+    expect(heading).toContain('Pool 1');
+  });
+
   it('keeps the live heading while a bout is running, even with a finished bout behind it', () => {
     const finished = completedPoolBout({ id: 'm-p1', poolName: 'Pool 1', scheduledAt: '09:00', modifiedAt: 2000 });
     const running = {

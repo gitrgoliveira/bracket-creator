@@ -9,6 +9,7 @@ import { AwardsView } from './viewer_awards.jsx';
 import { usePrimaryWatch } from './viewer_schedule.jsx';
 import { poolNameOf, isPoolDaihyosenBout, teamMatchTypeFor } from './pool_ids.jsx';
 import { NumberedName } from './numbered_name.jsx';
+import { resultRecencyDesc } from './result_recency.jsx';
 
 const { useState, useMemo, useRef: useRefV } = React;
 const StatusBadge = window.StatusBadge;
@@ -141,9 +142,15 @@ export function ViewerCompetition({ tournament, competition, pools, poolMatches,
     // this SAME hasBothSides filter as a knockout bye, for the same reason. The
     // operator has ruled that acceptable (PR #382). Do not add a Swiss case to
     // this filter expecting it to change anything.
+    // Newest FIRST by when the result was WRITTEN, not by scheduled time: a
+    // court running out of schedule order would otherwise top this list with a
+    // bout played earlier, and disagree with the operator console, which
+    // answers the same question from the same rule (mp-jnvl). An unstamped
+    // bout still falls back to scheduled time, so a competition whose results
+    // predate the stamp reads exactly as it did.
     const recent = allMatches
       .filter((m) => m.status === "completed" && m.winner && hasBothSides(m) && matchInvolvesWatched(m))
-      .sort((a, b) => (b.scheduledAt || "00:00").localeCompare(a.scheduledAt || "00:00"))
+      .sort(resultRecencyDesc)
       .slice(0, hasActiveFilter ? 20 : 5);
     return { runningMatches: running, upcomingMatches: upcoming, recentMatches: recent };
   }, [allMatches, highlightPlayers, hasActiveFilter]);

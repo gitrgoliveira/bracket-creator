@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { makeReactive } from './helpers/reactive_react.js';
 import { parsePath, pathFromState } from '../app.jsx';
-import { sortShiaijoMatches, partitionShiaijoMatches, mostRecentlyPlayed, recentlyPlayed, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
+import { sortShiaijoMatches, partitionShiaijoMatches, shiaijoScoreCell, isTeamMatch, groupQueueMatches, shiaijoStandingsKind, makeReconnectRefetcher, pendingFeederSlots, propagateBracketWinnerLocal, applyBronzeLoserLocal } from '../admin_shiaijo.jsx';
 import { swissRoundLabel } from '../pool_ids.jsx';
 
 // A team encounter's score must never be shown as a bare number; it always
@@ -361,93 +361,6 @@ describe('partitionShiaijoMatches', () => {
   it('returns empty groups for an empty input', () => {
     const out = partitionShiaijoMatches([]);
     expect(out).toEqual({ sorted: [], running: [], scheduled: [], completed: [] });
-  });
-});
-
-
-// The context/standings strip anchors to "the bout just played" once the court
-// has nothing running. `completed` is ordered by SCHEDULED time, so its tail is
-// the wrong bout whenever the court ran out of schedule order - the operator
-// scores a late-slot bout early, then an earlier one, and the strip silently
-// stays on the late-slot bout (mp-jnvl).
-describe('mostRecentlyPlayed; recency comes from the result write, not the slot', () => {
-  // Shaped like the real list: sorted by scheduledAt, so `late` is the tail.
-  const early = { id: 'm1', scheduledAt: '09:00', status: 'completed' };
-  const late = { id: 'm2', scheduledAt: '09:05', status: 'completed' };
-
-  it('picks the bout written last even when it was scheduled first', () => {
-    const played = [{ ...early, modifiedAt: 2000 }, { ...late, modifiedAt: 1000 }];
-    expect(mostRecentlyPlayed(played).id).toBe('m1');
-  });
-
-  it('still picks the tail when that is genuinely the last write', () => {
-    const played = [{ ...early, modifiedAt: 1000 }, { ...late, modifiedAt: 2000 }];
-    expect(mostRecentlyPlayed(played).id).toBe('m2');
-  });
-
-  // Unstamped paths are real: quick-score, /decision and the daihyosen writes
-  // build their result without a modifiedAt, as do files predating the stamp.
-  it('falls back to schedule order when nothing carries a stamp', () => {
-    expect(mostRecentlyPlayed([early, late]).id).toBe('m2');
-  });
-
-  it('ignores unstamped bouts when any bout is stamped', () => {
-    const played = [{ ...early, modifiedAt: 1000 }, late];
-    expect(mostRecentlyPlayed(played).id).toBe('m1');
-  });
-
-  it('treats a zero stamp as unstamped rather than as the epoch', () => {
-    const played = [{ ...early, modifiedAt: 0 }, { ...late, modifiedAt: 0 }];
-    expect(mostRecentlyPlayed(played).id).toBe('m2');
-  });
-
-  it('breaks a stamp tie towards the later slot, matching the tail fallback', () => {
-    const played = [{ ...early, modifiedAt: 5000 }, { ...late, modifiedAt: 5000 }];
-    expect(mostRecentlyPlayed(played).id).toBe('m2');
-  });
-
-  it('returns null for an empty list', () => {
-    expect(mostRecentlyPlayed([])).toBeNull();
-  });
-
-  // A knockout draw resolves its byes at generation time: they are completed,
-  // carry no stamp, and can hold the latest slot, so the tail-of-list pick
-  // could anchor the panel to a bout nobody fought.
-  it('prefers a fought result over an unstamped bye holding a later slot', () => {
-    const bye = { id: 'bye', scheduledAt: '09:05', status: 'completed' };
-    const fought = { id: 'm1', scheduledAt: '09:00', status: 'completed', modifiedAt: 2000 };
-    expect(mostRecentlyPlayed([fought, bye]).id).toBe('m1');
-  });
-});
-
-
-// The Completed preview shows only the last few bouts to keep the live queue
-// above the fold. "Last few" has to mean most recently PLAYED: picking the tail
-// of a schedule-ordered list hides the result the operator just entered (mp-jnvl).
-describe('recentlyPlayed; the preview keeps the newest results, in list order', () => {
-  const bout = (id, scheduledAt, modifiedAt) => ({ id, scheduledAt, status: 'completed', ...(modifiedAt ? { modifiedAt } : {}) });
-
-  it('keeps the newest results rather than the last slots', () => {
-    const list = [bout('a', '09:00', 4000), bout('b', '09:05', 1000), bout('c', '09:10', 2000)];
-    expect(recentlyPlayed(list, 2).map((m) => m.id)).toEqual(['a', 'c']);
-  });
-
-  it('returns the kept rows in the caller\'s order, not in recency order', () => {
-    const list = [bout('a', '09:00', 4000), bout('b', '09:05', 1000), bout('c', '09:10', 2000)];
-    // 'a' is the most recent write but still renders first: only WHICH bouts
-    // are shown changes, never the order the section reads in.
-    expect(recentlyPlayed(list, 2).map((m) => m.id)).not.toEqual(['c', 'a']);
-  });
-
-  it('falls back to the last slots when nothing carries a stamp', () => {
-    const list = [bout('a', '09:00'), bout('b', '09:05'), bout('c', '09:10')];
-    expect(recentlyPlayed(list, 2).map((m) => m.id)).toEqual(['b', 'c']);
-  });
-
-  it('returns the whole list untouched when it is no longer than the preview', () => {
-    const list = [bout('a', '09:00'), bout('b', '09:05')];
-    expect(recentlyPlayed(list, 8)).toBe(list);
-    expect(recentlyPlayed([], 8)).toEqual([]);
   });
 });
 

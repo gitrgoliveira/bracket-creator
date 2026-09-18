@@ -2367,6 +2367,13 @@ const API = {
     // treated as success) applies ONLY to queued retries inside _flushQueue.
     async recordDecision(compID, matchID, body, password) {
         const decisionUrl = `/api/competitions/${compID}/matches/${matchID}/decision`;
+        // Stamp in server-relative time, exactly as recordScore does (mp-y3nk).
+        // Stamped BEFORE the send so a queued replay carries the time the
+        // operator acted, not the time the network came back. Without it a
+        // match closed while still `scheduled` - the withdrawal panel's default
+        // win - was the one completion carrying no time at all, so no surface
+        // could order it against the bouts around it (mp-jnvl).
+        const payload = { ...body, modifiedAt: _serverNowMs() };
         let res;
         try {
             // F1: abort after 12 s; AbortError propagates as network failure.
@@ -2376,13 +2383,13 @@ const API = {
                     'Content-Type': 'application/json',
                     'X-Tournament-Password': password
                 },
-                body: JSON.stringify(body)
+                body: JSON.stringify(payload)
             });
         } catch (_networkErr) {
             // F5: network failure or timeout: enqueue as terminal for retry.
             _enqueueTerminalWrite(
                 _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
-                body, password, compID, matchID
+                payload, password, compID, matchID
             );
             return { queued: true };
         }
@@ -2391,7 +2398,7 @@ const API = {
             if (res.status >= 500 || res.status === 429) {
                 _enqueueTerminalWrite(
                     _revKey(compID, matchID), 'decision', 'POST', decisionUrl,
-                    body, password, compID, matchID
+                    payload, password, compID, matchID
                 );
                 return { queued: true };
             }

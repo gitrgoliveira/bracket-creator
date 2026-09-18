@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividualGroup, findNextPoolOnCourt, phaseProgressOnCourt, poolNameOf, sideLabel } from '../display.jsx';
 import { phaseLabel } from '../display_helpers.jsx';
+import { NumberedName } from '../numbered_name.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
@@ -930,5 +931,85 @@ describe('phaseLabel: league suppresses the round-robin round number', () => {
     } finally {
       window.bracketRoundLabel = saved;
     }
+  });
+});
+
+// bc-rvfx: the TV headline cells ELLIPSISE, and sideLabel's string form puts
+// Aka's number LAST, so a long team name truncated Aka's number away while
+// Shiro's leading number always survived: the two sides degraded differently
+// from the same data.
+//
+// MEASURED on the real board at 1920x1080 before converting (the bead required
+// a measurement, not an argument): the headline cell offers 811px at 54px
+// Archivo-800, so "Musashi Dojo Thunderbolts T108" (886px) lost its T108
+// outright. The cells now render NumberedName's clip mode, which puts the chip
+// in its own flex child so only the NAME ellipsises.
+//
+// The non-clipping rows (NextPair's NEXT line and UP NEXT list, the overlay's
+// individual lines) were measured at the same viewport, do NOT clip, and keep
+// the plain string form -- there is nothing there to protect.
+describe('TvWhiteBoard: the headline number cannot be truncated away (bc-rvfx)', () => {
+  function findAllVnodes(node, pred, out = []) {
+    if (!node || typeof node !== 'object') return out;
+    if (Array.isArray(node)) { node.forEach(k => findAllVnodes(k, pred, out)); return out; }
+    if (pred(node)) out.push(node);
+    const kids = node.children || node.props?.children || [];
+    [].concat(kids).forEach(k => findAllVnodes(k, pred, out));
+    return out;
+  }
+
+  // Names far past the measured ~28-character threshold, both numbered.
+  function longNamedTeams() {
+    return {
+      kind: 'running',
+      match: {
+        id: 'm9', round: 'Final',
+        sideA: { name: 'Kenshinkan Kendo Renshinkan Melbourne', number: 'T7' },  // AKA
+        sideB: { name: 'Musashi Dojo Thunderbolts Alpha', number: 'T25' },       // SHIRO
+        subResults: [],
+      },
+      competition: { id: 'c1', name: 'Teams', kind: 'team', teamSize: 5 },
+      isBracket: true,
+    };
+  }
+
+  // This block's own chrome props: `base` above is scoped to its own describe.
+  const chrome = {
+    tournament: { name: 'Cup' }, court: 'A', connected: true,
+    lineupA: null, lineupB: null, showDH: false, queueMatches: [], zekken: false,
+  };
+  const propsFor = (p) => ({ ...chrome, promoted: p, isTeamMatch: true, subResults: [], teamSize: 5 });
+
+  it('renders each headline name through NumberedName in clip mode', () => {
+    const chips = findAllVnodes(TvWhiteBoard(propsFor(longNamedTeams())),
+      n => n.type === NumberedName);
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+    // clip is what keeps the chip out of the ellipsised run; without it the
+    // wrapper is display:contents and the cell truncates the chip again.
+    chips.forEach(c => expect(c.props.clip).toBeTruthy());
+  });
+
+  it('keeps each number on its OUTER side: Shiro before, Aka after', () => {
+    const chips = findAllVnodes(TvWhiteBoard(propsFor(longNamedTeams())),
+      n => n.type === NumberedName);
+    const shiro = chips.find(c => c.props.side === 'shiro');
+    const aka = chips.find(c => c.props.side === 'aka');
+    expect(shiro).toBeTruthy();
+    expect(aka).toBeTruthy();
+    expect(shiro.props.number).toBe('T25');
+    expect(aka.props.number).toBe('T7');
+    // The name is handed over separately from the number, which is the whole
+    // point: the cell can ellipsise the one without touching the other.
+    expect(shiro.props.name).toBe('Musashi Dojo Thunderbolts Alpha');
+    expect(aka.props.name).toBe('Kenshinkan Kendo Renshinkan Melbourne');
+  });
+
+  it('still renders a numberless side as a bare name, with no empty chip', () => {
+    const p = longNamedTeams();
+    delete p.match.sideA.number;
+    const aka = findAllVnodes(TvWhiteBoard(propsFor(p)),
+      n => n.type === NumberedName).find(c => c.props.side === 'aka');
+    expect(aka).toBeTruthy();
+    expect(aka.props.number).toBe('');
   });
 });

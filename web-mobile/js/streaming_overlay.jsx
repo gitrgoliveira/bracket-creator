@@ -1,7 +1,8 @@
 // streaming_overlay.jsx: OBS/vMix streaming overlay (StreamingOverlay).
 // Transparent-background lower-third for broadcast integrations. T066, T067, mp-13y.
 
-import { findRunningOnCourt, sideLabel, TermD, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, sideLabel, sideLabelParts, TermD, StreamingQR } from './display_helpers.jsx';
+import { NumberedName } from './numbered_name.jsx';
 import { useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { pickFromLineup, pickMemberIdFromLineup, resolveBoutSideName, POS_LABELS_5, kachinukiHidesLineupPosition, resolveBoutSideSquadLabel, resolveBoutSideDisplayName } from './lineup_resolver.jsx';
 import { isPoolDaihyosenBout, teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
@@ -230,9 +231,14 @@ function StreamingOverlay({ court, position, competitions }) {
     const boutIpponsB = currentSub ? (realIppons(currentSub.ipponsB).join('') || '-') : '-';
     const boutIpponsA = currentSub ? (realIppons(currentSub.ipponsA).join('') || '-') : '-';
 
-    // Team names (outer flanks of QR in team mode).
-    const shiroTeamName = hasRunning ? sideLabel(running.match.sideB, zekken, "shiro") : '';
-    const akaTeamName = hasRunning ? sideLabel(running.match.sideA, zekken, "aka") : '';
+    // Team names (outer flanks of QR in team mode). These two cells ellipsise,
+    // and Aka's number rides at the END of the string form, so a long team name
+    // truncated Aka's number away while Shiro's leading one survived. They
+    // render NumberedName's clip mode off these parts instead, which keeps the
+    // chip out of the ellipsised run (bc-rvfx). The individual lines below are
+    // NOT converted: they have no clipping container to protect against.
+    const shiroTeamParts = hasRunning ? sideLabelParts(running.match.sideB, zekken) : null;
+    const akaTeamParts = hasRunning ? sideLabelParts(running.match.sideA, zekken) : null;
 
     // Individual match data (non-team).
     const shiro = hasRunning && !isTeamMatch ? sideLabel(running.match.sideB, zekken, "shiro") : '';
@@ -301,7 +307,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     {/* Shiro: left side (white) */}
                     <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
-                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiroTeamName}</span>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiroTeamParts ? <NumberedName side="shiro" clip {...shiroTeamParts} /> : ''}</span>
                             <span data-testid="overlay-shiro-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
@@ -322,7 +328,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
                             <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
-                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamName}</span>
+                            <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamParts ? <NumberedName side="aka" clip {...akaTeamParts} /> : ''}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
                             <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsA}</span>

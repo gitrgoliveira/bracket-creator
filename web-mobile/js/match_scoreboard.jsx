@@ -54,9 +54,12 @@ export function boutHansokuMark(foulCount) {
 // squadA/squadB (bc-pnum: extend the squad member label to the public
 // surfaces) are resolved from the SAME source the players list already
 // comes from: the passed `competition.squads` when present (TvDisplay /
-// StreamingOverlay carry the aggregate item, which now carries it), else
-// the `fetchCompetitionDetails` fallback fetch's own top-level `squads`
-// (the viewer card, which never gets a `competition` prop at all). Both are
+// StreamingOverlay carry the aggregate item, which normalizeViewerCompItem
+// maps the wire key onto), else the `fetchCompetitionDetails` fallback
+// fetch's own top-level `teamMembers` -- NOT `squads`, because
+// normalizeCompetitionDetail SPREADS the payload instead of renaming it, so
+// the detail shape keeps the wire name (the viewer card, which never gets a
+// `competition` prop at all). Both are
 // the identical {teamParticipantId: [{id,index,name}]} shape the public
 // viewer payload carries only for a team competition, so an individual
 // competition (or a payload predating this field) simply yields {} and
@@ -129,8 +132,8 @@ export function useTeamLineups(match, competition, roundIndex) {
         : [];
       // squads (bc-pnum): prefer the passed competition's own squads map
       // (present only for a team competition); only fall through to the
-      // detail fetch's squads when the caller passed no competition at all
-      // (the viewer card) or it carried no squads of its own.
+      // detail fetch's teamMembers when the caller passed no competition at
+      // all (the viewer card) or it carried no squads of its own.
       let squadsMap = (competition && competition.squads) || null;
       if (!players.length) {
         try {
@@ -464,17 +467,21 @@ export function BoutSubRow({ sub, index, lineupA, lineupB, teamSize, isDH, state
     + (isDH ? " msb-row--dh" : "");
   return (
     <div className={cls} data-testid={isDH ? "sub-row-dh" : `sub-row-${index}`}>
-      <span className="msb-name">
+      <span className="msb-name msb-name--labelled">
         {shiroLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE} data-testid="sub-member-label-b">{shiroLabel}</span>}
-        <span data-testid="sub-shiro-name">{shiroDisplayName}</span>
+        <span className="msb-name__text" data-testid="sub-shiro-name">{shiroDisplayName}</span>
       </span>
       {centreMarks(sub, matchSideA, matchSideB)}
       {/* The member label sits on the OUTER side of the name like the
           competitor number (operator ruling 2026-09-14, bc-dnst): Shiro's
           before the name, Aka's after it, so the two labels frame the
-          pairing from the outside as the score sheet's bout rows do. */}
-      <span className="msb-name msb-name--aka">
-        <span data-testid="sub-aka-name">{akaDisplayName}</span>
+          pairing from the outside as the score sheet's bout rows do.
+          --labelled makes the cell a flex row so the NAME is the only
+          shrinkable child: .msb-name's own ellipsis truncates the END of the
+          cell's text run, which on Aka is the LABEL, so a long name used to
+          eat Aka's label while Shiro's (leading) survived (bc-rvfx). */}
+      <span className="msb-name msb-name--aka msb-name--labelled">
+        <span className="msb-name__text" data-testid="sub-aka-name">{akaDisplayName}</span>
         {akaLabel && <span className="msb-member-label" style={SQUAD_MEMBER_LABEL_STYLE_AFTER} data-testid="sub-member-label-a">{akaLabel}</span>}
       </span>
     </div>

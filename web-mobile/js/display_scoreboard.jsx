@@ -2,7 +2,8 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, sideLabelParts, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
+import { NumberedName } from './numbered_name.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
 import { realIppons } from './result_slot.jsx';
@@ -76,6 +77,14 @@ function LinkDot({ linkState }) {
 function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, isTeamMatch, subResults, lineupA, lineupB, squadA, squadB, teamSize, showDH, queueMatches, zekken }) {
     const shiroTeam = sideLabel(promoted.match.sideB, zekken, "shiro");
     const akaTeam = sideLabel(promoted.match.sideA, zekken, "aka");
+    // The headline cells below ELLIPSISE, and Aka's number rides at the end of
+    // the string, so a long team name truncated it away while Shiro's leading
+    // number always survived (measured at 1920x1080: an 811px cell at 54px, so
+    // ~28 characters). Those cells render these PARTS through NumberedName's
+    // clip mode instead, which keeps the chip out of the ellipsised run. The
+    // string form above is still what the non-clipping rows use (bc-rvfx).
+    const shiroTeamParts = sideLabelParts(promoted.match.sideB, zekken);
+    const akaTeamParts = sideLabelParts(promoted.match.sideA, zekken);
     // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
     // the actual fighters are the rep players the operator records. When set,
     // show the rep player as the headline name with the team as a sub-label.
@@ -128,14 +137,14 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || shiroTeam}</div>
-                    {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shiroTeam}</div>}
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || <NumberedName side="shiro" clip {...shiroTeamParts} />}</div>
+                    {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="shiro" clip {...shiroTeamParts} /></div>}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || akaTeam}</div>
-                    {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{akaTeam}</div>}
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || <NumberedName side="aka" clip {...akaTeamParts} />}</div>
+                    {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="aka" clip {...akaTeamParts} /></div>}
                 </div>
             </div>
 

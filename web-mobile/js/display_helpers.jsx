@@ -2,7 +2,7 @@
 // Pure functions, the TermD wrapper, and StreamingQR used by TvDisplay,
 // LobbyDisplay, and StreamingOverlay. No module-level side-effects.
 
-import { withNumber } from './match_scoreboard.jsx';
+import { withNumber, numberedParts } from './match_scoreboard.jsx';
 import { poolNameOf, isSupplementaryBout, swissRoundLabel } from './pool_ids.jsx';
 
 // NOTE: this module is the shared *leaf* in the display graph: presentation
@@ -34,6 +34,29 @@ function TermD(props) {
 // (display_white_board.test.jsx asserts on `sideLabel`).
 function sideLabel(side, withZekkenName, color) {
     return withNumber(side, withZekkenName, color);
+}
+
+// sideLabelParts: the same side as {name, number} rather than one string, for
+// the TV/overlay cells that ELLIPSISE.
+//
+// sideLabel puts Aka's number LAST, and an ellipsis truncates the END of a
+// run, so in a clipping cell a long team name eats Aka's number while Shiro's
+// leading number always survives: the two sides degrade differently from the
+// same data. Measured on the TV board at 1920x1080 (bc-rvfx): the promoted
+// team-name cell offers 811px at 54px Archivo-800, so "Musashi Dojo
+// Thunderbolts T108" (886px) drops its T108 entirely, while the same name
+// numbered Shiro-style keeps it.
+//
+// A cell that clips renders <NumberedName clip> off these parts, so the chip
+// is its own flex child and only the NAME ellipsises. Cells that do NOT clip
+// keep plain sideLabel: NextPair's rows and the overlay's individual lines
+// were measured at the same viewport and have no ellipsis to protect against.
+//
+// Delegates to numberedParts for the same reason sideLabel delegates to
+// withNumber: the string form and the parts form must not drift about what a
+// side's name and number are.
+function sideLabelParts(side, withZekkenName) {
+    return numberedParts(side, withZekkenName);
 }
 
 // Reject a bracket side that is still a placeholder rather than a resolved
@@ -377,6 +400,7 @@ export {
     isSupplementaryBout,
     phaseProgressOnCourt,
     sideLabel,
+    sideLabelParts,
     TermD,
     StreamingQR,
 };

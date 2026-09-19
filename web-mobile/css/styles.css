@@ -181,6 +181,7 @@ a:hover {
 /* ---------- App shell ---------- */
 .app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -406,7 +407,7 @@ a:hover {
   gap: 6px;
   color: var(--ink);
   cursor: pointer;
-  transition: background 120ms;
+  transition: background 120ms var(--ease-out);
 }
 
 .running-strip__chip:hover {
@@ -522,7 +523,7 @@ a:hover {
   font-size: 13.5px;
   /* Enumerate the animated properties, `all` also animated the focus
      outline (it should snap in) and risks animating layout (mp-nubo P3). */
-  transition: background-color 120ms, border-color 120ms, color 120ms;
+  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
 }
 
 .btn:hover {
@@ -834,7 +835,7 @@ a:hover {
   background: var(--surface);
   font-size: 14px;
   outline: none;
-  transition: border-color 120ms, box-shadow 120ms;
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
 }
 
 .input:focus,
@@ -869,7 +870,7 @@ a:hover {
   border-radius: 8px;
   overflow: hidden;
   background: var(--surface);
-  transition: border-color 120ms, box-shadow 120ms;
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
 }
 
 .lined-textarea:focus-within {
@@ -1151,7 +1152,7 @@ a:hover {
   border-radius: var(--r-lg);
   padding: 18px;
   cursor: pointer;
-  transition: all 140ms;
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), transform 140ms var(--ease-out);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1330,7 +1331,7 @@ a:hover {
   width: 100%;
   font-family: inherit;
   text-align: left;
-  transition: all 140ms;
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
   position: relative;
   z-index: 1;
   cursor: pointer;
@@ -1651,7 +1652,7 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 18px;
-  transition: transform 120ms, box-shadow 120ms;
+  transition: transform 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
 }
 
 .pool:hover {
@@ -1926,7 +1927,7 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  transition: border-color 120ms;
+  transition: border-color 120ms var(--ease-out);
 }
 
 .sched-row:hover {
@@ -2259,6 +2260,7 @@ a:hover {
 .viewer {
   background: var(--bg);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .viewer__shell {
@@ -2267,6 +2269,7 @@ a:hover {
   margin: 0 auto;
   background: var(--bg);
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -2365,7 +2368,7 @@ a:hover {
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink-3);
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out), background 0.2s var(--ease-out);
 }
 .sync-status-pill .sync-pill__dot {
   font-size: 8px;
@@ -3298,7 +3301,7 @@ button.vsched-item:not([data-clickable]) {
   background: var(--accent);
   transform-origin: left;
   transform: scaleX(var(--bar-fill, 0));
-  transition: transform 300ms;
+  transition: transform 300ms var(--ease-out);
 }
 
 .vlist-item__pct {
@@ -3543,7 +3546,7 @@ button.vsched-item:not([data-clickable]) {
    .tcard:hover for system consistency. */
 .card--action {
   cursor: pointer;
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), transform 140ms var(--ease-out);
 }
 
 .card--action:hover {
@@ -4035,7 +4038,7 @@ button.vsched-item:not([data-clickable]) {
   border-radius: var(--r-lg);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s;
+  transition: background 0.12s var(--ease-out);
   min-width: 0;
 }
 
@@ -4336,7 +4339,7 @@ button.vsched-item:not([data-clickable]) {
   align-items: center;
   gap: 16px;
   cursor: pointer;
-  transition: all 200ms ease;
+  transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out);
   background: var(--surface);
   color: var(--ink-2);
 }
@@ -4458,7 +4461,7 @@ button.vsched-item:not([data-clickable]) {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-  transition: all 120ms;
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out), opacity 120ms var(--ease-out);
   font-size: 13px;
 }
 
@@ -4901,6 +4904,7 @@ button.vsched-item:not([data-clickable]) {
   border-radius: var(--r-lg);
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5010,7 +5014,7 @@ button.vsched-item:not([data-clickable]) {
   flex-direction: column;
   justify-content: center;
   min-width: 0; /* allow the grid track to shrink below the name's content width */
-  transition: background 0.3s ease;
+  transition: background 0.3s var(--ease-out);
   /* Aka/Shiro side treatment (DESIGN.md §4): solid side tint + a thick coloured
      top bar so the colour reads as real area. Matches the inline editor's
      Proposal C. */
@@ -5235,7 +5239,7 @@ button.vsched-item:not([data-clickable]) {
   min-height: 44px;
   margin-top: 8px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color 0.15s var(--ease-out), color 0.15s var(--ease-out), background 0.15s var(--ease-out);
 }
 
 .sb-draw-toggle:hover {
@@ -6217,7 +6221,7 @@ button.vsched-item:not([data-clickable]) {
   background: var(--surface);
   color: var(--ink-2);
   cursor: pointer;
-  transition: all 120ms;
+  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
 }
 
 .day-tab:hover {
@@ -7146,7 +7150,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    column is the expand/collapse indicator. */
 .team-sub-match--editable {
   cursor: pointer;
-  transition: box-shadow 120ms ease-out;
+  transition: box-shadow 120ms var(--ease-out);
 }
 .team-sub-match--editable:hover {
   opacity: 1;
@@ -7165,7 +7169,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 10px;
   line-height: 1;
   color: var(--ink-1);
-  transition: transform 120ms ease-out;
+  transition: transform 120ms var(--ease-out);
 }
 .tsm-caret--open {
   transform: rotate(90deg);
@@ -8213,7 +8217,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s var(--ease-out), color 0.2s var(--ease-out);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8233,7 +8237,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s var(--ease-out), background 0.15s var(--ease-out);
 }
 .ann-bell-btn:hover { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.1); }
 .ann-bell-btn--on { color: rgba(255, 255, 255, 0.95); }
@@ -8609,7 +8613,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--accent);
   cursor: pointer;
   padding: 0;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
   flex-shrink: 0;
 }
 .watchlist-bell-btn:hover { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 30%); }
@@ -9320,7 +9324,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft);
   color: var(--accent);
   line-height: 1;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
 }
 .shiaijo-title-select:hover .shiaijo-title-select__chevron {
   background: var(--accent);
@@ -9373,7 +9377,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   text-align: left;
   cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  transition: background-color 150ms var(--ease-out), border-color 150ms var(--ease-out);
 }
 .shiaijo-nudge:hover {
   background: var(--warn-border);
@@ -9486,6 +9490,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   position: sticky;
   top: 70px;
   max-height: calc(100vh - 90px);
+  max-height: calc(100dvh - 90px);
   overflow-y: auto;
 }
 

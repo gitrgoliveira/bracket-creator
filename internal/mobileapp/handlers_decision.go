@@ -36,6 +36,13 @@ type DecisionRequest struct {
 	DecisionReason string               `json:"decisionReason,omitempty"`
 	Encho          *state.EnchoMetadata `json:"encho,omitempty"`
 	Force          bool                 `json:"force,omitempty"`
+	// ModifiedAt is the client's server-relative write stamp, the same one
+	// /score carries (mp-y3nk). Sending it puts decision writes under the
+	// timestamp last-write-wins guard instead of its unstamped bypass, and
+	// gives a decision-completed match a recency the UI can order by: a match
+	// closed while still `scheduled` (the withdrawal panel's default win) was
+	// otherwise the one completion that carried no time at all (mp-jnvl).
+	ModifiedAt int64 `json:"modifiedAt,omitempty"`
 }
 
 // Validate enforces request-shape invariants on a decision payload
@@ -139,6 +146,17 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			engErr    error
 			reasonErr *ValidationError
 		)
+		// A stamp implausibly far in the server's future is refused outright,
+		// before the transaction opens, exactly as PUT /score refuses one: a
+		// decision now competes on timestamps, so neither honouring nor zeroing
+		// such a stamp is safe (modifiedAtRefuseSkewMs). Nothing is written.
+		if serverNowMs, aheadMs, refuse := clientClockSkew(req.ModifiedAt); refuse {
+			respondClockSkew(c, serverNowMs, aheadMs)
+			return
+		}
+		// A negative stamp is garbage; the clamp turns it into the unstamped
+		// bypass, which is always safe (mp-y3nk).
+		req.ModifiedAt = clampClientModifiedAt(req.ModifiedAt)
 		reason := strings.TrimSpace(req.DecisionReason)
 		txErr := tx.WithTransaction(id, func(stx state.StoreTx) error {
 			// mp-gmcg: a reason-less kachinuki reopen DEFERS its audit
@@ -180,7 +198,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// here left the two audit fields on one record disagreeing byte-for-
 			// byte on padding. Mirrors the score path's up-front TrimSpace of
 			// CorrectionReason (mp-gmcg review).
-			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho, req.Force)
+			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho, req.Force, req.ModifiedAt)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}
@@ -213,12 +231,16 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			var engNotFoundErr *engine.NotFoundError
 			switch {
 			case errors.Is(engErr, engine.ErrMatchSuperseded):
-				// bc-lww1. Not reachable today: RecordDecisionTx builds its
-				// MatchResult without a ModifiedAt, so ApplyByTimestamp takes
-				// the unstamped bypass and the write always applies. Mapped
-				// anyway, for the same reason the two daihyosen paths are: this
-				// is the LAST arm a future writer would remember to add, and
-				// the default below is internalError -> 500. The SPA queues
+				// bc-lww1. REACHABLE since mp-jnvl: the SPA stamps decision
+				// writes (api_client.recordDecision) and RecordDecisionTx puts
+				// that stamp on its MatchResult, so ApplyByTimestamp no longer
+				// takes the unstamped bypass and a decision can lose to a newer
+				// stored result -- the same way a score write can. An unstamped
+				// decision (an older client, or an engine-internal caller) still
+				// takes the bypass and always applies. Mapping it was already
+				// right for the reason the two daihyosen paths are: this is the
+				// LAST arm a future writer would remember to add, and the
+				// default below is internalError -> 500. The SPA queues
 				// /decision as a terminal write (_enqueueTerminalWrite, kind
 				// 'decision') and retries 5xx indefinitely, so an unmapped
 				// supersede here would not merely mis-report a dropped write,

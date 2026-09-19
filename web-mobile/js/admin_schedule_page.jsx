@@ -94,8 +94,17 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           TODO(T096): once per-bout fusensho is wired through the team-score
           serializer and the schedule row exposes bout details, append an
           "FS" badge to each affected bout cell. */}
+      {/* bc-cse: running admits the FULL score string here (any match kind),
+          mirroring VSchedItem (viewer_match.jsx:194) and TWMatch
+          (viewer_schedule.jsx) -- deliberately, not team-only. This block is
+          its own cell below the name column, not interleaved between two
+          competitor names the way matchStateCell's PoolNumberedMatchRow is,
+          so a running individual match's ippon letters (and any trailing
+          side mark, e.g. Ht) sit in the same kind of standalone cell
+          VSchedItem already shows them in; see bracket.jsx's matchStateCell
+          comment for why THAT caller is scoped to team-only instead. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        {m.status === "completed" && (
+        {(m.status === "completed" || m.status === "running") && (
           <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line", textAlign: "center", lineHeight: 1.3 }}>{window.matchScoreStr(m)}</div>
         )}
         {/* No centre "●" dot: a running match is signalled by the row's

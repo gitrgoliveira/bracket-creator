@@ -530,13 +530,22 @@ describe('match_scoreboard components', () => {
     expect(shiroSlots?.props?.className).toContain('msb-slots--win');
   });
 
+  // The number rides as a NumberedName chip, not a flat string baked into the
+  // cell (bc-dnst / bc-rvfx): collectText does not expand a function
+  // component (see the TeamScoreboard summary test below), so a swept-text
+  // assertion would quietly stop seeing it. Assert the HANDOVER instead: the
+  // vnode the cell passes its name/number/side to.
+  const handedOverParts = (cell) =>
+    findInTree(cell, n => n?.props?.name !== undefined && n?.props?.side !== undefined)?.props;
+
   it('IndividualScore places the assigned competitor number (numberPrefix) on the outer side when showNames is set', () => {
     // mp-13y / bc-dnst: when a competition has a numberPrefix configured, the
     // assigned number (e.g. "K1") is set on match.sideA.number /
     // match.sideB.number by AssignPlayerNumbers and surfaced via
     // normalizeMatch. The TV pool/round feed renders names with
     // showNames=true. Shiro's number sits BEFORE the name ("K1 Tanaka"),
-    // Aka's AFTER it ("Suzuki K2") — operator ruling 2026-09-14.
+    // Aka's AFTER it ("Suzuki K2") — operator ruling 2026-09-14 — via
+    // NumberedName's own side-based placement, not a concatenated string.
     const match = {
       sideA: { name: 'Suzuki', number: 'K2' },
       sideB: { name: 'Tanaka', number: 'K1' },
@@ -545,8 +554,8 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(IndividualScore, { match, showNames: true });
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
-    expect(collectText(shiro)).toBe('K1 Tanaka');
-    expect(collectText(aka)).toBe('Suzuki K2');
+    expect(handedOverParts(shiro)).toMatchObject({ side: 'shiro', name: 'Tanaka', number: 'K1', clip: true });
+    expect(handedOverParts(aka)).toMatchObject({ side: 'aka', name: 'Suzuki', number: 'K2', clip: true });
   });
 
   it('IndividualScore degrades to the bare name when no number is set (non-numbered competition)', () => {
@@ -558,8 +567,8 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(IndividualScore, { match, showNames: true });
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
-    expect(collectText(shiro)).toBe('Tanaka');
-    expect(collectText(aka)).toBe('Suzuki');
+    expect(handedOverParts(shiro)).toMatchObject({ side: 'shiro', name: 'Tanaka', number: '' });
+    expect(handedOverParts(aka)).toMatchObject({ side: 'aka', name: 'Suzuki', number: '' });
   });
 
   it('TeamScoreboard renders the IV/PW summary + one row per LINEUP POSITION (padding unplayed bouts)', () => {

@@ -2,7 +2,10 @@
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
-import { IndividualScore } from './match_scoreboard.jsx';
+import { IndividualScore, numberedParts } from './match_scoreboard.jsx';
+import { NumberedName } from './numbered_name.jsx';
+import { matchScoreStr, boutMiddle } from './bracket.jsx';
+import { isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -97,6 +100,41 @@ function buildCourtSlots(competitions, court) {
     return slots;
 }
 
+// teamScoreCell: the team-match twin of IndividualScore's row skeleton, for a
+// bout that is an aggregate rather than a fight (bc-lbty). A plain helper
+// (not a component, mirroring centreMarks in match_scoreboard.jsx) so it
+// renders inline into the caller's tree rather than as a lazy vnode.
+// The centre carries the IV/PW figures once the encounter has a score to
+// show (running or completed), else the plain "vs" boutMiddle already uses
+// for a scheduled fight — never an X/(E)/(DH) mark, which names a single
+// fight and has no meaning for a team aggregate (CLAUDE.md: the middle is a
+// closed set). white-space: pre-line honours matchScoreStr's two-line
+// "IV a-b\nPW c-d" string; without it the newline collapses.
+// matchScoreStr is EMPTY until the first bout is scored, which is the normal
+// state of every encounter between "Start match" and its first result: the team
+// editor filters subResults to bouts already played (admin_scoring_team.jsx), so
+// a just-started encounter carries no teamResult at all. Falling through to
+// boutMiddle there keeps the plain "vs" instead of a blank cell -- the same
+// `|| mid` shape matchStateCell uses (bracket.jsx).
+function teamScoreCell(match, withZekkenName) {
+    const live = match.status === "completed" || match.status === "running";
+    const centre = (live && matchScoreStr(match)) || boutMiddle(match.decision, match.encho, match.score);
+    // NumberedName in `clip` mode, not withNumber's flat string: `.msb-name`
+    // ellipsises, and a team read as "Mushin Steel W1" with the number baked
+    // into the string, as if it were part of the team's own name (operator
+    // ruling). The chip form keeps the number a distinct tag and survives
+    // truncation on either side (bc-rvfx / bc-dnst).
+    return (
+        <div className="msb" data-testid="team-lobby-score">
+            <div className="msb-row">
+                <span className="msb-name" data-testid="lobby-team-shiro-name"><NumberedName side="shiro" clip {...numberedParts(match.sideB, withZekkenName)} /></span>
+                <span className="msb-vs" style={{ whiteSpace: "pre-line" }} data-testid="lobby-team-centre">{centre}</span>
+                <span className="msb-name msb-name--aka" data-testid="lobby-team-aka-name"><NumberedName side="aka" clip {...numberedParts(match.sideA, withZekkenName)} /></span>
+            </div>
+        </div>
+    );
+}
+
 // Render one match cell (td > .match-cell div) for the cross-court table.
 // rowKind: 'now' | 'next' | 'queue': determines the background/border.
 // slot: the buildCourtSlots entry for this cell (null → empty cell).
@@ -119,6 +157,13 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     const { match, competition, isBracket, roundIndex, totalRounds } = slot;
     const zekken = !!(competition && competition.withZekkenName);
+    // A team encounter has no match-level ippons to show through
+    // IndividualScore (they live in subResults/teamResult instead), except a
+    // pool daihyosen/tiebreaker rep bout, which is a single individual fight
+    // even inside a team competition (mirrors display_scoreboard.jsx's
+    // promoted-slot gate).
+    const isTeamMatch = !!(competition && (competition.kind === "team" || (competition.teamSize || 0) > 0))
+        && !isSupplementaryBout(match.id);
 
     let cellBg = LOBBY_COLORS.schedBg;
     let cellBorder = 'transparent';
@@ -138,7 +183,7 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
-            <div style={{
+            <div className="lobby-cell" style={{
                 background: cellBg,
                 borderRadius: 8, padding: '10px 14px',
                 minHeight: 54,
@@ -148,7 +193,10 @@ function LobbyMatchCell({ slot, rowKind }) {
                     // One child, so no flex row: the chip that used to sit
                     // beside this text is gone (see the ruling above) and the
                     // truncation moved onto the element that owns the text.
-                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
+                    // vh, not a fixed 10px: the names beside it are vh-scaled
+                    // (.lobby-cell in styles.css), so a pinned size shrinks
+                    // away to nothing beside them on a large venue screen.
+                    <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon
@@ -156,8 +204,12 @@ function LobbyMatchCell({ slot, rowKind }) {
                     marks: attribution is positional, not color-only. For
                     scheduled rows the match has no ippons, so the slots
                     render empty (next to each name) which reads as "upcoming"
-                    consistently with the running case's progression. */}
-                <IndividualScore match={match} showNames withZekkenName={zekken} />
+                    consistently with the running case's progression. A team
+                    match instead renders teamScoreCell, whose IV/PW centre
+                    is the aggregate twin of this row (bc-lbty). */}
+                {isTeamMatch
+                    ? teamScoreCell(match, zekken)
+                    : <IndividualScore match={match} showNames withZekkenName={zekken} />}
             </div>
         </td>
     );

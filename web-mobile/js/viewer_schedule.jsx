@@ -256,7 +256,18 @@ export function TWMatch({ m, highlight, onClick }) {
   // already false.
   const aWin = sameCompetitor(m.winner, m.sideA);
   const bWin = sameCompetitor(m.winner, m.sideB);
-  const scoreStr = m.status === "completed" ? window.matchScoreStr(m) : null;
+  // Live, not just final: a running team match's score lives in subResults,
+  // not the match-level ippon arrays, so window.matchScoreStr(m) is the only
+  // way to surface it while play is in progress (mirrors VSchedItem,
+  // viewer_match.jsx:194). Deliberately the FULL score string, any match
+  // kind, not team-only: unlike matchStateCell's PoolNumberedMatchRow (which
+  // sits this value literally BETWEEN two competitor name cells and is
+  // scoped narrower for exactly that reason, see bracket.jsx), the score
+  // block here is its own right-aligned cell, structurally separate from the
+  // name column above -- the same layout VSchedItem already shows a running
+  // individual match's ippon letters in.
+  const isRunning = m.status === "running";
+  const scoreStr = (m.status === "completed" || isRunning) ? window.matchScoreStr(m) : null;
   // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned
@@ -290,8 +301,8 @@ export function TWMatch({ m, highlight, onClick }) {
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
-      <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
-        {m.status === "completed" && scoreStr}
+      <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line" }}>
+        {(m.status === "completed" || isRunning) && scoreStr}
         {/* No separate "BYE" span here. Two independent reasons: this list is
             filtered through hasBothSides (see ScheduleViewer.allMatches), which
             rejects a match with an absent side, and a bye is exactly that; and

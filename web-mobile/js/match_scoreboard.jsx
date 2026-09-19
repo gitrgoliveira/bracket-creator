@@ -678,6 +678,27 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   );
 }
 
+// teamIVPWFrom: THE SERVER'S FIGURE WINS (operator ruling: there can be only
+// one source of truth, and it is the data on the server). Go attaches
+// teamResult to every team match on both marshal paths, computed by the same
+// state.TeamResultFrom that feeds the standings, so taking it here makes this
+// row, the bracket card (teamIVPWScore, bracket.jsx, which already did), the
+// pool table and the Excel export one number rather than four agreeing ones.
+//
+// teamIVPW stays as the fallback for a payload that predates the field, and
+// is the mirror the summary used to derive from unconditionally. Note what
+// rides on these four values: TeamScoreboard's `tied` gates whether the
+// daihyosen row renders at all, so this is the structural answer, not just a
+// label. Extracted to its own export (bc-lbty) so the TV board's headline
+// IV/PW readout (display_scoreboard.jsx) and TeamScoreboard's own §277
+// summary row derive from the exact same function and can never disagree
+// about which source won.
+export function teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB) {
+  return teamResult && typeof teamResult === "object"
+    ? { ivShiro: teamResult.shiroIV || 0, ivAka: teamResult.akaIV || 0, pwShiro: teamResult.shiroPW || 0, pwAka: teamResult.akaPW || 0 }
+    : teamIVPW(subResults, matchSideA, matchSideB);
+}
+
 // TeamScoreboard: §277 team table: an IV/PW summary row (labeled, per side) +
 // one BoutSubRow per regular bout + the Daihyosen banner + rep-bout row when
 // `showDH`. Shiro left/dark, Aka right/red.
@@ -692,20 +713,7 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
   // Real numbered bouts only: exclude the daihyosen sentinel and any malformed
   // negative position (mirrors the Go-side defensive skip).
   const regular = (subResults || []).filter(s => s.position > DAIHYOSEN_POSITION);
-  // THE SERVER'S FIGURE WINS (operator ruling: there can be only one source of
-  // truth, and it is the data on the server). Go attaches teamResult to every
-  // team match on both marshal paths, computed by the same state.TeamResultFrom
-  // that feeds the standings, so taking it here makes this row, the bracket
-  // card (teamIVPWScore, bracket.jsx, which already did), the pool table and
-  // the Excel export one number rather than four agreeing ones.
-  //
-  // teamIVPW stays as the fallback for a payload that predates the field, and
-  // is the mirror the summary used to derive from unconditionally. Note what
-  // rides on these four values below: `tied` gates whether the daihyosen row
-  // renders at all, so this is the structural answer, not just a label.
-  const { ivShiro, ivAka, pwShiro, pwAka } = teamResult && typeof teamResult === "object"
-    ? { ivShiro: teamResult.shiroIV || 0, ivAka: teamResult.akaIV || 0, pwShiro: teamResult.shiroPW || 0, pwAka: teamResult.akaPW || 0 }
-    : teamIVPW(subResults, matchSideA, matchSideB);
+  const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(teamResult, subResults, matchSideA, matchSideB);
   // FIK: a Daihyosen (representative bout) only happens when the team match is
   // TIED after the regular bouts: equal individual victories AND equal points.
   // Guard the render on the tie so a stale/invalid position:-1 sub never shows a
@@ -755,30 +763,40 @@ export function TeamScoreboard({ subResults, teamResult, lineupA, lineupB, teamS
 
   return (
     <div className={"msb msb-team" + (tv ? " msb--tv" : "")} data-testid="team-scoreboard">
-      {/* §277 summary row: team name + IV then PW per side */}
-      <div className="msb-row msb-row--summary" data-testid="team-summary">
-        {/* The summary cell ellipsises, so it takes the chip as its own flex
-            child rather than a number baked into the string: at 402px the cell
-            is 85px wide and "Seishinkan Ember T7" (126px) lost its T7 outright,
-            while Shiro's leading number survived (measured, bc-rvfx). */}
-        <span className="msb-name msb-name--labelled" data-testid="summary-shiro-name">
-          <NumberedName side="shiro" clip name={shiroName || ""} number={numberB || ""} />
-        </span>
-        <span className="msb-marks">
-          <span className="msb-slots">
-            <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
-            <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwShiro}</span>
+      {/* §277 summary row: team name + IV then PW per side. Suppressed on the
+          TV board (variant="tv", bc-lbty operator decision 2026-09-19): the
+          headline team-name row above this component (display_scoreboard.jsx)
+          now carries the pairing AND each side's IV/PW readout via the same
+          teamIVPWFrom this row uses, so repeating the team name here a second
+          time was a duplicate, not a second source of information. The card
+          variant keeps this row unconditionally: viewer_match.jsx's own
+          comment records that its separate name row was already removed, so
+          THIS row is the only thing showing the pairing there. */}
+      {!tv && (
+        <div className="msb-row msb-row--summary" data-testid="team-summary">
+          {/* The summary cell ellipsises, so it takes the chip as its own flex
+              child rather than a number baked into the string: at 402px the cell
+              is 85px wide and "Seishinkan Ember T7" (126px) lost its T7 outright,
+              while Shiro's leading number survived (measured, bc-rvfx). */}
+          <span className="msb-name msb-name--labelled" data-testid="summary-shiro-name">
+            <NumberedName side="shiro" clip name={shiroName || ""} number={numberB || ""} />
           </span>
-          <span className="msb-vs" />
-          <span className="msb-slots msb-slots--aka">
-            <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwAka}</span>
-            <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>
+          <span className="msb-marks">
+            <span className="msb-slots">
+              <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivShiro}</span>
+              <span className="msb-slot msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwShiro}</span>
+            </span>
+            <span className="msb-vs" />
+            <span className="msb-slots msb-slots--aka">
+              <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Points Won">PW</abbr>{pwAka}</span>
+              <span className="msb-slot msb-slot--aka msb-sum"><abbr className="msb-lab" title="Individual Victories">IV</abbr>{ivAka}</span>
+            </span>
           </span>
-        </span>
-        <span className="msb-name msb-name--aka msb-name--labelled" data-testid="summary-aka-name">
-          <NumberedName side="aka" clip name={akaName || ""} number={numberA || ""} />
-        </span>
-      </div>
+          <span className="msb-name msb-name--aka msb-name--labelled" data-testid="summary-aka-name">
+            <NumberedName side="aka" clip name={akaName || ""} number={numberA || ""} />
+          </span>
+        </div>
+      )}
 
       {/* One row per lineup position (teamSize), padding past the recorded
           subResults so a running encounter shows the still-to-come bouts too:

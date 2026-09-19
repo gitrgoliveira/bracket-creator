@@ -63,7 +63,7 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 |---|---|---|
 | `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **running state** (border/ring/dot/running-strip), brand fills |
 | `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds** |
-| `--accent-fg` | `#ffffff` | Text on `--accent` |
+| `--accent-fg` | `#ffffff` | Text and icons **on a filled colour surface**: `--accent` primarily, but equally the amber announcement banner or the red outage strip, which need the same white and should not each spell it differently. A white *fill* is not this token: that is `--surface`. |
 | `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only: never running state** (see Principle 3) |
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
 | `--danger` | `var(--red)` | **Semantic alias of `--red`** for error/destructive intent (error text/borders, the hansoku ▲, invalid-input outlines, **unsaved work: a refused or parked write whose results have not reached the server**). Prefer `--danger` over `--red` when the meaning is "error", not "Aka side": it reads at the call site and keeps the value single-sourced. Never use for running state. **Unsaved results are danger, not caution:** amber is a warning and work at risk of being lost is bigger than that, so a parked-write state takes red even though it also implies an operator action. |
@@ -195,7 +195,7 @@ Keyframes (this is a curated guide, not an index: find each `@keyframes` block i
 - `daihyosen-tied-pulse`: **expected-next-action** pulse for a tied team encounter waiting on a daihyosen (`.daihyosen-controls--tied`). Also Principle 3, navy-hued despite being a next-action case: hue follows the token table, not a fixed vocabulary.
 - `sync-pill-pulse`: the "Syncing…" dot's opacity pulse. **Not a Principle 3 pulse**: it's a progress indicator (work in flight, not attention), exempted the same way as the spinner.
 
-Reduced motion isn't handled by one central block: `styles.css` has a separate `@media (prefers-reduced-motion: reduce)` next to most animated selectors, each disabling only what's defined nearby, rather than a single rule covering everything. Gate any new non-essential animation, pulses included, the same way: a block of its own beside the keyframe, or an existing one it can join.
+Reduced motion is handled by several `@media (prefers-reduced-motion: reduce)` blocks rather than one. Most sit beside the selector they disable, but one shared block (search it for `.conn-alert__dot`) collects selectors from all over the file, so grep before assuming a given animation is ungated. Gate any new non-essential animation, pulses included, the same way: a block of its own beside the keyframe, or an existing one it can join. **A keyframe injected from JSX needs gating too** and is easy to miss, because it is not in this file at all: `lobby-cycle-fill` (`display_lobby.jsx`) is currently the one ungated animation in the app.
 
 ### Breakpoints
 
@@ -456,7 +456,7 @@ Match-decision visual suffixes are documented in [§4 Match cards](#match-cards-
 - **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo**: see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L151](web-mobile/js/ui.jsx#L151)) so they don't clobber inputs.
 - **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. The internal floor is ≥ 36px on shared surfaces and ≥ 44px under coarse pointers: note that platform guidance (Apple HIG, WCAG 2.5.5 AAA) wants 44px universally; the 36px floor is a pragmatic choice for laptop-mouse admin surfaces, not a target to aim for. Test any new dense surface on a tablet before merging.
 - **Focus rings**: text-entry controls use the `--focus-ring` token (3px `--accent-soft`); buttons use `outline: 2px solid var(--accent)`. Don't suppress `:focus-visible`: operators tab through forms. See §3 Rings.
-- **Motion**: every ambient animation is gated behind `prefers-reduced-motion: reduce`, but there is no single global block to add to: `styles.css` carries a separate one beside each animated selector. Gate any new animation the same way, in its own block next to the keyframe or by joining the nearest existing one. See §3 Motion.
+- **Motion**: nearly every ambient animation is gated behind `prefers-reduced-motion: reduce`, but there is no single global block to add to, and one animation is still ungated (`lobby-cycle-fill`, injected from `display_lobby.jsx`). Gate any new animation as described in §3 Motion, and remember that a keyframe living in JSX rather than `styles.css` needs the same treatment.
 
 ## 7. Frontend conventions
 

@@ -244,12 +244,10 @@ a:hover {
   flex: 1;
 }
 
-/* Connection-status indicator (admin chrome). Deliberately NOT the pulsing
-   `.dot--running` running-match signal (Principle 3): a healthy data
-   connection is a calm, passive status, so its dot is static navy. Only the
-   disconnected state moves, so motion is reserved for the state that actually
-   needs attention. This keeps it distinct from the strip's pulsing dot sitting
-   directly below it. */
+/* Connection-status indicator (admin chrome). A healthy data connection is a
+   calm, passive status, so its dot is static navy. Only the disconnected state
+   moves, because a dropped connection is a warning and motion is reserved for
+   what needs attention (DESIGN.md Principle 3). */
 .topbar__conn {
   display: inline-flex;
   align-items: center;
@@ -372,7 +370,7 @@ a:hover {
 /* Running-strip: the admin "matches running now" bar. It is a NAVIGATION control
    (each chip is a button → opens that match's score editor), so it stays, but
    recoloured off red onto --accent navy, since red is now reserved for Aka +
-   danger. The running state is still conveyed by the strip's presence + pulsing dot. */
+   danger. The running state is still conveyed by the strip's presence + navy dot. */
 .running-strip {
   background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
@@ -2433,8 +2431,9 @@ button.sync-status-pill:focus-visible {
   border-color: var(--line);
   background: var(--surface);
 }
-/* syncing dot pulses to signal the write is in flight (motion is the
-   primary in-flight signal, per DESIGN.md Principle 3). */
+/* syncing dot pulses to signal the write is in flight. This is a progress
+   indicator, not a status pulse, so DESIGN.md Principle 3 explicitly exempts
+   it: it says "work is under way", not "look here". */
 .sync-pill--syncing .sync-pill__dot {
   animation: sync-pill-pulse 1s ease-in-out infinite;
 }
@@ -2455,9 +2454,10 @@ button.sync-status-pill:focus-visible {
    auth and is parked, not lost, until the operator signs in again. Danger
    rather than amber because the operator's finished results are sitting
    unsaved: that is a failure with data at risk, which is what --danger is
-   for, and it is bigger than the caution --warn carries. (The "expected next
-   action is amber" rule in Principle 3 is scoped to PULSES, not to static
-   styling -- a review round read it as general and was wrong.) */
+   for, and it is bigger than the caution --warn carries. (Amber is the
+   customary colour for "you have something to do next", but that never made it
+   the colour of every state wanting an operator action -- a review round read
+   it as general and was wrong.) */
 .sync-pill--auth {
   color: var(--danger-ink);
   border-color: var(--danger-border);
@@ -6710,7 +6710,7 @@ button.vsched-item:not([data-clickable]) {
 .msb-slots { display: flex; align-items: center; gap: 2px; }
 .msb-slot { display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 20px; padding: 0 3px; border: 1px solid var(--line-2);
-  border-radius: 3px; font-family: var(--font-mono, monospace); font-weight: 700;
+  border-radius: 3px; font-family: var(--font-mono); font-weight: 700;
   font-size: 13px; color: var(--ink-1); }
 .msb-slot--aka { color: var(--red); }
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
@@ -7062,8 +7062,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* Leading amber dot, matches the offline sync-pill's glance language so the
    two offline signals read as one family. Static (not pulsing): this is passive
-   status ("will retry automatically"); DESIGN.md reserves the amber *pulse* for
-   a demanded next action, which here is the explicit "Retry now" button. */
+   status ("will retry automatically"), and DESIGN.md Principle 3 reserves
+   motion for a warning or a demanded next action, which here is the explicit
+   "Retry now" button rather than the dot. */
 .pending-write-banner::before {
   content: "";
   flex: none;
@@ -8134,7 +8135,10 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Announcement Banner card - Feature mp-h60 / mp-udb */
 .announcement-banner {
-  background: linear-gradient(135deg, #d97706, var(--warn));
+  /* Both stops stay literal on purpose: they are a designed amber-600 to
+     amber-700 pair, and there is no token for the lighter one, so tokenising
+     only the dark stop would let the two drift apart if --warn ever moved. */
+  background: linear-gradient(135deg, #d97706, #b45309);
   color: var(--accent-fg);
   padding: 10px 16px;
   display: flex;

@@ -643,12 +643,18 @@ export function IndividualScore({ match, variant, showNames, withZekkenName, shi
   // adds only what makes it a second LINE, rather than restating those five.
   const shiroDojo = (showDojo && match.sideB && match.sideB.dojo) || "";
   const akaDojo = (showDojo && match.sideA && match.sideA.dojo) || "";
-  // NumberedName in `clip` mode, not a plain string: `.msb-name` ellipsises
-  // (CLAUDE.md's clipping-cell rule), and a string bakes the number into the
-  // truncated run — clip keeps the chip whole and only the name shrinks.
+  // `clip` only when the cell actually CLIPS, which is CLAUDE.md's rule
+  // verbatim: a clipping cell takes clip so the chip survives and the name
+  // ellipsises, a wrapping one does not. `.msb-name` ellipsises normally, but
+  // the showDojo variant adds `.msb-name--stacked { white-space: normal }`
+  // (styles.css) precisely so a long name WRAPS above its dojo. clip sets
+  // nowrap/ellipsis directly on `.numbered-name__text`, which beats that
+  // inherited `normal` and truncates the name instead — so the stacked cell
+  // takes the unclipped form, where `.numbered-name { display: contents }`
+  // leaves chip and name inline and the cell's own wrapping applies.
   const nameCell = (parts, side, dojo) => (
     <>
-      <NumberedName side={side} clip name={parts.name} number={parts.number} />
+      <NumberedName side={side} clip={!dojo} name={parts.name} number={parts.number} />
       {dojo && <span className="bc-dojo msb-dojo">{dojo}</span>}
     </>
   );

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCourtSlots, LOBBY_ROWS, LobbyMatchCell, LOBBY_COLORS } from '../display.jsx';
 import { IndividualScore } from '../match_scoreboard.jsx';
-import { findAll } from './helpers/vdom.js';
+import { findAll, collectText } from './helpers/vdom.js';
 
 // Unit tests for buildCourtSlots: the slot-building logic that drives the
 // cross-court table in LobbyDisplay (mp-1nf).
@@ -146,7 +146,11 @@ describe('buildCourtSlots', () => {
 function treeStr(node) { return JSON.stringify(node); }
 
 // Minimal slot factories for LobbyMatchCell rendering tests.
-function makeRunningSlot(overrides = {}) {
+// `match` is destructured OUT of the rest spread: with a trailing
+// `...overrides` the caller's whole `match` object replaced the merged one,
+// so the per-key defaults above were silently dropped and a partial override
+// lost sideA/sideB entirely.
+function makeRunningSlot({ match: matchOverride, ...rest } = {}) {
     return {
         match: {
             id: 'r1',
@@ -157,17 +161,17 @@ function makeRunningSlot(overrides = {}) {
             ipponsB: [],
             hansokuA: 0,
             hansokuB: 0,
-            ...overrides.match,
+            ...matchOverride,
         },
         competition: { id: 'c1', name: 'Open', withZekkenName: false },
         isBracket: false,
         roundIndex: 0,
         totalRounds: 1,
-        ...overrides,
+        ...rest,
     };
 }
 
-function makeScheduledSlot(overrides = {}) {
+function makeScheduledSlot({ match: matchOverride, ...rest } = {}) {
     return {
         match: {
             id: 's1',
@@ -178,13 +182,13 @@ function makeScheduledSlot(overrides = {}) {
             ipponsB: [],
             hansokuA: 0,
             hansokuB: 0,
-            ...overrides.match,
+            ...matchOverride,
         },
         competition: { id: 'c1', name: 'Open', withZekkenName: false },
         isBracket: false,
         roundIndex: 0,
         totalRounds: 1,
-        ...overrides,
+        ...rest,
     };
 }
 
@@ -418,6 +422,36 @@ describe('LobbyMatchCell: team matches render teamScoreCell, not IndividualScore
         const str = treeStr(tree);
         expect(str).toContain('"vs"');
         expect(str).not.toContain('IV 0');
+    });
+
+    // The lobby team cell must NEVER put a side result mark in its shared
+    // centre. matchScoreStr would: a team match carrying a decision but no
+    // sub-bouts falls through to formatIpponsScore and yields "Fus. vs OO" /
+    // "Kiken vs OO", a mark naming ONE competitor in the cell between the two
+    // team names -- the thing the operator ruling forbids absolutely. The cell
+    // takes teamIVPWScore instead, which is a plain count. Nor may it carry
+    // X / (E) / (DH): a team ENCOUNTER is an aggregate, not a fight.
+    it('never renders a side mark or a middle mark in the team centre, whatever the decision', () => {
+        for (const decision of ['fusenpai', 'kiken-voluntary', 'kiken-injury', 'hikiwake', 'daihyosen', 'fought']) {
+            for (const encho of [undefined, { periodCount: 1 }]) {
+                const slot = makeRunningSlot({
+                    match: {
+                        id: 'tmX', status: 'running', decision, encho,
+                        winner: 'Aka Dojo',
+                        sideA: { name: 'Aka Dojo' }, sideB: { name: 'Shiro Dojo' },
+                        ipponsA: null, ipponsB: null,
+                    },
+                    competition: { id: 'c1', name: 'Team Open', withZekkenName: false, kind: 'team' },
+                });
+                const centre = findAll(LobbyMatchCell({ slot, rowKind: 'now' }),
+                    n => n?.props?.['data-testid'] === 'lobby-team-centre')[0];
+                const text = collectText(centre);
+                expect(text).toBe('vs');
+                for (const mark of ['Ht', 'Kiken', 'Fus.', '○', 'X', '(E)', '(DH)']) {
+                    expect(text).not.toContain(mark);
+                }
+            }
+        }
     });
 
     // The state of EVERY encounter between "Start match" and its first result:

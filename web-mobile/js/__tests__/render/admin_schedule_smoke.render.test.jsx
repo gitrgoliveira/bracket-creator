@@ -19,6 +19,9 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+// The REAL score formatter, not a stub: a stub returning a fixed string
+// cannot distinguish a working gate from a broken one.
+import { matchScoreStr } from '../../bracket.jsx';
 
 // ── window stubs ─────────────────────────────────────────────────────────────
 // Split into:
@@ -159,9 +162,14 @@ describe('AdminSchedulePage: running match score cell (bc-cse)', () => {
   // branch (bracket.jsx) -- this fixture is the direct evidence that choice
   // was made on purpose here, not an oversight (see the comment above
   // AdminTWMatch's score block for why the two call sites diverge).
+  // Real team data, because the score is rendered by the REAL matchScoreStr:
+  // a stub returning a fixed string passes for any match shape, so it could
+  // not tell a working gate from a broken one.
   const RUNNING_MATCH = {
     id: 'm-running', compId: 'c1', court: 'A', status: 'running', phase: 'bracket', round: 'Final',
     sideA: { id: 'a', name: 'Aka Dojo' }, sideB: { id: 'b', name: 'Shiro Dojo' },
+    teamResult: { shiroIV: 1, akaIV: 1, shiroPW: 3, akaPW: 2 },
+    subResults: [{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: ['K'], winner: '' }],
   };
   const SCHEDULED_MATCH = {
     id: 'm-scheduled', compId: 'c1', court: 'A', status: 'scheduled', phase: 'bracket', round: 'Semifinal',
@@ -178,16 +186,18 @@ describe('AdminSchedulePage: running match score cell (bc-cse)', () => {
       poolLabel: window.poolLabel,
       matchHighlightedBy: window.matchHighlightedBy,
     };
-    window.matchScoreStr = () => 'IV 1-1\nPW 3-2';
+    window.matchScoreStr = matchScoreStr;
     window.poolLabel = () => 'Pool A';
     window.matchHighlightedBy = () => false;
   });
 
   afterEach(() => {
-    window.tournamentMatches = saved.tournamentMatches;
-    window.matchScoreStr = saved.matchScoreStr;
-    window.poolLabel = saved.poolLabel;
-    window.matchHighlightedBy = saved.matchHighlightedBy;
+    // delete, not `= saved.x`: these four are not in STUBBED_GLOBALS, so the
+    // keys did not exist before and assigning back writes a present-but-
+    // undefined key that a later `typeof` check reads differently.
+    for (const k of ['tournamentMatches', 'matchScoreStr', 'poolLabel', 'matchHighlightedBy']) {
+      if (saved[k] === undefined) delete window[k]; else window[k] = saved[k];
+    }
   });
 
   it('shows the live score for a RUNNING match', () => {
@@ -197,8 +207,8 @@ describe('AdminSchedulePage: running match score cell (bc-cse)', () => {
         tournament: TOURNAMENT_ONE_COURT, onBack: noop, onMoveCourt: noop, onLogout: noop, onViewerMode: noop, password: '',
       }),
     );
-    expect(container.textContent).toContain('IV 1-1');
-    expect(container.textContent).toContain('PW 3-2');
+    expect(container.textContent).toContain('IV 1\u20131');
+    expect(container.textContent).toContain('PW 3\u20132');
   });
 
   it('shows no score for a SCHEDULED match (gate stays closed pre-play)', () => {
@@ -208,6 +218,6 @@ describe('AdminSchedulePage: running match score cell (bc-cse)', () => {
         tournament: TOURNAMENT_ONE_COURT, onBack: noop, onMoveCourt: noop, onLogout: noop, onViewerMode: noop, password: '',
       }),
     );
-    expect(container.textContent).not.toContain('IV 1-1');
+    expect(container.textContent).not.toContain('IV 1\u20131');
   });
 });

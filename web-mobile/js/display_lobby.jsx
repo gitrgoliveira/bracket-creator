@@ -4,7 +4,7 @@
 import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
 import { IndividualScore, numberedParts } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
-import { matchScoreStr, boutMiddle } from './bracket.jsx';
+import { teamIVPWScore } from './bracket.jsx';
 import { isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
@@ -100,25 +100,32 @@ function buildCourtSlots(competitions, court) {
     return slots;
 }
 
-// teamScoreCell: the team-match twin of IndividualScore's row skeleton, for a
-// bout that is an aggregate rather than a fight (bc-lbty). A plain helper
-// (not a component, mirroring centreMarks in match_scoreboard.jsx) so it
-// renders inline into the caller's tree rather than as a lazy vnode.
-// The centre carries the IV/PW figures once the encounter has a score to
-// show (running or completed), else the plain "vs" boutMiddle already uses
-// for a scheduled fight — never an X/(E)/(DH) mark, which names a single
-// fight and has no meaning for a team aggregate (CLAUDE.md: the middle is a
-// closed set). white-space: pre-line honours matchScoreStr's two-line
-// "IV a-b\nPW c-d" string; without it the newline collapses.
-// matchScoreStr is EMPTY until the first bout is scored, which is the normal
-// state of every encounter between "Start match" and its first result: the team
-// editor filters subResults to bouts already played (admin_scoring_team.jsx), so
-// a just-started encounter carries no teamResult at all. Falling through to
-// boutMiddle there keeps the plain "vs" instead of a blank cell -- the same
-// `|| mid` shape matchStateCell uses (bracket.jsx).
+// teamScoreCell: the team-match twin of IndividualScore's row skeleton, for an
+// encounter that is an AGGREGATE rather than a fight (bc-lbty).
+//
+// The centre takes teamIVPWScore, NOT matchScoreStr, and this is a correctness
+// rule rather than a preference. matchScoreStr falls through to
+// formatIpponsScore whenever the aggregate is empty, and that emits SIDE marks:
+// a team match carrying a decision but no sub-bouts on disk (reachable -- see
+// CLAUDE.md on a kiken that carried no sub rows) yields "Fus. vs OO" or
+// "Kiken vs OO", which would put a mark naming ONE competitor into the shared
+// centre cell between the two team names. The operator ruling forbids that
+// absolutely. teamIVPWScore is a plain IV/PW count and can never carry one.
+// This is the same value, for the same reason, that matchStateCell's running
+// branch uses (bracket.jsx).
+//
+// The fallback is the bare "vs", not boutMiddle: boutMiddle exists to produce
+// X / (E) / (DH), and a team ENCOUNTER is not a fight, so its aggregate row
+// owns no middle mark even when the aggregate itself is tied (CLAUDE.md: the
+// summary centre is a deliberate spacer and NO mark ever goes in it). It also
+// needs no status gate -- teamIVPWScore is null until a bout is scored, which
+// covers both a scheduled encounter and the normal gap between "Start match"
+// and the first result.
+//
+// white-space: pre-line honours the two-line "IV a-b\nPW c-d" string; without
+// it the newline collapses and the cell renders one long line.
 function teamScoreCell(match, withZekkenName) {
-    const live = match.status === "completed" || match.status === "running";
-    const centre = (live && matchScoreStr(match)) || boutMiddle(match.decision, match.encho, match.score);
+    const centre = teamIVPWScore(match) || "vs";
     // NumberedName in `clip` mode, not withNumber's flat string: `.msb-name`
     // ellipsises, and a team read as "Mushin Steel W1" with the number baked
     // into the string, as if it were part of the team's own name (operator

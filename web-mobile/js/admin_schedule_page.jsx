@@ -29,6 +29,7 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
   // once both are id-less).
   const aWin = !!m.winner && !!m.sideA && sameCompetitor(m.winner, m.sideA);
   const bWin = !!m.winner && !!m.sideB && sameCompetitor(m.winner, m.sideB);
+  const scoreStr = (m.status === "completed" || m.status === "running") ? window.matchScoreStr(m) : "";
   const submitTime = (e) => {
     e.preventDefault();
     setEditingTime(false);
@@ -95,17 +96,20 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
           serializer and the schedule row exposes bout details, append an
           "FS" badge to each affected bout cell. */}
       {/* bc-cse: running admits the FULL score string here (any match kind),
-          mirroring VSchedItem (viewer_match.jsx:194) and TWMatch
-          (viewer_schedule.jsx) -- deliberately, not team-only. This block is
-          its own cell below the name column, not interleaved between two
-          competitor names the way matchStateCell's PoolNumberedMatchRow is,
-          so a running individual match's ippon letters (and any trailing
-          side mark, e.g. Ht) sit in the same kind of standalone cell
-          VSchedItem already shows them in; see bracket.jsx's matchStateCell
-          comment for why THAT caller is scoped to team-only instead. */}
+          like TWMatch (viewer_schedule.jsx) -- deliberately, not team-only.
+          matchStateCell (bracket.jsx) is scoped to the team aggregate instead
+          because it is the SHARED primitive several lists route through, so a
+          trailing side mark reaching its centre is a rule violation wherever
+          it renders; this row is a single surface already shipping that shape
+          for completed matches. Note the score block here is its own cell at
+          the end of the row -- which is NOT the distinction, since VSchedItem
+          sits its score between the two names and still shows the full string.
+          Gated on the VALUE, not just the status: matchScoreStr is "" for a
+          just-started match, and an empty div would still draw this column's
+          4px gap. */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-        {(m.status === "completed" || m.status === "running") && (
-          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line", textAlign: "center", lineHeight: 1.3 }}>{window.matchScoreStr(m)}</div>
+        {scoreStr && (
+          <div style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line", textAlign: "center", lineHeight: 1.3 }}>{scoreStr}</div>
         )}
         {/* No centre "●" dot: a running match is signalled by the row's
             .tw-match--running highlight (accent border + ring). The labelled

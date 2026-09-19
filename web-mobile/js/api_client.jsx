@@ -129,6 +129,23 @@ function normalizeViewerCompItem(item) {
 /** Composite key for per-(compID, matchID) maps. Prevents collisions across competitions. */
 function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
 
+// bc-kcdg: parses the 409 downstream_knockout_played refusal (correcting a
+// completed knockout match whose later round has already been played) into a
+// thrown Error carrying the structured fields as `.downstreamKnockoutPlayed`,
+// so a catcher asks write_result.jsx's downstreamKnockoutPlayedRefusal(err)
+// rather than re-deriving the shape from the raw body. Returns null when the
+// body isn't this refusal, so callers can `throw _downstreamKnockoutPlayedError(body) || new Error(...)`.
+function _downstreamKnockoutPlayedError(body) {
+    if (!body || body.error !== 'downstream_knockout_played') return null;
+    const err = new Error(body.message || body.error || 'Failed to record score');
+    err.downstreamKnockoutPlayed = {
+        matchId: body.matchId,
+        blockingMatchId: body.blockingMatchId,
+        displaced: body.displaced,
+    };
+    return err;
+}
+
 // ---------------------------------------------------------------------------
 // mp-y3nk: server-clock offset for timestamp reconciliation.
 //
@@ -2264,7 +2281,7 @@ const API = {
             if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
                 throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
             }
-            throw new Error(retryBody.error || "Failed to record score");
+            throw _downstreamKnockoutPlayedError(retryBody) || new Error(retryBody.error || "Failed to record score");
         };
 
         let res;
@@ -2351,7 +2368,12 @@ const API = {
         if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
             throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
         }
-        throw new Error(data.error || "Failed to record score");
+        // bc-kcdg: 409 downstream_knockout_played (correcting a completed
+        // knockout match whose later round already played) is parsed into a
+        // structured error rather than a plain message; see
+        // _downstreamKnockoutPlayedError and write_result.jsx's
+        // downstreamKnockoutPlayedRefusal.
+        throw _downstreamKnockoutPlayedError(data) || new Error(data.error || "Failed to record score");
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is

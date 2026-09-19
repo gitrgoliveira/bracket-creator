@@ -3,6 +3,13 @@
 
 import { applyPatch as patchCompetitionData, checkSeqGap } from './patch.jsx';
 import { createTimerPool } from './timer_pool.jsx';
+// Imported from the leaf, not read off `window`: write_result.jsx is
+// import-only (see its header) and every consumer ES-imports it directly.
+import {
+  downstreamKnockoutPlayedRefusal,
+  downstreamKnockoutPlayedConfirm,
+  DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+} from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
@@ -67,6 +74,47 @@ const Modal = window.Modal;
 // logic can be unit-tested in isolation of React state.
 function mergeCompetitionsIntoTournament(currentT, mutator) {
   return { ...currentT, competitions: mutator(currentT.competitions || []) };
+}
+
+// bc-kcdg: attempts a score write and, on a 409 downstream_knockout_played
+// refusal (correcting a completed knockout match whose later round has
+// already been played), offers the operator the confirm+retry override
+// rather than surfacing a plain error. Confirming resends the SAME result
+// with forceDownstreamReopen:true, which the server applies alongside
+// reopening the blocking match(es) for re-entry; declining leaves everything
+// as it was.
+//
+// Extracted as a pure-ish helper (like mergeCompetitionsIntoTournament above)
+// so the confirm+retry contract can be pinned without rendering the whole
+// admin SPA: recordScore/confirmDialog are injected rather than read off
+// window, and it is the single place editMatchScore -- and therefore every
+// score-editor host and both editor bodies -- gets this behaviour.
+//
+// Throws on any failure, including a declined override; in that one case the
+// thrown error carries `.downstreamKnockoutPlayedCancelled = true` so the
+// caller can pick the cancellation copy instead of the generic error one.
+async function attemptScoreWrite({ recordScore, confirmDialog, compId, matchId, result, password, match }) {
+  try {
+    return await recordScore(compId, matchId, result, password, match);
+  } catch (e) {
+    const refusal = downstreamKnockoutPlayedRefusal(e);
+    // The forceDownstreamReopen guard on `result` stops a second refusal
+    // (e.g. a genuine race between two operators) from looping the confirm
+    // dialog: only the first attempt for a given patch is offered the
+    // override; a refusal on the forced retry is treated like any other error.
+    if (!refusal || result.forceDownstreamReopen) throw e;
+    const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
+    const ok = await confirmDialog({ message, confirmLabel, danger });
+    if (ok) {
+      return attemptScoreWrite({
+        recordScore, confirmDialog, compId, matchId,
+        result: { ...result, forceDownstreamReopen: true },
+        password, match,
+      });
+    }
+    e.downstreamKnockoutPlayedCancelled = true;
+    throw e;
+  }
 }
 
 // Pure helper for the "merge a tournament-level patch onto the latest
@@ -272,11 +320,27 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
     await refreshCompsBestEffort("Move");
   };
 
+  // bc-kcdg: THE single chokepoint every score-editor host (the bracket
+  // panel, pools, the schedule score editor, per-court shiaijo) routes a
+  // score write through via onEditScore, for both the individual and team
+  // editor bodies. attemptScoreWrite above owns the downstream-knockout
+  // confirm+retry loop; wiring it here means every host and both editors
+  // get it for free.
   const editMatchScore = async (compId, matchId, result, match) => {
     let saveRes;
     try {
-      saveRes = await window.API.recordScore(compId, matchId, result, password, match);
+      saveRes = await attemptScoreWrite({
+        recordScore: window.API.recordScore,
+        confirmDialog: window.confirmDialog,
+        compId, matchId, result, password, match,
+      });
     } catch (e) {
+      if (e.downstreamKnockoutPlayedCancelled) {
+        // Declining the override leaves everything as it was: neither this
+        // match nor the later one it depends on was written.
+        showToast(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED);
+        throw e;
+      }
       showToast(e.message, "error");
       throw e;
     }
@@ -928,4 +992,4 @@ window.normalizeCreatedRecord = normalizeCreatedRecord;
 // component with no window binding, and its confirm phase now carries the
 // "will NOT be started" list, which is the surface that stops "Start all"
 // offering a competition the server would refuse.
-export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal };
+export { mergeCompetitionsIntoTournament, mergeTournamentPatch, normalizeCreatedRecord, StartAllModal, attemptScoreWrite };

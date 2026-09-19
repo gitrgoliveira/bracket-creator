@@ -109,6 +109,29 @@ describe('API Utils', () => {
       expect(result2.correctionReason).toBeUndefined();
     });
 
+    it('forwards forceDownstreamReopen:true (bc-kcdg confirmed override retry)', () => {
+      // admin.jsx's attemptScoreWrite sets this on the patch it resubmits after
+      // the operator confirms a 409 downstream_knockout_played override. Without
+      // forwarding it here the retry would be byte-identical to the refused
+      // attempt and the server would refuse it again.
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({
+        winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [],
+        forceDownstreamReopen: true,
+      }, match);
+      expect(result.forceDownstreamReopen).toBe(true);
+    });
+
+    it('omits forceDownstreamReopen when absent or falsy (an ordinary write never carries it)', () => {
+      const match = { sideA: 'A', sideB: 'B' };
+      const result = toBackendMatchResult({ winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [] }, match);
+      expect(result.forceDownstreamReopen).toBeUndefined();
+      const result2 = toBackendMatchResult({
+        winner: 'A', status: 'complete', ipponsA: ['M'], ipponsB: [], forceDownstreamReopen: false,
+      }, match);
+      expect(result2.forceDownstreamReopen).toBeUndefined();
+    });
+
     it('an explicit false leaves the payload markless (the clear IS the absence)', () => {
       const match = { sideA: 'A', sideB: 'B', decidedByHantei: true };
       const result = toBackendMatchResult({

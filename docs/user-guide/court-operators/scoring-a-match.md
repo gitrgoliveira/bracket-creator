@@ -43,7 +43,7 @@ What Correct offers depends on the format:
 
 Reopening puts the encounter back into play, and a court can only run one match at a time. If another match is already running on that court, the editor names it and offers two ways forward. Leave it running, or clear its score, send it back to the queue, and reopen in a single step. Sending a match back to the queue clears any score already entered for it, so if that match is part way through, finish it first instead.
 
-If the correction changes who won a knockout match, the later rounds update to follow the new winner. If a later round has already been played, the app does not yet block the correction. That match keeps its recorded result under the new competitor's name, so the new pairing must fight, and its result must be entered, before the bracket is right again. When you are done, use **Back to court** to return to the live match.
+If the correction changes who won a knockout match, the later rounds update to follow the new winner. If a later round, or the bronze (3rd-place) match, has already been fought and scored, the app refuses the correction and names the match that is blocking it. You can confirm anyway. Confirming applies the correction and sends that later match back to be fought again, along with any match further on that was also built on the old result: each one has its recorded result cleared, but keeps its bout log. The new pairing then fights, and its result must be entered before the bracket is right again. A later slot that was only filled by a bye, and never fought, does not block a correction; it simply updates to follow the new winner. When you are done, use **Back to court** to return to the live match.
 
 ## Matches waiting on earlier results
 

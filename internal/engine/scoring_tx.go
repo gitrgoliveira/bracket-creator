@@ -87,7 +87,19 @@ type topNFinisher struct {
 // is part of THIS tx's mutations.
 //
 // T156.
-func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
+//
+// opts (bc-kcdg) is variadic ForceOptions purely to keep every pre-existing
+// call site source-compatible; see ForceOptions' doc comment. Known gap: a
+// forced write that force-reopens downstream matches and is THEN rolled back
+// by the K3 AlreadyIneligibleError path below only restores the corrected
+// match itself (rollbackMatchResultTx replays `prior` through this same
+// match id) -- the downstream matches forceReopenDownstreamChain reopened
+// stay reopened. Reaching this requires force=true on a decision write whose
+// loser turns out to already be ineligible from a different match, a narrow
+// intersection not covered by this bead's test list; recorded here rather
+// than silently left undiscoverable.
+func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
+	fo := firstForceOptions(opts)
 	result.ID = matchID
 
 	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
@@ -190,9 +202,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	sideMismatch, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward)
+	sideMismatch, reopened, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force)
 	if err != nil {
 		return nil, err
+	}
+	if fo.Reopened != nil {
+		*fo.Reopened = reopened
 	}
 	if sideMismatch {
 		// Match identity is fixed at generation; a score payload naming
@@ -916,7 +931,14 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		result.WinnerID = sideBID
 	}
 	preserveLoserScore(result, prior, decisionBy)
-	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result)
+	// bc-kcdg: reuse this same force -- the operator already confirmed the
+	// T103 downstream-match override above, so a decision write that also
+	// changes an already-propagated bracket winner is authorized by the same
+	// confirmation rather than needing a second one. The reopened list is
+	// not surfaced from here (RecordDecisionTx has no ForceOptions of its
+	// own to receive it); see the known-gap note on
+	// RecordMatchResultWithIneligibilityTx.
+	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result, ForceOptions{Force: force})
 	if err != nil {
 		return nil, nil, err
 	}

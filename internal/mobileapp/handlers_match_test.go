@@ -3571,3 +3571,105 @@ func TestClientClockSkew(t *testing.T) {
 		assert.False(t, refuse, "%d is not skew and must not be refused", v)
 	}
 }
+
+// seedKcdgBracket builds the same three-round, all-real-results knockout as
+// internal/engine's seedThreeRoundBracket (bc-kcdg): m-r1-0 feeds m-r2-0,
+// which feeds m-r3-0 (the final), all completed with their own ippons.
+func seedKcdgBracket(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg-http", Status: state.CompStatusKnockout,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M"}},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Alice", SideB: "Charlie", SideAID: "alice", SideBID: "charlie",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M", "M"}},
+			},
+			{
+				{ID: "m-r3-0", SideA: "Alice", SideB: "Dave", SideAID: "alice", SideBID: "dave",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M", "M"}},
+			},
+		},
+	}))
+}
+
+// TestScoreHandler_DownstreamKnockoutPlayed_409Shape pins the FIXED wire
+// contract (bc-kcdg): correcting a completed knockout match whose winner
+// already propagated into a downstream match with its own recorded result is
+// refused with HTTP 409 and the exact body shape other surfaces build
+// against: {"error":"downstream_knockout_played","matchId":...,
+// "blockingMatchId":...,"displaced":...,"message":...}. A correctionReason is
+// required first (a completed->completed write is a correction, gated by
+// applyCorrectionReasonUnderTx) so the payload includes one throughout.
+func TestScoreHandler_DownstreamKnockoutPlayed_409Shape(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-http-409"
+	seedKcdgBracket(t, store, compID)
+
+	body, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"winner": "Bob", "ipponsB": []string{"M"},
+		"status": "completed", "correctionReason": "scoresheet was misread",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/m-r1-0/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "downstream_knockout_played", resp["error"])
+	assert.Equal(t, "m-r1-0", resp["matchId"])
+	assert.Equal(t, "m-r2-0", resp["blockingMatchId"])
+	assert.Equal(t, "Alice", resp["displaced"])
+	assert.NotEmpty(t, resp["message"])
+
+	// A refusal must leave the bracket untouched.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
+}
+
+// TestScoreHandler_DownstreamKnockoutPlayed_ForceReturns200 pins the force
+// path: the same correction, retried with forceDownstreamReopen:true,
+// returns HTTP 200, applies the correction, and reopens the downstream match
+// the refusal named -- matching the plan's "force path returning 200"
+// requirement.
+func TestScoreHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-http-force"
+	seedKcdgBracket(t, store, compID)
+
+	body, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"winner": "Bob", "ipponsB": []string{"M"},
+		"status": "completed", "correctionReason": "scoresheet was misread",
+		"forceDownstreamReopen": true,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/m-r1-0/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the correction applied")
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status, "the downstream match was reopened")
+	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
+}

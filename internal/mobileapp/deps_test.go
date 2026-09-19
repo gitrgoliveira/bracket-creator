@@ -50,11 +50,11 @@ func (stubScoringEngine) RecordMatchResult(string, string, *state.MatchResult) e
 	return nil
 }
 
-func (stubScoringEngine) RecordMatchResultWithIneligibility(string, string, *state.MatchResult) (*domain.CompetitorStatus, error) {
+func (stubScoringEngine) RecordMatchResultWithIneligibility(string, string, *state.MatchResult, ...engine.ForceOptions) (*domain.CompetitorStatus, error) {
 	return nil, nil
 }
 
-func (stubScoringEngine) RecordMatchResultWithIneligibilityTx(state.StoreTx, string, string, *state.MatchResult) (*domain.CompetitorStatus, error) {
+func (stubScoringEngine) RecordMatchResultWithIneligibilityTx(state.StoreTx, string, string, *state.MatchResult, ...engine.ForceOptions) (*domain.CompetitorStatus, error) {
 	return nil, nil
 }
 
@@ -82,7 +82,7 @@ func (stubScoringEngine) UpdateMatchCourt(string, string, string) error {
 	return nil
 }
 
-func (stubScoringEngine) OverrideBracketWinner(string, string, string, int64) (bool, error) {
+func (stubScoringEngine) OverrideBracketWinner(string, string, string, int64, ...engine.ForceOptions) (bool, error) {
 	return false, nil
 }
 

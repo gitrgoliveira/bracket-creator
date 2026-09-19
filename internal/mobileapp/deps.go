@@ -80,13 +80,19 @@ type ScoringEngine interface {
 	// fusenpai decision. The returned CompetitorStatus is non-nil only
 	// when a new ineligibility was persisted; the handler uses that to
 	// drive the competitor-status-updated SSE broadcast (T085/T092).
-	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
+	// opts is variadic engine.ForceOptions (bc-kcdg): omit it for the
+	// pre-existing behaviour (force=false, no reopen list wanted), or pass
+	// one to bypass the downstream-knockout-correction guard
+	// (engine.DownstreamKnockoutPlayedError) and collect the IDs of any
+	// downstream bracket match reopened as a result.
+	RecordMatchResultWithIneligibility(compID string, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	// RecordMatchResultWithIneligibilityTx is the tx-aware twin used by
 	// the score handler under WithTransaction (T156). Same return shape
 	// as RecordMatchResultWithIneligibility; calls flow through the
 	// supplied StoreTx so the match-write + ineligibility-write +
-	// lineup-freeze all commit under one lock acquire.
-	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
+	// lineup-freeze all commit under one lock acquire. opts: see
+	// RecordMatchResultWithIneligibility above.
+	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	// StartMatchTx is the FR-035 eligibility gate for the
 	// scheduled → running transition. Returns
 	// *engine.IneligibleCompetitorError when a participant is marked
@@ -132,8 +138,9 @@ type ScoringEngine interface {
 	// participant name (used by the admin "manual winner" flow and the
 	// offline force-start feeder assertion). modifiedAt is the
 	// server-relative timestamp for last-write-wins reconciliation (0 =
-	// unstamped). Mirrors engine.Engine.OverrideBracketWinner.
-	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64) (bool, error)
+	// unstamped). opts: see RecordMatchResultWithIneligibility above. Mirrors
+	// engine.Engine.OverrideBracketWinner.
+	OverrideBracketWinner(compID string, matchID string, winnerName string, modifiedAt int64, opts ...engine.ForceOptions) (bool, error)
 	// UpdateMatchTime updates a match's scheduledAt. Mirrors
 	// engine.Engine.UpdateMatchTime.
 	UpdateMatchTime(compID string, matchID string, scheduledAt string) error

@@ -6825,7 +6825,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    beside it -- the least legible thing in the cell. Set only when a score
    exists (display_lobby.jsx), so an unscored encounter's "vs" still reads as
    the quiet separator the individual rows show. */
-.lobby-cell .lobby-score { color: var(--ink, #111); font-size: 1.9vh; font-weight: 700; }
+.lobby-cell .lobby-score { color: var(--ink); font-size: 1.9vh; font-weight: 700; }
 /* The competitor-number chip is sized in em, so it tracked the name's 13px
    base and never got a TV bump like every other scoreboard token
    (.msb-row/.msb-name/.msb-slot/.msb-vs/.msb-lab all have one). Routing

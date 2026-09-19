@@ -57,7 +57,10 @@ describe('attemptScoreWrite (bc-kcdg)', () => {
       recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: originalResult, password: 'pw', match: null,
     });
 
-    expect(res).toEqual({ id: 'm1', status: 'completed' });
+    // The stored result comes back with the ids the operator just authorised
+    // reopening, so the caller can tell them what the confirmation DID rather
+    // than leaving them to read it off the board.
+    expect(res).toEqual({ id: 'm1', status: 'completed', downstreamReopened: ['m5'] });
     expect(confirmDialog).toHaveBeenCalledTimes(1);
     // The dialog must name the blocking match and the displaced competitor
     // (the copy itself is pinned in write_result_downstream_knockout.test.jsx;

@@ -8,6 +8,7 @@ import { createTimerPool } from './timer_pool.jsx';
 import {
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
   attemptScoreWrite,
+  downstreamKnockoutReopenedNotice,
 } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -309,6 +310,14 @@ function AdminApp({ tournament, onUpdate, onLogout, onViewerMode, onPasswordChan
       }
       showToast(e.message, "error");
       throw e;
+    }
+    // bc-kcdg: say what the confirmation actually did. The operator agreed to
+    // reopen specific later matches; without this the only evidence is the
+    // board. attemptScoreWrite attaches the ids the refusal named, so the
+    // notice names the same matches the dialog did.
+    if (saveRes && saveRes.downstreamReopened) {
+      const notice = downstreamKnockoutReopenedNotice(saveRes.downstreamReopened);
+      if (notice) showToast(notice);
     }
     // F5: when the write was only queued (offline/transient), skip the
     // best-effort refresh. There is nothing new on the server yet.

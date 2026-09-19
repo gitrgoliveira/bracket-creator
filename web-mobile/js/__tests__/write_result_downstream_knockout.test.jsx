@@ -11,6 +11,7 @@ import {
     downstreamKnockoutPlayedRefusal,
     downstreamKnockoutPlayedConfirm,
     DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+    downstreamKnockoutReopenedNotice,
 } from '../write_result.jsx';
 
 describe('downstreamKnockoutPlayedRefusal', () => {
@@ -107,5 +108,28 @@ describe('downstreamKnockoutPlayedConfirm with two blocked matches', () => {
         });
         expect(message).toContain('match m-r2-0');
         expect(message.toLowerCase()).not.toContain('matches ');
+    });
+});
+
+describe('downstreamKnockoutReopenedNotice', () => {
+    // The operator confirmed something specific. Telling them only that the
+    // save worked leaves "did the later match actually reopen?" to be answered
+    // by reading the board, which is what the confirmation was supposed to
+    // settle.
+    it('names the single match that was reopened', () => {
+        expect(downstreamKnockoutReopenedNotice(['m-r2-0']))
+            .toBe('Match m-r2-0 was reopened: it must be fought and scored again.');
+    });
+
+    it('names both when a semifinal reopened its two siblings', () => {
+        const notice = downstreamKnockoutReopenedNotice(['m-bronze', 'm-r2-0']);
+        expect(notice).toContain('m-bronze');
+        expect(notice).toContain('m-r2-0');
+        expect(notice).toContain('were reopened');
+    });
+
+    it('says nothing when nothing was reopened', () => {
+        expect(downstreamKnockoutReopenedNotice([])).toBeNull();
+        expect(downstreamKnockoutReopenedNotice(undefined)).toBeNull();
     });
 });

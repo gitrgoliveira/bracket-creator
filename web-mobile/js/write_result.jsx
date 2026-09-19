@@ -239,6 +239,21 @@ export function downstreamKnockoutPlayedQueueDrop({ blockingMatchId, displaced }
     };
 }
 
+// downstreamKnockoutReopenedNotice: what to tell the operator AFTER a
+// confirmed correction, naming the matches it reopened. The counterpart to
+// downstreamKnockoutPlayedConfirm, which names them before.
+//
+// Without this, "did the next match actually reopen?" is answered only by the
+// presence of a dialog beforehand and by reading the board afterwards. The
+// operator authorised something specific; the app should confirm it happened.
+export function downstreamKnockoutReopenedNotice(ids) {
+    const list = (ids || []).filter(Boolean);
+    if (!list.length) return null;
+    if (list.length === 1) return `Match ${list[0]} was reopened: it must be fought and scored again.`;
+    const named = `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+    return `Matches ${named} were reopened: they must be fought and scored again.`;
+}
+
 // attemptScoreWrite (bc-kcdg / bc-cse): the generic confirm+retry loop for the
 // refusal above. Takes recordScore/confirmDialog as INJECTED collaborators
 // (never read off `window`, never imported from a host module) so it works
@@ -275,11 +290,22 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
         const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
         const ok = await confirmDialog({ message, confirmLabel, danger });
         if (ok) {
-            return attemptScoreWrite({
+            const applied = await attemptScoreWrite({
                 recordScore, confirmDialog, compId, matchId,
                 result: { ...result, forceDownstreamReopen: true },
                 password, match,
             });
+            // Say what the confirmation DID, not just that it went through.
+            // The operator agreed to reopen specific matches; a silent success
+            // leaves them to work out from the board whether it happened. The
+            // ids come from the refusal they just read, so the notice names the
+            // same matches the dialog named. Attached rather than toasted here
+            // because this module owns the words, not the surface.
+            if (applied && typeof applied === 'object' && !writeDidNotLand(applied)) {
+                applied.downstreamReopened = refusal.blockingMatchIds
+                    || (refusal.blockingMatchId ? [refusal.blockingMatchId] : []);
+            }
+            return applied;
         }
         e.downstreamKnockoutPlayedCancelled = true;
         throw e;

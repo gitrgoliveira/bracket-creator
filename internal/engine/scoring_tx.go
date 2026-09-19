@@ -87,7 +87,19 @@ type topNFinisher struct {
 // is part of THIS tx's mutations.
 //
 // T156.
-func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error) {
+//
+// opts (bc-kcdg) is variadic ForceOptions purely to keep every pre-existing
+// call site source-compatible; see ForceOptions' doc comment. Known gap: a
+// forced write that force-reopens downstream matches and is THEN rolled back
+// by the K3 AlreadyIneligibleError path below only restores the corrected
+// match itself (rollbackMatchResultTx replays `prior` through this same
+// match id) -- the downstream matches forceReopenDownstreamChain reopened
+// stay reopened. Reaching this requires force=true on a decision write whose
+// loser turns out to already be ineligible from a different match, a narrow
+// intersection not covered by this bead's test list; recorded here rather
+// than silently left undiscoverable.
+func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...ForceOptions) (*domain.CompetitorStatus, error) {
+	fo := firstForceOptions(opts)
 	result.ID = matchID
 
 	// Engi dispatch seam (tx-aware): a flag-scored competition records via the
@@ -190,9 +202,12 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 		}
 	}
 
-	sideMismatch, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward)
+	sideMismatch, reopened, err := e.writeToPoolOrBracket(tx, compID, matchID, result, matchWriteForward, fo.Force)
 	if err != nil {
 		return nil, err
+	}
+	if fo.Reopened != nil {
+		*fo.Reopened = reopened
 	}
 	if sideMismatch {
 		// Match identity is fixed at generation; a score payload naming
@@ -799,7 +814,49 @@ func clientWriteStamp(stamp []int64) int64 {
 // RecordDecision otherwise.
 //
 // T090, T103, T156, contracts/match-decisions.md §POST /decision, bc-twin.
+//
+// bc-cse finding 5: force here governs ONLY the T103 downstream-match lock
+// above -- a different operator confirmation from the bc-kcdg
+// downstream-knockout-correction guard the underlying write applies (see
+// applyBracketResultIn / guardDownstreamKnockoutCorrection). This entry
+// point has always reused the SAME value for both, and its own
+// RecordMatchResultWithIneligibilityTx call below still does, purely
+// because every existing caller (the /decision HTTP handler, deps.go's
+// ScoringEngine interface, this function's own tests) has exactly ONE
+// force flag to give it and no channel to receive the reopened ids back --
+// see RecordDecisionTxWithOptions for the twin that decouples the two and
+// surfaces Reopened. RecordDecisionTx stays the pre-existing behaviour so
+// none of those callers need to change.
 func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, ForceOptions{Force: force}, clientWriteStamp(modifiedAt))
+}
+
+// RecordDecisionTxWithOptions is RecordDecisionTx's bc-kcdg-aware twin
+// (bc-cse finding 5). `force` still governs ONLY the T103 downstream-match
+// lock (the "undo" override); `kcdgOpts` is the SEPARATE authorization for
+// the bc-kcdg downstream-knockout-correction guard the underlying bracket
+// write applies, and its Reopened field, when non-nil, is populated with
+// the ids of every bracket match the write forced open -- the same contract
+// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner already
+// give their callers, so this decision entry point no longer silently drops
+// the list and leaves the caller unable to broadcast match_updated for the
+// reopened matches. A caller that does not need to distinguish the two
+// confirmations, or has only one flag to give, should keep calling
+// RecordDecisionTx instead (source-compatible with every caller that
+// predates this split).
+func (e *Engine) RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, kcdgOpts, clientWriteStamp(modifiedAt))
+}
+
+// recordDecisionTx is the canonical body RecordDecisionTx and
+// RecordDecisionTxWithOptions both delegate to, so the two never drift
+// (bc-cse finding 5, mirroring bc-twin's own reasoning for keeping one write
+// body per concern). kcdgOpts is the bc-kcdg ForceOptions threaded to the
+// underlying RecordMatchResultWithIneligibilityTx call; modifiedAtStamp is
+// the resolved clientWriteStamp value (a plain int64, since a private
+// function need not preserve the exported variadic ergonomics its two
+// public callers offer for their own source compatibility).
+func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts ForceOptions, modifiedAtStamp int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	if decisionBy != "shiro" && decisionBy != "aka" {
 		return nil, nil, validationErrorf("decisionBy must be 'shiro' or 'aka', got %q", decisionBy)
 	}
@@ -892,7 +949,7 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		DecisionReason: decisionReason,
 		Encho:          encho,
 		Status:         state.MatchStatusCompleted,
-		ModifiedAt:     clientWriteStamp(modifiedAt),
+		ModifiedAt:     modifiedAtStamp,
 	}
 	// shiro=SideB (White, left), aka=SideA (Red, right). The surviving side
 	// gets the ○ default-win fill and becomes Winner. WinnerSide/WinnerID are
@@ -916,7 +973,14 @@ func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		result.WinnerID = sideBID
 	}
 	preserveLoserScore(result, prior, decisionBy)
-	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result)
+	// bc-cse finding 5: kcdgOpts is the CALLER's own bc-kcdg authorization,
+	// decoupled from the T103 `force` above -- RecordDecisionTx's wrapper
+	// still passes ForceOptions{Force: force} (the pre-existing reuse, for
+	// source compatibility with every caller that has only one flag to
+	// give), but RecordDecisionTxWithOptions callers can now authorize the
+	// bc-kcdg guard independently of T103's undo confirmation, and read back
+	// which matches were reopened via kcdgOpts.Reopened.
+	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result, kcdgOpts)
 	if err != nil {
 		return nil, nil, err
 	}

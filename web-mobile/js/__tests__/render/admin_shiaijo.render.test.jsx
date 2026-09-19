@@ -2,6 +2,7 @@ import React from 'react';
 import { render, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+import { DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED } from '../../write_result.jsx';
 // Window globals required by admin_shiaijo.jsx.
 // MODULE-EVAL-TIME entries (e.g. `const AdminTopbar = window.AdminTopbar;`)
 // must be set before the dynamic import, or the module captures undefined.
@@ -410,6 +411,116 @@ describe('AdminShiaijoPage render-smoke', () => {
       expect(utils.getByRole('button', { name: /start match/i })).toBeTruthy();
     } finally {
       window.API.overrideBracketWinner = prevOverride;
+    }
+  });
+
+  // bc-kcdg: a feeder assertion refused with 409 downstream_knockout_played
+  // (the final built on this feeder's PRIOR result already played) must offer
+  // the same confirm+retry experience as a score correction, via the shared
+  // attemptScoreWrite loop -- not surface the raw refusal as an opaque error.
+  it('Run now → a downstream refusal on a feeder prompts confirm, and confirming retries with forceDownstreamReopen', async () => {
+    const rounds = [
+      [
+        { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [
+        { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+      ],
+    ];
+    const comp = { id: 'c1', name: 'Cup', bracket: { rounds } };
+    const pendingFinal = {
+      id: 'm-r1-0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    const refusal = new Error('Eve already played match m-r1-0, asserting this winner would displace them.');
+    refusal.downstreamKnockoutPlayed = { matchId: 'm-r2-0', blockingMatchId: 'm-r1-0', displaced: 'Eve' };
+    // First call for the m-r2-0 feeder is refused; every call after (its forced
+    // retry, and the untouched m-r2-1 feeder) succeeds.
+    const overrideBracketWinner = vi.fn()
+      .mockRejectedValueOnce(refusal)
+      .mockResolvedValue({ applied: true });
+    const prevOverride = window.API.overrideBracketWinner;
+    const prevConfirm = window.confirmDialog;
+    window.API.overrideBracketWinner = overrideBracketWinner;
+    window.confirmDialog = vi.fn().mockResolvedValue(true);
+    window.tournamentMatches = () => [pendingFinal];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament({ competitions: [comp] })); });
+      await act(async () => { utils.getByRole('button', { name: /run now/i }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Alice' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
+
+      // The dialog names the blocking match and the displaced competitor, not a
+      // generic prompt -- this IS the operator-facing copy the confirm dialog
+      // shows (write_result.jsx's downstreamKnockoutPlayedConfirm).
+      expect(window.confirmDialog).toHaveBeenCalledTimes(1);
+      const dialogArg = window.confirmDialog.mock.calls[0][0];
+      expect(dialogArg.message).toContain('m-r1-0');
+      expect(dialogArg.message).toContain('Eve');
+      expect(dialogArg.confirmLabel).toBe('Apply correction and reopen');
+
+      // The refused feeder is retried with the force flag; the untouched
+      // feeder is never offered it.
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-0', 'Alice', expect.anything(), true);
+      expect(overrideBracketWinner).toHaveBeenCalledWith('c1', 'm-r2-1', 'Carol', expect.anything());
+      expect(overrideBracketWinner).toHaveBeenCalledTimes(3);
+    } finally {
+      window.API.overrideBracketWinner = prevOverride;
+      window.confirmDialog = prevConfirm;
+    }
+  });
+
+  // bc-kcdg: declining the confirm dialog must leave BOTH the feeder assertion
+  // and the later match it would have reopened unwritten, and tell the
+  // operator so in the modal's own inline error area (not a raw thrown message).
+  it('Run now → declining the downstream-reopen prompt records nothing and shows the cancellation notice', async () => {
+    const rounds = [
+      [
+        { id: 'm-r2-0', status: 'scheduled', sideA: { id: 'a', name: 'Alice' }, sideB: { id: 'b', name: 'Bob' } },
+        { id: 'm-r2-1', status: 'scheduled', sideA: { id: 'c', name: 'Carol' }, sideB: { id: 'd', name: 'Dan' } },
+      ],
+      [
+        { id: 'm-r1-0', status: 'scheduled', sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' } },
+      ],
+    ];
+    const comp = { id: 'c1', name: 'Cup', bracket: { rounds } };
+    const pendingFinal = {
+      id: 'm-r1-0', compId: 'c1', compName: 'Cup', status: 'scheduled',
+      phase: 'bracket', matchNumber: 3, court: 'A',
+      sideA: { id: '', name: 'Winner of r2-m0' }, sideB: { id: '', name: 'Winner of r2-m1' },
+    };
+    const refusal = new Error('Eve already played match m-r1-0, asserting this winner would displace them.');
+    refusal.downstreamKnockoutPlayed = { matchId: 'm-r2-0', blockingMatchId: 'm-r1-0', displaced: 'Eve' };
+    const overrideBracketWinner = vi.fn().mockRejectedValue(refusal);
+    const prevOverride = window.API.overrideBracketWinner;
+    const prevConfirm = window.confirmDialog;
+    window.API.overrideBracketWinner = overrideBracketWinner;
+    window.confirmDialog = vi.fn().mockResolvedValue(false);
+    window.tournamentMatches = () => [pendingFinal];
+    window.filterMatchesByCourt = (matches) => matches;
+    try {
+      let utils;
+      await act(async () => { utils = renderPage(makeMinimalTournament({ competitions: [comp] })); });
+      await act(async () => { utils.getByRole('button', { name: /run now/i }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Alice' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: 'Carol' }).click(); });
+      await act(async () => { utils.getByRole('button', { name: /record & make startable/i }).click(); });
+
+      expect(utils.getByText(DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED)).toBeTruthy();
+      // The loop aborts on the first (declined) feeder: the untouched second
+      // feeder is never even attempted, and no retry with the force flag ran.
+      expect(overrideBracketWinner).toHaveBeenCalledTimes(1);
+      // The modal stays open (declining is not the same as onClose/onResolved).
+      expect(utils.getByRole('button', { name: /record & make startable/i })).toBeTruthy();
+    } finally {
+      window.API.overrideBracketWinner = prevOverride;
+      window.confirmDialog = prevConfirm;
     }
   });
 

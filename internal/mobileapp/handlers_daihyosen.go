@@ -109,7 +109,7 @@ func respondIfValidationError(c *gin.Context, err error) bool {
 // read used (see RegisterDaihyosenHandlers).
 type DaihyosenEngine interface {
 	AddDaihyosen(compID, matchID string, sideA, sideB engine.TeamSummary, isPool bool, sideAEligible, sideBEligible int) (*state.SubMatchResult, error)
-	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult) (*domain.CompetitorStatus, error)
+	RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, matchID string, result *state.MatchResult, opts ...engine.ForceOptions) (*domain.CompetitorStatus, error)
 	MaybeAutoCompletePools(compID string) (engine.AutoCompleteOutcome, error)
 }
 

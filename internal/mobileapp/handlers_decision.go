@@ -43,6 +43,17 @@ type DecisionRequest struct {
 	// closed while still `scheduled` (the withdrawal panel's default win) was
 	// otherwise the one completion that carried no time at all (mp-jnvl).
 	ModifiedAt int64 `json:"modifiedAt,omitempty"`
+	// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-correction
+	// guard (engine.DownstreamKnockoutPlayedError, HTTP 409
+	// downstream_knockout_played): a decision that changes an already-
+	// propagated bracket winner while a downstream match carries a result of
+	// its own is refused by default. Same field name and contract as every
+	// other knockout-correction write (see scoreRequestBody.ForceDownstreamReopen
+	// in handlers_match.go); a SEPARATE field from Force above, which answers
+	// a different question (T103's decision-lock override): this maps to
+	// engine.ForceOptions.Force on the RecordDecisionTxWithOptions call
+	// below, never to the force parameter Force itself feeds.
+	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 }
 
 // Validate enforces request-shape invariants on a decision payload
@@ -145,6 +156,10 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			status    *domain.CompetitorStatus
 			engErr    error
 			reasonErr *ValidationError
+			// bc-kcdg: reopenedDownstream collects the IDs of any downstream
+			// bracket match reopened by a forced correction, populated only
+			// when req.ForceDownstreamReopen actually unblocked one.
+			reopenedDownstream []string
 		)
 		// A stamp implausibly far in the server's future is refused outright,
 		// before the transaction opens, exactly as PUT /score refuses one: a
@@ -198,7 +213,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// here left the two audit fields on one record disagreeing byte-for-
 			// byte on padding. Mirrors the score path's up-front TrimSpace of
 			// CorrectionReason (mp-gmcg review).
-			result, status, engErr = eng.RecordDecisionTx(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho, req.Force, req.ModifiedAt)
+			// bc-kcdg/bc-cse finding 5: RecordDecisionTxWithOptions keeps
+			// req.Force (T103 decision-lock override) and
+			// req.ForceDownstreamReopen (the bc-kcdg downstream-knockout-
+			// correction guard) as two independent confirmations -- setting
+			// one does not silently grant the other -- and surfaces the
+			// reopened downstream match ids so they can be broadcast below.
+			result, status, engErr = eng.RecordDecisionTxWithOptions(stx, id, mid, req.Decision, req.DecisionBy, reason, req.Encho, req.Force,
+				engine.ForceOptions{Force: req.ForceDownstreamReopen, Reopened: &reopenedDownstream}, req.ModifiedAt)
 			if result != nil && result.ResultSource == "" {
 				result.ResultSource = "admin"
 			}
@@ -271,6 +293,14 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 					"error":  "decision_locked",
 					"reason": engErr.Error(),
 				})
+			case respondIfDownstreamKnockoutPlayed(c, engErr):
+				// bc-kcdg: this decision would change an already-propagated
+				// bracket winner while a downstream match carries a result of
+				// its own. Fixed wire contract, shared with every other
+				// knockout-correction write (see
+				// respondIfDownstreamKnockoutPlayed's doc comment);
+				// respondIfDownstreamKnockoutPlayed already wrote the response.
+				// Retry with forceDownstreamReopen:true once confirmed.
 			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
 			default:
@@ -291,6 +321,13 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			"matchId":       mid,
 			"result":        matchPtrForBroadcast(result),
 		})
+		// bc-kcdg: each reopened match is distinct from the one the decision
+		// just corrected; broadcast it too so a client watching only that
+		// court/match learns its verdict was cleared (mirrors /score,
+		// /override-winner, and /quick-score).
+		for _, reopenedID := range reopenedDownstream {
+			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopenedID})
+		}
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
 				"competitionId": id,

@@ -86,6 +86,45 @@ func (e *DownstreamKnockoutScoredError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutScored
 }
 
+// ErrDownstreamKnockoutPlayed is the sentinel matched by errors.Is for
+// DownstreamKnockoutPlayedError. Handlers should return HTTP 409.
+//
+// bc-kcdg.
+var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already played")
+
+// DownstreamKnockoutPlayedError is returned when correcting a completed
+// bracket match (via a score write or OverrideBracketWinner) would change
+// the winner already propagated into a downstream match -- the next round,
+// or the bronze/3rd-place match a semifinal also feeds -- that carries a
+// result of its own. propagateBracketWinner repaints a downstream slot's
+// SideA/SideB unconditionally; without this guard the repaint left that
+// match displaying a competitor its own recorded Winner/score/status
+// disagreed with. Refused by default (operator ruling); the caller may
+// retry with ForceOptions.Force set, which applies the correction and
+// reopens every downstream match in the propagation chain that carries its
+// own result. Never raised for a matchWriteRestore (a K3 rollback replaying
+// a trusted snapshot), and never raised for a downstream slot that was
+// merely auto-completed by a bye (see bracketMatchCarriesOwnResult).
+type DownstreamKnockoutPlayedError struct {
+	// MatchID is the id of the match being corrected.
+	MatchID string
+	// BlockingMatchID is the id of the FIRST downstream match, walking the
+	// propagation chain, that carries a result of its own.
+	BlockingMatchID string
+	// Displaced is the corrected match's currently stored winner name -- the
+	// competitor the correction would displace from the downstream chain.
+	Displaced string
+}
+
+func (e *DownstreamKnockoutPlayedError) Error() string {
+	return fmt.Sprintf("correcting match %q would change the winner already propagated into %q, which has recorded its own result; this would displace %q from the chain without updating %q's own result. Retry with forceDownstreamReopen to apply the correction and send %q back to the queue to be fought again",
+		e.MatchID, e.BlockingMatchID, e.Displaced, e.BlockingMatchID, e.BlockingMatchID)
+}
+
+func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
+	return target == ErrDownstreamKnockoutPlayed
+}
+
 // ErrSwissExportUnsupported is returned by Engine.ExportCompetitionXlsx (and
 // therefore by ExportTournamentWorkbooks), and is aliased by
 // internal/export.ErrSwissExportUnsupported for BuildResultsWorkbook. Swiss

@@ -30,7 +30,7 @@ import { swissRoundLabel } from './pool_ids.jsx';
 import { NumberedName } from './numbered_name.jsx';
 // mp-jnvl: the recency rule is shared with the public viewer's Recent
 // results, so it lives in its own leaf rather than in this page.
-import { recentlyPlayed, mostRecentlyPlayed } from './result_recency.jsx';
+import { resultRecencyDesc } from './result_recency.jsx';
 
 const { useState: useStateSh, useMemo: useMemoSh, useEffect: useEffectSh, useRef: useRefSh, useCallback: useCallbackSh } = React;
 
@@ -63,6 +63,13 @@ export function sortShiaijoMatches(matches) {
     });
 }
 
+// Completed bouts read in the order they were PLAYED, oldest first, which is
+// only the schedule order on a court that ran to schedule (mp-jnvl). That makes
+// the newest result the TAIL, so the context strip's anchor and the Completed
+// preview are both a plain tail again: the preview stays a contiguous window
+// and "Show all" extends the list instead of inserting rows into the middle of
+// it (operator ruling 2026-09-19). Running and scheduled keep schedule order,
+// which is the order they will be fought in.
 export function partitionShiaijoMatches(matches) {
     const sorted = sortShiaijoMatches(matches);
     const running = [], scheduled = [], completed = [];
@@ -71,6 +78,10 @@ export function partitionShiaijoMatches(matches) {
         else if (m.status === "scheduled") scheduled.push(m);
         else if (m.status === "completed") completed.push(m);
     }
+    // Oldest write first: resultRecencyDesc is newest-first, so reverse it. An
+    // all-unstamped list falls back to scheduled time and keeps exactly the
+    // order it had before the stamp existed.
+    completed.sort((a, b) => resultRecencyDesc(b, a));
     return { sorted, running, scheduled, completed };
 }
 
@@ -796,22 +807,26 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // The standings/context panel follows the court's current focus: not
     // strictly the running match: so it stays visible (and updates) after a
     // bout is finished, instead of collapsing to the empty state. Priority:
-    // the running match; else the bout just played (mostRecentlyPlayed, by
-    // result-write time rather than schedule position), so the operator sees
-    // their result land in the standings; else the next scheduled bout
+    // the running match; else the bout just played, which is the TAIL because
+    // partitionShiaijoMatches orders completed by play time, so the operator
+    // sees their result land in the standings; else the next scheduled bout
     // (before the court's first match).
     const contextMatch = useMemoSh(
-        () => selectedMatch || mostRecentlyPlayed(filteredCompleted) || filteredScheduled[0] || null,
+        () => selectedMatch || filteredCompleted[filteredCompleted.length - 1] || filteredScheduled[0] || null,
         [selectedMatch, filteredCompleted, filteredScheduled]
     );
 
-    // What the panel is describing, when that is not the live bout. The
-    // heading says so outright, because the panel keeps a finished bout on
-    // screen (and, for knockout, highlights it in the bracket) while the
-    // operator's attention is elsewhere (mp-jnvl). Two ways to land on a
-    // finished bout, and they are different facts: the panel FELL BACK to the
-    // last result, or the operator opened that result to correct it.
+    // What the panel is describing, when that is not the live bout. The heading
+    // says so outright, because the panel keeps the bout on screen (and, for
+    // knockout, highlights it in the bracket) while the operator's attention is
+    // elsewhere (mp-jnvl). Three cases: before the court's first bout the
+    // anchor is the one about to be FOUGHT ("Up next", operator ruling
+    // 2026-09-19 - the highlight means "play this next", so say that); after a
+    // bout it is the last result; and the operator can open a finished bout
+    // deliberately to correct it, which is a different fact from falling back
+    // to it.
     const contextLead = useMemoSh(() => {
+        if (contextMatch?.status === "scheduled") return "Up next";
         if (contextMatch?.status !== "completed") return "";
         return contextMatch === correctingMatch ? "Correcting" : (selectedMatch ? "" : "Just played");
     }, [contextMatch, correctingMatch, selectedMatch]);
@@ -821,7 +836,7 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
     // console re-renders on every SSE broadcast and a full-day court can hold
     // a hundred completed bouts.
     const completedShown = useMemoSh(
-        () => (showAllCompleted ? filteredCompleted : recentlyPlayed(filteredCompleted, COMPLETED_PREVIEW)),
+        () => (showAllCompleted ? filteredCompleted : filteredCompleted.slice(-COMPLETED_PREVIEW)),
         [showAllCompleted, filteredCompleted]
     );
 
@@ -1407,11 +1422,10 @@ function AdminShiaijoPage({ tournament, court: routeCourt, onBack, onEditScore, 
                                         so it must not be hidden behind a collapse toggle. To keep the
                                         live queue above the fold on a full day, only the most recent
                                         COMPLETED_PREVIEW show by default; "Show all N" reveals the rest.
-                                        "Most recent" is by result-write time (recentlyPlayed), not the
-                                        tail of the list: the list is ordered by SCHEDULE, so on a court
-                                        running out of order the tail would hide the bout just played.
-                                        The rows kept stay in schedule order, so only which bouts are
-                                        shown changes, never how the section reads. */}
+                                        The tail IS the most recent: partitionShiaijoMatches orders
+                                        completed by play time, so this stays a contiguous window and
+                                        "Show all" extends the list rather than inserting rows into the
+                                        middle of it (operator ruling 2026-09-19). */}
                                     <div className="section-title">
                                         Completed <span className="shiaijo-count" aria-label={`${filteredCompleted.length} matches`}>{filteredCompleted.length}</span>
                                     </div>
@@ -1937,10 +1951,13 @@ export function shiaijoStandingsKind(match) {
 //     shiaijoStandingsKind. Pools also show which pool is next on this
 //     court; leagues have no "next pool" concept.
 //   • bracket phase → a bracket fragment with the anchored match highlighted.
-// `lead` replaces the heading's leading word when the anchored match is not
-// the live bout ("Just played" for a finished bout the panel fell back to,
-// "Correcting" for one the operator opened to fix): the highlight would
-// otherwise read as the bout now being fought (mp-jnvl).
+// `lead` replaces the heading's leading word when the anchored match is not the
+// live bout: "Up next" for a bout not yet fought, "Just played" for a finished
+// one the panel fell back to, "Correcting" for one the operator opened to fix.
+// Without it the highlight reads as the bout now being fought (mp-jnvl). With
+// no lead the word names the panel's CONTENT - standings for a pool, the
+// bracket fragment for a knockout; "Context" said nothing and was dropped
+// (operator ruling 2026-09-19).
 function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, lead, open, onToggle }) {
     const comp = (competitions || []).find((c) => c.id === match.compId);
     const bracket = comp && (comp.bracket || (Array.isArray(comp.rounds) ? { rounds: comp.rounds } : null));
@@ -2005,7 +2022,7 @@ function ShiaijoContext({ match, competitions, court, nextPoolName, tweaks, lead
     return (
         <div className="shiaijo-context">
             <button type="button" className="section-title shiaijo-context__toggle" aria-expanded={open} onClick={onToggle}>
-                {open ? "−" : "+"} {lead || (isPool ? "Standings" : "Context")} · {match.compName} · {phaseLabel}
+                {open ? "−" : "+"} {lead || (isPool ? "Standings" : "Bracket")} · {match.compName} · {phaseLabel}
             </button>
             {open && (
                 <div className="shiaijo-context__body">

@@ -150,6 +150,43 @@ describe('AdminShiaijoPage render-smoke', () => {
     expect(heading).toContain('Pool 1');
   });
 
+  // Before the court's first bout the strip anchors to a bout NOT YET FOUGHT.
+  // The bracket highlight there means "play this next", so the heading says so
+  // rather than the meaningless "Context" it used to lead with (operator ruling
+  // 2026-09-19).
+  it('says "Up next" before the court has played anything', () => {
+    const upcoming = {
+      id: 'm-k1', compId: 'c1', compName: 'Cup', status: 'scheduled', phase: 'bracket',
+      court: 'A', scheduledAt: '09:00', round: 'Quarterfinals',
+      sideA: { id: 'p1', name: 'Yamada' }, sideB: { id: 'p2', name: 'Tanaka' },
+    };
+    window.tournamentMatches = () => [upcoming];
+    window.filterMatchesByCourt = (matches) => matches;
+    const { container } = renderPage(makeMinimalTournament());
+    const heading = container.querySelector('.shiaijo-context__toggle').textContent;
+    expect(heading).toContain('Up next');
+    expect(heading).not.toContain('Context');
+    expect(heading).toContain('Quarterfinals');
+  });
+
+  // With nothing to qualify, the lead names the panel's CONTENT: a knockout
+  // panel renders a bracket fragment, so it says Bracket, the counterpart of
+  // Standings for a pool. "Context" named nothing and is gone.
+  it('names the panel content, never "Context", while a knockout bout is running', () => {
+    const running = {
+      id: 'm-k2', compId: 'c1', compName: 'Cup', status: 'running', phase: 'bracket',
+      court: 'A', scheduledAt: '09:05', round: 'Semifinals',
+      sideA: { id: 'p3', name: 'Sato' }, sideB: { id: 'p4', name: 'Kato' },
+    };
+    window.tournamentMatches = () => [running];
+    window.filterMatchesByCourt = (matches) => matches;
+    const { container } = renderPage(makeMinimalTournament());
+    const heading = container.querySelector('.shiaijo-context__toggle').textContent;
+    expect(heading).toContain('Bracket');
+    expect(heading).not.toContain('Context');
+    expect(heading).not.toContain('Up next');
+  });
+
   it('keeps the live heading while a bout is running, even with a finished bout behind it', () => {
     const finished = completedPoolBout({ id: 'm-p1', poolName: 'Pool 1', scheduledAt: '09:00', modifiedAt: 2000 });
     const running = {

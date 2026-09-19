@@ -1,4 +1,4 @@
-// result_recency.jsx: which completed bout is the most recent RESULT.
+// result_recency.jsx: the order completed bouts happened in.
 //
 // One owner, because two surfaces answer the same operator question and used
 // to answer it differently (mp-jnvl): the court console's context strip ("the
@@ -31,24 +31,4 @@ export function resultRecencyDesc(a, b) {
     const tb = Number(b.modifiedAt) || 0;
     if (ta !== tb) return tb - ta;
     return (b.scheduledAt || "").localeCompare(a.scheduledAt || "");
-}
-
-// The `count` most recently played bouts, returned in the CALLER's order so a
-// list already ordered for display keeps reading the way it did; only which
-// bouts appear changes.
-export function recentlyPlayed(completed, count) {
-    if (completed.length <= count) return completed;
-    const keep = new Set(
-        completed
-            .map((m, i) => ({ m, i }))
-            .sort((x, y) => resultRecencyDesc(x.m, y.m) || (y.i - x.i))
-            .slice(0, count)
-            .map((e) => e.i)
-    );
-    return completed.filter((_, i) => keep.has(i));
-}
-
-// The single bout just played, for a panel that anchors to one result.
-export function mostRecentlyPlayed(completed) {
-    return recentlyPlayed(completed, 1)[0] || null;
 }

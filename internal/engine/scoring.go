@@ -2394,7 +2394,18 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 // fix. A running match reopened through the KACHINUKI path still blocks, and
 // should: someone is fighting it.
 func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
-	recorded := len(bm.IpponsA) > 0 ||
+	// CLOSED is the precondition (operator ruling 2026-09-19: "you do not
+	// affect the state of the next match unless it was closed"). A scheduled
+	// slot has nothing to lose, and a RUNNING match is being fought right now:
+	// it holds no verdict yet, so the repaint leaves nothing self-contradictory
+	// behind, and clearing a bout in progress to protect a result that does not
+	// exist would be the more destructive act. Only a completed match can end
+	// up displaying a competitor its own recorded result disagrees with, which
+	// is the whole defect.
+	if bm.Status != state.MatchStatusCompleted {
+		return false
+	}
+	return len(bm.IpponsA) > 0 ||
 		len(bm.IpponsB) > 0 ||
 		len(bm.SubResults) > 0 ||
 		bm.Decision != "" ||
@@ -2410,59 +2421,50 @@ func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 		// an overridden match from a bye pass-through, which sets the same
 		// Winner/Status pair and must NOT block.
 		bm.IsOverridden
-	if recorded {
-		return true
-	}
-	return bm.Status == state.MatchStatusRunning
 }
 
-// firstDownstreamWithOwnResult walks the whole downstream propagation chain
-// from (rIdx, mIdx) -- the next-round slot this match feeds, and, for a
-// semifinal, the bronze slot it also feeds -- and returns the FIRST match
-// found that carries a result of its own (bracketMatchCarriesOwnResult). A
-// winner can be propagated several rounds deep through a chain of byes, so
-// the walk must continue past a downstream slot that has no result of its
-// own (a bye pass-through) rather than stopping there: bc-kcdg's cascade
-// rule is that the refusal names the first REAL result the correction would
-// displace, wherever in the chain it sits. Reuses downstreamTargets
-// (kachinuki.go), the single owner of WHERE a winner propagates, so this
-// cannot drift from propagateBracketWinner's own slot rule.
+// firstDownstreamWithOwnResult returns the match ONE HOP down that this
+// result was propagated into and that is closed with a result of its own --
+// the next-round slot, or, for a semifinal, the bronze slot it also feeds.
+// Nil when neither is closed.
+//
+// ONE HOP, not the whole chain (operator ruling 2026-09-19): "if a correction
+// is applied then that match is completed and reopens the next one, if that
+// one is also completed". The deeper rounds are not this write's business and
+// are not silently unwound behind one confirmation. They are reached in their
+// own turn: once the operator re-fights the reopened match and enters THAT
+// result, the write propagates a round further, meets this same check against
+// the round after it, and asks again. One decision per round, each one the
+// operator's, instead of a single dialog quietly clearing three matches.
+//
+// Reuses downstreamTargets (kachinuki.go), the single owner of WHERE a winner
+// propagates, so this cannot drift from propagateBracketWinner's slot rule.
 func firstDownstreamWithOwnResult(bracket *state.Bracket, rIdx, mIdx int) *state.BracketMatch {
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
 	if bronze != nil && bracketMatchCarriesOwnResult(bronze) {
 		return bronze
 	}
-	if next == nil {
-		return nil
-	}
-	if bracketMatchCarriesOwnResult(next) {
+	if next != nil && bracketMatchCarriesOwnResult(next) {
 		return next
 	}
-	return firstDownstreamWithOwnResult(bracket, rIdx+1, mIdx/2)
+	return nil
 }
 
-// forceReopenDownstreamChain walks the SAME downstream chain
-// firstDownstreamWithOwnResult walks, reopening (reopenBracketMatch) EVERY
-// match in it that carries its own result, and returns their IDs. Unlike
-// firstDownstreamWithOwnResult it does not stop at the first hit: a forced
-// correction may have to unwind a whole chain of real results (e.g. a
-// semifinal correction that already fed both the final AND the bronze
-// match), and the walk past a non-carrying (bye pass-through) slot must
-// continue regardless, exactly as firstDownstreamWithOwnResult's does,
-// because that slot's OWN downstream may still hold a real result further
-// along.
+// forceReopenDownstreamChain reopens exactly what
+// firstDownstreamWithOwnResult would have named -- ONE HOP down, and only a
+// match that is CLOSED with a result of its own -- and returns the ids it
+// touched. A semifinal feeds two slots (the final and the bronze match), so
+// the answer can legitimately be both; it is never a deeper round.
 //
-// Every reopen here passes reopenBracketMatch an EMPTY reason (bc-kcdg
-// finding 1/4), never a description of the correction that triggered it.
-// Two things follow from reopenPending(""): the reopened match carries NO
-// inherited CorrectionReason -- its own audit note would otherwise describe
-// a DIFFERENT match's correction, an unrelated one from the operator's
-// point of view -- and ReopenPending is set, which is what
-// bracketMatchCarriesOwnResult's own running+ReopenPending exemption keys
-// on to let the operator's next re-entry into this same match through. A
-// non-empty invented reason here (as this used to pass) defeated both: the
-// match came back non-pending (so its own re-score was blocked again by the
-// very predicate meant to allow it) and carried someone else's audit trail.
+// The two functions walk identically on purpose: the refusal names what the
+// confirmation will clear, and the operator is never told about one match and
+// charged for another. Deeper rounds are reached in their own turn, when the
+// re-fought result propagates into them and meets this same check (see
+// firstDownstreamWithOwnResult for the ruling).
+//
+// requeueBracketMatch, not reopenBracketMatch: the match goes back to the
+// queue clean rather than to "running" owing an audit reason. See that
+// function for why the reopen shape was unusable here.
 func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int) []string {
 	var reopened []string
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
@@ -2470,14 +2472,11 @@ func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int) []string
 		requeueBracketMatch(bronze)
 		reopened = append(reopened, bronze.ID)
 	}
-	if next == nil {
-		return reopened
-	}
-	if bracketMatchCarriesOwnResult(next) {
+	if next != nil && bracketMatchCarriesOwnResult(next) {
 		requeueBracketMatch(next)
 		reopened = append(reopened, next.ID)
 	}
-	return append(reopened, forceReopenDownstreamChain(bracket, rIdx+1, mIdx/2)...)
+	return reopened
 }
 
 // requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
@@ -2579,6 +2578,32 @@ func bracketWinnerChanged(bm *state.BracketMatch, result *state.MatchResult, pol
 	return result.Winner != bm.Winner, nil
 }
 
+// displacedCompetitor names the competitor the correction would knock out of
+// the blocking match: the one SITTING IN THE SLOT this match feeds, which is
+// the name the operator is looking at on the board.
+//
+// Not simply the corrected match's stored winner, which is empty exactly when
+// the operator needs the name most. Walking the bracket forward one round at a
+// time, the second match they correct has already been requeued by the first
+// confirmation, so its winner was cleared: the dialog fell back to "The
+// competitor currently recorded as advancing" in the ORDINARY path, not in
+// some edge case. Seen in the browser during UAT.
+//
+// The slot rule mirrors propagateBracketWinner's: even slots feed SideA, odd
+// slots feed SideB, for the next-round match and for the bronze match alike.
+// Falls back to the stored winner when the slot holds an unresolved feeder
+// placeholder rather than a competitor.
+func displacedCompetitor(bm, blocking *state.BracketMatch, mIdx int) string {
+	slot := blocking.SideB
+	if mIdx%2 == 0 {
+		slot = blocking.SideA
+	}
+	if slot != "" && !strings.HasPrefix(slot, "Winner of") {
+		return slot
+	}
+	return bm.Winner
+}
+
 // guardDownstreamKnockoutCorrection is bc-kcdg's refusal rule. It fires only
 // for a forward-policy write that would COMPLETE the match (a "running"
 // live-status update never propagates, see applyBracketResultIn) AND would
@@ -2609,7 +2634,7 @@ func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, b
 	return &DownstreamKnockoutPlayedError{
 		MatchID:         bm.ID,
 		BlockingMatchID: blocking.ID,
-		Displaced:       bm.Winner,
+		Displaced:       displacedCompetitor(bm, blocking, mIdx),
 	}
 }
 
@@ -2803,7 +2828,7 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 	return &DownstreamKnockoutPlayedError{
 		MatchID:         m.ID,
 		BlockingMatchID: blocking.ID,
-		Displaced:       m.Winner,
+		Displaced:       displacedCompetitor(m, blocking, mIdx),
 	}
 }
 

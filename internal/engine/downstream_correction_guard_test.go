@@ -271,12 +271,16 @@ func TestDownstreamKnockoutCorrection_RestoreBypassesGuard(t *testing.T) {
 	assert.Equal(t, "Alice", b.Rounds[1][0].Winner, "restore's own repaint leaves the downstream verdict untouched, same as an unguarded correction would")
 }
 
-func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
-	eng, store, _ := setupTestEngine(t)
-	compID := "kcdg-bronze"
+// seedBronzeBracket builds a played naginata-shaped knockout: two semifinals,
+// a final, and a bronze match, all completed with their own results. A
+// semifinal here feeds BOTH the final and the bronze match, which is the one
+// shape where a single correction blocks on two matches at once.
+func seedBronzeBracket(t *testing.T, store *state.Store, compID string) {
+	t.Helper()
 	require.NoError(t, store.SaveCompetition(&state.Competition{
 		ID: compID, Name: "kcdg-bronze", Status: state.CompStatusKnockout,
 	}))
+
 	b := &state.Bracket{
 		Rounds: [][]state.BracketMatch{
 			{ // semifinals
@@ -300,6 +304,12 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 		},
 	}
 	require.NoError(t, store.SaveBracket(compID, b))
+}
+
+func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-bronze"
+	seedBronzeBracket(t, store, compID)
 
 	// Correct the m-r1-0 semifinal to Bob: bronze has ALREADY been played
 	// (Bob won it), and this correction's loser-to-bronze feed would try to
@@ -316,7 +326,7 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 		assert.Empty(t, reopened)
 	})
 
-	t.Run("force applies and reopens bronze", func(t *testing.T) {
+	t.Run("force clears BOTH siblings the semifinal fed", func(t *testing.T) {
 		var reopened []string
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed"),
@@ -324,40 +334,37 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 			return err
 		})
 		require.NoError(t, txErr)
-		// EXACTLY bronze, and nothing else. Contains() used to pass here while
-		// the final was quietly cleared in the same breath: the dialog named
-		// one match and the confirmation charged the operator for two
-		// (operator ruling 2026-09-19 -- one match per question, bronze first).
-		assert.Equal(t, []string{"m-bronze"}, reopened)
+		// Bronze AND the final, on the ONE confirmation that named them both.
+		//
+		// They cannot be split into a dialog each, which an earlier revision
+		// tried: once the first confirmation applies, the winner no longer
+		// changes, so repeating the correction raises nothing and the second
+		// sibling would sit contradicting itself forever. Confirmed against the
+		// running app before this test was written -- re-saving the same
+		// correction returned 200 with the final still showing the old winner.
+		assert.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, reopened)
 
 		got, err := store.LoadBracket(compID)
 		require.NoError(t, err)
 		assert.Equal(t, state.MatchStatusScheduled, got.ThirdPlaceMatch.Status)
 		assert.Empty(t, got.ThirdPlaceMatch.Winner)
 		assert.Equal(t, "Alice", got.ThirdPlaceMatch.SideA, "the semifinal's new loser (Alice) was repainted into bronze")
-
-		// The FINAL keeps its result: it is a separate question, asked on the
-		// next attempt.
-		assert.Equal(t, state.MatchStatusCompleted, got.Rounds[1][0].Status, "the final is not cleared by bronze's confirmation")
-		assert.Equal(t, "Alice", got.Rounds[1][0].Winner)
+		assert.Equal(t, state.MatchStatusScheduled, got.Rounds[1][0].Status, "the final went with it")
+		assert.Empty(t, got.Rounds[1][0].Winner)
 	})
 
-	t.Run("the final is asked about separately, on the next attempt", func(t *testing.T) {
-		// Bronze is settled; correcting again now meets the final.
-		var reopened []string
+	t.Run("the refusal names both", func(t *testing.T) {
+		// Re-seed: the subtest above consumed the played state.
+		seedBronzeBracket(t, store, compID)
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
-			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0",
-				&state.MatchResult{
-					ID: "m-r1-0", SideA: "Alice", SideB: "Bob",
-					Winner: "Alice", IpponsA: []string{"M", "M"},
-					Status: state.MatchStatusCompleted, CorrectionReason: "back to Alice",
-				}, ForceOptions{Reopened: &reopened})
+			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{})
 			return err
 		})
 		var dkErr *DownstreamKnockoutPlayedError
 		require.ErrorAs(t, txErr, &dkErr)
-		assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID, "now the final is the one at stake")
-		assert.Empty(t, reopened)
+		assert.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, dkErr.BlockingMatchIDs,
+			"the operator must be told about everything the confirmation will clear")
+		assert.Equal(t, "m-bronze", dkErr.BlockingMatchID, "single-value form stays the first")
 	})
 }
 

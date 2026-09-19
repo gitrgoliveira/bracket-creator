@@ -78,3 +78,34 @@ describe('DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED', () => {
         expect(typeof DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED).toBe('string');
     });
 });
+
+describe('downstreamKnockoutPlayedConfirm with two blocked matches', () => {
+    // A semifinal feeds both the final and the bronze match. Both are cleared
+    // by one confirmation, so the dialog has to NAME both: naming one while
+    // clearing two is the defect this wording exists to avoid, and splitting
+    // them into two dialogs is impossible (the second would never be asked,
+    // because after the first confirmation the winner no longer changes).
+    it('names every match it is about to clear, in the plural', () => {
+        const { message } = downstreamKnockoutPlayedConfirm({
+            blockingMatchId: 'm-bronze',
+            blockingMatchIds: ['m-bronze', 'm-r2-0'],
+            displaced: 'Suzuki Ichiro',
+        });
+        expect(message).toContain('m-bronze');
+        expect(message).toContain('m-r2-0');
+        expect(message.toLowerCase()).toContain('matches');
+        expect(message.toLowerCase()).toContain('back to the queue');
+        expect(message.toLowerCase()).toContain('cleared');
+        expect(message.toLowerCase()).not.toMatch(/\bmat\b/);
+    });
+
+    it('stays singular when only one match is blocked', () => {
+        const { message } = downstreamKnockoutPlayedConfirm({
+            blockingMatchId: 'm-r2-0',
+            blockingMatchIds: ['m-r2-0'],
+            displaced: 'Suzuki Ichiro',
+        });
+        expect(message).toContain('match m-r2-0');
+        expect(message.toLowerCase()).not.toContain('matches ');
+    });
+});

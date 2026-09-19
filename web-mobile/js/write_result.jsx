@@ -172,7 +172,7 @@ export function downstreamKnockoutPlayedRefusal(err) {
 // to be fought and re-entered (its recorded result is cleared). Cancelling
 // leaves everything as it was -- the caller must not retry on a
 // cancelled/false result, only on an explicit confirm.
-export function downstreamKnockoutPlayedConfirm({ blockingMatchId, displaced } = {}) {
+export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatchIds, displaced } = {}) {
     // The `displaced` default covers a shape the server genuinely sends: it is
     // the corrected match's STORED winner, and a bye-resolved slot is completed
     // with an empty winner, so a correction written over one arrives with
@@ -181,15 +181,28 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, displaced } =
     // so it only covers a caller passing an incomplete object, which is what
     // this function's own unit test does.
     const who = displaced || 'The competitor currently recorded as advancing';
-    const blocking = blockingMatchId || 'the later match';
+    // matchList names EVERY match the confirmation clears. Normally one; a
+    // semifinal feeds both the final and the bronze match, and both go
+    // together, so the dialog has to say so rather than naming one and
+    // clearing two.
+    const ids = (blockingMatchIds && blockingMatchIds.length)
+        ? blockingMatchIds
+        : (blockingMatchId ? [blockingMatchId] : []);
+    const many = ids.length > 1;
+    const blocking = many
+        ? `${ids.slice(0, -1).join(', ')} and ${ids[ids.length - 1]}`
+        : (ids[0] || 'the later match');
     // ONE paragraph, no newlines: the dialog renders `message` in a plain <p>
     // (ui.jsx) whose .dialog-msg rule sets no white-space, so a \n here
     // silently collapses to a space rather than breaking the line.
     return {
-        message:
-            `${who} already played match ${blocking}, which was built on this match's current result. ` +
-            `Applying this correction sends match ${blocking} back to the queue for re-entry: its ` +
-            'recorded result is cleared, and it must be fought and scored again.',
+        message: many
+            ? `${who} already played matches ${blocking}, which were built on this match's current result. ` +
+              `Applying this correction sends both back to the queue for re-entry: their recorded results ` +
+              'are cleared, and they must be fought and scored again.'
+            : `${who} already played match ${blocking}, which was built on this match's current result. ` +
+              `Applying this correction sends match ${blocking} back to the queue for re-entry: its ` +
+              'recorded result is cleared, and it must be fought and scored again.',
         confirmLabel: 'Apply correction and reopen',
         danger: true,
     };

@@ -170,7 +170,7 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // respondIfDownstreamKnockoutPlayed answers engine.DownstreamKnockoutPlayedError
 // (bc-kcdg) with the ONE fixed wire contract every knockout-correction write
 // shares -- HTTP 409 {"error":"downstream_knockout_played","matchId",
-// "blockingMatchId","displaced","message"} -- and reports whether it
+// "blockingMatchId","blockingMatchIds","displaced","message"} -- and reports whether it
 // answered, so the caller's switch can fall through to its own remaining
 // arms exactly like the other respondIf* helpers in this file.
 //
@@ -194,8 +194,12 @@ func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
 		"error":           "downstream_knockout_played",
 		"matchId":         downstreamPlayedErr.MatchID,
 		"blockingMatchId": downstreamPlayedErr.BlockingMatchID,
-		"displaced":       downstreamPlayedErr.Displaced,
-		"message":         downstreamPlayedErr.Error(),
+		// Every blocked match, so the dialog can name what it will clear. One
+		// entry except for a semifinal, which feeds the final AND the bronze
+		// match; blockingMatchId stays as the first for older clients.
+		"blockingMatchIds": downstreamPlayedErr.BlockingMatchIDs,
+		"displaced":        downstreamPlayedErr.Displaced,
+		"message":          downstreamPlayedErr.Error(),
 	})
 	return true
 }

@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ValidationError represents a client-caused precondition or input failure.
@@ -101,11 +102,12 @@ var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already 
 // match displaying a competitor its own recorded Winner/score/status
 // disagreed with. Refused by default (operator ruling); the caller may
 // retry with ForceOptions.Force set, which applies the correction and
-// requeues the ONE match named here: the next-round slot, or the bronze match,
-// whichever is closed with a result of its own. Never a deeper round, and
-// never both slots at once -- one match per confirmation, so a semifinal that
-// invalidated both the final and the bronze match raises this twice, once per
-// attempt.
+// requeues exactly the matches named here. That is ONE match in every case
+// but one: a semifinal feeds both the final and the bronze match, and when
+// both are closed both are named and both are cleared together, because the
+// second could never be asked about separately (see
+// newDownstreamKnockoutPlayedError). Never a deeper round: those arrive on
+// their own write, when the re-fought result propagates into them.
 //
 // Never raised for a matchWriteRestore (a K3 rollback replaying a trusted
 // snapshot), and never for a downstream slot merely auto-completed by a bye
@@ -113,17 +115,27 @@ var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already 
 type DownstreamKnockoutPlayedError struct {
 	// MatchID is the id of the match being corrected.
 	MatchID string
-	// BlockingMatchID is the id of the ONE match this correction is blocked
-	// on: one hop down, closed, and carrying a result of its own.
+	// BlockingMatchID is the FIRST blocking match (bronze before the next
+	// round), kept as the single-value form every existing consumer reads.
 	BlockingMatchID string
+	// BlockingMatchIDs is every match this correction is blocked on, one hop
+	// down and closed with a result of its own. Almost always one; a semifinal
+	// feeds both the final and the bronze match, so it can be two, and both are
+	// cleared by the one confirmation that names them (see
+	// newDownstreamKnockoutPlayedError for why they cannot be split).
+	BlockingMatchIDs []string
 	// Displaced is the corrected match's currently stored winner name -- the
 	// competitor the correction would knock out of BlockingMatchID.
 	Displaced string
 }
 
 func (e *DownstreamKnockoutPlayedError) Error() string {
-	return fmt.Sprintf("correcting match %q would change the winner already propagated into %q, which has recorded its own result; this would displace %q from that match without updating its own result. Retry with forceDownstreamReopen to apply the correction and send %q back to the queue to be fought again",
-		e.MatchID, e.BlockingMatchID, e.Displaced, e.BlockingMatchID)
+	blocked := e.BlockingMatchID
+	if len(e.BlockingMatchIDs) > 1 {
+		blocked = strings.Join(e.BlockingMatchIDs, " and ")
+	}
+	return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and send %s back to the queue to be fought again",
+		e.MatchID, blocked, e.Displaced, blocked)
 }
 
 func (e *DownstreamKnockoutPlayedError) Is(target error) bool {

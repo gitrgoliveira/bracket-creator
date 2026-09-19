@@ -2447,15 +2447,18 @@ func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 //
 // Reuses downstreamTargets (kachinuki.go), the single owner of WHERE a winner
 // propagates, so this cannot drift from propagateBracketWinner's slot rule.
-func firstDownstreamWithOwnResult(bracket *state.Bracket, rIdx, mIdx int) *state.BracketMatch {
+func firstDownstreamWithOwnResult(bracket *state.Bracket, rIdx, mIdx int) []*state.BracketMatch {
+	var blocking []*state.BracketMatch
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
+	// Bronze first: it is the slot the operator forgets, and naming it first
+	// keeps the order stable for the dialog and for the tests.
 	if bronze != nil && bracketMatchCarriesOwnResult(bronze) {
-		return bronze
+		blocking = append(blocking, bronze)
 	}
 	if next != nil && bracketMatchCarriesOwnResult(next) {
-		return next
+		blocking = append(blocking, next)
 	}
-	return nil
+	return blocking
 }
 
 // winnerActuallyChanged compares a bracket match's winner against what it held
@@ -2491,12 +2494,12 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // queue clean rather than to "running" owing an audit reason. See that
 // function for why the reopen shape was unusable here.
 func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int) []string {
-	blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx)
-	if blocking == nil {
-		return nil
+	var reopened []string
+	for _, m := range firstDownstreamWithOwnResult(bracket, rIdx, mIdx) {
+		requeueBracketMatch(m)
+		reopened = append(reopened, m.ID)
 	}
-	requeueBracketMatch(blocking)
-	return []string{blocking.ID}
+	return reopened
 }
 
 // requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
@@ -2608,6 +2611,34 @@ func bracketWinnerChanged(bm *state.BracketMatch, result *state.MatchResult, pol
 	return result.Winner != bm.Winner, nil
 }
 
+// newDownstreamKnockoutPlayedError builds the refusal for every blocking match
+// the correction would displace someone from.
+//
+// Usually one. A SEMIFINAL is the exception: it feeds the final AND the bronze
+// match, and both can be closed, so both are named and both are cleared on one
+// confirmation. That pairing has to be handled together, not one dialog each:
+// the second dialog would never arrive. Once the first confirmation applies,
+// the winner no longer changes, so a repeat of the same correction is not a
+// correction at all and raises nothing -- leaving the other sibling displaying
+// a competitor its own result contradicts, permanently. Verified in the
+// browser before this was written.
+//
+// Deeper rounds are NOT bundled in: each is reached by its own write, when the
+// re-fought result propagates, and that write is a genuine winner change which
+// raises this again.
+func newDownstreamKnockoutPlayedError(bm *state.BracketMatch, blocking []*state.BracketMatch, mIdx int) *DownstreamKnockoutPlayedError {
+	ids := make([]string, 0, len(blocking))
+	for _, b := range blocking {
+		ids = append(ids, b.ID)
+	}
+	return &DownstreamKnockoutPlayedError{
+		MatchID:          bm.ID,
+		BlockingMatchID:  ids[0],
+		BlockingMatchIDs: ids,
+		Displaced:        displacedCompetitor(bm, blocking[0], mIdx),
+	}
+}
+
 // displacedCompetitor names the competitor the correction would knock out of
 // the blocking match: the one SITTING IN THE SLOT this match feeds, which is
 // the name the operator is looking at on the board.
@@ -2658,14 +2689,10 @@ func guardDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mIdx int, b
 		return nil
 	}
 	blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx)
-	if blocking == nil {
+	if len(blocking) == 0 {
 		return nil
 	}
-	return &DownstreamKnockoutPlayedError{
-		MatchID:         bm.ID,
-		BlockingMatchID: blocking.ID,
-		Displaced:       displacedCompetitor(bm, blocking, mIdx),
-	}
+	return newDownstreamKnockoutPlayedError(bm, blocking, mIdx)
 }
 
 func (e *Engine) propagateBracketWinner(bracket *state.Bracket, rIdx, mIdx int) {
@@ -2852,14 +2879,10 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 		return nil
 	}
 	blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx)
-	if blocking == nil {
+	if len(blocking) == 0 {
 		return nil
 	}
-	return &DownstreamKnockoutPlayedError{
-		MatchID:         m.ID,
-		BlockingMatchID: blocking.ID,
-		Displaced:       displacedCompetitor(m, blocking, mIdx),
-	}
+	return newDownstreamKnockoutPlayedError(m, blocking, mIdx)
 }
 
 // OverrideBracketWinner atomically loads the bracket, locates the

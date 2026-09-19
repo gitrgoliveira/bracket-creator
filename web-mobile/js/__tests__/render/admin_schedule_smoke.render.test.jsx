@@ -19,6 +19,9 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { installWindowStubs } from '../helpers/stub_globals.js';
+// The REAL score formatter, not a stub: a stub returning a fixed string
+// cannot distinguish a working gate from a broken one.
+import { matchScoreStr } from '../../bracket.jsx';
 
 // ── window stubs ─────────────────────────────────────────────────────────────
 // Split into:
@@ -140,5 +143,81 @@ describe('AdminSchedulePage smoke', () => {
     expect(screen.getByTestId('admin-topbar')).toBeInTheDocument();
     expect(screen.getByTestId('breadcrumbs')).toBeInTheDocument();
     expect(screen.getByTestId('player-multi-filter')).toBeInTheDocument();
+  });
+});
+
+// bc-cse regression: AdminTWMatch (the per-court row rendered by
+// AdminSchedulePage) gated its score cell on `m.status === "completed"`, so
+// a running team match's live subResults-derived score never showed on the
+// admin schedule board -- only once the match ended. Widened to admit
+// "running" too. These tests supply a populated tournament (rather than
+// EMPTY_TOURNAMENT above) so AdminTWMatch actually renders a match row, with
+// window.tournamentMatches/window.matchScoreStr/window.poolLabel/
+// window.matchHighlightedBy overridden locally per test and restored
+// afterward -- the base STUBBED_GLOBALS above intentionally returns no
+// matches, so those four are not among them.
+describe('AdminSchedulePage: running match score cell (bc-cse)', () => {
+  // Deliberately INDIVIDUAL-shaped (no teamResult): AdminTWMatch's gate does
+  // not distinguish match kind, unlike matchStateCell's team-only running
+  // branch (bracket.jsx) -- this fixture is the direct evidence that choice
+  // was made on purpose here, not an oversight (see the comment above
+  // AdminTWMatch's score block for why the two call sites diverge).
+  // Real team data, because the score is rendered by the REAL matchScoreStr:
+  // a stub returning a fixed string passes for any match shape, so it could
+  // not tell a working gate from a broken one.
+  const RUNNING_MATCH = {
+    id: 'm-running', compId: 'c1', court: 'A', status: 'running', phase: 'bracket', round: 'Final',
+    sideA: { id: 'a', name: 'Aka Dojo' }, sideB: { id: 'b', name: 'Shiro Dojo' },
+    teamResult: { shiroIV: 1, akaIV: 1, shiroPW: 3, akaPW: 2 },
+    subResults: [{ position: 1, sideA: '', sideB: '', ipponsA: ['M'], ipponsB: ['K'], winner: '' }],
+  };
+  const SCHEDULED_MATCH = {
+    id: 'm-scheduled', compId: 'c1', court: 'A', status: 'scheduled', phase: 'bracket', round: 'Semifinal',
+    sideA: { id: 'c', name: 'Third Dojo' }, sideB: { id: 'd', name: 'Fourth Dojo' },
+  };
+  const TOURNAMENT_ONE_COURT = { id: 't1', name: 'Test Tournament', competitions: [], courts: ['A'] };
+
+  let saved;
+
+  beforeEach(() => {
+    saved = {
+      tournamentMatches: window.tournamentMatches,
+      matchScoreStr: window.matchScoreStr,
+      poolLabel: window.poolLabel,
+      matchHighlightedBy: window.matchHighlightedBy,
+    };
+    window.matchScoreStr = matchScoreStr;
+    window.poolLabel = () => 'Pool A';
+    window.matchHighlightedBy = () => false;
+  });
+
+  afterEach(() => {
+    // delete, not `= saved.x`: these four are not in STUBBED_GLOBALS, so the
+    // keys did not exist before and assigning back writes a present-but-
+    // undefined key that a later `typeof` check reads differently.
+    for (const k of ['tournamentMatches', 'matchScoreStr', 'poolLabel', 'matchHighlightedBy']) {
+      if (saved[k] === undefined) delete window[k]; else window[k] = saved[k];
+    }
+  });
+
+  it('shows the live score for a RUNNING match', () => {
+    window.tournamentMatches = () => [RUNNING_MATCH];
+    const { container } = render(
+      React.createElement(AdminSchedulePage, {
+        tournament: TOURNAMENT_ONE_COURT, onBack: noop, onMoveCourt: noop, onLogout: noop, onViewerMode: noop, password: '',
+      }),
+    );
+    expect(container.textContent).toContain('IV 1\u20131');
+    expect(container.textContent).toContain('PW 3\u20132');
+  });
+
+  it('shows no score for a SCHEDULED match (gate stays closed pre-play)', () => {
+    window.tournamentMatches = () => [SCHEDULED_MATCH];
+    const { container } = render(
+      React.createElement(AdminSchedulePage, {
+        tournament: TOURNAMENT_ONE_COURT, onBack: noop, onMoveCourt: noop, onLogout: noop, onViewerMode: noop, password: '',
+      }),
+    );
+    expect(container.textContent).not.toContain('IV 1\u20131');
   });
 });

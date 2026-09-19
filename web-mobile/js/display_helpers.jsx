@@ -48,9 +48,17 @@ function sideLabel(side, withZekkenName, color) {
 // numbered Shiro-style keeps it.
 //
 // A cell that clips renders <NumberedName clip> off these parts, so the chip
-// is its own flex child and only the NAME ellipsises. Cells that do NOT clip
-// keep plain sideLabel: NextPair's rows and the overlay's individual lines
-// were measured at the same viewport and have no ellipsis to protect against.
+// is its own flex child and only the NAME ellipsises. A cell that does NOT
+// clip has nothing to protect and could keep the plain sideLabel string
+// instead — the overlay's individual lines still do, measured at the same
+// viewport as the clipping cells above. NextPair's rows (the TV NEXT line and
+// the UP NEXT pool bout list) are the one exception: they do not clip either,
+// but as of 2026-09-19 they render <NumberedName> (non-clip) off these parts
+// too, by operator decision (bc-lbty), purely for visual consistency with the
+// chipped row above them — the chip/no-chip split on one screen read as an
+// oversight rather than a deliberate choice. Do not read that as a rule that
+// every non-clipping cell must chip: the overlay's own non-clipping lines are
+// the counter-example, still on the plain string by design.
 //
 // Delegates to numberedParts for the same reason sideLabel delegates to
 // withNumber: the string form and the parts form must not drift about what a

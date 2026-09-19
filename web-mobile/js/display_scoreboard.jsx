@@ -2,10 +2,10 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabel, sideLabelParts, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabelParts, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
-import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW } from './match_scoreboard.jsx';
+import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW, teamIVPWFrom } from './match_scoreboard.jsx';
 import { realIppons } from './result_slot.jsx';
 
 const { useMemo: useMD } = React;
@@ -41,10 +41,11 @@ function emptyStateHeadline(allCompleted, noMatches) {
 // TvWhiteTeamBoard: mp-13y: white scoreboard for a running TEAM match
 // (per the agreed mockup). Replaces the dark aka/shiro half-panels for the
 // team case with a light board: court header + black rule, team name row
-// (Shiro black left / Aka red right, NO top IV score), then the per-bout
-// grid (done / in-progress amber / queued grey), optional Daihyosen banner,
-// and a single "Next" line. Individual matches, empty states and the lobby
-// keep the existing dark surface (no mockup for those).
+// (Shiro black left / Aka red right, each carrying its own IV/PW readout as
+// of the bc-lbty pass below), then the per-bout grid (done / in-progress
+// amber / queued grey), optional Daihyosen banner, and a single "Next" line.
+// Individual matches, empty states and the lobby keep the existing dark
+// surface (no mockup for those).
 
 // LinkDot: 3-state connection indicator (mp-9ukk Phase 2).
 // 'connected' renders an INVISIBLE span (visibility:hidden + transparent), not
@@ -83,9 +84,12 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     // 1920x1080: an 811px headline cell at 54px, so ~28 characters; and 85px
     // on the 402px viewer card, which a perfectly ordinary name overflows).
     // So this board passes PARTS and lets NumberedName's clip mode keep the
-    // chip out of the ellipsised run. sideLabel is still used below for
-    // NextPair's rows, which were measured at the same viewport and do not
-    // clip (bc-rvfx).
+    // chip out of the ellipsised run. NextPair's rows below do not clip (they
+    // were measured at the same viewport and have no ellipsis to protect
+    // against), but as of 2026-09-19 they render the SAME NumberedName chip in
+    // its plain (non-clip) form off sideLabelParts too, for visual consistency
+    // with the row above (operator decision, bc-lbty): see sideLabelParts'
+    // own header in display_helpers.jsx for the full clip-vs-string rule.
     const shiroTeamParts = sideLabelParts(promoted.match.sideB, zekken);
     const akaTeamParts = sideLabelParts(promoted.match.sideA, zekken);
     // Daihyosen / tiebreaker rep bout (mp-62vr): SideA/SideB are TEAM names, but
@@ -97,6 +101,12 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     const repShiro = (promoted.match.repPlayerB || "").trim();
     const repAka = (promoted.match.repPlayerA || "").trim();
     const next = queueMatches && queueMatches.length ? queueMatches[0] : null;
+    // Hoisted out of the TeamScoreboard call below (bc-lbty) so this row's own
+    // IV/PW readout can derive from the exact same values via teamIVPWFrom:
+    // one computation, never two chances to disagree.
+    const matchSideA = promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "");
+    const matchSideB = promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "");
+    const { ivShiro, ivAka, pwShiro, pwAka } = teamIVPWFrom(promoted.match?.teamResult, subResults, matchSideA, matchSideB);
     // NO middle mark here (operator ruling): the FIK row centre rendered by the
     // shared scoreboard below is the mark's ONE home, and this header chip
     // duplicating X/(E)/(DH) ~10cm above it was an error; the plain "vs" stays.
@@ -111,9 +121,15 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
     const compName = promoted.competition?.name || "";
     const compPhase = phaseLabel(promoted.match, promoted.isBracket, promoted.roundIndex, promoted.totalRounds, promoted.competition?.format);
     const headerSubtitle = [compName, compPhase].filter(Boolean).join(" · ");
-    // The shared scoreboard below carries the score (IV/PW summary for teams,
-    // ippon slots for individuals) AND the middle mark, so this team-name row
-    // centre is a bare "vs" with no suffix branch.
+    // The centre is a CLOSED SET (vs / X / (E) / (DH), operator ruling) and
+    // never carries a result belonging to one competitor, so it stays a bare
+    // "vs" regardless of what either side's cell shows. It used to be bare
+    // because the score lived only in the shared scoreboard below; as of
+    // bc-lbty (2026-09-19) a TEAM match's IV/PW now ALSO renders per side in
+    // this row's own Shiro/Aka cells (see below), and the shared scoreboard's
+    // own §277 summary row is suppressed on the TV board to avoid repeating
+    // the team name a second time (TeamScoreboard, match_scoreboard.jsx) - but
+    // that score still belongs to a SIDE, never to this shared centre cell.
     const nameCentre = <div style={{ fontSize: "2.4vh", color: "var(--ink-3)", fontWeight: 700 }}>vs</div>;
 
     return (
@@ -136,23 +152,49 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 </div>
             </div>
 
-            {/* Team name row: Shiro black (left), Aka red (right), no top score */}
+            {/* Team name row: Shiro black (left), Aka red (right). A TEAM match
+                (bc-lbty, operator decision 2026-09-19) also carries each side's
+                own IV/PW readout in its cell, now that TeamScoreboard's §277
+                summary row below is suppressed on the TV board: the pairing and
+                the score used to be shown twice (once here, once there); this
+                is the one home for both now. Each side's figures take that
+                side's OWN colour (#111 / #b91c1c), which is what the summary
+                row they replace did via .msb-slot and .msb-slot--aka: a neutral
+                slate here would put grey figures under a red name, the same
+                name-vs-number colour mismatch this pass exists to remove. */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || <NumberedName side="shiro" clip {...shiroTeamParts} />}</div>
                     {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="shiro" clip {...shiroTeamParts} /></div>}
+                    {isTeamMatch && (
+                        <div data-testid="headline-ivpw-shiro" style={{ display: "flex", gap: "1.4vw", fontSize: "2vh", fontWeight: 700, color: "#111", marginTop: "0.6vh" }}>
+                            <span><abbr className="msb-lab" title="Individual Victories" style={{ display: "inline", fontSize: "0.7em" }}>IV</abbr> {ivShiro}</span>
+                            <span><abbr className="msb-lab" title="Points Won" style={{ display: "inline", fontSize: "0.7em" }}>PW</abbr> {pwShiro}</span>
+                        </div>
+                    )}
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || <NumberedName side="aka" clip {...akaTeamParts} />}</div>
                     {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="aka" clip {...akaTeamParts} /></div>}
+                    {isTeamMatch && (
+                        <div data-testid="headline-ivpw-aka" style={{ display: "flex", gap: "1.4vw", justifyContent: "flex-end", fontSize: "2vh", fontWeight: 700, color: "#b91c1c", marginTop: "0.6vh" }}>
+                            <span><abbr className="msb-lab" title="Points Won" style={{ display: "inline", fontSize: "0.7em" }}>PW</abbr> {pwAka}</span>
+                            <span><abbr className="msb-lab" title="Individual Victories" style={{ display: "inline", fontSize: "0.7em" }}>IV</abbr> {ivAka}</span>
+                        </div>
+                    )}
                 </div>
             </div>
 
             {/* Shared FIK scoreboard (match_scoreboard.jsx): the SAME component
-                the viewer card uses; variant="tv" only scales it up. Up-next
+                the viewer card uses. On the card (viewer) variant="tv" only
+                scales it up; on THIS board (variant="tv") it also suppresses
+                its own §277 summary row, because the team-name row above now
+                carries the pairing and each side's IV/PW (bc-lbty operator
+                decision 2026-09-19: the two rows duplicated the team name, and
+                the summary row was the redundant one, not the headline). Up-next
                 matches have no bouts yet: TeamScoreboard renders numbered/roster
                 rows (mp-13y #6) so the board reads as a real scoreboard rather
                 than an empty grid. */}
@@ -166,8 +208,7 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                         teamSize={teamSize} showDH={showDH} variant="tv"
                         isRunning={promoted.match?.status === "running"}
                         shiroName={shiroTeamParts.name} akaName={akaTeamParts.name}
-                        matchSideA={promoted.match.sideA?.name || (typeof promoted.match.sideA === "string" ? promoted.match.sideA : "")}
-                        matchSideB={promoted.match.sideB?.name || (typeof promoted.match.sideB === "string" ? promoted.match.sideB : "")}
+                        matchSideA={matchSideA} matchSideB={matchSideB}
                         squadA={squadA} squadB={squadB}
                         numberA={promoted.match.sideA?.number || ""} numberB={promoted.match.sideB?.number || ""}
                         kachinuki={teamMatchTypeFor(promoted.competition) === "kachinuki"} />
@@ -185,8 +226,8 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <NextPair
-                        shiro={sideLabel(next.sideB, next._comp?.withZekkenName, "shiro")}
-                        aka={sideLabel(next.sideA, next._comp?.withZekkenName, "aka")}
+                        shiro={<NumberedName side="shiro" {...sideLabelParts(next.sideB, next._comp?.withZekkenName)} />}
+                        aka={<NumberedName side="aka" {...sideLabelParts(next.sideA, next._comp?.withZekkenName)} />}
                         style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh", fontWeight: 600 }}
                     />
                 </div>
@@ -309,14 +350,21 @@ function findNextPoolOnCourt(competition, currentPoolName, court) {
     // roster of names (operator ruling 2026-09-14, bc-dnst: a roster coloured
     // by each name's first side did not say which bouts were coming). All of
     // the pool's matches in the comp, not just this court's: a pool's bouts
-    // are fixed, the courts list is just routing. Labels go through sideLabel
-    // (number on the outer side + zekken displayName) like every other TV
-    // surface; a side still to be resolved reads "TBD".
+    // are fixed, the courts list is just routing. Labels render as NumberedName
+    // chips off sideLabelParts (number on the outer side + zekken displayName),
+    // matching the main scoreboard row above (operator decision 2026-09-19,
+    // bc-lbty: the NEXT strip now chips its number everywhere for visual
+    // consistency, rather than the bare-string form this used to call sideLabel
+    // for); a side still to be resolved reads "TBD".
     const zekken = !!competition.withZekkenName;
     const bouts = competition.poolMatches
         .filter(m => poolNameOf(m.id) === nextName)
         .sort(compareByRunOrder)
-        .map(m => ({ id: m.id, shiro: sideLabel(m.sideB, zekken, "shiro"), aka: sideLabel(m.sideA, zekken, "aka") }));
+        .map(m => ({
+            id: m.id,
+            shiro: <NumberedName side="shiro" {...sideLabelParts(m.sideB, zekken)} />,
+            aka: <NumberedName side="aka" {...sideLabelParts(m.sideA, zekken)} />,
+        }));
     return { name: nextName, bouts };
 }
 
@@ -508,8 +556,8 @@ function TvIndividualBoard({ tournament, court, linkState = 'connected', promote
                 <div style={{ display: "flex", alignItems: "center", gap: "1.5vw", borderTop: "1px dashed #d1d5db", paddingTop: "1.6vh", marginTop: "1.6vh" }}>
                     <span style={{ fontSize: "1.8vh", letterSpacing: "0.12em", color: "var(--ink-3)", fontWeight: 700 }}>NEXT</span>
                     <NextPair
-                        shiro={sideLabel(next.sideB, next._comp?.withZekkenName ?? zekken, "shiro")}
-                        aka={sideLabel(next.sideA, next._comp?.withZekkenName ?? zekken, "aka")}
+                        shiro={<NumberedName side="shiro" {...sideLabelParts(next.sideB, next._comp?.withZekkenName ?? zekken)} />}
+                        aka={<NumberedName side="aka" {...sideLabelParts(next.sideA, next._comp?.withZekkenName ?? zekken)} />}
                         style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: "2.6vh", fontWeight: 600 }}
                     />
                 </div>

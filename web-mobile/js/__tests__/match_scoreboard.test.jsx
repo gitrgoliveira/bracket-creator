@@ -183,6 +183,42 @@ describe('match_scoreboard: teamIVPW', () => {
   });
 });
 
+// bc-lbty (Change 2): teamIVPWFrom is the extraction of TeamScoreboard's own
+// teamResult-vs-teamIVPW derivation, pulled out so the TV board's headline
+// IV/PW readout (display_scoreboard.jsx) and TeamScoreboard's own §277
+// summary row call the exact same function and can never disagree about
+// which source won. These two cases mirror "is the fallback: TeamScoreboard
+// prefers the server figure" / "derives locally..." above (which prove the
+// behaviour THROUGH TeamScoreboard), but pin the extracted function directly,
+// so a future caller of teamIVPWFrom is covered even where it is not
+// TeamScoreboard.
+describe('match_scoreboard: teamIVPWFrom', () => {
+  let teamIVPWFrom;
+  beforeEach(async () => { vi.resetModules(); ({ teamIVPWFrom } = await import('../match_scoreboard.jsx')); });
+  afterEach(() => { vi.resetModules(); });
+
+  it('prefers the server-computed teamResult when present', () => {
+    const subResults = [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }];
+    // The bout log alone would derive ivShiro:1/pwShiro:1 (see the next test);
+    // the explicit server figure must win instead.
+    const result = teamIVPWFrom(
+      { shiroIV: 2, akaIV: 0, shiroPW: 5, akaPW: 1 },
+      subResults, 'Team A', 'Team B',
+    );
+    expect(result).toEqual({ ivShiro: 2, ivAka: 0, pwShiro: 5, pwAka: 1 });
+  });
+
+  it('falls back to teamIVPW when teamResult is absent', () => {
+    const subResults = [{ position: 1, sideA: 'Sato', sideB: 'Ito', winner: 'Ito', ipponsA: [], ipponsB: ['M'] }];
+    expect(teamIVPWFrom(undefined, subResults, 'Team A', 'Team B'))
+      .toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 1, pwAka: 0 });
+    // A non-object teamResult (e.g. a stale falsy 0/"" payload field) is
+    // treated the same as absent, not passed through.
+    expect(teamIVPWFrom(null, subResults, 'Team A', 'Team B'))
+      .toEqual({ ivShiro: 1, ivAka: 0, pwShiro: 1, pwAka: 0 });
+  });
+});
+
 // What the centre cell actually holds. Asserting that a `sub-row-hantei` testid
 // is absent would be VACUOUS: no production code emits a centre Ht any more, so
 // such an expectation can never fail and would not catch a reintroduction under
@@ -530,13 +566,22 @@ describe('match_scoreboard components', () => {
     expect(shiroSlots?.props?.className).toContain('msb-slots--win');
   });
 
+  // The number rides as a NumberedName chip, not a flat string baked into the
+  // cell (bc-dnst / bc-rvfx): collectText does not expand a function
+  // component (see the TeamScoreboard summary test below), so a swept-text
+  // assertion would quietly stop seeing it. Assert the HANDOVER instead: the
+  // vnode the cell passes its name/number/side to.
+  const handedOverParts = (cell) =>
+    findInTree(cell, n => n?.props?.name !== undefined && n?.props?.side !== undefined)?.props;
+
   it('IndividualScore places the assigned competitor number (numberPrefix) on the outer side when showNames is set', () => {
     // mp-13y / bc-dnst: when a competition has a numberPrefix configured, the
     // assigned number (e.g. "K1") is set on match.sideA.number /
     // match.sideB.number by AssignPlayerNumbers and surfaced via
     // normalizeMatch. The TV pool/round feed renders names with
     // showNames=true. Shiro's number sits BEFORE the name ("K1 Tanaka"),
-    // Aka's AFTER it ("Suzuki K2") — operator ruling 2026-09-14.
+    // Aka's AFTER it ("Suzuki K2") — operator ruling 2026-09-14 — via
+    // NumberedName's own side-based placement, not a concatenated string.
     const match = {
       sideA: { name: 'Suzuki', number: 'K2' },
       sideB: { name: 'Tanaka', number: 'K1' },
@@ -545,8 +590,8 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(IndividualScore, { match, showNames: true });
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
-    expect(collectText(shiro)).toBe('K1 Tanaka');
-    expect(collectText(aka)).toBe('Suzuki K2');
+    expect(handedOverParts(shiro)).toMatchObject({ side: 'shiro', name: 'Tanaka', number: 'K1', clip: true });
+    expect(handedOverParts(aka)).toMatchObject({ side: 'aka', name: 'Suzuki', number: 'K2', clip: true });
   });
 
   it('IndividualScore degrades to the bare name when no number is set (non-numbered competition)', () => {
@@ -558,8 +603,8 @@ describe('match_scoreboard components', () => {
     const tree = runtime.mount(IndividualScore, { match, showNames: true });
     const shiro = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-shiro-name');
     const aka = findInTree(tree, n => n?.props?.['data-testid'] === 'indiv-aka-name');
-    expect(collectText(shiro)).toBe('Tanaka');
-    expect(collectText(aka)).toBe('Suzuki');
+    expect(handedOverParts(shiro)).toMatchObject({ side: 'shiro', name: 'Tanaka', number: '' });
+    expect(handedOverParts(aka)).toMatchObject({ side: 'aka', name: 'Suzuki', number: '' });
   });
 
   it('TeamScoreboard renders the IV/PW summary + one row per LINEUP POSITION (padding unplayed bouts)', () => {
@@ -670,6 +715,34 @@ describe('match_scoreboard components', () => {
     // clip is what keeps the chip out of the ellipsised run on both sides.
     expect(shiro.props.clip).toBeTruthy();
     expect(aka.props.clip).toBeTruthy();
+  });
+
+  it('TeamScoreboard suppresses its own §277 summary row on the TV board (variant="tv"), keeps it on the card (bc-lbty)', () => {
+    // Change 3(a): the TV board's own headline row (display_scoreboard.jsx)
+    // now carries the pairing AND each side's IV/PW, so TeamScoreboard's own
+    // summary row would only repeat the team name a second time there. The
+    // card variant (viewer_match.jsx) has no such headline row -- its own
+    // comment records that its separate name row was already removed -- so
+    // the summary row stays there as the ONLY thing showing the pairing.
+    const subResults = [{ position: 1, ipponsB: ['M'], ipponsA: [] }];
+    const base = {
+      subResults, lineupA: null, lineupB: null, teamSize: 5, showDH: false,
+      shiroName: 'White Team', akaName: 'Red Team',
+    };
+    const tvTree = runtime.mount(TeamScoreboard, { ...base, variant: 'tv' });
+    expect(findInTree(tvTree, n => n?.props?.['data-testid'] === 'team-summary')).toBeNull();
+
+    const cardTree = runtime.mount(TeamScoreboard, { ...base, variant: 'card' });
+    expect(findInTree(cardTree, n => n?.props?.['data-testid'] === 'team-summary')).toBeTruthy();
+
+    // No variant at all (the viewer card's own call site) must behave like
+    // "card": the summary row is the default, not an opt-in.
+    const noVariantTree = runtime.mount(TeamScoreboard, base);
+    expect(findInTree(noVariantTree, n => n?.props?.['data-testid'] === 'team-summary')).toBeTruthy();
+
+    // The rest of the board (bout rows) is unaffected by the variant either way.
+    expect(boutRows(tvTree).length).toBe(5);
+    expect(boutRows(cardTree).length).toBe(5);
   });
 
   it('a DRAWN team encounter leaves the summary centre bare (the mark is the drawn BOUT\'s)', () => {

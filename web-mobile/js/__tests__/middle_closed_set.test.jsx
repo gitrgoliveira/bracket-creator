@@ -96,12 +96,19 @@ describe('the middle is a closed set, and never a side result mark', () => {
     expect(sawMiddle).toBe(true);
   });
 
-  // matchStateCell returns the middle for a live match, but for a COMPLETED one
-  // it returns the score STRING (matchScoreStr), which legitimately carries
-  // side marks — a hantei's "Ht" rides beside its winner there. So the middle
-  // rule applies to the non-completed statuses; the completed shape is covered
-  // by the score-string sweep above. Asserting "no Ht" across all statuses (the
-  // first version of this test) only passed because it never fed one in.
+  // matchStateCell returns the middle for a live INDIVIDUAL match, but for a
+  // COMPLETED one it returns the score STRING (matchScoreStr), which
+  // legitimately carries side marks — a hantei's "Ht" rides beside its
+  // winner there. So the pure-middle rule applies to every non-completed
+  // status, RUNNING included: matchStateCell's one production caller
+  // (PoolNumberedMatchRow, viewer_standings.jsx) places this value literally
+  // BETWEEN the two competitor name cells, and a running match's score is
+  // never attributable to a settled winner the way a completed one is, so a
+  // running individual match keeps the bare middle even after bc-cse (see the
+  // team-match test below for what DOES go live while running, and the
+  // comment on matchStateCell itself for why the two statuses diverge).
+  // Asserting "no Ht" across all statuses (the first version of this test)
+  // only passed because it never fed one in.
   it('matchStateCell yields a pure middle value until the match completes', () => {
     for (const status of ['scheduled', 'running', '', undefined]) {
       for (const decision of DECISIONS) {
@@ -111,5 +118,21 @@ describe('the middle is a closed set, and never a side result mark', () => {
         }
       }
     }
+  });
+
+  // bc-cse: the one exception to the "pure middle until completed" rule
+  // above is a RUNNING TEAM match, whose live IV/PW aggregate is never a
+  // side mark (no Ht/Kiken/Fus. can appear in a plain count), so there is no
+  // closed-set risk in showing it early. This is the direct regression guard
+  // for the underlying bug (a running team encounter showed nothing) without
+  // reopening the individual-match risk above.
+  it('a running TEAM match is the one case that goes live before completion', () => {
+    const m = {
+      status: 'running', decision: '', encho: null,
+      teamResult: { shiroIV: 1, akaIV: 0, shiroPW: 2, akaPW: 1 },
+    };
+    const cell = matchStateCell(m);
+    expect(cell).toBe('IV 1–0\nPW 2–1');
+    expect(MIDDLE).not.toContain(cell);
   });
 });

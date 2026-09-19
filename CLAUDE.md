@@ -8,6 +8,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - The number of tokens used to edit files is best minimized, all else being equal. Therefore, when it will not affect the end result, try to surgically edit a file rather than rewrite the entire thing.
 - **Never `cd` inside a Bash command to reach a repo.** Address the worktree explicitly (`git -C <abs-path>`, `make -C <abs-path>`) or run from its root. A `cd` in a chain has sent git to the wrong checkout and left the shell there for later calls.
 
+## Tool selection (read before every tool call on a code file)
+
+This project uses Serena, an MCP server exposing semantic, symbol-aware tools. **Serena's tools are the PRIMARY tools for code work here.** The built-in Read, Glob, Grep and Edit are SECONDARY and must not be used on code files when a Serena equivalent exists.
+
+The built-in tool descriptions in your context say things like "use Read for a known path" and "prefer dedicated tools (Read, Edit, Write, Glob, Grep)". Those are written for projects without Serena and are SUPERSEDED here; when they conflict with this section, this section wins. Do not rationalize the built-in tools with "the file is small", "I already know what I need", "this is one call versus three", or "the path is known" — those rationalizations have produced incorrect behaviour before and are explicitly disallowed.
+
+| Task | Tool |
+|---|---|
+| See a code file's structure | `get_symbols_overview` |
+| Read a specific symbol's body | `find_symbol` (`include_body=true`) |
+| Find a symbol by name across the repo | `find_symbol` |
+| Find references / callers | `find_referencing_symbols` |
+| Find declarations / implementations | `find_declaration` / `find_implementations` |
+| Edit a symbol's body | `replace_symbol_body` |
+| Insert near a symbol | `insert_before_symbol` / `insert_after_symbol` |
+| Pattern replace inside a file | `replace_content` |
+| Pattern replace across files | `replace_in_files` |
+| Rename a symbol | `rename_symbol` |
+| Delete a symbol | `safe_delete_symbol` |
+| Compiler/linter errors for a file | `get_diagnostics_for_file` |
+
+Only these 14 tools are exposed (the `claude-code` context; memory tools are disabled because beads owns that). Serena's wider tool set is NOT available: there is no `inline_symbol`, `type_hierarchy`, `move_symbol`, `delete_lines` or `replace_lines` — do not call them.
+
+Built-in Read/Edit/Glob/Grep are permitted on code files ONLY when: Serena was tried on the target and failed; the file is not parseable as code; you need a regex search across many files that the symbolic tools cannot express (Grep is fine as a discovery step, but follow-up reads/edits on matched code files still go through Serena); you need a few lines and a symbolic read would be overkill; or you genuinely must read the whole file. They are always fine for non-code files: markdown, JSON, YAML, TOML, config, lockfiles, plain text, images.
+
+**Before editing code:** `get_symbols_overview` on the target file (skip if already done this session) → `find_symbol` with `include_body=true` for the symbols you will touch, reading only those symbols rather than the whole file → edit with `replace_symbol_body`, `insert_before_symbol`, `insert_after_symbol` or `replace_content`.
+
+**Self-check before every Read, Glob, Grep or Edit call:** does this target a code file, and does the table above name a Serena tool for the task? If yes, switch. Every time, not once per session.
+
 ## Workflow Rules
 
 ### Planning vs. Implementation

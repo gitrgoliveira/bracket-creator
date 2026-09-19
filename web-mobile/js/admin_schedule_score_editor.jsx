@@ -201,6 +201,15 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "-"}</div>
+                {/* The match number is how the app names a knockout match to the
+                    operator everywhere else -- the bracket, the printed tree, and
+                    the correction dialogs, which say "Match 3". Without it here,
+                    a dialog naming a match sent the operator to a list that
+                    identified its rows only by time and competitors. Pool matches
+                    carry no number and show none. */}
+                {m.phase === "bracket" && m.matchNumber > 0 && (
+                  <div className="score-edit-row__matchno">Match {m.matchNumber}</div>
+                )}
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
               </div>
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />

@@ -50,7 +50,7 @@ describe('attemptScoreWrite (bc-kcdg)', () => {
     const recordScore = vi.fn()
       .mockRejectedValueOnce(downstreamError())
       // The server reports what it actually reopened on the write's response.
-      .mockResolvedValueOnce({ id: 'm1', status: 'completed', reopenedMatchIds: ['m5'] });
+      .mockResolvedValueOnce({ id: 'm1', status: 'completed', reopenedMatches: [{ id: 'm5', number: 5 }] });
     const confirmDialog = vi.fn().mockResolvedValue(true);
     const originalResult = { status: 'completed' };
 
@@ -63,7 +63,7 @@ describe('attemptScoreWrite (bc-kcdg)', () => {
     // refusal happened to name.
     expect(res).toEqual({
       id: 'm1', status: 'completed',
-      reopenedMatchIds: ['m5'], downstreamReopened: ['m5'],
+      reopenedMatches: [{ id: 'm5', number: 5 }], downstreamReopened: [{ id: 'm5', number: 5 }],
     });
     expect(confirmDialog).toHaveBeenCalledTimes(1);
     // The dialog must name the blocking match and the displaced competitor
@@ -142,11 +142,11 @@ describe('attemptScoreWrite reports the server, not its own guess', () => {
     e.downstreamKnockoutPlayed = { matchId: 'm1', blockingMatchId: 'm5', displaced: 'Aoki Taro' };
     const recordScore = vi.fn()
       .mockRejectedValueOnce(e)
-      .mockResolvedValueOnce({ id: 'm1', status: 'completed', reopenedMatchIds: ['m-bronze', 'm5'] });
+      .mockResolvedValueOnce({ id: 'm1', status: 'completed', reopenedMatches: [{ id: 'm-bronze', number: 4 }, { id: 'm5', number: 5 }] });
     const res = await attemptScoreWrite({
       recordScore, confirmDialog: vi.fn().mockResolvedValue(true),
       compId: 'c1', matchId: 'm1', result: { status: 'completed' }, password: 'pw', match: null,
     });
-    expect(res.downstreamReopened).toEqual(['m-bronze', 'm5']);
+    expect(res.downstreamReopened).toEqual([{ id: 'm-bronze', number: 4 }, { id: 'm5', number: 5 }]);
   });
 });

@@ -545,6 +545,21 @@ const (
 // (force=false, no reopen list wanted). Only the two callers that need to
 // offer an operator override (the score-write and override-winner HTTP
 // handlers) pass one.
+// ReopenedMatch identifies a match a forced correction reopened: its id, for
+// broadcasts and for anything addressing the match, and its MATCH NUMBER, which
+// is what the operator is shown.
+//
+// The two travel together rather than as parallel slices because only the
+// number is meaningful to a person: "m-r2-0" is an internal id that appears
+// nowhere on the operator's screens, while "Match 3" is the label on the score
+// sheet, the bracket and the Excel tree. Number is 0 for a match that never got
+// one (a bye placeholder, or a bracket saved before numbering existed), and a
+// caller showing it must fall back rather than print "Match 0".
+type ReopenedMatch struct {
+	ID     string
+	Number int
+}
+
 type ForceOptions struct {
 	// Force bypasses the downstream-knockout-correction guard
 	// (DownstreamKnockoutPlayedError): when a forward-policy completed write
@@ -559,7 +574,7 @@ type ForceOptions struct {
 	// bracket match reopened by a forced correction (empty when Force is
 	// false, or when nothing needed reopening). The caller uses it to
 	// broadcast match_updated for each one, not just the corrected match.
-	Reopened *[]string
+	Reopened *[]ReopenedMatch
 }
 
 // firstForceOptions returns the caller's ForceOptions, or the zero value
@@ -600,7 +615,7 @@ func firstForceOptions(opts []ForceOptions) ForceOptions {
 // match).
 // force (bc-kcdg) reaches ONLY the bracket branch's downstream-knockout-
 // correction guard; the pool branch has no equivalent concept and ignores it.
-func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool) (mismatch bool, reopened []string, err error) {
+func (e *Engine) writeToPoolOrBracket(h state.StoreTx, compId, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool) (mismatch bool, reopened []ReopenedMatch, err error) {
 	var superseded bool
 	perr := e.withPoolMatch(h, compId, matchId, func(r *state.MatchResult) error {
 		// The POOL branch of the path POST /score and the bulk-score endpoint
@@ -1946,8 +1961,8 @@ func markTiedStandingsLeague(comp *state.Competition, sorted []state.PlayerStand
 // step amplified the risk because it mutates ADJACENT bracket cells
 // (the next-round match), so a concurrent save with a stale view
 // could clobber another operator's propagation too.
-func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool) ([]string, error) {
-	var reopened []string
+func (e *Engine) recordBracketMatchResult(h state.StoreTx, compId string, matchId string, result *state.MatchResult, policy matchWritePolicy, force bool) ([]ReopenedMatch, error) {
+	var reopened []ReopenedMatch
 	err := h.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		var ierr error
 		reopened, ierr = e.applyBracketResultIn(bracket, compId, matchId, result, policy, force)
@@ -2280,7 +2295,7 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 // propagation have landed, requeues the ONE downstream match the correction
 // would otherwise have silently repainted; its id is returned so the caller
 // can broadcast match_updated for it.
-func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool) ([]string, error) {
+func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool) ([]ReopenedMatch, error) {
 	if bracket == nil {
 		return nil, notFoundErrorf("bracket not found for competition %s", compID)
 	}
@@ -2335,7 +2350,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			// Propagate only a genuinely completed result. A "running" update is
 			// for live-status display, so the next round's SideA/SideB must stay
 			// empty until the match has a final result.
-			var reopened []string
+			var reopened []ReopenedMatch
 			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				if force && policy == matchWriteForward &&
@@ -2496,11 +2511,11 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // (operator ruling 2026-09-19: "no changes in the queue necessary if the
 // matches were already played"). It carries its own audit note rather than
 // owing one -- see downstreamReopenReason.
-func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []string {
-	var reopened []string
+func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []ReopenedMatch {
+	var reopened []ReopenedMatch
 	for _, m := range firstDownstreamWithOwnResult(bracket, rIdx, mIdx) {
 		reopenBracketMatch(m, downstreamReopenReason(correctedID))
-		reopened = append(reopened, m.ID)
+		reopened = append(reopened, ReopenedMatch{ID: m.ID, Number: m.MatchNumber})
 	}
 	return reopened
 }
@@ -2635,15 +2650,15 @@ func bracketWinnerChanged(bm *state.BracketMatch, result *state.MatchResult, pol
 // re-fought result propagates, and that write is a genuine winner change which
 // raises this again.
 func newDownstreamKnockoutPlayedError(bm *state.BracketMatch, blocking []*state.BracketMatch, mIdx int) *DownstreamKnockoutPlayedError {
-	ids := make([]string, 0, len(blocking))
+	blocked := make([]ReopenedMatch, 0, len(blocking))
 	for _, b := range blocking {
-		ids = append(ids, b.ID)
+		blocked = append(blocked, ReopenedMatch{ID: b.ID, Number: b.MatchNumber})
 	}
 	return &DownstreamKnockoutPlayedError{
-		MatchID:          bm.ID,
-		BlockingMatchID:  ids[0],
-		BlockingMatchIDs: ids,
-		Displaced:        displacedCompetitor(bm, blocking[0], mIdx),
+		MatchID:         bm.ID,
+		BlockingMatchID: blocked[0].ID,
+		Blocking:        blocked,
+		Displaced:       displacedCompetitor(bm, blocking[0], mIdx),
 	}
 }
 
@@ -2919,7 +2934,7 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 // Reopened field, when non-nil, is populated with their IDs.
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64, opts ...ForceOptions) (bool, error) {
 	fo := firstForceOptions(opts)
-	var reopened []string
+	var reopened []ReopenedMatch
 	err := e.store.UpdateBracket(compId, func(bracket *state.Bracket) error {
 		if bracket == nil {
 			return notFoundErrorf("bracket not found for competition %s", compId)

@@ -159,7 +159,7 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 			// bc-kcdg: reopenedDownstream collects the IDs of any downstream
 			// bracket match reopened by a forced correction, populated only
 			// when req.ForceDownstreamReopen actually unblocked one.
-			reopenedDownstream []string
+			reopenedDownstream []engine.ReopenedMatch
 		)
 		// A stamp implausibly far in the server's future is refused outright,
 		// before the transaction opens, exactly as PUT /score refuses one: a
@@ -336,8 +336,8 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 		// just corrected; broadcast it too so a client watching only that
 		// court/match learns its verdict was cleared (mirrors /score,
 		// /override-winner, and /quick-score).
-		for _, reopenedID := range reopenedDownstream {
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopenedID})
+		for _, reopened := range reopenedDownstream {
+			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
 		}
 		if status != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{

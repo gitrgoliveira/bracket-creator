@@ -118,28 +118,45 @@ type DownstreamKnockoutPlayedError struct {
 	// BlockingMatchID is the FIRST blocking match (bronze before the next
 	// round), kept as the single-value form every existing consumer reads.
 	BlockingMatchID string
-	// BlockingMatchIDs is every match this correction is blocked on, one hop
-	// down and closed with a result of its own. Almost always one; a semifinal
-	// feeds both the final and the bronze match, so it can be two, and both are
-	// cleared by the one confirmation that names them (see
-	// newDownstreamKnockoutPlayedError for why they cannot be split).
-	BlockingMatchIDs []string
+	// Blocking is every match this correction is blocked on, one hop down and
+	// closed with a result of its own, each with the MATCH NUMBER the operator
+	// knows it by. Almost always one; a semifinal feeds both the final and the
+	// bronze match, so it can be two, and both are cleared by the one
+	// confirmation that names them (see newDownstreamKnockoutPlayedError for
+	// why they cannot be split).
+	Blocking []ReopenedMatch
 	// Displaced is the corrected match's currently stored winner name -- the
 	// competitor the correction would knock out of BlockingMatchID.
 	Displaced string
 }
 
 func (e *DownstreamKnockoutPlayedError) Error() string {
-	blocked := e.BlockingMatchID
-	if len(e.BlockingMatchIDs) > 1 {
-		blocked = strings.Join(e.BlockingMatchIDs, " and ")
+	labels := make([]string, 0, len(e.Blocking))
+	for _, b := range e.Blocking {
+		labels = append(labels, MatchLabel(b))
 	}
-	return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and send %s back to the queue to be fought again",
+	blocked := e.BlockingMatchID
+	if len(labels) > 0 {
+		blocked = strings.Join(labels, " and ")
+	}
+	return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s to be fought again",
 		e.MatchID, blocked, e.Displaced, blocked)
 }
 
 func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 	return target == ErrDownstreamKnockoutPlayed
+}
+
+// MatchLabel names a match the way the OPERATOR sees it: "Match 3", the label
+// on the score sheet, the bracket and the Excel tree sheet. Falls back to the
+// internal id only when a match carries no number (a bye placeholder, or a
+// bracket saved before numbering existed), because a bare id is still better
+// than "Match 0" -- but it is a fallback, not the normal case.
+func MatchLabel(m ReopenedMatch) string {
+	if m.Number > 0 {
+		return fmt.Sprintf("Match %d", m.Number)
+	}
+	return m.ID
 }
 
 // ErrSwissExportUnsupported is returned by Engine.ExportCompetitionXlsx (and

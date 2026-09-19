@@ -142,13 +142,13 @@ function _downstreamKnockoutPlayedError(body) {
     err.downstreamKnockoutPlayed = {
         matchId: body.matchId,
         blockingMatchId: body.blockingMatchId,
-        // Every match the confirmation will clear. One, except when a
-        // semifinal fed both the final and the bronze match. Falls back to the
-        // single-value field so a server that predates the list still names
-        // the match it is about to touch.
-        blockingMatchIds: body.blockingMatchIds && body.blockingMatchIds.length
-            ? body.blockingMatchIds
-            : (body.blockingMatchId ? [body.blockingMatchId] : []),
+        // Every match the confirmation will clear, each as {id, number}: the
+        // NUMBER is what the operator is shown ("Match 3"), the id only
+        // addresses it. One entry, except when a semifinal fed both the final
+        // and the bronze match.
+        blockingMatches: body.blockingMatches && body.blockingMatches.length
+            ? body.blockingMatches
+            : (body.blockingMatchId ? [{ id: body.blockingMatchId }] : []),
         displaced: body.displaced,
     };
     return err;

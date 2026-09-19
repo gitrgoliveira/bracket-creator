@@ -1417,7 +1417,7 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
         .mockRejectedValueOnce(downstreamError())
         // The server reports what it actually reopened; the client never
         // infers it from the refusal it was shown.
-        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatchIds: ['m5'] }),
+        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatches: [{ id: 'm5', number: 5 }] }),
     };
     window.confirmDialog = vi.fn().mockResolvedValue(true);
 
@@ -1430,7 +1430,8 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     // operator can be told rather than left to read the board.
     expect(result).toEqual({
       winner: 'Aoki Taro', status: 'completed',
-      reopenedMatchIds: ['m5'], downstreamReopened: ['m5'],
+      reopenedMatches: [{ id: 'm5', number: 5 }],
+      downstreamReopened: [{ id: 'm5', number: 5 }],
     });
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     const dialogArg = window.confirmDialog.mock.calls[0][0];
@@ -1490,7 +1491,7 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
         .mockRejectedValueOnce(downstreamError())
         // The server reports what it actually reopened; the client never
         // infers it from the refusal it was shown.
-        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatchIds: ['m5'] }),
+        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatches: [{ id: 'm5', number: 5 }] }),
     };
     window.confirmDialog = vi.fn().mockResolvedValue(true);
 

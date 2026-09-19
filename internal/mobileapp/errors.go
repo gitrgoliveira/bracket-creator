@@ -170,7 +170,7 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 // respondIfDownstreamKnockoutPlayed answers engine.DownstreamKnockoutPlayedError
 // (bc-kcdg) with the ONE fixed wire contract every knockout-correction write
 // shares -- HTTP 409 {"error":"downstream_knockout_played","matchId",
-// "blockingMatchId","blockingMatchIds","displaced","message"} -- and reports whether it
+// "blockingMatchId","blockingMatches","displaced","message"} -- and reports whether it
 // answered, so the caller's switch can fall through to its own remaining
 // arms exactly like the other respondIf* helpers in this file.
 //
@@ -197,11 +197,25 @@ func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
 		// Every blocked match, so the dialog can name what it will clear. One
 		// entry except for a semifinal, which feeds the final AND the bronze
 		// match; blockingMatchId stays as the first for older clients.
-		"blockingMatchIds": downstreamPlayedErr.BlockingMatchIDs,
-		"displaced":        downstreamPlayedErr.Displaced,
-		"message":          downstreamPlayedErr.Error(),
+		// Each blocked match with the number the operator knows it by; the id
+		// rides along for addressing, never for display.
+		"blockingMatches": blockedMatchesPayload(downstreamPlayedErr.Blocking),
+		"displaced":       downstreamPlayedErr.Displaced,
+		"message":         downstreamPlayedErr.Error(),
 	})
 	return true
+}
+
+// blockedMatchesPayload renders the blocked matches for the wire: id for
+// addressing, number for the operator. A number of 0 means the match never got
+// one (a bye placeholder, or a pre-numbering bracket); the client falls back to
+// the id there rather than printing "Match 0".
+func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
+	out := make([]map[string]any, 0, len(blocking))
+	for _, b := range blocking {
+		out = append(out, map[string]any{"id": b.ID, "number": b.Number})
+	}
+	return out
 }
 
 // respondIfDownstreamKnockoutScored answers engine.DownstreamKnockoutScoredError

@@ -29,6 +29,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// reopenedIDs pulls the ids out of what a forced correction reopened, so an
+// assertion reads as a list of matches rather than of structs. The NUMBER each
+// carries is what the operator is shown; it is asserted where that matters
+// (TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber).
+func reopenedIDs(rs []ReopenedMatch) []string {
+	out := make([]string, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, r.ID)
+	}
+	return out
+}
+
 // readCompFile reads a competition data file straight off disk, mirroring
 // superseded_matrix_test.go's footprint assertion (dir comes from
 // setupTestEngine's third return value).
@@ -88,7 +100,7 @@ func TestDownstreamKnockoutCorrection_RefusedByDefault(t *testing.T) {
 	require.NoError(t, err)
 	verBefore := store.FileVersion(compID, "bracket.json")
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{Reopened: &reopened})
 		return err
@@ -115,14 +127,14 @@ func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	compID := "kcdg-force"
 	seedThreeRoundBracket(t, store, compID)
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed override"),
 			ForceOptions{Force: true, Reopened: &reopened})
 		return err
 	})
 	require.NoError(t, txErr)
-	assert.Equal(t, []string{"m-r2-0"}, reopened,
+	assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened),
 		"ONE HOP: the next match only. The round beyond it is asked about in its own turn, "+
 			"when the re-fought result propagates into it (operator ruling 2026-09-19).")
 
@@ -186,7 +198,7 @@ func TestDownstreamKnockoutCorrection_WinnerUnchangedStillApplies(t *testing.T) 
 		Winner: "Alice", IpponsA: []string{"M", "M"},
 		Status: state.MatchStatusCompleted, CorrectionReason: "extra ippon noted",
 	}
-	var reopened []string
+	var reopened []ReopenedMatch
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", result, ForceOptions{Reopened: &reopened})
 		return err
@@ -228,7 +240,7 @@ func TestDownstreamKnockoutCorrection_ByeDoesNotBlock(t *testing.T) {
 	}
 	require.NoError(t, store.SaveBracket(compID, b))
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{Reopened: &reopened})
 		return err
@@ -318,7 +330,7 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 	// (Bob won it), and this correction's loser-to-bronze feed would try to
 	// send Alice (the current loser) into bronze's SideA in place of Bob.
 	t.Run("refused without force", func(t *testing.T) {
-		var reopened []string
+		var reopened []ReopenedMatch
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{Reopened: &reopened})
 			return err
@@ -330,7 +342,7 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 	})
 
 	t.Run("force clears BOTH siblings the semifinal fed", func(t *testing.T) {
-		var reopened []string
+		var reopened []ReopenedMatch
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed"),
 				ForceOptions{Force: true, Reopened: &reopened})
@@ -345,7 +357,7 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 		// sibling would sit contradicting itself forever. Confirmed against the
 		// running app before this test was written -- re-saving the same
 		// correction returned 200 with the final still showing the old winner.
-		assert.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, reopened)
+		assert.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, reopenedIDs(reopened))
 
 		got, err := store.LoadBracket(compID)
 		require.NoError(t, err)
@@ -365,7 +377,7 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 		})
 		var dkErr *DownstreamKnockoutPlayedError
 		require.ErrorAs(t, txErr, &dkErr)
-		assert.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, dkErr.BlockingMatchIDs,
+		assert.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, reopenedIDs(dkErr.Blocking),
 			"the operator must be told about everything the confirmation will clear")
 		assert.Equal(t, "m-bronze", dkErr.BlockingMatchID, "single-value form stays the first")
 	})
@@ -381,7 +393,7 @@ func TestDownstreamKnockoutCorrection_ForceWithUnchangedWinnerClearsNothing(t *t
 	compID := "kcdg-force-same-winner"
 	seedThreeRoundBracket(t, store, compID)
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
 		// Same winner as stored (Alice), just a tidied scoreline.
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", &state.MatchResult{
@@ -405,7 +417,7 @@ func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
 	seedThreeRoundBracket(t, store, compID)
 
 	t.Run("refused without force", func(t *testing.T) {
-		var reopened []string
+		var reopened []ReopenedMatch
 		applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Bob", 0, ForceOptions{Reopened: &reopened})
 		var dkErr *DownstreamKnockoutPlayedError
 		require.ErrorAs(t, err, &dkErr)
@@ -419,11 +431,11 @@ func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
 	})
 
 	t.Run("force applies and reopens the chain", func(t *testing.T) {
-		var reopened []string
+		var reopened []ReopenedMatch
 		applied, err := eng.OverrideBracketWinner(compID, "m-r1-0", "Bob", 0, ForceOptions{Force: true, Reopened: &reopened})
 		require.NoError(t, err)
 		assert.True(t, applied)
-		assert.Equal(t, []string{"m-r2-0"}, reopened, "one hop, same as the score-write door")
+		assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened), "one hop, same as the score-write door")
 
 		b, lerr := store.LoadBracket(compID)
 		require.NoError(t, lerr)
@@ -466,7 +478,7 @@ func TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks(t *testing.T) {
 		},
 	}))
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{Reopened: &reopened})
 		return err
@@ -483,7 +495,7 @@ func TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks(t *testing.T) {
 			ForceOptions{Force: true, Reopened: &reopened})
 		return err
 	}))
-	assert.Equal(t, []string{"m-r2-0"}, reopened)
+	assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened))
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
@@ -507,13 +519,13 @@ func TestDownstreamKnockoutCorrection_OneHopPerConfirmation(t *testing.T) {
 
 	// Hop 1: force-correct m-r1-0. ONLY m-r2-0 is requeued; the final is not
 	// touched yet and keeps the result it holds.
-	var reopened []string
+	var reopened []ReopenedMatch
 	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed override"),
 			ForceOptions{Force: true, Reopened: &reopened})
 		return err
 	}))
-	assert.Equal(t, []string{"m-r2-0"}, reopened, "one hop: the next match only")
+	assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened), "one hop: the next match only")
 
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -546,7 +558,7 @@ func TestDownstreamKnockoutCorrection_OneHopPerConfirmation(t *testing.T) {
 			ForceOptions{Force: true, Reopened: &reopened})
 		return err
 	}))
-	assert.Equal(t, []string{"m-r3-0"}, reopened)
+	assert.Equal(t, []string{"m-r3-0"}, reopenedIDs(reopened))
 
 	b, err = store.LoadBracket(compID)
 	require.NoError(t, err)
@@ -581,7 +593,7 @@ func TestDownstreamKnockoutCorrection_StaleWriteReportsSupersededNotGuard(t *tes
 	stale := correctR1ToBob("fix")
 	stale.ModifiedAt = 5_000
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", stale, ForceOptions{Reopened: &reopened})
 		return err
@@ -677,14 +689,14 @@ func TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg(t *testing.T) {
 	})
 
 	t.Run("bc-kcdg force authorizes the write and surfaces Reopened", func(t *testing.T) {
-		var reopened []string
+		var reopened []ReopenedMatch
 		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
 			_, _, err := eng.RecordDecisionTxWithOptions(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "reason",
 				nil, false, ForceOptions{Force: true, Reopened: &reopened})
 			return err
 		})
 		require.NoError(t, txErr)
-		assert.Equal(t, []string{"m-r2-0"}, reopened,
+		assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened),
 			"the reopened downstream ids must reach the caller so it can broadcast match_updated for each")
 
 		b, err := store.LoadBracket(compID)
@@ -729,7 +741,7 @@ func TestDownstreamKnockoutCorrection_RunningDownstreamIsLeftAlone(t *testing.T)
 		},
 	}))
 
-	var reopened []string
+	var reopened []ReopenedMatch
 	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"),
 			ForceOptions{Reopened: &reopened})
@@ -829,7 +841,7 @@ func TestDownstreamKnockoutCorrection_DaihyosenSilentRescoreIsNotAWinnerChange(t
 
 	// A re-score that touches only the numbered bout and says NOTHING about
 	// the rep bout's verdict: exactly what the team editor sends.
-	var reopened []string
+	var reopened []ReopenedMatch
 	err := inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, e := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", &state.MatchResult{
 			ID: "m-r1-0", SideA: "TeamA", SideB: "TeamB",
@@ -874,4 +886,60 @@ func TestRecordDecisionTx_T103ForceDoesNotAuthorizeDownstreamClear(t *testing.T)
 	require.NoError(t, lerr)
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[1][0].Status, "and nothing downstream may be cleared")
 	assert.Equal(t, "Alice", b.Rounds[1][0].Winner)
+}
+
+// TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber pins the
+// identity the OPERATOR is shown. "m-r2-0" is an internal id that appears on no
+// operator screen: the scores list, the bracket and the Excel tree all say
+// "Match 3". A refusal or a notice naming the id sends the operator looking for
+// something that is not in front of them (operator ruling 2026-09-19).
+func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-numbers"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg", Status: state.CompStatusKnockout,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M"}, MatchNumber: 1},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Alice", SideB: "Charlie", SideAID: "alice", SideBID: "charlie",
+					Winner: "Alice", WinnerID: "alice", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M", "M"}, MatchNumber: 3},
+			},
+		},
+	}))
+
+	// The refusal names the match by number, in the error text and in the
+	// structured field the client renders from.
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("fix"), ForceOptions{})
+		return err
+	})
+	var dkErr *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, txErr, &dkErr)
+	require.Len(t, dkErr.Blocking, 1)
+	assert.Equal(t, 3, dkErr.Blocking[0].Number, "the operator's label, not the id")
+	assert.Contains(t, dkErr.Error(), "Match 3")
+	assert.NotContains(t, dkErr.Error(), "m-r2-0", "the internal id must not be shown")
+
+	// And so does what the forced write reports back.
+	var reopened []ReopenedMatch
+	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed"),
+			ForceOptions{Force: true, Reopened: &reopened})
+		return err
+	}))
+	require.Len(t, reopened, 1)
+	assert.Equal(t, "m-r2-0", reopened[0].ID, "the id still travels, for addressing the match")
+	assert.Equal(t, 3, reopened[0].Number)
+	assert.Equal(t, "Match 3", MatchLabel(reopened[0]))
+
+	// A match with no number (a bye placeholder, or a pre-numbering bracket)
+	// falls back to the id rather than printing "Match 0".
+	assert.Equal(t, "m-x", MatchLabel(ReopenedMatch{ID: "m-x"}))
 }

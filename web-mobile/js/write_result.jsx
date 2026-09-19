@@ -143,6 +143,27 @@ export function notLandedBanner(res) {
     return null;
 }
 
+
+// matchLabel names a match the way the OPERATOR sees it: "Match 3", the label
+// on the scores list, the bracket and the printed tree. The internal id
+// ("m-r2-0") appears on no operator screen, so naming it there sends them
+// looking for something that is not in front of them (operator ruling
+// 2026-09-19). Falls back to the id only when a match carries no number -- a
+// bye placeholder, or a bracket saved before numbering existed -- because a
+// bare id still beats "Match 0".
+export function matchLabel(m) {
+    if (!m) return '';
+    if (typeof m === 'string') return m;
+    return m.number > 0 ? `Match ${m.number}` : (m.id || '');
+}
+
+// matchLabelList joins several labels for a sentence: "Match 3 and Match 4".
+function matchLabelList(ms) {
+    const labels = (ms || []).map(matchLabel).filter(Boolean);
+    if (labels.length <= 1) return labels[0] || '';
+    return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 // downstreamKnockoutPlayedRefusal / downstreamKnockoutPlayedConfirm /
 // DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED (bc-kcdg / bc-cse).
 //
@@ -172,7 +193,7 @@ export function downstreamKnockoutPlayedRefusal(err) {
 // to be fought and re-entered (its recorded result is cleared). Cancelling
 // leaves everything as it was -- the caller must not retry on a
 // cancelled/false result, only on an explicit confirm.
-export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatchIds, displaced } = {}) {
+export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatches, displaced } = {}) {
     // The `displaced` default covers a shape the server genuinely sends: it is
     // the corrected match's STORED winner, and a bye-resolved slot is completed
     // with an empty winner, so a correction written over one arrives with
@@ -185,23 +206,21 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     // semifinal feeds both the final and the bronze match, and both go
     // together, so the dialog has to say so rather than naming one and
     // clearing two.
-    const ids = (blockingMatchIds && blockingMatchIds.length)
-        ? blockingMatchIds
-        : (blockingMatchId ? [blockingMatchId] : []);
-    const many = ids.length > 1;
-    const blocking = many
-        ? `${ids.slice(0, -1).join(', ')} and ${ids[ids.length - 1]}`
-        : (ids[0] || 'the later match');
+    const ms = (blockingMatches && blockingMatches.length)
+        ? blockingMatches
+        : (blockingMatchId ? [{ id: blockingMatchId }] : []);
+    const many = ms.length > 1;
+    const blocking = matchLabelList(ms) || 'the later match';
     // ONE paragraph, no newlines: the dialog renders `message` in a plain <p>
     // (ui.jsx) whose .dialog-msg rule sets no white-space, so a \n here
     // silently collapses to a space rather than breaking the line.
     return {
         message: many
-            ? `${who} already played matches ${blocking}, which were built on this match's current result. ` +
+            ? `${who} already played ${blocking}, which were built on this match's current result. ` +
               'Applying this correction reopens both for re-entry: their recorded results are cleared, ' +
               'and they must be fought and scored again.'
-            : `${who} already played match ${blocking}, which was built on this match's current result. ` +
-              `Applying this correction reopens match ${blocking} for re-entry: its recorded result is ` +
+            : `${who} already played ${blocking}, which was built on this match's current result. ` +
+              `Applying this correction reopens ${blocking} for re-entry: its recorded result is ` +
               'cleared, and it must be fought and scored again.',
         confirmLabel: 'Apply correction and reopen',
         danger: true,
@@ -230,12 +249,14 @@ export const DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED = 'Correction cancelled: the m
 // and this file's own notLandedBanner both use, so a caller passes it
 // straight into that channel rather than composing a third copy of the
 // who/blocking defaults downstreamKnockoutPlayedConfirm already states.
-export function downstreamKnockoutPlayedQueueDrop({ blockingMatchId, displaced } = {}) {
+export function downstreamKnockoutPlayedQueueDrop({ blockingMatchId, blockingMatches, displaced } = {}) {
     const who = displaced || 'The competitor currently recorded as advancing';
-    const blocking = blockingMatchId || 'the later match';
+    const blocking = matchLabelList(
+        (blockingMatches && blockingMatches.length) ? blockingMatches : (blockingMatchId ? [{ id: blockingMatchId }] : []),
+    ) || 'the later match';
     return {
-        reason: `${who} already played match ${blocking}, so this queued correction could not be applied automatically`,
-        advice: `Redo the correction now that you're online: you'll be asked to confirm reopening match ${blocking} for re-entry.`,
+        reason: `${who} already played ${blocking}, so this queued correction could not be applied automatically`,
+        advice: `Redo the correction now that you're online: you'll be asked to confirm reopening ${blocking} for re-entry.`,
     };
 }
 
@@ -246,12 +267,13 @@ export function downstreamKnockoutPlayedQueueDrop({ blockingMatchId, displaced }
 // Without this, "did the next match actually reopen?" is answered only by the
 // presence of a dialog beforehand and by reading the board afterwards. The
 // operator authorised something specific; the app should confirm it happened.
-export function downstreamKnockoutReopenedNotice(ids) {
-    const list = (ids || []).filter(Boolean);
+export function downstreamKnockoutReopenedNotice(matches) {
+    const list = (matches || []).filter(Boolean);
     if (!list.length) return null;
-    if (list.length === 1) return `Match ${list[0]} was reopened: it must be fought and scored again.`;
-    const named = `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
-    return `Matches ${named} were reopened: they must be fought and scored again.`;
+    const named = matchLabelList(list);
+    return list.length === 1
+        ? `${named} was reopened: it must be fought and scored again.`
+        : `${named} were reopened: they must be fought and scored again.`;
 }
 
 // attemptScoreWrite (bc-kcdg / bc-cse): the generic confirm+retry loop for the
@@ -303,8 +325,8 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
             // whether or not anything was. Absent field means the server
             // reopened nothing, and nothing is claimed.
             if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
-                && applied.reopenedMatchIds && applied.reopenedMatchIds.length) {
-                applied.downstreamReopened = applied.reopenedMatchIds;
+                && applied.reopenedMatches && applied.reopenedMatches.length) {
+                applied.downstreamReopened = applied.reopenedMatches;
             }
             return applied;
         }

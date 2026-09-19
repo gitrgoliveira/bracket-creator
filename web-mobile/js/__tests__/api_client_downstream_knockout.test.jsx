@@ -48,8 +48,8 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
       matchId: 'm1',
       blockingMatchId: 'm5',
       // Singleton list: the only multi-entry case is a semifinal that fed
-      // both the final and the bronze match.
-      blockingMatchIds: ['m5'],
+      // both the final and the bronze match. Shape is {id, number}.
+      blockingMatches: [{ id: 'm5' }],
       displaced: 'Aoki Taro',
     });
   });
@@ -137,8 +137,8 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
       matchId: 'm-r2-0',
       blockingMatchId: 'm-r1-0',
       // Singleton list: the only multi-entry case is a semifinal that fed
-      // both the final and the bronze match.
-      blockingMatchIds: ['m-r1-0'],
+      // both the final and the bronze match. Shape is {id, number}.
+      blockingMatches: [{ id: 'm-r1-0' }],
       displaced: 'Bob',
     });
   });
@@ -228,8 +228,8 @@ describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
       matchId: 'm1',
       blockingMatchId: 'm5',
       // Singleton list: the only multi-entry case is a semifinal that fed
-      // both the final and the bronze match.
-      blockingMatchIds: ['m5'],
+      // both the final and the bronze match. Shape is {id, number}.
+      blockingMatches: [{ id: 'm5' }],
       displaced: 'Aoki Taro',
     });
   });

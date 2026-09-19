@@ -615,7 +615,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// reason, admin corrections are meant to override normal flow.
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
-			var reopenedThisItem []string
+			var reopenedThisItem []engine.ReopenedMatch
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
 				// Correction-reason audit policy (require a reason when the write
 				// rewrites a result the operator already declared final — a
@@ -696,8 +696,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// corrected; broadcast it too so a client watching only that
 			// court/match learns its verdict was cleared (mirrors /score and
 			// /override-winner).
-			for _, reopenedID := range reopenedThisItem {
-				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopenedID})
+			for _, reopened := range reopenedThisItem {
+				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
 			}
 		}
 
@@ -847,7 +847,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// comment) to RecordMatchResultWithIneligibility, the same primitive
 		// /score and bulk-score already use, so this endpoint can honour the
 		// force flag at all.
-		var reopenedDownstream []string
+		var reopenedDownstream []engine.ReopenedMatch
 		engStatus, err := eng.RecordMatchResultWithIneligibility(id, mid, &result, engine.ForceOptions{
 			Force:    req.ForceDownstreamReopen,
 			Reopened: &reopenedDownstream,
@@ -903,8 +903,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// bc-kcdg: each reopened match is distinct from the one just corrected;
 		// broadcast it too so a client watching only that court/match learns
 		// its verdict was cleared (mirrors /score and /override-winner).
-		for _, reopenedID := range reopenedDownstream {
-			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopenedID})
+		for _, reopened := range reopenedDownstream {
+			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
 		}
 		if engStatus != nil {
 			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
@@ -1351,7 +1351,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		// bc-kcdg: reopenedDownstream collects the IDs of any downstream
 		// bracket match reopened by a forced override, populated only when
 		// req.ForceDownstreamReopen actually unblocked one.
-		var reopenedDownstream []string
+		var reopenedDownstream []engine.ReopenedMatch
 		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt), engine.ForceOptions{
 			Force:    req.ForceDownstreamReopen,
 			Reopened: &reopenedDownstream,
@@ -1383,8 +1383,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// bc-kcdg: each reopened match is distinct from the one the
 			// operator just overrode; broadcast it too so a client watching
 			// only that court/match learns its verdict was cleared.
-			for _, reopenedID := range reopenedDownstream {
-				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopenedID})
+			for _, reopened := range reopenedDownstream {
+				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
 			}
 		}
 		c.JSON(http.StatusOK, gin.H{"applied": applied})
@@ -2050,7 +2050,7 @@ type scoreRequestBody struct {
 // error anywhere. That is exactly what happened here, and it survived the unit
 // tests because they assert on the handler's Go-side behaviour; only a live
 // request showed the field missing from the body.
-func scoreResponseWithReopened(result *state.MatchResult, reopened []string) any {
+func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.ReopenedMatch) any {
 	if result == nil {
 		return result
 	}
@@ -2071,7 +2071,16 @@ func scoreResponseWithReopened(result *state.MatchResult, reopened []string) any
 	if err := json.Unmarshal(raw, &merged); err != nil {
 		return result
 	}
-	merged["reopenedMatchIds"] = reopened
+	// Identify each match the way the OPERATOR does: by its match number, the
+	// label on the score sheet, the bracket and the Excel tree. The id rides
+	// along for anything addressing the match, but nothing shows it to a
+	// person (operator ruling 2026-09-19: "that's how the matches should be
+	// identified to the user").
+	out := make([]map[string]any, 0, len(reopened))
+	for _, r := range reopened {
+		out = append(out, map[string]any{"id": r.ID, "number": r.Number})
+	}
+	merged["reopenedMatches"] = out
 	return merged
 }
 
@@ -2272,7 +2281,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			// when body.ForceDownstreamReopen actually unblocked one. Each
 			// gets its own match_updated broadcast below, alongside the
 			// corrected match's own.
-			reopenedDownstream []string
+			reopenedDownstream []engine.ReopenedMatch
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
 			if !isWithdrawal && !isCorrection {

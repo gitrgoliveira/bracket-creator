@@ -42,10 +42,13 @@ describe('downstreamKnockoutPlayedRefusal', () => {
 describe('downstreamKnockoutPlayedConfirm', () => {
     it('names the blocking match and states what confirming does', () => {
         const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm({
-            blockingMatchId: 'K7', displaced: 'Suzuki Ichiro',
+            blockingMatchId: 'm-r2-0',
+            blockingMatches: [{ id: 'm-r2-0', number: 7 }],
+            displaced: 'Suzuki Ichiro',
         });
-        // Names the blocking match id.
-        expect(message).toContain('K7');
+        // Names the match the way the operator sees it, never the internal id.
+        expect(message).toContain('Match 7');
+        expect(message).not.toContain('m-r2-0');
         // Names the displaced competitor.
         expect(message).toContain('Suzuki Ichiro');
         // States plainly what confirming DOES to the later match -- reopens it,
@@ -89,12 +92,14 @@ describe('downstreamKnockoutPlayedConfirm with two blocked matches', () => {
     it('names every match it is about to clear, in the plural', () => {
         const { message } = downstreamKnockoutPlayedConfirm({
             blockingMatchId: 'm-bronze',
-            blockingMatchIds: ['m-bronze', 'm-r2-0'],
+            blockingMatches: [{ id: 'm-bronze', number: 4 }, { id: 'm-r2-0', number: 3 }],
             displaced: 'Suzuki Ichiro',
         });
-        expect(message).toContain('m-bronze');
-        expect(message).toContain('m-r2-0');
-        expect(message.toLowerCase()).toContain('matches');
+        // Both, by number, and never by the ids the operator has never seen.
+        expect(message).toContain('Match 4');
+        expect(message).toContain('Match 3');
+        expect(message).not.toContain('m-bronze');
+        expect(message).not.toContain('m-r2-0');
         expect(message.toLowerCase()).toContain('reopens both');
         expect(message.toLowerCase()).toContain('cleared');
         expect(message.toLowerCase()).not.toMatch(/\bmat\b/);
@@ -103,11 +108,11 @@ describe('downstreamKnockoutPlayedConfirm with two blocked matches', () => {
     it('stays singular when only one match is blocked', () => {
         const { message } = downstreamKnockoutPlayedConfirm({
             blockingMatchId: 'm-r2-0',
-            blockingMatchIds: ['m-r2-0'],
+            blockingMatches: [{ id: 'm-r2-0', number: 3 }],
             displaced: 'Suzuki Ichiro',
         });
-        expect(message).toContain('match m-r2-0');
-        expect(message.toLowerCase()).not.toContain('matches ');
+        expect(message).toContain('Match 3');
+        expect(message.toLowerCase()).not.toContain('were reopened');
     });
 });
 
@@ -116,15 +121,24 @@ describe('downstreamKnockoutReopenedNotice', () => {
     // save worked leaves "did the later match actually reopen?" to be answered
     // by reading the board, which is what the confirmation was supposed to
     // settle.
-    it('names the single match that was reopened', () => {
-        expect(downstreamKnockoutReopenedNotice(['m-r2-0']))
-            .toBe('Match m-r2-0 was reopened: it must be fought and scored again.');
+    it('names the single match that was reopened, by its number', () => {
+        expect(downstreamKnockoutReopenedNotice([{ id: 'm-r2-0', number: 3 }]))
+            .toBe('Match 3 was reopened: it must be fought and scored again.');
+    });
+
+    it('falls back to the id when a match carries no number', () => {
+        // A bye placeholder, or a bracket saved before numbering existed.
+        // Better a bare id than "Match 0".
+        expect(downstreamKnockoutReopenedNotice([{ id: 'm-r2-0', number: 0 }]))
+            .toContain('m-r2-0');
     });
 
     it('names both when a semifinal reopened its two siblings', () => {
-        const notice = downstreamKnockoutReopenedNotice(['m-bronze', 'm-r2-0']);
-        expect(notice).toContain('m-bronze');
-        expect(notice).toContain('m-r2-0');
+        const notice = downstreamKnockoutReopenedNotice([
+            { id: 'm-bronze', number: 4 }, { id: 'm-r2-0', number: 3 },
+        ]);
+        expect(notice).toContain('Match 4');
+        expect(notice).toContain('Match 3');
         expect(notice).toContain('were reopened');
     });
 

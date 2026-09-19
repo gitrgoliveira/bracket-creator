@@ -200,6 +200,32 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, displaced } =
 // completely unchanged -- neither was written.
 export const DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED = 'Correction cancelled: the match and the later result it depends on were left unchanged.';
 
+// downstreamKnockoutPlayedQueueDrop (bc-cse): the copy for THIS refusal
+// arriving on a QUEUED replay rather than a live tap. A correction typed
+// while offline (or during a transient 5xx run) is retried automatically on
+// reconnect; if the later match was played in the meantime, the retry hits
+// this same 409. There is no operator at the keyboard for the flush loop to
+// prompt -- attemptScoreWrite's confirm dialog above has nothing to show a
+// tap into -- so the write is dropped exactly like any other non-retryable
+// 4xx (the api_client.jsx flush loop's generic "rejected" branch), but with
+// this reason instead of the bare "downstream_knockout_played" token: a
+// dropped correction is finished work the operator must be told about in
+// words, and the queue must not retry it forever (it will never land
+// without forceDownstreamReopen, which nothing sets automatically).
+//
+// Returns the { reason, advice } shape _notifyTerminalWriteFailed's payload
+// and this file's own notLandedBanner both use, so a caller passes it
+// straight into that channel rather than composing a third copy of the
+// who/blocking defaults downstreamKnockoutPlayedConfirm already states.
+export function downstreamKnockoutPlayedQueueDrop({ blockingMatchId, displaced } = {}) {
+    const who = displaced || 'The competitor currently recorded as advancing';
+    const blocking = blockingMatchId || 'the later match';
+    return {
+        reason: `${who} already played match ${blocking}, so this queued correction could not be applied automatically`,
+        advice: `Redo the correction now that you're online: you'll be asked to confirm sending match ${blocking} back for re-entry.`,
+    };
+}
+
 // attemptScoreWrite (bc-kcdg / bc-cse): the generic confirm+retry loop for the
 // refusal above. Takes recordScore/confirmDialog as INJECTED collaborators
 // (never read off `window`, never imported from a host module) so it works

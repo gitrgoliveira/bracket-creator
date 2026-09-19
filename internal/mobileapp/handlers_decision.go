@@ -301,6 +301,17 @@ func RegisterDecisionHandlers(r *gin.RouterGroup, eng ScoringEngine, store Compe
 				// respondIfDownstreamKnockoutPlayed's doc comment);
 				// respondIfDownstreamKnockoutPlayed already wrote the response.
 				// Retry with forceDownstreamReopen:true once confirmed.
+			case respondIfDownstreamKnockoutScored(c, engErr):
+				// mp-e2k1: this decision writes a pool match (e.g. kiken/
+				// fusenpai on a Mixed competition's pool phase) via
+				// RecordDecisionTx -> RecordMatchResultWithIneligibilityTx, which
+				// would displace a qualifying finisher already scored into a
+				// downstream bracket match. Same fixed wire contract as
+				// /score's mapping (see respondIfDownstreamKnockoutScored's
+				// doc comment); before this, /decision fell through to
+				// respondIfEngineWriteError/internalError, a generic 500 the
+				// offline write queue retries forever for a write that can
+				// never win.
 			case errors.As(engErr, &engNotFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": engNotFoundErr.Error()})
 			default:

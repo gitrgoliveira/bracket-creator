@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gitrgoliveira/bracket-creator/internal/domain"
 	"github.com/gitrgoliveira/bracket-creator/internal/state"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -323,14 +324,69 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 			return err
 		})
 		require.NoError(t, txErr)
-		assert.Contains(t, reopened, "m-bronze")
+		// EXACTLY bronze, and nothing else. Contains() used to pass here while
+		// the final was quietly cleared in the same breath: the dialog named
+		// one match and the confirmation charged the operator for two
+		// (operator ruling 2026-09-19 -- one match per question, bronze first).
+		assert.Equal(t, []string{"m-bronze"}, reopened)
 
 		got, err := store.LoadBracket(compID)
 		require.NoError(t, err)
 		assert.Equal(t, state.MatchStatusScheduled, got.ThirdPlaceMatch.Status)
 		assert.Empty(t, got.ThirdPlaceMatch.Winner)
 		assert.Equal(t, "Alice", got.ThirdPlaceMatch.SideA, "the semifinal's new loser (Alice) was repainted into bronze")
+
+		// The FINAL keeps its result: it is a separate question, asked on the
+		// next attempt.
+		assert.Equal(t, state.MatchStatusCompleted, got.Rounds[1][0].Status, "the final is not cleared by bronze's confirmation")
+		assert.Equal(t, "Alice", got.Rounds[1][0].Winner)
 	})
+
+	t.Run("the final is asked about separately, on the next attempt", func(t *testing.T) {
+		// Bronze is settled; correcting again now meets the final.
+		var reopened []string
+		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+			_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0",
+				&state.MatchResult{
+					ID: "m-r1-0", SideA: "Alice", SideB: "Bob",
+					Winner: "Alice", IpponsA: []string{"M", "M"},
+					Status: state.MatchStatusCompleted, CorrectionReason: "back to Alice",
+				}, ForceOptions{Reopened: &reopened})
+			return err
+		})
+		var dkErr *DownstreamKnockoutPlayedError
+		require.ErrorAs(t, txErr, &dkErr)
+		assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID, "now the final is the one at stake")
+		assert.Empty(t, reopened)
+	})
+}
+
+// TestDownstreamKnockoutCorrection_ForceWithUnchangedWinnerClearsNothing pins
+// that force does not become a licence to clear. force deliberately SKIPS the
+// guard, and an unconditional requeue there meant a confirmed write that
+// stored the SAME winner still sent the next round back to the queue: nobody
+// displaced, nothing to unwind, a played match cleared for nothing.
+func TestDownstreamKnockoutCorrection_ForceWithUnchangedWinnerClearsNothing(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-force-same-winner"
+	seedThreeRoundBracket(t, store, compID)
+
+	var reopened []string
+	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
+		// Same winner as stored (Alice), just a tidied scoreline.
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", &state.MatchResult{
+			ID: "m-r1-0", SideA: "Alice", SideB: "Bob",
+			Winner: "Alice", IpponsA: []string{"M", "K"},
+			Status: state.MatchStatusCompleted, CorrectionReason: "scoreline typo",
+		}, ForceOptions{Force: true, Reopened: &reopened})
+		return err
+	}))
+	assert.Empty(t, reopened, "nothing was displaced, so nothing may be cleared")
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[1][0].Status)
+	assert.Equal(t, "Alice", b.Rounds[1][0].Winner)
 }
 
 func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
@@ -723,4 +779,89 @@ func TestDownstreamKnockoutCorrection_DisplacedNamesTheStaleCompetitor(t *testin
 	assert.Equal(t, "Alice", dkErr.Displaced,
 		"the operator must be told WHO is being knocked out of the blocking match, "+
 			"not a generic phrase produced by the requeued match's cleared winner")
+}
+
+// TestDownstreamKnockoutCorrection_DaihyosenSilentRescoreIsNotAWinnerChange
+// pins the ORDER in which the guard reads the winner. A team knockout decided
+// on the representative bout is re-scored verdict-silent by design: the team
+// editor omits an untouched daihyosen row's ippon arrays, and the engine
+// restores the stored verdict (preserveDaihyosenOutcome) before persisting.
+//
+// Reading the winner BEFORE that restore made the incoming result look
+// winner-less, so an ordinary re-score of a rep-bout-decided match was refused
+// as a "winner change" that would displace somebody. The operator was asked to
+// clear the next round for a write that stores the very same winner.
+func TestDownstreamKnockoutCorrection_DaihyosenSilentRescoreIsNotAWinnerChange(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-daihyosen-silent"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg", Status: state.CompStatusKnockout, TeamSize: 3,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "TeamA", SideB: "TeamB", SideAID: "ta", SideBID: "tb",
+					Winner: "TeamA", WinnerID: "ta", Status: state.MatchStatusCompleted,
+					SubResults: []state.SubMatchResult{
+						{Position: 1, SideA: "a1", SideB: "b1", Winner: "a1"},
+						// The rep bout: position -1, decided by hantei.
+						{Position: -1, SideA: "a2", SideB: "b2", Winner: "a2",
+							Decision: "daihyosen", IpponsA: []string{domain.HanteiMark}},
+					}},
+			},
+			{
+				{ID: "m-r2-0", SideA: "TeamA", SideB: "TeamC", SideAID: "ta", SideBID: "tc",
+					Winner: "TeamA", WinnerID: "ta", Status: state.MatchStatusCompleted,
+					IpponsA: []string{"M", "M"}},
+			},
+		},
+	}))
+
+	// A re-score that touches only the numbered bout and says NOTHING about
+	// the rep bout's verdict: exactly what the team editor sends.
+	var reopened []string
+	err := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, e := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", &state.MatchResult{
+			ID: "m-r1-0", SideA: "TeamA", SideB: "TeamB",
+			Status: state.MatchStatusCompleted, CorrectionReason: "bout 1 scoreline",
+			SubResults: []state.SubMatchResult{
+				{Position: 1, SideA: "a1", SideB: "b1", Winner: "a1", IpponsA: []string{"M"}},
+				{Position: -1, SideA: "a2", SideB: "b2"},
+			},
+		}, ForceOptions{Reopened: &reopened})
+		return e
+	})
+	require.NoError(t, err, "a re-score that keeps the stored rep-bout winner must not be refused")
+	assert.Empty(t, reopened)
+
+	b, lerr := store.LoadBracket(compID)
+	require.NoError(t, lerr)
+	assert.Equal(t, "TeamA", b.Rounds[0][0].Winner, "the restored verdict still wins the encounter")
+	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[1][0].Status, "and the next round is untouched")
+}
+
+// TestRecordDecisionTx_T103ForceDoesNotAuthorizeDownstreamClear pins that the
+// two confirmations stay separate. T103's `force` answers "undo this kiken even
+// though its loser has a later match"; the bc-kcdg override answers "clear the
+// already-played next round". Feeding the first into the second meant an
+// operator confirming a decision-lock override silently authorized a played
+// match being sent back to the queue, with no dialog ever naming it.
+func TestRecordDecisionTx_T103ForceDoesNotAuthorizeDownstreamClear(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-t103-separate"
+	seedThreeRoundBracket(t, store, compID)
+
+	err := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, _, e := eng.RecordDecisionTx(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "withdrew",
+			nil, true /* T103 force */)
+		return e
+	})
+	var dkErr *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, err, &dkErr,
+		"T103's force must not stand in for the bc-kcdg confirmation: the refusal must still be raised")
+
+	b, lerr := store.LoadBracket(compID)
+	require.NoError(t, lerr)
+	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[1][0].Status, "and nothing downstream may be cleared")
+	assert.Equal(t, "Alice", b.Rounds[1][0].Winner)
 }

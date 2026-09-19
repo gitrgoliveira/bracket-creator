@@ -518,15 +518,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			MatchID string `json:"matchId"`
 			Error   string `json:"error"`
 			// Reason is a machine-readable discriminator, set only where the
-			// failure is a known verdict rather than an arbitrary error. Three
-			// values today: "superseded" and "clock_skew" from the timestamp
-			// guard (a newer result for this match is already stored, or this
-			// entry's modifiedAt is implausibly far in the future so it can be
-			// neither trusted nor zeroed, see modifiedAtRefuseSkewMs), and
-			// "downstream_knockout_played" (bc-kcdg) when correcting this entry
-			// would repaint a downstream match that has recorded its own
-			// result; retry the SAME entry with forceDownstreamReopen:true once
-			// the operator confirms the override.
+			// failure is a known verdict rather than an arbitrary error. Values
+			// today: "superseded" and "clock_skew" from the timestamp guard (a
+			// newer result for this match is already stored, or this entry's
+			// modifiedAt is implausibly far in the future so it can be neither
+			// trusted nor zeroed, see modifiedAtRefuseSkewMs); "corrupt_overrides"
+			// when a corrupt overrides.json blocks the standings read the
+			// mp-e2k1 guard below needs; "downstream_knockout_played" (bc-kcdg)
+			// when correcting this entry would repaint a downstream bracket
+			// match that has recorded its own result; and
+			// "downstream_knockout_scored" (mp-e2k1) when correcting this pool
+			// entry would displace a qualifying finisher already scored into a
+			// downstream bracket match. The latter two both resolve by retrying
+			// the SAME entry with forceDownstreamReopen:true once the operator
+			// confirms the override.
 			//
 			// It matters because the single-match endpoints answer those
 			// conditions with a distinct body ({"applied": false, "reason":
@@ -643,6 +648,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			}); err != nil {
 				bulkErr := scoreError{MatchID: results[i].ID, Error: err.Error()}
 				var downstreamPlayedErr *engine.DownstreamKnockoutPlayedError
+				var downstreamScoredErr *engine.DownstreamKnockoutScoredError
 				switch {
 				case errors.Is(err, engine.ErrMatchSuperseded):
 					bulkErr.Reason = "superseded"
@@ -667,6 +673,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// forceDownstreamReopen:true once they've confirmed the
 					// override, exactly as /score's 409 body prompts them to.
 					bulkErr.Reason = "downstream_knockout_played"
+				case errors.As(err, &downstreamScoredErr):
+					// mp-e2k1: re-scoring THIS entry (a pool match) would
+					// displace a qualifying finisher already scored into a
+					// downstream bracket match. Same batch-Reason treatment as
+					// downstream_knockout_played above, and for the identical
+					// reason: this endpoint has no dedicated 409 to answer
+					// with, so the discriminator rides in Reason so the caller
+					// can distinguish it from an arbitrary rejection instead of
+					// only seeing the raw error text.
+					bulkErr.Reason = "downstream_knockout_scored"
 				}
 				errs = append(errs, bulkErr)
 				continue
@@ -762,10 +778,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		// Kachinuki matches are scored one bout at a time via the score
 		// endpoint (server-appended winner-stays bout log). Quick-score
-		// synthesises a positional log and writes it wholesale through the
-		// plain RecordMatchResult path, which has no kachinuki merge and no
-		// premature-completion check, so a single call would destroy a live
-		// winner-stays sequence. Same incompatibility class as engi: reject.
+		// synthesises a positional log and writes it wholesale through
+		// RecordMatchResultWithIneligibility, which merges a kachinuki bout
+		// log BY POSITION (applyKachinukiMerge) rather than replacing it, so
+		// a synthesised wholesale write from this endpoint would still
+		// corrupt a live winner-stays sequence built up bout-by-bout
+		// elsewhere. Same incompatibility class as engi: reject.
 		// comp.IsKachinuki(), not a bare TeamMatchType test: the sequence this
 		// guard protects only exists when the engine actually runs kachinuki
 		// advancement, which requires TeamSize >= 2 (MaybeAdvanceKachinuki
@@ -855,6 +873,16 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// Fixed wire contract, shared with every other knockout-correction
 			// write (see respondIfDownstreamKnockoutPlayed's doc comment).
 			if respondIfDownstreamKnockoutPlayed(c, err) {
+				return
+			}
+			// mp-e2k1: re-scoring this pool match would displace a qualifying
+			// finisher already scored into a downstream bracket match. Same
+			// fixed wire contract as /score's mapping (see
+			// respondIfDownstreamKnockoutScored's doc comment); before this,
+			// quick-score fell through to a generic 500 for this error, which
+			// the offline write queue retries forever for a write that can
+			// never win.
+			if respondIfDownstreamKnockoutScored(c, err) {
 				return
 			}
 			// A tied quick-score on a bracket team match produces a
@@ -2000,7 +2028,7 @@ type scoreRequestBody struct {
 	// downstream_knockout_played): correcting a completed bracket match whose
 	// already-propagated winner fed a downstream match that has since
 	// recorded its own result is refused by default. Setting this applies
-	// the correction and reopens every downstream match in the chain that
+	// the correction and requeues the one downstream match that
 	// carries its own result (see forceReopenDownstreamChain).
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 }
@@ -2411,15 +2439,7 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				respondCourtBusy(c, courtBusyErr, "starting a new one")
 				return
 			}
-			var downstreamKnockoutErr *engine.DownstreamKnockoutScoredError
-			if errors.As(engErr, &downstreamKnockoutErr) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":    "downstream_knockout_scored",
-					"pool":     downstreamKnockoutErr.Pool,
-					"finisher": downstreamKnockoutErr.Finisher,
-					"matchId":  downstreamKnockoutErr.MatchID,
-					"message":  downstreamKnockoutErr.Error(),
-				})
+			if respondIfDownstreamKnockoutScored(c, engErr) {
 				return
 			}
 			// bc-kcdg: correcting this match would change an already-propagated

@@ -551,7 +551,7 @@ type ForceOptions struct {
 	// would change a bracket match's already-propagated winner and a
 	// downstream match in the propagation chain carries a result of its own,
 	// the write is refused unless Force is true. A true Force also reopens
-	// (reopenBracketMatch) every downstream match in the chain that carries
+	// (requeueBracketMatch) the ONE downstream match that carries
 	// its own result, since the correction just repainted their SideA/SideB
 	// out from under their recorded verdicts.
 	Force bool
@@ -2277,9 +2277,9 @@ func applyBracketMatchResult(bm *state.BracketMatch, result *state.MatchResult, 
 // any mutation — UpdateBracket skips the save on a non-nil error, so a
 // refusal leaves no footprint, matching the ErrMatchSuperseded contract just
 // above it. force skips the guard and, once the correction and its
-// propagation have landed, reopens every downstream match the correction
-// would otherwise have silently repainted; the reopened match IDs are
-// returned so the caller can broadcast match_updated for each one.
+// propagation have landed, requeues the ONE downstream match the correction
+// would otherwise have silently repainted; its id is returned so the caller
+// can broadcast match_updated for it.
 func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID string, result *state.MatchResult, policy matchWritePolicy, force bool) ([]string, error) {
 	if bracket == nil {
 		return nil, notFoundErrorf("bracket not found for competition %s", compID)
@@ -2312,6 +2312,13 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 					}
 				}
 			}
+			// Captured BEFORE the write, so the force branch below can tell a
+			// correction that actually changes the winner from one that does
+			// not. force skips the guard, and an unconditional requeue there
+			// cleared the next round for a write that stored the same winner --
+			// including one confirmed for an unrelated reason, since the
+			// decision path's own T103 force used to arrive as this flag.
+			priorWinner, priorWinnerID := bm.Winner, bm.WinnerID
 			applied, err := applyBracketMatchResult(bm, result, policy)
 			if err != nil {
 				return nil, err
@@ -2331,11 +2338,8 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			var reopened []string
 			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
-				if force && policy == matchWriteForward {
-					// No invented reason (bc-kcdg finding 4): see
-					// forceReopenDownstreamChain's own doc comment for why an
-					// empty reason is what makes the reopened match's own
-					// re-entry possible afterwards.
+				if force && policy == matchWriteForward &&
+					winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
 					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx)
 				}
 			}
@@ -2396,12 +2400,16 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 	// CLOSED is the precondition (operator ruling 2026-09-19: "you do not
 	// affect the state of the next match unless it was closed"). A scheduled
-	// slot has nothing to lose, and a RUNNING match is being fought right now:
-	// it holds no verdict yet, so the repaint leaves nothing self-contradictory
-	// behind, and clearing a bout in progress to protect a result that does not
-	// exist would be the more destructive act. Only a completed match can end
-	// up displaying a competitor its own recorded result disagrees with, which
-	// is the whole defect.
+	// slot has nothing to lose. A RUNNING match is left alone too, and the
+	// trade there is worth stating plainly rather than glossing: it KEEPS the
+	// ippons already struck while propagation repaints the name above them, so
+	// for the rest of that bout the board can show one competitor's strike
+	// under another's name. Accepted because no VERDICT is recorded yet -- the
+	// match still has to be decided, and whoever is at the shiaijo decides it
+	// -- and because clearing a bout in progress to protect a result that does
+	// not exist is the more destructive act. Only a COMPLETED match can be
+	// left permanently displaying a competitor its own recorded result
+	// disagrees with, which is the defect this guard exists for.
 	if bm.Status != state.MatchStatusCompleted {
 		return false
 	}
@@ -2450,40 +2458,52 @@ func firstDownstreamWithOwnResult(bracket *state.Bracket, rIdx, mIdx int) *state
 	return nil
 }
 
-// forceReopenDownstreamChain reopens exactly what
-// firstDownstreamWithOwnResult would have named -- ONE HOP down, and only a
-// match that is CLOSED with a result of its own -- and returns the ids it
-// touched. A semifinal feeds two slots (the final and the bronze match), so
-// the answer can legitimately be both; it is never a deeper round.
+// winnerActuallyChanged compares a bracket match's winner against what it held
+// before the write, by id when both sides carry one and by name otherwise
+// (bc-pnum: an id is authoritative when present, and the three id-less
+// BracketMatch shapes are why the name arm survives).
 //
-// The two functions walk identically on purpose: the refusal names what the
-// confirmation will clear, and the operator is never told about one match and
-// charged for another. Deeper rounds are reached in their own turn, when the
-// re-fought result propagates into them and meets this same check (see
-// firstDownstreamWithOwnResult for the ruling).
+// The force path needs this because force deliberately SKIPS the guard, so
+// without it a confirmed write requeued the next round even when it stored the
+// very same winner -- no displacement, nothing to unwind, a round cleared for
+// nothing.
+func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketMatch) bool {
+	if priorWinnerID != "" && bm.WinnerID != "" {
+		return priorWinnerID != bm.WinnerID
+	}
+	return priorWinner != bm.Winner
+}
+
+// forceReopenDownstreamChain requeues EXACTLY ONE match: the one
+// firstDownstreamWithOwnResult named, and nothing else. It calls that same
+// function rather than re-deriving the target, so the refusal and the
+// confirmation can never disagree about which match is at stake.
+//
+// ONE MATCH PER CONFIRMATION, including the bronze match (operator ruling
+// 2026-09-19). A semifinal feeds two slots -- the final and the bronze match
+// -- and an earlier version cleared both while the dialog named only one,
+// which is the operator being told about one match and charged for two. Now a
+// semifinal correction that invalidates both asks twice: once for the bronze
+// match, then again for the final on the next attempt. Deeper rounds arrive
+// the same way, when the re-fought result propagates into them.
 //
 // requeueBracketMatch, not reopenBracketMatch: the match goes back to the
 // queue clean rather than to "running" owing an audit reason. See that
 // function for why the reopen shape was unusable here.
 func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int) []string {
-	var reopened []string
-	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
-	if bronze != nil && bracketMatchCarriesOwnResult(bronze) {
-		requeueBracketMatch(bronze)
-		reopened = append(reopened, bronze.ID)
+	blocking := firstDownstreamWithOwnResult(bracket, rIdx, mIdx)
+	if blocking == nil {
+		return nil
 	}
-	if next != nil && bracketMatchCarriesOwnResult(next) {
-		requeueBracketMatch(next)
-		reopened = append(reopened, next.ID)
-	}
-	return reopened
+	requeueBracketMatch(blocking)
+	return []string{blocking.ID}
 }
 
 // requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
 // no verdict, no scoreline, no provenance, no audit debt. It is the single
 // owner of what "send this bracket match back to the queue" means, shared by
 // RevertMatchToQueue (the operator requeueing one match) and bc-kcdg's forced
-// correction (requeueing every downstream match the corrected winner had
+// correction (requeueing the one downstream match the corrected winner had
 // already been propagated into).
 //
 // REQUEUE, not reopen, is the right primitive for the bc-kcdg path, and the
@@ -2568,6 +2588,16 @@ func bracketWinnerChanged(bm *state.BracketMatch, result *state.MatchResult, pol
 	}
 	if result.SideBID == "" {
 		result.SideBID = bm.SideBID
+	}
+	// Restore a stored daihyosen verdict BEFORE reading the winner, exactly as
+	// applyBracketMatchResult does before persisting it. A team knockout decided
+	// on the rep bout is re-scored verdict-silent by design (buildPatch omits an
+	// untouched daihyosen row), so the incoming result arrives winner-less and a
+	// comparison made here would read "the winner changed" for a write that
+	// stores the very same winner: the operator was asked to clear the next
+	// round for a correction that changes nothing.
+	if policy == matchWriteForward {
+		preserveDaihyosenOutcome(bm.SubResults, result)
 	}
 	if err := resolveWinnerIDFromSides(result, policy); err != nil {
 		return false, err
@@ -2853,7 +2883,7 @@ func guardOverrideDownstreamKnockoutCorrection(bracket *state.Bracket, rIdx, mId
 // bc-kcdg: the round branch (bronze has no downstream, so it is exempt) runs
 // guardOverrideDownstreamKnockoutCorrection before mutating, unless opts
 // carries Force. A forced override that changes an already-propagated
-// winner reopens every downstream match in the chain that carries its own
+// winner requeues the one downstream match that carries its own
 // result (forceReopenDownstreamChain), same as the score-write path; opts'
 // Reopened field, when non-nil, is populated with their IDs.
 func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName string, modifiedAt int64, opts ...ForceOptions) (bool, error) {
@@ -2881,6 +2911,11 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 							return err
 						}
 					}
+					// Captured before the override rewrites it, for the same
+					// reason the score door captures its own: a forced override
+					// that names the winner already recorded must not requeue
+					// the next round.
+					priorWinner, priorWinnerID := m.Winner, m.WinnerID
 					setBracketOverrideWinner(m, winnerName)
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
@@ -2895,9 +2930,11 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 						m.ModifiedAt = modifiedAt
 					}
 					e.propagateBracketWinner(bracket, rIdx, mIdx)
-					if fo.Force {
-						// No invented reason (bc-kcdg finding 4): see
-						// forceReopenDownstreamChain's own doc comment.
+					// Same gate as the score door: a forced override that names
+					// the winner already recorded displaces nobody, so there is
+					// nothing downstream to unwind. displacedWinner is this
+					// match's winner as it stood before setBracketOverrideWinner.
+					if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
 						reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx)
 					}
 					return nil

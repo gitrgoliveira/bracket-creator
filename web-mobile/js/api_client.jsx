@@ -40,6 +40,7 @@ import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+    downstreamKnockoutPlayedQueueDrop,
 } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
@@ -1138,10 +1139,24 @@ async function _flushQueue() {
                         const body = await res.json().catch(() => ({}));
                         if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, reason: body.reasonHuman || body.error || 'conflict (409)' });
+                            // bc-cse: a queued kiken/fusenpai/daihyosen correction can hit
+                            // this same 409 the score path's flush-loop drop handles below
+                            // -- the later match was played before this replay ran. Same
+                            // human copy, same reason this can't just retry: there is no
+                            // operator here for attemptScoreWrite's confirm dialog to
+                            // prompt, and nothing sets forceDownstreamReopen automatically.
+                            const downstreamRefusal = _downstreamKnockoutPlayedError(body);
+                            const dropCopy = downstreamRefusal
+                                ? downstreamKnockoutPlayedQueueDrop(downstreamRefusal.downstreamKnockoutPlayed)
+                                : null;
+                            const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || 'conflict (409)');
+                            _notifyTerminalWriteFailed({
+                                compID, matchID, kind, status: 409, reason,
+                                ...(dropCopy ? { advice: dropCopy.advice } : {}),
+                            });
                             _notifyQueueAlert({
                                 kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                                detail: body.reasonHuman || body.error || 'conflict (409)',
+                                detail: reason,
                             });
                         }
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
@@ -1165,12 +1180,32 @@ async function _flushQueue() {
                         // fails minutes later on a different court.
                         const body = await res.json().catch(() => ({}));
                         console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
+                        // bc-cse: a queued knockout correction (score OR decision) can
+                        // land here too -- offline, or during a transient-5xx retry run,
+                        // the later match got played before this replay ran, so the
+                        // server answers the SAME 409 downstream_knockout_played the live
+                        // confirm dialog handles. There is no operator at this device's
+                        // screen for the flush loop to prompt (attemptScoreWrite's dialog
+                        // has nothing to show a tap into), so this write is dropped
+                        // exactly like any other non-retryable 4xx below -- but with
+                        // downstreamKnockoutPlayedQueueDrop's words instead of the bare
+                        // "downstream_knockout_played" token, which is what an operator
+                        // reading this alert used to see with no way to understand it or
+                        // move forward.
+                        const downstreamRefusal = _downstreamKnockoutPlayedError(body);
+                        const dropCopy = downstreamRefusal
+                            ? downstreamKnockoutPlayedQueueDrop(downstreamRefusal.downstreamKnockoutPlayed)
+                            : null;
+                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || `HTTP ${res.status}`);
                         if (terminal) {
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status}` });
+                            _notifyTerminalWriteFailed({
+                                compID, matchID, kind, status: res.status, reason,
+                                ...(dropCopy ? { advice: dropCopy.advice } : {}),
+                            });
                         }
                         _notifyQueueAlert({
                             kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
-                            detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+                            detail: reason,
                         });
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     }
@@ -2428,7 +2463,17 @@ const API = {
             // can surface the error. The decision-locked-as-success rule is ONLY
             // for queued retries in _flushQueue, not for direct calls.
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to record decision");
+            // bc-cse: 409 downstream_knockout_played (a kiken/fusenpai/daihyosen
+            // decision that corrects a completed knockout match whose later
+            // round already played) gets the SAME structured parse as the
+            // score/override-winner paths, via the one shared helper -- see
+            // _downstreamKnockoutPlayedError above. Without this the SPA threw
+            // the bare "downstream_knockout_played" token and dropped the
+            // server's message, and nothing could set forceDownstreamReopen on
+            // a decision retry (submitDecisionRequest, admin_scoring_shared.jsx,
+            // is what now reads .downstreamKnockoutPlayed off this error via
+            // attemptScoreWrite).
+            throw _downstreamKnockoutPlayedError(err) || new Error(err.error || "Failed to record decision");
         }
         const data = await res.json();
         // bc-cse defence in depth, and INERT today by construction: the

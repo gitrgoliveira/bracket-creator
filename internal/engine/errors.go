@@ -101,24 +101,29 @@ var ErrDownstreamKnockoutPlayed = errors.New("downstream knockout match already 
 // match displaying a competitor its own recorded Winner/score/status
 // disagreed with. Refused by default (operator ruling); the caller may
 // retry with ForceOptions.Force set, which applies the correction and
-// reopens every downstream match in the propagation chain that carries its
-// own result. Never raised for a matchWriteRestore (a K3 rollback replaying
-// a trusted snapshot), and never raised for a downstream slot that was
-// merely auto-completed by a bye (see bracketMatchCarriesOwnResult).
+// requeues the ONE match named here: the next-round slot, or the bronze match,
+// whichever is closed with a result of its own. Never a deeper round, and
+// never both slots at once -- one match per confirmation, so a semifinal that
+// invalidated both the final and the bronze match raises this twice, once per
+// attempt.
+//
+// Never raised for a matchWriteRestore (a K3 rollback replaying a trusted
+// snapshot), and never for a downstream slot merely auto-completed by a bye
+// (see bracketMatchCarriesOwnResult).
 type DownstreamKnockoutPlayedError struct {
 	// MatchID is the id of the match being corrected.
 	MatchID string
-	// BlockingMatchID is the id of the FIRST downstream match, walking the
-	// propagation chain, that carries a result of its own.
+	// BlockingMatchID is the id of the ONE match this correction is blocked
+	// on: one hop down, closed, and carrying a result of its own.
 	BlockingMatchID string
 	// Displaced is the corrected match's currently stored winner name -- the
-	// competitor the correction would displace from the downstream chain.
+	// competitor the correction would knock out of BlockingMatchID.
 	Displaced string
 }
 
 func (e *DownstreamKnockoutPlayedError) Error() string {
-	return fmt.Sprintf("correcting match %q would change the winner already propagated into %q, which has recorded its own result; this would displace %q from the chain without updating %q's own result. Retry with forceDownstreamReopen to apply the correction and send %q back to the queue to be fought again",
-		e.MatchID, e.BlockingMatchID, e.Displaced, e.BlockingMatchID, e.BlockingMatchID)
+	return fmt.Sprintf("correcting match %q would change the winner already propagated into %q, which has recorded its own result; this would displace %q from that match without updating its own result. Retry with forceDownstreamReopen to apply the correction and send %q back to the queue to be fought again",
+		e.MatchID, e.BlockingMatchID, e.Displaced, e.BlockingMatchID)
 }
 
 func (e *DownstreamKnockoutPlayedError) Is(target error) bool {

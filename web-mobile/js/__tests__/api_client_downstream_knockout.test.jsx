@@ -184,3 +184,76 @@ describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () =
     expect(sentBody.forceDownstreamReopen).toBeUndefined();
   });
 });
+
+// bc-cse: API.recordDecision (kiken / fusenpai / daihyosen) shares the SAME
+// parser (_downstreamKnockoutPlayedError) and the SAME force-flag field name
+// as recordScore/overrideBracketWinner above. Before this fix the /decision
+// 4xx branch threw a plain `new Error(err.error || ...)`, so a
+// downstream_knockout_played refusal surfaced as the literal string
+// "downstream_knockout_played" with the server's actual message discarded and
+// no field a retry could set to get past it.
+describe('API.recordDecision: downstream_knockout_played (bc-cse)', () => {
+  let originalFetch;
+  afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
+
+  it('throws an Error decorated with the structured refusal fields (not the bare token)', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: 'downstream_knockout_played',
+        matchId: 'm1',
+        blockingMatchId: 'm5',
+        displaced: 'Aoki Taro',
+        message: 'Aoki Taro already played match m5, correcting m1 would displace them.',
+      }),
+    });
+
+    const err = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+
+    // The operator-facing message is the server's sentence, not the bare code.
+    expect(err.message).toBe('Aoki Taro already played match m5, correcting m1 would displace them.');
+    expect(err.message).not.toBe('downstream_knockout_played');
+    expect(downstreamKnockoutPlayedRefusal(err)).toEqual({
+      matchId: 'm1',
+      blockingMatchId: 'm5',
+      displaced: 'Aoki Taro',
+    });
+  });
+
+  it('does not decorate an unrelated 409 (e.g. decision_locked)', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'decision_locked' }),
+    });
+
+    const err = await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka' }, 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('decision_locked');
+    expect(downstreamKnockoutPlayedRefusal(err)).toBeNull();
+  });
+
+  it('forwards forceDownstreamReopen:true on the confirmed retry onto the wire payload', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'm1', status: 'completed' }),
+    });
+
+    await API.recordDecision('c1', 'm1', { decision: 'kiken-voluntary', decisionBy: 'aka', forceDownstreamReopen: true }, 'pw');
+
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c1/matches/m1/decision');
+    const sentBody = JSON.parse(opts.body);
+    expect(sentBody.forceDownstreamReopen).toBe(true);
+  });
+});

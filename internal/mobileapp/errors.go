@@ -200,6 +200,40 @@ func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
 	return true
 }
 
+// respondIfDownstreamKnockoutScored answers engine.DownstreamKnockoutScoredError
+// (mp-e2k1) with the ONE fixed wire contract -- HTTP 409
+// {"error":"downstream_knockout_scored","pool","finisher","matchId","message"}
+// -- and reports whether it answered, so the caller's switch can fall through
+// to its own remaining arms exactly like the other respondIf* helpers in this
+// file. This is a DIFFERENT guard from respondIfDownstreamKnockoutPlayed
+// above: mp-e2k1 fires on a POOL match re-score (in a Mixed competition) that
+// would change which competitor holds a qualifying rank while a downstream
+// bracket match already carries that finisher's own scored result, whereas
+// bc-kcdg's DownstreamKnockoutPlayedError guards a bracket-match correction
+// that would repaint an already-propagated winner. Both are reachable from
+// every write endpoint that ends up inside RecordMatchResultWithIneligibility(Tx)
+// for a pool match id (/score, /quick-score, bulk-score's per-entry
+// transaction, and /decision via RecordDecisionTx(WithOptions)); before this
+// helper existed, only /score mapped it and the rest fell through to a
+// generic 500, which the SPA's offline write queue retries forever (mp-q8c6
+// poisoned-queue pattern) for a write that can never win. OverrideBracketWinner
+// writes the bracket directly (UpdateBracket) and never reaches this guard, so
+// it has no arm for this error.
+func respondIfDownstreamKnockoutScored(c *gin.Context, err error) bool {
+	var downstreamScoredErr *engine.DownstreamKnockoutScoredError
+	if !errors.As(err, &downstreamScoredErr) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":    "downstream_knockout_scored",
+		"pool":     downstreamScoredErr.Pool,
+		"finisher": downstreamScoredErr.Finisher,
+		"matchId":  downstreamScoredErr.MatchID,
+		"message":  downstreamScoredErr.Error(),
+	})
+	return true
+}
+
 // classifyRosterWriteError maps one of the participant-roster write sentinel
 // errors -- returned by Store.AddParticipant, Store.SaveParticipants,
 // Store.UpdateParticipant, Store.BulkCheckIn, and every other write that

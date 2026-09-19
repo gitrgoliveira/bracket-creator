@@ -828,7 +828,7 @@ func clientWriteStamp(stamp []int64) int64 {
 // surfaces Reopened. RecordDecisionTx stays the pre-existing behaviour so
 // none of those callers need to change.
 func (e *Engine) RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
-	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, ForceOptions{Force: force}, clientWriteStamp(modifiedAt))
+	return e.recordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, ForceOptions{}, clientWriteStamp(modifiedAt))
 }
 
 // RecordDecisionTxWithOptions is RecordDecisionTx's bc-kcdg-aware twin
@@ -973,13 +973,17 @@ func (e *Engine) recordDecisionTx(tx state.StoreTx, compID, matchID, decision, d
 		result.WinnerID = sideBID
 	}
 	preserveLoserScore(result, prior, decisionBy)
-	// bc-cse finding 5: kcdgOpts is the CALLER's own bc-kcdg authorization,
-	// decoupled from the T103 `force` above -- RecordDecisionTx's wrapper
-	// still passes ForceOptions{Force: force} (the pre-existing reuse, for
-	// source compatibility with every caller that has only one flag to
-	// give), but RecordDecisionTxWithOptions callers can now authorize the
-	// bc-kcdg guard independently of T103's undo confirmation, and read back
-	// which matches were reopened via kcdgOpts.Reopened.
+	// kcdgOpts is the caller's own bc-kcdg authorization and is NOT derived
+	// from the T103 `force` above. They answer different questions: T103's
+	// force confirms undoing a kiken or fusenpai whose loser has since been
+	// scheduled, while this one confirms clearing an already-played later
+	// match. Feeding T103's flag in here (as the first cut did) meant an
+	// operator confirming an unrelated decision-lock override silently
+	// authorized a round being requeued, with no dialog naming it.
+	// RecordDecisionTx therefore passes an EMPTY ForceOptions; only
+	// RecordDecisionTxWithOptions callers, which have the operator's actual
+	// answer, can set it, and they read back the reopened ids via
+	// kcdgOpts.Reopened.
 	status, err := e.RecordMatchResultWithIneligibilityTx(tx, compID, matchID, result, kcdgOpts)
 	if err != nil {
 		return nil, nil, err

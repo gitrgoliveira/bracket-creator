@@ -37,6 +37,14 @@ describe('scoreRowMatchLabel', () => {
         expect(scoreRowMatchLabel({ phase: 'pool', id: 'Pool A-TB-1', poolName: 'Pool A' })).toBe('');
     });
 
+    it('names the 3rd-place match, the one match named rather than numbered', () => {
+        // The bronze hangs off the bracket's ThirdPlaceMatch field, which the
+        // numbering never walks, so it has no number in the app or on the
+        // printed tree. Falling back to its id would show "m-bronze".
+        expect(scoreRowMatchLabel({ phase: 'bracket', id: 'm-bronze', matchNumber: 0 }))
+            .toBe('the 3rd-place match');
+    });
+
     it('says nothing for a bracket match drawn before numbering existed', () => {
         expect(scoreRowMatchLabel({ phase: 'bracket', id: 'm-r1-0', matchNumber: 0 })).toBe('');
         expect(scoreRowMatchLabel({ phase: 'bracket', id: 'm-r1-0' })).toBe('');

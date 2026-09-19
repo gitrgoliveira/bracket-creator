@@ -148,13 +148,25 @@ export function notLandedBanner(res) {
 // on the scores list, the bracket and the printed tree. The internal id
 // ("m-r2-0") appears on no operator screen, so naming it there sends them
 // looking for something that is not in front of them (operator ruling
-// 2026-09-19). Falls back to the id only when a match carries no number -- a
-// bye placeholder, or a bracket saved before numbering existed -- because a
-// bare id still beats "Match 0".
+// 2026-09-19).
+//
+// The 3rd-place match is the one match named rather than numbered: the
+// numbering walks the bracket's rounds and the bronze hangs off a separate
+// field, so it is numbered neither in the app nor on the printed tree, and
+// the id fallback would have shown "m-bronze". Mirrors engine.MatchLabel
+// (internal/engine/errors.go), which answers for the same match on the wire.
+//
+// The id fallback remains for a match with no number and no name -- a bye
+// placeholder, or a bracket saved before numbering existed -- because a bare
+// id still beats "Match 0".
+const BRONZE_MATCH_ID = 'm-bronze';
+
 export function matchLabel(m) {
     if (!m) return '';
     if (typeof m === 'string') return m;
-    return m.number > 0 ? `Match ${m.number}` : (m.id || '');
+    if (m.number > 0) return `Match ${m.number}`;
+    if (m.id === BRONZE_MATCH_ID) return 'the 3rd-place match';
+    return m.id || '';
 }
 
 // matchLabelList joins several labels for a sentence: "Match 3 and Match 4".

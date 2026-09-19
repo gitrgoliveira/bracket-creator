@@ -2515,6 +2515,26 @@ func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correcte
 	var reopened []ReopenedMatch
 	for _, m := range firstDownstreamWithOwnResult(bracket, rIdx, mIdx) {
 		reopenBracketMatch(m, downstreamReopenReason(correctedID))
+		// A downstream reopen leaves the match SCHEDULED, where the kachinuki
+		// reopen leaves it RUNNING, and the difference is who is standing at
+		// the shiaijo. Kachinuki reopens the encounter the operator has this
+		// second, to fight on; this one reopens a match that was played
+		// earlier and must be fought AGAIN, with nobody on the court yet.
+		//
+		// Running is not merely inaccurate here, it is unusable: a running
+		// match holds its court, and a semifinal reopens BOTH the final and
+		// the 3rd-place match, which a draw runs on the same court. Two
+		// running matches there deadlocked each other -- scoring either was
+		// refused with court_busy naming the other, so neither could ever be
+		// completed and the operator had no way out of the state their own
+		// confirmation had created. Found by scoring a reopened bronze in the
+		// browser; both statuses look identical until you try to finish one.
+		//
+		// The status is not the queue: the match stays exactly where it sat
+		// (operator ruling 2026-09-19, "no changes in the queue necessary if
+		// the matches were already played"), it simply is not claimed as in
+		// progress until someone starts it.
+		m.Status = state.MatchStatusScheduled
 		reopened = append(reopened, ReopenedMatch{ID: m.ID, Number: m.MatchNumber})
 	}
 	return reopened

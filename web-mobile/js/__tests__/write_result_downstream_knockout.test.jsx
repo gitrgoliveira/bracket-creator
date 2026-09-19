@@ -12,6 +12,7 @@ import {
     downstreamKnockoutPlayedConfirm,
     DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
     downstreamKnockoutReopenedNotice,
+    matchLabel,
 } from '../write_result.jsx';
 
 describe('downstreamKnockoutPlayedRefusal', () => {
@@ -145,5 +146,30 @@ describe('downstreamKnockoutReopenedNotice', () => {
     it('says nothing when nothing was reopened', () => {
         expect(downstreamKnockoutReopenedNotice([])).toBeNull();
         expect(downstreamKnockoutReopenedNotice(undefined)).toBeNull();
+    });
+});
+
+describe('matchLabel names the 3rd-place match', () => {
+    // The bronze is numbered neither in the app nor on the printed tree (the
+    // numbering walks the bracket's rounds and the bronze hangs off its own
+    // field), so the id fallback would have put "m-bronze" in front of an
+    // operator who has never seen an internal id.
+    it('names it rather than falling back to its id', () => {
+        expect(matchLabel({ id: 'm-bronze', number: 0 })).toBe('the 3rd-place match');
+    });
+
+    it('still prefers a number when one exists', () => {
+        expect(matchLabel({ id: 'm-bronze', number: 4 })).toBe('Match 4');
+    });
+
+    it('reaches the dialog copy, so the refusal never names an id', () => {
+        const { message } = downstreamKnockoutPlayedConfirm({
+            blockingMatchId: 'm-bronze',
+            blockingMatches: [{ id: 'm-bronze', number: 0 }, { id: 'm-r2-0', number: 3 }],
+            displaced: 'Suzuki Ichiro',
+        });
+        expect(message).toContain('the 3rd-place match');
+        expect(message).toContain('Match 3');
+        expect(message).not.toContain('m-bronze');
     });
 });

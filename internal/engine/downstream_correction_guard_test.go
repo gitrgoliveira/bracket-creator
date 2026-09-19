@@ -170,7 +170,8 @@ func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	// metadata, and the operator's justification lives on the match they
 	// actually corrected.
 	next := b.Rounds[1][0]
-	assert.Equal(t, state.MatchStatusRunning, next.Status, "reopened IN PLACE: the queue is not touched")
+	assert.Equal(t, state.MatchStatusScheduled, next.Status,
+		"reopened IN PLACE (the queue is not touched) and waiting to be fought again, NOT claimed as in progress")
 	assert.Empty(t, next.Winner, "its winner is cleared")
 	assert.Empty(t, next.IpponsA, "its ippons are cleared")
 	assert.Contains(t, next.CorrectionReason, "m-r1-0",
@@ -361,10 +362,10 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 
 		got, err := store.LoadBracket(compID)
 		require.NoError(t, err)
-		assert.Equal(t, state.MatchStatusRunning, got.ThirdPlaceMatch.Status)
+		assert.Equal(t, state.MatchStatusScheduled, got.ThirdPlaceMatch.Status)
 		assert.Empty(t, got.ThirdPlaceMatch.Winner)
 		assert.Equal(t, "Alice", got.ThirdPlaceMatch.SideA, "the semifinal's new loser (Alice) was repainted into bronze")
-		assert.Equal(t, state.MatchStatusRunning, got.Rounds[1][0].Status, "the final went with it")
+		assert.Equal(t, state.MatchStatusScheduled, got.Rounds[1][0].Status, "the final went with it")
 		assert.Empty(t, got.Rounds[1][0].Winner)
 	})
 
@@ -441,7 +442,7 @@ func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
 		require.NoError(t, lerr)
 		assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
 		assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
-		assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
+		assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
 		assert.Equal(t, state.MatchStatusCompleted, b.Rounds[2][0].Status, "the round beyond waits its turn")
 	})
 }
@@ -498,7 +499,7 @@ func TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks(t *testing.T) {
 	assert.Equal(t, []string{"m-r2-0"}, reopenedIDs(reopened))
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
 	assert.Empty(t, b.Rounds[1][0].Winner)
 	assert.False(t, b.Rounds[1][0].IsOverridden, "the manual verdict must be cleared with the rest")
 }
@@ -529,7 +530,7 @@ func TestDownstreamKnockoutCorrection_OneHopPerConfirmation(t *testing.T) {
 
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[2][0].Status, "the round beyond is left alone for now")
 	assert.Equal(t, "Alice", b.Rounds[2][0].Winner, "and keeps its recorded result")
 
@@ -563,7 +564,7 @@ func TestDownstreamKnockoutCorrection_OneHopPerConfirmation(t *testing.T) {
 	b, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.Equal(t, "Charlie", b.Rounds[1][0].Winner)
-	assert.Equal(t, state.MatchStatusRunning, b.Rounds[2][0].Status)
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[2][0].Status)
 	assert.Equal(t, "Charlie", b.Rounds[2][0].SideA, "repainted with the new winner")
 }
 
@@ -942,4 +943,52 @@ func TestDownstreamKnockoutCorrection_ReopenedCarriesTheMatchNumber(t *testing.T
 	// A match with no number (a bye placeholder, or a pre-numbering bracket)
 	// falls back to the id rather than printing "Match 0".
 	assert.Equal(t, "m-x", MatchLabel(ReopenedMatch{ID: "m-x"}))
+}
+
+// TestDownstreamKnockoutCorrection_ReopenedSiblingsDoNotHoldACourt pins the
+// STATUS a downstream reopen leaves behind, which is not the one the kachinuki
+// reopen leaves (running) but scheduled: the match was played earlier and has
+// to be fought AGAIN, with nobody on the court yet.
+//
+// The difference is not cosmetic. A running match holds its court, and a
+// semifinal reopens BOTH the final and the 3rd-place match, which a draw runs
+// on the same court by default. With both left running, scoring either was
+// refused with court_busy naming the other: neither could be completed, and
+// the operator had no way out of a state their own confirmation had created.
+// Found by scoring a reopened bronze through the browser, after the engine
+// tests had passed.
+func TestDownstreamKnockoutCorrection_ReopenedSiblingsDoNotHoldACourt(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-bronze-court"
+	seedBronzeBracket(t, store, compID)
+
+	var reopened []ReopenedMatch
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed"),
+			ForceOptions{Force: true, Reopened: &reopened})
+		return err
+	})
+	require.NoError(t, txErr)
+	require.ElementsMatch(t, []string{"m-bronze", "m-r2-0"}, reopenedIDs(reopened))
+
+	got, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	for _, m := range []*state.BracketMatch{got.ThirdPlaceMatch, &got.Rounds[1][0]} {
+		assert.Equal(t, state.MatchStatusScheduled, m.Status,
+			"%s must be waiting to be fought, not holding the court", m.ID)
+	}
+	// The one thing the court lock counts: at most one running match. Two
+	// siblings reopened together must never both be live.
+	running := 0
+	for _, round := range got.Rounds {
+		for i := range round {
+			if round[i].Status == state.MatchStatusRunning {
+				running++
+			}
+		}
+	}
+	if got.ThirdPlaceMatch.Status == state.MatchStatusRunning {
+		running++
+	}
+	assert.Zero(t, running, "a reopen starts nothing; the operator starts the next match themselves")
 }

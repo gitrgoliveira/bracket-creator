@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/gitrgoliveira/bracket-creator/internal/state"
 )
 
 // ValidationError represents a client-caused precondition or input failure.
@@ -148,13 +150,26 @@ func (e *DownstreamKnockoutPlayedError) Is(target error) bool {
 }
 
 // MatchLabel names a match the way the OPERATOR sees it: "Match 3", the label
-// on the score sheet, the bracket and the Excel tree sheet. Falls back to the
-// internal id only when a match carries no number (a bye placeholder, or a
-// bracket saved before numbering existed), because a bare id is still better
-// than "Match 0" -- but it is a fallback, not the normal case.
+// on the score sheet, the bracket and the Excel tree sheet.
+//
+// The 3rd-place match is the one match that has a NAME instead of a number:
+// assignBracketMatchNumbers walks Bracket.Rounds, and the bronze hangs off the
+// separate ThirdPlaceMatch field, so it is numbered neither here nor on the
+// printed tree (helper.AssignMatchNumbers walks the same rounds). It is called
+// the 3rd-place match on every surface an operator sees, so that is what this
+// says; reaching the id fallback for it would show "m-bronze" to someone who
+// has never seen an internal id.
+//
+// The id fallback remains for a match that carries no number for a reason we
+// cannot name (a bye placeholder, or a bracket saved before numbering
+// existed): a bare id still beats "Match 0", but it is a fallback, not a
+// normal case.
 func MatchLabel(m ReopenedMatch) string {
 	if m.Number > 0 {
 		return fmt.Sprintf("Match %d", m.Number)
+	}
+	if m.ID == state.BronzeMatchID {
+		return "the 3rd-place match"
 	}
 	return m.ID
 }

@@ -1,7 +1,7 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, matchLabel } from './write_result.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
@@ -44,13 +44,22 @@ const getScoreBtnClass = window.getScoreBtnClass;
 // owner of the pool-vs-league-vs-Swiss heading, so a Swiss round reads
 // "Round 3 · Match 2" rather than the synthetic "Swiss-R3" id.
 //
+// A knockout row is named by matchLabel (write_result.jsx), the same owner the
+// correction dialogs use, so the row an operator is sent to looking for
+// "Match 15" -- or for "the 3rd-place match", the one match named rather than
+// numbered -- carries exactly the words they were given.
+//
 // Returns "" when the match carries no number at all: a bracket match drawn
 // before numbering existed, and a pool supplementary bout (daihyosen or
 // tiebreaker), which is an appended rep bout rather than one of the pool's
 // numbered round-robin bouts.
 export function scoreRowMatchLabel(m) {
   if (!m) return "";
-  if (m.phase === "bracket") return m.matchNumber > 0 ? `Match ${m.matchNumber}` : "";
+  if (m.phase === "bracket") {
+    const label = matchLabel({ number: m.matchNumber, id: m.id });
+    // matchLabel falls back to the raw id, which names nothing on screen.
+    return label === m.id ? "" : label;
+  }
   const n = poolMatchNumberOf(m.id || "");
   if (!n) return "";
   const pool = (window.poolLabel ? window.poolLabel(m) : m.poolName) || "";

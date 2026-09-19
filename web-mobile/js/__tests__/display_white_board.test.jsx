@@ -3,7 +3,7 @@ import { overlayPositionLabel, TvWhiteBoard, TvIndividualBoard, gatherIndividual
 import { phaseLabel } from '../display_helpers.jsx';
 import { NumberedName } from '../numbered_name.jsx';
 import { TeamScoreboard, IndividualScore } from '../match_scoreboard.jsx';
-import { findInTree as findVnode } from './helpers/vdom.js';
+import { findInTree as findVnode, hasClass, collectText } from './helpers/vdom.js';
 
 // mp-13y: white TvDisplay board. The board is TV CHROME (court header, team-name
 // row, NEXT, sponsor) that delegates the scoreboard body to the SHARED
@@ -140,6 +140,40 @@ describe('TvWhiteBoard', () => {
     expect(sb).toBeTruthy();
     expect(sb.props.variant).toBe('tv');
     expect(sb.props.subResults.length).toBe(2);
+  });
+
+  it("a TEAM match shows each side's IV/PW in the headline row, never in the centre (bc-lbty Change 3)", () => {
+    const p = teamPromoted();
+    const props = { ...base, promoted: p, isTeamMatch: true,
+      subResults: p.match.subResults, teamSize: 5 };
+    const tree = TvWhiteBoard(props);
+    // ABSOLUTE CONSTRAINT: the centre stays a bare "vs". The closed-set rule
+    // (vs/X/(E)/(DH)) never admits a per-side figure like IV/PW.
+    const headerCentre = findVnode(tree, n => n?.props?.style?.fontSize === '2.4vh');
+    expect(headerCentre).toBeTruthy();
+    expect(collectText(headerCentre)).toBe('vs');
+    // Each side's OWN cell carries its IV/PW instead (teamIVPWFrom, falling
+    // back to teamIVPW here since teamPromoted()'s match carries no
+    // teamResult): sideB (White Team/shiro) won the one scored bout 1-0.
+    const shiroBlock = findVnode(tree, n => n?.props?.['data-testid'] === 'headline-ivpw-shiro');
+    const akaBlock = findVnode(tree, n => n?.props?.['data-testid'] === 'headline-ivpw-aka');
+    expect(shiroBlock).toBeTruthy();
+    expect(akaBlock).toBeTruthy();
+    expect(collectText(shiroBlock)).toBe('IV 1PW 1');
+    expect(collectText(akaBlock)).toBe('PW 0IV 0');
+  });
+
+  it('an INDIVIDUAL match renders no headline IV/PW readout', () => {
+    const p = {
+      kind: 'running',
+      match: { id: 'i1', round: 'Round 1', sideA: { name: 'Aka P' }, sideB: { name: 'Shiro P' },
+        ipponsB: ['K'], ipponsA: ['M'], subResults: [] },
+      competition: { id: 'c2', name: 'Ind', teamSize: 0 }, isBracket: false,
+    };
+    const props = { ...base, promoted: p, isTeamMatch: false, subResults: [], teamSize: 0 };
+    const tree = TvWhiteBoard(props);
+    expect(findVnode(tree, n => n?.props?.['data-testid'] === 'headline-ivpw-shiro')).toBeNull();
+    expect(findVnode(tree, n => n?.props?.['data-testid'] === 'headline-ivpw-aka')).toBeNull();
   });
 
   it('delegates an individual match to IndividualScore (no team bout grid)', () => {
@@ -350,6 +384,15 @@ describe('findNextPoolOnCourt', () => {
     { id: 'Pool B-1', court: 'A', sideA: 'Philippe',sideB: 'Frank', status: 'scheduled', scheduledAt: '09:20' },
     { id: 'Pool B-2', court: 'A', sideA: 'Dave',    sideB: 'Frank', status: 'scheduled', scheduledAt: '09:25' },
   ] };
+  // bc-lbty: findNextPoolOnCourt now returns each bout's shiro/aka as a
+  // NumberedName chip element (Change 1: the NEXT strip chips its number
+  // everywhere for visual consistency with the main row), not a plain
+  // string. Flattening back to {id, shiro, aka} NAME strings here lets the
+  // tests below keep asserting on this function's OWN name/pairing/ordering
+  // logic without re-testing chip rendering (that is covered separately, see
+  // "bout labels honour the outer-side number..." below and the "NEXT strip
+  // renders NumberedName chips" describe further down this file).
+  const boutNames = (bouts) => bouts.map(b => ({ id: b.id, shiro: b.shiro.props.name, aka: b.aka.props.name }));
   it('returns the next pool on this court with its bouts as Shiro/Aka pairs in run order', () => {
     const res = findNextPoolOnCourt(comp, 'Pool A', 'A');
     expect(res).not.toBeNull();
@@ -357,7 +400,7 @@ describe('findNextPoolOnCourt', () => {
     // The strip shows WHICH BOUTS come next, as a group (operator ruling
     // 2026-09-14, bc-dnst), not a roster: each entry is one match, sideB as
     // Shiro (left, dark) and sideA as Aka (right, red), in run order.
-    expect(res.bouts).toEqual([
+    expect(boutNames(res.bouts)).toEqual([
       { id: 'Pool B-0', shiro: 'Dave', aka: 'Philippe' },
       { id: 'Pool B-1', shiro: 'Frank', aka: 'Philippe' },
       { id: 'Pool B-2', shiro: 'Frank', aka: 'Dave' },
@@ -378,7 +421,7 @@ describe('findNextPoolOnCourt', () => {
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
     expect(res.bouts.map(b => b.id)).toEqual(['Pool B-2', 'Pool B-10']);
-    expect(res.bouts[0]).toEqual({ id: 'Pool B-2', shiro: 'EarlyShiro', aka: 'Early' });
+    expect(boutNames(res.bouts)[0]).toEqual({ id: 'Pool B-2', shiro: 'EarlyShiro', aka: 'Early' });
   });
   it('ignores pools on other courts', () => {
     const c2 = { poolMatches: [
@@ -407,10 +450,12 @@ describe('findNextPoolOnCourt', () => {
     ] };
     expect(findNextPoolOnCourt(c3, 'Pool A', 'A').name).toBe('Pool B');
   });
-  it('bout labels honour the outer-side number + zekken displayName via sideLabel', () => {
+  it('bout labels honour the outer-side number + zekken displayName via NumberedName chips', () => {
     // Object sides with number + displayName; withZekkenName true: the bouts
     // must read like the rows above them, Shiro's number BEFORE the name and
-    // Aka's AFTER it (operator ruling 2026-09-14, bc-dnst).
+    // Aka's AFTER it (operator ruling 2026-09-14, bc-dnst) -- now via a
+    // NumberedName chip's own side/name/number props (bc-lbty), not a
+    // composed string.
     const c = { withZekkenName: true, poolMatches: [
       { id: 'Pool A-0', court: 'A', sideA: 'X', sideB: 'Y', status: 'running', scheduledAt: '09:00' },
       { id: 'Pool B-0', court: 'A', status: 'scheduled', scheduledAt: '09:30',
@@ -418,7 +463,13 @@ describe('findNextPoolOnCourt', () => {
         sideB: { name: 'Suzuki', displayName: 'Sho', number: 'K2' } },
     ] };
     const res = findNextPoolOnCourt(c, 'Pool A', 'A');
-    expect(res.bouts).toEqual([{ id: 'Pool B-0', shiro: 'K2 Sho', aka: 'Ryu K1' }]);
+    expect(res.bouts).toHaveLength(1);
+    const [bout] = res.bouts;
+    expect(bout.id).toBe('Pool B-0');
+    expect(bout.shiro.type).toBe(NumberedName);
+    expect(bout.shiro.props).toMatchObject({ side: 'shiro', name: 'Sho', number: 'K2' });
+    expect(bout.aka.type).toBe(NumberedName);
+    expect(bout.aka.props).toMatchObject({ side: 'aka', name: 'Ryu', number: 'K1' });
   });
   it('surfaces team names for team competitions (sideA/sideB ARE team names)', () => {
     const team = { kind: 'team', poolMatches: [
@@ -428,7 +479,7 @@ describe('findNextPoolOnCourt', () => {
     ] };
     const res = findNextPoolOnCourt(team, 'Pool A', 'A');
     expect(res.name).toBe('Pool B');
-    expect(res.bouts).toEqual([
+    expect(boutNames(res.bouts)).toEqual([
       { id: 'Pool B-0', shiro: 'Team Delta', aka: 'Team Gamma' },
       { id: 'Pool B-1', shiro: 'Team Epsilon', aka: 'Team Gamma' },
     ]);
@@ -658,16 +709,33 @@ describe('TvIndividualBoard', () => {
     // be fought.
     const nameSpans = [];
     const kidsOf = n => (n.children != null ? n.children : n.props?.children);
+    // chipName: a span's child is either a plain string (pre-chip form) or a
+    // NumberedName chip element (bc-lbty) -- and kidsOf's own top-level
+    // `.children` alias is ALWAYS an array (even for a single child, per the
+    // mock createElement in reactive_react.js / vitest.setup.js), so a single
+    // chip child arrives here as a one-element array, not the bare element.
+    const chipName = (c) => {
+      const el = Array.isArray(c) && c.length === 1 ? c[0] : c;
+      return (el && typeof el === 'object' && el.type === NumberedName) ? el.props.name : null;
+    };
     // Each bout pair is now rendered via the shared NextPair component
     // (display_scoreboard.jsx), not inline spans: expand any function-typed
     // node (NextPair included) by invoking it with its own props, mirroring
     // what a real renderer would do, so the walk still reaches the coloured
-    // name spans NextPair produces internally.
+    // name spans NextPair produces internally. NumberedName (bc-lbty: the
+    // shiro/aka props are now chips, not strings) is the one exception left
+    // UNEXPANDED: its rendered text lives in its own inner span, so expanding
+    // it would separate the name text from the colour NextPair's wrapping
+    // span (matched below) applies. Reading the chip's `.props.name` via
+    // chipName() instead keeps the colour and the name on the SAME span,
+    // exactly as the pre-chip plain-string form did.
     (function walk(n){ if(!n||typeof n!=='object') return; if(Array.isArray(n)){n.forEach(walk);return;}
-      if (typeof n.type === 'function') { walk(n.type(n.props)); return; }
+      if (typeof n.type === 'function' && n.type !== NumberedName) { walk(n.type(n.props)); return; }
       if(n.type === 'span') {
         const c = kidsOf(n);
-        const text = typeof c === 'string' ? c : (Array.isArray(c) && c.length === 1 && typeof c[0] === 'string' ? c[0] : '');
+        const text = typeof c === 'string' ? c
+          : chipName(c)
+          || (Array.isArray(c) && c.length === 1 && typeof c[0] === 'string' ? c[0] : '');
         if (['Philippe','Dave','Frank'].includes(text)) nameSpans.push({ text, color: n.props?.style?.color });
       }
       [].concat(kidsOf(n) || []).forEach(walk); })(tree);
@@ -1007,16 +1075,28 @@ describe('TvWhiteBoard: the headline number cannot be truncated away (bc-rvfx)',
 // bc-rvfx / PR #428 audit: sideLabel's outer-side number placement (Shiro's
 // number BEFORE the name, Aka's AFTER it) is wired at several
 // display_scoreboard.jsx call sites. The two promoted-headline cells are
-// covered above (they went through the later NumberedName/clip conversion);
-// these NON-clipping rows still call sideLabel directly as a plain string
-// and were left unpinned by that same audit. NOTE: `base` above is scoped to
-// the `TvWhiteBoard`/`TvIndividualBoard` describes above, so this block
-// defines its own chrome props rather than reaching for either.
+// covered above (they went through the later NumberedName/clip conversion).
+// These NON-clipping NEXT rows used to call sideLabel directly as a plain
+// string and were left unpinned by that same audit; as of bc-lbty
+// (2026-09-19, Change 1) they render the SAME NumberedName chip (in its
+// plain, non-clip form) off sideLabelParts, so these tests now assert on the
+// chip's side/name/number PROPS rather than a composed string. NOTE: `base`
+// above is scoped to the `TvWhiteBoard`/`TvIndividualBoard` describes above,
+// so this block defines its own chrome props rather than reaching for either.
 describe('TvWhiteBoard NEXT line: competitor number sits on the outer side (bc-rvfx)', () => {
   const chrome = {
     tournament: { name: 'Cup' }, court: 'A', connected: true,
     lineupA: null, lineupB: null, showDH: false, zekken: false,
   };
+
+  // findNextPairProps: NextPair is not exported by display_scoreboard.jsx, so
+  // its element is matched here by shape (a node carrying both `shiro` and
+  // `aka` props) rather than by importing the component. A generic
+  // findAll/findInTree walk never reaches `shiro`/`aka` on its own: they are
+  // custom props holding the two chip elements directly, not `children`,
+  // which is the only thing those helpers descend into.
+  const findNextPairProps = (tree) =>
+    findVnode(tree, n => n && n.props && n.props.shiro !== undefined && n.props.aka !== undefined)?.props;
 
   it("puts Shiro's number before the name and Aka's after it", () => {
     const p = teamPromoted();
@@ -1029,17 +1109,20 @@ describe('TvWhiteBoard NEXT line: competitor number sits on the outer side (bc-r
         _comp: { withZekkenName: false },
       }],
     };
-    const str = render(props);
+    const pair = findNextPairProps(TvWhiteBoard(props));
+    expect(pair).toBeTruthy();
+    expect(pair.shiro.type).toBe(NumberedName);
+    expect(pair.aka.type).toBe(NumberedName);
     // sideB (Tanaka) is Shiro: number leads. sideA (Yamada) is Aka: number trails.
-    expect(str).toContain('K5 Tanaka');
-    expect(str).toContain('Yamada K9');
-    expect(str).not.toContain('K9 Yamada');
-    expect(str).not.toContain('Tanaka K5');
+    expect(pair.shiro.props).toMatchObject({ side: 'shiro', name: 'Tanaka', number: 'K5' });
+    expect(pair.aka.props).toMatchObject({ side: 'aka', name: 'Yamada', number: 'K9' });
   });
 });
 
 describe('TvIndividualBoard: competitor number sits on the outer side (bc-rvfx)', () => {
   const chrome = { tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false };
+  const findNextPairProps = (tree) =>
+    findVnode(tree, n => n && n.props && n.props.shiro !== undefined && n.props.aka !== undefined)?.props;
 
   it("NEXT line puts Shiro's number before the name and Aka's after it", () => {
     const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
@@ -1055,21 +1138,23 @@ describe('TvIndividualBoard: competitor number sits on the outer side (bc-rvfx)'
       sideB: { name: 'Tanaka', number: 'K5' },
       _comp: { withZekkenName: false },
     }];
-    const str = JSON.stringify(TvIndividualBoard({ ...chrome, promoted, queueMatches }));
-    expect(str).not.toContain('tvd-next-pool'); // sanity: not exercising the pool strip below
-    expect(str).toContain('K5 Tanaka');
-    expect(str).toContain('Yamada K9');
-    expect(str).not.toContain('K9 Yamada');
-    expect(str).not.toContain('Tanaka K5');
+    const tree = TvIndividualBoard({ ...chrome, promoted, queueMatches });
+    expect(JSON.stringify(tree)).not.toContain('tvd-next-pool'); // sanity: not exercising the pool strip below
+    const pair = findNextPairProps(tree);
+    expect(pair).toBeTruthy();
+    expect(pair.shiro.type).toBe(NumberedName);
+    expect(pair.aka.type).toBe(NumberedName);
+    expect(pair.shiro.props).toMatchObject({ side: 'shiro', name: 'Tanaka', number: 'K5' });
+    expect(pair.aka.props).toMatchObject({ side: 'aka', name: 'Yamada', number: 'K9' });
   });
 
   it("UP NEXT pool bout strip puts each bout's number on the outer side", () => {
     // Mirrors the existing "renders the UP NEXT pool strip..." fixture above,
     // but with NUMBERED sides: that test's fixture uses bare name strings, so
-    // it never exercises sideLabel's number-placement behaviour at this
-    // render site (findNextPoolOnCourt's OWN unit test covers the computed
-    // shiro/aka strings directly; this covers those strings actually
-    // reaching the rendered NextPair unmangled).
+    // it never exercises the number-placement behaviour at this render site
+    // (findNextPoolOnCourt's OWN unit test covers the computed shiro/aka
+    // chip elements directly; this covers those elements actually reaching
+    // the rendered NextPair unmangled).
     const multiPool = { name: 'Indiv', kind: 'individual', teamSize: 0, format: 'mixed', poolMatches: [
       { id: 'Pool A-0', court: 'B', sideA: 'Eduardo', sideB: 'Carol', status: 'running', scheduledAt: '09:00' },
       { id: 'Pool B-0', court: 'B', status: 'scheduled', scheduledAt: '09:30',
@@ -1077,11 +1162,95 @@ describe('TvIndividualBoard: competitor number sits on the outer side (bc-rvfx)'
         sideB: { name: 'Tanaka', number: 'K5' } },
     ] };
     const promoted = { competition: multiPool, match: multiPool.poolMatches[0], isBracket: false };
-    const str = JSON.stringify(TvIndividualBoard({ ...chrome, promoted, queueMatches: [] }));
-    expect(str).toContain('tvd-next-pool');
-    expect(str).toContain('K5 Tanaka');
-    expect(str).toContain('Yamada K9');
-    expect(str).not.toContain('K9 Yamada');
-    expect(str).not.toContain('Tanaka K5');
+    const tree = TvIndividualBoard({ ...chrome, promoted, queueMatches: [] });
+    expect(JSON.stringify(tree)).toContain('tvd-next-pool');
+    const pair = findNextPairProps(tree);
+    expect(pair).toBeTruthy();
+    expect(pair.shiro.type).toBe(NumberedName);
+    expect(pair.aka.type).toBe(NumberedName);
+    expect(pair.shiro.props).toMatchObject({ side: 'shiro', name: 'Tanaka', number: 'K5' });
+    expect(pair.aka.props).toMatchObject({ side: 'aka', name: 'Yamada', number: 'K9' });
+  });
+});
+
+// bc-lbty (Change 1): the NEXT strip's NumberedName conversion. Both
+// TvWhiteBoard's own team "Next line" (a running/up-next TEAM match) and
+// TvIndividualBoard's own individual "Next match line" now render the queued
+// match's sides as NumberedName chips (a `.num-prefix` span holding the
+// number) rather than a bare "T14 Renshin Slate" string, so the NEXT strip
+// reads consistently with the chipped main row above it (operator decision
+// 2026-09-19). These tests go one step further than the "outer side" describe
+// blocks above: they actually CALL the found chip element (NumberedName is a
+// pure, hookless function, safe to invoke directly) and assert a real
+// `.num-prefix` span comes out, proving the strip renders a chip and not just
+// that chip-shaped props were handed to NextPair.
+describe('NEXT strip renders NumberedName chips, not bare strings (bc-lbty)', () => {
+  const findNextPairProps = (tree) =>
+    findVnode(tree, n => n && n.props && n.props.shiro !== undefined && n.props.aka !== undefined)?.props;
+
+  // numPrefixText: render the chip and read the text out of its `.num-prefix`
+  // span specifically (not just anywhere in the chip), so a number that leaked
+  // into the plain name span instead would not be mistaken for a real chip.
+  const numPrefixText = (rendered) => {
+    const span = findVnode(rendered, n => hasClass(n, 'num-prefix'));
+    if (!span) return null;
+    const c = span.children != null ? span.children : span.props?.children;
+    return Array.isArray(c) ? c.join('') : c;
+  };
+
+  it("TvWhiteBoard's team NEXT line renders a .num-prefix chip for both sides", () => {
+    const p = teamPromoted();
+    const props = {
+      tournament: { name: 'Cup' }, court: 'A', connected: true,
+      lineupA: null, lineupB: null, showDH: false, zekken: false,
+      promoted: p, isTeamMatch: true, subResults: p.match.subResults, teamSize: 5,
+      queueMatches: [{
+        sideA: { name: 'Yamada', number: 'K9' },
+        sideB: { name: 'Tanaka', number: 'K5' },
+        _comp: { withZekkenName: false },
+      }],
+    };
+    const pair = findNextPairProps(TvWhiteBoard(props));
+    expect(pair).toBeTruthy();
+    // Not a bare string: the NEXT strip hands NextPair a NumberedName element.
+    expect(typeof pair.shiro).not.toBe('string');
+    expect(typeof pair.aka).not.toBe('string');
+    expect(pair.shiro.type).toBe(NumberedName);
+    expect(pair.aka.type).toBe(NumberedName);
+    // NextPair rows don't clip: the plain (non-clip) chip form is used.
+    expect(pair.shiro.props.clip).toBeFalsy();
+    expect(pair.aka.props.clip).toBeFalsy();
+    // Rendering each chip actually produces a `.num-prefix` span carrying the
+    // number as ITS OWN element, for BOTH sides -- not a number glued onto
+    // the name text the way the old bare-string form read.
+    expect(numPrefixText(pair.shiro.type(pair.shiro.props))).toBe('K5');
+    expect(numPrefixText(pair.aka.type(pair.aka.props))).toBe('K9');
+  });
+
+  it("TvIndividualBoard's NEXT line renders a .num-prefix chip for both sides", () => {
+    const comp = { name: 'Indiv', kind: 'individual', teamSize: 0, poolMatches: [
+      { id: 'Pool A-0', court: 'B', sideA: 'X', sideB: 'Y', status: 'running', ipponsA: [], ipponsB: [], scheduledAt: '09:00' },
+    ] };
+    const promoted = { competition: comp, match: comp.poolMatches[0], isBracket: false };
+    const queueMatches = [{
+      id: 'Pool A-9',
+      sideA: { name: 'Yamada', number: 'K9' },
+      sideB: { name: 'Tanaka', number: 'K5' },
+      _comp: { withZekkenName: false },
+    }];
+    const tree = TvIndividualBoard({
+      tournament: { name: 'Cup' }, court: 'B', connected: true, zekken: false,
+      promoted, queueMatches,
+    });
+    const pair = findNextPairProps(tree);
+    expect(pair).toBeTruthy();
+    expect(typeof pair.shiro).not.toBe('string');
+    expect(typeof pair.aka).not.toBe('string');
+    expect(pair.shiro.type).toBe(NumberedName);
+    expect(pair.aka.type).toBe(NumberedName);
+    expect(pair.shiro.props.clip).toBeFalsy();
+    expect(pair.aka.props.clip).toBeFalsy();
+    expect(numPrefixText(pair.shiro.type(pair.shiro.props))).toBe('K5');
+    expect(numPrefixText(pair.aka.type(pair.aka.props))).toBe('K9');
   });
 });

@@ -665,9 +665,13 @@ export const PoolNumberedMatchRow = React.memo(({ m, num, onMatchClick, isEngi }
         {bDN ? <span className="pool-match-numbered-row__name">{bDN}</span> : null}
       </div>
       <span className="pool-match-numbered-row__score">
-        {/* Running matches are signalled by the row highlight (shared .is-running),
-            not a centre dot: matchStateCell shows the score when completed and
-            the plain "vs" middle otherwise (a dash is never a middle value). */}
+        {/* Running matches are ALSO signalled by the row highlight (shared
+            .is-running), not just a centre score: matchStateCell shows the
+            final score once completed, the live IV/PW aggregate for a
+            running TEAM match (never a side mark, so no closed-set risk in
+            this [name][score][name] row), and otherwise the plain "vs"
+            middle -- a running INDIVIDUAL match stays "vs" here until it
+            completes (a dash is never a middle value either way). */}
         {window.matchStateCell(m)}
       </span>
       <div className="pool-match-numbered-row__side pool-match-numbered-row__side--aka">

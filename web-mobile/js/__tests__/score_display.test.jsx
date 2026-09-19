@@ -316,12 +316,24 @@ describe('matchStateCell: shared running-row centre cue', () => {
     expect(matchStateCell({ status: 'completed', ipponsB: ['M'], ipponsA: ['K'] })).toBe('M vs K');
   });
 
+  // bc-cse: a running INDIVIDUAL match's ippon letters do NOT go live through
+  // matchStateCell, unlike a running TEAM match's IV/PW aggregate (see the
+  // team block below). matchStateCell's one production caller
+  // (PoolNumberedMatchRow, viewer_standings.jsx) places this value literally
+  // BETWEEN the two competitor name cells, and completed-only individual
+  // ippon letters can carry a trailing side mark (e.g. Ht) that a plain team
+  // aggregate never can -- see the comment on matchStateCell (bracket.jsx)
+  // for the full reasoning. Still reads "vs" until the match completes.
+  it('running individual match keeps the plain "vs" middle (ippon letters do not go live here)', () => {
+    expect(matchStateCell({ status: 'running', ipponsB: ['M'], ipponsA: ['K'] })).toBe('vs');
+  });
+
   it('completed with no derivable score → plain "vs" (never a dash)', () => {
     // No ippons, no score, no decision → matchScoreStr returns "" → "vs".
     expect(matchStateCell({ status: 'completed' })).toBe('vs');
   });
 
-  it('every non-completed status reads the plain "vs" middle (never a dash or dot)', () => {
+  it('every non-completed status with no derivable score reads the plain "vs" middle (never a dash or dot)', () => {
     for (const status of ['running', 'scheduled', 'bye', undefined]) {
       expect(matchStateCell({ status })).toBe('vs');
     }
@@ -349,6 +361,21 @@ describe('team score string carries IV and PW', () => {
       ],
     };
     expect(matchStateCell(m)).toBe('IV 0–5\nPW 0–5');
+  });
+
+  // bc-cse: a team match's score lives in subResults/teamResult, never the
+  // match-level ippon arrays -- so while a team encounter is RUNNING,
+  // matchStateCell was the only path a live IV/PW readout had, and it was
+  // gated completed-only. Pin that a running team match reads live now too.
+  it('renders IV and PW from a RUNNING team match, not just a completed one', () => {
+    const m = {
+      status: 'running', sideA: 'Ryu', sideB: 'Tora', winner: null,
+      teamResult: { shiroIV: 1, akaIV: 0, shiroPW: 2, akaPW: 1 },
+      subResults: [
+        { position: 1, sideA: 'Ryu Ichiro', sideB: 'Tora Ichiro', winner: 'Tora Ichiro', ipponsB: ['M'] },
+      ],
+    };
+    expect(matchStateCell(m)).toBe('IV 1–0\nPW 2–1');
   });
 
   it('renders the tied IV and PW for a daihyosen-decided final', () => {

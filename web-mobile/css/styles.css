@@ -56,7 +56,6 @@
   --ok-strong: #15803d;   /* green-700: stronger text/border on soft */
   --ok-soft: #f0fdf4;     /* green-50: success fill */
   --ok-border: #dcfce7;   /* green-100: success hairline border */
-  --ok-border-strong: #bbf7d0; /* green-200: success hairline on a chip that shares its row's fill */
   --ok-ink: #166534;      /* green-800: strongest success text, AA on --ok-soft */
   --white-side: #f6f7fb;
 
@@ -267,21 +266,21 @@ a:hover {
 }
 
 .topbar__conn--down {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .topbar__conn--down .topbar__conn__dot {
-  background: var(--red);
+  background: var(--danger);
   animation: conn-pulse 1.6s ease-out infinite;
 }
 
 @keyframes conn-pulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 35%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 35%, transparent);
   }
   70%,
   100% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 0%, transparent);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 0%, transparent);
   }
 }
 
@@ -1119,11 +1118,15 @@ a:hover {
   border-color: var(--line);
 }
 
+/* Base dot carries a neutral fill so a bare `.dot` is visible. Without it the
+   one un-modified use (the dashboard's "Currently running" heading) rendered an
+   8px hole. `.dot--running` overrides the colour below. */
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
   display: inline-block;
+  background: var(--ink-3);
 }
 
 /* Running-match signal: colour moved off red → --accent navy so red stays
@@ -1764,7 +1767,7 @@ a:hover {
 .rank-badge--adv {
   background: var(--ok-soft);
   color: var(--ok-ink);
-  border: 1px solid var(--ok-border-strong);
+  border: 1px solid var(--ok);
 }
 
 /* Numbered match list section header */
@@ -1833,7 +1836,7 @@ a:hover {
 
 .pool-match-numbered-row__side--shiro {
   background: var(--white-side);
-  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(42,51,70,0.07) 3px, rgba(42,51,70,0.07) 6px);
+  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--shiro-hatch) 3px, var(--shiro-hatch) 6px);
   border-radius: 6px 0 0 6px;
 }
 

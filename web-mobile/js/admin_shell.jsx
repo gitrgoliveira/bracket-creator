@@ -535,7 +535,7 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
             {/* Plain dot, not dot--running: these are started competitions, which
                 is not the same as a match in progress right now. Matches
                 actually under way (topbar strip + match rows) carry the navy
-                fill + ring of dot--running; this dot carries neither. */}
+                fill + ring of dot--running; this one is neutral grey. */}
             <span className="dot"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>

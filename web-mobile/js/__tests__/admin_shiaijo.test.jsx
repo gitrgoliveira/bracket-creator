@@ -362,6 +362,40 @@ describe('partitionShiaijoMatches', () => {
     const out = partitionShiaijoMatches([]);
     expect(out).toEqual({ sorted: [], running: [], scheduled: [], completed: [] });
   });
+
+  // Completed reads in the order the bouts were PLAYED, oldest first, so the
+  // newest result is the TAIL. That is what lets the context strip anchor to
+  // the tail and the Completed preview stay a contiguous window whose "Show
+  // all" extends the list (mp-jnvl, operator ruling 2026-09-19).
+  it('orders completed by play time, so the newest result is the tail', () => {
+    const { completed } = partitionShiaijoMatches([
+      { id: 'played-2nd', status: 'completed', scheduledAt: '09:20', modifiedAt: 2000 },
+      { id: 'played-3rd', status: 'completed', scheduledAt: '09:00', modifiedAt: 3000 },
+      { id: 'played-1st', status: 'completed', scheduledAt: '09:10', modifiedAt: 1000 },
+    ]);
+    expect(completed.map((m) => m.id)).toEqual(['played-1st', 'played-2nd', 'played-3rd']);
+  });
+
+  it('keeps schedule order for completed bouts when none carries a stamp', () => {
+    const { completed } = partitionShiaijoMatches([
+      { id: 'c', status: 'completed', scheduledAt: '09:20' },
+      { id: 'a', status: 'completed', scheduledAt: '09:00' },
+      { id: 'b', status: 'completed', scheduledAt: '09:10' },
+    ]);
+    // Exactly the order this list had before the stamp existed.
+    expect(completed.map((m) => m.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  // Running and scheduled are what happens NEXT, so they keep schedule order.
+  it('leaves the running and scheduled groups in schedule order', () => {
+    const { running, scheduled } = partitionShiaijoMatches([
+      { id: 's2', status: 'scheduled', scheduledAt: '09:30', modifiedAt: 9000 },
+      { id: 'r1', status: 'running', scheduledAt: '09:00', modifiedAt: 1 },
+      { id: 's1', status: 'scheduled', scheduledAt: '09:10' },
+    ]);
+    expect(running.map((m) => m.id)).toEqual(['r1']);
+    expect(scheduled.map((m) => m.id)).toEqual(['s1', 's2']);
+  });
 });
 
 

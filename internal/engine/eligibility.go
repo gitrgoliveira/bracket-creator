@@ -383,14 +383,14 @@ func (e *Engine) checkEligibilityExcludingMatch(compID string, playerIDs []strin
 // a WithTransaction closure.
 //
 // T090, T103, contracts/match-decisions.md §POST /decision, bc-twin.
-func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool) (*state.MatchResult, *domain.CompetitorStatus, error) {
+func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
 	var (
 		result *state.MatchResult
 		status *domain.CompetitorStatus
 		engErr error
 	)
 	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
-		result, status, engErr = e.RecordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force)
+		result, status, engErr = e.RecordDecisionTx(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, modifiedAt...)
 		// Return nil regardless: engErr is an application-level signal
 		// (validation → 400, AlreadyIneligible → 409, ErrDecisionLocked →
 		// 409) surfaced after the tx, and any K3 rollback has already

@@ -23,13 +23,23 @@ const THEME = {
   "cardVariant": 1
 };
 
+// state.ValidateTheme rejects a malformed colour on the API write path but is
+// never run on load, so a hand-edited tournament.md reaches us unvalidated.
+// Setting --accent to a non-colour makes every declaration reading it invalid
+// at computed-value time, which silently strips the navy hero, the running
+// ring and the rest, so each value is checked before it is applied.
+const HEX_RE = /^#?([0-9a-fA-F]{6})$/;
+export function isHexColor(hex) {
+  return HEX_RE.test(hex || "");
+}
+
 // Darken a #rrggbb hex toward black by `amount` (0..1). Used to derive the
 // filled-button hover shade (--accent-strong) from a runtime Branding accent
 // so the hover tracks the configured colour instead of a hard-coded navy
 // (mp-nubo). Returns null on malformed input so callers fall back to the CSS
 // default token.
 function darkenHex(hex, amount) {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+  const m = HEX_RE.exec(hex || "");
   if (!m) return null;
   const n = parseInt(m[1], 16);
   const f = 1 - amount;
@@ -43,7 +53,7 @@ function darkenHex(hex, amount) {
 // sibling of darkenHex, used to derive --accent-soft from the Branding accent.
 // 0.08 reproduces the stock #e7eaf3 tint from the stock navy to within 6/255.
 export function tintHex(hex, amount) {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+  const m = HEX_RE.exec(hex || "");
   if (!m) return null;
   const n = parseInt(m[1], 16);
   const mix = (c) => Math.round(255 - amount * (255 - c));
@@ -66,21 +76,19 @@ const STOCK_ACCENT_SOFT = "#e7eaf3";
 // when the theme field is absent so the CSS defaults take over.
 export function applyTheme(theme) {
   const root = document.documentElement;
-  if (theme && theme.primaryColor) {
-    root.style.setProperty("--accent", theme.primaryColor);
+  const primary = theme && isHexColor(theme.primaryColor) ? theme.primaryColor : null;
+  if (primary) {
+    root.style.setProperty("--accent", primary);
     // mp-nubo: keep the button hover shade in sync with the custom accent.
-    const strong = darkenHex(theme.primaryColor, 0.2);
-    if (strong) root.style.setProperty("--accent-strong", strong);
-    else root.style.removeProperty("--accent-strong");
+    // primary is already known to parse, so darkenHex cannot fail here.
+    root.style.setProperty("--accent-strong", darkenHex(primary, 0.2));
   } else {
     root.style.removeProperty("--accent");
     root.style.removeProperty("--accent-strong");
   }
-  const chosenSoft = theme && theme.accentSoftColor;
+  const chosenSoft = theme && isHexColor(theme.accentSoftColor) ? theme.accentSoftColor : null;
   const softIsStock = !chosenSoft || chosenSoft.toLowerCase() === STOCK_ACCENT_SOFT;
-  const derivedSoft = softIsStock && theme && theme.primaryColor
-    ? tintHex(theme.primaryColor, 0.08)
-    : null;
+  const derivedSoft = softIsStock && primary ? tintHex(primary, 0.08) : null;
   if (!softIsStock) {
     root.style.setProperty("--accent-soft", chosenSoft);
   } else if (derivedSoft) {

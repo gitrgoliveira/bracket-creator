@@ -81,3 +81,35 @@ describe('applyTheme --accent-soft', () => {
     expect(soft()).toBe('');
   });
 });
+
+// state.ValidateTheme guards the API write path but is never run on load, so a
+// hand-edited tournament.md reaches applyTheme unvalidated. Verified against a
+// real server: GET /api/tournament happily returns primaryColor "not-a-colour",
+// and before this guard the SPA set --accent to it, which made every
+// declaration reading --accent invalid at computed-value time. The navy hero
+// rendered transparent.
+describe('applyTheme rejects malformed colours', () => {
+  beforeEach(() => {
+    document.documentElement.style.removeProperty('--accent');
+    document.documentElement.style.removeProperty('--accent-strong');
+    document.documentElement.style.removeProperty('--accent-soft');
+  });
+
+  it('leaves --accent unset rather than poisoning every rule that reads it', () => {
+    applyTheme({ primaryColor: 'not-a-colour', accentSoftColor: '#e7eaf3' });
+    expect(accent()).toBe('');
+    expect(document.documentElement.style.getPropertyValue('--accent-strong')).toBe('');
+  });
+
+  it('ignores a malformed explicit soft colour', () => {
+    applyTheme({ primaryColor: '#8e24aa', accentSoftColor: 'rgb(1,2,3)' });
+    // Not applied, and not treated as an explicit choice either: the primary
+    // still drives the derived tint.
+    expect(soft()).toBe(tintHex('#8e24aa', 0.08));
+  });
+
+  it('accepts a valid colour with no leading hash, as the parsers always have', () => {
+    applyTheme({ primaryColor: '8e24aa' });
+    expect(accent()).toBe('8e24aa');
+  });
+});

@@ -3502,7 +3502,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             </details>
           )}
           {decisionErr && (
-            <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
+            <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
           )}
           {decisionPromptKind && (
             <DecisionPrompt
@@ -3637,7 +3637,7 @@ export function TeamScoreEditorModal({ match, teamSize, onClose, onSubmit, onSub
             </div>
           )}
           {reopenErr && (
-            <div data-testid="kachinuki-reopen-error" style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 6 }}>{reopenErr}</div>
+            <div data-testid="kachinuki-reopen-error" style={{ color: "var(--danger)", fontSize: 12, marginBottom: 6 }}>{reopenErr}</div>
           )}
           {/* mp-gmcg: court-busy remedy. A busy court used to be a dead end
               for the one group that has no alternative (a correction bypasses

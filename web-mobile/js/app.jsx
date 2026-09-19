@@ -1959,7 +1959,7 @@ function CreateTournament({ onCreated, authConfig }) {
             <div
               data-testid="create-tournament-error"
               role="alert"
-              style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 8, marginTop: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}
+              style={{ color: "var(--danger)", fontSize: 12, marginBottom: 8, marginTop: 12, padding: 8, border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}
             >
               {error}
             </div>

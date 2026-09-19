@@ -309,14 +309,14 @@ function StreamingOverlay({ court, position, competitions }) {
                     <div style={{ flex: 1, minWidth: 0 }} data-testid="overlay-shiro">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
                             <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shiroTeamParts ? <NumberedName side="shiro" clip {...shiroTeamParts} /> : ''}</span>
-                            <span data-testid="overlay-shiro-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</span>
+                            <span data-testid="overlay-shiro-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#ffffff', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>IV {ovlIV.ivShiro} · PW {ovlIV.pwShiro}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
                             <span style={{ fontSize: '1.9vh', color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {boutShiroLabel && <span style={{ opacity: 0.75, fontWeight: 600, marginRight: '0.35em' }} data-testid="overlay-shiro-member-label">{boutShiroLabel}</span>}
                                 {boutShiroName}
                             </span>
-                            <span data-testid="overlay-shiro-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#ffffff', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsB}</span>
+                            <span data-testid="overlay-shiro-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#ffffff', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{boutIpponsB}</span>
                         </div>
                     </div>
 
@@ -328,11 +328,11 @@ function StreamingOverlay({ court, position, competitions }) {
                     {/* Aka: right side (red) */}
                     <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }} data-testid="overlay-aka">
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw' }}>
-                            <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
+                            <span data-testid="overlay-aka-ivpw" style={{ flexShrink: 0, fontSize: '1.8vh', color: '#fda4af', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>PW {ovlIV.pwAka} · IV {ovlIV.ivAka}</span>
                             <span style={{ fontWeight: 700, fontSize: '2.6vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{akaTeamParts ? <NumberedName side="aka" clip {...akaTeamParts} /> : ''}</span>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1vw', marginTop: '0.4vh', opacity: 0.85 }}>
-                            <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono, monospace)', fontWeight: 700 }}>{boutIpponsA}</span>
+                            <span data-testid="overlay-aka-bout" style={{ flexShrink: 0, fontSize: '2vh', color: '#fda4af', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{boutIpponsA}</span>
                             <span style={{ fontSize: '1.9vh', color: '#fda4af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {/* Aka's member label sits AFTER the name, on the outer
                                     side, like its competitor number (operator ruling
@@ -354,8 +354,8 @@ function StreamingOverlay({ court, position, competitions }) {
                             // the app. Kept as a chip (not a flood) so the transparent
                             // lower-third still lets broadcast video show through.
                             background: '#fff',
-                            color: 'var(--accent, #1d3557)',
-                            border: '1px solid var(--accent, #1d3557)',
+                            color: 'var(--accent)',
+                            border: '1px solid var(--accent)',
                             fontSize: '1.4vh',
                             fontWeight: 800,
                             letterSpacing: '0.06em',
@@ -369,7 +369,7 @@ function StreamingOverlay({ court, position, competitions }) {
                     <div style={{
                         flexShrink: 0,
                         padding: '0 2vw',
-                        fontFamily: 'var(--font-mono, monospace)',
+                        fontFamily: 'var(--font-mono)',
                         fontWeight: 700,
                         fontSize: '3.5vh',
                     }}>
@@ -384,7 +384,7 @@ function StreamingOverlay({ court, position, competitions }) {
                             display: 'inline-block',
                             // Solid-red Aka chip (DESIGN.md §4): --red fill, matching the
                             // app's Aka badges. e63946 → --red for token consistency.
-                            background: 'var(--red, #c1121f)',
+                            background: 'var(--red)',
                             color: '#fff',
                             fontSize: '1.4vh',
                             fontWeight: 800,
@@ -417,7 +417,7 @@ function StreamingOverlay({ court, position, competitions }) {
                 }}>
                     {isDHMatch && (
                         <span data-testid="overlay-dh-badge" style={{
-                            background: 'var(--warn-strong, #f59e0b)',
+                            background: 'var(--warn-strong)',
                             color: '#1a1d24',
                             fontWeight: 800,
                             letterSpacing: '0.06em',

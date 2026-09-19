@@ -785,7 +785,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
               Aka = sideA, matching the scoreboard's colour assignment. */}
           {m.repIsTeam && (
             <div data-testid="rep-bout-picker" className="rep-bout-picker" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2, #3a414e)" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>
                 <span>Shiro rep · {m.sideB?.name || ""}</span>
                 <select
                   data-testid="rep-shiro-select"
@@ -799,7 +799,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
                   {(m.repRosterB || []).map(nm => <option key={nm} value={nm}>{nm}</option>)}
                 </select>
               </label>
-              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--red, #b91c1c)" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, fontWeight: 700, color: "var(--red)" }}>
                 <span>Aka rep · {m.sideA?.name || ""}</span>
                 <select
                   data-testid="rep-aka-select"
@@ -1036,7 +1036,7 @@ export function ScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext, on
             </div>
           )}
           {decisionErr && (
-            <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
+            <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 6 }}>{decisionErr}</div>
           )}
           {decisionPromptKind && (
             <DecisionPrompt

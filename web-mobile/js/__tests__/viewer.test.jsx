@@ -567,7 +567,7 @@ describe('MatchDetailCard team sub-rows (mp-8sw)', () => {
     const score = findVnode(tree, n => n.type === IndividualScore);
     expect(score).toBeTruthy();
     expect(score.props.showNames).toBe(true);
-    // Resolved names are passed IN: the component's own withNumber would render
+    // Resolved names are passed IN: the component's own derivation would render
     // an unplayed bracket side as "TBD" rather than its feeder label.
     expect(score.props.shiroName).toBe('Bob');
     expect(score.props.akaName).toBe('Alice');

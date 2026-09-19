@@ -13,7 +13,7 @@
 // unchanged.
 
 import { writeDidNotLand } from './write_result.jsx';
-import { useTeamLineups, TeamScoreboard, IndividualScore, withNumber, numberedParts } from './match_scoreboard.jsx';
+import { useTeamLineups, TeamScoreboard, IndividualScore, numberedParts } from './match_scoreboard.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { TermV, poolLabel } from './viewer_utils.jsx';
 import { DAIHYOSEN_POSITION } from './pool_ids.jsx';
@@ -94,18 +94,12 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
   // for a mount without bracket.js; production load order rules it out
   // (index.html tags bracket.js before every viewer module).
   const slotName = slotLabel || window.slotDisplayName || ((n) => n);
-  // withNumber places the assigned competitor number on the outer side (e.g.
-  // "K1 Tanaka" for Shiro, "Yamada K2" for Aka) when the competition has
-  // numberPrefix; team-level sides have no .number so this degrades to the
-  // bare team name. sideA is Aka, sideB is Shiro.
-  const aName = slotName(withNumber(match.sideA, undefined, "aka"), (match.feeders || [])[0]);
-  const bName = slotName(withNumber(match.sideB, undefined, "shiro"), (match.feeders || [])[1]);
-  // TeamScoreboard's summary cell composes the number itself through
-  // NumberedName, because that cell ellipsises and a number baked into the
-  // string is the first thing truncated on Aka: at 402px the cell is 85px and
-  // "Seishinkan Ember T7" lost its T7 (bc-rvfx). So it takes the BARE name.
-  // IndividualScore below still renders shiroName/akaName AS the display name,
-  // so it keeps the numbered form above: do not collapse these into one value.
+  // Both TeamScoreboard's summary cell and IndividualScore compose the
+  // number themselves through NumberedName, because those cells ellipsise
+  // and a number baked into the string is the first thing truncated on Aka
+  // (measured: at 402px the summary cell is 85px and "Seishinkan Ember T7"
+  // lost its T7; bc-rvfx). So this card hands both the BARE name; sideA is
+  // Aka, sideB is Shiro.
   const aNameBare = slotName(numberedParts(match.sideA, undefined).name, (match.feeders || [])[0]);
   const bNameBare = slotName(numberedParts(match.sideB, undefined).name, (match.feeders || [])[1]);
   const isRunning = match.status === "running";
@@ -171,7 +165,7 @@ export function MatchDetailCard({ match, onClose, escapeToClose = true, slotLabe
             numberA={match.sideA?.number || ""} numberB={match.sideB?.number || ""}
             kachinuki={match.teamMatchType === "kachinuki"} />
         : <IndividualScore match={match} variant="card" showNames showDojo
-            shiroName={bName} akaName={aName} />}
+            shiroName={bNameBare} akaName={aNameBare} />}
     </div>
   );
 }

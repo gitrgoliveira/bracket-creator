@@ -6823,6 +6823,34 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    it renders at the 12px base beside ~3.5vh slots. */
 .msb--tv .msb-ht { font-size: calc(2.4vh * var(--msb-scale, 1)); }
 
+/* Lobby board (display_lobby.jsx). The lobby renders IndividualScore with no
+   `variant`, so it inherited .msb-row's 13px base -- phone-card size on a
+   venue TV read from across a hall. It is NOT .msb--tv: that board shows ONE
+   match per screen, while the lobby packs 2 shiaijo x 6 queue rows, so it
+   needs its own smaller step. Scoped to the cell wrapper rather than a
+   component variant so the shared row keeps one class list and the team cell
+   (which is the lobby's own markup, not IndividualScore) is covered by the
+   same rule. vh, matching the lobby's own chrome (2.4vh title, 1.6vh footer),
+   so it scales with the screen rather than pinning px on an unknown TV. */
+.lobby-cell .msb-row { font-size: 1.7vh; }
+.lobby-cell .msb-name { font-size: 1.9vh; }
+.lobby-cell .msb-vs { font-size: 1.5vh; min-width: 3vh; }
+.lobby-cell .msb-slot { min-width: 2.6vh; height: 3vh; font-size: 1.9vh; }
+/* The live IV/PW aggregate, which is the whole point of this board. It shares
+   the centre ELEMENT with the plain "vs" separator, so without a class of its
+   own it inherited .msb-vs's muted grey at a size SMALLER than the names
+   beside it -- the least legible thing in the cell. Set only when a score
+   exists (display_lobby.jsx), so an unscored encounter's "vs" still reads as
+   the quiet separator the individual rows show. */
+.lobby-cell .lobby-score { color: var(--ink, #111); font-size: 1.9vh; font-weight: 700; }
+/* The competitor-number chip is sized in em, so it tracked the name's 13px
+   base and never got a TV bump like every other scoreboard token
+   (.msb-row/.msb-name/.msb-slot/.msb-vs/.msb-lab all have one). Routing
+   IndividualScore through NumberedName therefore SHRANK the number on the hall
+   TV, from the name's own ~3vh to 0.64em of it. Restore a readable size that
+   is still clearly subordinate to the name. */
+.msb--tv .num-prefix { font-size: calc(2.2vh * var(--msb-scale, 1)); }
+
 /* ---------- League Round-Robin Matrix (Viewer) ---------- */
 .league-matrix-wrap {
   overflow-x: auto;

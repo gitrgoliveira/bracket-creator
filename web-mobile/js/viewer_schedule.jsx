@@ -256,7 +256,22 @@ export function TWMatch({ m, highlight, onClick }) {
   // already false.
   const aWin = sameCompetitor(m.winner, m.sideA);
   const bWin = sameCompetitor(m.winner, m.sideB);
-  const scoreStr = m.status === "completed" ? window.matchScoreStr(m) : null;
+  // Live, not just final: a running team match's score lives in subResults,
+  // not the match-level ippon arrays, so window.matchScoreStr(m) is the only
+  // way to surface it while play is in progress. Deliberately the FULL score
+  // string for any match kind, matching VSchedItem (viewer_match.jsx), which
+  // already shows a running individual match's ippon letters.
+  //
+  // matchStateCell (bracket.jsx) is scoped NARROWER -- team aggregate only --
+  // and the difference is not layout: VSchedItem sits its score between the
+  // two competitor names just as matchStateCell's caller does. It is that
+  // matchStateCell is the SHARED primitive several lists route through, so a
+  // side mark reaching its centre is a rule violation wherever it renders,
+  // while these two schedule rows are single surfaces already shipping that
+  // shape for completed matches. Do not "unify" them without re-reading the
+  // closed-set ruling in CLAUDE.md.
+  const isRunning = m.status === "running";
+  const scoreStr = (m.status === "completed" || isRunning) ? window.matchScoreStr(m) : null;
   // FR-025: per-court queue position: see VSchedItem for the contract.
   // Short pill form here because the tw-match row is denser than the
   // upcoming-list row in the per-competition viewer. Wording is owned
@@ -290,8 +305,8 @@ export function TWMatch({ m, highlight, onClick }) {
         </div>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
-      <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13 }}>
-        {m.status === "completed" && scoreStr}
+      <div style={{ textAlign: "right", fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: 13, whiteSpace: "pre-line" }}>
+        {scoreStr}
         {/* No separate "BYE" span here. Two independent reasons: this list is
             filtered through hasBothSides (see ScheduleViewer.allMatches), which
             rejects a match with an absent side, and a bye is exactly that; and

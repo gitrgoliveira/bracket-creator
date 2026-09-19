@@ -376,7 +376,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 <div data-testid="lobby-empty" style={{
                     flex: 1,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 28, opacity: 0.55,
+                    fontSize: '2.6vh', opacity: 0.55,
                 }}>
                     No active courts
                 </div>

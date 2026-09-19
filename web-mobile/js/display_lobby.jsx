@@ -126,6 +126,11 @@ function buildCourtSlots(competitions, court) {
 // it the newline collapses and the cell renders one long line.
 function teamScoreCell(match, withZekkenName) {
     const centre = teamIVPWScore(match) || "vs";
+    // The score is what this board exists to show, so it takes a class of its
+    // own rather than inheriting .msb-vs's muted separator grey. Only when
+    // there IS a score: an unscored encounter's "vs" is a separator and should
+    // keep reading like the individual rows' one beside it.
+    const scored = centre !== "vs";
     // NumberedName in `clip` mode, not withNumber's flat string: `.msb-name`
     // ellipsises, and a team read as "Mushin Steel W1" with the number baked
     // into the string, as if it were part of the team's own name (operator
@@ -135,7 +140,7 @@ function teamScoreCell(match, withZekkenName) {
         <div className="msb" data-testid="team-lobby-score">
             <div className="msb-row">
                 <span className="msb-name" data-testid="lobby-team-shiro-name"><NumberedName side="shiro" clip {...numberedParts(match.sideB, withZekkenName)} /></span>
-                <span className="msb-vs" style={{ whiteSpace: "pre-line" }} data-testid="lobby-team-centre">{centre}</span>
+                <span className={"msb-vs" + (scored ? " lobby-score" : "")} style={{ whiteSpace: "pre-line" }} data-testid="lobby-team-centre">{centre}</span>
                 <span className="msb-name msb-name--aka" data-testid="lobby-team-aka-name"><NumberedName side="aka" clip {...numberedParts(match.sideA, withZekkenName)} /></span>
             </div>
         </div>
@@ -156,7 +161,7 @@ function LobbyMatchCell({ slot, rowKind }) {
                     border: '1px solid transparent',
                     opacity: 0.12,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18,
+                    fontSize: '2.2vh',
                 }}>-</div>
             </td>
         );
@@ -302,7 +307,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '20px 36px 16px',
-                fontSize: 13, color: LOBBY_COLORS.inkDim,
+                fontSize: '1.5vh', color: LOBBY_COLORS.inkDim,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
@@ -333,7 +338,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                         </div>
                     )}
                     {totalPages > 1 && (
-                        <span data-testid="lobby-page-indicator" style={{ fontSize: 11, color: LOBBY_COLORS.inkMuted, letterSpacing: '0.06em', fontWeight: 400 }}>
+                        <span data-testid="lobby-page-indicator" style={{ fontSize: '1.3vh', color: LOBBY_COLORS.inkMuted, letterSpacing: '0.06em', fontWeight: 400 }}>
                             {pageCourtLabel} · {page + 1} / {totalPages}
                         </span>
                     )}
@@ -405,14 +410,14 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                             <th scope="col" style={{
                                                 textAlign: 'center',
                                                 padding: '14px 12px 12px',
-                                                fontSize: 18, fontWeight: 700, letterSpacing: '0.1em',
+                                                fontSize: '2.2vh', fontWeight: 700, letterSpacing: '0.1em',
                                                 textTransform: 'uppercase',
                                                 borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
                                                 background: LOBBY_COLORS.bg,
                                             }}>
                                                 Shiaijo {cc}
                                                 {subtitle && (
-                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
+                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: '1.3vh', fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
                                                         {subtitle}
                                                     </div>
                                                 )}
@@ -434,7 +439,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                         {/* Row label: <th scope="row"> so AT associates it with its cells */}
                                         <th scope="row" style={{
                                             textAlign: 'right', paddingRight: 16,
-                                            fontSize: 10, fontWeight: 700, letterSpacing: '0.14em',
+                                            fontSize: '1.2vh', fontWeight: 700, letterSpacing: '0.14em',
                                             textTransform: 'uppercase', color: LOBBY_COLORS.inkMuted,
                                             verticalAlign: 'top', paddingTop: 16,
                                             borderRight: `1px solid ${LOBBY_COLORS.line}`,

@@ -23,13 +23,23 @@ const THEME = {
   "cardVariant": 1
 };
 
+// state.ValidateTheme rejects a malformed colour on the API write path but is
+// never run on load, so a hand-edited tournament.md reaches us unvalidated.
+// Setting --accent to a non-colour makes every declaration reading it invalid
+// at computed-value time, which silently strips the navy hero, the running
+// ring and the rest, so each value is checked before it is applied.
+const HEX_RE = /^#?([0-9a-fA-F]{6})$/;
+export function isHexColor(hex) {
+  return HEX_RE.test(hex || "");
+}
+
 // Darken a #rrggbb hex toward black by `amount` (0..1). Used to derive the
 // filled-button hover shade (--accent-strong) from a runtime Branding accent
 // so the hover tracks the configured colour instead of a hard-coded navy
 // (mp-nubo). Returns null on malformed input so callers fall back to the CSS
 // default token.
 function darkenHex(hex, amount) {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+  const m = HEX_RE.exec(hex || "");
   if (!m) return null;
   const n = parseInt(m[1], 16);
   const f = 1 - amount;
@@ -39,23 +49,50 @@ function darkenHex(hex, amount) {
   return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
 }
 
+// Tint a #rrggbb hex toward white, keeping `amount` (0..1) of the colour. The
+// sibling of darkenHex, used to derive --accent-soft from the Branding accent.
+// 0.08 reproduces the stock #e7eaf3 tint from the stock navy to within 6/255.
+export function tintHex(hex, amount) {
+  const m = HEX_RE.exec(hex || "");
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const mix = (c) => Math.round(255 - amount * (255 - c));
+  const r = mix((n >> 16) & 255);
+  const g = mix((n >> 8) & 255);
+  const b = mix(n & 255);
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
+
+// The stock soft tint. BrandingManager's normalizeTheme fills accentSoftColor
+// with this whenever the operator has not picked one, so a stored value equal
+// to it means "not chosen" rather than "chosen to be navy". Without that
+// distinction an operator who sets only the primary colour gets a purple accent
+// against 61 rules still tinted navy, which is the desync bc-csst exists to
+// close.
+const STOCK_ACCENT_SOFT = "#e7eaf3";
+
 // mp-scf: apply tournament-configured CSS custom properties. Called once
 // after tournament load and again on tournament_updated. Removes overrides
 // when the theme field is absent so the CSS defaults take over.
-function applyTheme(theme) {
+export function applyTheme(theme) {
   const root = document.documentElement;
-  if (theme && theme.primaryColor) {
-    root.style.setProperty("--accent", theme.primaryColor);
+  const primary = theme && isHexColor(theme.primaryColor) ? theme.primaryColor : null;
+  if (primary) {
+    root.style.setProperty("--accent", primary);
     // mp-nubo: keep the button hover shade in sync with the custom accent.
-    const strong = darkenHex(theme.primaryColor, 0.2);
-    if (strong) root.style.setProperty("--accent-strong", strong);
-    else root.style.removeProperty("--accent-strong");
+    // primary is already known to parse, so darkenHex cannot fail here.
+    root.style.setProperty("--accent-strong", darkenHex(primary, 0.2));
   } else {
     root.style.removeProperty("--accent");
     root.style.removeProperty("--accent-strong");
   }
-  if (theme && theme.accentSoftColor) {
-    root.style.setProperty("--accent-soft", theme.accentSoftColor);
+  const chosenSoft = theme && isHexColor(theme.accentSoftColor) ? theme.accentSoftColor : null;
+  const softIsStock = !chosenSoft || chosenSoft.toLowerCase() === STOCK_ACCENT_SOFT;
+  const derivedSoft = softIsStock && primary ? tintHex(primary, 0.08) : null;
+  if (!softIsStock) {
+    root.style.setProperty("--accent-soft", chosenSoft);
+  } else if (derivedSoft) {
+    root.style.setProperty("--accent-soft", derivedSoft);
   } else {
     root.style.removeProperty("--accent-soft");
   }
@@ -1922,7 +1959,7 @@ function CreateTournament({ onCreated, authConfig }) {
             <div
               data-testid="create-tournament-error"
               role="alert"
-              style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 8, marginTop: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}
+              style={{ color: "var(--danger)", fontSize: 12, marginBottom: 8, marginTop: 12, padding: 8, border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}
             >
               {error}
             </div>

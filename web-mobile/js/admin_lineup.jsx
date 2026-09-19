@@ -775,7 +775,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       </div>
 
       {error && (
-        <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 12, padding: 8, border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
+        <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 12, padding: 8, border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
           {error}
         </div>
       )}
@@ -868,7 +868,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
         </div>
 
         {squadSorted.length > 0 && (
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line, #ddd)" }}>
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
             <div className="overline" style={{ marginBottom: 8 }}>Team members</div>
             {/* A `title` is the only reason a disabled Clear name carries, and
                 a title needs hover, which a touch tablet does not have. The

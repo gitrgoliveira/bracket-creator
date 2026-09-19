@@ -352,7 +352,7 @@ export function AdminSchedulePage({ tournament, onBack, onMoveCourt, onLogout, o
                 next render. We navigate via AppRouter.route so preact-router
                 fires its history listeners (useQuery re-renders). */}
             {effectiveCourt && (
-              <span className="bc-court-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 14, background: "var(--bg-2, #eef2f7)", fontSize: 12, fontWeight: 600 }}>
+              <span className="bc-court-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px", borderRadius: 14, background: "var(--bg-2)", fontSize: 12, fontWeight: 600 }}>
                 Showing {window.Term ? React.createElement(window.Term, { name: "shiaijo" }, "Shiaijo") : "Shiaijo"} {effectiveCourt}
                 <button type="button"
                   className="btn btn--ghost btn--sm"

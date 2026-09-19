@@ -492,7 +492,7 @@ export function FightingSpiritSection({ fsAwards, isFs }) {
             style={{
               padding: isFs ? "14px 20px" : "10px 14px",
               borderRadius: 8,
-              background: "var(--accent-soft, #fff7ed)",
+              background: "var(--accent-soft)",
               border: "1px solid var(--accent-warm, #fb923c)",
               display: "flex",
               flexDirection: "column",
@@ -600,7 +600,7 @@ export function AllWinnersView({ tournament, onBack, tweaks }) {
             <div key={comp.id} className="card" style={{ padding: "12px 16px", marginBottom: 12 }} data-testid={`all-winners-card-${comp.id}`}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{comp.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2, #f0f0f0)", borderRadius: 4, padding: "1px 6px" }}>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", background: "var(--surface-2)", borderRadius: 4, padding: "1px 6px" }}>
                   {competitionKindLabel(comp)}
                 </div>
               </div>

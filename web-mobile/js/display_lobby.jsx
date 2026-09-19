@@ -26,8 +26,8 @@ const LOBBY_COLORS = {
     line:       'rgba(0,0,0,0.10)',
     lineStrong: 'rgba(0,0,0,0.20)',
     // NOW row: navy accent: emphasis is on the live match.
-    nowBg:      'var(--accent-soft, #e7eaf3)',
-    nowBorder:  'var(--accent, #1d3557)',
+    nowBg:      'var(--accent-soft)',
+    nowBorder:  'var(--accent)',
     // NEXT row: quiet neutral: visible but clearly subordinate to NOW. It
     // shares the queue background (schedBg); a distinct border is its only cue.
     nextBorder: 'rgba(0,0,0,0.10)',

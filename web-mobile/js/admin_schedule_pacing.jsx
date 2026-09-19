@@ -149,7 +149,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
     const abs = Math.abs(delta);
     if (abs <= 5) return { color: "var(--green, #16a34a)", fontWeight: 600 };
     if (abs <= 20) return { color: "var(--amber, #d97706)", fontWeight: 600 };
-    return { color: "var(--red, #dc2626)", fontWeight: 700 };
+    return { color: "var(--red)", fontWeight: 700 };
   };
 
   const statusLabel = (stat) => {

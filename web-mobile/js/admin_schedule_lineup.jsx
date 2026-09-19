@@ -516,13 +516,13 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{ fontWeight: 700, fontSize: 13 }}>{teamName}</span>
         {isMatchOverride
-          ? <span style={{ fontSize: 11, color: "var(--accent, #1d73d5)", fontWeight: 600 }}>Override for this match</span>
+          ? <span style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600 }}>Override for this match</span>
           : <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Inheriting round default</span>
         }
       </div>
 
       {error && (
-        <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 8, padding: "6px 8px", border: "1px solid var(--danger, #c00)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
+        <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 8, padding: "6px 8px", border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
           {error}
         </div>
       )}
@@ -684,7 +684,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-          <div style={{ borderRight: "1px solid var(--line, #e5e7eb)", paddingRight: 20 }}>
+          <div style={{ borderRight: "1px solid var(--line)", paddingRight: 20 }}>
             <div className="overline" style={{ marginBottom: 8 }}>
               SHIRO (white)
             </div>
@@ -738,7 +738,7 @@ export function MatchLineupPanel({ match, tournament, password, showToast, onClo
       zIndex: 1000, padding: 16
     }}>
       <div style={{
-        background: "var(--bg, #fff)", borderRadius: 8,
+        background: "var(--bg)", borderRadius: 8,
         boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: 24,
         width: "100%", maxWidth: 680, maxHeight: "90vh", overflowY: "auto"
       }}>

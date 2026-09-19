@@ -171,11 +171,11 @@ function AdminTopbar({ onLogout, onViewerMode, tournament, hideRunningStrip }) {
         <div className="topbar__spacer"></div>
         {/* Connection-status indicator for the SSE stream. Labelled "Connected"
             so it reads as the data-connection state, not on-court match
-            activity, and styled as a calm STATIC dot, deliberately not the
-            pulsing `.dot--running` signal that flags a match in progress (the
-            strip below). Only the disconnected state pulses, so motion flags
-            the moment that actually needs attention. role=status + aria-live
-            announce the change to assistive tech without alarming. */}
+            activity. The connected dot is a calm STATIC dot; only the
+            disconnected state pulses, because a dropped connection is a
+            warning and motion is reserved for what needs attention
+            (DESIGN.md Principle 3). role=status + aria-live announce the
+            change to assistive tech without alarming. */}
         <span
           className={`topbar__conn${connected ? "" : " topbar__conn--down"}`}
           role="status"
@@ -532,10 +532,10 @@ function AdminDashboard({ tournament, password, onOpenCompetition, onCreateCompe
 
         {running.length > 0 && (<>
           <div className="section-title" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {/* Static dot, not dot--running: these are started competitions, which
-                is not the same as a match in progress right now. The pulsing
-                signal is reserved for matches actually under way (topbar strip
-                + match rows) per DESIGN.md Principle 3. */}
+            {/* Plain dot, not dot--running: these are started competitions, which
+                is not the same as a match in progress right now. Matches
+                actually under way (topbar strip + match rows) carry the navy
+                fill + ring of dot--running; this one is neutral grey. */}
             <span className="dot"></span> Currently running
           </div>
           <div className="tlist" style={{ marginBottom: 24 }}>

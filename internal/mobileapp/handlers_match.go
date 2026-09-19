@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -912,7 +913,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			})
 		}
 		tryAutoCompletePools(c, eng, hub, id)
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, scoreResponseWithReopened(&result, reopenedDownstream))
 	})
 
 	// Score endpoint, Slice 0 demonstration of the interface-DI +
@@ -2033,6 +2034,47 @@ type scoreRequestBody struct {
 	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 }
 
+// scoreResponseWithReopened is the score write's reply: the stored
+// MatchResult exactly as it always serialized, plus the ids of any match this
+// write reopened.
+//
+// The ids have to come from the SERVER. The client could guess them from the
+// refusal it was just shown, and did, but that is the server's intention
+// rather than its outcome: a report saying "m-r2-0 was reopened" because the
+// refusal named it, whether or not anything was.
+//
+// It marshals the result and splices the key in, rather than embedding
+// MatchResult in a wrapper struct. state.MatchResult has its own MarshalJSON
+// (team_result.go), which an embedded field PROMOTES to the wrapper: the
+// wrapper then serializes as just the match and the extra key vanishes with no
+// error anywhere. That is exactly what happened here, and it survived the unit
+// tests because they assert on the handler's Go-side behaviour; only a live
+// request showed the field missing from the body.
+func scoreResponseWithReopened(result *state.MatchResult, reopened []string) any {
+	if result == nil {
+		return result
+	}
+	if len(reopened) == 0 {
+		return result
+	}
+	// Both errors below are RETURNED BY THE API and cannot be discarded
+	// (errcheck), not defences against a state anyone expects: a MatchResult
+	// that gin is about to marshal anyway does not fail here. Falling back to
+	// the bare result keeps the receipt honest -- the write is already stored,
+	// so the worst case is the operator not being told what was reopened,
+	// rather than a stored result reported as a failure.
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return result
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return result
+	}
+	merged["reopenedMatchIds"] = reopened
+	return merged
+}
+
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
 	// C3: coalesce high-frequency "running" match_updated broadcasts to ≤4/s
 	// per match. Completed writes always proceed (isRunning=false).
@@ -2560,6 +2602,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// Don't echo internal write-ordering metadata back in the response.
 		result.Rev = 0
 		result.RevSession = ""
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, scoreResponseWithReopened(result, reopenedDownstream))
 	})
 }

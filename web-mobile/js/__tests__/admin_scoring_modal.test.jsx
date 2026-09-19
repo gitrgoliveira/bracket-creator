@@ -1415,7 +1415,9 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     window.API = {
       recordDecision: vi.fn()
         .mockRejectedValueOnce(downstreamError())
-        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed' }),
+        // The server reports what it actually reopened; the client never
+        // infers it from the refusal it was shown.
+        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatchIds: ['m5'] }),
     };
     window.confirmDialog = vi.fn().mockResolvedValue(true);
 
@@ -1426,7 +1428,10 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     // The decision path gets the same after-the-fact accounting as a score
     // correction: the result carries what the confirmation reopened, so the
     // operator can be told rather than left to read the board.
-    expect(result).toEqual({ winner: 'Aoki Taro', status: 'completed', downstreamReopened: ['m5'] });
+    expect(result).toEqual({
+      winner: 'Aoki Taro', status: 'completed',
+      reopenedMatchIds: ['m5'], downstreamReopened: ['m5'],
+    });
     expect(window.confirmDialog).toHaveBeenCalledTimes(1);
     const dialogArg = window.confirmDialog.mock.calls[0][0];
     expect(dialogArg.message).toContain('m5');
@@ -1483,7 +1488,9 @@ describe('submitDecisionRequest / makeSubmitDecision: downstream_knockout_played
     window.API = {
       recordDecision: vi.fn()
         .mockRejectedValueOnce(downstreamError())
-        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed' }),
+        // The server reports what it actually reopened; the client never
+        // infers it from the refusal it was shown.
+        .mockResolvedValueOnce({ winner: 'Aoki Taro', status: 'completed', reopenedMatchIds: ['m5'] }),
     };
     window.confirmDialog = vi.fn().mockResolvedValue(true);
 

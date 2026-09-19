@@ -295,15 +295,16 @@ export async function attemptScoreWrite({ recordScore, confirmDialog, compId, ma
                 result: { ...result, forceDownstreamReopen: true },
                 password, match,
             });
-            // Say what the confirmation DID, not just that it went through.
-            // The operator agreed to reopen specific matches; a silent success
-            // leaves them to work out from the board whether it happened. The
-            // ids come from the refusal they just read, so the notice names the
-            // same matches the dialog named. Attached rather than toasted here
-            // because this module owns the words, not the surface.
-            if (applied && typeof applied === 'object' && !writeDidNotLand(applied)) {
-                applied.downstreamReopened = refusal.blockingMatchIds
-                    || (refusal.blockingMatchId ? [refusal.blockingMatchId] : []);
+            // Say what the confirmation DID, not just that it went through,
+            // and take that from the SERVER: the write's response carries
+            // reopenedMatchIds, which is what it actually reopened. Reusing the
+            // refusal's ids here (as the first cut did) reported the server's
+            // INTENTION -- "m-r2-0 was reopened" because the dialog named it,
+            // whether or not anything was. Absent field means the server
+            // reopened nothing, and nothing is claimed.
+            if (applied && typeof applied === 'object' && !writeDidNotLand(applied)
+                && applied.reopenedMatchIds && applied.reopenedMatchIds.length) {
+                applied.downstreamReopened = applied.reopenedMatchIds;
             }
             return applied;
         }

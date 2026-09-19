@@ -186,4 +186,37 @@ func TestDownstreamGuard_EngiKnockoutIsGuardedToo(t *testing.T) {
 		assert.Equal(t, state.MatchStatusScheduled, final.Status, "and the final waits to be fought again")
 		assert.Empty(t, final.Winner)
 	})
+
+	t.Run("through the dispatch seam, the door a client actually knocks on", func(t *testing.T) {
+		// The subtests above call the engi recorder directly, so they say
+		// nothing about the seam in RecordMatchResultWithIneligibilityTx that
+		// routes an engi write to it -- and that seam is where ForceOptions
+		// had to be threaded. Without this, dropping the options at the seam
+		// leaves every test above green while no real client can either be
+		// refused or confirm.
+		// Put the final back to a played state so it blocks again.
+		_, err := eng.recordEngiMatchResult(store, compID, finalID, 3, 2, "replay")
+		require.NoError(t, err)
+
+		// Flip SF0 back the other way, through the public entry point.
+		refused := inTx(t, store, compID, func(tx state.StoreTx) error {
+			_, rErr := eng.RecordMatchResultWithIneligibilityTx(tx, compID, sf0,
+				&state.MatchResult{ID: sf0, FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted, CorrectionReason: "back again"},
+				ForceOptions{})
+			return rErr
+		})
+		var dkErr *DownstreamKnockoutPlayedError
+		require.ErrorAs(t, refused, &dkErr, "the seam must carry the refusal out to the caller")
+
+		var reopened []ReopenedMatch
+		confirmed := inTx(t, store, compID, func(tx state.StoreTx) error {
+			_, rErr := eng.RecordMatchResultWithIneligibilityTx(tx, compID, sf0,
+				&state.MatchResult{ID: sf0, FlagsA: 3, FlagsB: 2, Status: state.MatchStatusCompleted, CorrectionReason: "confirmed"},
+				ForceOptions{Force: true, Reopened: &reopened})
+			return rErr
+		})
+		require.NoError(t, confirmed, "and must carry the confirmation in")
+		assert.Equal(t, []string{finalID}, reopenedIDs(reopened),
+			"the reopened list has to come back through the seam too, or nothing can broadcast it")
+	})
 }

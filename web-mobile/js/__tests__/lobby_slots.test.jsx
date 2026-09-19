@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildCourtSlots, LOBBY_ROWS, LobbyMatchCell, LOBBY_COLORS } from '../display.jsx';
 import { IndividualScore } from '../match_scoreboard.jsx';
-import { findAll } from './helpers/vdom.js';
+import { findAll, collectText } from './helpers/vdom.js';
 
 // Unit tests for buildCourtSlots: the slot-building logic that drives the
 // cross-court table in LobbyDisplay (mp-1nf).
@@ -146,7 +146,11 @@ describe('buildCourtSlots', () => {
 function treeStr(node) { return JSON.stringify(node); }
 
 // Minimal slot factories for LobbyMatchCell rendering tests.
-function makeRunningSlot(overrides = {}) {
+// `match` is destructured OUT of the rest spread: with a trailing
+// `...overrides` the caller's whole `match` object replaced the merged one,
+// so the per-key defaults above were silently dropped and a partial override
+// lost sideA/sideB entirely.
+function makeRunningSlot({ match: matchOverride, ...rest } = {}) {
     return {
         match: {
             id: 'r1',
@@ -157,17 +161,17 @@ function makeRunningSlot(overrides = {}) {
             ipponsB: [],
             hansokuA: 0,
             hansokuB: 0,
-            ...overrides.match,
+            ...matchOverride,
         },
         competition: { id: 'c1', name: 'Open', withZekkenName: false },
         isBracket: false,
         roundIndex: 0,
         totalRounds: 1,
-        ...overrides,
+        ...rest,
     };
 }
 
-function makeScheduledSlot() {
+function makeScheduledSlot({ match: matchOverride, ...rest } = {}) {
     return {
         match: {
             id: 's1',
@@ -178,11 +182,13 @@ function makeScheduledSlot() {
             ipponsB: [],
             hansokuA: 0,
             hansokuB: 0,
+            ...matchOverride,
         },
         competition: { id: 'c1', name: 'Open', withZekkenName: false },
         isBracket: false,
         roundIndex: 0,
         totalRounds: 1,
+        ...rest,
     };
 }
 
@@ -371,5 +377,127 @@ describe('LobbyMatchCell: delegates body to IndividualScore (mp-0ky7 / score reu
         expect(meta).toBeTruthy();
         expect(meta.props.style.overflow).toBe('hidden');
         expect(meta.props.style.whiteSpace).toBe('nowrap');
+    });
+});
+
+// ── LobbyMatchCell: team matches render the IV/PW aggregate, not empty
+// IndividualScore ippon slots (bc-lbty) ──────────────────────────────────────
+// A team match carries its score in subResults/teamResult, never in the
+// match-level ipponsA/ipponsB IndividualScore reads, so routing every cell
+// through IndividualScore left a running team encounter reading as
+// not-started. The team branch renders through teamScoreCell instead.
+describe('LobbyMatchCell: team matches render teamScoreCell, not IndividualScore (bc-lbty)', () => {
+    const findIndiv = tree => findAll(tree, n => n?.type === IndividualScore);
+
+    it('running team slot renders the IV/PW figures and no IndividualScore vnode', () => {
+        const slot = makeRunningSlot({
+            match: {
+                id: 'tm1',
+                status: 'running',
+                sideA: { name: 'Aka Dojo' },
+                sideB: { name: 'Shiro Dojo' },
+                teamResult: { shiroIV: 1, akaIV: 1, shiroPW: 3, akaPW: 2 },
+            },
+            competition: { id: 'c1', name: 'Team Open', withZekkenName: false, kind: 'team' },
+        });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        expect(findIndiv(tree)).toHaveLength(0);
+        const str = treeStr(tree);
+        expect(str).toContain('IV 1–1');
+        expect(str).toContain('PW 3–2');
+    });
+
+    it('scheduled team slot renders "vs", never "IV 0-0" (a not-yet-started encounter must read as upcoming)', () => {
+        const slot = makeScheduledSlot({
+            match: {
+                id: 'tm2',
+                status: 'scheduled',
+                sideA: { name: 'Aka Dojo' },
+                sideB: { name: 'Shiro Dojo' },
+            },
+            competition: { id: 'c1', name: 'Team Open', withZekkenName: false, kind: 'team' },
+        });
+        const tree = LobbyMatchCell({ slot, rowKind: 'next' });
+        expect(findIndiv(tree)).toHaveLength(0);
+        const str = treeStr(tree);
+        expect(str).toContain('"vs"');
+        expect(str).not.toContain('IV 0');
+    });
+
+    // The lobby team cell must NEVER put a side result mark in its shared
+    // centre. matchScoreStr would: a team match carrying a decision but no
+    // sub-bouts falls through to formatIpponsScore and yields "Fus. vs OO" /
+    // "Kiken vs OO", a mark naming ONE competitor in the cell between the two
+    // team names -- the thing the operator ruling forbids absolutely. The cell
+    // takes teamIVPWScore instead, which is a plain count. Nor may it carry
+    // X / (E) / (DH): a team ENCOUNTER is an aggregate, not a fight.
+    it('never renders a side mark or a middle mark in the team centre, whatever the decision', () => {
+        for (const decision of ['fusenpai', 'kiken-voluntary', 'kiken-injury', 'hikiwake', 'daihyosen', 'fought']) {
+            for (const encho of [undefined, { periodCount: 1 }]) {
+                const slot = makeRunningSlot({
+                    match: {
+                        id: 'tmX', status: 'running', decision, encho,
+                        winner: 'Aka Dojo',
+                        sideA: { name: 'Aka Dojo' }, sideB: { name: 'Shiro Dojo' },
+                        ipponsA: null, ipponsB: null,
+                    },
+                    competition: { id: 'c1', name: 'Team Open', withZekkenName: false, kind: 'team' },
+                });
+                const centre = findAll(LobbyMatchCell({ slot, rowKind: 'now' }),
+                    n => n?.props?.['data-testid'] === 'lobby-team-centre')[0];
+                const text = collectText(centre);
+                expect(text).toBe('vs');
+                for (const mark of ['Ht', 'Kiken', 'Fus.', '○', 'X', '(E)', '(DH)']) {
+                    expect(text).not.toContain(mark);
+                }
+            }
+        }
+    });
+
+    // The state of EVERY encounter between "Start match" and its first result:
+    // the team editor sends only bouts already played, so a just-started match
+    // carries no subResults and no teamResult, and matchScoreStr returns "".
+    // Without the boutMiddle fallback the centre renders blank, which is worse
+    // than the bug this fix is for -- it reads as nothing at all.
+    it('running team slot with no bout scored yet still reads "vs", never a blank centre', () => {
+        const slot = makeRunningSlot({
+            match: {
+                id: 'tm3',
+                status: 'running',
+                sideA: { name: 'Aka Dojo' },
+                sideB: { name: 'Shiro Dojo' },
+                ipponsA: null,
+                ipponsB: null,
+            },
+            competition: { id: 'c1', name: 'Team Open', withZekkenName: false, kind: 'team' },
+        });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        expect(findIndiv(tree)).toHaveLength(0);
+        expect(treeStr(tree)).toContain('"vs"');
+    });
+
+    it('a supplementary bout ("Pool A-DH-1") inside a team competition still renders through IndividualScore', () => {
+        const slot = makeRunningSlot({
+            match: {
+                id: 'Pool A-DH-1',
+                status: 'running',
+                sideA: { name: 'Aka Fighter' },
+                sideB: { name: 'Shiro Fighter' },
+                ipponsA: ['M'],
+                ipponsB: [],
+            },
+            competition: { id: 'c1', name: 'Team Open', withZekkenName: false, kind: 'team' },
+        });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        expect(findIndiv(tree)).toHaveLength(1);
+    });
+
+    it('an individual (non-team) slot still renders exactly one IndividualScore vnode', () => {
+        const slot = makeRunningSlot({
+            match: { id: 'im1', status: 'running', sideA: { name: 'Aka Fighter' }, sideB: { name: 'Shiro Fighter' }, ipponsA: ['M'], ipponsB: [] },
+            competition: { id: 'c1', name: 'Open', withZekkenName: false },
+        });
+        const tree = LobbyMatchCell({ slot, rowKind: 'now' });
+        expect(findIndiv(tree)).toHaveLength(1);
     });
 });

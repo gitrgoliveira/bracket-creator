@@ -1268,13 +1268,30 @@ function matchScoreStr(m) {
 }
 
 // matchStateCell: the centre score-cell content for a compact match row,
-// shared so every list renders the SAME cue: completed → score string,
-// anything else → boutMiddle (normally the plain "vs"); the row's
+// shared so every list renders the SAME cue: completed → the FULL score
+// string (matchScoreStr, which legitimately carries a trailing side mark —
+// e.g. Ht beside an unattributable winner); running → the TEAM aggregate
+// only (teamIVPWScore, which never carries a side mark — IV/PW are plain
+// counts), because matchStateCell's one production caller
+// (PoolNumberedMatchRow, viewer_standings.jsx) places its return value
+// literally BETWEEN the two competitor name cells, a genuine
+// [name][middle][name] row. A completed individual match's trailing mark is
+// an accepted, already-shipped shape there; feeding that same shape to a
+// RUNNING individual match — reachable in principle from a match-level Ht
+// mark surviving into `running`, though every known write path (e.g.
+// kachinuki reopen, kachinuki.go reopenPoolMatch/reopenBracketMatch) nils
+// the ippons on that transition — is not worth risking against the
+// operator's absolute "never a centre Ht" ruling for a row shaped like this.
+// A running TEAM match has no such risk (its aggregate is mark-free), so it
+// gets the live update the underlying bug is actually about; a running
+// individual match keeps the plain "vs" middle until it completes.
+// Everything else → boutMiddle (normally the plain "vs"); the row's
 // .is-running highlight is the "now" signal, NOT a centre glyph, and the
 // labelled "● NOW" badge elsewhere is a separate affordance.
 function matchStateCell(m) {
   const mid = boutMiddle(m.decision, m.encho, m.score);
   if (m.status === "completed") return matchScoreStr(m) || mid;
+  if (m.status === "running") return teamIVPWScore(m) || mid;
   return mid;
 }
 

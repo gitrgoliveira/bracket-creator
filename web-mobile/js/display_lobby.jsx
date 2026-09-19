@@ -2,7 +2,10 @@
 // Multi-court cross-court table for venue lobby screens. T064, T065, mp-13y.
 
 import { findRunningOnCourt, findUpcomingOnCourt, findActiveCourts, phaseLabel, phaseProgressOnCourt } from './display_helpers.jsx';
-import { IndividualScore } from './match_scoreboard.jsx';
+import { IndividualScore, numberedParts } from './match_scoreboard.jsx';
+import { NumberedName } from './numbered_name.jsx';
+import { teamIVPWScore } from './bracket.jsx';
+import { isSupplementaryBout } from './pool_ids.jsx';
 
 const { useState: useSD, useEffect: useED, useMemo: useMD } = React;
 
@@ -97,6 +100,53 @@ function buildCourtSlots(competitions, court) {
     return slots;
 }
 
+// teamScoreCell: the team-match twin of IndividualScore's row skeleton, for an
+// encounter that is an AGGREGATE rather than a fight (bc-lbty).
+//
+// The centre takes teamIVPWScore, NOT matchScoreStr, and this is a correctness
+// rule rather than a preference. matchScoreStr falls through to
+// formatIpponsScore whenever the aggregate is empty, and that emits SIDE marks:
+// a team match carrying a decision but no sub-bouts on disk (reachable -- see
+// CLAUDE.md on a kiken that carried no sub rows) yields "Fus. vs OO" or
+// "Kiken vs OO", which would put a mark naming ONE competitor into the shared
+// centre cell between the two team names. The operator ruling forbids that
+// absolutely. teamIVPWScore is a plain IV/PW count and can never carry one.
+// This is the same value, for the same reason, that matchStateCell's running
+// branch uses (bracket.jsx).
+//
+// The fallback is the bare "vs", not boutMiddle: boutMiddle exists to produce
+// X / (E) / (DH), and a team ENCOUNTER is not a fight, so its aggregate row
+// owns no middle mark even when the aggregate itself is tied (CLAUDE.md: the
+// summary centre is a deliberate spacer and NO mark ever goes in it). It also
+// needs no status gate -- teamIVPWScore is null until a bout is scored, which
+// covers both a scheduled encounter and the normal gap between "Start match"
+// and the first result.
+//
+// white-space: pre-line honours the two-line "IV a-b\nPW c-d" string; without
+// it the newline collapses and the cell renders one long line.
+function teamScoreCell(match, withZekkenName) {
+    const centre = teamIVPWScore(match) || "vs";
+    // The score is what this board exists to show, so it takes a class of its
+    // own rather than inheriting .msb-vs's muted separator grey. Only when
+    // there IS a score: an unscored encounter's "vs" is a separator and should
+    // keep reading like the individual rows' one beside it.
+    const scored = centre !== "vs";
+    // NumberedName in `clip` mode, not withNumber's flat string: `.msb-name`
+    // ellipsises, and a team read as "Mushin Steel W1" with the number baked
+    // into the string, as if it were part of the team's own name (operator
+    // ruling). The chip form keeps the number a distinct tag and survives
+    // truncation on either side (bc-rvfx / bc-dnst).
+    return (
+        <div className="msb" data-testid="team-lobby-score">
+            <div className="msb-row">
+                <span className="msb-name" data-testid="lobby-team-shiro-name"><NumberedName side="shiro" clip {...numberedParts(match.sideB, withZekkenName)} /></span>
+                <span className={"msb-vs" + (scored ? " lobby-score" : "")} style={{ whiteSpace: "pre-line" }} data-testid="lobby-team-centre">{centre}</span>
+                <span className="msb-name msb-name--aka" data-testid="lobby-team-aka-name"><NumberedName side="aka" clip {...numberedParts(match.sideA, withZekkenName)} /></span>
+            </div>
+        </div>
+    );
+}
+
 // Render one match cell (td > .match-cell div) for the cross-court table.
 // rowKind: 'now' | 'next' | 'queue': determines the background/border.
 // slot: the buildCourtSlots entry for this cell (null → empty cell).
@@ -111,7 +161,7 @@ function LobbyMatchCell({ slot, rowKind }) {
                     border: '1px solid transparent',
                     opacity: 0.12,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18,
+                    fontSize: '2.2vh',
                 }}>-</div>
             </td>
         );
@@ -119,6 +169,13 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     const { match, competition, isBracket, roundIndex, totalRounds } = slot;
     const zekken = !!(competition && competition.withZekkenName);
+    // A team encounter has no match-level ippons to show through
+    // IndividualScore (they live in subResults/teamResult instead), except a
+    // pool daihyosen/tiebreaker rep bout, which is a single individual fight
+    // even inside a team competition (mirrors display_scoreboard.jsx's
+    // promoted-slot gate).
+    const isTeamMatch = !!(competition && (competition.kind === "team" || (competition.teamSize || 0) > 0))
+        && !isSupplementaryBout(match.id);
 
     let cellBg = LOBBY_COLORS.schedBg;
     let cellBorder = 'transparent';
@@ -138,7 +195,7 @@ function LobbyMatchCell({ slot, rowKind }) {
 
     return (
         <td style={{ padding: '4px 8px', verticalAlign: 'top' }}>
-            <div style={{
+            <div className="lobby-cell" style={{
                 background: cellBg,
                 borderRadius: 8, padding: '10px 14px',
                 minHeight: 54,
@@ -148,7 +205,10 @@ function LobbyMatchCell({ slot, rowKind }) {
                     // One child, so no flex row: the chip that used to sit
                     // beside this text is gone (see the ruling above) and the
                     // truncation moved onto the element that owns the text.
-                    <div style={{ fontSize: 10, color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
+                    // vh, not a fixed 10px: the names beside it are vh-scaled
+                    // (.lobby-cell in styles.css), so a pinned size shrinks
+                    // away to nothing beside them on a large venue screen.
+                    <div style={{ fontSize: '1.2vh', color: LOBBY_COLORS.inkMuted, marginBottom: 4, letterSpacing: '0.02em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{compMeta}</div>
                 )}
                 {/* One matchup = one IndividualScore row (same component the
                     per-court board and viewer card use). Owns names, ippon
@@ -156,8 +216,12 @@ function LobbyMatchCell({ slot, rowKind }) {
                     marks: attribution is positional, not color-only. For
                     scheduled rows the match has no ippons, so the slots
                     render empty (next to each name) which reads as "upcoming"
-                    consistently with the running case's progression. */}
-                <IndividualScore match={match} showNames withZekkenName={zekken} />
+                    consistently with the running case's progression. A team
+                    match instead renders teamScoreCell, whose IV/PW centre
+                    is the aggregate twin of this row (bc-lbty). */}
+                {isTeamMatch
+                    ? teamScoreCell(match, zekken)
+                    : <IndividualScore match={match} showNames withZekkenName={zekken} />}
             </div>
         </td>
     );
@@ -243,7 +307,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
             <div style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '20px 36px 16px',
-                fontSize: 13, color: LOBBY_COLORS.inkDim,
+                fontSize: '1.5vh', color: LOBBY_COLORS.inkDim,
                 letterSpacing: '0.08em', textTransform: 'uppercase',
                 borderBottom: `1px solid ${LOBBY_COLORS.line}`,
             }}>
@@ -274,7 +338,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                         </div>
                     )}
                     {totalPages > 1 && (
-                        <span data-testid="lobby-page-indicator" style={{ fontSize: 11, color: LOBBY_COLORS.inkMuted, letterSpacing: '0.06em', fontWeight: 400 }}>
+                        <span data-testid="lobby-page-indicator" style={{ fontSize: '1.3vh', color: LOBBY_COLORS.inkMuted, letterSpacing: '0.06em', fontWeight: 400 }}>
                             {pageCourtLabel} · {page + 1} / {totalPages}
                         </span>
                     )}
@@ -312,7 +376,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                 <div data-testid="lobby-empty" style={{
                     flex: 1,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 28, opacity: 0.55,
+                    fontSize: '2.6vh', opacity: 0.55,
                 }}>
                     No active courts
                 </div>
@@ -346,14 +410,14 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                             <th scope="col" style={{
                                                 textAlign: 'center',
                                                 padding: '14px 12px 12px',
-                                                fontSize: 18, fontWeight: 700, letterSpacing: '0.1em',
+                                                fontSize: '2.2vh', fontWeight: 700, letterSpacing: '0.1em',
                                                 textTransform: 'uppercase',
                                                 borderBottom: `2px solid ${LOBBY_COLORS.lineStrong}`,
                                                 background: LOBBY_COLORS.bg,
                                             }}>
                                                 Shiaijo {cc}
                                                 {subtitle && (
-                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: 11, fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
+                                                    <div data-testid={`lobby-shiaijo-subtitle-${cc}`} style={{ fontSize: '1.3vh', fontWeight: 400, color: LOBBY_COLORS.inkMuted, marginTop: 4, letterSpacing: '0.02em', textTransform: 'none' }}>
                                                         {subtitle}
                                                     </div>
                                                 )}
@@ -375,7 +439,7 @@ function LobbyDisplay({ tournament, competitions, connected = true }) {
                                         {/* Row label: <th scope="row"> so AT associates it with its cells */}
                                         <th scope="row" style={{
                                             textAlign: 'right', paddingRight: 16,
-                                            fontSize: 10, fontWeight: 700, letterSpacing: '0.14em',
+                                            fontSize: '1.2vh', fontWeight: 700, letterSpacing: '0.14em',
                                             textTransform: 'uppercase', color: LOBBY_COLORS.inkMuted,
                                             verticalAlign: 'top', paddingTop: 16,
                                             borderRight: `1px solid ${LOBBY_COLORS.line}`,

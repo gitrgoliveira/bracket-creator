@@ -42,6 +42,44 @@ describe('msb name cell (dojo line + winner emphasis)', () => {
     expect(shiroCell(container).textContent).toBe('BobOsaka Budokan');
   });
 
+  // bc-dnst: the competitor number is a CHIP, not a string glued to the name.
+  // A bare string read as part of the name ("Mushin Steel W1" on the lobby
+  // board) and, in an ellipsising cell, Aka's trailing number was the first
+  // thing truncated away. The `clip` mode is what saves it: the NAME
+  // ellipsises and the chip stays whole, so dropping `clip` silently brings
+  // that truncation back — assert it in real DOM, where the chip exists as its
+  // own element, rather than only on the handed-over props.
+  it('renders the competitor number as its own chip, on the outer side of each name', () => {
+    const numbered = {
+      sideA: { id: 'pA', name: 'Alice', number: 'K2' },
+      sideB: { id: 'pB', name: 'Bob', number: 'K1' },
+    };
+    const { container } = render(
+      <IndividualScore match={{ ...numbered, ipponsA: [], ipponsB: [] }} showNames />
+    );
+    const shiro = shiroCell(container);
+    const aka = akaCell(container);
+    expect(shiro.querySelector('.num-prefix').textContent).toBe('K1');
+    expect(aka.querySelector('.num-prefix').textContent).toBe('K2');
+    // Outer side: Shiro's chip LEADS its cell, Aka's TRAILS (operator ruling
+    // 2026-09-14), which is what --after encodes.
+    expect(shiro.querySelector('.num-prefix').classList.contains('num-prefix--after')).toBe(false);
+    expect(aka.querySelector('.num-prefix').classList.contains('num-prefix--after')).toBe(true);
+    // clip mode: the chip is a flex sibling of the name, not inside its
+    // truncating run.
+    expect(shiro.querySelector('.numbered-name--clip')).not.toBeNull();
+    expect(aka.querySelector('.numbered-name--clip')).not.toBeNull();
+  });
+
+  it('renders no chip at all when the competition assigns no numbers', () => {
+    const { container } = render(
+      <IndividualScore match={{ ...sides, ipponsA: [], ipponsB: [] }} showNames />
+    );
+    expect(shiroCell(container).querySelector('.num-prefix')).toBeNull();
+    expect(akaCell(container).querySelector('.num-prefix')).toBeNull();
+    expect(shiroCell(container).textContent).toBe('Bob');
+  });
+
   it('gives the dojo the shared bc-dojo type rather than a fourth copy of it', () => {
     const { container } = render(
       <IndividualScore match={{ ...sides, ipponsA: [], ipponsB: [] }} variant="card" showNames showDojo />

@@ -4020,3 +4020,60 @@ func TestBulkScoreHandler_DownstreamKnockoutScored_ReasonCode(t *testing.T) {
 		}
 	}
 }
+
+// TestScoreHandler_ReopenedBroadcastCarriesTheMatchID pins the SHAPE of the
+// match_updated event a forced correction sends for each match it reopened.
+//
+// The loop over those matches once ranged over []engine.ReopenedMatch while
+// naming its variable reopenedID, a leftover from when the list was []string,
+// so the payload carried the whole struct ({"ID":"m-r2-0","Number":9}) where
+// every client reads a plain id. The reopened match's own watchers therefore
+// never learned its result had been cleared -- the one thing this broadcast
+// exists to tell them. The three sibling call sites all send `.ID`; nothing
+// caught the fourth because no test read the payload.
+func TestScoreHandler_ReopenedBroadcastCarriesTheMatchID(t *testing.T) {
+	r, store, _, hub, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-broadcast-shape"
+	seedKcdgBracket(t, store, compID)
+
+	ch := hub.Subscribe()
+	defer hub.Unsubscribe(ch)
+
+	body, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"winner": "Bob", "ipponsB": []string{"M"},
+		"status": "completed", "correctionReason": "scoresheet was misread",
+		"forceDownstreamReopen": true,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/m-r1-0/score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	// Drain what the write broadcast and find the reopened match's event.
+	var sawReopened bool
+	for drained := false; !drained; {
+		select {
+		case msg := <-ch:
+			evt := decodeHubEvent(t, msg)
+			if evt.Type != EventMatchUpdated {
+				continue
+			}
+			data, ok := evt.Data.(map[string]any)
+			require.True(t, ok, "match_updated data is an object")
+			if data["matchId"] == "m-r2-0" {
+				sawReopened = true
+			}
+			// Whatever match it names, it names it as a STRING id. A struct
+			// here decodes to map[string]any and fails this.
+			_, isString := data["matchId"].(string)
+			assert.True(t, isString, "matchId must be the plain id, got %#v", data["matchId"])
+		default:
+			drained = true
+		}
+	}
+	assert.True(t, sawReopened, "the reopened downstream match gets its own match_updated, keyed by its id")
+}

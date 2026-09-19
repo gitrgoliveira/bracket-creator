@@ -2558,10 +2558,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// from the one the operator corrected, so each gets its own
 		// match_updated broadcast; a client watching only that court/match
 		// would otherwise never learn its verdict was cleared.
-		for _, reopenedID := range reopenedDownstream {
+		for _, reopened := range reopenedDownstream {
 			hub.Broadcast(EventMatchUpdated, gin.H{
 				"competitionId": id,
-				"matchId":       reopenedID,
+				"matchId":       reopened.ID,
 			})
 		}
 		// T085/T092, when a kiken or fusenpai is recorded, the engine

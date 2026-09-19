@@ -226,9 +226,15 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     // ONE paragraph, no newlines: the dialog renders `message` in a plain <p>
     // (ui.jsx) whose .dialog-msg rule sets no white-space, so a \n here
     // silently collapses to a space rather than breaking the line.
+    // The plural arm names NO competitor, and that is not an oversight. The
+    // two matches a semifinal feeds hold different people -- the final its
+    // winner, the bronze its loser -- so `displaced`, which describes one
+    // slot, is false of the other. It read "Ren Takada already played the
+    // 3rd-place match and Match 3" when Ren had played only the bronze.
+    // Mirrors engine.DownstreamKnockoutPlayedError.Error's own plural arm.
     return {
         message: many
-            ? `${who} already played ${blocking}, which were built on this match's current result. ` +
+            ? `${blocking} were built on this match's current result and have already been played. ` +
               'Applying this correction reopens both for re-entry: their recorded results are cleared, ' +
               'and they must be fought and scored again.'
             : `${who} already played ${blocking}, which was built on this match's current result. ` +

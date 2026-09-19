@@ -104,6 +104,11 @@ describe('downstreamKnockoutPlayedConfirm with two blocked matches', () => {
         expect(message.toLowerCase()).toContain('reopens both');
         expect(message.toLowerCase()).toContain('cleared');
         expect(message.toLowerCase()).not.toMatch(/\bmat\b/);
+        // No competitor is named when TWO matches block. They hold different
+        // people -- the final its winner, the bronze its loser -- so one name
+        // is false of one of them. The dialog read "Ren Takada already played
+        // the 3rd-place match and Match 3" when Ren had played only the bronze.
+        expect(message).not.toContain('Suzuki Ichiro');
     });
 
     it('stays singular when only one match is blocked', () => {

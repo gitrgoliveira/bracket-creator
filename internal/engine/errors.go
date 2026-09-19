@@ -127,8 +127,17 @@ type DownstreamKnockoutPlayedError struct {
 	// confirmation that names them (see newDownstreamKnockoutPlayedError for
 	// why they cannot be split).
 	Blocking []ReopenedMatch
-	// Displaced is the corrected match's currently stored winner name -- the
-	// competitor the correction would knock out of BlockingMatchID.
+	// Displaced names the competitor sitting in the slot BlockingMatchID took
+	// from this match -- the one the correction would knock out of it.
+	//
+	// It describes THAT ONE MATCH and is only stated when there is one. The
+	// two siblings a semifinal feeds hold DIFFERENT people (the final holds
+	// its winner, the bronze its loser), so a single name is true of one and
+	// false of the other: the dialog read "Ren Takada already played the
+	// 3rd-place match and Match 3" when Ren had played only the bronze and
+	// the final was the other competitor's. Consumers must keep that scope --
+	// see the plural arm below and downstreamKnockoutPlayedConfirm in
+	// write_result.jsx, which mirrors it.
 	Displaced string
 }
 
@@ -140,6 +149,12 @@ func (e *DownstreamKnockoutPlayedError) Error() string {
 	blocked := e.BlockingMatchID
 	if len(labels) > 0 {
 		blocked = strings.Join(labels, " and ")
+	}
+	if len(e.Blocking) > 1 {
+		// No Displaced clause: it names one competitor, and these matches do
+		// not share one.
+		return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which have recorded their own results. Retry with forceDownstreamReopen to apply the correction and reopen both to be fought again",
+			e.MatchID, blocked)
 	}
 	return fmt.Sprintf("correcting match %q would change the winner already propagated into %s, which has recorded its own result; this would displace %q without updating that result. Retry with forceDownstreamReopen to apply the correction and reopen %s to be fought again",
 		e.MatchID, blocked, e.Displaced, blocked)

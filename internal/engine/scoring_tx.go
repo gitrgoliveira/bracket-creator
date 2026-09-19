@@ -129,7 +129,10 @@ func (e *Engine) RecordMatchResultWithIneligibilityTx(tx state.StoreTx, compID, 
 	// stamping winners -- caught by TestWinnerIDInvariant_EveryWritePathStampsASideID).
 	engiStartWrite := result.FlagsA == 0 && result.FlagsB == 0 && result.Status != state.MatchStatusCompleted
 	if comp != nil && comp.Engi && !engiStartWrite {
-		rec, recErr := e.recordEngiMatchResult(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason)
+		// fo carries bc-kcdg's downstream-correction confirmation through the
+		// engi seam. Without it an engi knockout correction could neither be
+		// refused nor confirmed: the guard lives past this early return.
+		rec, recErr := e.recordEngiMatchResult(tx, compID, matchID, result.FlagsA, result.FlagsB, result.CorrectionReason, fo)
 		if recErr != nil {
 			return nil, recErr
 		}

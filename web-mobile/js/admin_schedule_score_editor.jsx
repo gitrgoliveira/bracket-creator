@@ -54,7 +54,6 @@ const getScoreBtnClass = window.getScoreBtnClass;
 // tiebreaker), which is an appended rep bout rather than one of the pool's
 // numbered round-robin bouts.
 export function scoreRowMatchLabel(m) {
-  if (!m) return "";
   if (m.phase === "bracket") {
     const label = matchLabel({ number: m.matchNumber, id: m.id });
     // matchLabel falls back to the raw id, which names nothing on screen.

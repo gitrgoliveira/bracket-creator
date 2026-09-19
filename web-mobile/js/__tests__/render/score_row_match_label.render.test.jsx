@@ -53,9 +53,4 @@ describe('scoreRowMatchLabel', () => {
     it('falls back to the bare number when nothing names the pool', () => {
         expect(scoreRowMatchLabel({ phase: 'pool', id: 'Pool A-0' })).toBe('Match 1');
     });
-
-    it('does not throw on a missing match', () => {
-        expect(scoreRowMatchLabel(null)).toBe('');
-        expect(scoreRowMatchLabel(undefined)).toBe('');
-    });
 });

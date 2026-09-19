@@ -405,6 +405,35 @@ func (e *Engine) RecordDecision(compID, matchID, decision, decisionBy, decisionR
 	return result, status, engErr
 }
 
+// RecordDecisionWithOptions is RecordDecision's bc-kcdg-aware twin
+// (bc-cse finding 5), mirroring RecordDecisionTxWithOptions the same way
+// RecordDecision mirrors RecordDecisionTx: it acquires the per-comp lock
+// once for the whole sequence, then delegates to RecordDecisionTxWithOptions
+// so `force` (T103) and `kcdgOpts` (bc-kcdg) stay the two separate
+// operator confirmations described there, with kcdgOpts.Reopened populated
+// for the caller exactly as OverrideBracketWinner's does.
+//
+// NEVER call this from inside a transaction, for the same non-reentrant-lock
+// reason documented on RecordDecision; call RecordDecisionTxWithOptions
+// directly when already inside a WithTransaction closure.
+func (e *Engine) RecordDecisionWithOptions(compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	var (
+		result *state.MatchResult
+		status *domain.CompetitorStatus
+		engErr error
+	)
+	txErr := e.store.WithTransaction(compID, func(tx state.StoreTx) error {
+		result, status, engErr = e.RecordDecisionTxWithOptions(tx, compID, matchID, decision, decisionBy, decisionReason, encho, force, kcdgOpts, modifiedAt...)
+		// Same commit contract as RecordDecision: engErr is surfaced after
+		// the tx regardless, so the closure always returns nil.
+		return nil
+	})
+	if txErr != nil {
+		return nil, nil, txErr
+	}
+	return result, status, engErr
+}
+
 // lookupExistingResult fetches the currently-persisted MatchResult for
 // compID/matchID from either the pool-matches or bracket store. For
 // bracket matches the BracketMatch fields are projected onto a

@@ -122,6 +122,17 @@ type ScoringEngine interface {
 	// lock acquire. Same contract as RecordDecision; calls flow through the
 	// supplied StoreTx.
 	RecordDecisionTx(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
+	// RecordDecisionTxWithOptions is RecordDecisionTx's bc-kcdg-aware twin
+	// (bc-cse finding 5): force still governs ONLY the T103 downstream-match
+	// lock above, while kcdgOpts is the SEPARATE authorization for the
+	// bc-kcdg downstream-knockout-correction guard the underlying bracket
+	// write applies (engine.DownstreamKnockoutPlayedError, HTTP 409
+	// downstream_knockout_played) -- the decision handler's
+	// forceDownstreamReopen field maps to kcdgOpts.Force, never to force.
+	// kcdgOpts.Reopened, when non-nil, is populated with the ids of every
+	// bracket match the write forced open, mirroring
+	// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner.
+	RecordDecisionTxWithOptions(tx state.StoreTx, compID, matchID, decision, decisionBy, decisionReason string, encho *state.EnchoMetadata, force bool, kcdgOpts engine.ForceOptions, modifiedAt ...int64) (*state.MatchResult, *domain.CompetitorStatus, error)
 	// MaybeAutoCompletePools transitions the competition's status to
 	// "complete" when every pool match is done, or injects supplementary
 	// ippon-shobu tiebreaker matches when ties are detected. It runs one

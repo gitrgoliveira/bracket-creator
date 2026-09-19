@@ -140,14 +140,27 @@ func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
 	assert.Equal(t, "Alice", b.Rounds[2][0].SideA, "unresolved until m-r2-0 is re-scored")
 
-	// Both downstream matches were reopened: verdict cleared, status running,
-	// but the bout log (none here, so just the ippons) is what CorrectionReason
-	// documents; the key assertion is the verdict fields, per reopenBracketMatch.
+	// Both downstream matches went back to the QUEUE, clean: no verdict, no
+	// scoreline, no audit debt (requeueBracketMatch, shared with
+	// RevertMatchToQueue).
+	//
+	// Not "reopened to running with ReopenPending set", which is what an
+	// earlier revision did. Running says a match is on court being fought, and
+	// nobody is fighting these; worse, the flag makes the next completion owe a
+	// reason, and only the TEAM editor has a prompt for one, so completing a
+	// re-fought individual match was rejected outright with "this match was
+	// reopened; ending it again requires a reason" -- the operator could not
+	// enter the very result the app had just sent them to fetch. Seen in the
+	// browser, not theorised. CorrectionReason stays empty for the reason
+	// RevertMatchToQueue documents: a requeued match carries no stale audit
+	// metadata, and the operator's justification lives on the match they
+	// actually corrected.
 	for _, m := range []state.BracketMatch{b.Rounds[1][0], b.Rounds[2][0]} {
-		assert.Equal(t, state.MatchStatusRunning, m.Status, "match %s must be reopened to running", m.ID)
+		assert.Equal(t, state.MatchStatusScheduled, m.Status, "match %s must go back to the queue", m.ID)
 		assert.Empty(t, m.Winner, "match %s must have its winner cleared", m.ID)
 		assert.Empty(t, m.IpponsA, "match %s must have its ippons cleared", m.ID)
-		assert.NotEmpty(t, m.CorrectionReason, "a reopened match must carry an audit reason")
+		assert.Empty(t, m.CorrectionReason, "match %s must not inherit a description of a DIFFERENT match's correction", m.ID)
+		assert.False(t, m.ReopenPending, "match %s must not owe an audit reason it has no way to pay", m.ID)
 	}
 }
 
@@ -309,7 +322,7 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 
 		got, err := store.LoadBracket(compID)
 		require.NoError(t, err)
-		assert.Equal(t, state.MatchStatusRunning, got.ThirdPlaceMatch.Status)
+		assert.Equal(t, state.MatchStatusScheduled, got.ThirdPlaceMatch.Status)
 		assert.Empty(t, got.ThirdPlaceMatch.Winner)
 		assert.Equal(t, "Alice", got.ThirdPlaceMatch.SideA, "the semifinal's new loser (Alice) was repainted into bronze")
 	})
@@ -345,8 +358,8 @@ func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
 		require.NoError(t, lerr)
 		assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
 		assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
-		assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
-		assert.Equal(t, state.MatchStatusRunning, b.Rounds[2][0].Status)
+		assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
+		assert.Equal(t, state.MatchStatusScheduled, b.Rounds[2][0].Status)
 	})
 }
 
@@ -393,7 +406,7 @@ func TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks(t *testing.T) {
 	assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID)
 	assert.Empty(t, reopened)
 
-	// And the forced path must reopen it, clearing the manual verdict.
+	// And the forced path must requeue it, clearing the manual verdict.
 	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
 		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed"),
 			ForceOptions{Force: true, Reopened: &reopened})
@@ -402,7 +415,243 @@ func TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks(t *testing.T) {
 	assert.Equal(t, []string{"m-r2-0"}, reopened)
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
 	assert.Empty(t, b.Rounds[1][0].Winner)
 	assert.False(t, b.Rounds[1][0].IsOverridden, "the manual verdict must be cleared with the rest")
+}
+
+// TestDownstreamKnockoutCorrection_ReopenedMatchCanBeRescored pins bc-cse
+// finding 1: after a forced correction reopens a chain of downstream
+// matches, the operator's own re-entry into the FIRST reopened match must
+// not be refused by the guard naming a SIBLING still awaiting its own
+// re-entry. Before the fix, bracketMatchCarriesOwnResult counted
+// Status==running as a real result with no exemption for a match reopened
+// this way, so the plain re-score below was refused -- even naming an empty
+// competitor, since the reopen had already cleared the stored winner the
+// guard reported as "displaced".
+func TestDownstreamKnockoutCorrection_ReopenedMatchCanBeRescored(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-rescore-after-force"
+	seedThreeRoundBracket(t, store, compID)
+
+	// Force-correct m-r1-0 to Bob, which reopens m-r2-0 (now Bob vs Charlie)
+	// and m-r3-0 (the final) -- see TestDownstreamKnockoutCorrection_Force.
+	require.NoError(t, inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", correctR1ToBob("confirmed override"),
+			ForceOptions{Force: true})
+		return err
+	}))
+
+	// The operator now fights m-r2-0 (Bob vs Charlie) and enters a PLAIN
+	// result -- no force: this is the match's OWN first re-entry after being
+	// reopened, not a correction of an already-propagated winner.
+	result := &state.MatchResult{
+		ID: "m-r2-0", SideA: "Bob", SideB: "Charlie",
+		Winner: "Charlie", IpponsB: []string{"M"},
+		Status: state.MatchStatusCompleted,
+	}
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r2-0", result, ForceOptions{})
+		return err
+	})
+	require.NoError(t, txErr, "a match awaiting its own re-entry must not be refused by naming a sibling still in the same state")
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Charlie", b.Rounds[1][0].Winner)
+	// The re-score propagates normally into the still-reopened final.
+	assert.Equal(t, "Charlie", b.Rounds[2][0].SideA)
+}
+
+// TestDownstreamKnockoutCorrection_StaleWriteReportsSupersededNotGuard pins
+// bc-cse finding 2: a stale replayed write (an offline court reconnecting
+// with a write timestamped before the currently-stored one) must be
+// reported through the ordinary ErrMatchSuperseded / {"applied":false}
+// contract, never through the downstream-correction guard's destructive
+// "apply and reopen" 409 -- even when the stale payload would, if it were
+// ever applied, also change the propagated winner and name a downstream
+// match that carries its own result. Before the fix the guard ran BEFORE
+// the LWW staleness check, so this exact write was refused with
+// *DownstreamKnockoutPlayedError instead.
+func TestDownstreamKnockoutCorrection_StaleWriteReportsSupersededNotGuard(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-stale-guard"
+	seedThreeRoundBracket(t, store, compID)
+
+	// Stamp m-r1-0 as though it had been scored with a server-relative write
+	// time, mirroring a normally-scored match.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	b.Rounds[0][0].ModifiedAt = 10_000
+	require.NoError(t, store.SaveBracket(compID, b))
+
+	// A stale replayed correction, timestamped BEFORE the stored write.
+	stale := correctR1ToBob("fix")
+	stale.ModifiedAt = 5_000
+
+	var reopened []string
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", stale, ForceOptions{Reopened: &reopened})
+		return err
+	})
+
+	require.ErrorIs(t, txErr, ErrMatchSuperseded, "a stale write must be reported as superseded, not refused by the downstream-correction guard")
+	var dkErr *DownstreamKnockoutPlayedError
+	require.NotErrorAs(t, txErr, &dkErr, "the guard must never even run for a write the LWW check would drop")
+	assert.Empty(t, reopened)
+
+	got, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", got.Rounds[0][0].Winner, "a superseded write must not apply")
+}
+
+// TestDownstreamKnockoutCorrection_GuardResolvesWinnerFromStoredSidesWhenOmitted
+// pins bc-cse finding 3: a correction payload that names the new winner by
+// NAME only -- no SideA/SideB, no WinnerSide, no WinnerID -- must still be
+// evaluated against the ACTUAL new winner, not a name/ippon-count guess made
+// before the stored side names are backfilled onto the payload.
+//
+// IpponsA deliberately outscores IpponsB, the OPPOSITE of the named winner:
+// before the fix, bracketWinnerChanged resolved WinnerID via
+// resolveWinnerIDFromSides while result.SideA/SideB were still "" (the
+// backfill hadn't run yet), so its name-fallback branches never matched and
+// it fell through to the ippon-count guess -- resolving SideA's id (Alice,
+// the CURRENT stored winner) instead of Bob's, making bracketWinnerChanged
+// report "unchanged" and skip the guard entirely for a correction that DOES
+// change the propagated winner.
+func TestDownstreamKnockoutCorrection_GuardResolvesWinnerFromStoredSidesWhenOmitted(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-omitted-sides"
+	seedThreeRoundBracket(t, store, compID)
+
+	result := &state.MatchResult{
+		ID:      "m-r1-0",
+		Winner:  "Bob",
+		IpponsA: []string{"M", "M"}, // outscores IpponsB; the OPPOSITE of Winner
+		IpponsB: []string{"M"},
+		Status:  state.MatchStatusCompleted, CorrectionReason: "fix",
+	}
+
+	txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, err := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", result, ForceOptions{})
+		return err
+	})
+
+	var dkErr *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, txErr, &dkErr, "the guard must detect the winner actually changed even when the payload omits side names")
+	assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", b.Rounds[0][0].Winner, "a refused correction must not touch the bracket")
+	assert.Equal(t, "alice", b.Rounds[0][0].WinnerID, "a refused correction must not corrupt the stored winner id either")
+}
+
+// TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg pins bc-cse
+// finding 5: RecordDecisionTx's T103 `force` (the kiken/fusenpai
+// decision-lock override) and the bc-kcdg downstream-knockout-correction
+// guard are different operator confirmations. RecordDecisionTxWithOptions
+// must evaluate them independently -- a decision write with the T103 force
+// flag set must still be refused by the bc-kcdg guard when kcdgOpts.Force is
+// false -- and must surface the reopened match ids to the caller once
+// kcdgOpts.Force authorizes the write, the same contract
+// RecordMatchResultWithIneligibility(Tx) and OverrideBracketWinner already
+// give theirs.
+func TestRecordDecisionTxWithOptions_DecouplesForceFromBcKcdg(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-decision-decouple"
+	seedThreeRoundBracket(t, store, compID)
+
+	t.Run("T103 force does not imply bc-kcdg force", func(t *testing.T) {
+		// decisionBy="aka" makes m-r1-0's SideA (Alice, the current winner)
+		// the WITHDRAWER, so Bob (SideB) becomes the new winner by default --
+		// exactly the winner change the bc-kcdg guard exists to catch. The
+		// prior result carries no withdrawal decision, so hadPriorLoser is
+		// false and T103's own lock check never even runs regardless of
+		// `force`: passing force=true here exercises ONLY whether it leaks
+		// into the unrelated bc-kcdg guard.
+		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+			_, _, err := eng.RecordDecisionTxWithOptions(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "reason",
+				nil, true, ForceOptions{})
+			return err
+		})
+		var dkErr *DownstreamKnockoutPlayedError
+		require.ErrorAs(t, txErr, &dkErr, "the bc-kcdg guard must run regardless of the unrelated T103 force flag")
+		assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID)
+
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Alice", b.Rounds[0][0].Winner, "a refused decision write must not touch the bracket")
+	})
+
+	t.Run("bc-kcdg force authorizes the write and surfaces Reopened", func(t *testing.T) {
+		var reopened []string
+		txErr := inTx(t, store, compID, func(tx state.StoreTx) error {
+			_, _, err := eng.RecordDecisionTxWithOptions(tx, compID, "m-r1-0", "kiken-voluntary", "aka", "reason",
+				nil, false, ForceOptions{Force: true, Reopened: &reopened})
+			return err
+		})
+		require.NoError(t, txErr)
+		assert.ElementsMatch(t, []string{"m-r2-0", "m-r3-0"}, reopened,
+			"the reopened downstream ids must reach the caller so it can broadcast match_updated for each")
+
+		b, err := store.LoadBracket(compID)
+		require.NoError(t, err)
+		assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
+	})
+}
+
+// TestDownstreamKnockoutCorrection_ReopenedButPartlyFoughtStillBlocks is the
+// other half of the reopened-match exemption. A match reopened by a forced
+// correction is exempt only while it carries NOTHING: once the operator has
+// started re-fighting it and struck an ippon, that mark is a real result in
+// progress and a SECOND upstream correction must be refused like any other.
+//
+// Reachable state, not a synthetic one: the reopen leaves the match running
+// with the debt owed, the re-fight's running score writes add marks, and the
+// HTTP boundary re-stamps ReopenPending (a server-owned flag a client cannot
+// clear) until the match is completed and the reason collected.
+//
+// Exempting on the flag alone -- which is how the first fix for finding 1 was
+// written -- repainted this match's side under the fighters while keeping the
+// ippon already struck for the competitor being replaced: precisely the defect
+// this bead exists to close, reintroduced by its own fix.
+func TestDownstreamKnockoutCorrection_ReopenedButPartlyFoughtStillBlocks(t *testing.T) {
+	eng, store, _ := setupTestEngine(t)
+	compID := "kcdg-reopened-partly-fought"
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: compID, Name: "kcdg", Status: state.CompStatusKnockout,
+	}))
+	require.NoError(t, store.SaveBracket(compID, &state.Bracket{
+		Rounds: [][]state.BracketMatch{
+			{
+				{ID: "m-r1-0", SideA: "Alice", SideB: "Bob", SideAID: "alice", SideBID: "bob",
+					Winner: "Bob", WinnerID: "bob", Status: state.MatchStatusCompleted,
+					IpponsB: []string{"M"}},
+			},
+			{
+				{ID: "m-r2-0", SideA: "Bob", SideB: "Charlie", SideAID: "bob", SideBID: "charlie",
+					Status: state.MatchStatusRunning, ReopenPending: true,
+					IpponsA: []string{"K"}},
+			},
+		},
+	}))
+
+	err := inTx(t, store, compID, func(tx state.StoreTx) error {
+		_, e := eng.RecordMatchResultWithIneligibilityTx(tx, compID, "m-r1-0", &state.MatchResult{
+			ID: "m-r1-0", SideA: "Alice", SideB: "Bob",
+			Winner: "Alice", IpponsA: []string{"M", "M"},
+			Status: state.MatchStatusCompleted, CorrectionReason: "second thoughts",
+		}, ForceOptions{})
+		return e
+	})
+
+	var dkErr *DownstreamKnockoutPlayedError
+	require.ErrorAs(t, err, &dkErr, "a reopened match with marks already struck must still block")
+	assert.Equal(t, "m-r2-0", dkErr.BlockingMatchID)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "the match being re-fought must not be repainted")
+	assert.Equal(t, []string{"K"}, b.Rounds[1][0].IpponsA, "and its struck ippon must survive")
 }

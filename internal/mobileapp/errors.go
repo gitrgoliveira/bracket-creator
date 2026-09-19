@@ -167,6 +167,39 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 	return true
 }
 
+// respondIfDownstreamKnockoutPlayed answers engine.DownstreamKnockoutPlayedError
+// (bc-kcdg) with the ONE fixed wire contract every knockout-correction write
+// shares -- HTTP 409 {"error":"downstream_knockout_played","matchId",
+// "blockingMatchId","displaced","message"} -- and reports whether it
+// answered, so the caller's switch can fall through to its own remaining
+// arms exactly like the other respondIf* helpers in this file.
+//
+// Correcting a completed bracket match (via /score, /override-winner,
+// /decision, or /quick-score) can change a winner already propagated into a
+// downstream match that has since recorded its own result; the engine
+// refuses by default and the operator retries with forceDownstreamReopen
+// once they've confirmed the override (see ForceOptions.Force on the
+// matching request field of whichever endpoint they're using). Before this
+// existed, only /score and /override-winner had this mapping hand-copied
+// into their own error switches (identically, since both need the exact
+// same four fields); /decision and /quick-score fell through to a generic
+// 500, which the SPA's offline write queue retries forever (mp-q8c6
+// poisoned-queue pattern) for a write that can never win.
+func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
+	var downstreamPlayedErr *engine.DownstreamKnockoutPlayedError
+	if !errors.As(err, &downstreamPlayedErr) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":           "downstream_knockout_played",
+		"matchId":         downstreamPlayedErr.MatchID,
+		"blockingMatchId": downstreamPlayedErr.BlockingMatchID,
+		"displaced":       downstreamPlayedErr.Displaced,
+		"message":         downstreamPlayedErr.Error(),
+	})
+	return true
+}
+
 // classifyRosterWriteError maps one of the participant-roster write sentinel
 // errors -- returned by Store.AddParticipant, Store.SaveParticipants,
 // Store.UpdateParticipant, Store.BulkCheckIn, and every other write that

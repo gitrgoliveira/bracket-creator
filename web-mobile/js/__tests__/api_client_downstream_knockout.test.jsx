@@ -7,6 +7,11 @@
 // shape from the raw body. Also pins that a caller-supplied
 // `forceDownstreamReopen: true` on the patch reaches the wire, since that is
 // the flag the confirmed retry depends on (api_serializers.jsx).
+//
+// The second describe block below pins the SAME contract for
+// API.overrideBracketWinner (the manual winner pick used by the admin bracket
+// panel and ResolveFeedersModal's "Run now" recovery), which shares the parser
+// (_downstreamKnockoutPlayedError) rather than re-deriving it.
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { API } from '../api_client.jsx';
@@ -87,6 +92,92 @@ describe('API.recordScore: downstream_knockout_played (bc-kcdg)', () => {
     });
 
     await API.recordScore('c1', 'm1', { status: 'completed' }, 'pw');
+
+    const [, opts] = global.fetch.mock.calls[0];
+    const sentBody = JSON.parse(opts.body);
+    expect(sentBody.forceDownstreamReopen).toBeUndefined();
+  });
+});
+
+// bc-kcdg: overrideBracketWinner (the admin bracket panel's / ResolveFeedersModal's
+// manual winner pick) shares the SAME parser (_downstreamKnockoutPlayedError in
+// api_client.jsx) and the SAME force-flag field name as recordScore above, so a
+// caller can offer the identical confirm+retry loop rather than surfacing the
+// raw 409 token with no explanation.
+describe('API.overrideBracketWinner: downstream_knockout_played (bc-kcdg)', () => {
+  let originalFetch;
+  afterEach(() => { if (originalFetch) global.fetch = originalFetch; });
+
+  it('throws an Error decorated with the structured refusal fields', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: 'downstream_knockout_played',
+        matchId: 'm-r2-0',
+        blockingMatchId: 'm-r1-0',
+        displaced: 'Bob',
+        message: 'Bob already played match m-r1-0, asserting this winner would displace them.',
+      }),
+    });
+
+    const err = await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+
+    // The operator-facing message is the server's sentence, not the bare code
+    // -- this is exactly the "raw token with no explanation" gap being closed.
+    expect(err.message).toBe('Bob already played match m-r1-0, asserting this winner would displace them.');
+    expect(downstreamKnockoutPlayedRefusal(err)).toEqual({
+      matchId: 'm-r2-0',
+      blockingMatchId: 'm-r1-0',
+      displaced: 'Bob',
+    });
+  });
+
+  it('does not decorate an unrelated 4xx failure', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'match not found' }),
+    });
+
+    const err = await API.overrideBracketWinner('c1', 'm1', 'Alice', 'pw').then(
+      () => { throw new Error('expected a rejection'); },
+      (e) => e,
+    );
+    expect(err.message).toBe('match not found');
+    expect(downstreamKnockoutPlayedRefusal(err)).toBeNull();
+  });
+
+  it('forwards forceDownstreamReopen:true on the confirmed retry onto the wire payload', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ applied: true }),
+    });
+
+    await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw', true);
+
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/api/competitions/c1/matches/m-r2-0/override-winner');
+    const sentBody = JSON.parse(opts.body);
+    expect(sentBody.forceDownstreamReopen).toBe(true);
+  });
+
+  it('omits forceDownstreamReopen from the wire payload when not passed', async () => {
+    originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ applied: true }),
+    });
+
+    await API.overrideBracketWinner('c1', 'm-r2-0', 'Alice', 'pw');
 
     const [, opts] = global.fetch.mock.calls[0];
     const sentBody = JSON.parse(opts.body);

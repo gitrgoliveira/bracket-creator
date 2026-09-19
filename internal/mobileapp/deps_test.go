@@ -74,6 +74,10 @@ func (stubScoringEngine) RecordDecisionTx(state.StoreTx, string, string, string,
 	return nil, nil, nil
 }
 
+func (stubScoringEngine) RecordDecisionTxWithOptions(state.StoreTx, string, string, string, string, string, *state.EnchoMetadata, bool, engine.ForceOptions, ...int64) (*state.MatchResult, *domain.CompetitorStatus, error) {
+	return nil, nil, nil
+}
+
 func (stubScoringEngine) MaybeAutoCompletePools(string) (engine.AutoCompleteOutcome, error) {
 	return engine.AutoCompleteNoChange, nil
 }

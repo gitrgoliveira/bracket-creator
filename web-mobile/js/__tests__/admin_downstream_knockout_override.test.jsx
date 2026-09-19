@@ -1,10 +1,13 @@
-// bc-kcdg: admin.jsx's attemptScoreWrite is the confirm+retry loop behind
-// editMatchScore, the single chokepoint every score-editor host (bracket
-// panel, pools, schedule score editor, per-court shiaijo) and both editor
-// bodies (individual, team) route a score write through. Extracted (like
-// mergeCompetitionsIntoTournament) as a pure-ish helper taking recordScore/
-// confirmDialog as injected collaborators, so the contract is pinned here
-// without rendering the whole admin SPA.
+// bc-kcdg: attemptScoreWrite (defined in write_result.jsx, re-exported by
+// admin.jsx) is the confirm+retry loop behind editMatchScore, the single
+// chokepoint every score-editor host (bracket panel, pools, schedule score
+// editor, per-court shiaijo) and both editor bodies (individual, team) route a
+// score write through. It is ALSO used directly by admin_shiaijo.jsx's
+// ResolveFeedersModal for the override-winner "Run now" recovery (see
+// admin_shiaijo.render.test.jsx). Taking recordScore/confirmDialog as injected
+// collaborators means the contract is pinned here without rendering the whole
+// admin SPA; importing it via admin.jsx's re-export (rather than
+// write_result.jsx directly) additionally pins that the re-export still works.
 
 import { describe, it, expect, vi } from 'vitest';
 import { attemptScoreWrite } from '../admin.jsx';

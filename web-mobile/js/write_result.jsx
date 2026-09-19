@@ -188,8 +188,8 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, displaced } =
     return {
         message:
             `${who} already played match ${blocking}, which was built on this match's current result. ` +
-            `Applying this correction will reopen match ${blocking} for re-entry: its recorded ` +
-            'result is cleared, and it must be fought and scored again.',
+            `Applying this correction sends match ${blocking} back to the queue for re-entry: its ` +
+            'recorded result is cleared, and it must be fought and scored again.',
         confirmLabel: 'Apply correction and reopen',
         danger: true,
     };
@@ -199,3 +199,50 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, displaced } =
 // override left the match, and the later one it would have reopened,
 // completely unchanged -- neither was written.
 export const DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED = 'Correction cancelled: the match and the later result it depends on were left unchanged.';
+
+// attemptScoreWrite (bc-kcdg / bc-cse): the generic confirm+retry loop for the
+// refusal above. Takes recordScore/confirmDialog as INJECTED collaborators
+// (never read off `window`, never imported from a host module) so it works
+// from either script-tagged host that needs it: admin.jsx's editMatchScore
+// (the single chokepoint every score-editor host and both editor bodies route
+// a score write through) and admin_shiaijo.jsx's ResolveFeedersModal (the
+// override-winner "Run now" recovery). Those two cannot import each other --
+// both are `<script type="module">` entry points in index.html, and a module
+// that is both script-tagged and ES-imported evaluates twice under two URLs,
+// splitting its module-level singleton state (see this file's header) -- so
+// the shared loop lives here instead, beside the refusal shape it orchestrates,
+// which this file is safe to import from anywhere.
+//
+// On a refusal, prompts via confirmDialog with the message/label
+// downstreamKnockoutPlayedConfirm builds; on confirm, resends the SAME result
+// with forceDownstreamReopen:true, which the server applies alongside
+// reopening the blocking match(es) for re-entry. Declining leaves everything
+// as it was.
+//
+// Throws on any failure, including a declined override; in that one case the
+// thrown error carries `.downstreamKnockoutPlayedCancelled = true` so the
+// caller can pick DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED instead of the generic
+// error copy.
+export async function attemptScoreWrite({ recordScore, confirmDialog, compId, matchId, result, password, match }) {
+    try {
+        return await recordScore(compId, matchId, result, password, match);
+    } catch (e) {
+        const refusal = downstreamKnockoutPlayedRefusal(e);
+        // The forceDownstreamReopen guard on `result` stops a second refusal
+        // (e.g. a genuine race between two operators) from looping the confirm
+        // dialog: only the first attempt for a given patch is offered the
+        // override; a refusal on the forced retry is treated like any other error.
+        if (!refusal || result.forceDownstreamReopen) throw e;
+        const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
+        const ok = await confirmDialog({ message, confirmLabel, danger });
+        if (ok) {
+            return attemptScoreWrite({
+                recordScore, confirmDialog, compId, matchId,
+                result: { ...result, forceDownstreamReopen: true },
+                password, match,
+            });
+        }
+        e.downstreamKnockoutPlayedCancelled = true;
+        throw e;
+    }
+}

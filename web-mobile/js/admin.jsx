@@ -6,9 +6,8 @@ import { createTimerPool } from './timer_pool.jsx';
 // Imported from the leaf, not read off `window`: write_result.jsx is
 // import-only (see its header) and every consumer ES-imports it directly.
 import {
-  downstreamKnockoutPlayedRefusal,
-  downstreamKnockoutPlayedConfirm,
   DOWNSTREAM_KNOCKOUT_PLAYED_CANCELLED,
+  attemptScoreWrite,
 } from './write_result.jsx';
 
 const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
@@ -76,46 +75,13 @@ function mergeCompetitionsIntoTournament(currentT, mutator) {
   return { ...currentT, competitions: mutator(currentT.competitions || []) };
 }
 
-// bc-kcdg: attempts a score write and, on a 409 downstream_knockout_played
-// refusal (correcting a completed knockout match whose later round has
-// already been played), offers the operator the confirm+retry override
-// rather than surfacing a plain error. Confirming resends the SAME result
-// with forceDownstreamReopen:true, which the server applies alongside
-// reopening the blocking match(es) for re-entry; declining leaves everything
-// as it was.
-//
-// Extracted as a pure-ish helper (like mergeCompetitionsIntoTournament above)
-// so the confirm+retry contract can be pinned without rendering the whole
-// admin SPA: recordScore/confirmDialog are injected rather than read off
-// window, and it is the single place editMatchScore -- and therefore every
-// score-editor host and both editor bodies -- gets this behaviour.
-//
-// Throws on any failure, including a declined override; in that one case the
-// thrown error carries `.downstreamKnockoutPlayedCancelled = true` so the
-// caller can pick the cancellation copy instead of the generic error one.
-async function attemptScoreWrite({ recordScore, confirmDialog, compId, matchId, result, password, match }) {
-  try {
-    return await recordScore(compId, matchId, result, password, match);
-  } catch (e) {
-    const refusal = downstreamKnockoutPlayedRefusal(e);
-    // The forceDownstreamReopen guard on `result` stops a second refusal
-    // (e.g. a genuine race between two operators) from looping the confirm
-    // dialog: only the first attempt for a given patch is offered the
-    // override; a refusal on the forced retry is treated like any other error.
-    if (!refusal || result.forceDownstreamReopen) throw e;
-    const { message, confirmLabel, danger } = downstreamKnockoutPlayedConfirm(refusal);
-    const ok = await confirmDialog({ message, confirmLabel, danger });
-    if (ok) {
-      return attemptScoreWrite({
-        recordScore, confirmDialog, compId, matchId,
-        result: { ...result, forceDownstreamReopen: true },
-        password, match,
-      });
-    }
-    e.downstreamKnockoutPlayedCancelled = true;
-    throw e;
-  }
-}
+// bc-kcdg: attemptScoreWrite (imported from write_result.jsx, the shared
+// confirm+retry loop for a 409 downstream_knockout_played refusal) is the
+// single place editMatchScore below -- and therefore every score-editor host
+// and both editor bodies -- gets this behaviour. It is ALSO used by
+// admin_shiaijo.jsx's ResolveFeedersModal for the override-winner "Run now"
+// recovery; see write_result.jsx's doc comment for why the shared loop lives
+// there rather than being defined once per script-tagged host.
 
 // Pure helper for the "merge a tournament-level patch onto the latest
 // tournament state" pattern used by AdminApp.updateTournament. Same

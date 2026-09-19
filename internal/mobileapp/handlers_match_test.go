@@ -3670,6 +3670,150 @@ func TestScoreHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the correction applied")
 	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
-	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status, "the downstream match was reopened")
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status, "the downstream match went back to the queue")
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
+}
+
+// TestQuickScoreHandler_DownstreamKnockoutPlayed_409Shape pins the FIXED wire
+// contract (bc-kcdg finding B): a quick-score correction that would change an
+// already-propagated bracket winner while a downstream match carries a
+// result of its own is refused with HTTP 409, the same body shape /score
+// uses, never the 500 an unmapped *engine.DownstreamKnockoutPlayedError used
+// to fall through to (quick-score previously wrote through the plain
+// RecordMatchResult, which offers no override at all; see
+// writeMatchResult's doc comment in engine/scoring.go). Revert only the
+// respondIfDownstreamKnockoutPlayed arm (and the switch from RecordMatchResult
+// to RecordMatchResultWithIneligibility) to see this go red.
+func TestQuickScoreHandler_DownstreamKnockoutPlayed_409Shape(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-qs-409"
+	seedKcdgBracket(t, store, compID)
+
+	body, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"teamAWins": 0, "teamBWins": 1,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/m-r1-0/quick-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "downstream_knockout_played", resp["error"])
+	assert.Equal(t, "m-r1-0", resp["matchId"])
+	assert.Equal(t, "m-r2-0", resp["blockingMatchId"])
+	assert.Equal(t, "Alice", resp["displaced"])
+	assert.NotEmpty(t, resp["message"])
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", b.Rounds[0][0].Winner, "a refusal must leave the bracket untouched")
+}
+
+// TestQuickScoreHandler_DownstreamKnockoutPlayed_ForceReturns200 pins the
+// force path: the same correction, retried with forceDownstreamReopen:true,
+// returns HTTP 200, applies the correction, and reopens the downstream
+// match the refusal named.
+func TestQuickScoreHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-qs-force"
+	seedKcdgBracket(t, store, compID)
+
+	body, _ := json.Marshal(map[string]any{
+		"sideA": "Alice", "sideB": "Bob",
+		"teamAWins": 0, "teamBWins": 1,
+		"forceDownstreamReopen": true,
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PUT", "/api/competitions/"+compID+"/matches/m-r1-0/quick-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the correction applied")
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status, "the downstream match went back to the queue")
+	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
+}
+
+// TestBulkScoreHandler_DownstreamKnockoutPlayed_ReasonCode pins the FIXED
+// per-entry contract for bulk-score (bc-kcdg finding C): unlike the
+// single-match endpoints, bulk-score is always HTTP 200 with per-entry
+// partial-success results, so a downstream-knockout refusal on one entry
+// surfaces as a machine-readable Reason ("downstream_knockout_played") on
+// that entry rather than a dedicated status code, exactly like the existing
+// "superseded"/"clock_skew"/"corrupt_overrides" reasons. The rejected entry
+// must leave the bracket untouched, and a same-payload retry with
+// forceDownstreamReopen:true on that entry must succeed.
+func TestBulkScoreHandler_DownstreamKnockoutPlayed_ReasonCode(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-bulk-409"
+	seedKcdgBracket(t, store, compID)
+
+	entry := map[string]any{
+		"id": "m-r1-0", "sideA": "Alice", "sideB": "Bob",
+		"winner": "Bob", "ipponsB": []string{"M"},
+		"status": "completed", "correctionReason": "scoresheet was misread",
+	}
+	body, _ := json.Marshal([]map[string]any{entry})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		Succeeded int `json:"succeeded"`
+		Errors    []struct {
+			MatchID string `json:"matchId"`
+			Error   string `json:"error"`
+			Reason  string `json:"reason"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, 0, resp.Succeeded)
+	require.Len(t, resp.Errors, 1)
+	assert.Equal(t, "m-r1-0", resp.Errors[0].MatchID)
+	assert.Equal(t, "downstream_knockout_played", resp.Errors[0].Reason)
+	assert.NotEmpty(t, resp.Errors[0].Error)
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", b.Rounds[0][0].Winner, "a refusal must leave the bracket untouched")
+
+	// Retry the same entry with forceDownstreamReopen:true: it must now
+	// succeed and reopen the downstream match.
+	entry["forceDownstreamReopen"] = true
+	body2, _ := json.Marshal([]map[string]any{entry})
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest("POST", "/api/competitions/"+compID+"/matches/bulk-score", bytes.NewBuffer(body2))
+	req2.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w2, req2)
+
+	require.Equal(t, http.StatusOK, w2.Code, w2.Body.String())
+	var resp2 struct {
+		Succeeded int   `json:"succeeded"`
+		Errors    []any `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(w2.Body.Bytes(), &resp2))
+	assert.Equal(t, 1, resp2.Succeeded)
+	assert.Empty(t, resp2.Errors)
+
+	b2, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b2.Rounds[0][0].Winner, "the forced correction applied")
+	assert.Equal(t, "Bob", b2.Rounds[1][0].SideA, "propagation repainted the downstream slot")
+	assert.Equal(t, state.MatchStatusScheduled, b2.Rounds[1][0].Status, "the downstream match went back to the queue")
+	assert.Empty(t, b2.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
 }

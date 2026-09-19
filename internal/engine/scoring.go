@@ -2291,8 +2291,25 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 				continue
 			}
 			if !force {
-				if err := guardDownstreamKnockoutCorrection(bracket, rIdx, mIdx, bm, result, policy); err != nil {
-					return nil, err
+				// bc-cse finding 2: a stale replayed write must be reported as
+				// ErrMatchSuperseded -- the ordinary 200 {"applied":false}
+				// contract every other bracket write gives a reconnecting
+				// offline court (see CLAUDE.md "Write refusal and the clock
+				// frame") -- never the destructive "apply and reopen" 409 the
+				// downstream guard raises. Test the SAME staleness predicate
+				// applyBracketMatchResult's own applyMatchWrite call applies
+				// just below (domain.ApplyByTimestamp against bm.ModifiedAt,
+				// forward policy only) rather than restating the LWW rule
+				// here, so the two checks cannot drift; this call is a
+				// non-mutating PRE-check purely to decide whether the guard
+				// should even run. When it says stale, skip the guard and let
+				// applyBracketMatchResult's identical check drop the write
+				// through the normal (non-guard) path below.
+				stale := policy == matchWriteForward && !domain.ApplyByTimestamp(result.ModifiedAt, bm.ModifiedAt)
+				if !stale {
+					if err := guardDownstreamKnockoutCorrection(bracket, rIdx, mIdx, bm, result, policy); err != nil {
+						return nil, err
+					}
 				}
 			}
 			applied, err := applyBracketMatchResult(bm, result, policy)
@@ -2315,11 +2332,11 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 			if bracket.Rounds[rIdx][mIdx].Status == state.MatchStatusCompleted {
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				if force && policy == matchWriteForward {
-					reason := strings.TrimSpace(result.CorrectionReason)
-					if reason == "" {
-						reason = fmt.Sprintf("downstream reopened: winner changed by a forced correction of match %s", matchID)
-					}
-					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, reason)
+					// No invented reason (bc-kcdg finding 4): see
+					// forceReopenDownstreamChain's own doc comment for why an
+					// empty reason is what makes the reopened match's own
+					// re-entry possible afterwards.
+					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx)
 				}
 			}
 			return reopened, nil
@@ -2360,9 +2377,24 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 // treat a bye completion as blocking (retracting a winner whose bye already
 // resolved downstream would orphan that resolution). The two predicates
 // answer different questions for different rules; do not merge them.
+//
+// RECORDED CONTENT always blocks, whatever the status, and a RUNNING match
+// blocks even while empty: it is on court being fought right now, which is
+// the ordinary case this predicate exists to catch.
+//
+// There is deliberately no exemption for a match this bead's own forced
+// correction has already dealt with. forceReopenDownstreamChain REQUEUES its
+// downstream matches (requeueBracketMatch: scheduled, no verdict, no marks),
+// so they fail both arms naturally and the operator's re-entry is never
+// refused. An earlier fix instead left them RUNNING and exempted them by their
+// ReopenPending flag, which had to be unpicked twice: the flag alone also
+// exempted a match PART WAY through its re-fight, so a second correction
+// silently repainted it while keeping the ippons already struck for the
+// competitor being replaced -- this bead's own defect, reintroduced by its
+// fix. A running match reopened through the KACHINUKI path still blocks, and
+// should: someone is fighting it.
 func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
-	return bm.Status == state.MatchStatusRunning ||
-		len(bm.IpponsA) > 0 ||
+	recorded := len(bm.IpponsA) > 0 ||
 		len(bm.IpponsB) > 0 ||
 		len(bm.SubResults) > 0 ||
 		bm.Decision != "" ||
@@ -2378,6 +2410,10 @@ func bracketMatchCarriesOwnResult(bm *state.BracketMatch) bool {
 		// an overridden match from a bye pass-through, which sets the same
 		// Winner/Status pair and must NOT block.
 		bm.IsOverridden
+	if recorded {
+		return true
+	}
+	return bm.Status == state.MatchStatusRunning
 }
 
 // firstDownstreamWithOwnResult walks the whole downstream propagation chain
@@ -2415,30 +2451,110 @@ func firstDownstreamWithOwnResult(bracket *state.Bracket, rIdx, mIdx int) *state
 // continue regardless, exactly as firstDownstreamWithOwnResult's does,
 // because that slot's OWN downstream may still hold a real result further
 // along.
-func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, reason string) []string {
+//
+// Every reopen here passes reopenBracketMatch an EMPTY reason (bc-kcdg
+// finding 1/4), never a description of the correction that triggered it.
+// Two things follow from reopenPending(""): the reopened match carries NO
+// inherited CorrectionReason -- its own audit note would otherwise describe
+// a DIFFERENT match's correction, an unrelated one from the operator's
+// point of view -- and ReopenPending is set, which is what
+// bracketMatchCarriesOwnResult's own running+ReopenPending exemption keys
+// on to let the operator's next re-entry into this same match through. A
+// non-empty invented reason here (as this used to pass) defeated both: the
+// match came back non-pending (so its own re-score was blocked again by the
+// very predicate meant to allow it) and carried someone else's audit trail.
+func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int) []string {
 	var reopened []string
 	bronze, next := downstreamTargets(bracket, rIdx, mIdx)
 	if bronze != nil && bracketMatchCarriesOwnResult(bronze) {
-		reopenBracketMatch(bronze, reason)
+		requeueBracketMatch(bronze)
 		reopened = append(reopened, bronze.ID)
 	}
 	if next == nil {
 		return reopened
 	}
 	if bracketMatchCarriesOwnResult(next) {
-		reopenBracketMatch(next, reason)
+		requeueBracketMatch(next)
 		reopened = append(reopened, next.ID)
 	}
-	return append(reopened, forceReopenDownstreamChain(bracket, rIdx+1, mIdx/2, reason)...)
+	return append(reopened, forceReopenDownstreamChain(bracket, rIdx+1, mIdx/2)...)
+}
+
+// requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
+// no verdict, no scoreline, no provenance, no audit debt. It is the single
+// owner of what "send this bracket match back to the queue" means, shared by
+// RevertMatchToQueue (the operator requeueing one match) and bc-kcdg's forced
+// correction (requeueing every downstream match the corrected winner had
+// already been propagated into).
+//
+// REQUEUE, not reopen, is the right primitive for the bc-kcdg path, and the
+// difference is not cosmetic. reopenBracketMatch leaves a match RUNNING and
+// owing a reason (ReopenPending), which fits the kachinuki case where the
+// operator reopened the encounter they are standing in front of. A downstream
+// match invalidated by someone else's correction is not on court and nobody
+// is fighting it, and the debt is unpayable in practice: the individual score
+// editor has no reason prompt (only the team editor implements
+// reopenReasonRequired), so completing the re-fought match was rejected with
+// "this match was reopened; ending it again requires a reason" and the
+// operator had no way to enter the result the app had just told them to go
+// and fetch. Observed in the browser, not theorised.
+//
+// Clearing CorrectionReason follows RevertMatchToQueue's own doctrine that a
+// requeued match keeps no stale audit metadata: the justification for the
+// change lives on the match the operator actually corrected, which is where
+// they wrote it.
+func requeueBracketMatch(m *state.BracketMatch) {
+	m.Status = state.MatchStatusScheduled
+	m.Winner = ""
+	m.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
+	m.IpponsA = nil
+	m.IpponsB = nil
+	m.HansokuA = 0
+	m.HansokuB = 0
+	m.Decision = ""
+	m.DecisionBy = ""
+	m.DecisionReason = ""
+	m.Encho = nil
+	m.SubResults = nil
+	m.FlagsA = 0
+	m.FlagsB = 0
+	m.IsOverridden = false
+	m.ResultSource = ""
+	m.CorrectionReason = ""
+	// Mirror of the pool branch (mp-gmcg review): clear the reopen-pending
+	// audit debt so a reopened-then-requeued bracket match can be replayed
+	// and finalized without applyCorrectionReasonUnderTx demanding a reason
+	// for a result the requeue already discarded.
+	m.ReopenPending = false
+	// Revert fence (mp-y3nk): stamp now() so any pre-revert offline write
+	// (T_stale < T_revert) is dropped by ApplyByTimestamp on replay.
+	// Using 0 would make ApplyByTimestamp always return true (weaker).
+	m.ModifiedAt = time.Now().UnixMilli()
 }
 
 // bracketWinnerChanged reports whether result's resolved winner differs from
 // bm's CURRENTLY stored winner (i.e. before this write mutates bm). It
-// backfills result.SideAID/SideBID from bm and resolves result.WinnerID via
-// resolveWinnerIDFromSides first -- the same backfill+resolve
-// applyBracketMatchResult performs later, called here early so the
-// comparison and the eventual write agree on the same id; the later call
-// becomes a no-op once WinnerID is set.
+// backfills result.SideA/SideB and result.SideAID/SideBID from bm and
+// resolves result.WinnerID via resolveWinnerIDFromSides first -- the same
+// backfill+resolve applyBracketMatchResult performs later, called here early
+// so the comparison and the eventual write agree on the same id; the later
+// call becomes a no-op once WinnerID is set.
+//
+// bc-cse finding 3: the NAME backfill (reconcileSides) must run BEFORE the id
+// backfill and resolveWinnerIDFromSides, exactly as applyBracketMatchResult
+// orders it (reconcileSides at the top, the SideAID/SideBID+resolve block
+// afterwards) -- not after, and not omitted. resolveWinnerIDFromSides' own
+// name-fallback (result.Winner == result.SideA/SideB) depends on
+// result.SideA/SideB already reflecting the stored pairing: a payload that
+// names a winner but omits side names (result.SideA/SideB left "" by the
+// client) would otherwise fail that fallback silently and fall through to
+// the ippon-count guess, which resolves to whichever side scored more
+// regardless of which competitor the payload actually named -- the wrong
+// winner id on a payload that named the right winner. reconcileSides'
+// reported mismatch is ignored here (the actual write's own reconcileSides
+// call rejects a genuine disagreement); this call's only job is the
+// backfill side effect, run under the exact same stored pairing
+// applyBracketMatchResult itself is about to write against.
 //
 // Comparison is BY ID when bm.WinnerID is already stamped (a resolved
 // competitor, bc-brid); it falls back to bare-name comparison only for the
@@ -2447,6 +2563,7 @@ func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, reason s
 // unrepaired legacy row) -- see CLAUDE.md's bc-pnum id-only-when-present
 // ruling.
 func bracketWinnerChanged(bm *state.BracketMatch, result *state.MatchResult, policy matchWritePolicy) (bool, error) {
+	reconcileSides(result, storedSides{A: bm.SideA, B: bm.SideB, AID: bm.SideAID, BID: bm.SideBID})
 	if result.SideAID == "" {
 		result.SideAID = bm.SideAID
 	}
@@ -2739,7 +2856,6 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 							return err
 						}
 					}
-					displacedWinner := m.Winner
 					setBracketOverrideWinner(m, winnerName)
 					m.IsOverridden = true
 					m.Status = state.MatchStatusCompleted
@@ -2755,8 +2871,9 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					}
 					e.propagateBracketWinner(bracket, rIdx, mIdx)
 					if fo.Force {
-						reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx,
-							fmt.Sprintf("downstream reopened: winner override at match %s (was %q)", matchId, displacedWinner))
+						// No invented reason (bc-kcdg finding 4): see
+						// forceReopenDownstreamChain's own doc comment.
+						reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx)
 					}
 					return nil
 				}
@@ -2907,32 +3024,7 @@ func (e *Engine) RevertMatchToQueue(compId, matchId string) error {
 		// Same contract as the pool path: normalise any non-completed match to
 		// a clean scheduled match, clearing stale score/provenance/audit fields
 		// even if it was already scheduled.
-		m.Status = state.MatchStatusScheduled
-		m.Winner = ""
-		m.WinnerID = "" // bc-brid: the verdict's id half, cleared with the name.
-		m.IpponsA = nil
-		m.IpponsB = nil
-		m.HansokuA = 0
-		m.HansokuB = 0
-		m.Decision = ""
-		m.DecisionBy = ""
-		m.DecisionReason = ""
-		m.Encho = nil
-		m.SubResults = nil
-		m.FlagsA = 0
-		m.FlagsB = 0
-		m.IsOverridden = false
-		m.ResultSource = ""
-		m.CorrectionReason = ""
-		// Mirror of the pool branch (mp-gmcg review): clear the reopen-pending
-		// audit debt so a reopened-then-requeued bracket match can be replayed
-		// and finalized without applyCorrectionReasonUnderTx demanding a reason
-		// for a result the requeue already discarded.
-		m.ReopenPending = false
-		// Revert fence (mp-y3nk): stamp now() so any pre-revert offline write
-		// (T_stale < T_revert) is dropped by ApplyByTimestamp on replay.
-		// Using 0 would make ApplyByTimestamp always return true (weaker).
-		m.ModifiedAt = time.Now().UnixMilli()
+		requeueBracketMatch(m)
 	}); err != nil {
 		// Neither pool nor bracket holds this match: surface a typed
 		// NotFoundError so the handler can answer 404 (a fabricated match id

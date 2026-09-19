@@ -117,7 +117,7 @@ type DownstreamKnockoutPlayedError struct {
 }
 
 func (e *DownstreamKnockoutPlayedError) Error() string {
-	return fmt.Sprintf("correcting match %q would change the winner already propagated into %q, which has recorded its own result; this would displace %q from the chain without updating %q's own result. Retry with forceDownstreamReopen to apply the correction and reopen %q",
+	return fmt.Sprintf("correcting match %q would change the winner already propagated into %q, which has recorded its own result; this would displace %q from the chain without updating %q's own result. Retry with forceDownstreamReopen to apply the correction and send %q back to the queue to be fought again",
 		e.MatchID, e.BlockingMatchID, e.Displaced, e.BlockingMatchID, e.BlockingMatchID)
 }
 

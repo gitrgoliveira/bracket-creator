@@ -2506,10 +2506,16 @@ const API = {
         // JSON input") right after a successful save.
         return true;
     },
-    async overrideBracketWinner(compID, matchID, winnerName, password) {
+    // bc-kcdg: forceDownstreamReopen is the operator's confirmed override of a
+    // 409 downstream_knockout_played refusal (this match's later round already
+    // played on the current winner), threaded through exactly as recordScore's
+    // payload carries it, so a confirmed retry here also reopens the blocking
+    // match(es) for re-entry rather than silently repainting them.
+    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen) {
         const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         const payload = { winnerName, modifiedAt: _serverNowMs() };
+        if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
         let res;
         try {
             // fetchWithTimeout so a stalled request is treated as offline rather
@@ -2538,7 +2544,12 @@ const API = {
         }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to override winner");
+            // bc-kcdg: 409 downstream_knockout_played (this feeder's assertion
+            // would repaint a later match that already played on the current
+            // winner) is parsed into the same structured error recordScore
+            // throws, so a caller can offer the same confirm+retry loop
+            // (write_result.jsx's attemptScoreWrite) rather than a plain message.
+            throw _downstreamKnockoutPlayedError(err) || new Error(err.error || "Failed to override winner");
         }
         // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
         // the timestamp guard dropped this assertion because a newer/equal result

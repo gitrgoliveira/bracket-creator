@@ -158,11 +158,14 @@ func TestDownstreamKnockoutCorrection_Force(t *testing.T) {
 	// metadata, and the operator's justification lives on the match they
 	// actually corrected.
 	next := b.Rounds[1][0]
-	assert.Equal(t, state.MatchStatusScheduled, next.Status, "the next match goes back to the queue")
+	assert.Equal(t, state.MatchStatusRunning, next.Status, "reopened IN PLACE: the queue is not touched")
 	assert.Empty(t, next.Winner, "its winner is cleared")
 	assert.Empty(t, next.IpponsA, "its ippons are cleared")
-	assert.Empty(t, next.CorrectionReason, "it does not inherit a description of a DIFFERENT match's correction")
-	assert.False(t, next.ReopenPending, "and it does not owe an audit reason it has no way to pay")
+	assert.Contains(t, next.CorrectionReason, "m-r1-0",
+		"its audit note describes its OWN reopen and names the correction that caused it")
+	assert.False(t, next.ReopenPending,
+		"and it owes no further reason: only the team editor can collect one, so an "+
+			"individual match reopened owing one could not be completed at all (400)")
 
 	// The round BEYOND it is deliberately untouched by this confirmation.
 	beyond := b.Rounds[2][0]
@@ -346,10 +349,10 @@ func TestDownstreamKnockoutCorrection_Bronze(t *testing.T) {
 
 		got, err := store.LoadBracket(compID)
 		require.NoError(t, err)
-		assert.Equal(t, state.MatchStatusScheduled, got.ThirdPlaceMatch.Status)
+		assert.Equal(t, state.MatchStatusRunning, got.ThirdPlaceMatch.Status)
 		assert.Empty(t, got.ThirdPlaceMatch.Winner)
 		assert.Equal(t, "Alice", got.ThirdPlaceMatch.SideA, "the semifinal's new loser (Alice) was repainted into bronze")
-		assert.Equal(t, state.MatchStatusScheduled, got.Rounds[1][0].Status, "the final went with it")
+		assert.Equal(t, state.MatchStatusRunning, got.Rounds[1][0].Status, "the final went with it")
 		assert.Empty(t, got.Rounds[1][0].Winner)
 	})
 
@@ -426,7 +429,7 @@ func TestOverrideBracketWinner_DownstreamGuard(t *testing.T) {
 		require.NoError(t, lerr)
 		assert.Equal(t, "Bob", b.Rounds[0][0].Winner)
 		assert.Equal(t, "Bob", b.Rounds[1][0].SideA)
-		assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
+		assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
 		assert.Equal(t, state.MatchStatusCompleted, b.Rounds[2][0].Status, "the round beyond waits its turn")
 	})
 }
@@ -483,7 +486,7 @@ func TestDownstreamKnockoutCorrection_OverriddenDownstreamBlocks(t *testing.T) {
 	assert.Equal(t, []string{"m-r2-0"}, reopened)
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
 	assert.Empty(t, b.Rounds[1][0].Winner)
 	assert.False(t, b.Rounds[1][0].IsOverridden, "the manual verdict must be cleared with the rest")
 }
@@ -514,7 +517,7 @@ func TestDownstreamKnockoutCorrection_OneHopPerConfirmation(t *testing.T) {
 
 	b, err := store.LoadBracket(compID)
 	require.NoError(t, err)
-	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status)
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status)
 	assert.Equal(t, state.MatchStatusCompleted, b.Rounds[2][0].Status, "the round beyond is left alone for now")
 	assert.Equal(t, "Alice", b.Rounds[2][0].Winner, "and keeps its recorded result")
 
@@ -548,7 +551,7 @@ func TestDownstreamKnockoutCorrection_OneHopPerConfirmation(t *testing.T) {
 	b, err = store.LoadBracket(compID)
 	require.NoError(t, err)
 	assert.Equal(t, "Charlie", b.Rounds[1][0].Winner)
-	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[2][0].Status)
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[2][0].Status)
 	assert.Equal(t, "Charlie", b.Rounds[2][0].SideA, "repainted with the new winner")
 }
 

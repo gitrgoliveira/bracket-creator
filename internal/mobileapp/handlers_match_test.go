@@ -3670,7 +3670,7 @@ func TestScoreHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the correction applied")
 	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
-	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status, "the downstream match went back to the queue")
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status, "the downstream match was reopened in place")
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
 }
 
@@ -3741,7 +3741,7 @@ func TestQuickScoreHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the correction applied")
 	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
-	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status, "the downstream match went back to the queue")
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status, "the downstream match was reopened in place")
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
 }
 
@@ -3814,7 +3814,7 @@ func TestBulkScoreHandler_DownstreamKnockoutPlayed_ReasonCode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", b2.Rounds[0][0].Winner, "the forced correction applied")
 	assert.Equal(t, "Bob", b2.Rounds[1][0].SideA, "propagation repainted the downstream slot")
-	assert.Equal(t, state.MatchStatusScheduled, b2.Rounds[1][0].Status, "the downstream match went back to the queue")
+	assert.Equal(t, state.MatchStatusRunning, b2.Rounds[1][0].Status, "the downstream match was reopened in place")
 	assert.Empty(t, b2.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
 }
 

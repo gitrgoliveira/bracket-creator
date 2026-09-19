@@ -47,12 +47,12 @@ describe('downstreamKnockoutPlayedConfirm', () => {
         expect(message).toContain('K7');
         // Names the displaced competitor.
         expect(message).toContain('Suzuki Ichiro');
-        // States plainly what confirming DOES to the later match -- sends it
-        // back to the queue, clearing its recorded result -- rather than just
-        // "proceed anyway". The wording says queue, not "reopen", because the
-        // server requeues that match (requeueBracketMatch): it is not put back
-        // on court, it is put back in the list waiting to be fought.
-        expect(message.toLowerCase()).toContain('back to the queue');
+        // States plainly what confirming DOES to the later match -- reopens it,
+        // clearing its recorded result -- rather than just "proceed anyway".
+        // The wording says reopen, not "back to the queue", because the match
+        // was already played and is reopened IN PLACE: the queue is untouched
+        // (operator ruling 2026-09-19).
+        expect(message.toLowerCase()).toContain('reopens match');
         expect(message.toLowerCase()).toContain('re-entry');
         expect(message.toLowerCase()).toContain('cleared');
         // Never the word "mat" (kendo has no mats -- CLAUDE.md).
@@ -64,7 +64,7 @@ describe('downstreamKnockoutPlayedConfirm', () => {
     it('falls back to generic wording when displaced/blockingMatchId are missing', () => {
         const { message } = downstreamKnockoutPlayedConfirm({});
         expect(message).toBeTruthy();
-        expect(message.toLowerCase()).toContain('back to the queue');
+        expect(message.toLowerCase()).toContain('reopens');
     });
 
     it('defaults to an empty object so it never throws on a bare call', () => {
@@ -94,7 +94,7 @@ describe('downstreamKnockoutPlayedConfirm with two blocked matches', () => {
         expect(message).toContain('m-bronze');
         expect(message).toContain('m-r2-0');
         expect(message.toLowerCase()).toContain('matches');
-        expect(message.toLowerCase()).toContain('back to the queue');
+        expect(message.toLowerCase()).toContain('reopens both');
         expect(message.toLowerCase()).toContain('cleared');
         expect(message.toLowerCase()).not.toMatch(/\bmat\b/);
     });

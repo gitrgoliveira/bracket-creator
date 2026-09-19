@@ -337,7 +337,7 @@ func TestDecisionHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the decision applied")
 	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
-	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status, "the downstream match went back to the queue")
+	assert.Equal(t, state.MatchStatusRunning, b.Rounds[1][0].Status, "the downstream match was reopened in place")
 	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
 }
 

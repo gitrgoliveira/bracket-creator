@@ -551,7 +551,7 @@ type ForceOptions struct {
 	// would change a bracket match's already-propagated winner and a
 	// downstream match in the propagation chain carries a result of its own,
 	// the write is refused unless Force is true. A true Force also reopens
-	// (requeueBracketMatch) the ONE downstream match that carries
+	// (reopenBracketMatch) the ONE downstream match that carries
 	// its own result, since the correction just repainted their SideA/SideB
 	// out from under their recorded verdicts.
 	Force bool
@@ -2340,7 +2340,7 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 				e.propagateBracketWinner(bracket, rIdx, mIdx)
 				if force && policy == matchWriteForward &&
 					winnerActuallyChanged(priorWinner, priorWinnerID, bm) {
-					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx)
+					reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, bm.ID)
 				}
 			}
 			return reopened, nil
@@ -2388,7 +2388,8 @@ func (e *Engine) applyBracketResultIn(bracket *state.Bracket, compID, matchID st
 //
 // There is deliberately no exemption for a match this bead's own forced
 // correction has already dealt with. forceReopenDownstreamChain REQUEUES its
-// downstream matches (requeueBracketMatch: scheduled, no verdict, no marks),
+// downstream matches (reopenBracketMatch: reopened in place, no verdict, no
+// marks),
 // so they fail both arms naturally and the operator's re-entry is never
 // refused. An earlier fix instead left them RUNNING and exempted them by their
 // ReopenPending flag, which had to be unpicked twice: the flag alone also
@@ -2490,41 +2491,48 @@ func winnerActuallyChanged(priorWinner, priorWinnerID string, bm *state.BracketM
 // match, then again for the final on the next attempt. Deeper rounds arrive
 // the same way, when the re-fought result propagates into them.
 //
-// requeueBracketMatch, not reopenBracketMatch: the match goes back to the
-// queue clean rather than to "running" owing an audit reason. See that
-// function for why the reopen shape was unusable here.
-func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int) []string {
+// reopenBracketMatch, not requeueBracketMatch: the match was already played
+// and stays where it is, reopened in place, so the queue is left alone
+// (operator ruling 2026-09-19: "no changes in the queue necessary if the
+// matches were already played"). It carries its own audit note rather than
+// owing one -- see downstreamReopenReason.
+func forceReopenDownstreamChain(bracket *state.Bracket, rIdx, mIdx int, correctedID string) []string {
 	var reopened []string
 	for _, m := range firstDownstreamWithOwnResult(bracket, rIdx, mIdx) {
-		requeueBracketMatch(m)
+		reopenBracketMatch(m, downstreamReopenReason(correctedID))
 		reopened = append(reopened, m.ID)
 	}
 	return reopened
 }
 
+// downstreamReopenReason is the audit note a downstream match carries when a
+// correction upstream reopened it. It describes THIS match's own event -- it
+// was reopened, and why -- rather than repeating the operator's note about the
+// match they corrected, which would read as someone else's history on this
+// match's trail.
+//
+// Supplying a reason at all is what keeps the reopen payable. reopenPending("")
+// treats an empty reason as "still owes an audit justification", and only the
+// TEAM editor has a prompt to collect one, so an individual match reopened with
+// no reason could not be completed at all: the write came back 400 "this match
+// was reopened; ending it again requires a reason". The system knows why this
+// one was reopened, so it says so itself instead of billing the operator for an
+// explanation of something it did to them.
+func downstreamReopenReason(correctedID string) string {
+	return fmt.Sprintf("reopened: the result of match %s was corrected", correctedID)
+}
+
 // requeueBracketMatch normalises a bracket match to a CLEAN SCHEDULED match:
-// no verdict, no scoreline, no provenance, no audit debt. It is the single
-// owner of what "send this bracket match back to the queue" means, shared by
-// RevertMatchToQueue (the operator requeueing one match) and bc-kcdg's forced
-// correction (requeueing the one downstream match the corrected winner had
-// already been propagated into).
+// no verdict, no scoreline, no provenance, no audit debt. It is
+// RevertMatchToQueue's bracket branch, extracted so the body has a name and a
+// doc rather than sitting inline in a closure.
 //
-// REQUEUE, not reopen, is the right primitive for the bc-kcdg path, and the
-// difference is not cosmetic. reopenBracketMatch leaves a match RUNNING and
-// owing a reason (ReopenPending), which fits the kachinuki case where the
-// operator reopened the encounter they are standing in front of. A downstream
-// match invalidated by someone else's correction is not on court and nobody
-// is fighting it, and the debt is unpayable in practice: the individual score
-// editor has no reason prompt (only the team editor implements
-// reopenReasonRequired), so completing the re-fought match was rejected with
-// "this match was reopened; ending it again requires a reason" and the
-// operator had no way to enter the result the app had just told them to go
-// and fetch. Observed in the browser, not theorised.
-//
-// Clearing CorrectionReason follows RevertMatchToQueue's own doctrine that a
-// requeued match keeps no stale audit metadata: the justification for the
-// change lives on the match the operator actually corrected, which is where
-// they wrote it.
+// Sole caller today. bc-kcdg's forced correction briefly used it too, until
+// the operator ruled that a downstream match invalidated by a correction was
+// already played and should be reopened where it is, leaving the queue alone
+// (see forceReopenDownstreamChain, which calls reopenBracketMatch instead).
+// Keep the two distinct: requeue is "this match has not happened", reopen is
+// "this match happened and must happen again".
 func requeueBracketMatch(m *state.BracketMatch) {
 	m.Status = state.MatchStatusScheduled
 	m.Winner = ""
@@ -2958,7 +2966,7 @@ func (e *Engine) OverrideBracketWinner(compId string, matchId string, winnerName
 					// nothing downstream to unwind. displacedWinner is this
 					// match's winner as it stood before setBracketOverrideWinner.
 					if fo.Force && winnerActuallyChanged(priorWinner, priorWinnerID, m) {
-						reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx)
+						reopened = forceReopenDownstreamChain(bracket, rIdx, mIdx, m.ID)
 					}
 					return nil
 				}

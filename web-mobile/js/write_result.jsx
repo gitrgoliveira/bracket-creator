@@ -198,11 +198,11 @@ export function downstreamKnockoutPlayedConfirm({ blockingMatchId, blockingMatch
     return {
         message: many
             ? `${who} already played matches ${blocking}, which were built on this match's current result. ` +
-              `Applying this correction sends both back to the queue for re-entry: their recorded results ` +
-              'are cleared, and they must be fought and scored again.'
+              'Applying this correction reopens both for re-entry: their recorded results are cleared, ' +
+              'and they must be fought and scored again.'
             : `${who} already played match ${blocking}, which was built on this match's current result. ` +
-              `Applying this correction sends match ${blocking} back to the queue for re-entry: its ` +
-              'recorded result is cleared, and it must be fought and scored again.',
+              `Applying this correction reopens match ${blocking} for re-entry: its recorded result is ` +
+              'cleared, and it must be fought and scored again.',
         confirmLabel: 'Apply correction and reopen',
         danger: true,
     };
@@ -235,7 +235,7 @@ export function downstreamKnockoutPlayedQueueDrop({ blockingMatchId, displaced }
     const blocking = blockingMatchId || 'the later match';
     return {
         reason: `${who} already played match ${blocking}, so this queued correction could not be applied automatically`,
-        advice: `Redo the correction now that you're online: you'll be asked to confirm sending match ${blocking} back for re-entry.`,
+        advice: `Redo the correction now that you're online: you'll be asked to confirm reopening match ${blocking} for re-entry.`,
     };
 }
 

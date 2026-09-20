@@ -143,3 +143,8 @@ mp-*/
 .github/skills
 
 *.pdf
+
+# Serena: track only the project config; everything else is per-machine state.
+# `.serena/*` (not `.serena/`) so the negation below can re-include the file.
+.serena/*
+!.serena/project.yml

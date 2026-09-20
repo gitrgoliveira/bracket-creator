@@ -259,8 +259,13 @@ describe('WatchlistPanel', () => {
     const tree = runtime.mount(WatchlistPanel, baseProps({
       watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
     }));
-    expect(byClass(tree, 'pmf__chip--unresolved'), 'the chip carries the unresolved state').toHaveLength(1);
-    expect(byClass(tree, 'pmf__chip-warn'), 'and a non-colour marker for it').toHaveLength(1);
+    const chip = byClass(tree, 'pmf__chip--unresolved');
+    expect(chip, 'the chip carries the unresolved state').toHaveLength(1);
+    // A non-colour marker, so the state is not carried by the amber alone.
+    // Rendered bare, as every other ⚠ in the tree is, which also means it
+    // takes the chip's own --warn-ink (8.75:1) rather than a dedicated
+    // --warn (4.84:1) that would be fainter than the text it marks.
+    expect(collectText(chip[0])).toMatch(/⚠/);
 
     const hint = findAll(tree, (n) => n.props?.['data-testid'] === 'watchlist-unresolved');
     expect(hint, 'the hint names the real problem').toHaveLength(1);
@@ -270,11 +275,13 @@ describe('WatchlistPanel', () => {
   });
 
   it('claims nothing about a roster it does not have', () => {
-    // Absence is a claim, and an empty roster supports no claim. app.jsx holds
-    // the viewer behind a spinner until the payload lands, so this is a floor
-    // rather than a live bug -- without it, a future lazy roster load would
-    // turn every chip amber on first paint and tell the reader to delete
-    // people who are perfectly fine.
+    // Absence is a claim, and an empty roster supports no claim. This state is
+    // REACHABLE and was checked in the browser: a tournament with no
+    // competitions yet (the roster is built from t.competitions) plus a
+    // watchlist carried over from a previous event -- bc_watchlist is one
+    // localStorage key per BROWSER, not per tournament. Without the guard that
+    // screen turns every chip amber and tells the reader to delete people who
+    // are perfectly fine.
     const wl = [{ type: 'player', id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo' }];
     const tree = runtime.mount(WatchlistPanel, baseProps({
       roster: [], watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,

@@ -4381,10 +4381,6 @@ button.vsched-item:not([data-clickable]) {
   border: 1px solid var(--warn-border);
 }
 
-.pmf__chip-warn {
-  font-weight: 700;
-  color: var(--warn);
-}
 
 /* The matching hint. Same reasoning as the chip: caution, not error. */
 .watchlist-primary-unresolved {

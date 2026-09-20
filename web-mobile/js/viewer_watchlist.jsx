@@ -391,12 +391,14 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
     // upcoming matches for X" while X was fighting. The id is NOT re-resolved by
     // name: bc-pnum rules an id that resolves to nothing resolves to nothing.
     // What changes is that the failure is now VISIBLE.
-    // `roster.length` is the guard, not a nicety: absence is a claim about a
-    // roster, so with no roster there is nothing to be absent from and the
-    // honest answer is silence. app.jsx:1376 holds the whole viewer behind a
-    // spinner until the tournament payload lands, so this is not reachable
-    // today -- it is here so that a future lazy roster load cannot turn every
-    // chip amber on first paint.
+    // `roster.length` is load-bearing, not defensive: absence is a claim ABOUT
+    // a roster, so with no roster there is nothing to be absent from and the
+    // honest answer is silence. The state is reachable and was checked in the
+    // browser -- a tournament with no competitions yet (roster is built from
+    // t.competitions) plus a watchlist carried over from a previous event,
+    // which is the normal shape of bc_watchlist: one localStorage key per
+    // BROWSER, not per tournament. Without this every chip there would go
+    // amber and tell the reader to delete people who are perfectly fine.
     const unresolved = roster.length > 0 && !!entry.id && !pRecord;
     return (
       <span key={k} className={`pmf__chip ${checkedIn ? "is-checked-in" : ""} ${isPrimary ? "is-primary" : ""} ${unresolved ? "pmf__chip--unresolved" : ""}`}
@@ -406,7 +408,7 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
             {isPrimary ? "★" : "☆"}
           </button>
         )}
-        {unresolved && <span className="pmf__chip-warn" aria-hidden="true">⚠</span>}
+        {unresolved && <span aria-hidden="true">⚠</span>}
         <NumberedName name={name} number={(pRecord && pRecord.number) || ""} />
         {checkedIn && <span className="pmf__chip-tick" aria-hidden="true">✓</span>}
         <button type="button" onClick={() => removeEntry(entry)} aria-label={`Remove ${name}`}>×</button>

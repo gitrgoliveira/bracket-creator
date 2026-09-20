@@ -6,6 +6,7 @@ import { createTimerPool } from './timer_pool.jsx';
 import { setCachedAuthConfig } from './admin_helpers.jsx';
 import { LS_NOTIFICATIONS_ENABLED } from './notification_keys.jsx';
 import { bridge, setSnapshotProvider, setDisplayCourt, getLastBroadcastAt, applyPatchToTree, mergeSnapshotIntoTree, deriveLinkState, freshnessMs } from './court_bridge.jsx';
+import { BRANDING_DEFAULTS } from './admin_branding.jsx';
 
 const { useState: useS, useEffect: useE, useRef: useR, useCallback: useC } = React;
 
@@ -27,56 +28,62 @@ const THEME = {
 // never run on load, so a hand-edited tournament.md reaches us unvalidated.
 // Setting --accent to a non-colour makes every declaration reading it invalid
 // at computed-value time, which silently strips the navy hero, the running
-// ring and the rest, so each value is checked before it is applied.
-const HEX_RE = /^#?([0-9a-fA-F]{6})$/;
+// ring and the rest, so each value is checked before it is applied. The check
+// is the server's own (state.hexColorRE): a leading hash and six hex digits.
+// A hashless "8e24aa" is not a CSS colour either, so admitting it would poison
+// --accent exactly the way an arbitrary string does.
+const HEX_RE = /^#([0-9a-fA-F]{6})$/;
 export function isHexColor(hex) {
   return HEX_RE.test(hex || "");
 }
 
-// Darken a #rrggbb hex toward black by `amount` (0..1). Used to derive the
-// filled-button hover shade (--accent-strong) from a runtime Branding accent
-// so the hover tracks the configured colour instead of a hard-coded navy
-// (mp-nubo). Returns null on malformed input so callers fall back to the CSS
-// default token.
-function darkenHex(hex, amount) {
+// Mix a #rrggbb hex toward one end of every channel (0 = black, 255 = white),
+// keeping `keep` (0..1) of the original. Returns null on malformed input so a
+// caller falls back to the CSS default token. The one parse shared by both
+// derived accent tokens, so they cannot drift in what they accept.
+function mixHex(hex, keep, toward) {
   const m = HEX_RE.exec(hex || "");
   if (!m) return null;
   const n = parseInt(m[1], 16);
-  const f = 1 - amount;
-  const r = Math.round(((n >> 16) & 255) * f);
-  const g = Math.round(((n >> 8) & 255) * f);
-  const b = Math.round((n & 255) * f);
-  return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
-}
-
-// Tint a #rrggbb hex toward white, keeping `amount` (0..1) of the colour. The
-// sibling of darkenHex, used to derive --accent-soft from the Branding accent.
-// 0.08 reproduces the stock #e7eaf3 tint from the stock navy to within 6/255.
-export function tintHex(hex, amount) {
-  const m = HEX_RE.exec(hex || "");
-  if (!m) return null;
-  const n = parseInt(m[1], 16);
-  const mix = (c) => Math.round(255 - amount * (255 - c));
+  const mix = (c) => Math.round(toward + keep * (c - toward));
   const r = mix((n >> 16) & 255);
   const g = mix((n >> 8) & 255);
   const b = mix(n & 255);
   return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
 }
 
-// The stock soft tint. BrandingManager's normalizeTheme fills accentSoftColor
-// with this whenever the operator has not picked one, so a stored value equal
-// to it means "not chosen" rather than "chosen to be navy". Without that
-// distinction an operator who sets only the primary colour gets a purple accent
-// against 61 rules still tinted navy, which is the desync bc-csst exists to
-// close.
-const STOCK_ACCENT_SOFT = "#e7eaf3";
+// Darken toward black by `amount`: the filled-button hover shade
+// (--accent-strong) derived from a runtime Branding accent so the hover tracks
+// the configured colour instead of a hard-coded navy (mp-nubo).
+function darkenHex(hex, amount) {
+  return mixHex(hex, 1 - amount, 0);
+}
+
+// Tint toward white keeping `amount` of the colour: --accent-soft derived from
+// the Branding accent. 0.08 is the stock pair's ratio (#1d3557 to #e7eaf3),
+// which it reproduces only to within 6/255, so it serves a CUSTOM primary and
+// never re-derives the stock pair (see applyTheme).
+export function tintHex(hex, amount) {
+  return mixHex(hex, amount, 255);
+}
+
+const sameHex = (a, b) => a.toLowerCase() === b.toLowerCase();
 
 // mp-scf: apply tournament-configured CSS custom properties. Called once
 // after tournament load and again on tournament_updated. Removes overrides
 // when the theme field is absent so the CSS defaults take over.
+//
+// BrandingManager's normalizeTheme fills BOTH colours with the stock defaults
+// whenever the operator sets any theme field, so a stored stock value means
+// "not chosen", not "chosen to be navy". Without that distinction an operator
+// who sets only the primary colour gets a purple accent against 61 rules
+// still tinted navy, which is the desync bc-csst exists to close. A stock
+// primary is left to :root for the same reason: its hand-tuned companions
+// (#e7eaf3, #16263f) are what the derivations only approximate.
 export function applyTheme(theme) {
   const root = document.documentElement;
-  const primary = theme && isHexColor(theme.primaryColor) ? theme.primaryColor : null;
+  const chosen = (v, stock) => (isHexColor(v) && !sameHex(v, stock) ? v : null);
+  const primary = theme ? chosen(theme.primaryColor, BRANDING_DEFAULTS.primaryColor) : null;
   if (primary) {
     root.style.setProperty("--accent", primary);
     // mp-nubo: keep the button hover shade in sync with the custom accent.
@@ -86,16 +93,12 @@ export function applyTheme(theme) {
     root.style.removeProperty("--accent");
     root.style.removeProperty("--accent-strong");
   }
-  const chosenSoft = theme && isHexColor(theme.accentSoftColor) ? theme.accentSoftColor : null;
-  const softIsStock = !chosenSoft || chosenSoft.toLowerCase() === STOCK_ACCENT_SOFT;
-  const derivedSoft = softIsStock && primary ? tintHex(primary, 0.08) : null;
-  if (!softIsStock) {
-    root.style.setProperty("--accent-soft", chosenSoft);
-  } else if (derivedSoft) {
-    root.style.setProperty("--accent-soft", derivedSoft);
-  } else {
-    root.style.removeProperty("--accent-soft");
-  }
+  // An explicit non-stock soft colour wins; otherwise a custom primary derives
+  // its own tint, and no custom primary means no override.
+  const explicitSoft = theme ? chosen(theme.accentSoftColor, BRANDING_DEFAULTS.accentSoftColor) : null;
+  const soft = explicitSoft || (primary && tintHex(primary, 0.08));
+  if (soft) root.style.setProperty("--accent-soft", soft);
+  else root.style.removeProperty("--accent-soft");
   document.title = (theme && theme.windowTitle) || "Bracket Creator Mobile";
 }
 // Expose globally so BrandingManager (loaded as a separate module) can call
@@ -1959,7 +1962,8 @@ function CreateTournament({ onCreated, authConfig }) {
             <div
               data-testid="create-tournament-error"
               role="alert"
-              style={{ color: "var(--danger)", fontSize: 12, marginBottom: 8, marginTop: 12, padding: 8, border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}
+              className="alert alert--error"
+              style={{ marginBottom: 8, marginTop: 12 }}
             >
               {error}
             </div>

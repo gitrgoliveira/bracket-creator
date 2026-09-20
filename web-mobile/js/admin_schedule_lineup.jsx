@@ -522,7 +522,7 @@ export function MatchLineupSideEditor({ comp, team, match, allMatches, password,
       </div>
 
       {error && (
-        <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 8, padding: "6px 8px", border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
+        <div className="alert alert--error" style={{ marginBottom: 8 }}>
           {error}
         </div>
       )}

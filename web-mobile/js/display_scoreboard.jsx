@@ -823,7 +823,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                                 borderRadius: "0.6vw", padding: "0.5vh 1.2vw",
                                 fontWeight: 700, fontSize: "1.8vh",
                             }}>
-                                {/* Static navy dot: wayfinding only, NOT pulsing */}
+                                {/* Static navy wayfinding dot */}
                                 <span style={{ width: "0.9vh", height: "0.9vh", borderRadius: "50%", background: "var(--accent)", display: "inline-block", flexShrink: 0 }} />
                                 Shiaijo {c}
                             </span>

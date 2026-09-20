@@ -1152,7 +1152,7 @@ a:hover {
   border-radius: var(--r-lg);
   padding: 18px;
   cursor: pointer;
-  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), transform 140ms var(--ease-out);
+  transition: background-color 140ms var(--ease-out), border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), transform 140ms var(--ease-out);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1331,7 +1331,7 @@ a:hover {
   width: 100%;
   font-family: inherit;
   text-align: left;
-  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out);
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), opacity 140ms var(--ease-out);
   position: relative;
   z-index: 1;
   cursor: pointer;
@@ -2431,7 +2431,7 @@ button.sync-status-pill:focus-visible {
   border-color: color-mix(in oklch, var(--accent) 25%, transparent);
   background: var(--accent-soft);
 }
-/* syncing, neutral ink, pulsing dot to indicate in-flight */
+/* syncing, neutral ink */
 .sync-pill--syncing {
   color: var(--ink-2);
   border-color: var(--line);
@@ -3156,8 +3156,7 @@ button.vsched-item:not([data-clickable]) {
 /* Tournament info card (mp-ef3), public event details */
 .tournament-info {
   background: var(--accent-soft);
-  border: 1px solid rgba(29, 53, 87, 0.22); /* fallback for browsers without color-mix() */
-  border-color: color-mix(in oklch, var(--accent) 22%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
   border-radius: var(--r-lg);
   padding: 14px 16px;
   margin-bottom: 14px;
@@ -3199,7 +3198,6 @@ button.vsched-item:not([data-clickable]) {
 .tournament-info__link {
   color: var(--accent);
   text-decoration: underline;
-  text-decoration-color: rgba(29, 53, 87, 0.3); /* fallback for browsers without color-mix() */
   text-decoration-color: color-mix(in oklch, var(--accent) 30%, transparent);
   text-underline-offset: 2px;
 }
@@ -4339,7 +4337,7 @@ button.vsched-item:not([data-clickable]) {
   align-items: center;
   gap: 16px;
   cursor: pointer;
-  transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out);
+  transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), color 200ms var(--ease-out);
   background: var(--surface);
   color: var(--ink-2);
 }
@@ -6341,7 +6339,7 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .parse-preview .cell--missing {
-  color: var(--red);
+  color: var(--danger);
   background: var(--danger-soft);
 }
 
@@ -6737,7 +6735,7 @@ button.vsched-item:not([data-clickable]) {
   font-size: 13px; color: var(--ink-1); }
 .msb-slot--aka { color: var(--red); }
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
-.msb-hansoku { color: var(--red); font-weight: 700; }
+.msb-hansoku { color: var(--danger); font-weight: 700; }
 /* The loose result mark (both slots full, drifted data): it is the row's ONLY
    indication of the verdict on that surface, so it reads at slot strength.
    The old 10px/muted values were the deleted centre chip's quiet styling. */
@@ -6776,7 +6774,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    rows → bigger scale, so the same row template fills the screen whether the
    pool has 3 matches or 10. Other consumers of variant="tv" (TvWhiteBoard,
    streaming overlay) leave --msb-scale unset and get the default sizes. */
-.msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid #e5e7eb; }
+.msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid var(--line); }
 .msb--tv .msb-name { font-size: calc(3vh * var(--msb-scale, 1)); }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
 .msb--tv .msb-slot { min-width: min(calc(5vh * var(--msb-scale, 1)), 8.5vh); height: min(calc(5.6vh * var(--msb-scale, 1)), 9.5vh); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
@@ -7507,7 +7505,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* --- Shared modal chrome refresh (Instrument Panel typography + tone) -- */
 .editor-modal {
-  background: var(--surface); /* fallback for browsers without color-mix() */
   background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 96%, var(--ink) 4%) 100%);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, var(--shadow-lg);
 }
@@ -8092,7 +8089,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 6px;
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--bg-2);
 }
@@ -8120,7 +8117,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 @keyframes daihyosen-tied-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(29, 53, 87, 0.28); /* fallback for browsers without color-mix() */
     box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 28%, transparent);
   }
   50% { box-shadow: 0 0 0 6px transparent; }
@@ -8436,7 +8432,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* centre, real score MK – M (Shiro white, Aka red), + decision/fouls */
 .tvd-centre { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; padding: 0 1.5vw; background: rgba(0,0,0,0.25); }
 .tvd-score { font-family: var(--font-impact); font-size: 9vh; line-height: 0.9; display: flex; align-items: center; gap: 0.18em; }
-.tvd-score__s { color: var(--surface); }
+.tvd-score__s { color: var(--accent-fg); }
 .tvd-score__d { color: rgba(255,255,255,0.3); font-size: 0.55em; }
 .tvd-score__a { color: var(--aka-bright); text-shadow: 0 0 4vh rgba(255,59,59,0.4); }
 .tvd-centre__sfx { font: 700 2.4vh/1 var(--font-strong); letter-spacing: 0.05em; color: rgba(255,255,255,0.75); }
@@ -8541,29 +8537,24 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* mp-wvkh: followed-player highlights */
 .pool__row--me {
-  background: rgba(29,53,87,0.07); /* fallback for browsers without color-mix() */
   background: color-mix(in oklch, var(--accent) 7%, transparent);
 }
 /* Matrix row: top inset shadow on every cell so the highlight shows through win/loss/draw backgrounds */
 .league-matrix__row--me td,
 .league-matrix__row--me th {
-  box-shadow: inset 0 2px 0 rgba(29,53,87,0.35); /* fallback for browsers without color-mix() */
   box-shadow: inset 0 2px 0 color-mix(in oklch, var(--accent) 35%, transparent);
 }
 .league-matrix__row--me .league-matrix__row-head {
-  background: rgba(29,53,87,0.07); /* fallback for browsers without color-mix() */
   background: color-mix(in oklch, var(--accent) 7%, transparent);
   font-weight: 700;
 }
 /* Matrix col: left inset shadow so it doesn't override win/loss/draw cell backgrounds */
 .league-matrix__col--me {
-  box-shadow: inset 2px 0 0 rgba(29,53,87,0.35); /* fallback for browsers without color-mix() */
   box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 35%, transparent);
   font-weight: 700;
 }
 /* Corner cell (row and col): combine both shadows */
 .league-matrix__row--me .league-matrix__col--me {
-  box-shadow: inset 0 2px 0 rgba(29,53,87,0.35), inset 2px 0 0 rgba(29,53,87,0.35); /* fallback for browsers without color-mix() */
   box-shadow: inset 0 2px 0 color-mix(in oklch, var(--accent) 35%, transparent),
               inset 2px 0 0 color-mix(in oklch, var(--accent) 35%, transparent);
 }
@@ -8757,8 +8748,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 8px;
   background: #f2e2e4; /* fallback, approximate red-10% over bg */
   background: color-mix(in oklch, var(--red) 10%, var(--bg));
-  border: 1px solid rgba(193, 18, 31, 0.35); /* fallback for browsers without color-mix() */
-  border-color: color-mix(in oklch, var(--red) 35%, transparent);
+  border: 1px solid color-mix(in oklch, var(--red) 35%, transparent);
   border-radius: var(--r-md);
   padding: 8px 12px;
   font-size: 12px;
@@ -8780,8 +8770,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 8px;
   background: var(--accent-soft);
-  border: 1px solid rgba(29, 53, 87, 0.3); /* fallback for browsers without color-mix() */
-  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
   border-radius: var(--r-md);
   padding: 8px 12px;
   font-size: 12px;

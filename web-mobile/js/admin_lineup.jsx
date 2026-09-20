@@ -775,7 +775,7 @@ function AdminLineup({ comp, team, round, password, showToast, onClose }) {
       </div>
 
       {error && (
-        <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 12, padding: 8, border: "1px solid var(--danger)", borderRadius: 4, background: "rgba(204,0,0,0.05)" }}>
+        <div className="alert alert--error" style={{ marginBottom: 12 }}>
           {error}
         </div>
       )}

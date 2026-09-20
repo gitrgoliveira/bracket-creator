@@ -12,6 +12,7 @@ import { filterMatchesByCourt, CourtPacePanel } from './admin_schedule_pacing.js
 import { formatMinutes, timeToMinutes, timeEdited, clampDurationSeconds, COURT_STORAGE_KEY } from './admin_schedule_utils.jsx';
 import { DurationInput } from './duration.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { SideCell } from './side_cell.jsx';
 import { NumberedName } from './numbered_name.jsx';
 
 const { useState: useStateA, useMemo: useMemoA } = React;
@@ -83,14 +84,12 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
             public schedule rows. The squares were the side's only TEXT, so the
             sr-only labels below replace them: DESIGN.md §4 requires colour is
             never the only signal, and the Shiro hatch covers the sighted case. */}
-        <div className={`tw-match__name tw-match__name--shiro ${bWin ? "tw-match__name--w" : ""}`}>
-          <span className="sr-only">Shiro: </span>
+        <SideCell side="shiro" fill={false} className={`tw-match__name tw-match__name--shiro ${bWin ? "tw-match__name--w" : ""}`}>
           <NumberedName name={m.sideB?.name || "TBD"} number={m.sideB?.number} />
-        </div>
-        <div className={`tw-match__name tw-match__name--aka ${aWin ? "tw-match__name--w" : ""}`}>
-          <span className="sr-only">Aka: </span>
+        </SideCell>
+        <SideCell side="aka" fill={false} className={`tw-match__name tw-match__name--aka ${aWin ? "tw-match__name--w" : ""}`}>
           <NumberedName name={m.sideA?.name || "TBD"} number={m.sideA?.number} />
-        </div>
+        </SideCell>
         <div className="tw-match__comp">{m.compName}</div>
       </div>
       {/* T097: formatIpponsScore appends "Kiken / Fus. / DH / (E)" suffixes

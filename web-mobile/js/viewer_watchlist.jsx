@@ -23,6 +23,7 @@
 // ones all resolve to the same /dist/numbered_name.jsx URL and the browser
 // evaluates it once. It is not on `window` at all, so there is nothing to read.
 import { NumberedName } from './numbered_name.jsx';
+import { sideWord } from './side_cell.jsx';
 
 const { useState, useMemo, useCallback } = React;
 const useRefV = React.useRef;
@@ -224,10 +225,20 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
   // inside the render body is a new type on every render, so React remounts the
   // subtree on every SSE tick, and it also hides these rows from the panel
   // suite's shim, which does not execute child component vnodes.
+  //
+  // NOT a SideCell, and the reason is narrow. SideCell exists to make the
+  // sr-only label arrive WITH the tint, and this card is the one surface that
+  // names the side in VISIBLE text instead (CLAUDE.md's single exception,
+  // granted on SIZE: a large personal card read at arm's length, not a dense
+  // row). So it would be constructed with label={false}, i.e. with the only
+  // thing it guarantees turned off, and wrapping the row in a component also
+  // hides it from the panel suite's shim, which does not execute child
+  // component vnodes. It takes sideWord from the same leaf, which is the part
+  // that actually drifts. Do not copy the visible word onto a dense row.
   const sideRow = (key, side, name, number, dojo, you) => (
     <div key={key} className={`wl-hero__side side-fill--${side}`}>
       <span className="wl-hero__side-head">
-        <span className="wl-hero__side-lbl">{side === "aka" ? "Aka" : "Shiro"}</span>
+        <span className="wl-hero__side-lbl">{sideWord(side)}</span>
         {you ? <span className="wl-hero__you">you</span> : null}
       </span>
       <span className="wl-hero__side-name"><NumberedName name={name} number={number || ""} /></span>

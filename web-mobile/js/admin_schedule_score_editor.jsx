@@ -2,6 +2,7 @@
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
 import { writeDidNotLand, matchLabel } from './write_result.jsx';
+import { SideCell } from './side_cell.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
@@ -256,11 +257,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                       be the only signal, and the Shiro hatch covers the sighted case.
                       Mirrors PoolNumberedMatchRow (viewer_standings.jsx), which
                       dropped its badge for the same tint. */}
-                  <div className={`score-edit-row__side score-edit-row__side--shiro side-fill--shiro ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
-                    <span className="sr-only">Shiro: </span>
+                  <SideCell side="shiro" className={`score-edit-row__side score-edit-row__side--shiro ${bWin ? "score-edit-row__side--win" : ""}`} style={{ textAlign: "right" }}>
                     <div className="name"><NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip /></div>
                     <div className="dojo">{m.sideB?.dojo}</div>
-                  </div>
+                  </SideCell>
                   {/* Foul ▲ flanks the SCORE (Shiro left, Aka right): a hansoku is part of
                       the scoreline, so it reads at the score's level. The slots are reserved
                       symmetrically so the centred score never shifts when a foul appears. */}
@@ -271,11 +271,10 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
                     </span>
                     <span className="score-edit-row__foul">{foulA && <span className="msb-hansoku" data-testid="foul-mark-a">{foulA}</span>}</span>
                   </div>
-                  <div className={`score-edit-row__side score-edit-row__side--aka side-fill--aka ${aWin ? "score-edit-row__side--win" : ""}`}>
-                    <span className="sr-only">Aka: </span>
+                  <SideCell side="aka" className={`score-edit-row__side score-edit-row__side--aka ${aWin ? "score-edit-row__side--win" : ""}`}>
                     <div className="name"><NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip /></div>
                     <div className="dojo">{m.sideA?.dojo}</div>
-                  </div>
+                  </SideCell>
               </div>
               <div>
                 {/* Running: no "● NOW" label: the row highlight is the signal (removed as

@@ -44,14 +44,6 @@ const block = (selector) => {
 };
 
 // Every surface that was converted, with the side classes it must now apply.
-// The side named in an sr-only span, EITHER as a literal or via
-// sideColorName(), the helper that owns this string. Pinning only the literal
-// made hoisting the word into that helper -- the DRY fix this repo's own
-// "one primitive" rule asks for -- redden a test whose message is about the
-// label being present.
-const srOnlySide = (side) =>
-  new RegExp(`<span className="sr-only">(${side}|\\{sideColorName\\("${side.toLowerCase()}"\\)\\}): <\\/span>`);
-
 const SURFACES = [
   ['admin_schedule_score_editor.jsx', 'score-edit-row__side'],
   ['admin_shiaijo.jsx', 'shiaijo-qrow__side'],
@@ -67,11 +59,22 @@ describe('the side is carried by a tinted cell', () => {
     expect(block('.side-fill--aka')).toContain('background: var(--red-soft)');
   });
 
+  // Pins the PRIMITIVE, not the spelling. This used to require the exact
+  // substring `<base>--shiro side-fill--shiro`, so it pinned two class names
+  // being adjacent in that order inside one literal: reordering them, or
+  // moving the fill into the SideCell that now emits it, failed a test whose
+  // message is about the tint being applied.
   for (const [file, base] of SURFACES) {
-    it(`${base} applies both fill classes`, () => {
+    it(`${base} renders both sides through SideCell`, () => {
       const src = read(file);
-      expect(src).toContain(`${base}--shiro side-fill--shiro`);
-      expect(src).toContain(`${base}--aka side-fill--aka`);
+      expect(src).toMatch(/<SideCell side="shiro"/);
+      expect(src).toMatch(/<SideCell side="aka"/);
+      expect(src, `${base} keeps its own geometry class`).toContain(`${base}--shiro`);
+      expect(src).toContain(`${base}--aka`);
+      // The fill arrives FROM the primitive on these surfaces, so it must not
+      // also be hand-typed -- two sources for one fact is what this removes.
+      expect(src, 'the fill class is the primitive\'s job here')
+        .not.toMatch(/side-fill--(shiro|aka)/);
     });
   }
 
@@ -97,13 +100,25 @@ describe('the side is carried by a tinted cell', () => {
     expect(css, 'the rules outlived their only renderer').not.toMatch(/bc-color-badge/);
   });
 
-  it('replaces the badge TEXT with an sr-only label on every converted surface', () => {
-    for (const file of ['admin_schedule_score_editor.jsx', 'admin_shiaijo.jsx']) {
+  // The label is no longer hand-typed anywhere: SideCell emits it with the
+  // tint, so a surface cannot ship one without the other. That is the whole
+  // point of the primitive -- two surfaces shipped the tint with the side
+  // announced to nobody, each having reached for an aria-label the element's
+  // role does not permit.
+  it('gets its side label from the primitive on every converted surface', () => {
+    const CONVERTED = [
+      'admin_schedule_score_editor.jsx', 'admin_shiaijo.jsx', 'admin_scoring_engi.jsx',
+      'admin_schedule_page.jsx', 'viewer_schedule.jsx',
+    ];
+    for (const file of CONVERTED) {
       const src = read(file);
-      expect(src, `${file} names no Shiro side in text`).toMatch(/<span className="sr-only">Shiro: <\/span>/);
-      expect(src, `${file} names no Aka side in text`).toMatch(/<span className="sr-only">Aka: <\/span>/);
+      expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="shiro"/);
+      expect(src, `${file} does not use SideCell`).toMatch(/<SideCell side="aka"/);
+      expect(src, `${file} suppresses the label it must carry`).not.toMatch(/label=\{false\}/);
     }
-    // And the inert channel is gone rather than left beside the real one: an
+    // ...and the primitive really emits it, so the loop above is not vacuous.
+    expect(codeOf('side_cell.jsx')).toMatch(/<span className="sr-only">\{sideWord\(side\)\}: <\/span>/);
+    // The inert channel is gone rather than left beside the real one: an
     // aria-label on these role=generic cells was never announced.
     expect(read('admin_shiaijo.jsx')).not.toMatch(/shiaijo-(qrow|sides)__side[^>]*aria-label/);
   });
@@ -136,8 +151,11 @@ describe('the stacked and engi surfaces carry the side the same way', () => {
       expect(src, `${f} still renders an A/S square`).not.toMatch(/tw-match__badge/);
       expect(src).toContain('tw-match__name--shiro');
       expect(src).toContain('tw-match__name--aka');
-      expect(src).toMatch(/<span className="sr-only">Shiro: <\/span>/);
-      expect(src).toMatch(/<span className="sr-only">Aka: <\/span>/);
+      // These rows PAINT THEIR OWN tint at the 6/7px pitch, so they pass
+      // fill={false} and come to the primitive only for the label. Stacking
+      // side-fill--* on top would repaint them at the dense-row pitch.
+      expect(src).toMatch(/<SideCell side="shiro" fill=\{false\}/);
+      expect(src).toMatch(/<SideCell side="aka" fill=\{false\}/);
     }
     expect(css, 'the A/S square styling is dead CSS now').not.toMatch(/tw-match__badge/);
   });
@@ -145,8 +163,10 @@ describe('the stacked and engi surfaces carry the side the same way', () => {
   it('drops the engi badge, whose card was already tinted', () => {
     const src = read('admin_scoring_engi.jsx');
     expect(src).not.toMatch(/engi-side__badge/);
-    expect(src).toMatch(srOnlySide('Shiro'));
-    expect(src).toMatch(srOnlySide('Aka'));
+    // Its own fill too (7/8px pitch), so fill={false} and the label from the
+    // primitive. The literal this used to pin moved into side_cell.jsx.
+    expect(src).toMatch(/<SideCell side="shiro" fill=\{false\}/);
+    expect(src).toMatch(/<SideCell side="aka" fill=\{false\}/);
     expect(css).not.toMatch(/engi-side__badge/);
     // The fill it relies on must survive: nothing else names the side there.
     expect(block('.engi-side--aka')).toContain('background: var(--red-soft)');

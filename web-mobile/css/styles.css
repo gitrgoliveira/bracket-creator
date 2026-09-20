@@ -1878,6 +1878,38 @@ a:hover {
   background: var(--red-soft);
 }
 
+/* HATCH PITCH. The Shiro hatch exists at three pitches across the app and that
+   is deliberate -- a dense queue row and a full-height score editor want
+   different stripe frequencies -- but until bc-sccl every surface hand-rolled
+   its own copy of the gradient, so there are SEVEN. These two modifiers are
+   how a new surface picks a pitch instead of writing an eighth:
+
+     (default)            3px / 6px   dense rows: the scores list, the court
+                                      console, the pool numbered row
+     .side-fill--mid      6px / 7px   also .vsched-item__side--shiro,
+                                      .tw-match__name--shiro, .bc-match--v1
+                                      .bc-side--b
+     .side-fill--loose    7px / 8px   also .engi-side--shiro, .sb-side--shiro,
+                                      .team-sub-match__side--shiro
+
+   The six surfaces named above KEEP their own copies for now, on purpose. The
+   declarations are identical, so folding them in is tempting, but it would
+   move a background declaration up the sheet past other rules that paint the same
+   elements (.bc-match--v2 .bc-side--b, .editor-modal--compact .sb-side--shiro,
+   the compact team-bouts override), and the only honest way to show that
+   changed nothing is to re-measure six surfaces in a browser -- two of them
+   scoring surfaces. Worth doing; not worth doing blind. What matters now is
+   that nobody adds a seventh copy. */
+.side-fill--shiro.side-fill--mid {
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 6px, var(--shiro-hatch) 6px 7px);
+}
+
+.side-fill--shiro.side-fill--loose {
+  background-image: repeating-linear-gradient(
+    -45deg, transparent 0 7px, var(--shiro-hatch) 7px 8px);
+}
+
 .pool-match-numbered-row__name {
   font-weight: 600;
   font-size: 12px;

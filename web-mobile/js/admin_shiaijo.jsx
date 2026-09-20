@@ -14,6 +14,7 @@
 
 import { createTimerPool } from './timer_pool.jsx';
 import { realIppons } from './result_slot.jsx';
+import { SideCell } from './side_cell.jsx';
 // Imported DIRECTLY from the leaf rather than read off `window`. Two of the
 // call sites below sit inside a `try { } catch (_e) { }` that swallows, so a
 // missing global there would degrade into exactly the silent not-saved failure
@@ -1883,15 +1884,13 @@ export function ShiaijoQueueRow({ m, scheduled, courts, onMoveCourt, onMove, onE
                     nothing. Removing the badge on top of it would have left the
                     side carried by colour alone on the one surface where reading
                     it wrong mis-scores a bout. */}
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--shiro side-fill--shiro">
-                    <span className="sr-only">Shiro: </span>
+                <SideCell side="shiro" className="shiaijo-qrow__side shiaijo-qrow__side--shiro">
                     <span className="shiaijo-qrow__name"><NumberedName side="shiro" name={bName} number={m.sideB?.number} clip /></span>
-                </div>
+                </SideCell>
                 <span className="shiaijo-qrow__vs">vs</span>
-                <div className="shiaijo-qrow__side shiaijo-qrow__side--aka side-fill--aka">
-                    <span className="sr-only">Aka: </span>
+                <SideCell side="aka" className="shiaijo-qrow__side shiaijo-qrow__side--aka">
                     <span className="shiaijo-qrow__name"><NumberedName side="aka" name={aName} number={m.sideA?.number} clip /></span>
-                </div>
+                </SideCell>
             </div>
             {/* Completed result on its own centred line BELOW the names: the
                 canonical "marks in the centre" position, but stacked so the
@@ -1965,21 +1964,19 @@ function MatchSides({ m, large }) {
         <div className={`shiaijo-sides ${large ? "shiaijo-sides--lg" : ""}`}>
             {/* Side by CELL TINT, not a SHIRO/AKA badge (bc-sccl); an sr-only
                 span carries the side in text, as on the queue row above. */}
-            <div className="shiaijo-sides__side shiaijo-sides__side--shiro side-fill--shiro">
-                <span className="sr-only">Shiro: </span>
+            <SideCell side="shiro" className="shiaijo-sides__side shiaijo-sides__side--shiro">
                 <div className="name">
                     <NumberedName side="shiro" name={m.sideB?.name} number={m.sideB?.number} clip />
                 </div>
                 <div className="dojo">{m.sideB?.dojo}</div>
-            </div>
+            </SideCell>
             <div className="shiaijo-sides__vs">vs</div>
-            <div className="shiaijo-sides__side shiaijo-sides__side--aka side-fill--aka" style={{ textAlign: "right" }}>
-                <span className="sr-only">Aka: </span>
+            <SideCell side="aka" className="shiaijo-sides__side shiaijo-sides__side--aka" style={{ textAlign: "right" }}>
                 <div className="name">
                     <NumberedName side="aka" name={m.sideA?.name} number={m.sideA?.number} clip />
                 </div>
                 <div className="dojo">{m.sideA?.dojo}</div>
-            </div>
+            </SideCell>
         </div>
     );
 }

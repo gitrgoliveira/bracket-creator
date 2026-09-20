@@ -36,10 +36,13 @@ const { useState, useRef: useRefV, useCallback } = React;
 // so all three viewer surfaces agree. Running matches return null because
 // WatchHeroCard already signals the running state via its navy .wl-hero__now
 // band and label change ("Your match"): the Queue chip must not add a
-// redundant label. Note the card's own "when" line still renders while running
-// (it reads "Now"), so the live region does not leave the DOM with this chip. We intentionally do NOT
-// fall back to "Scheduled HH:MM" the way display.jsx does: the
-// MyMatchPanel already has a dedicated Time chip.
+// redundant label. Note the card's own "when" line still renders while
+// running (it reads "Now"), so the live region does not leave the DOM with
+// this chip. We intentionally do NOT fall back to "Scheduled HH:MM" the way
+// display.jsx does: the hero's own "when" line carries the time, in
+// .wl-hero__when. (That line used to say "the MyMatchPanel already has a
+// dedicated Time chip" -- bc-wlhc removed the three-chip Court/Time/Queue row
+// and there is no MyMatchPanel in the tree.)
 // Exported for unit-testing.
 export function mymatchQueueLabel(m) {
   if (!m) return null;

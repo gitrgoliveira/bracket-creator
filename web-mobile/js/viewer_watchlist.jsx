@@ -24,7 +24,7 @@
 // evaluates it once. It is not on `window` at all, so there is nothing to read.
 import { NumberedName } from './numbered_name.jsx';
 
-const { useState, useMemo } = React;
+const { useState, useMemo, useCallback } = React;
 const useRefV = React.useRef;
 const pluralize = window.pluralize;
 
@@ -54,22 +54,33 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
   const excludedDojos = useMemo(() => new Set(watchedDojos || []), [watchedDojos]);
   const q = query.trim().toLowerCase();
 
+  // What "matches the query" means, stated ONCE per entity type. The dropdown's
+  // lists and the empty-state's count below both ask these: they used to carry
+  // independent copies of the same two expressions, so extending the rule (a
+  // zekken, a competitor number) in one and not the other would have made the
+  // picker say "No one here matches X" about people the roster does hold --
+  // which is precisely the distinction the count exists to draw.
+  // useCallback, not plain functions: the three memos below depend on them, and
+  // the dependency they really have is on `q` THROUGH them, which the
+  // exhaustive-deps rule cannot see past a fresh closure.
+  const playerMatchesQuery = useCallback(
+    (p) => !q || (p.name || "").toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q),
+    [q]
+  );
+  const dojoMatchesQuery = useCallback((d) => !q || (d.name || "").toLowerCase().includes(q), [q]);
+
   // Dojo matches: a dojo is offered until it is watched as a dojo entry. The
   // count shows how many roster members it currently covers.
   const dojoMatches = useMemo(() => {
     return (dojos || [])
       .filter((d) => !excludedDojos.has(d.name))
-      .filter((d) => !q || d.name.toLowerCase().includes(q))
+      .filter(dojoMatchesQuery)
       .slice(0, 6);
-  }, [dojos, q, excludedDojos]);
+  }, [dojos, dojoMatchesQuery, excludedDojos]);
 
   const playerMatches = useMemo(() => {
-    const base = roster.filter((p) => !excludedPlayers.has(p.id));
-    if (!q) return base.slice(0, 20);
-    return base.filter((p) =>
-      (p.name || "").toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q)
-    ).slice(0, 20);
-  }, [roster, q, excludedPlayers]);
+    return roster.filter((p) => !excludedPlayers.has(p.id) && playerMatchesQuery(p)).slice(0, 20);
+  }, [roster, playerMatchesQuery, excludedPlayers]);
 
   const total = dojoMatches.length + playerMatches.length;
 
@@ -78,14 +89,10 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
   // different next actions -- "that name is not in this tournament" (check the
   // spelling) versus "you already watch all of them" (nothing to do) -- and
   // this is the only thing that tells them apart. See the empty row below.
-  const matchedIncludingWatched = useMemo(() => {
-    if (!q) return roster.length + (dojos || []).length;
-    const d = (dojos || []).filter((x) => x.name.toLowerCase().includes(q)).length;
-    const p = roster.filter((x) =>
-      (x.name || "").toLowerCase().includes(q) || (x.dojo || "").toLowerCase().includes(q)
-    ).length;
-    return d + p;
-  }, [roster, dojos, q]);
+  const matchedIncludingWatched = useMemo(
+    () => (dojos || []).filter(dojoMatchesQuery).length + roster.filter(playerMatchesQuery).length,
+    [roster, dojos, playerMatchesQuery, dojoMatchesQuery]
+  );
 
   window.useClickOutside(ref, () => setOpen(false), open);
 

@@ -842,7 +842,9 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
 // sideColorName: the human-readable side name for a "shiro"/"aka" colour key.
 // Named for the colour it takes so it cannot be confused with admin_helpers.jsx's
 // sideName(side), which takes a side object and returns a participant name.
-// Used in header badges and aria-labels of both editors.
+// Used in the sr-only side labels and aria-labels of both editors. (It named
+// the header badges until bc-sccl removed them; a reader tracing the badge
+// rule from here would look for markup that no longer exists.)
 function sideColorName(color) {
   return color === "shiro" ? "Shiro" : "Aka";
 }

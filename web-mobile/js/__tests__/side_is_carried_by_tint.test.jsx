@@ -44,6 +44,14 @@ const block = (selector) => {
 };
 
 // Every surface that was converted, with the side classes it must now apply.
+// The side named in an sr-only span, EITHER as a literal or via
+// sideColorName(), the helper that owns this string. Pinning only the literal
+// made hoisting the word into that helper -- the DRY fix this repo's own
+// "one primitive" rule asks for -- redden a test whose message is about the
+// label being present.
+const srOnlySide = (side) =>
+  new RegExp(`<span className="sr-only">(${side}|\\{sideColorName\\("${side.toLowerCase()}"\\)\\}): <\\/span>`);
+
 const SURFACES = [
   ['admin_schedule_score_editor.jsx', 'score-edit-row__side'],
   ['admin_shiaijo.jsx', 'shiaijo-qrow__side'],
@@ -137,8 +145,8 @@ describe('the stacked and engi surfaces carry the side the same way', () => {
   it('drops the engi badge, whose card was already tinted', () => {
     const src = read('admin_scoring_engi.jsx');
     expect(src).not.toMatch(/engi-side__badge/);
-    expect(src).toMatch(/<span className="sr-only">Shiro: <\/span>/);
-    expect(src).toMatch(/<span className="sr-only">Aka: <\/span>/);
+    expect(src).toMatch(srOnlySide('Shiro'));
+    expect(src).toMatch(srOnlySide('Aka'));
     expect(css).not.toMatch(/engi-side__badge/);
     // The fill it relies on must survive: nothing else names the side there.
     expect(block('.engi-side--aka')).toContain('background: var(--red-soft)');

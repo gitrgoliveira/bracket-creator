@@ -20,7 +20,7 @@
 
 const { useState: useStateE, useEffect: useEffectE, useRef: useRefE } = React;
 
-import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer } from './admin_scoring_shared.jsx';
+import { ReasonPrompt, CORRECTION_PRESETS, useAdoptFromServer, sideColorName } from './admin_scoring_shared.jsx';
 import { useEscapeToClose, confirmDialog } from './ui.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule.
 import { NumberedName } from './numbered_name.jsx';
@@ -353,7 +353,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
                 as the kendo score card -- so the badge restated the side a third
                 time. The sr-only label keeps it in text for a screen reader,
                 since the hatch only serves the sighted case. */}
-            <span className="sr-only">Shiro: </span>
+            <span className="sr-only">{sideColorName("shiro")}: </span>
             {/* The competitor number rides the FIRST member's line, as on every
                 other engi surface (viewer_standings.jsx, viewer_competition.jsx):
                 an engi PAIR is one participant with one number, so the chip
@@ -401,7 +401,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
 
           {/* Aka / Red / sideA */}
           <div className={`engi-side engi-side--aka${winnerSide === "a" ? " engi-side--winner" : ""}`} data-testid="engi-side-aka">
-            <span className="sr-only">Aka: </span>
+            <span className="sr-only">{sideColorName("aka")}: </span>
             <div className="engi-side__names">
               <div className="engi-side__name">
                 <NumberedName side="aka" name={akaName} number={m.sideA?.number} />

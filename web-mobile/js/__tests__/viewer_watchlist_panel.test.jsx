@@ -525,6 +525,50 @@ describe('WatchPicker', () => {
     expect(text).toMatch(/Zzzzz/);
   });
 
+  // The competitor NUMBER is searchable (operator request 2026-09-21).
+  describe('the competitor number is searchable', () => {
+    // Z and W on purpose: neither letter occurs in any fixture name or dojo,
+    // so a hit here can only have come from the NUMBER. ("m" would have been
+    // useless -- it matches "Aoi Mori" by name.)
+    const NUMBERED = [
+      { id: 'p1', name: 'Robert Young', dojo: 'Hagane Dojo', number: 'Z1' },
+      { id: 'p2', name: 'Nolan Clark', dojo: 'Tsubaki Kenyukai', number: 'Z12' },
+      { id: 'p3', name: 'Aoi Mori', dojo: 'Hagane Dojo', number: 'W2' },
+    ];
+    const offered = (tree) =>
+      byClass(tree, 'pmf__option')
+        .filter((o) => !String(o.props.className).includes('--dojo'))
+        .map((o) => collectText(o, expandNamed('NumberedName')));
+
+    it('offers a whole draw for its bare prefix', () => {
+      // The number embeds the competition's numberPrefix, so this is the
+      // useful filter: "everyone in the Z draw".
+      const found = offered(openWith('z', { roster: NUMBERED })).join(' | ');
+      expect(found).toContain('Robert Young');
+      expect(found).toContain('Nolan Clark');
+      expect(found, 'W2 is a different draw').not.toContain('Aoi Mori');
+    });
+
+    it('matches from the START, not anywhere in the number', () => {
+      // Substring matching would drag every number CONTAINING 1 into a search
+      // for "1" -- here both Z1 and Z12 -- which is noise, not a filter.
+      const tree = openWith('1', { roster: NUMBERED });
+      expect(offered(tree), 'no number STARTS with 1').toHaveLength(0);
+      expect(emptyRow(tree)).toHaveLength(1);
+    });
+
+    it('shows the number on the row, so the match is visible', () => {
+      // Matching on something the reader cannot see is worse than not
+      // matching: they would type Z1, get a list, and not see which row is Z1.
+      expect(offered(openWith('z', { roster: NUMBERED }))[0]).toContain('Z1');
+    });
+
+    it('names the number as searchable when nothing matches', () => {
+      const text = collectText(emptyRow(openWith('Zzzzz', { roster: NUMBERED }))[0]);
+      expect(text).toMatch(/competitor number/);
+    });
+  });
+
   it('distinguishes "already watching them all" from "no such person"', () => {
     const tree = openWith('Hagane', {
       watchedPlayerIds: ['p1', 'p3'], watchedDojos: ['Hagane Dojo'],

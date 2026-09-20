@@ -65,7 +65,22 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
   // the dependency they really have is on `q` THROUGH them, which the
   // exhaustive-deps rule cannot see past a fresh closure.
   const playerMatchesQuery = useCallback(
-    (p) => !q || (p.name || "").toLowerCase().includes(q) || (p.dojo || "").toLowerCase().includes(q),
+    (p) =>
+      !q ||
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.dojo || "").toLowerCase().includes(q) ||
+      // The competitor NUMBER, matched from the START (operator request
+      // 2026-09-21). Prefix, not substring, because the number already embeds
+      // the competition's numberPrefix ("M1", "K12"): typing "M" is then
+      // "everyone in the men's draw", which is the useful filter, while a
+      // substring match on "1" would drag in every K12 and M21 as well.
+      //
+      // Nothing to match before the draw: competitor numbers belong to draw
+      // POSITIONS and none is shown until the draw is generated (bc-pnum), so
+      // p.number is empty and this arm is simply false. That is why the row
+      // renders the number too -- matching on something the reader cannot see
+      // is worse than not matching at all.
+      String(p.number || "").toLowerCase().startsWith(q),
     [q]
   );
   const dojoMatchesQuery = useCallback((d) => !q || (d.name || "").toLowerCase().includes(q), [q]);
@@ -105,8 +120,8 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
       <div className="pmf__bar" onClick={() => setOpen(true)}>
         <input
           className="pmf__input"
-          placeholder={placeholder || "Search players or dojos…"}
-          aria-label={placeholder || "Search players or dojos"}
+          placeholder={placeholder || "Search name, dojo or number…"}
+          aria-label={placeholder || "Search name, dojo or number"}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
@@ -123,7 +138,7 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
             {roster.length === 0
               ? "No competitors have been added to this tournament yet."
               : matchedIncludingWatched === 0
-                ? `No one here matches “${query.trim()}”. Try a surname, or a dojo name.`
+                ? `No one here matches “${query.trim()}”. Try a surname, a dojo, or a competitor number.`
                 : q
                   ? `Everyone matching “${query.trim()}” is already on your watchlist.`
                   : "Everyone in this tournament is already on your watchlist."}
@@ -159,7 +174,11 @@ function WatchPicker({ roster, dojos, watchedPlayerIds, watchedDojos, onPickPlay
               <span className="pmf__check">{p.checkedIn ? "✓" : ""}</span>
               <span className="pmf__opt-body">
                 <span className="pmf__opt-name">
-                  {p.name}
+                  {/* Through NumberedName, the one owner of the chip rule. No
+                      `side` here on purpose: this is a one-name-per-row list,
+                      not a left/right pairing, so the number leads and the
+                      chips align in a column down the dropdown. */}
+                  <NumberedName name={p.name} number={p.number || ""} />
                   {p.checkedIn && <span className="tag-badge pmf__checkin-tag">Checked in</span>}
                 </span>
                 <span className="pmf__opt-dojo">{p.dojo || ""}</span>
@@ -527,6 +546,14 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
       {count >= WATCHLIST_MAX ? (
         <div className="hint--sm">Watchlist full ({WATCHLIST_MAX}). Remove an entry to add more.</div>
       ) : (
+        /* The placeholder names the NUMBER: a search nobody can discover is
+           one nobody uses, and this overrides WatchPicker's own default, so
+           changing the default alone did not reach this surface (operator
+           request 2026-09-21). A plain block comment, not {}: this is a
+           ternary BRANCH, an expression position, where a JSX comment is a
+           syntax error -- and the first attempt put one among the ATTRIBUTES,
+           where esbuild dropped the placeholder and I read the failure as a
+           success because the error scrolled past a tail -1. */
         <WatchPicker
           roster={roster}
           dojos={dojos}
@@ -534,7 +561,7 @@ function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, 
           watchedDojos={watchedDojos}
           onPickPlayer={addPlayer}
           onPickDojo={addDojo}
-          placeholder={count === 0 ? "Add a player or dojo to watch…" : "Add another player or dojo…"}
+          placeholder={count === 0 ? "Add a name, dojo or number to watch…" : "Add another name, dojo or number…"}
         />
       )}
 

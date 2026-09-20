@@ -51,9 +51,14 @@ export function SideLabel({ side }) {
 //              top would repaint them at a different pitch. They still come
 //              here for the label, which is the part that was going missing.
 //   label      pass false ONLY where the side is already named in VISIBLE
-//              text, which today is the watchlist hero alone (CLAUDE.md's one
-//              exception, by size: a large personal card, not a dense row).
-//              A second label there would be announced twice.
+//              text, so a second label would be announced twice. NO CALLER
+//              passes it today: the one surface that names the side visibly
+//              (the watchlist hero, CLAUDE.md's exception, granted by size)
+//              does not use SideCell at all -- it would be built with the
+//              only thing this guarantees turned off, and wrapping its row in
+//              a component hides it from the panel suite's shim. The flag
+//              exists for the next such surface; until one arrives it is
+//              unexercised, so treat it as untested.
 //   as         element to render; "div" by default.
 export function SideCell({ side, className = "", density = "", fill = true, label = true, as: Tag = "div", children, ...rest }) {
   const cls = [

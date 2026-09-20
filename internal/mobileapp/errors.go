@@ -167,6 +167,91 @@ func respondUnexportableCompetitionError(c *gin.Context, err error) bool {
 	return true
 }
 
+// respondIfDownstreamKnockoutPlayed answers engine.DownstreamKnockoutPlayedError
+// (bc-kcdg) with the ONE fixed wire contract every knockout-correction write
+// shares -- HTTP 409 {"error":"downstream_knockout_played","matchId",
+// "blockingMatchId","blockingMatches","displaced","message"} -- and reports whether it
+// answered, so the caller's switch can fall through to its own remaining
+// arms exactly like the other respondIf* helpers in this file.
+//
+// Correcting a completed bracket match (via /score, /override-winner,
+// /decision, or /quick-score) can change a winner already propagated into a
+// downstream match that has since recorded its own result; the engine
+// refuses by default and the operator retries with forceDownstreamReopen
+// once they've confirmed the override (see ForceOptions.Force on the
+// matching request field of whichever endpoint they're using). Before this
+// existed, only /score and /override-winner had this mapping hand-copied
+// into their own error switches (identically, since both need the exact
+// same four fields); /decision and /quick-score fell through to a generic
+// 500, which the SPA's offline write queue retries forever (mp-q8c6
+// poisoned-queue pattern) for a write that can never win.
+func respondIfDownstreamKnockoutPlayed(c *gin.Context, err error) bool {
+	var downstreamPlayedErr *engine.DownstreamKnockoutPlayedError
+	if !errors.As(err, &downstreamPlayedErr) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":           "downstream_knockout_played",
+		"matchId":         downstreamPlayedErr.MatchID,
+		"blockingMatchId": downstreamPlayedErr.BlockingMatchID,
+		// Every blocked match, so the dialog can name what it will clear. One
+		// entry except for a semifinal, which feeds the final AND the bronze
+		// match; blockingMatchId stays as the first for older clients.
+		// Each blocked match with the number the operator knows it by; the id
+		// rides along for addressing, never for display.
+		"blockingMatches": blockedMatchesPayload(downstreamPlayedErr.Blocking),
+		"displaced":       downstreamPlayedErr.Displaced,
+		"message":         downstreamPlayedErr.Error(),
+	})
+	return true
+}
+
+// blockedMatchesPayload renders the blocked matches for the wire: id for
+// addressing, number for the operator. A number of 0 means the match never got
+// one (a bye placeholder, or a pre-numbering bracket); the client falls back to
+// the id there rather than printing "Match 0".
+func blockedMatchesPayload(blocking []engine.ReopenedMatch) []map[string]any {
+	out := make([]map[string]any, 0, len(blocking))
+	for _, b := range blocking {
+		out = append(out, map[string]any{"id": b.ID, "number": b.Number})
+	}
+	return out
+}
+
+// respondIfDownstreamKnockoutScored answers engine.DownstreamKnockoutScoredError
+// (mp-e2k1) with the ONE fixed wire contract -- HTTP 409
+// {"error":"downstream_knockout_scored","pool","finisher","matchId","message"}
+// -- and reports whether it answered, so the caller's switch can fall through
+// to its own remaining arms exactly like the other respondIf* helpers in this
+// file. This is a DIFFERENT guard from respondIfDownstreamKnockoutPlayed
+// above: mp-e2k1 fires on a POOL match re-score (in a Mixed competition) that
+// would change which competitor holds a qualifying rank while a downstream
+// bracket match already carries that finisher's own scored result, whereas
+// bc-kcdg's DownstreamKnockoutPlayedError guards a bracket-match correction
+// that would repaint an already-propagated winner. Both are reachable from
+// every write endpoint that ends up inside RecordMatchResultWithIneligibility(Tx)
+// for a pool match id (/score, /quick-score, bulk-score's per-entry
+// transaction, and /decision via RecordDecisionTx(WithOptions)); before this
+// helper existed, only /score mapped it and the rest fell through to a
+// generic 500, which the SPA's offline write queue retries forever (mp-q8c6
+// poisoned-queue pattern) for a write that can never win. OverrideBracketWinner
+// writes the bracket directly (UpdateBracket) and never reaches this guard, so
+// it has no arm for this error.
+func respondIfDownstreamKnockoutScored(c *gin.Context, err error) bool {
+	var downstreamScoredErr *engine.DownstreamKnockoutScoredError
+	if !errors.As(err, &downstreamScoredErr) {
+		return false
+	}
+	c.JSON(http.StatusConflict, gin.H{
+		"error":    "downstream_knockout_scored",
+		"pool":     downstreamScoredErr.Pool,
+		"finisher": downstreamScoredErr.Finisher,
+		"matchId":  downstreamScoredErr.MatchID,
+		"message":  downstreamScoredErr.Error(),
+	})
+	return true
+}
+
 // classifyRosterWriteError maps one of the participant-roster write sentinel
 // errors -- returned by Store.AddParticipant, Store.SaveParticipants,
 // Store.UpdateParticipant, Store.BulkCheckIn, and every other write that

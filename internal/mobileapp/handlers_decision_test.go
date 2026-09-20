@@ -262,3 +262,132 @@ func TestDecisionHandler_CorruptOverrides_TerminalError(t *testing.T) {
 	require.Len(t, stored, 1)
 	assert.Equal(t, state.MatchStatusScheduled, stored[0].Status, "the rejected write must not have landed")
 }
+
+// TestDecisionHandler_DownstreamKnockoutPlayed_409Shape pins the FIXED wire
+// contract (bc-kcdg finding A): a decision that would change an already-
+// propagated bracket winner while a downstream match carries a result of its
+// own is refused with HTTP 409 and the exact body shape /score and
+// /override-winner already build against: {"error":"downstream_knockout_played",
+// "matchId":...,"blockingMatchId":...,"displaced":...,"message":...}.
+//
+// Before this fix, *engine.DownstreamKnockoutPlayedError had no arm in this
+// handler's switch and fell through to internalError (HTTP 500); the SPA's
+// offline write queue treats a decision as a terminal write and retries a
+// 5xx forever (mp-q8c6 poisoned-queue pattern) against a write that could
+// never win. Revert only the `respondIfDownstreamKnockoutPlayed` arm in
+// handlers_decision.go's error switch to see this go red (500 instead of
+// 409).
+func TestDecisionHandler_DownstreamKnockoutPlayed_409Shape(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-decision-409"
+	seedKcdgBracket(t, store, compID)
+
+	// decisionBy "aka" names sideA (Alice) as the withdrawing loser, so Bob
+	// (sideB) becomes the winner -- the same winner-flip the score-endpoint
+	// pin (TestScoreHandler_DownstreamKnockoutPlayed_409Shape) exercises.
+	body, _ := json.Marshal(DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka"})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/"+compID+"/matches/m-r1-0/decision",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "downstream_knockout_played", resp["error"])
+	assert.Equal(t, "m-r1-0", resp["matchId"])
+	assert.Equal(t, "m-r2-0", resp["blockingMatchId"])
+	assert.Equal(t, "Alice", resp["displaced"])
+	assert.NotEmpty(t, resp["message"])
+
+	// A refusal must leave the bracket untouched.
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Alice", b.Rounds[0][0].Winner)
+}
+
+// TestDecisionHandler_DownstreamKnockoutPlayed_ForceReturns200 pins the force
+// path for the decision endpoint: the same kiken, retried with
+// forceDownstreamReopen:true, returns HTTP 200, applies the decision, and
+// reopens the downstream match the refusal named.
+func TestDecisionHandler_DownstreamKnockoutPlayed_ForceReturns200(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "kcdg-decision-force"
+	seedKcdgBracket(t, store, compID)
+
+	body, _ := json.Marshal(DecisionRequest{
+		Decision: "kiken-voluntary", DecisionBy: "aka", ForceDownstreamReopen: true,
+	})
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/competitions/"+compID+"/matches/m-r1-0/decision",
+		bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	b, err := store.LoadBracket(compID)
+	require.NoError(t, err)
+	assert.Equal(t, "Bob", b.Rounds[0][0].Winner, "the decision applied")
+	assert.Equal(t, "Bob", b.Rounds[1][0].SideA, "propagation repainted the downstream slot")
+	assert.Equal(t, state.MatchStatusScheduled, b.Rounds[1][0].Status,
+		"reopened in place and waiting to be fought again: running would hold the court, which deadlocked two reopened siblings")
+	assert.Empty(t, b.Rounds[1][0].Winner, "the reopened match's stale verdict was cleared")
+}
+
+// TestDecisionHandler_DownstreamKnockoutScored_409Shape pins the FIXED wire
+// contract (bc-cse finding 1): a kiken decision on a completed POOL match
+// that would flip its qualifying finisher, while the knockout leaf that
+// finisher's win already fed carries its own scored result, writes through
+// RecordDecisionTx -> RecordMatchResultWithIneligibilityTx, which raises
+// *engine.DownstreamKnockoutScoredError (mp-e2k1). Before this fix the
+// decision handler's error switch had no arm for it, so it fell through to
+// respondIfEngineWriteError/internalError, a generic HTTP 500 the SPA's
+// offline write queue retries forever for a write that can never win
+// (mp-q8c6 poisoned-queue pattern). Revert only the
+// respondIfDownstreamKnockoutScored case in handlers_decision.go's switch to
+// see this go red (500 instead of 409).
+//
+// decisionBy "aka" names sideA (A1) as the withdrawing loser, so A2 (sideB)
+// becomes the winner -- flipping Pool A's finisher exactly like
+// TestScoreHandler_DownstreamKnockoutScored_409Shape's re-score does.
+func TestDecisionHandler_DownstreamKnockoutScored_409Shape(t *testing.T) {
+	r, store, _, _, tempDir := setupTestRouter(t)
+	defer os.RemoveAll(tempDir)
+
+	compID := "e2k1-decision-409"
+	seedMixedCompWithScoredKnockoutFinisher(t, store, compID)
+
+	body, _ := json.Marshal(DecisionRequest{Decision: "kiken-voluntary", DecisionBy: "aka"})
+	req, err := http.NewRequest(http.MethodPost,
+		"/api/competitions/"+compID+"/matches/Pool A-0/decision",
+		bytes.NewBuffer(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "downstream_knockout_scored", resp["error"])
+	assert.Equal(t, "Pool A", resp["pool"])
+	assert.Equal(t, "A1", resp["finisher"])
+	assert.Equal(t, "m-r1-0", resp["matchId"])
+	assert.NotEmpty(t, resp["message"])
+
+	stored, err := store.LoadPoolMatches(compID)
+	require.NoError(t, err)
+	for _, m := range stored {
+		if m.ID == "Pool A-0" {
+			assert.Equal(t, "A1", m.Winner, "a refusal must leave the pool match untouched")
+		}
+	}
+}

@@ -1,0 +1,152 @@
+// bc-kcdg: attemptScoreWrite (defined in write_result.jsx, re-exported by
+// admin.jsx) is the confirm+retry loop behind editMatchScore, the single
+// chokepoint every score-editor host (bracket panel, pools, schedule score
+// editor, per-court shiaijo) and both editor bodies (individual, team) route a
+// score write through. It is ALSO used directly by admin_shiaijo.jsx's
+// ResolveFeedersModal for the override-winner "Run now" recovery (see
+// admin_shiaijo.render.test.jsx). Taking recordScore/confirmDialog as injected
+// collaborators means the contract is pinned here without rendering the whole
+// admin SPA; importing it via admin.jsx's re-export (rather than
+// write_result.jsx directly) additionally pins that the re-export still works.
+
+import { describe, it, expect, vi } from 'vitest';
+import { attemptScoreWrite } from '../admin.jsx';
+
+function downstreamError(fields = {}) {
+  const e = new Error('Aoki Taro already played match m5.');
+  e.downstreamKnockoutPlayed = {
+    matchId: 'm1', blockingMatchId: 'm5', displaced: 'Aoki Taro', ...fields,
+  };
+  return e;
+}
+
+describe('attemptScoreWrite (bc-kcdg)', () => {
+  it('passes a normal write straight through on success', async () => {
+    const recordScore = vi.fn().mockResolvedValue({ id: 'm1', status: 'completed' });
+    const confirmDialog = vi.fn();
+    const result = { status: 'completed' };
+    const res = await attemptScoreWrite({
+      recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result, password: 'pw', match: null,
+    });
+    expect(res).toEqual({ id: 'm1', status: 'completed' });
+    expect(recordScore).toHaveBeenCalledTimes(1);
+    expect(recordScore).toHaveBeenCalledWith('c1', 'm1', result, 'pw', null);
+    // No refusal: the confirm dialog must never be shown for an ordinary
+    // success or an ordinary (non-downstream) failure.
+    expect(confirmDialog).not.toHaveBeenCalled();
+  });
+
+  it('re-throws a plain (non-downstream) failure without ever prompting', async () => {
+    const plainErr = new Error('Failed to record score');
+    const recordScore = vi.fn().mockRejectedValue(plainErr);
+    const confirmDialog = vi.fn();
+    await expect(attemptScoreWrite({
+      recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: {}, password: 'pw', match: null,
+    })).rejects.toBe(plainErr);
+    expect(confirmDialog).not.toHaveBeenCalled();
+  });
+
+  it('on a downstream refusal, prompts and, on confirm, retries with forceDownstreamReopen:true', async () => {
+    const recordScore = vi.fn()
+      .mockRejectedValueOnce(downstreamError())
+      // The server reports what it actually reopened on the write's response.
+      .mockResolvedValueOnce({ id: 'm1', status: 'completed', reopenedMatches: [{ id: 'm5', number: 5 }] });
+    const confirmDialog = vi.fn().mockResolvedValue(true);
+    const originalResult = { status: 'completed' };
+
+    const res = await attemptScoreWrite({
+      recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: originalResult, password: 'pw', match: null,
+    });
+
+    // The caller is told what the confirmation DID, from the SERVER's own
+    // report (reopenedMatchIds on the write's response), not from the ids the
+    // refusal happened to name.
+    expect(res).toEqual({
+      id: 'm1', status: 'completed',
+      reopenedMatches: [{ id: 'm5', number: 5 }], downstreamReopened: [{ id: 'm5', number: 5 }],
+    });
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    // The dialog must name the blocking match and the displaced competitor
+    // (the copy itself is pinned in write_result_downstream_knockout.test.jsx;
+    // this just confirms attemptScoreWrite actually threads the refusal
+    // through rather than showing a generic prompt).
+    const dialogArg = confirmDialog.mock.calls[0][0];
+    expect(dialogArg.message).toContain('m5');
+    expect(dialogArg.message).toContain('Aoki Taro');
+
+    // The retry must be the SAME patch plus the force flag, not a fresh one.
+    expect(recordScore).toHaveBeenCalledTimes(2);
+    const retryArgs = recordScore.mock.calls[1];
+    expect(retryArgs[2]).toEqual({ status: 'completed', forceDownstreamReopen: true });
+    // The original object must not be mutated in place.
+    expect(originalResult).toEqual({ status: 'completed' });
+  });
+
+  it('on a downstream refusal, declining leaves the match unwritten and marks the error cancelled', async () => {
+    const err = downstreamError();
+    const recordScore = vi.fn().mockRejectedValue(err);
+    const confirmDialog = vi.fn().mockResolvedValue(false);
+
+    const caught = await attemptScoreWrite({
+      recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: { status: 'completed' }, password: 'pw', match: null,
+    }).then(() => { throw new Error('expected a rejection'); }, (e) => e);
+
+    expect(caught).toBe(err);
+    expect(caught.downstreamKnockoutPlayedCancelled).toBe(true);
+    // Only the one doomed attempt: no retry was ever sent.
+    expect(recordScore).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not loop the confirm dialog on a second refusal after the forced retry', async () => {
+    // A genuine race: the forced retry is refused again. The guard on
+    // result.forceDownstreamReopen must stop a second prompt and just
+    // propagate the error like any other failure.
+    const err2 = downstreamError({ blockingMatchId: 'm6' });
+    const recordScore = vi.fn()
+      .mockRejectedValueOnce(downstreamError())
+      .mockRejectedValueOnce(err2);
+    const confirmDialog = vi.fn().mockResolvedValue(true);
+
+    const caught = await attemptScoreWrite({
+      recordScore, confirmDialog, compId: 'c1', matchId: 'm1', result: { status: 'completed' }, password: 'pw', match: null,
+    }).then(() => { throw new Error('expected a rejection'); }, (e) => e);
+
+    expect(caught).toBe(err2);
+    expect(caught.downstreamKnockoutPlayedCancelled).toBeUndefined();
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(recordScore).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('attemptScoreWrite reports the server, not its own guess', () => {
+  // The refusal says what the server INTENDS to reopen. The response says what
+  // it DID. Reporting the first as if it were the second is a claim the client
+  // has no standing to make: if the write reopened nothing, or something else,
+  // the operator would still be told the refusal's list.
+  it('claims nothing when the server reopened nothing', async () => {
+    const e = new Error('Aoki Taro already played match m5.');
+    e.downstreamKnockoutPlayed = { matchId: 'm1', blockingMatchId: 'm5', displaced: 'Aoki Taro' };
+    const recordScore = vi.fn()
+      .mockRejectedValueOnce(e)
+      // Forced write applied, but the server reopened nothing after all.
+      .mockResolvedValueOnce({ id: 'm1', status: 'completed' });
+    const res = await attemptScoreWrite({
+      recordScore, confirmDialog: vi.fn().mockResolvedValue(true),
+      compId: 'c1', matchId: 'm1', result: { status: 'completed' }, password: 'pw', match: null,
+    });
+    expect(res.downstreamReopened).toBeUndefined();
+  });
+
+  it('reports the server list even when it differs from the refusal', async () => {
+    const e = new Error('Aoki Taro already played match m5.');
+    e.downstreamKnockoutPlayed = { matchId: 'm1', blockingMatchId: 'm5', displaced: 'Aoki Taro' };
+    const recordScore = vi.fn()
+      .mockRejectedValueOnce(e)
+      .mockResolvedValueOnce({ id: 'm1', status: 'completed', reopenedMatches: [{ id: 'm-bronze', number: 4 }, { id: 'm5', number: 5 }] });
+    const res = await attemptScoreWrite({
+      recordScore, confirmDialog: vi.fn().mockResolvedValue(true),
+      compId: 'c1', matchId: 'm1', result: { status: 'completed' }, password: 'pw', match: null,
+    });
+    expect(res.downstreamReopened).toEqual([{ id: 'm-bronze', number: 4 }, { id: 'm5', number: 5 }]);
+  });
+});

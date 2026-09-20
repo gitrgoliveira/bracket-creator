@@ -40,6 +40,7 @@ import {
     writeDidNotLand, writeWasSuperseded, writeWasRefusedForClock,
     SUPERSEDED_REASON, SUPERSEDED_ADVICE,
     CLOCK_SKEW_REASON_TEXT, CLOCK_SKEW_ADVICE, CLOCK_SKEW_UNHEALED_ADVICE,
+    downstreamKnockoutPlayedQueueDrop,
 } from './write_result.jsx';
 
 // ---------------------------------------------------------------------------
@@ -128,6 +129,30 @@ function normalizeViewerCompItem(item) {
 
 /** Composite key for per-(compID, matchID) maps. Prevents collisions across competitions. */
 function _revKey(compID, matchID) { return `${compID}:${matchID}`; }
+
+// bc-kcdg: parses the 409 downstream_knockout_played refusal (correcting a
+// completed knockout match whose later round has already been played) into a
+// thrown Error carrying the structured fields as `.downstreamKnockoutPlayed`,
+// so a catcher asks write_result.jsx's downstreamKnockoutPlayedRefusal(err)
+// rather than re-deriving the shape from the raw body. Returns null when the
+// body isn't this refusal, so callers can `throw _downstreamKnockoutPlayedError(body) || new Error(...)`.
+function _downstreamKnockoutPlayedError(body) {
+    if (!body || body.error !== 'downstream_knockout_played') return null;
+    const err = new Error(body.message || body.error || 'Failed to record score');
+    err.downstreamKnockoutPlayed = {
+        matchId: body.matchId,
+        blockingMatchId: body.blockingMatchId,
+        // Every match the confirmation will clear, each as {id, number}: the
+        // NUMBER is what the operator is shown ("Match 3"), the id only
+        // addresses it. One entry, except when a semifinal fed both the final
+        // and the bronze match.
+        blockingMatches: body.blockingMatches && body.blockingMatches.length
+            ? body.blockingMatches
+            : (body.blockingMatchId ? [{ id: body.blockingMatchId }] : []),
+        displaced: body.displaced,
+    };
+    return err;
+}
 
 // ---------------------------------------------------------------------------
 // mp-y3nk: server-clock offset for timestamp reconciliation.
@@ -1121,10 +1146,24 @@ async function _flushQueue() {
                         const body = await res.json().catch(() => ({}));
                         if (body.error !== 'decision_locked' && body.error !== 'already_ineligible') {
                             console.warn(`[sync] queued decision write rejected (409):`, body);
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: 409, reason: body.reasonHuman || body.error || 'conflict (409)' });
+                            // bc-cse: a queued kiken/fusenpai/daihyosen correction can hit
+                            // this same 409 the score path's flush-loop drop handles below
+                            // -- the later match was played before this replay ran. Same
+                            // human copy, same reason this can't just retry: there is no
+                            // operator here for attemptScoreWrite's confirm dialog to
+                            // prompt, and nothing sets forceDownstreamReopen automatically.
+                            const downstreamRefusal = _downstreamKnockoutPlayedError(body);
+                            const dropCopy = downstreamRefusal
+                                ? downstreamKnockoutPlayedQueueDrop(downstreamRefusal.downstreamKnockoutPlayed)
+                                : null;
+                            const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || 'conflict (409)');
+                            _notifyTerminalWriteFailed({
+                                compID, matchID, kind, status: 409, reason,
+                                ...(dropCopy ? { advice: dropCopy.advice } : {}),
+                            });
                             _notifyQueueAlert({
                                 kind: 'rejected', count: 1, terminalCount: 1, compID, matchID,
-                                detail: body.reasonHuman || body.error || 'conflict (409)',
+                                detail: reason,
                             });
                         }
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
@@ -1148,12 +1187,32 @@ async function _flushQueue() {
                         // fails minutes later on a different court.
                         const body = await res.json().catch(() => ({}));
                         console.warn(`[sync] queued ${kind || 'running'} write rejected (${res.status}):`, body);
+                        // bc-cse: a queued knockout correction (score OR decision) can
+                        // land here too -- offline, or during a transient-5xx retry run,
+                        // the later match got played before this replay ran, so the
+                        // server answers the SAME 409 downstream_knockout_played the live
+                        // confirm dialog handles. There is no operator at this device's
+                        // screen for the flush loop to prompt (attemptScoreWrite's dialog
+                        // has nothing to show a tap into), so this write is dropped
+                        // exactly like any other non-retryable 4xx below -- but with
+                        // downstreamKnockoutPlayedQueueDrop's words instead of the bare
+                        // "downstream_knockout_played" token, which is what an operator
+                        // reading this alert used to see with no way to understand it or
+                        // move forward.
+                        const downstreamRefusal = _downstreamKnockoutPlayedError(body);
+                        const dropCopy = downstreamRefusal
+                            ? downstreamKnockoutPlayedQueueDrop(downstreamRefusal.downstreamKnockoutPlayed)
+                            : null;
+                        const reason = dropCopy ? dropCopy.reason : (body.reasonHuman || body.error || `HTTP ${res.status}`);
                         if (terminal) {
-                            _notifyTerminalWriteFailed({ compID, matchID, kind, status: res.status, reason: body.reasonHuman || body.error || `HTTP ${res.status}` });
+                            _notifyTerminalWriteFailed({
+                                compID, matchID, kind, status: res.status, reason,
+                                ...(dropCopy ? { advice: dropCopy.advice } : {}),
+                            });
                         }
                         _notifyQueueAlert({
                             kind: 'rejected', count: 1, terminalCount: terminal ? 1 : 0, compID, matchID,
-                            detail: body.reasonHuman || body.error || `HTTP ${res.status}`,
+                            detail: reason,
                         });
                         if (_writeQueue.get(key) === descriptor) _writeQueue.delete(key);
                     }
@@ -2264,7 +2323,7 @@ const API = {
             if (retryBody.error === "ineligible_competitor" || retryBody.error === "already_ineligible") {
                 throw new Error(retryBody.reasonHuman || retryBody.reason || retryBody.error || "Failed to record score");
             }
-            throw new Error(retryBody.error || "Failed to record score");
+            throw _downstreamKnockoutPlayedError(retryBody) || new Error(retryBody.error || "Failed to record score");
         };
 
         let res;
@@ -2351,7 +2410,12 @@ const API = {
         if (data.error === "ineligible_competitor" || data.error === "already_ineligible") {
             throw new Error(data.reasonHuman || data.reason || data.error || "Failed to record score");
         }
-        throw new Error(data.error || "Failed to record score");
+        // bc-kcdg: 409 downstream_knockout_played (correcting a completed
+        // knockout match whose later round already played) is parsed into a
+        // structured error rather than a plain message; see
+        // _downstreamKnockoutPlayedError and write_result.jsx's
+        // downstreamKnockoutPlayedRefusal.
+        throw _downstreamKnockoutPlayedError(data) || new Error(data.error || "Failed to record score");
     },
     // T093–T095: kiken / fusenpai / fusensho / daihyosen: server auto-fills
     // scoreline and Winner from {decision, decisionBy, encho}. Body shape is
@@ -2406,7 +2470,17 @@ const API = {
             // can surface the error. The decision-locked-as-success rule is ONLY
             // for queued retries in _flushQueue, not for direct calls.
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to record decision");
+            // bc-cse: 409 downstream_knockout_played (a kiken/fusenpai/daihyosen
+            // decision that corrects a completed knockout match whose later
+            // round already played) gets the SAME structured parse as the
+            // score/override-winner paths, via the one shared helper -- see
+            // _downstreamKnockoutPlayedError above. Without this the SPA threw
+            // the bare "downstream_knockout_played" token and dropped the
+            // server's message, and nothing could set forceDownstreamReopen on
+            // a decision retry (submitDecisionRequest, admin_scoring_shared.jsx,
+            // is what now reads .downstreamKnockoutPlayed off this error via
+            // attemptScoreWrite).
+            throw _downstreamKnockoutPlayedError(err) || new Error(err.error || "Failed to record decision");
         }
         const data = await res.json();
         // bc-cse defence in depth, and INERT today by construction: the
@@ -2484,10 +2558,16 @@ const API = {
         // JSON input") right after a successful save.
         return true;
     },
-    async overrideBracketWinner(compID, matchID, winnerName, password) {
+    // bc-kcdg: forceDownstreamReopen is the operator's confirmed override of a
+    // 409 downstream_knockout_played refusal (this match's later round already
+    // played on the current winner), threaded through exactly as recordScore's
+    // payload carries it, so a confirmed retry here also reopens the blocking
+    // match(es) for re-entry rather than silently repainting them.
+    async overrideBracketWinner(compID, matchID, winnerName, password, forceDownstreamReopen) {
         const url = `/api/competitions/${compID}/matches/${matchID}/override-winner`;
         // mp-y3nk: stamp in server-relative time for last-write-wins reconciliation.
         const payload = { winnerName, modifiedAt: _serverNowMs() };
+        if (forceDownstreamReopen) payload.forceDownstreamReopen = true;
         let res;
         try {
             // fetchWithTimeout so a stalled request is treated as offline rather
@@ -2516,7 +2596,12 @@ const API = {
         }
         if (!res.ok) {
             const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || "Failed to override winner");
+            // bc-kcdg: 409 downstream_knockout_played (this feeder's assertion
+            // would repaint a later match that already played on the current
+            // winner) is parsed into the same structured error recordScore
+            // throws, so a caller can offer the same confirm+retry loop
+            // (write_result.jsx's attemptScoreWrite) rather than a plain message.
+            throw _downstreamKnockoutPlayedError(err) || new Error(err.error || "Failed to override winner");
         }
         // Backend replies 200 {"applied": <bool>} (mp-y3nk). applied=false means
         // the timestamp guard dropped this assertion because a newer/equal result

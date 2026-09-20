@@ -1,11 +1,12 @@
 // Score editor components extracted from admin_schedule.jsx (mp-d7tl).
 // startPatch, ScoreEditCourtBtn (local), AdminScoreEditor, AdminScoreEditorPage.
 
-import { writeDidNotLand } from './write_result.jsx';
+import { writeDidNotLand, matchLabel } from './write_result.jsx';
 import { allMatchesCompleted } from './admin_schedule_utils.jsx';
 import { MatchLineupPanel } from './admin_schedule_lineup.jsx';
 import { boutHansokuMark } from './match_scoreboard.jsx';
 import { sameCompetitor } from './competitor_identity.jsx';
+import { poolMatchNumberOf } from './pool_ids.jsx';
 // NumberedName: single owner of the number-chip-on-the-outer-side rule
 // (bc-dnst); see that file's header for why this stays an ES import.
 import { NumberedName } from './numbered_name.jsx';
@@ -24,6 +25,45 @@ const ScoreEditorModal = window.ScoreEditorModal;
 // check always pass.
 const hasBothSides = window.hasBothSides;
 const getScoreBtnClass = window.getScoreBtnClass;
+
+// scoreRowMatchLabel: how the scores list names a match to the operator.
+//
+// EVERY row carries an identity, because this list is where an operator lands
+// after a dialog names a match ("Match 15 was reopened"), and a row identified
+// only by its time and its two competitors cannot be found that way.
+//
+// The two phases number independently, so the label says which numbering it
+// is quoting. A knockout match owns a number across the whole tree, the same
+// one the printed tree and the correction dialogs use, so it reads bare:
+// "Match 15". A pool bout is numbered inside its own pool and the numbering
+// restarts per pool (operator ruling 2026-09-19), so its pool is named with
+// it: "Pool A · Match 2". Without that prefix the two would collide, since
+// every pool has a Match 1 and so does the bracket.
+//
+// The pool's own name comes from window.poolLabel (viewer_utils.jsx), the one
+// owner of the pool-vs-league-vs-Swiss heading, so a Swiss round reads
+// "Round 3 · Match 2" rather than the synthetic "Swiss-R3" id.
+//
+// A knockout row is named by matchLabel (write_result.jsx), the same owner the
+// correction dialogs use, so the row an operator is sent to looking for
+// "Match 15" -- or for "the 3rd-place match", the one match named rather than
+// numbered -- carries exactly the words they were given.
+//
+// Returns "" when the match carries no number at all: a bracket match drawn
+// before numbering existed, and a pool supplementary bout (daihyosen or
+// tiebreaker), which is an appended rep bout rather than one of the pool's
+// numbered round-robin bouts.
+export function scoreRowMatchLabel(m) {
+  if (m.phase === "bracket") {
+    const label = matchLabel({ number: m.matchNumber, id: m.id });
+    // matchLabel falls back to the raw id, which names nothing on screen.
+    return label === m.id ? "" : label;
+  }
+  const n = poolMatchNumberOf(m.id || "");
+  if (!n) return "";
+  const pool = (window.poolLabel ? window.poolLabel(m) : m.poolName) || "";
+  return pool ? `${pool} · Match ${n}` : `Match ${n}`;
+}
 
 // ---------- Score editor ----------
 export function AdminScoreEditorPage({ tournament, onBack, onEditScore, onMoveCourt, onLogout, onViewerMode, password }) {
@@ -197,10 +237,12 @@ export function AdminScoreEditor({ t, c, onEditScore, onMoveCourt, restrictToCom
           // Fall back so the cell is never blank: an empty score renders the
           // boutMiddle placeholder (normally "vs"). Live techniques show once present.
           const seScore = showScore ? window.matchScoreStr(m) : "";
+          const matchNo = scoreRowMatchLabel(m);
           return (
             <div key={`${m.compId}:${m.id}`} className={`score-edit-row ${m.status === "running" ? "score-edit-row--running is-running" : ""} ${m.status === "completed" ? "score-edit-row--complete" : ""}`}>
               <div>
                 <div className="score-edit-row__time">{m.scheduledAt || "-"}</div>
+                {matchNo && <div className="score-edit-row__matchno">{matchNo}</div>}
                 <div style={{ fontSize: 10, color: "var(--ink-3)", marginTop: 2 }}>{m.compName}</div>
               </div>
               <ScoreEditCourtBtn m={m} courts={tournament.courts || []} onMoveCourt={onMoveCourt} />

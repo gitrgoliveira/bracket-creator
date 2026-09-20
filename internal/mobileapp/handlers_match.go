@@ -1,6 +1,7 @@
 package mobileapp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -491,7 +492,19 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		if !ok {
 			return
 		}
-		var results []state.MatchResult
+		// bulkScoreEntry wraps state.MatchResult with a transient, per-entry
+		// field that binds from the JSON body but is never part of
+		// state.MatchResult itself -- mirrors scoreRequestBody's wrapping of
+		// ScoreRequest below for the single-match /score endpoint.
+		type bulkScoreEntry struct {
+			state.MatchResult
+			// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-
+			// correction guard for THIS entry, same field name and contract as
+			// every other knockout-correction write (see
+			// scoreRequestBody.ForceDownstreamReopen).
+			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+		}
+		var results []bulkScoreEntry
 		if err := c.ShouldBindJSON(&results); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -506,11 +519,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			MatchID string `json:"matchId"`
 			Error   string `json:"error"`
 			// Reason is a machine-readable discriminator, set only where the
-			// failure is a known verdict rather than an arbitrary error. Two
-			// values today, both from the timestamp guard: "superseded" (a
-			// newer result for this match is already stored) and "clock_skew"
-			// (this entry's modifiedAt is implausibly far in the future, so it
-			// can be neither trusted nor zeroed, see modifiedAtRefuseSkewMs).
+			// failure is a known verdict rather than an arbitrary error. Values
+			// today: "superseded" and "clock_skew" from the timestamp guard (a
+			// newer result for this match is already stored, or this entry's
+			// modifiedAt is implausibly far in the future so it can be neither
+			// trusted nor zeroed, see modifiedAtRefuseSkewMs); "corrupt_overrides"
+			// when a corrupt overrides.json blocks the standings read the
+			// mp-e2k1 guard below needs; "downstream_knockout_played" (bc-kcdg)
+			// when correcting this entry would repaint a downstream bracket
+			// match that has recorded its own result; and
+			// "downstream_knockout_scored" (mp-e2k1) when correcting this pool
+			// entry would displace a qualifying finisher already scored into a
+			// downstream bracket match. The latter two both resolve by retrying
+			// the SAME entry with forceDownstreamReopen:true once the operator
+			// confirms the override.
 			//
 			// It matters because the single-match endpoints answer those
 			// conditions with a distinct body ({"applied": false, "reason":
@@ -569,8 +591,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// path, ahead of the legacy-hantei fold and the hantei
 			// mark-placement check inside validateBulkScoreLengths. See
 			// backfillMatchIdentityForHantei.
-			backfillMatchIdentityForHantei(store, id, results[i].ID, &results[i])
-			if err := validateBulkScoreLengths(&results[i], allowNumberedEncho); err != nil {
+			backfillMatchIdentityForHantei(store, id, results[i].ID, &results[i].MatchResult)
+			if err := validateBulkScoreLengths(&results[i].MatchResult, allowNumberedEncho); err != nil {
 				errs = append(errs, scoreError{MatchID: results[i].ID, Error: err.Error()})
 				continue
 			}
@@ -593,6 +615,7 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// reason, admin corrections are meant to override normal flow.
 			results[i].CorrectionReason = strings.TrimSpace(results[i].CorrectionReason)
 			var capturedStatus *domain.CompetitorStatus
+			var reopenedThisItem []engine.ReopenedMatch
 			if err := tx.WithTransaction(id, func(stx state.StoreTx) error {
 				// Correction-reason audit policy (require a reason when the write
 				// rewrites a result the operator already declared final — a
@@ -602,14 +625,17 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				// applyCorrectionReasonUnderTx, shared with the single-score path
 				// so the two cannot drift; only the error SHAPE differs here
 				// (partial-success entries carry a plain message).
-				check, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i])
+				check, snapErr := applyCorrectionReasonUnderTx(stx, id, results[i].ID, &results[i].MatchResult)
 				if snapErr != nil {
 					return snapErr
 				}
 				if check.Reject != nil {
 					return errors.New(check.Reject.Message)
 				}
-				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i])
+				status, err := eng.RecordMatchResultWithIneligibilityTx(stx, id, results[i].ID, &results[i].MatchResult, engine.ForceOptions{
+					Force:    results[i].ForceDownstreamReopen,
+					Reopened: &reopenedThisItem,
+				})
 				if err != nil {
 					return err
 				}
@@ -622,6 +648,8 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				return nil
 			}); err != nil {
 				bulkErr := scoreError{MatchID: results[i].ID, Error: err.Error()}
+				var downstreamPlayedErr *engine.DownstreamKnockoutPlayedError
+				var downstreamScoredErr *engine.DownstreamKnockoutScoredError
 				switch {
 				case errors.Is(err, engine.ErrMatchSuperseded):
 					bulkErr.Reason = "superseded"
@@ -636,13 +664,40 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 					// arbitrary rejection and route the operator to
 					// DELETE .../overrides rather than retrying the same bytes.
 					bulkErr.Reason = "corrupt_overrides"
+				case errors.As(err, &downstreamPlayedErr):
+					// bc-kcdg: correcting THIS entry would repaint a downstream
+					// match that already carries its own result. Unlike the
+					// single-match endpoints, a batch entry has no dedicated 409
+					// to answer with (this endpoint is always 200, partial
+					// success), so the discriminator rides in Reason instead: the
+					// operator can retry the same entry with
+					// forceDownstreamReopen:true once they've confirmed the
+					// override, exactly as /score's 409 body prompts them to.
+					bulkErr.Reason = "downstream_knockout_played"
+				case errors.As(err, &downstreamScoredErr):
+					// mp-e2k1: re-scoring THIS entry (a pool match) would
+					// displace a qualifying finisher already scored into a
+					// downstream bracket match. Same batch-Reason treatment as
+					// downstream_knockout_played above, and for the identical
+					// reason: this endpoint has no dedicated 409 to answer
+					// with, so the discriminator rides in Reason so the caller
+					// can distinguish it from an arbitrary rejection instead of
+					// only seeing the raw error text.
+					bulkErr.Reason = "downstream_knockout_scored"
 				}
 				errs = append(errs, bulkErr)
 				continue
 			}
-			successful = append(successful, results[i])
+			successful = append(successful, results[i].MatchResult)
 			if capturedStatus != nil {
 				eligibilityUpdates = append(eligibilityUpdates, capturedStatus)
+			}
+			// bc-kcdg: each reopened match is distinct from the entry just
+			// corrected; broadcast it too so a client watching only that
+			// court/match learns its verdict was cleared (mirrors /score and
+			// /override-winner).
+			for _, reopened := range reopenedThisItem {
+				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
 			}
 		}
 
@@ -674,6 +729,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			TeamAWins int    `json:"teamAWins"`
 			TeamBWins int    `json:"teamBWins"`
 			Draws     int    `json:"draws"`
+			// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-
+			// correction guard, same field name and contract as the score-write
+			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
+			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -720,10 +779,12 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 		// Kachinuki matches are scored one bout at a time via the score
 		// endpoint (server-appended winner-stays bout log). Quick-score
-		// synthesises a positional log and writes it wholesale through the
-		// plain RecordMatchResult path, which has no kachinuki merge and no
-		// premature-completion check, so a single call would destroy a live
-		// winner-stays sequence. Same incompatibility class as engi: reject.
+		// synthesises a positional log and writes it wholesale through
+		// RecordMatchResultWithIneligibility, which merges a kachinuki bout
+		// log BY POSITION (applyKachinukiMerge) rather than replacing it, so
+		// a synthesised wholesale write from this endpoint would still
+		// corrupt a live winner-stays sequence built up bout-by-bout
+		// elsewhere. Same incompatibility class as engi: reject.
 		// comp.IsKachinuki(), not a bare TeamMatchType test: the sequence this
 		// guard protects only exists when the engine actually runs kachinuki
 		// advancement, which requires TeamSize >= 2 (MaybeAdvanceKachinuki
@@ -778,7 +839,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			Status:     state.MatchStatusCompleted,
 			SubResults: subResults,
 		}
-		if err := eng.RecordMatchResult(id, mid, &result); err != nil {
+		// bc-kcdg: reopenedDownstream collects the IDs of any downstream
+		// bracket match reopened by a forced correction, populated only when
+		// req.ForceDownstreamReopen actually unblocked one. Switched from the
+		// plain RecordMatchResult (which hard-refuses the downstream-knockout-
+		// correction guard with no override, see writeMatchResult's doc
+		// comment) to RecordMatchResultWithIneligibility, the same primitive
+		// /score and bulk-score already use, so this endpoint can honour the
+		// force flag at all.
+		var reopenedDownstream []engine.ReopenedMatch
+		engStatus, err := eng.RecordMatchResultWithIneligibility(id, mid, &result, engine.ForceOptions{
+			Force:    req.ForceDownstreamReopen,
+			Reopened: &reopenedDownstream,
+		})
+		if err != nil {
 			if errors.Is(err, engine.ErrMatchSuperseded) {
 				// bc-lww1. Unreachable from today's SPA (this endpoint's payload
 				// carries no modifiedAt, and an unstamped write never loses the
@@ -795,6 +869,23 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 				})
 				return
 			}
+			// bc-kcdg: correcting this match would change an already-propagated
+			// winner while a downstream match carries a result of its own.
+			// Fixed wire contract, shared with every other knockout-correction
+			// write (see respondIfDownstreamKnockoutPlayed's doc comment).
+			if respondIfDownstreamKnockoutPlayed(c, err) {
+				return
+			}
+			// mp-e2k1: re-scoring this pool match would displace a qualifying
+			// finisher already scored into a downstream bracket match. Same
+			// fixed wire contract as /score's mapping (see
+			// respondIfDownstreamKnockoutScored's doc comment); before this,
+			// quick-score fell through to a generic 500 for this error, which
+			// the offline write queue retries forever for a write that can
+			// never win.
+			if respondIfDownstreamKnockoutScored(c, err) {
+				return
+			}
 			// A tied quick-score on a bracket team match produces a
 			// Completed write with no winner, which validateBracketCompletion
 			// rejects as *engine.ValidationError; map it to 400 so the caller
@@ -809,8 +900,20 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 		}
 
 		hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+		// bc-kcdg: each reopened match is distinct from the one just corrected;
+		// broadcast it too so a client watching only that court/match learns
+		// its verdict was cleared (mirrors /score and /override-winner).
+		for _, reopened := range reopenedDownstream {
+			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
+		}
+		if engStatus != nil {
+			hub.Broadcast(EventCompetitorStatusUpdated, gin.H{
+				"competitionId": id,
+				"status":        engStatus,
+			})
+		}
 		tryAutoCompletePools(c, eng, hub, id)
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, scoreResponseWithReopened(&result, reopenedDownstream))
 	})
 
 	// Score endpoint, Slice 0 demonstration of the interface-DI +
@@ -1192,6 +1295,10 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			// ModifiedAt is the client's server-relative timestamp for
 			// last-write-wins reconciliation (mp-y3nk); 0 when unstamped.
 			ModifiedAt int64 `json:"modifiedAt"`
+			// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-
+			// correction guard, same field name and contract as the score-write
+			// endpoint's (see scoreRequestBody.ForceDownstreamReopen).
+			ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1241,7 +1348,14 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			return
 		}
 
-		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt))
+		// bc-kcdg: reopenedDownstream collects the IDs of any downstream
+		// bracket match reopened by a forced override, populated only when
+		// req.ForceDownstreamReopen actually unblocked one.
+		var reopenedDownstream []engine.ReopenedMatch
+		applied, err := eng.OverrideBracketWinner(id, mid, winnerName, clampClientModifiedAt(req.ModifiedAt), engine.ForceOptions{
+			Force:    req.ForceDownstreamReopen,
+			Reopened: &reopenedDownstream,
+		})
 		if err != nil {
 			// Map engine client-errors to their proper status so the offline
 			// terminal-write replay never treats a permanent 4xx (unknown match,
@@ -1250,6 +1364,9 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 			var notFoundErr *engine.NotFoundError
 			var validationErr *engine.ValidationError
 			switch {
+			case respondIfDownstreamKnockoutPlayed(c, err):
+				// Same fixed wire contract as the score-write endpoint's 409;
+				// respondIfDownstreamKnockoutPlayed already wrote the response.
 			case errors.As(err, &notFoundErr):
 				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			case errors.As(err, &validationErr):
@@ -1262,6 +1379,13 @@ func RegisterMatchHandlers(r *gin.RouterGroup, eng *engine.Engine, store Competi
 
 		if applied {
 			hub.Broadcast(EventTournamentUpdated, nil)
+			hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": mid})
+			// bc-kcdg: each reopened match is distinct from the one the
+			// operator just overrode; broadcast it too so a client watching
+			// only that court/match learns its verdict was cleared.
+			for _, reopened := range reopenedDownstream {
+				hub.Broadcast(EventMatchUpdated, gin.H{"competitionId": id, "matchId": reopened.ID})
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"applied": applied})
 	})
@@ -1900,6 +2024,64 @@ type scoreRequestBody struct {
 	// completed writes (corrections, daihyosen finishes) skip
 	// advancement entirely.
 	KachinukiBoutFinal bool `json:"kachinukiBoutFinal"`
+	// ForceDownstreamReopen bypasses bc-kcdg's downstream-knockout-correction
+	// guard (engine.DownstreamKnockoutPlayedError, HTTP 409
+	// downstream_knockout_played): correcting a completed bracket match whose
+	// already-propagated winner fed a downstream match that has since
+	// recorded its own result is refused by default. Setting this applies
+	// the correction and requeues the one downstream match that
+	// carries its own result (see forceReopenDownstreamChain).
+	ForceDownstreamReopen bool `json:"forceDownstreamReopen"`
+}
+
+// scoreResponseWithReopened is the score write's reply: the stored
+// MatchResult exactly as it always serialized, plus the ids of any match this
+// write reopened.
+//
+// The ids have to come from the SERVER. The client could guess them from the
+// refusal it was just shown, and did, but that is the server's intention
+// rather than its outcome: a report saying "m-r2-0 was reopened" because the
+// refusal named it, whether or not anything was.
+//
+// It marshals the result and splices the key in, rather than embedding
+// MatchResult in a wrapper struct. state.MatchResult has its own MarshalJSON
+// (team_result.go), which an embedded field PROMOTES to the wrapper: the
+// wrapper then serializes as just the match and the extra key vanishes with no
+// error anywhere. That is exactly what happened here, and it survived the unit
+// tests because they assert on the handler's Go-side behaviour; only a live
+// request showed the field missing from the body.
+func scoreResponseWithReopened(result *state.MatchResult, reopened []engine.ReopenedMatch) any {
+	if result == nil {
+		return result
+	}
+	if len(reopened) == 0 {
+		return result
+	}
+	// Both errors below are RETURNED BY THE API and cannot be discarded
+	// (errcheck), not defences against a state anyone expects: a MatchResult
+	// that gin is about to marshal anyway does not fail here. Falling back to
+	// the bare result keeps the receipt honest -- the write is already stored,
+	// so the worst case is the operator not being told what was reopened,
+	// rather than a stored result reported as a failure.
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return result
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return result
+	}
+	// Identify each match the way the OPERATOR does: by its match number, the
+	// label on the score sheet, the bracket and the Excel tree. The id rides
+	// along for anything addressing the match, but nothing shows it to a
+	// person (operator ruling 2026-09-19: "that's how the matches should be
+	// identified to the user").
+	out := make([]map[string]any, 0, len(reopened))
+	for _, r := range reopened {
+		out = append(out, map[string]any{"id": r.ID, "number": r.Number})
+	}
+	merged["reopenedMatches"] = out
+	return merged
 }
 
 func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store CompetitionStore, tx CompetitionTransactor, hub Broadcaster, verifier PasswordVerifier, tl TournamentLoader) {
@@ -2094,6 +2276,12 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 			engStatus          *domain.CompetitorStatus
 			engErr             error
 			staleAfterComplete bool
+			// reopenedDownstream (bc-kcdg) collects the IDs of any downstream
+			// bracket match reopened by a forced correction, populated only
+			// when body.ForceDownstreamReopen actually unblocked one. Each
+			// gets its own match_updated broadcast below, alongside the
+			// corrected match's own.
+			reopenedDownstream []engine.ReopenedMatch
 		)
 		txErr := tx.WithCourtExclusivityLock(func() error {
 			if !isWithdrawal && !isCorrection {
@@ -2178,7 +2366,10 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 						return nil
 					}
 				}
-				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result)
+				engStatus, engErr = eng.RecordMatchResultWithIneligibilityTx(stx, id, mid, result, engine.ForceOptions{
+					Force:    body.ForceDownstreamReopen,
+					Reopened: &reopenedDownstream,
+				})
 				// engErr is a normal application-level signal (AlreadyIneligible
 				// → 409, validation/not-found → other codes); we surface it
 				// after the tx returns. The score-write inside the tx already
@@ -2299,15 +2490,14 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				respondCourtBusy(c, courtBusyErr, "starting a new one")
 				return
 			}
-			var downstreamKnockoutErr *engine.DownstreamKnockoutScoredError
-			if errors.As(engErr, &downstreamKnockoutErr) {
-				c.JSON(http.StatusConflict, gin.H{
-					"error":    "downstream_knockout_scored",
-					"pool":     downstreamKnockoutErr.Pool,
-					"finisher": downstreamKnockoutErr.Finisher,
-					"matchId":  downstreamKnockoutErr.MatchID,
-					"message":  downstreamKnockoutErr.Error(),
-				})
+			if respondIfDownstreamKnockoutScored(c, engErr) {
+				return
+			}
+			// bc-kcdg: correcting this match would change an already-propagated
+			// winner while a downstream match carries a result of its own. Fixed
+			// wire contract, shared with every other knockout-correction write
+			// (see respondIfDownstreamKnockoutPlayed's doc comment).
+			if respondIfDownstreamKnockoutPlayed(c, engErr) {
 				return
 			}
 			var notFoundEngErr *engine.NotFoundError
@@ -2362,6 +2552,18 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 				"result":        matchPtrForBroadcast(result),
 			})
 		}
+		// bc-kcdg: a forced correction may have reopened downstream bracket
+		// matches whose SideA/SideB the correction's propagation just
+		// repainted (forceReopenDownstreamChain). Each is a distinct match
+		// from the one the operator corrected, so each gets its own
+		// match_updated broadcast; a client watching only that court/match
+		// would otherwise never learn its verdict was cleared.
+		for _, reopened := range reopenedDownstream {
+			hub.Broadcast(EventMatchUpdated, gin.H{
+				"competitionId": id,
+				"matchId":       reopened.ID,
+			})
+		}
 		// T085/T092, when a kiken or fusenpai is recorded, the engine
 		// persisted a CompetitorStatus for the losing player; surface
 		// it so admin clients can invalidate cached match lists.
@@ -2409,6 +2611,6 @@ func registerScoreHandler(r *gin.RouterGroup, eng ScoringEngine, store Competiti
 		// Don't echo internal write-ordering metadata back in the response.
 		result.Rev = 0
 		result.RevSession = ""
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, scoreResponseWithReopened(result, reopenedDownstream))
 	})
 }

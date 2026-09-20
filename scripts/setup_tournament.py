@@ -283,7 +283,11 @@ def score_all_matches(comp_id):
             sideB = match['sideB']
             
             if is_team:
-                res_data = get_predictable_result(True, i + iteration)
+                # A knockout encounter needs a winner, so never ask for a drawn
+                # one there: the server refuses it ("cannot mark completed with
+                # no winner"), which used to abort the Teams category partway
+                # through its bracket. Pool encounters may still be drawn.
+                res_data = get_predictable_result(True, i + iteration, can_draw=is_pool_match)
                 payload = {
                     "sideA": sideA,
                     "sideB": sideB,

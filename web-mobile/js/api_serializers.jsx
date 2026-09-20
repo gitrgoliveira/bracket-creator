@@ -144,6 +144,13 @@ function toBackendMatchResult(patch, match) {
     // operator's typed/selected reason never reached the wire and the audit
     // trail silently stayed empty on every correction, kendo and team alike.
     if (patch.correctionReason) result.correctionReason = patch.correctionReason;
+    // bc-kcdg: transient request-only flag confirming the operator's explicit
+    // override after a 409 downstream_knockout_played refusal (a completed
+    // knockout match whose later round already played). Never persisted; the
+    // server applies this correction and reopens the named blocking match(es)
+    // for re-entry. Set by admin.jsx's editMatchScore on the confirmed retry
+    // only -- see write_result.jsx's downstreamKnockoutPlayedRefusal.
+    if (patch.forceDownstreamReopen) result.forceDownstreamReopen = true;
     if (patch.subResults) {
         // Same conversion per bout: a sub carrying the editor's boolean (the
         // daihyosen editor states it unconditionally) has it folded into the

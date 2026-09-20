@@ -314,6 +314,28 @@ describe('WatchlistPanel', () => {
       'the chip carries the state too, not just the sentence').toHaveLength(1);
   });
 
+  // The amber claim is about the TOURNAMENT, so it may only be made when the
+  // tournament's rosters actually loaded.
+  it('makes no "not in this roster" claim while a roster failed to load', () => {
+    const wl = [{ type: 'player', id: 'gone', name: 'Kaito Shimizu', dojo: 'Old Dojo' }];
+    const props = {
+      // Non-empty: another competition's roster loaded fine, which is exactly
+      // the state that used to defeat the roster.length guard.
+      roster: [{ id: 'p9', name: 'Someone Else', dojo: 'Kenshinkan' }],
+      watchlist: wl, primaryEntry: wl[0], heroEntry: wl[0], heroNextMatch: null,
+    };
+    const broken = runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: false }));
+    expect(collectText(broken), 'it cannot know this while a roster is missing')
+      .not.toMatch(/is not in this tournament's roster/);
+    expect(byClass(broken, 'pmf__chip--unresolved'),
+      'and the chip must not go amber either').toHaveLength(0);
+
+    // Same entry, same roster, rosters all loaded: now the claim is warranted.
+    const ok = runtime.mount(WatchlistPanel, baseProps({ ...props, rosterLoaded: true }));
+    expect(collectText(ok)).toMatch(/is not in this tournament's roster/);
+    expect(byClass(ok, 'pmf__chip--unresolved')).toHaveLength(1);
+  });
+
   // "Showing X." asserted a card that was not there.
   it('does not say it is showing someone when there is no card', () => {
     const wl = [

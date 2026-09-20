@@ -99,6 +99,12 @@ function normalizeViewerCompItem(item) {
         // inside one of them. Hoisted like poolMatches so the console can
         // render the notice off the flattened competition it already has.
         dataIssues: item.dataIssues,
+        // Whether this competition's participants.csv actually LOADED, also a
+        // sibling of config for the same reason. Hoisted like dataIssues or it
+        // is silently dropped. Absent (an older payload) is read as loaded by
+        // rosterFullyLoaded, so this never makes an existing client quieter
+        // than it was.
+        rosterAvailable: item.rosterAvailable,
         // bc-pnum: the members map is ALSO a sibling of config on the wire,
         // where it is called `teamMembers` (present only for a team
         // competition, keyed by the team's participant id --

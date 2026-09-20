@@ -618,3 +618,61 @@ func TestViewerAggregateAndDetail_CorruptPoolsCSVAgree(t *testing.T) {
 		})
 	}
 }
+
+// The aggregate swallowed a per-competition PARTICIPANTS failure differently
+// from every other file's: it logged, assigned nil, and served the payload with
+// no trace. A roster that failed to read then looked exactly like one that is
+// empty, and the viewer watchlist -- whose "not in this tournament's roster"
+// claim is guarded only by the roster being non-empty -- turned every watched
+// competitor from that competition amber, telling the reader to delete and
+// re-add someone the picker could not offer back, because the same missing
+// roster is why they were not listed.
+func TestViewerAggregateSaysWhenARosterCouldNotLoad(t *testing.T) {
+	r, store, _, _, dir := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusPools, Format: state.CompFormatMixed,
+	}))
+
+	// An OS-level read failure, because a MALFORMED file is not one: helper's
+	// reader sets LazyQuotes and FieldsPerRecord = -1, so bad bytes parse into
+	// garbage rows rather than erroring (an unclosed quote was the first
+	// fixture here and it loaded fine). A directory at the file's path is the
+	// deterministic way to make the read itself fail; chmod is not, since a
+	// root-running CI bypasses it.
+	require.NoError(t, os.Mkdir(
+		filepath.Join(dir, "competitions", "kendo", "participants.csv"), 0750))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code,
+		"one unreadable file must not blank the whole view")
+
+	var payload []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload, 1)
+	assert.Equal(t, false, payload[0]["rosterAvailable"],
+		"the payload must say the roster did not load; nil Players alone cannot")
+}
+
+// The other half: a competition whose roster is simply EMPTY (no file yet) is
+// not a failure. loadParticipants returns ([], nil) for a missing file, so a
+// competition in setup must still report its roster available -- otherwise the
+// watchlist would go permanently silent about genuinely stale entries.
+func TestViewerAggregateReportsAnEmptyRosterAsAvailable(t *testing.T) {
+	r, store, _, _, _ := setupTestRouter(t)
+	require.NoError(t, store.SaveCompetition(&state.Competition{
+		ID: "kendo", Name: "Kendo", Status: state.CompStatusSetup, Format: state.CompFormatMixed,
+	}))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/viewer/competitions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var payload []map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload, 1)
+	assert.Equal(t, true, payload[0]["rosterAvailable"],
+		"no participants.csv yet is not a load failure")
+}

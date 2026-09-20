@@ -2,7 +2,7 @@
 // Extracted from viewer.jsx (mp-pxxc step 10).
 
 import { competitionKindLabel, compMatches, tournamentMatches, TournamentInfo, compareDmy } from './viewer_utils.jsx';
-import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
+import { matchParticipantIds, addPlayerToWatchlist, resolveEntryPlayerIds, resolveWatchedPlayers, findPrimaryEntry, heroEntry, buildPrimaryNextMatch, buildRoster, rosterFullyLoaded, useWatchlist, buildWatchedSets, matchInvolvesWatchedSet } from './viewer_watchlist_core.jsx';
 import { runOnce, notifEnable, notifDisable, useChimeMuted, isFollowedMatchOnDeck, useFollowedMatchAlert, useSecondaryWatchAlert, MyMatchAlertBanner } from './viewer_alerts.jsx';
 import { notificationSupported } from './viewer_notifications.jsx';
 import { VSchedItem, MatchViewerModal } from './viewer_match.jsx';
@@ -129,6 +129,10 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
   const [watchlist, setWatchlist] = useWatchlist();
   const [primaryKey, setPrimaryKey] = usePrimaryWatch();
   const roster = useMemo(() => buildRoster(t.competitions), [t.competitions]);
+  // Derived beside the roster because it qualifies it: a non-empty roster does
+  // not mean every competition's participants loaded, and only the panel's
+  // "not in this tournament" claim depends on the difference.
+  const rosterLoaded = useMemo(() => rosterFullyLoaded(t.competitions), [t.competitions]);
 
   // Add a single player to the watchlist (dedup by id). Used by the deep link.
   const addWatchPlayer = (p) => setWatchlist(prev => addPlayerToWatchlist(prev, p));
@@ -340,6 +344,7 @@ export function ViewerHome({ tournament, onSelectCompetition, onAdminClick, onOp
               former "Find my matches" hero + the multi-player watchlist. */}
           <WatchlistPanel
             roster={roster}
+            rosterLoaded={rosterLoaded}
             watchlist={watchlist}
             setWatchlist={setWatchlist}
             primaryKey={primaryKey}

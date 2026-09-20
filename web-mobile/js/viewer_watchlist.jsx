@@ -343,7 +343,7 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
 // first-added entry, because a card is not a chime and hiding it cost the
 // reader the one thing they opened the page for. Everything visual below reads
 // heroEntry; only the pin hint reads primaryEntry.
-function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
+function WatchlistPanel({ roster, rosterLoaded = true, watchlist, setWatchlist, primaryKey, setPrimaryKey, primaryEntry, heroEntry, heroNextMatch, upcoming, onMatchClick, chimeMuted, onBellToggle, onFirstAdd }) {
   // Cross-boundary helpers from viewer.jsx, read at render time (see header).
   const { effectivePrimaryKey, addPlayerToWatchlist, entryKey, resolveEntryPlayerIds, VSchedItem, WATCHLIST_MAX } = window;
   const rosterById = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
@@ -413,7 +413,11 @@ function WatchlistPanel({ roster, watchlist, setWatchlist, primaryKey, setPrimar
   // carried over from a previous event, which is the normal shape of
   // bc_watchlist -- one localStorage key per BROWSER, not per tournament.
   const entryUnresolved = (entry) => {
-    if (!entry || roster.length === 0) return false;
+    // rosterLoaded is the other half of roster.length. A non-empty roster only
+    // means SOME competition's participants loaded; if another one's failed,
+    // this entry's absence says nothing about the tournament and the honest
+    // answer is silence, exactly as for an empty roster.
+    if (!entry || !rosterLoaded || roster.length === 0) return false;
     if (entry.type === "dojo") return resolveEntryPlayerIds(entry, roster).length === 0;
     return !!entry.id && !rosterById.get(entry.id);
   };

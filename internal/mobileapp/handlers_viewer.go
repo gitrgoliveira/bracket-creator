@@ -413,7 +413,21 @@ func buildViewerCompetitionPayload(store *state.Store, compID, courtFilter strin
 	// competition detail endpoint build the list from (bc-pnum ruling 1e
 	// follow-up), so the two surfaces never disagree about what a given
 	// competition's issues are.
-	issues := viewerDataIssues(comp, players, pools, poolMatches, pmErr, brErr, poolsErr)
+	// Whether this competition's roster LOADED, which is a different fact from
+	// whether it is empty. A failed read leaves Players nil, and a client that
+	// cannot tell the two apart reads "this id is not in the roster" from what
+	// is really "this roster is missing" -- the viewer watchlist then turns a
+	// perfectly valid entry amber and tells the reader to delete and re-add
+	// someone the picker cannot offer back, because the same missing roster is
+	// why they are not listed.
+	//
+	// TWO things this is NOT. A missing file: loadParticipants returns
+	// ([], nil) for one, so a competition with no roster yet reports true. And
+	// a malformed file: LazyQuotes plus FieldsPerRecord = -1 mean bad bytes
+	// parse into garbage rows rather than failing, so what this actually
+	// reports is an OS-level read failure -- narrow, but previously invisible.
+	payload["rosterAvailable"] = plErr == nil
+	issues := viewerDataIssues(comp, players, pools, poolMatches, plErr, pmErr, brErr, poolsErr)
 	if len(issues) > 0 {
 		payload["dataIssues"] = issues
 	}
@@ -509,11 +523,17 @@ func missingIDsIssue(file, detail string) *gin.H {
 // fault as poolsErr (engine.CalculatePoolStandings's own internal LoadPools
 // reads the same pools.csv) -- reporting both would either double the entry
 // or require a dedup rule this function would then own alone.
-func viewerDataIssues(comp *state.Competition, players []domain.Player, pools []helper.Pool, poolMatches []state.MatchResult, pmErr, brErr, poolsErr error) []gin.H {
+func viewerDataIssues(comp *state.Competition, players []domain.Player, pools []helper.Pool, poolMatches []state.MatchResult, plErr, pmErr, brErr, poolsErr error) []gin.H {
 	if !drawInPoolsFile(comp) {
 		pools, poolsErr = nil, nil
 	}
-	issues := dataIssuesFrom(pmErr, brErr, poolsErr)
+	// plErr joins the others: it was the one file whose failure was logged and
+	// then dropped. Note it rarely produces a corrupt-file issue in practice --
+	// helper's CSV reader sets LazyQuotes and FieldsPerRecord = -1, so bad
+	// bytes parse into garbage rows instead of erroring, and what reaches here
+	// is an OS-level read failure. Threaded anyway so the one path that can
+	// report is not the one path that stays silent.
+	issues := dataIssuesFrom(plErr, pmErr, brErr, poolsErr)
 	if mi := missingIDsIssue("participants.csv", helper.MissingParticipantIDsMessage(players)); mi != nil {
 		issues = append(issues, *mi)
 	}
@@ -816,7 +836,8 @@ func RegisterViewerHandlers(r *gin.RouterGroup, store *state.Store, eng *engine.
 			if isTeamComp {
 				payload["teamMembers"] = squads
 			}
-			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
+			payload["rosterAvailable"] = playersErr == nil
+			if issues := viewerDataIssues(comp, comp.Players, pools, poolMatches, playersErr, poolMatchesErr, bracketErr, poolsErr); len(issues) > 0 {
 				payload["dataIssues"] = issues
 			}
 			return json.Marshal(payload)

@@ -353,6 +353,28 @@ export function buildPrimaryNextMatch(primaryEntry, roster, allMatches) {
   return mine[0] || null;
 }
 
+// Did every competition's roster LOAD? buildRoster cannot say: a competition
+// whose participants.csv failed to read contributes no players, which is
+// indistinguishable there from one that simply has none.
+//
+// That difference decides whether an id's ABSENCE from the roster means
+// anything. The viewer payload swallowed a per-competition participants
+// failure (logged, then Players = nil, payload still returned), so one
+// unreadable file left every OTHER competition populating the roster -- the
+// watchlist's roster.length > 0 guard passed, and every watched competitor
+// from the failed competition turned amber and was told to delete and re-add
+// someone the picker could not offer back, because the same missing roster is
+// why they were not listed.
+//
+// Absent is read as LOADED: an older payload carries no such key, and a
+// client that read that as "unavailable" would go silent about genuinely
+// stale entries. A MISSING participants.csv is not a failure either -- the
+// store returns ([], nil) for one -- so a competition with no roster yet
+// reports true.
+export function rosterFullyLoaded(competitions) {
+  return (competitions || []).every((c) => !c || c.rosterAvailable !== false);
+}
+
 // checkedIn=true wins if any check-in-enabled competition has the player checked in.
 export function buildRoster(competitions) {
   const map = new Map();

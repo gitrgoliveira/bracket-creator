@@ -245,14 +245,23 @@ function WatchHeroCard({ nextMatch, primaryIds, entityLabel, onMatchClick }) {
           motion for warnings and expected actions, not for "ongoing". */}
       {running ? (
         <div className="wl-hero__now">
-          On court now{nextMatch.court ? <> · <TermV name="shiaijo">Shiaijo</TermV> {nextMatch.court}</> : null}
+          {/* The band does NOT name the court. The body's 34px letter below is
+              the card's hero and the one statement of where to go; the band
+              naming it too put "SHIAIJO A" and "Shiaijo A" 20px apart. Same
+              rule that removed the TV header chip and the team summary row:
+              one fact, one home, and the bigger one wins. */}
+          On court now
         </div>
       ) : null}
       <div className="wl-hero__body">
+        {/* The eyebrow names WHO the card is about; the line below names WHEN.
+            The scheduled dojo arm used to append "· next up", which restated
+            the queue label two lines down -- and worse, said it even when the
+            queue read "3 before yours", so the card asserted a position it did
+            not hold. Naming the dojo alone matches what the running arm always
+            did. */}
         <div className="wl-hero__lbl">
-          {running
-            ? (showDojoEyebrow ? entityLabel : "Your match")
-            : (showDojoEyebrow ? `${entityLabel} · next up` : "Your next match")}
+          {showDojoEyebrow ? entityLabel : (running ? "Your match" : "Your next match")}
         </div>
         {/* The INSTRUCTION is the headline: where to walk. The watched person's
             own name is the one fact they already know, so it moves down to its

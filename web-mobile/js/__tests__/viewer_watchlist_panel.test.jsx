@@ -130,6 +130,20 @@ describe('WatchHeroCard', () => {
     expect(rowText(sideRows(tree)[0])).toContain('Robert Young');
   });
 
+  // The scheduled dojo arm used to append "· next up" unconditionally, so a
+  // card with THREE bouts ahead of it still announced "Hagane Dojo · next up".
+  // That is not a duplicate of the queue line, it contradicts it. The eyebrow
+  // names WHO; the line below names WHEN.
+  it('names the dojo alone, and leaves the queue line to say where in the queue', () => {
+    const scheduled = { ...MATCH, status: 'scheduled', queuePosition: 4 };
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: scheduled, primaryIds: new Set(['p1', 'p3']), entityLabel: 'Hagane Dojo', onMatchClick: vi.fn() });
+    const lbl = collectText(byClass(tree, 'wl-hero__lbl')[0], expandNamed('NumberedName'));
+    expect(lbl).toBe('Hagane Dojo');
+    const live = findAll(tree, (n) => n.props?.['aria-live'] === 'polite')[0];
+    expect(collectText(live, expandNamed('NumberedName')),
+      'the queue position has exactly one home, and it is this line').toContain('3 before yours');
+  });
+
   // bc-wlhc. MATCH is running, so this also pins the two things the old card
   // got wrong at exactly that moment: the running signal must be the navy BAND
   // (the old 1.20:1 ring was the only cue), and the live region must still be
@@ -144,6 +158,19 @@ describe('WatchHeroCard', () => {
     expect(live, 'the live region survives the start of the match').toBeTruthy();
     // While running the line reads "Now", not the scheduled time.
     expect(collectText(live, expandNamed('NumberedName'))).toContain('Now');
+  });
+
+  // The band used to read "On court now · Shiaijo A" while the 34px hero
+  // letter said "Shiaijo A" twenty pixels below it. One fact, one home: the
+  // hero letter is the bigger statement, so the band gives the court up.
+  // (Same rule that removed the TV header chip and the team summary row.)
+  it('states the court once: the band does not repeat the hero letter', () => {
+    const tree = runtime.mount(WatchHeroCard, { nextMatch: MATCH, primaryIds: new Set(['p1']), entityLabel: 'Robert Young', onMatchClick: vi.fn() });
+    const band = collectText(byClass(tree, 'wl-hero__now')[0], expandNamed('NumberedName'));
+    expect(band).toMatch(/on court now/i);
+    expect(band, 'the band must not name the court').not.toMatch(/\bA\b/);
+    // ...and the hero letter still carries it, so nothing was simply deleted.
+    expect(collectText(byClass(tree, 'wl-hero__where-v')[0], expandNamed('NumberedName'))).toBe('A');
   });
 
   it('never wraps the court letter: it is its own nowrap element', () => {

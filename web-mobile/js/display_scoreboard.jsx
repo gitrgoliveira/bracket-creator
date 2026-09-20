@@ -2,7 +2,9 @@
 // Fullscreen white board shown on Shiaijo-dedicated screens.
 // T061, T062, T063, mp-13y.
 
-import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabelParts, phaseLabel, TermD, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
+// TermD is gone from this import: the board's only glossary terms were the
+// SHIRO/AKA headings, dropped with bc-sccl.
+import { findRunningOnCourt, findUpcomingOnCourt, countCourtMatches, sideLabelParts, phaseLabel, poolNameOf, isSupplementaryBout, phaseProgressOnCourt, bracketRoundSiblings, StreamingQR } from './display_helpers.jsx';
 import { NumberedName } from './numbered_name.jsx';
 import { teamMatchTypeFor, DAIHYOSEN_POSITION } from './pool_ids.jsx';
 import { TeamScoreboard, IndividualScore, useTeamLineups, teamIVPW, teamIVPWFrom } from './match_scoreboard.jsx';
@@ -163,8 +165,16 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 slate here would put grey figures under a red name, the same
                 name-vs-number colour mismatch this pass exists to remove. */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
+                {/* No SHIRO/AKA heading (operator ruling 2026-09-20, bc-sccl). On a
+                    board read from across a hall the side is already carried by the
+                    two cues that survive at that distance: POSITION (Shiro left, Aka
+                    right, fixed by kendo convention and never swapped) and COLOUR
+                    (the name and its IV/PW in --ink-1 vs --red). The word added a
+                    third statement of the same fact and cost a line of vertical
+                    space on the surface with the least of it. No sr-only stand-in
+                    here: this is a projector/OBS surface with no screen-reader
+                    audience, unlike the operator consoles that did take one. */}
                 <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "var(--ink-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || <NumberedName side="shiro" clip {...shiroTeamParts} />}</div>
                     {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="shiro" clip {...shiroTeamParts} /></div>}
                     {isTeamMatch && (
@@ -176,7 +186,6 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--red)" }}><TermD name="aka">AKA</TermD></div>
                     <div style={{ fontSize: "5vh", fontWeight: 800, color: "var(--red)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || <NumberedName side="aka" clip {...akaTeamParts} />}</div>
                     {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="aka" clip {...akaTeamParts} /></div>}
                     {isTeamMatch && (

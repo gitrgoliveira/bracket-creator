@@ -33,6 +33,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(resolve(__dirname, '..', p), 'utf8');
 const css = readFileSync(resolve(__dirname, '..', '..', 'css', 'styles.css'), 'utf8');
 
+// Source with comments stripped. Comments here legitimately NAME what was
+// removed (each removal site explains itself), so an absence assertion that
+// read the raw file would match its own explanation -- which is exactly what
+// happened on this helper's first use.
+const codeOf = (file) => read(file)
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
+
 // The declarations of one top-level rule, by exact selector.
 const block = (selector) => {
   const start = css.indexOf(`\n${selector} {`);
@@ -147,5 +155,28 @@ describe('the engi editor shows the competitor number', () => {
     // chip there would imply two competitors.
     expect(src()).toMatch(/\{shiroDN && <div className="engi-side__name">\{shiroDN\}<\/div>\}/);
     expect(src()).toMatch(/\{akaDN && <div className="engi-side__name">\{akaDN\}<\/div>\}/);
+  });
+});
+
+// The TV board carries the side WITHOUT a heading (operator ruling 2026-09-20).
+// It has no tint to rely on, so the two cues that survive across a hall do the
+// work instead: POSITION (Shiro left, Aka right, fixed by kendo convention) and
+// COLOUR (each name and its IV/PW in --ink-1 vs --red). The SHIRO/AKA words
+// were a third statement of the same fact on the surface with the least
+// vertical space. No sr-only replacement: a projector/OBS board has no
+// screen-reader audience, unlike the operator consoles that did take one.
+describe('the TV board names no side', () => {
+  const src = () => read('display_scoreboard.jsx');
+
+  it('renders no SHIRO/AKA heading', () => {
+    expect(src()).not.toMatch(/TermD name="(shiro|aka)"/);
+    expect(codeOf('display_scoreboard.jsx')).not.toMatch(/["'`](SHIRO|AKA)["'`]/);
+  });
+
+  it('still separates the sides by colour, which is now load-bearing', () => {
+    // If these two ever became the same colour the board would carry the side
+    // by position alone, which is what the heading used to back up.
+    expect(src()).toMatch(/color: "var\(--ink-1\)"[^}]*\}\}>\{repShiro/);
+    expect(src()).toMatch(/color: "var\(--red\)"[^}]*\}\}>\{repAka/);
   });
 });

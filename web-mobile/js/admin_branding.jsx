@@ -76,25 +76,18 @@ function BrandingManager({ tournament, password, showToast, onThemeChange }) {
     else setAccentSoftColor(value);
     // Propagate to parent so the PUT /tournament body includes all branding.
     if (onThemeChange) onThemeChange(next);
-    // Live-preview the color change in CSS without waiting for save.
-    if (typeof window.applyTheme === "function") {
-      window.applyTheme(next);
-    } else {
-      const root = document.documentElement;
-      if (field === "primaryColor") root.style.setProperty("--accent", value);
-      else root.style.setProperty("--accent-soft", value);
-    }
+    // Live-preview the color change in CSS without waiting for save. app.js
+    // installs window.applyTheme while its module evaluates, before the SPA
+    // mounts, so it is always present by the time a picker can fire; an
+    // inline copy here drifted from it (no colour guard, no derived tokens).
+    window.applyTheme(next);
   };
 
   const handleWindowTitleChange = (value) => {
     setWindowTitle(value);
     if (onThemeChange) onThemeChange({ primaryColor, accentSoftColor, windowTitle: value });
     // Route through the shared helper so the default string stays in one place.
-    if (typeof window.applyTheme === "function") {
-      window.applyTheme({ primaryColor, accentSoftColor, windowTitle: value });
-    } else {
-      document.title = value || "Bracket Creator Mobile";
-    }
+    window.applyTheme({ primaryColor, accentSoftColor, windowTitle: value });
   };
 
   const handleLogoUpload = async (e) => {

@@ -29,7 +29,7 @@ The repo ships two frontends, both embedded into the Go binary at build time:
 
 | Surface | Path | Purpose | Stack |
 |---|---|---|---|
-| **Mobile app** | [web-mobile/](web-mobile/) | Tournament admin + spectator/player viewer for the `mobile-app` command. **Primary surface.** | Preact, with JSX compiled to `React.createElement` via esbuild's classic transform (see [Makefile:esbuild-jsx](Makefile#L110)). Single ~5,000-line `styles.css`. |
+| **Mobile app** | [web-mobile/](web-mobile/) | Tournament admin + spectator/player viewer for the `mobile-app` command. **Primary surface.** | Preact, with JSX compiled to `React.createElement` via esbuild's classic transform (see [Makefile:esbuild-jsx](Makefile#L110)). Single >10,000-line `styles.css`. |
 | **Bracket generator** | [web/](web/) | One-shot Excel-bracket generator served by the `serve` command. | Bootstrap 5.3 + plain JS, ~350 lines of overrides |
 
 When extending the design system, **mobile-app is the canonical surface**. The bracket generator is a form; keep it functional and visually simple, don't import mobile-app patterns.
@@ -40,33 +40,35 @@ When extending the design system, **mobile-app is the canonical surface**. The b
 
 1. **Clarity over decoration.** Operators run tournaments under time pressure; a glanceable card beats a beautiful one. No gratuitous animation, no decorative shadows.
 2. **Kendo first.** Red (Aka) and White (Shiro) are positional, never swapped. Web bracket cards put Aka first/top; the horizontal scoreboard and list rows put Shiro left / Aka right; Excel puts White in the left column. The two sides must be **distinguishable at a glance on every surface**: the distinction is carried by *treatment*, not hue alone (so it survives glare, projectors, and color-blindness): Aka = solid/red-tinted fill, Shiro = framed white (cool border + diagonal hatch) so "white" never dissolves into the page. **Color area must scale with the surface.** A full-screen scoreboard can flood half the screen; a dense schedule row cannot rely on a 5px spine. Give each side a tinted cell, a colored header, or a filled badge so the signal stays legible as the component shrinks. See [§4 Match cards](#match-cards--bc-match), [§4 Aka/Shiro side treatment](#akashiro-side-treatment), and [CLAUDE.md](CLAUDE.md) "Match Colors" for the full rule.
-3. **Running state is loud, but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, and a pulsing dot whose *motion* is the primary signal. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only.** Running state must never use red, so the two never collide on the same card (a running match still shows its Aka side in red while the running ring stays navy).
+3. **Running state is loud, but not red.** Anything currently happening on a court gets the **`--accent` (navy) treatment**: navy border, soft-navy ring, navy dot. Anything else stays neutral. Don't dilute it. **Red is reserved for Aka (side) and danger only.** Running state must never use red, so the two never collide on the same card (a running match still shows its Aka side in red while the running ring stays navy).
 
-   **Pulse has exactly two sanctioned meanings, kept apart by hue, never by motion.** The *motion* always says "this needs your eyes"; the *color* says which kind:
-   - **Navy pulse (`--accent`)**: *happening now* - a live/running match on a court (the `.dot--running` dot, running ring/strip).
-   - **Amber pulse (`--warn`)**: *your expected next action* - a state where the operator should act but nothing is live yet. E.g. the court console nudging the operator to switch to the competition that now needs this court (active competition done/not-started while another has matches assignable here).
+   **Motion is reserved for attention, never for "this is normal and ongoing"** (operator ruling, 2026-09-19: a pulse "would mean it needs an action or it's a warning"; the running state "does not need a pulse"). A pulse means one of two things: a **warning** (the SSE connection dropped) or an **expected operator action** (a tied team encounter waiting on a daihyosen). Ordinary ongoing state, a match currently running, a write in flight, is carried by **hue and treatment alone**: the running dot keeps its navy fill and soft ring, it simply doesn't move. A state that qualifies for attention *may* pulse, but nothing requires it to: the court console's competition-switch nudge (`.shiaijo-nudge`, composing `.alert--warn`) is a clickable but *static* amber banner with an icon and a "Switch →" call to action, and it is fully compliant: motion is a permission, not an obligation.
 
-   These two are mutually exclusive by hue so they can coexist on screen without ambiguity (navy = "watch this", amber = "do this next"). Do **not** add a third pulse meaning, and do **not** use red for either (red stays Aka/danger). A next-action pulse must clear itself the moment the action is no longer expected.
+   Hue inside a pulse follows the token table (§3), not a fixed two-value vocabulary: `--danger`/red for a warning that risks data (the dropped-connection dot), `--accent`/navy for an expected action rooted in the running/court language (`.daihyosen-controls--tied`, waiting on a rep bout). A pulse may also depart from its token's usual hue where the surface's own contrast demands it (the sustained-outage strip is solid red, so its dot pulses white/`--accent-fg` rather than red-on-red): that's a contrast accommodation, not a new hue rule, and doesn't license inventing others.
+
+   Progress indicators (the loading spinner's rotation, the "Syncing…" dot's opacity fade) sit outside this principle entirely: they mean "work is under way," not "look here," so they may animate without being either a warning or an action. What keeps them distinct from a pulse is that they run only while the work does, and stop when it finishes.
 4. **Touch-friendly dense surfaces.** Operators score on tablets; players check brackets on phones. The existing pattern bumps tap targets under `@media (pointer: coarse)`, see `.btn--icon-sm` at 44px in [styles.css#L2356](web-mobile/css/styles.css#L2356). Aim for ≥ 36px in shared surfaces, ≥ 44px under coarse pointers.
 5. **Status drives color, color doesn't drive meaning.** The pipeline `setup → pools → knockout → completed` has its own palette; reuse the existing `.badge--*` rather than inventing local hues.
 6. **Domain coupling is allowed.** Class names like `.bc-tree`, `.pool__table`, `.podium-step` exist because they map 1:1 to bracket concepts. Don't generalize a `.match-card` into a `.list-row`: readability wins.
 
 ## 3. Design tokens
 
-All tokens are defined in the `:root` block in [styles.css](web-mobile/css/styles.css). Reference them via `var(--name)`: never hardcode hex or px scales. The file is ~5,000 lines on purpose; search before adding, but file growth is not a budget.
+All tokens are defined in the `:root` block in [styles.css](web-mobile/css/styles.css). Reference them via `var(--name)`: never hardcode hex or px scales. The file is >10,000 lines on purpose; search before adding, but file growth is not a budget.
+
+**Never give a `:root` token a `var()` fallback.** `var(--accent, #1d3557)` reads like defensive coding but is not: the fallback fires only when the token is *undefined*, and a browser too old for custom properties drops the whole declaration anyway, fallback included. So on a `:root` token it is dead code, and worse, a frozen copy that will not follow a rebrand when `--accent` is re-set at runtime. It also rots unnoticed: `--red` once carried `#c00`, `#b91c1c` and `#dc2626` at different call sites, and `--ink-2` carried four different values. A fallback is legitimate in exactly one case, a token that is **optional by design** because it is set per-element from JS and absent is a normal state: `var(--msb-scale, 1)` and `var(--bar-fill, 0)`. If you find yourself writing a fallback for anything else, the token is missing from `:root`, so add it there.
 
 ### Color
 
 | Token | Value | Use |
 |---|---|---|
-| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **running state** (border/ring/dot/running-strip), brand fills |
-| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds** |
-| `--accent-fg` | `#ffffff` | Text on `--accent` |
+| `--accent` | `#1d3557` | Primary CTAs, active nav, winner-side (Shiro), Shiro frame/badges, **running state** (border/ring/dot/running-strip), brand fills. **Re-set at runtime** by `applyTheme` (`app.jsx`) from the Branding primary, together with `--accent-strong`, the filled-button hover shade darkened from it; a stored value that is the stock navy, or not a `#rrggbb` colour, leaves `:root`'s values in place. |
+| `--accent-soft` | `#e7eaf3` | Hover/active tint, focus rings, Shiro court chips, **running state rings/backgrounds**. **Derived at runtime** from a custom Branding primary (8% of it toward white) unless the operator picked a soft colour of their own; the stock pair leaves this token alone, because the derivation only approximates the hand-tuned value. |
+| `--accent-fg` | `#ffffff` | The **on-colour** ink: text and icons that sit on a filled colour surface (`--accent` primarily, but equally the amber announcement banner and the red outage strip, which need the same white and should not each spell it differently). It is also the *fill* of an element that inverts against such a surface, like the white admin pill on the navy hero, where the on-colour value is exactly what is wanted. Only use `--surface` when the white is a neutral page surface (a card, a modal, an input), not part of a colour pairing. |
 | `--red` | `#c1121f` | Aka (Red) side fill/badge, danger buttons. **Aka + danger only: never running state** (see Principle 3) |
 | `--red-soft` | `#fde7e8` | Aka (Red) side tint (score editor, bracket, pool/schedule rows) |
 | `--danger` | `var(--red)` | **Semantic alias of `--red`** for error/destructive intent (error text/borders, the hansoku ▲, invalid-input outlines, **unsaved work: a refused or parked write whose results have not reached the server**). Prefer `--danger` over `--red` when the meaning is "error", not "Aka side": it reads at the call site and keeps the value single-sourced. Never use for running state. **Unsaved results are danger, not caution:** amber is a warning and work at risk of being lost is bigger than that, so a parked-write state takes red even though it also implies an operator action. |
 | `--danger-soft` | `var(--red-soft)` | Soft danger tint: faint error backgrounds. Alias of `--red-soft`. |
-| `--warn` | `#b45309` | Warning text/icon (amber-700, >=4.5:1 on `--warn-soft`). Caution/attention, **never error** (use `--danger`) and **never running** (use `--accent`). Per Principle 3 amber is non-overlapping with red and navy: and is the **one sanctioned colour for an "expected next action" pulse** (e.g. the court-console competition-switch nudge), distinct from the navy running pulse. **That rule is about PULSES, not about static styling** -- it does not make amber the colour of every state that wants an operator action. A state that also carries error or data-loss meaning takes `--danger` (see the parked-write case there). |
+| `--warn` | `#b45309` | Warning text/icon (amber-700, >=4.5:1 on `--warn-soft`). Caution/attention, **never error** (use `--danger`) and **never running** (use `--accent`). It's the customary colour for a state where the operator has something to do next (e.g. the court-console competition-switch nudge, a static banner: see Principle 3), but pulse hue is no longer fixed to amber, or to any single colour: Principle 3 ties motion to attention in general, not to one hue. **Amber's caution meaning doesn't make it the colour of every state that wants an operator action**: a state that also carries error or data-loss meaning takes `--danger` regardless of whether it pulses (see the parked-write case there). |
 | `--warn-strong` | `#f59e0b` | Saturated amber-500 accent border for status pills (offline sync pill) |
 | `--warn-soft` | `#fffbeb` | Warning fill (amber-50): `.alert--warn`, `.tag-badge--warn`, offline pill background |
 | `--warn-border` | `#fde68a` | Warning hairline border (amber-200) |
@@ -88,6 +90,8 @@ All tokens are defined in the `:root` block in [styles.css](web-mobile/css/style
 | `--ink-5` | `#f1f3f6` | **Inverse text/border**: use only on dark (`--ink` / `--ink-1`) backgrounds (e.g. `.sb-draw-toggle--active`). Never use on `--surface` or `--bg`. |
 | `--line` | `#e4e6eb` | Default borders, dividers |
 | `--line-2` | `#eef0f4` | Subtle dividers, alt rows, hover backgrounds |
+| `--line-strong` | `#c7cdd9` | Divider that must read as structure rather than decoration: the bracket's SVG connector strokes, the dashed bye slot, and the quiet-state frame of `.daihyosen-controls`, a control group that has to read as a group on its own `--bg-2` fill. Darker than `--line`; don't reach for it for ordinary borders. |
+| `--text-link` | `#2563eb` | Standalone text links outside body copy (`.viewer-display-modes__link`). Body links inherit `--accent` instead, so this is only for a link that must read as a link rather than as brand. |
 | `--bg` | `#f7f8fa` | Page background |
 | `--surface` | `#ffffff` | Cards, modals, inputs |
 
@@ -167,7 +171,7 @@ Two semantic ring tokens, both `0 0 0 3px var(--accent-soft)` today. They carry 
 | `--focus-ring` | Keyboard-focus halo on **text-entry controls** (`.input/.textarea/.select`, `.radio-pill`, `.lined-textarea`, `.ipt-btn`). Buttons use the separate `outline: 2px solid var(--accent)` convention, not this. |
 | `--ring-active` | The **running/highlight card** halo (`.bc-match--running` / `--highlight`, `.sched-row--running`, `.vsched-item--running`): part of the navy running-signal language (§5). |
 
-The `.dot--running` pulse uses a 4px ring inline (its own keyframe), not these tokens.
+`.dot--running` declares its own static 4px ring inline (`box-shadow: 0 0 0 4px var(--accent-soft)`), not one of these tokens: the dot doesn't pulse (Principle 3), so there's no keyframe left tied to it either.
 
 ### Motion
 
@@ -184,13 +188,15 @@ Durations remain literals (de facto tokens, fold new work toward these):
 | `160ms` | Match-decision modal entrance (`decision-prompt-in`) |
 | `300ms` | Progress bars, toast slide-in |
 
-Keyframes (find each `@keyframes` block in [styles.css](web-mobile/css/styles.css)):
-- `pulse` (1.6s infinite): running state (`.dot--running`, navy `--accent`). The same motion is reused, tinted amber (`--warn`), for an **expected-next-action** nudge (see Principle 3); gate any next-action pulse behind `prefers-reduced-motion` and clear it when the action is no longer expected
+Keyframes (this is a curated guide, not an index: find each `@keyframes` block in [styles.css](web-mobile/css/styles.css) rather than expecting every one listed here):
 - `spin` (0.6s linear infinite): loading spinners
 - `toast-in` (300ms): toast entrance
 - `decision-prompt-in` (160ms, `var(--ease-out)`): match-decision modal entrance
+- `conn-pulse` / `conn-alert-pulse`: the two SSE-connection **warning** pulses (topbar down-dot; the white dot on the sustained-outage strip). Attention pulses per Principle 3.
+- `daihyosen-tied-pulse`: **expected-next-action** pulse for a tied team encounter waiting on a daihyosen (`.daihyosen-controls--tied`). Also Principle 3, navy-hued despite being a next-action case: hue follows the token table, not a fixed vocabulary.
+- `sync-pill-pulse`: the "Syncing…" dot's opacity pulse. **Not a Principle 3 pulse**: it's a progress indicator (work in flight, not attention), exempted the same way as the spinner.
 
-A `prefers-reduced-motion: reduce` block at the bottom of `styles.css` disables all four animations (`.dot--running`, `.spinner`, `.toast`, `.decision-prompt`). Gate any new non-essential animation behind this media query.
+Reduced motion is handled by several `@media (prefers-reduced-motion: reduce)` blocks rather than one. Most sit beside the selector they disable, but one shared block (search it for `.conn-alert__dot`) collects selectors from all over the file, so grep before assuming a given animation is ungated. Gate any new non-essential animation, pulses included, the same way: a block of its own beside the keyframe, or an existing one it can join. **A keyframe injected from JSX needs gating too** and is easy to miss, because it is not in this file at all: `lobby-cycle-fill` (`display_lobby.jsx`) is currently the one ungated animation in the app.
 
 ### Breakpoints
 
@@ -226,7 +232,7 @@ If a new overlay doesn't fit one of these, lift the layer for the entire band ra
 
 Each component lives in `web-mobile/css/styles.css` and is composed in [web-mobile/js/](web-mobile/js/) via Preact's `React.createElement` (after esbuild). Class naming is loosely BEM with `--` for variants and `is-active` / `.is-` for boolean states.
 
-> **On the line numbers below:** they're accurate at time of writing but `styles.css` is ~5,000 lines and edits shift them. If a link points to the wrong rule, **grep the class name in `styles.css`**: that's the durable lookup. New entries should prefer class-name references over line numbers.
+> **On the line numbers below:** they're accurate at time of writing but `styles.css` is >10,000 lines and edits shift them. If a link points to the wrong rule, **grep the class name in `styles.css`**: that's the durable lookup. New entries should prefer class-name references over line numbers.
 
 ### Index
 
@@ -439,7 +445,7 @@ If you add new viewer surfaces, design for the 480px-shell mobile case first and
 When any match is running, three things must be true simultaneously:
 1. `.running-strip` appears in the topbar stack with one chip per running court
 2. The relevant `.bc-match`, `.sched-row`, `.vsched-item` carry the `--running` modifier
-3. A `.dot--running` pulses next to the status badge
+3. A `.dot--running` (static navy dot, see Principle 3) sits next to the status badge
 
 If only one or two surface the signal, it's a bug.
 
@@ -451,7 +457,7 @@ Match-decision visual suffixes are documented in [§4 Match cards](#match-cards-
 - **Keyboard**: every modal honors Escape via `useEscapeToClose`. The admin score editor supports `←` / `→` to navigate between matches **on the same shiaijo**: see [CLAUDE.md](CLAUDE.md) and the note in [admin_schedule.jsx](web-mobile/js/admin_schedule.jsx). When adding keyboard shortcuts, gate them on `!isTextEntry(e.target)` (defined in [ui.jsx#L151](web-mobile/js/ui.jsx#L151)) so they don't clobber inputs.
 - **Touch**: `@media (pointer: coarse)` blocks bump padding on dense controls. The internal floor is ≥ 36px on shared surfaces and ≥ 44px under coarse pointers: note that platform guidance (Apple HIG, WCAG 2.5.5 AAA) wants 44px universally; the 36px floor is a pragmatic choice for laptop-mouse admin surfaces, not a target to aim for. Test any new dense surface on a tablet before merging.
 - **Focus rings**: text-entry controls use the `--focus-ring` token (3px `--accent-soft`); buttons use `outline: 2px solid var(--accent)`. Don't suppress `:focus-visible`: operators tab through forms. See §3 Rings.
-- **Motion**: there's no global `prefers-reduced-motion` opt-out yet: tracked in `bd show bracket-creator-3ch`. Pulse, spin, toast-in, and decision-prompt-in are the only ambient animations; if you add more, gate them yourself until the global block lands.
+- **Motion**: nearly every ambient animation is gated behind `prefers-reduced-motion: reduce`, but there is no single global block to add to, and one animation is still ungated (`lobby-cycle-fill`, injected from `display_lobby.jsx`). Gate any new animation as described in §3 Motion, and remember that a keyframe living in JSX rather than `styles.css` needs the same treatment.
 
 ## 7. Frontend conventions
 
@@ -510,7 +516,7 @@ Before introducing a new component, color, or pattern:
 
 1. **Reuse first.** Check the component list in §4: there is almost always a match (especially for status badges, cards, table rows).
 2. **Extend, don't fork.** A new button shape is a `.btn--<modifier>`, not a new `.action-button`.
-3. **Token-only colors, with two carve-outs.** If you need a hex literal in a CSS rule, you probably need a new token in `:root`: add it there and reference it. Two existing exceptions: (a) the **status palette** in §3 (badge-only colors that live inside `.badge--*` blocks, never lifted into other components), and (b) the **podium gold/silver/bronze gradients** in `.podium-step--*`. New exceptions need to be argued for, not assumed: and the decision-chip inline styles ([§4 Match cards](#match-cards--bc-match)) are debt, not a precedent. (The success/present green was exactly this kind of spreading literal: it lived in ~8 component blocks before being promoted to the `--ok*` ramp; if you find another hue repeating across components, tokenize it the same way.)
+3. **Token-only colors, with four carve-outs.** If you need a hex literal in a CSS rule, you probably need a new token in `:root`: add it there and reference it. Four existing exceptions: (a) the **status palette** in §3 (badge-only colors that live inside `.badge--*` blocks, never lifted into other components), (b) the **podium gold/silver/bronze gradients** in `.podium-step--*`, (c) the **Aka/Shiro side colors**, which point 4 below sanctions and which live inside their own side blocks (`.sb-side--*`, `.tvd-side--*`, `.engi-side__badge--*`, `.bc-side--*` and their siblings), and (d) the **announcement banner's amber gradient** (`.announcement-banner`), whose two stops are a designed amber-600 to amber-700 pair with no token for the lighter one: tokenising only the dark stop would let the pair drift apart if `--warn` ever moved. New exceptions need to be argued for, not assumed: and the decision-chip inline styles ([§4 Match cards](#match-cards--bc-match)) are debt, not a precedent. (The success/present green was exactly this kind of spreading literal: it lived in ~8 component blocks before being promoted to the `--ok*` ramp; if you find another hue repeating across components, tokenize it the same way.)
 4. **Domain-specific is fine.** Match-side colors and podium gradients live inside their component blocks intentionally. Don't generalize them.
 5. **Verify visually.** UI changes are validated in a running browser via `make run-mobile`, not by diff inspection: see [CLAUDE.md](CLAUDE.md) "Common Pitfalls".
 6. **Match the prefix.** Pick the existing prefix that covers your concept (`bc-`, `pool-`, `sched-`, `vsched-`, `tcard-`, `viewer-`, `score-`, `running-`, `my-match-`) before inventing a new one.

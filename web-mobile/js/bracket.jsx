@@ -630,7 +630,7 @@ function BracketConnectors({ rounds, treeRef, refMap, version }) {
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
       {paths.map((p) => (
-        <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+        <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong)" strokeWidth="1.5" />
       ))}
     </svg>
   );
@@ -937,7 +937,7 @@ function BracketConnectorsMeta({ columns, feedersById, treeRef, refMap, version,
   return (
     <svg className="bc-connectors" width={size.w} height={size.h} style={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }}>
       {paths.map((p) => (
-        <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong, #c7cdd9)" strokeWidth="1.5" />
+        <path key={p.key} d={p.d} fill="none" stroke="var(--line-strong)" strokeWidth="1.5" />
       ))}
     </svg>
   );

@@ -994,7 +994,7 @@ function AdminSettings({ c, tournament, onUpdate, onBack, password, showToast, o
             background: saveBlocked ? "var(--red-soft)" : isDirty ? "var(--warn-soft)" : lastSaved ? "var(--accent-soft)" : "transparent",
             color: saveBlocked ? "var(--red)" : isDirty ? "var(--warn-ink)" : "var(--accent)",
             fontWeight: 600,
-            transition: "all 300ms"
+            transition: "background-color 300ms var(--ease-out), color 300ms var(--ease-out)"
           }}>
             {saving && !saveErr ? "Saving…" : saveBlocked ? saveBlockMessage : isDirty ? "● Unsaved changes" : lastSaved ? `✓ Saved at ${lastSaved}` : ""}
           </div>

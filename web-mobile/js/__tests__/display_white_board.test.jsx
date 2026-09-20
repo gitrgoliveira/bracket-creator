@@ -740,9 +740,9 @@ describe('TvIndividualBoard', () => {
       }
       [].concat(kidsOf(n) || []).forEach(walk); })(tree);
     const coloursOf = (name) => nameSpans.filter(s => s.text === name).map(s => s.color);
-    expect(coloursOf('Philippe')).toEqual(['#b91c1c', '#b91c1c']);
-    expect(coloursOf('Frank')).toEqual(['#111', '#111']);
-    expect(coloursOf('Dave')).toEqual(['#111', '#b91c1c']);
+    expect(coloursOf('Philippe')).toEqual(['var(--red)', 'var(--red)']);
+    expect(coloursOf('Frank')).toEqual(['var(--ink-1)', 'var(--ink-1)']);
+    expect(coloursOf('Dave')).toEqual(['var(--ink-1)', 'var(--red)']);
     // The bouts container must be a wrappable flex row so a big pool's bouts
     // wrap to further lines rather than clipping or ellipsizing.
     const kidsOf2 = n => (n.children != null ? n.children : n.props?.children);

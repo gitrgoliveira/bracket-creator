@@ -658,7 +658,7 @@ function DecisionPrompt({ kind, sideA, sideB, defaultSide, askReason, requireRea
   };
 
   return (
-    <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2, #fafafa)" }}>
+    <form className="decision-prompt" onSubmit={submit} style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2)" }}>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
         <div style={{ fontWeight: 600 }}>{isKiken ? "Which side withdrew?" : "Which side did not show up?"}</div>
@@ -792,12 +792,12 @@ function RemainingMatchesPanel({ compID, password, withdrawnPlayer, onAwarded, o
   const playerName = withdrawnPlayer?.name || "player";
 
   return (
-    <div className="remaining-matches" style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 12, background: "var(--bg-2, #fafafa)" }}>
+    <div className="remaining-matches" style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 12, marginTop: 12, background: "var(--bg-2)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>Remaining matches for {playerName}</div>
         {onClose && <button type="button" className="btn btn--ghost btn--sm" onClick={onClose} style={{ padding: "2px 8px" }}>✕</button>}
       </div>
-      {err && <div style={{ color: "var(--danger, #c00)", fontSize: 12, marginBottom: 6 }}>{err}</div>}
+      {err && <div style={{ color: "var(--danger)", fontSize: 12, marginBottom: 6 }}>{err}</div>}
       {matches === null && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>Loading…</div>}
       {matches !== null && matches.length === 0 && (
         <div style={{ fontSize: 12, color: "var(--ink-3)" }}>No remaining scheduled matches.</div>
@@ -1093,7 +1093,7 @@ function ReasonPrompt({ label = "Reason for change", presets = REASON_PROMPT_NO_
     <form
       className="reason-prompt"
       onSubmit={submit}
-      style={{ border: "1px solid var(--line, #ddd)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2, #fafafa)" }}
+      style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 12, marginTop: 8, marginBottom: 8, background: "var(--bg-2)" }}
     >
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{label}</div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>

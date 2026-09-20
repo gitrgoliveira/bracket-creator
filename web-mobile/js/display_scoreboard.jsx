@@ -16,9 +16,9 @@ const { useMemo: useMD } = React;
 function NextPair({ shiro, aka, ...rest }) {
     return (
         <span {...rest}>
-            <span style={{ color: "#111" }}>{shiro}</span>
+            <span style={{ color: "var(--ink-1)" }}>{shiro}</span>
             <span style={{ color: "var(--ink-3)", fontWeight: 600, fontSize: "2vh", padding: "0 1vw" }}>vs</span>
-            <span style={{ color: "#b91c1c" }}>{aka}</span>
+            <span style={{ color: "var(--red)" }}>{aka}</span>
         </span>
     );
 }
@@ -58,20 +58,20 @@ function emptyStateHeadline(allCompleted, noMatches) {
 function LinkDot({ linkState }) {
     const connected = linkState === 'connected';
     const isStale = linkState === 'stale';
-    // 'local' uses var(--warn, #b45309); 'stale' uses var(--danger, #dc2626).
+    // 'local' uses var(--warn); 'stale' uses var(--danger).
     // Per DESIGN.md principle 2, the two degraded states are distinguished by
     // TREATMENT, not hue alone (so the meaning survives projector glare and
     // colour-blindness): 'stale' carries a dark ring, 'local' is a plain dot.
     // When connected we keep the element but make it invisible (visibility
     // hidden, aria-hidden) so the header reserves the dot's space and the
     // subtitle does not shift horizontally as the state toggles.
-    const bg = isStale ? 'var(--danger, #dc2626)' : 'var(--warn, #b45309)';
+    const bg = isStale ? 'var(--danger)' : 'var(--warn)';
     const label = isStale ? 'No data feed' : 'Operator broadcast (server offline)';
     return (
         <span data-testid="display-link-dot" data-link-state={linkState}
             role={connected ? undefined : 'status'} aria-label={connected ? undefined : label}
             aria-hidden={connected ? 'true' : undefined}
-            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: connected ? 'transparent' : bg, display: 'inline-block', flexShrink: 0, boxShadow: isStale ? '0 0 0 0.3vh var(--ink-1, #111827)' : 'none', visibility: connected ? 'hidden' : 'visible' }} />
+            style={{ width: '1.4vh', height: '1.4vh', borderRadius: '50%', background: connected ? 'transparent' : bg, display: 'inline-block', flexShrink: 0, boxShadow: isStale ? '0 0 0 0.3vh var(--ink-1)' : 'none', visibility: connected ? 'hidden' : 'visible' }} />
     );
 }
 
@@ -158,17 +158,17 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 summary row below is suppressed on the TV board: the pairing and
                 the score used to be shown twice (once here, once there); this
                 is the one home for both now. Each side's figures take that
-                side's OWN colour (#111 / #b91c1c), which is what the summary
+                side's OWN colour (var(--ink-1) / var(--red)), which is what the summary
                 row they replace did via .msb-slot and .msb-slot--aka: a neutral
                 slate here would put grey figures under a red name, the same
                 name-vs-number colour mismatch this pass exists to remove. */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "2vw", marginBottom: "2vh" }}>
                 <div style={{ minWidth: 0 }}>
                     <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--ink-3)" }}><TermD name="shiro">SHIRO</TermD></div>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#111", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || <NumberedName side="shiro" clip {...shiroTeamParts} />}</div>
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "var(--ink-1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repShiro || <NumberedName side="shiro" clip {...shiroTeamParts} />}</div>
                     {repShiro && <div data-testid="rep-shiro-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="shiro" clip {...shiroTeamParts} /></div>}
                     {isTeamMatch && (
-                        <div data-testid="headline-ivpw-shiro" style={{ display: "flex", gap: "1.4vw", fontSize: "2vh", fontWeight: 700, color: "#111", marginTop: "0.6vh" }}>
+                        <div data-testid="headline-ivpw-shiro" style={{ display: "flex", gap: "1.4vw", fontSize: "2vh", fontWeight: 700, color: "var(--ink-1)", marginTop: "0.6vh" }}>
                             <span><abbr className="msb-lab" title="Individual Victories" style={{ display: "inline", fontSize: "0.7em" }}>IV</abbr> {ivShiro}</span>
                             <span><abbr className="msb-lab" title="Points Won" style={{ display: "inline", fontSize: "0.7em" }}>PW</abbr> {pwShiro}</span>
                         </div>
@@ -176,11 +176,11 @@ function TvWhiteBoard({ tournament, court, linkState = 'connected', promoted, is
                 </div>
                 <div style={{ display: "flex", justifyContent: "center" }}>{nameCentre}</div>
                 <div style={{ minWidth: 0, textAlign: "right" }}>
-                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "#b91c1c" }}><TermD name="aka">AKA</TermD></div>
-                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "#b91c1c", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || <NumberedName side="aka" clip {...akaTeamParts} />}</div>
+                    <div style={{ fontFamily: "var(--font-impact)", fontSize: "2.2vh", letterSpacing: "0.14em", color: "var(--red)" }}><TermD name="aka">AKA</TermD></div>
+                    <div style={{ fontSize: "5vh", fontWeight: 800, color: "var(--red)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{repAka || <NumberedName side="aka" clip {...akaTeamParts} />}</div>
                     {repAka && <div data-testid="rep-aka-team" style={{ fontSize: "2.4vh", fontWeight: 600, color: "var(--ink-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><NumberedName side="aka" clip {...akaTeamParts} /></div>}
                     {isTeamMatch && (
-                        <div data-testid="headline-ivpw-aka" style={{ display: "flex", gap: "1.4vw", justifyContent: "flex-end", fontSize: "2vh", fontWeight: 700, color: "#b91c1c", marginTop: "0.6vh" }}>
+                        <div data-testid="headline-ivpw-aka" style={{ display: "flex", gap: "1.4vw", justifyContent: "flex-end", fontSize: "2vh", fontWeight: 700, color: "var(--red)", marginTop: "0.6vh" }}>
                             <span><abbr className="msb-lab" title="Points Won" style={{ display: "inline", fontSize: "0.7em" }}>PW</abbr> {pwAka}</span>
                             <span><abbr className="msb-lab" title="Individual Victories" style={{ display: "inline", fontSize: "0.7em" }}>IV</abbr> {ivAka}</span>
                         </div>
@@ -823,7 +823,7 @@ function TvDisplay({ court, tournament, competitions, withZekkenName, linkState 
                                 borderRadius: "0.6vw", padding: "0.5vh 1.2vw",
                                 fontWeight: 700, fontSize: "1.8vh",
                             }}>
-                                {/* Static navy dot: wayfinding only, NOT pulsing */}
+                                {/* Static navy wayfinding dot */}
                                 <span style={{ width: "0.9vh", height: "0.9vh", borderRadius: "50%", background: "var(--accent)", display: "inline-block", flexShrink: 0 }} />
                                 Shiaijo {c}
                             </span>

@@ -70,7 +70,7 @@ Set the **Public URL** field to the externally reachable address of your app (fo
 The same **Edit details** page also has branding and sponsor fields, below tournament details. All fields are optional; the default kendo theme applies when nothing is configured.
 
 - **Logo**: upload an image file shown on the viewer, the lobby displays, and the admin screens.
-- **Accent colours**: set a primary accent colour and a soft background tint; the viewer and display screens adopt them across the whole site.
+- **Accent colours**: set a primary accent colour and, if you want one, a soft background tint; the viewer and display screens adopt them across the whole site. Leave the tint alone and it is derived from the primary, so one colour choice re-tints every surface, including the running-match rings and focus halos.
 - **Sponsors**: upload full-width images that appear on the public viewer page only. Sponsor images do not appear on the TV lobby boards or scoring displays.
 
 ## Announcements

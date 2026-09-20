@@ -147,9 +147,9 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
 
   const badgeStyle = (delta) => {
     const abs = Math.abs(delta);
-    if (abs <= 5) return { color: "var(--green, #16a34a)", fontWeight: 600 };
-    if (abs <= 20) return { color: "var(--amber, #d97706)", fontWeight: 600 };
-    return { color: "var(--red, #dc2626)", fontWeight: 700 };
+    if (abs <= 5) return { color: "var(--ok)", fontWeight: 600 };
+    if (abs <= 20) return { color: "var(--warn)", fontWeight: 600 };
+    return { color: "var(--danger)", fontWeight: 700 };
   };
 
   const statusLabel = (stat) => {
@@ -188,7 +188,7 @@ export function CourtPacePanel({ byCourt, safeMatchDuration }) {
             ))}
           </div>
           {suggestion && (
-            <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--amber-bg, #fffbeb)", border: "1px solid var(--amber-border, #fde68a)", borderRadius: 6, fontSize: 13 }}>
+            <div style={{ marginTop: 8, padding: "8px 12px", background: "var(--warn-soft)", border: "1px solid var(--warn-border)", borderRadius: 6, fontSize: 13 }}>
               <strong>Suggestion:</strong> Move {suggestion.n} {suggestion.n === 1 ? "match" : "matches"} from Shiaijo {suggestion.from} to Shiaijo {suggestion.to} to rebalance court load. Use the court picker on each match card to reassign.
             </div>
           )}

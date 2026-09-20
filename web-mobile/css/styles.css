@@ -65,8 +65,10 @@
   --ink-3: #6b7280;
   --ink-4: #6c7480; /* 4.7:1 on white, was #9aa1ac (2.8:1) */
   --ink-5: #f1f3f6; /* inverse text/border, use only on dark (--ink / --ink-1) backgrounds */
+  --text-link: #2563eb;    /* link blue: standalone text links outside body copy */
   --line: #e4e6eb;
   --line-2: #eef0f4;
+  --line-strong: #c7cdd9;  /* stronger divider: bracket connector strokes, bye slots */
   --bg: #f7f8fa;
   --surface: #ffffff;
   /* Secondary surface, slightly tinted fill for cards/cells that sit on
@@ -179,6 +181,7 @@ a:hover {
 /* ---------- App shell ---------- */
 .app {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -241,12 +244,10 @@ a:hover {
   flex: 1;
 }
 
-/* Connection-status indicator (admin chrome). Deliberately NOT the pulsing
-   `.dot--running` running-match signal (Principle 3): a healthy data
-   connection is a calm, passive status, so its dot is static navy. Only the
-   disconnected state moves, so motion is reserved for the state that actually
-   needs attention. This keeps it distinct from the strip's pulsing dot sitting
-   directly below it. */
+/* Connection-status indicator (admin chrome). A healthy data connection is a
+   calm, passive status, so its dot is static navy. Only the disconnected state
+   moves, because a dropped connection is a warning and motion is reserved for
+   what needs attention (DESIGN.md Principle 3). */
 .topbar__conn {
   display: inline-flex;
   align-items: center;
@@ -266,21 +267,21 @@ a:hover {
 }
 
 .topbar__conn--down {
-  color: var(--red);
+  color: var(--danger);
 }
 
 .topbar__conn--down .topbar__conn__dot {
-  background: var(--red);
+  background: var(--danger);
   animation: conn-pulse 1.6s ease-out infinite;
 }
 
 @keyframes conn-pulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 35%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 35%, transparent);
   }
   70%,
   100% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, var(--red) 0%, transparent);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--danger) 0%, transparent);
   }
 }
 
@@ -369,7 +370,7 @@ a:hover {
 /* Running-strip: the admin "matches running now" bar. It is a NAVIGATION control
    (each chip is a button → opens that match's score editor), so it stays, but
    recoloured off red onto --accent navy, since red is now reserved for Aka +
-   danger. The running state is still conveyed by the strip's presence + pulsing dot. */
+   danger. The running state is still conveyed by the strip's presence + navy dot. */
 .running-strip {
   background: var(--accent-soft);
   border-bottom: 1px solid var(--line);
@@ -406,7 +407,7 @@ a:hover {
   gap: 6px;
   color: var(--ink);
   cursor: pointer;
-  transition: background 120ms;
+  transition: background 120ms var(--ease-out);
 }
 
 .running-strip__chip:hover {
@@ -522,7 +523,7 @@ a:hover {
   font-size: 13.5px;
   /* Enumerate the animated properties, `all` also animated the focus
      outline (it should snap in) and risks animating layout (mp-nubo P3). */
-  transition: background-color 120ms, border-color 120ms, color 120ms;
+  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
 }
 
 .btn:hover {
@@ -834,7 +835,7 @@ a:hover {
   background: var(--surface);
   font-size: 14px;
   outline: none;
-  transition: border-color 120ms, box-shadow 120ms;
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
 }
 
 .input:focus,
@@ -869,7 +870,7 @@ a:hover {
   border-radius: 8px;
   overflow: hidden;
   background: var(--surface);
-  transition: border-color 120ms, box-shadow 120ms;
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
 }
 
 .lined-textarea:focus-within {
@@ -1118,32 +1119,24 @@ a:hover {
   border-color: var(--line);
 }
 
+/* Base dot carries a neutral fill so a bare `.dot` is visible. Without it the
+   one un-modified use (the dashboard's "Currently running" heading) rendered an
+   8px hole. `.dot--running` overrides the colour below. */
 .dot {
   width: 8px;
   height: 8px;
   border-radius: 999px;
   display: inline-block;
+  background: var(--ink-3);
 }
 
-/* Running-match signal: pulsing dot. Colour moved off red → --accent navy so red is
-   reserved for Aka (side) + danger (DESIGN.md §2/§4). The PULSE (motion) is the
-   running-match signal, not the hue. */
+/* Running-match signal: colour moved off red → --accent navy so red stays
+   reserved for Aka (side) + danger (DESIGN.md §2/§4). A running match is
+   normal ongoing state, so hue + the static ring carry the signal, not
+   motion (DESIGN.md Principle 3). */
 .dot--running {
   background: var(--accent);
   box-shadow: 0 0 0 4px var(--accent-soft);
-  animation: pulse 1.6s infinite;
-}
-
-@keyframes pulse {
-
-  0%,
-  100% {
-    box-shadow: 0 0 0 4px var(--accent-soft);
-  }
-
-  50% {
-    box-shadow: 0 0 0 6px transparent;
-  }
 }
 
 /* ---------- Tournament cards ---------- */
@@ -1159,7 +1152,7 @@ a:hover {
   border-radius: var(--r-lg);
   padding: 18px;
   cursor: pointer;
-  transition: all 140ms;
+  transition: background-color 140ms var(--ease-out), border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), transform 140ms var(--ease-out);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -1338,7 +1331,7 @@ a:hover {
   width: 100%;
   font-family: inherit;
   text-align: left;
-  transition: all 140ms;
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), opacity 140ms var(--ease-out);
   position: relative;
   z-index: 1;
   cursor: pointer;
@@ -1411,9 +1404,9 @@ a:hover {
   gap: 8px;
   padding: 8px 10px 8px 13px;
   min-height: 44px;
-  border: 1.5px dashed var(--line-strong, #c7cdd9);
+  border: 1.5px dashed var(--line-strong);
   border-radius: var(--r);
-  background: var(--line, #f0f2f5);
+  background: var(--line);
   pointer-events: none;
   user-select: none;
   position: relative;
@@ -1659,7 +1652,7 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 18px;
-  transition: transform 120ms, box-shadow 120ms;
+  transition: transform 120ms var(--ease-out), box-shadow 120ms var(--ease-out);
 }
 
 .pool:hover {
@@ -1737,7 +1730,7 @@ a:hover {
 
 /* Uniform green advancing row (no ▲ arrow, no cut-border, tint + badge carry the signal) */
 .pool__table tr.advancing {
-  background: #ecfdf5;
+  background: var(--ok-soft);
 }
 
 /* Team standings carry 8 numeric columns (W L T IV IL IT PW PL). On a phone
@@ -1773,9 +1766,9 @@ a:hover {
 }
 
 .rank-badge--adv {
-  background: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
+  background: var(--ok-soft);
+  color: var(--ok-ink);
+  border: 1px solid var(--ok);
 }
 
 /* Numbered match list section header */
@@ -1843,13 +1836,13 @@ a:hover {
 }
 
 .pool-match-numbered-row__side--shiro {
-  background: var(--white-side, #f6f7fb);
-  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, rgba(42,51,70,0.07) 3px, rgba(42,51,70,0.07) 6px);
+  background: var(--white-side);
+  background-image: repeating-linear-gradient(-45deg, transparent, transparent 3px, var(--shiro-hatch) 3px, var(--shiro-hatch) 6px);
   border-radius: 6px 0 0 6px;
 }
 
 .pool-match-numbered-row__side--aka {
-  background: var(--red-soft, #fde7e8);
+  background: var(--red-soft);
   justify-content: flex-end;
   text-align: right;
   border-radius: 0 6px 6px 0;
@@ -1934,7 +1927,7 @@ a:hover {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface);
-  transition: border-color 120ms;
+  transition: border-color 120ms var(--ease-out);
 }
 
 .sched-row:hover {
@@ -2267,6 +2260,7 @@ a:hover {
 .viewer {
   background: var(--bg);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .viewer__shell {
@@ -2275,6 +2269,7 @@ a:hover {
   margin: 0 auto;
   background: var(--bg);
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -2373,7 +2368,7 @@ a:hover {
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink-3);
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  transition: color 0.2s var(--ease-out), border-color 0.2s var(--ease-out), background 0.2s var(--ease-out);
 }
 .sync-status-pill .sync-pill__dot {
   font-size: 8px;
@@ -2436,14 +2431,15 @@ button.sync-status-pill:focus-visible {
   border-color: color-mix(in oklch, var(--accent) 25%, transparent);
   background: var(--accent-soft);
 }
-/* syncing, neutral ink, pulsing dot to indicate in-flight */
+/* syncing, neutral ink */
 .sync-pill--syncing {
   color: var(--ink-2);
   border-color: var(--line);
   background: var(--surface);
 }
-/* syncing dot pulses to signal the write is in flight (motion is the
-   primary in-flight signal, per DESIGN.md Principle 3). */
+/* syncing dot pulses to signal the write is in flight. This is a progress
+   indicator, not a status pulse, so DESIGN.md Principle 3 explicitly exempts
+   it: it says "work is under way", not "look here". */
 .sync-pill--syncing .sync-pill__dot {
   animation: sync-pill-pulse 1s ease-in-out infinite;
 }
@@ -2464,9 +2460,10 @@ button.sync-status-pill:focus-visible {
    auth and is parked, not lost, until the operator signs in again. Danger
    rather than amber because the operator's finished results are sitting
    unsaved: that is a failure with data at risk, which is what --danger is
-   for, and it is bigger than the caution --warn carries. (The "expected next
-   action is amber" rule in Principle 3 is scoped to PULSES, not to static
-   styling -- a review round read it as general and was wrong.) */
+   for, and it is bigger than the caution --warn carries. (Amber is the
+   customary colour for "you have something to do next", but that never made it
+   the colour of every state wanting an operator action -- a review round read
+   it as general and was wrong.) */
 .sync-pill--auth {
   color: var(--danger-ink);
   border-color: var(--danger-border);
@@ -2882,8 +2879,8 @@ button.vsched-item:not([data-clickable]) {
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 3px;
-  background: var(--accent-soft, #eef);
-  color: var(--accent, #36c);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* Winner badge, flat accent, no gradient */
@@ -2944,12 +2941,12 @@ button.vsched-item:not([data-clickable]) {
   gap: 8px;
   padding: 8px 12px;
   margin-bottom: 12px;
-  background: var(--accent-soft, #eef);
+  background: var(--accent-soft);
   border-radius: 8px;
   font-size: 13px;
 }
 .viewer-filter-bar__icon {
-  color: var(--accent, #36c);
+  color: var(--accent);
 }
 
 /* Section-title with inline running-match dot */
@@ -2998,7 +2995,7 @@ button.vsched-item:not([data-clickable]) {
   flex-wrap: wrap;
 }
 .viewer-display-modes__link {
-  color: var(--text-link, #2563eb);
+  color: var(--text-link);
   text-decoration: none;
 }
 .viewer-display-modes__sep {
@@ -3125,36 +3122,15 @@ button.vsched-item:not([data-clickable]) {
   padding: 7px 14px;
   letter-spacing: 0.02em;
   /* Lift the white pill off the navy hero so it reads as a raised, pressable
-     control, then a slow white ring pulse draws the eye, the loud "set this
-     up" signal while the tournament has zero competitions. White ring (not the
-     navy running-pulse of §3) so the two motion languages never collide. */
+     control. The loud STATIC treatment (solid white fill + elevation) is the
+     "set this up" signal while the tournament has zero competitions; the
+     primary path is the "Open admin" button in the empty-state card below. */
   box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35);
-  animation: admin-pill-pulse 2s var(--ease-out) infinite;
 }
 
 .viewer__head--hero .viewer__admin-pill--prominent:hover {
   background: var(--accent-soft);
   color: var(--accent);
-  /* Intent shown, settle the pulse so it doesn't nag during interaction. */
-  animation: none;
-}
-
-@keyframes admin-pill-pulse {
-  0% {
-    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35),
-                0 0 0 0 color-mix(in srgb, var(--accent-fg) 55%, transparent);
-  }
-  70%,
-  100% {
-    box-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.35),
-                0 0 0 7px color-mix(in srgb, var(--accent-fg) 0%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .viewer__head--hero .viewer__admin-pill--prominent {
-    animation: none;
-  }
 }
 
 .viewer__logo {
@@ -3180,8 +3156,7 @@ button.vsched-item:not([data-clickable]) {
 /* Tournament info card (mp-ef3), public event details */
 .tournament-info {
   background: var(--accent-soft);
-  border: 1px solid rgba(29, 53, 87, 0.22); /* fallback for browsers without color-mix() */
-  border-color: color-mix(in oklch, var(--accent) 22%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
   border-radius: var(--r-lg);
   padding: 14px 16px;
   margin-bottom: 14px;
@@ -3223,7 +3198,7 @@ button.vsched-item:not([data-clickable]) {
 .tournament-info__link {
   color: var(--accent);
   text-decoration: underline;
-  text-decoration-color: rgba(29, 53, 87, 0.3);
+  text-decoration-color: color-mix(in oklch, var(--accent) 30%, transparent);
   text-underline-offset: 2px;
 }
 
@@ -3324,7 +3299,7 @@ button.vsched-item:not([data-clickable]) {
   background: var(--accent);
   transform-origin: left;
   transform: scaleX(var(--bar-fill, 0));
-  transition: transform 300ms;
+  transition: transform 300ms var(--ease-out);
 }
 
 .vlist-item__pct {
@@ -3569,7 +3544,7 @@ button.vsched-item:not([data-clickable]) {
    .tcard:hover for system consistency. */
 .card--action {
   cursor: pointer;
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  transition: border-color 140ms var(--ease-out), box-shadow 140ms var(--ease-out), transform 140ms var(--ease-out);
 }
 
 .card--action:hover {
@@ -4061,7 +4036,7 @@ button.vsched-item:not([data-clickable]) {
   border-radius: var(--r-lg);
   cursor: pointer;
   text-align: left;
-  transition: background 0.12s;
+  transition: background 0.12s var(--ease-out);
   min-width: 0;
 }
 
@@ -4362,7 +4337,7 @@ button.vsched-item:not([data-clickable]) {
   align-items: center;
   gap: 16px;
   cursor: pointer;
-  transition: all 200ms ease;
+  transition: background-color 200ms var(--ease-out), border-color 200ms var(--ease-out), color 200ms var(--ease-out);
   background: var(--surface);
   color: var(--ink-2);
 }
@@ -4484,7 +4459,7 @@ button.vsched-item:not([data-clickable]) {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-  transition: all 120ms;
+  transition: border-color 120ms var(--ease-out), box-shadow 120ms var(--ease-out), opacity 120ms var(--ease-out);
   font-size: 13px;
 }
 
@@ -4529,7 +4504,7 @@ button.vsched-item:not([data-clickable]) {
 .tw-match__round {
   font-size: 0.7rem;
   font-weight: 600;
-  color: var(--text-secondary, #666);
+  color: var(--ink-3);
   margin-left: 0.25rem;
 }
 
@@ -4938,6 +4913,7 @@ button.vsched-item:not([data-clickable]) {
   border-radius: var(--r-lg);
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5047,7 +5023,7 @@ button.vsched-item:not([data-clickable]) {
   flex-direction: column;
   justify-content: center;
   min-width: 0; /* allow the grid track to shrink below the name's content width */
-  transition: background 0.3s ease;
+  transition: background 0.3s var(--ease-out);
   /* Aka/Shiro side treatment (DESIGN.md §4): solid side tint + a thick coloured
      top bar so the colour reads as real area. Matches the inline editor's
      Proposal C. */
@@ -5272,7 +5248,7 @@ button.vsched-item:not([data-clickable]) {
   min-height: 44px;
   margin-top: 8px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  transition: border-color 0.15s var(--ease-out), color 0.15s var(--ease-out), background 0.15s var(--ease-out);
 }
 
 .sb-draw-toggle:hover {
@@ -6259,7 +6235,7 @@ button.vsched-item:not([data-clickable]) {
   background: var(--surface);
   color: var(--ink-2);
   cursor: pointer;
-  transition: all 120ms;
+  transition: background-color 120ms var(--ease-out), border-color 120ms var(--ease-out), color 120ms var(--ease-out);
 }
 
 .day-tab:hover {
@@ -6358,12 +6334,12 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .parse-preview th {
-  background: var(--surface-2, #f5f5f5);
+  background: var(--surface-2);
   font-weight: 600;
 }
 
 .parse-preview .cell--missing {
-  color: var(--red, #c00);
+  color: var(--danger);
   background: var(--danger-soft);
 }
 
@@ -6383,7 +6359,7 @@ button.vsched-item:not([data-clickable]) {
    body size, normal case, its own line, and it wraps like prose. */
 .import-result {
   padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line);
 }
 
 .import-result__head {
@@ -6598,7 +6574,7 @@ button.vsched-item:not([data-clickable]) {
 .field__select {
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 6px;
   font-size: 13px;
   background: var(--surface);
@@ -6608,7 +6584,7 @@ button.vsched-item:not([data-clickable]) {
 .field__input {
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 6px;
   font-size: 13px;
   background: var(--surface);
@@ -6678,7 +6654,7 @@ button.vsched-item:not([data-clickable]) {
 }
 
 .match-detail-card__comp {
-  color: var(--ink-2, #374151);
+  color: var(--ink-2);
 }
 
 .match-detail-card__close {
@@ -6716,15 +6692,15 @@ button.vsched-item:not([data-clickable]) {
    Shiro = left/dark, Aka = right/red. */
 .msb { width: 100%; }
 .msb-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px;
-  border-top: 1px solid var(--line, #eee); font-size: 13px; }
+  border-top: 1px solid var(--line); font-size: 13px; }
 /* Remove the leading hairline only when the FIRST row is not a summary row,
    i.e. the individual scoreboard, whose first (and only) row is a score row.
    In a team scoreboard the summary row is first and keeps its own thick rule
    (below); the first bout row sits second, so it keeps its hairline. */
 .msb-row:first-child:not(.msb-row--summary) { border-top: none; }
-.msb-name { flex: 1; min-width: 0; font-weight: 600; color: #111;
+.msb-name { flex: 1; min-width: 0; font-weight: 600; color: var(--ink-1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msb-name--aka { text-align: right; color: var(--red, #b91c1c); }
+.msb-name--aka { text-align: right; color: var(--red); }
 /* A bout row's name cell carries a member label on the OUTER side, so the
    cell holds TWO inline children. Ellipsis truncates the END of the run,
    which on Aka is the label: a long name clipped Aka's label away while
@@ -6754,12 +6730,12 @@ button.vsched-item:not([data-clickable]) {
   gap: 4px; min-width: 104px; }
 .msb-slots { display: flex; align-items: center; gap: 2px; }
 .msb-slot { display: inline-flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 20px; padding: 0 3px; border: 1px solid var(--line-2, #e5e7eb);
-  border-radius: 3px; font-family: var(--font-mono, monospace); font-weight: 700;
-  font-size: 13px; color: #111; }
-.msb-slot--aka { color: var(--red, #b91c1c); }
+  min-width: 18px; height: 20px; padding: 0 3px; border: 1px solid var(--line-2);
+  border-radius: 3px; font-family: var(--font-mono); font-weight: 700;
+  font-size: 13px; color: var(--ink-1); }
+.msb-slot--aka { color: var(--red); }
 .msb-vs { min-width: 16px; text-align: center; color: #9ca3af; font-size: 11px; font-weight: 700; }
-.msb-hansoku { color: var(--red, #dc2626); font-weight: 700; }
+.msb-hansoku { color: var(--danger); font-weight: 700; }
 /* The loose result mark (both slots full, drifted data): it is the row's ONLY
    indication of the verdict on that surface, so it reads at slot strength.
    The old 10px/muted values were the deleted centre chip's quiet styling. */
@@ -6770,7 +6746,7 @@ button.vsched-item:not([data-clickable]) {
    reads as the result (mp-13y: green was never part of the FIK spec). */
 .msb-slots--win .msb-slot { font-weight: 800; }
 /* §277 summary row: labelled IV/PW per side */
-.msb-row--summary { border-top: 2px solid #111; }
+.msb-row--summary { border-top: 2px solid var(--ink-1); }
 .msb-row--summary .msb-slot { border: none; flex-direction: column; min-width: 26px;
   font-size: 16px; font-weight: 800; height: auto; }
 .msb-lab { display: block; font-size: 10px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; }
@@ -6788,8 +6764,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .msb-row--queued .msb-slot { color: #9ca3af; }
 /* Daihyosen: the rep bout carries its own (DH) centre mark, so no text
    banner — just a top-border divider separating it from the numbered bouts. */
-.msb-row--dh { border-top: 2px solid #111; }
-.msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: var(--ink-3); border-top: 2px solid #111; }
+.msb-row--dh { border-top: 2px solid var(--ink-1); }
+.msb-dh-pending { text-align: center; padding: 8px 0; font-size: 12px; color: var(--ink-3); border-top: 2px solid var(--ink-1); }
 /* TV variant, scale up for the fullscreen board.
    The font sizes and slot box dimensions are multiplied by --msb-scale
    (default 1); a few fixed values (horizontal padding, slot border-radius)
@@ -6798,7 +6774,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    rows → bigger scale, so the same row template fills the screen whether the
    pool has 3 matches or 10. Other consumers of variant="tv" (TvWhiteBoard,
    streaming overlay) leave --msb-scale unset and get the default sizes. */
-.msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid #e5e7eb; }
+.msb--tv .msb-row { font-size: calc(3vh * var(--msb-scale, 1)); padding: calc(1.2vh * var(--msb-scale, 1)) 1vw; border-top: 1px solid var(--line); }
 .msb--tv .msb-name { font-size: calc(3vh * var(--msb-scale, 1)); }
 .msb--tv .msb-marks { min-width: 22vw; gap: 0.6vw; }
 .msb--tv .msb-slot { min-width: min(calc(5vh * var(--msb-scale, 1)), 8.5vh); height: min(calc(5.6vh * var(--msb-scale, 1)), 9.5vh); font-size: calc(3.5vh * var(--msb-scale, 1)); border-radius: 0.4vh; }
@@ -6824,12 +6800,12 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    year, which blanked the centre of every board that is not .msb--tv (the lobby
    passes no variant at all) — so if a base rule reappears here, check it is not
    hiding the middle value again. Only the TV contrast lift is real. */
-.msb--tv .msb-sep { color: var(--ink-2, #3a414e); font-weight: 700; }
-.msb--tv .msb-row--summary { border-top: 0.4vh solid #111; }
+.msb--tv .msb-sep { color: var(--ink-2); font-weight: 700; }
+.msb--tv .msb-row--summary { border-top: 0.4vh solid var(--ink-1); }
 .msb--tv .msb-row--summary .msb-slot { min-width: calc(6vh * var(--msb-scale, 1)); font-size: calc(3.4vh * var(--msb-scale, 1)); }
 .msb--tv .msb-lab { font-size: calc(1.2vh * var(--msb-scale, 1)); }
 .msb--tv .msb-hansoku { font-size: calc(2.8vh * var(--msb-scale, 1)); font-weight: 900; }
-.msb--tv .msb-row--dh { border-top: 0.3vh solid #111; }
+.msb--tv .msb-row--dh { border-top: 0.3vh solid var(--ink-1); }
 /* TV bout decisiveness comes from the base .msb-slots--win weight bump alone.
    There is deliberately NO font-size override here: one existed (3.2vh, below
    the 3.5vh base) from when a --win group could only hold Ht/maru marks, but a
@@ -6858,7 +6834,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    beside it -- the least legible thing in the cell. Set only when a score
    exists (display_lobby.jsx), so an unscored encounter's "vs" still reads as
    the quiet separator the individual rows show. */
-.lobby-cell .lobby-score { color: var(--ink, #111); font-size: 1.9vh; font-weight: 700; }
+.lobby-cell .lobby-score { color: var(--ink); font-size: 1.9vh; font-weight: 700; }
 /* The competitor-number chip is sized in em, so it tracked the name's 13px
    base and never got a TV bump like every other scoreboard token
    (.msb-row/.msb-name/.msb-slot/.msb-vs/.msb-lab all have one). Routing
@@ -7135,8 +7111,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 /* Leading amber dot, matches the offline sync-pill's glance language so the
    two offline signals read as one family. Static (not pulsing): this is passive
-   status ("will retry automatically"); DESIGN.md reserves the amber *pulse* for
-   a demanded next action, which here is the explicit "Retry now" button. */
+   status ("will retry automatically"), and DESIGN.md Principle 3 reserves
+   motion for a warning or a demanded next action, which here is the explicit
+   "Retry now" button rather than the dot. */
 .pending-write-banner::before {
   content: "";
   flex: none;
@@ -7203,8 +7180,8 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* The SHIRO/AKA chips are dropped on read-only rows; the side is carried by the
    column + the tinted side background. Colour the name Shiro-dark / Aka-red so
    each row still reads its side at a glance, matching the scoreboard. */
-.team-sub-match--readonly .team-sub-match__side--shiro .tsm-name__static { color: var(--ink, #111827); }
-.team-sub-match--readonly .team-sub-match__side--aka .tsm-name__static { color: var(--red, #b91c1c); }
+.team-sub-match--readonly .team-sub-match__side--shiro .tsm-name__static { color: var(--ink); }
+.team-sub-match--readonly .team-sub-match__side--aka .tsm-name__static { color: var(--red); }
 .tsm-name__static--win {
   font-weight: 800;
 }
@@ -7215,7 +7192,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
    column is the expand/collapse indicator. */
 .team-sub-match--editable {
   cursor: pointer;
-  transition: box-shadow 120ms ease-out;
+  transition: box-shadow 120ms var(--ease-out);
 }
 .team-sub-match--editable:hover {
   opacity: 1;
@@ -7234,7 +7211,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   font-size: 10px;
   line-height: 1;
   color: var(--ink-1);
-  transition: transform 120ms ease-out;
+  transition: transform 120ms var(--ease-out);
 }
 .tsm-caret--open {
   transform: rotate(90deg);
@@ -7372,7 +7349,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: inline;
 }
 .tw-term:focus-visible {
-  outline: 2px solid var(--accent, #1d3557);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -7399,11 +7376,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   max-width: 320px;
   margin-top: 6px;
   padding: 10px 12px;
-  background: var(--bg, #fff);
-  border: 1px solid var(--line, #ddd);
+  background: var(--bg);
+  border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  color: var(--ink-1, #111);
+  color: var(--ink-1);
   font-size: 12px;
   font-weight: 400;
   line-height: 1.45;
@@ -7425,7 +7402,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .tw-tooltip__kanji {
   font-weight: 700;
-  color: var(--ink-2, #555);
+  color: var(--ink-2);
 }
 .tw-tooltip__short {
   font-weight: 700;
@@ -7433,7 +7410,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .tw-tooltip__body {
   display: block;
   margin-top: 4px;
-  color: var(--ink-2, #444);
+  color: var(--ink-2);
 }
 
 @media (max-width: 480px) {
@@ -7459,9 +7436,9 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .glossary-entry {
   padding: 12px 14px;
-  border: 1px solid var(--line, #ddd);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--bg, #fff);
+  background: var(--bg);
 }
 .glossary-entry__head {
   font-size: 14px;
@@ -7469,29 +7446,29 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 }
 .glossary-entry__romaji {
   font-weight: 700;
-  color: var(--ink-1, #111);
+  color: var(--ink-1);
 }
 .glossary-entry__kanji {
-  color: var(--ink-2, #555);
+  color: var(--ink-2);
   font-weight: 600;
 }
 .glossary-entry__short {
-  color: var(--ink-3, #777);
+  color: var(--ink-3);
   font-style: italic;
 }
 .glossary-entry__tooltip {
   margin: 6px 0 0 0;
   font-size: 13px;
   line-height: 1.5;
-  color: var(--ink-2, #444);
+  color: var(--ink-2);
 }
 .glossary-entry__see {
   margin-top: 6px;
   font-size: 11px;
-  color: var(--ink-3, #777);
+  color: var(--ink-3);
 }
 .glossary-entry__see a {
-  color: var(--accent, #1d3557);
+  color: var(--accent);
   text-decoration: none;
   border-bottom: 1px dotted currentColor;
 }
@@ -7528,7 +7505,6 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* --- Shared modal chrome refresh (Instrument Panel typography + tone) -- */
 .editor-modal {
-  background: var(--surface); /* fallback for browsers without color-mix() */
   background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 96%, var(--ink) 4%) 100%);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, var(--shadow-lg);
 }
@@ -7935,13 +7911,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 /* ？ icon that carries the glossary tooltip for a decision button. */
 .glossary-hint .tw-term {
   border-bottom: none;
-  color: var(--ink-3, #888);
+  color: var(--ink-3);
   font-size: 13px;
   line-height: 1;
 }
 .glossary-hint .tw-term:hover,
 .glossary-hint .tw-term:focus-visible {
-  color: var(--ink-2, #555);
+  color: var(--ink-2);
 }
 /* A term measures its room on open (Term in glossary.jsx) and flips the
    tooltip to open leftwards when the default left-anchored box would run past
@@ -8113,7 +8089,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 6px;
   margin-top: 12px;
   padding: 12px;
-  border: 1px solid var(--border, #d8dee9);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
   background: var(--bg-2);
 }
@@ -8140,12 +8116,13 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--accent-strong);
 }
 @keyframes daihyosen-tied-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(29, 53, 87, 0.28); }
-  50%      { box-shadow: 0 0 0 6px rgba(29, 53, 87, 0); }
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 28%, transparent);
+  }
+  50% { box-shadow: 0 0 0 6px transparent; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot--running,
   .topbar__conn--down .topbar__conn__dot,
   .conn-alert__dot,
   .spinner,
@@ -8205,8 +8182,11 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 /* Announcement Banner card - Feature mp-h60 / mp-udb */
 .announcement-banner {
+  /* Both stops stay literal on purpose: they are a designed amber-600 to
+     amber-700 pair, and there is no token for the lighter one, so tokenising
+     only the dark stop would let the two drift apart if --warn ever moved. */
   background: linear-gradient(135deg, #d97706, #b45309);
-  color: #ffffff;
+  color: var(--accent-fg);
   padding: 10px 16px;
   display: flex;
   align-items: center;
@@ -8255,7 +8235,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .announcement-banner__badge {
   background: rgba(255, 255, 255, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.25);
-  color: #ffffff;
+  color: var(--accent-fg);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -8277,7 +8257,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 4px;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s var(--ease-out), color 0.2s var(--ease-out);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8285,7 +8265,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .announcement-banner__dismiss:hover {
   background: rgba(255, 255, 255, 0.15);
-  color: #ffffff;
+  color: var(--accent-fg);
 }
 .ann-bell-btn {
   background: transparent;
@@ -8297,7 +8277,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s var(--ease-out), background 0.15s var(--ease-out);
 }
 .ann-bell-btn:hover { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.1); }
 .ann-bell-btn--on { color: rgba(255, 255, 255, 0.95); }
@@ -8384,7 +8364,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 
 .match-alert-banner__dismiss:hover {
   background: rgba(255, 255, 255, 0.15);
-  color: #ffffff;
+  color: var(--accent-fg);
 }
 
 /* mp-4fd: shared "✕ Clear" button for the followed-player indicator. */
@@ -8446,15 +8426,15 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(80% 60% at 80% 0%, rgba(255,59,59,0.35), transparent 60%);
 }
-.tvd-side--aka .tvd-side__bar { background: var(--aka-bright, #ff3b3b); }
+.tvd-side--aka .tvd-side__bar { background: var(--aka-bright); }
 .tvd-side--aka .tvd-side__lab { color: #ffd9dc; }
 
 /* centre, real score MK – M (Shiro white, Aka red), + decision/fouls */
 .tvd-centre { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1vh; padding: 0 1.5vw; background: rgba(0,0,0,0.25); }
 .tvd-score { font-family: var(--font-impact); font-size: 9vh; line-height: 0.9; display: flex; align-items: center; gap: 0.18em; }
-.tvd-score__s { color: #fff; }
+.tvd-score__s { color: var(--accent-fg); }
 .tvd-score__d { color: rgba(255,255,255,0.3); font-size: 0.55em; }
-.tvd-score__a { color: var(--aka-bright, #ff5b54); text-shadow: 0 0 4vh rgba(255,59,59,0.4); }
+.tvd-score__a { color: var(--aka-bright); text-shadow: 0 0 4vh rgba(255,59,59,0.4); }
 .tvd-centre__sfx { font: 700 2.4vh/1 var(--font-strong); letter-spacing: 0.05em; color: rgba(255,255,255,0.75); }
 .tvd-centre__fouls { font-size: 2.2vh; opacity: 0.65; font-weight: 500; }
 .tvd-centre__vs { font-family: var(--font-impact); font-size: 5vh; color: rgba(255,255,255,0.4); writing-mode: vertical-rl; }
@@ -8556,17 +8536,30 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
 .pool__table tr.pool__row--tied { background: var(--warn-soft); }
 
 /* mp-wvkh: followed-player highlights */
-.pool__row--me { background: rgba(29,53,87,0.07); }
+.pool__row--me {
+  background: color-mix(in oklch, var(--accent) 7%, transparent);
+}
 /* Matrix row: top inset shadow on every cell so the highlight shows through win/loss/draw backgrounds */
 .league-matrix__row--me td,
-.league-matrix__row--me th { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35); }
-.league-matrix__row--me .league-matrix__row-head { background: rgba(29,53,87,0.07); font-weight: 700; }
+.league-matrix__row--me th {
+  box-shadow: inset 0 2px 0 color-mix(in oklch, var(--accent) 35%, transparent);
+}
+.league-matrix__row--me .league-matrix__row-head {
+  background: color-mix(in oklch, var(--accent) 7%, transparent);
+  font-weight: 700;
+}
 /* Matrix col: left inset shadow so it doesn't override win/loss/draw cell backgrounds */
-.league-matrix__col--me { box-shadow: inset 2px 0 0 rgba(29,53,87,0.35); font-weight: 700; }
+.league-matrix__col--me {
+  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 35%, transparent);
+  font-weight: 700;
+}
 /* Corner cell (row and col): combine both shadows */
-.league-matrix__row--me .league-matrix__col--me { box-shadow: inset 0 2px 0 rgba(29,53,87,0.35), inset 2px 0 0 rgba(29,53,87,0.35); }
-.bc-match--my-match { box-shadow: inset 3px 0 0 var(--accent, #1d3557); }
-.vsched-item--me { box-shadow: inset 3px 0 0 var(--accent, #1d3557); }
+.league-matrix__row--me .league-matrix__col--me {
+  box-shadow: inset 0 2px 0 color-mix(in oklch, var(--accent) 35%, transparent),
+              inset 2px 0 0 color-mix(in oklch, var(--accent) 35%, transparent);
+}
+.bc-match--my-match { box-shadow: inset 3px 0 0 var(--accent); }
+.vsched-item--me { box-shadow: inset 3px 0 0 var(--accent); }
 
 /* App version footer at the bottom of pages */
 .app-version-footer {
@@ -8655,7 +8648,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   color: var(--accent);
   cursor: pointer;
   padding: 0;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
   flex-shrink: 0;
 }
 .watchlist-bell-btn:hover { background: color-mix(in srgb, var(--accent-soft) 70%, var(--accent) 30%); }
@@ -8755,8 +8748,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   gap: 8px;
   background: #f2e2e4; /* fallback, approximate red-10% over bg */
   background: color-mix(in oklch, var(--red) 10%, var(--bg));
-  border: 1px solid rgba(193, 18, 31, 0.35); /* fallback for browsers without color-mix() */
-  border-color: color-mix(in oklch, var(--red) 35%, transparent);
+  border: 1px solid color-mix(in oklch, var(--red) 35%, transparent);
   border-radius: var(--r-md);
   padding: 8px 12px;
   font-size: 12px;
@@ -8778,8 +8770,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   align-items: center;
   gap: 8px;
   background: var(--accent-soft);
-  border: 1px solid rgba(29, 53, 87, 0.3); /* fallback for browsers without color-mix() */
-  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
   border-radius: var(--r-md);
   padding: 8px 12px;
   font-size: 12px;
@@ -9366,7 +9357,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   background: var(--accent-soft);
   color: var(--accent);
   line-height: 1;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
 }
 .shiaijo-title-select:hover .shiaijo-title-select__chevron {
   background: var(--accent);
@@ -9419,7 +9410,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   margin-bottom: 12px;
   text-align: left;
   cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  transition: background-color 150ms var(--ease-out), border-color 150ms var(--ease-out);
 }
 .shiaijo-nudge:hover {
   background: var(--warn-border);
@@ -9532,6 +9523,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   position: sticky;
   top: 70px;
   max-height: calc(100vh - 90px);
+  max-height: calc(100dvh - 90px);
   overflow-y: auto;
 }
 
@@ -9952,7 +9944,7 @@ abbr.msb-lab { text-decoration: none; cursor: help; }
   border-radius: 7px;
   border: 2px solid var(--ink-4);
   background: var(--surface);
-  color: #fff;
+  color: var(--surface);
   display: grid;
   place-items: center;
   transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);

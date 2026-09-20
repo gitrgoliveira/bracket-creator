@@ -93,3 +93,36 @@ describe('text on a tinted cell keeps its contrast', () => {
     expect(css).toMatch(/\.shiaijo-sides__side \.dojo \{[^}]*color: var\(--ink-2\)/);
   });
 });
+
+// Two more surfaces converted in the same pass (operator decision 2026-09-20).
+// The compact schedule rows STACK their two sides, so they take the treatment
+// .vsched-item__side--* already gives the stacked public schedule rows rather
+// than the left/right form used above. The engi card needed no new fill at all:
+// it already carried one, and only the badge came off.
+describe('the stacked and engi surfaces carry the side the same way', () => {
+  it('tints both compact schedule rows and drops the A/S squares', () => {
+    // \s* because this declaration wraps the angle onto the next line.
+    expect(block('.tw-match__name--shiro')).toMatch(/repeating-linear-gradient\(\s*-45deg/);
+    expect(block('.tw-match__name--aka')).toContain('background: var(--red-soft)');
+    for (const f of ['admin_schedule_page.jsx', 'viewer_schedule.jsx']) {
+      const src = read(f);
+      expect(src, `${f} still renders an A/S square`).not.toMatch(/tw-match__badge/);
+      expect(src).toContain('tw-match__name--shiro');
+      expect(src).toContain('tw-match__name--aka');
+      expect(src).toMatch(/<span className="sr-only">Shiro: <\/span>/);
+      expect(src).toMatch(/<span className="sr-only">Aka: <\/span>/);
+    }
+    expect(css, 'the A/S square styling is dead CSS now').not.toMatch(/tw-match__badge/);
+  });
+
+  it('drops the engi badge, whose card was already tinted', () => {
+    const src = read('admin_scoring_engi.jsx');
+    expect(src).not.toMatch(/engi-side__badge/);
+    expect(src).toMatch(/<span className="sr-only">Shiro: <\/span>/);
+    expect(src).toMatch(/<span className="sr-only">Aka: <\/span>/);
+    expect(css).not.toMatch(/engi-side__badge/);
+    // The fill it relies on must survive: nothing else names the side there.
+    expect(block('.engi-side--aka')).toContain('background: var(--red-soft)');
+    expect(block('.engi-side--shiro')).toMatch(/repeating-linear-gradient/);
+  });
+});

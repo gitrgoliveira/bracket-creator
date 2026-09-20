@@ -345,7 +345,13 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
         <div className="engi-sides">
           {/* Shiro / White / sideB */}
           <div className={`engi-side engi-side--shiro${winnerSide === "b" ? " engi-side--winner" : ""}`} data-testid="engi-side-shiro">
-            <div className="engi-side__badge engi-side__badge--shiro">Shiro</div>
+            {/* No Aka/Shiro badge (operator decision 2026-09-20, bc-sccl): this
+                card already carries the full DESIGN.md §4 treatment -- a tinted
+                fill plus a coloured top bar, the same tokens and 45° hatch pitch
+                as the kendo score card -- so the badge restated the side a third
+                time. The sr-only label keeps it in text for a screen reader,
+                since the hatch only serves the sighted case. */}
+            <span className="sr-only">Shiro: </span>
             <div className="engi-side__names">
               <div className="engi-side__name">{shiroName}</div>
               {shiroDN && <div className="engi-side__name">{shiroDN}</div>}
@@ -384,7 +390,7 @@ export function EngiScoreEditorModal({ match, onClose, onSubmit, onSubmitAndNext
 
           {/* Aka / Red / sideA */}
           <div className={`engi-side engi-side--aka${winnerSide === "a" ? " engi-side--winner" : ""}`} data-testid="engi-side-aka">
-            <div className="engi-side__badge engi-side__badge--aka">Aka</div>
+            <span className="sr-only">Aka: </span>
             <div className="engi-side__names">
               <div className="engi-side__name">{akaName}</div>
               {akaDN && <div className="engi-side__name">{akaDN}</div>}

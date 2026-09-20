@@ -77,12 +77,18 @@ const AdminTWMatch = React.memo(({ m, highlight, courts, onMove, onTimeChange })
         </div>
       </div>
       <div className="tw-match__players">
-        <div className={`tw-match__name ${bWin ? "tw-match__name--w" : ""}`}>
-          <span className="tw-match__badge tw-match__badge--shiro">S</span>
+        {/* Side by CELL TINT, not the old 14x14 S/A squares (operator decision
+            2026-09-20, bc-sccl). These rows STACK the two sides, so they take
+            the same treatment .vsched-item__side--* already gives the stacked
+            public schedule rows. The squares were the side's only TEXT, so the
+            sr-only labels below replace them: DESIGN.md §4 requires colour is
+            never the only signal, and the Shiro hatch covers the sighted case. */}
+        <div className={`tw-match__name tw-match__name--shiro ${bWin ? "tw-match__name--w" : ""}`}>
+          <span className="sr-only">Shiro: </span>
           <NumberedName name={m.sideB?.name || "TBD"} number={m.sideB?.number} />
         </div>
-        <div className={`tw-match__name ${aWin ? "tw-match__name--w" : ""}`}>
-          <span className="tw-match__badge tw-match__badge--aka">A</span>
+        <div className={`tw-match__name tw-match__name--aka ${aWin ? "tw-match__name--w" : ""}`}>
+          <span className="sr-only">Aka: </span>
           <NumberedName name={m.sideA?.name || "TBD"} number={m.sideA?.number} />
         </div>
         <div className="tw-match__comp">{m.compName}</div>
